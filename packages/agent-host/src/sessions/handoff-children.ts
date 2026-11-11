@@ -10,7 +10,7 @@ import type { SessionAppWiring } from './session-app-wiring.js'
  * One piece of the original's work a handoff moved to the session that took over (#693), as the handoff note
  * lists it: a session (started with start_agent, forked, or asked in another project, finished or not), a start_agent request still
  * waiting for the person, whose handle is the request id, a mail message, or an app. `can` is what the new session can actually do with it, which
- * depends on what moved: a child it now started, a turn it now owns in a session it did not start, another project's
+ * depends on what moved: a child it now started, work it now gave a session it did not start, another project's
  * session, a standing card.
  */
 export type MovedChild = {
@@ -99,10 +99,8 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
     turnRunning: (m: SessionInfo) => boolean
     /** The apps a session attached itself (#1638) */
     readonly apps: Pick<SessionAppWiring, 'appAccess'>
-    /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
-    mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverMessage[]
-    /** The original's open tasks to a child that moves become the successor's, inside the same transaction (`MailHooks.repointTasks`) */
-    mailRepointTasks: (fromSessionId: string, toSessionId: string, childId: string) => void
+    /** The original's mail and the tasks it gave the children that move, moved to the successor inside the store's transaction (`MessageService.handOver`); nothing without a mailbox */
+    mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope, children: readonly string[]) => HandedOverMessage[]
   }
 
 /**
@@ -128,7 +126,7 @@ export class HandoffChildren {
    * - `goes`: a handoff whose original the window removes next. All its unsettled mail moves too.
    * - `removed`: the original is being removed now (`trashSessionOnce`), after a handoff that kept it or one whose
    *   window did not say it would remove it. Its children themselves go to the session that inherited its handoff
-   *   (`askedBy`/`parentSessionId`, with the reports, turns and delegations that are theirs), since an orphan is worse;
+   *   (`askedBy`/`parentSessionId`, with the tasks, reports and delegations that are theirs), since an orphan is worse;
    *   that session is told in its conversation (its note was read long ago), and the original, about to go, is told
    *   nothing. What the original asked for and the person never answered stays behind: its start_agent requests are
    *   withdrawn and dropped by the session archive as before, so no card appears in another session
@@ -173,11 +171,10 @@ export class HandoffChildren {
       return SETTLED_CHILD
     }
     const childIds = [...this.host.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
-    // A removed original gives only its children; another session's turn it held, or another project's, is let go
+    // A removed original gives only its children; work it gave another session, or another project's, is let go
     const linked = removed ? new Set(childIds) : new Set<string>([
       ...delegated.map((d) => d.sessionId),
       ...owing,
-      ...[...this.host.children.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
       ...childIds,
     ])
     /*
@@ -212,12 +209,11 @@ export class HandoffChildren {
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
       // What the new session can actually do with it, by what moved (#693 review)
       const told = owing.has(id)
-      const owns = this.host.children.turnOwners.get(id)?.callerId === from
       const can = project !== undefined
-        ? `Call ask_project with project "${project}" and no task to wait for its answer${owns ? '; you are told of the cards of its turn and answer them with agent_session (answer)' : ''}. It is that project's session: agent_session does nothing else with it.`
+        ? `Call ask_project with project "${project}" and no task to wait for its answer${told ? '; you are told of its cards and answer them with agent_session (answer) as far as you may' : ''}. It is that project's session: agent_session does nothing else with it.`
         : s.askedBy === from
           ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work with agent_session (send) and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, send, stop, delete).`
-          : `${told ? 'Its report comes to you' : 'Nothing about it comes to you unless you ask'}${owns ? ', and you are told of the cards of the turn you now own' : ''}. You did not start it, so agent_session works on it only with the auto preset.`
+          : `${told ? 'Its report and its cards come to you' : 'Nothing about it comes to you unless you ask'}. You did not start it, so agent_session works on it only with the auto preset.`
       const folded = state === SETTLED_CHILD && project === undefined && s.askedBy === from
       moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}), ...(folded ? { folded: true } : {}) })
     }
@@ -246,10 +242,6 @@ export class HandoffChildren {
     const mailWhich = scope === 'kept' ? (sessions.length ? { senders: sessions } : null) : 'all'
     // The original is told of a child that stays, also when nothing else moves
     const stayText = stays.length ? `Still with this session, since their reports finish a task it was given: ${stays.map((c) => `“${c.name}” [${c.handle}]`).join('; ')}.` : ''
-    if (!moved.length && mailWhich === null) {
-      if (stays.length) this.host.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text: `Nothing moved to “${heir.name}” [${to}]. ${stayText}` })
-      return stays
-    }
     let threads: HandedOverMessage[] = []
     try {
       this.host.store.children.moveChildren(
@@ -259,10 +251,9 @@ export class HandoffChildren {
           sessions,
           startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
         },
+        // The mail's one move (docs/plans/mailbox.md §10.6.5): what the original holds, and the work it gave the children that move
         () => {
-          if (mailWhich !== null) threads = this.host.mailHandOver(from, to, mailWhich)
-          // The answer of work the original gave a child that moves is the successor's (docs/plans/mailbox.md §10.6.3; step 5 moves this onto handOver)
-          for (const id of sessions) if (owing.has(id)) this.host.mailRepointTasks(from, to, id)
+          if (mailWhich !== null) threads = this.host.mailHandOver(from, to, mailWhich, sessions)
         },
       )
     } catch (e) {

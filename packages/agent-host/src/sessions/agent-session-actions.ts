@@ -103,12 +103,12 @@ export class AgentSessionActions {
     const caller = this.host.meta.get(callerId)
     const child = this.host.meta.get(opts.sessionId)
     /*
-     * A turn this caller gave a session of another project (#676, ask_project): its cards are the caller's to read and
-     * answer. Nothing else of that session is; ask_project with no task waits on the turn.
+     * A session of another project this caller has work open in (#676, ask_project; docs/plans/mailbox.md §10.6.4): its cards are the caller's to
+     * read, and to answer as the gate allows. Nothing else of that session is; ask_project with no task waits on it.
      */
-    if (caller && child && child.projectId !== caller.projectId && this.host.children.turnOwners.get(child.id)?.callerId === callerId) {
+    if (caller && child && child.projectId !== caller.projectId && this.host.children.openTasks(child.id, 'to').includes(callerId)) {
       if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
-      if (opts.action !== 'status' && opts.action !== 'wait') return { ok: false, error: `"${child.name}" is another project's session: you can read and answer the cards of the turn you gave it (status, answer), and wait on it with ask_project.` }
+      if (opts.action !== 'status' && opts.action !== 'wait') return { ok: false, error: `"${child.name}" is another project's session: you can read and answer the cards of the work you gave it (status, answer), and wait on it with ask_project.` }
       const cards = this.host.routedCards(child.id, callerId)
       return cards.length
         ? { ok: true, state: 'asking', sessionId: child.id, sessionName: child.name, tool: child.tool, cards }
@@ -126,6 +126,9 @@ export class AgentSessionActions {
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
     const key = `${callerId}>${child.id}`
     let d = this.host.children.delegations.get(key)
+    // The cards of work it gave are what the caller reads first (#676, docs/plans/mailbox.md §10.6.4), whatever delegation runs there or ran before
+    const cards = opts.action === 'status' || opts.action === 'wait' ? this.host.routedCards(child.id, callerId) : []
+    if (cards.length) return d && !d.settled ? this.flow.agentAsking(d, cards) : { ok: true, state: 'asking', sessionId: child.id, sessionName: child.name, tool: child.tool, cards }
     let releaseObservation: (() => void) | undefined
     if (!d && this.host.autoBoundaryOpen(callerId)) {
       const existing = [...this.host.children.delegations.values()].find((run) => run.sessionId === child.id && !run.settled)
@@ -137,17 +140,9 @@ export class AgentSessionActions {
       }
     }
     const observing = !!d && d.callerId !== callerId
-    // A turn it gave that this host has no delegation for (it found the link in the store after a swap, #676)
-    if (!d && (opts.action === 'status' || opts.action === 'wait')) {
-      const cards = this.host.routedCards(child.id, callerId)
-      if (cards.length) return { ok: true, state: 'asking', sessionId: child.id, sessionName: child.name, tool: child.tool, cards }
-    }
     try {
       switch (opts.action) {
         case 'status': {
-          // The cards of the turn it gave are what the owner reads first (#676)
-          const cards = d && !d.settled && !observing ? this.host.routedCards(child.id, callerId) : []
-          if (d && cards.length) return this.flow.agentAsking(d, cards)
           if (d && !d.settled) return this.flow.agentWorking(d, observing)
           return d ? await this.flow.awaitAgent(key, d, signal, observing) : this.flow.agentAtRest(child, callerId)
         }
@@ -217,17 +212,18 @@ export class AgentSessionActions {
           const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
           const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
           const next = this.flow.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
+          // Written before the words go in, so a card the turn raises at once finds the caller's work open (docs/plans/mailbox.md §10.6.4)
+          const withdraw = this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
           try {
             await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? '', [], '', canMailParent(child, callerId)), undefined, from, false)
           } catch (e) {
+            withdraw()
             // Its wait fails too (#839): a wait of the caller's joined it while the child woke
             next.wait.fail(e as Error)
             this.host.children.dropDelegation(key, next)
             if (this.host.agentRuns.get(child.id) === next.wait) this.host.agentRuns.delete(child.id)
-            this.host.children.releaseTurn(child.id, callerId)
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
-          this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
           return this.flow.awaitAgent(key, next, signal)
         }
         default:

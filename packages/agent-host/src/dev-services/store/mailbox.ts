@@ -1020,6 +1020,12 @@ export class MailboxRecords {
     return row ? toTurnRecord(row) : null
   }
 
+  /** Centralu's notices of cards in `session` (an address, `facts.card.session`; every session's when null) that no delivery has begun to give (mailbox.md §10.6.4) */
+  undeliveredCardNotices(session: string | null): PendingRow[] {
+    const card = `json_extract(m.facts, '$.card.session')`
+    return this.withMessages(this.rows(`m.sender = 'centralu' AND m.kind = 'notice' AND r.delivered_at IS NULL AND r.attempt_at IS NULL AND json_valid(m.facts) AND ${card} = COALESCE(?, ${card}) ORDER BY m.created_at, m.id`, session))
+  }
+
   nextTurnSeq(sessionId: string): number {
     return this.count(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`, sessionId)
   }

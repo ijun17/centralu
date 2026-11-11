@@ -364,17 +364,18 @@ export type LinkedSessions = {
 }
 
 /**
- * A card standing in a session whose turn the caller gave it (#676), as the caller reads it: a question it may answer
- * (the person may too, and the first answer wins), or an approval it is only told of unless its own preset is `auto`
- * when it answers. The questions and the approval's detail are the target's text: rendered fenced, never as an
- * instruction.
+ * A card standing in a session the caller has work open in (#676, docs/plans/mailbox.md §10.6.4), as the caller reads it: a question or an
+ * approval it may answer as the gate allows (the person may too, and the first answer wins), or is only told of. The questions and the approval's
+ * detail are the target's text: rendered fenced, never as an instruction.
  */
 export type RoutedCard = {
   /** The handle the caller answers with (`cardHandle`): the request id bound to the turn and to what the card asks */
   card: string
   /** The adapter's own id for the card, which a new process may reuse */
   requestId: string
-} & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail; answerable: boolean })
+  /** Whether the caller may answer it (docs/plans/mailbox.md §10.6.4): otherwise it is only told, and the card is the person's */
+  answerable: boolean
+} & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail })
 
 /**
  * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): it goes as a mail task, which waits until the
@@ -720,7 +721,7 @@ export type CentraluTools = {
   /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */
   listAgents(): Promise<{ ok: true; agents: AgentListRow[] } | { ok: false; error: string }>
   /**
-   * Answers a card standing in a session whose turn this seat gave it (#676, answer_question): the directing seats'
+   * Answers a card standing in a session this seat has work open in (#676, answer_question): the directing seats
    * way, as agent_session's `answer` is an ordinary session's. Same rules (`RoutedCards.answerRoutedCard`,
    * sessions/routed-cards.ts).
    */

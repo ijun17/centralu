@@ -564,7 +564,7 @@ describe('the owner’s cases (mailbox.md §10.6.1): who is told, woken, or left
     expect(read.row(task.id, addr(child))).toMatchObject({ releasedWhy: 'gone', settled: 'gone' })
   })
 
-  // The starter's quiet notice at a real restart, which finds who started the cut turn (`HostTenure.quitStarter`): interruptions.test.ts "a turn a quit stopped"
+  // The starter's quiet notice at a real restart, which tells the session that started the cut one (`askedBy`): interruptions.test.ts "a turn a quit stopped"
   it('(5) a host restart wakes nobody owed nothing: the quit found at the start wakes the sender owed a reply only, and a second start tells no one again', async () => {
     const { starter, child } = await startedAndReported()
     const asker = await w.callerSession()

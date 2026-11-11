@@ -1,6 +1,6 @@
 import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import { PERSON } from './address.js'
+import { PERSON, parseAddress } from './address.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
@@ -38,6 +38,19 @@ export function linkedGoneRecorder(mail: MessageService, records: MailboxRecords
  */
 export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => string {
   return (callerId, childId, origin, task) => mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false }).id
+}
+
+/**
+ * The parties with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`; `PERSON` for the person's
+ * own work), or its own tasks' receivers (`from`). The one definition of open work by party (`MailHooks.openTasks`, a card's givers, docs/plans/mailbox.md §10.6.4)
+ */
+export function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from'): string[] {
+  const rows = side === 'to' ? records.watchedTo(address) : records.watchedFrom(address)
+  return [...new Set(rows.flatMap((r) => {
+    const m = r.deliveredAt === null || r.releasedAt !== null ? undefined : records.message(r.messageId)
+    const other = m?.kind === 'task' ? parseAddress(side === 'to' ? m.sender : r.recipient) : null
+    return other?.kind === 'session' ? [other.sessionId] : other?.kind === 'person' ? [PERSON] : []
+  }))]
 }
 
 /** The caller withdraws what it sent the session and the session has not been given yet (`agent_session stop`): how many tasks */
@@ -179,23 +192,3 @@ export function requestTurnRecorder(mail: MessageService, turns: Pick<MailTurns,
   }
 }
 
-/**
- * A handoff gives the successor the children the original gave work (docs/plans/mailbox.md §10.6.3, until step 5 moves handoffs onto `handOver`):
- * the open tasks the original gave the child are withdrawn and one task from the successor, with the newest one's words, is written delivered, so
- * the child's reply or last response answers the successor
- */
-export function taskRepointer(mail: MessageService, records: MailboxRecords): (fromId: string, toId: string, childId: string) => void {
-  return (fromId, toId, childId) => {
-    const [from, child] = [mail.sessionAddress(fromId), mail.sessionAddress(childId)]
-    records.transaction(() => {
-      const open = records.watchedTo(child).flatMap((r) => {
-        const m = r.deliveredAt === null ? undefined : records.message(r.messageId)
-        return m?.kind === 'task' && m.sender === from ? [m] : []
-      })
-      const newest = open.at(-1)
-      if (!newest) return
-      for (const m of open) mail.done(from, m.id)
-      mail.task(mail.sessionAddress(toId), child, { text: newest.body, origin: delegationOrigin(newest.origin), delivered: true })
-    })
-  }
-}

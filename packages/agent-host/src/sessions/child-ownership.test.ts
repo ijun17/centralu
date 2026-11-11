@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
+import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { ChildOwnership, type Delegation } from './child-ownership.js'
 import type { AgentStartRecord } from './agent-start-record.js'
@@ -65,20 +65,6 @@ function begins(id: string): void {
   own.noteTurnStart(id, store.messages.nextSeq(id) - 1)
 }
 
-describe('delegated turns', () => {
-  it('a turn is stored, released only by its own caller when one is named, and told cards are stored', () => {
-    own.ownTurn('child', 'caller', false)
-    const turnId = own.turnOwners.get('child')!.turnId
-    own.markTurnTold('child', 'card-1')
-    expect(store.children.listDelegatedTurns()).toEqual([{ sessionId: 'child', callerSessionId: 'caller', told: ['card-1'], turnId }])
-    own.releaseTurn('child', 'someone-else')
-    expect(own.turnOwners.has('child')).toBe(true)
-    own.releaseTurn('child', 'caller')
-    expect(own.turnOwners.has('child')).toBe(false)
-    expect(store.children.listDelegatedTurns()).toEqual([])
-  })
-})
-
 describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', () => {
   const heard = () => {
     const turns: { sessionId: string; by: string; cli: boolean; source: string; ownerId?: string; again?: true }[] = []
@@ -86,35 +72,28 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
     return turns
   }
 
-  it('says whose the turn is, and the caller whose turn it was given as, a delegation going or not; none for a turn nobody gave', () => {
+  it('says whose request the turn runs for: the session its message names, else the caller of a delegation still running there (its first prompt)', () => {
     const turns = heard()
-    own.ownTurn('a', 'caller', false)
-    own.setDelegation('caller>a', delegation('caller', 'a'))
+    // Whatever delegation runs there, the message the turn opened with names its sender (docs/plans/mailbox.md §10.6.4)
+    own.setDelegation('other>a', delegation('other', 'a'))
     give('a', 'a-1', 'caller')
     begins('a')
-    // The Assistant's send_to_session: the turn is its task's, until the turn ends
-    own.ownTurn('b', 'orchestrator', true)
-    give('b', 'b-1', 'caller')
+    own.setDelegation('owner>b', delegation('owner', 'b'))
     begins('b')
-    give('c', 'c-1', 'caller')
+    own.setDelegation('gone>c', delegation('gone', 'c', { settled: true }))
     begins('c')
     expect(turns).toEqual([
-      { sessionId: 'a', by: 'work', cli: false, source: 'caller', ownerId: 'caller' },
-      { sessionId: 'b', by: 'work', cli: false, source: 'caller', ownerId: 'orchestrator' },
-      { sessionId: 'c', by: 'work', cli: false, source: 'caller' },
+      { sessionId: 'a', by: 'work', cli: false, source: 'caller', ownerId: 'c' },
+      { sessionId: 'b', by: 'work', cli: true, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'c', by: 'work', cli: true, source: 'caller' },
     ])
   })
 
-  it('says a turn no message started is the CLI’s own, and the person’s message is theirs', () => {
+  it('says the person’s message is theirs', () => {
     const turns = heard()
-    own.ownTurn('a', 'owner', true)
-    begins('a')
     give('b', 'b-1')
     begins('b')
-    expect(turns).toEqual([
-      { sessionId: 'a', by: 'work', cli: true, source: 'caller', ownerId: 'owner' },
-      { sessionId: 'b', by: 'person', cli: false, source: 'caller' },
-    ])
+    expect(turns).toEqual([{ sessionId: 'b', by: 'person', cli: false, source: 'caller' }])
   })
 
   it('says what the work’s message was: a caller’s send, a report about another session, an app’s; the newest message guesses, and the input the tool names says again', () => {
@@ -207,8 +186,6 @@ describe('the mailbox reads the tasks open with a session (docs/plans/mailbox.md
 
 describe('moveOwner', () => {
   it('moves every map for the moving children, and leaves what is not theirs', () => {
-    own.ownTurn('c1', 'from', false)
-    own.ownTurn('stays', 'from', false)
     const d1 = delegation('from', 'c1', { agent: true })
     const d2 = delegation('from', 'c2')
     const kept = delegation('from', 'stays')
@@ -223,8 +200,6 @@ describe('moveOwner', () => {
 
     own.moveOwner('from', 'to', { sessions: ['c1', 'c2'], starts: [open] }, () => {})
 
-    expect(own.turnOwners.get('c1')?.callerId).toBe('to')
-    expect(own.turnOwners.get('stays')?.callerId).toBe('from')
     expect([...own.delegations.keys()].sort()).toEqual(['from>stays', 'to>c1', 'to>proj>c2'])
     expect(d1.callerId).toBe('to')
     expect(kept.callerId).toBe('from')
@@ -271,28 +246,6 @@ describe('forgetting a session', () => {
     expect(own.delegations.get('k')).toBe(b)
     own.dropDelegation('k', b)
     expect(own.delegations.has('k')).toBe(false)
-  })
-})
-
-describe('restoring what the previous host left (#646, #676, #677)', () => {
-  const at = (id: string, state: SessionInfo['state']) => ({ id, state }) as SessionInfo
-  const sessions = new Map([
-    ['kept-working', at('kept-working', 'working')],
-    ['kept-paused', at('kept-paused', 'idle')],
-    ['kept-idle', at('kept-idle', 'idle')],
-    ['gone-process', at('gone-process', 'idle')],
-    ['caller', at('caller', 'idle')],
-  ])
-  const kept = new Set(['kept-working', 'kept-paused', 'kept-idle'])
-
-  it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {
-    store.children.setDelegatedTurn('kept-working', 'caller', 'turn-1')
-    store.children.setDelegatedTurnTold('kept-working', ['card-1'])
-    store.children.setDelegatedTurn('kept-idle', 'caller', 'turn-2')
-    own.restoreTurns(sessions, kept)
-    expect(own.turnOwners.get('kept-working')).toEqual({ callerId: 'caller', untilTurnEnd: true, told: new Set(['card-1']), turnId: 'turn-1' })
-    expect(own.turnOwners.has('kept-idle')).toBe(false)
-    expect(store.children.listDelegatedTurns().map((r) => r.sessionId)).toEqual(['kept-working'])
   })
 })
 

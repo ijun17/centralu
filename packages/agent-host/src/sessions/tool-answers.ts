@@ -67,7 +67,7 @@ export function cardsText(cards: readonly RoutedCard[]): string {
   return cards
     .map((c) =>
       c.kind === 'question'
-        ? `card ${c.card} (question), as JSON: ${trustedJsonText(JSON.stringify(c.questions.map((q) => ({ question: q.question, header: q.header, options: q.options.map((o) => o.label), ...(q.options.some((o) => o.description) ? { descriptions: q.options.map((o) => o.description) } : {}), multiSelect: q.multiSelect }))))}`
+        ? `card ${c.card} (question${c.answerable ? '' : ', only the person can answer it'}), as JSON: ${trustedJsonText(JSON.stringify(c.questions.map((q) => ({ question: q.question, header: q.header, options: q.options.map((o) => o.label), ...(q.options.some((o) => o.description) ? { descriptions: q.options.map((o) => o.description) } : {}), multiSelect: q.multiSelect }))))}`
         : `card ${c.card} (approval${c.answerable ? ', yours to allow or deny' : ', only the person can answer it'}), as JSON: ${trustedJsonText(JSON.stringify(c.detail))}`,
     )
     .join('\n')
@@ -222,7 +222,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     case 'asking':
       return {
         text:
-          `${who} is waiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
+          `${who} is waiting on you in work you gave it:\n${cardsText(r.cards)}\n` +
           `agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…) answers it. ${ANSWER_FORM}`,
       }
     case 'mailed':

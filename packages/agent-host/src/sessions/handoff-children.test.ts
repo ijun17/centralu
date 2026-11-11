@@ -117,15 +117,12 @@ describe('a handoff moves the live children to the new session (#693)', () => {
 
     expect(owner(child)).toBe(heir)
     expect(owedTo(child)).toEqual([addressOf(heir)])
-    expect(store.children.listDelegatedTurns()).toEqual([expect.objectContaining({ sessionId: child, callerSessionId: heir })])
     expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
 
     h.claude.handles.get(child)!.answer('done here')
     await eventually(() => reports(heir, child).length === 1)
     expect(reports(parent, child)).toEqual([])
     expect(owedTo(child)).toEqual([])
-    // The delegated turn's link (#676) ends with the turn, under its new owner too
-    await eventually(() => store.children.listDelegatedTurns().length === 0)
   })
 
   it("keeps the record's table of parts pointing at the right lines once the moved-children block is above it (#1481)", async () => {
@@ -346,7 +343,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     // The call that gave the work was still waiting: it hears where the work went
     expect(await sent).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
     const note = readFileSync(handoffNotePath(project.id, parent), 'utf8')
-    expect(note).toContain(`"Docs" — working — handle: ${other}. Its report comes to you, and you are told of the cards of the turn you now own. You did not start it, so agent_session works on it only with the auto preset.`)
+    expect(note).toContain(`"Docs" — working — handle: ${other}. Its report and its cards come to you. You did not start it, so agent_session works on it only with the auto preset.`)
     expect(owner(other) ?? null).toBeNull()
   })
 
@@ -393,7 +390,6 @@ describe('a handoff moves the live children to the new session (#693)', () => {
 
     expect(owner(child)).toBe(parent)
     expect(owedTo(child)).toEqual([addressOf(parent)])
-    expect(store.children.listDelegatedTurns()).toEqual([expect.objectContaining({ sessionId: child, callerSessionId: parent })])
     // The host's memory agrees with the store: the original still owns it, the new session does not
     expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'working' })
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: false })
@@ -452,9 +448,8 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
       })).id
       const note = readFileSync(handoffNotePath(w.caller.id, caller), 'utf8')
       // Another project's session: what the new session can do is ask_project and the cards, not agent_session's verbs (#693 review)
-      expect(note).toContain(`"Sprites" (project ${w.target.name}) — working — handle: ${target}. Call ask_project with project "${w.target.name}" and no task to wait for its answer; you are told of the cards`)
+      expect(note).toContain(`"Sprites" (project ${w.target.name}) — working — handle: ${target}. Call ask_project with project "${w.target.name}" and no task to wait for its answer`)
       expect(note).not.toContain('as on a session you started')
-      expect(w.store.children.listDelegatedTurns()).toEqual([expect.objectContaining({ sessionId: target, callerSessionId: heir })])
       // The other project's session is not the new session's child: its owner on the row stays as it was
       expect(w.store.sessions.listSessions().find((s) => s.id === target)?.askedBy ?? null).toBeNull()
       // The original, kept, is told where its delegation went rather than waiting on it

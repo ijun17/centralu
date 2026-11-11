@@ -86,12 +86,12 @@ export const CENTRALU_TOOLS = [
   },
   {
     /*
-     * #676: a card raised in the turn this seat gave a session (send_to_session to a session at rest) comes to this
+     * #676: a card raised in a session this seat has work open in (send_to_session with reportBack) comes to this
      * seat too; read_session shows it, and this answers it. The directing seats' form of agent_session's "answer",
      * which an ordinary session has. Rare for the Assistant (RARE_COMMANDS): the notice of a card names the call.
      */
     name: 'answer_question',
-    description: 'Answers a card a session raised in the turn you gave it (read_session shows it). One line per question; allow/deny for an approval.',
+    description: 'Answers a card a session raised in work you gave it (read_session shows it). One line per question; allow/deny for an approval.',
     schema: z.object({ sessionId: z.string(), card: z.string().optional(), text: z.string() }),
   },
   {

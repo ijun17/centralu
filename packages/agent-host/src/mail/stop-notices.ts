@@ -111,24 +111,33 @@ export class StopNotices {
 
   /**
    * Whether a stop notice to `sender` may quote the words of `stopped`'s turn `turnSeq` (its latest when absent): the one rule every stop notice
-   * to a session quotes by (security-boundaries/inter-agent-content.md). All of it must hold:
-   * - `sender` is a session that can read `stopped` with read_session (`mayRead`, that tool's own rule);
+   * to a session quotes by (security-boundaries/inter-agent-content.md). `sender` is a session that can read `stopped` with read_session
+   * (`mayRead`, that tool's own rule), and the turn is `sender`'s alone (`alone`)
+   */
+  quotes(stopped: string, sender: string, turnSeq?: number): boolean {
+    return this.d.mayRead?.(sender, stopped) === true && this.alone(stopped, sender, { turnSeq })
+  }
+
+  /**
+   * Whether `session`'s turn `turnSeq` (its latest when absent) is `sender`'s alone: what a stop notice may quote to it (`quotes`), and whether it may
+   * answer the session's cards as its work's giver (docs/plans/mailbox.md §10.6.4). All of it must hold:
    * - the turn is the session's latest (no turn since), and `sender`'s own message started it: a mail the mailbox delivered, or work `sender`
    *   gave it (a start_agent task, an agent_session send: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the
-   *   CLI started by itself (`cli`), or the person's, is never quoted, even when it goes on with a task's work;
+   *   CLI started by itself (`cli`), or the person's, is never `sender`'s alone, even when it goes on with a task's work;
    * - every message the mailbox gave into it is from `sender`;
    * - everything else that may have entered it (`turnInputs`: each user row stored since the turn before began, and a question card answered
    *   since) was sent by `sender`: none from the person, an app, a script, a relayed report or another session.
-   * A turn anyone else had a part in, or one these records cannot tell, is not split: nothing of it is quoted to anyone
+   * A turn anyone else had a part in, or one these records cannot tell, is no one's alone. `gaveIt`: only work `sender` gave it started the turn (a
+   * `caller` turn), not a mail the mailbox delivered
    */
-  quotes(stopped: string, sender: string, turnSeq?: number): boolean {
-    const [party, from] = [parseAddress(stopped), parseAddress(sender)]
-    if (party?.kind !== 'session' || from?.kind !== 'session' || this.d.mayRead?.(sender, stopped) !== true) return false
+  alone(session: string, sender: string, { turnSeq, gaveIt = false }: { turnSeq?: number; gaveIt?: boolean } = {}): boolean {
+    const [party, from] = [parseAddress(session), parseAddress(sender)]
+    if (party?.kind !== 'session' || from?.kind !== 'session') return false
     const seq = turnSeq ?? this.d.records.nextTurnSeq(party.sessionId) - 1
     if (this.d.records.nextTurnSeq(party.sessionId) !== seq + 1) return false
     const turn = this.d.records.turn(party.sessionId, seq)
-    if (!turn || (turn.startedBy !== 'mail' && turn.startedBy !== 'caller') || turn.starterId === null || this.d.records.message(turn.starterId)?.sender !== sender) return false
-    if (this.d.records.inTurn(stopped, seq).some((r) => r.message.sender !== sender)) return false
+    if (!turn || (turn.startedBy !== 'caller' && (gaveIt || turn.startedBy !== 'mail')) || turn.starterId === null || this.d.records.message(turn.starterId)?.sender !== sender) return false
+    if (this.d.records.inTurn(session, seq).some((r) => r.message.sender !== sender)) return false
     const given = this.d.turnInputs?.(party.sessionId)
     return given !== undefined && given.every((id) => id === from.sessionId)
   }

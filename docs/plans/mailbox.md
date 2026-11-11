@@ -784,6 +784,7 @@ task is never reminded: its report settles it.
 | `answer` | report | the session's last response, clipped as today (`draft.answer`) |
 | `quiet` | message, report, notice | delivered without a wake (on a message: an answer that needs nothing to a message that needed nothing, D3): `shouldQuery: false` on Claude, at the next turn elsewhere. It replaces the v61 `wake` column. The new `wakes()` reads it |
 | `needsOwner` | notice | an app's post the receiver must see (v61 `needs_owner`), kept for the apps slice |
+| `card` | notice | `{ session, requestId, handle, kind }`: the card a session raised, told to a giver of its open work (§10.6.4); never the card's text |
 | `clarifies` | message | the task id this message is a clarification about (§9.7); set by Centralu at send |
 | `covers` | report | the ids of every task this report settled besides its `reply_to` (§9.3) |
 | `reminder` | notice | 1 or 2: this notice is a reminder (§10) |
@@ -1204,13 +1205,12 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
   `delivered_at`, `read_at`, `attempt_at`, `turn_seq` are cleared and `attempts = 0`, whether or not `from` had read it.
   A request the old orchestrator read never started a turn of the new one, so keeping it read would strand it (#1683).
   Each moved row gets a notice for `to` with `facts.handedOver` (key §6.5).
-- **`handOver(from, to, scope)`** (the handoff, `ChildOwnershipRecords.moveChildren`, run inside its transaction as
+- **`handOver(from, to, scope, children)`** (the handoff, `ChildOwnershipRecords.moveChildren`, run inside its transaction as
   today; `scope` is today's `HandOverScope`, `'all' | { assignees: readonly string[] }`, `service.ts:177`, re-keyed to
   `{ senders: readonly string[] }`: the senders of the mail to `from` that moves, the children whose tasks move):
   - every unsettled watched row **to** `from` moves to `to`, undelivered again unless read;
   - when `to` already has a row for the same message, `to`'s row stays as it is and `from`'s is deleted;
-  - a later reply to a message **from** `from` goes to the nearest living heir when `from` is gone
-    (`Store.handoffHeirs`, as `reportRecorder` finds it today).
+  - the open tasks `from` gave the `children` that move go again from `to` (§10.6.5, #1936).
 
   The preview (`handOverPreview`) lists each moved message by id and the first line of its body, quoted.
 - **`partyGone(address)`** (trash):
@@ -1711,8 +1711,8 @@ own notice says it), nor when an older report path tells it or may (`told`, `hel
 
 **A restart wakes no one who needs nothing.** The quit found at the start goes through the same rule: a sender owed a reply is woken
 (unless the same quit cut it), and a starter owed nothing is told quietly. The starter there is the first that still exists of the session
-owed the turn's report, the one that gave the turn, and the one that started it (`HostTenure.quitStarter`, read before the start drops those
-rows, so a later start tells no one again). One owed the report is told whoever's turn it was ("Its report to you will not come.") and woken
+owed the turn's report, the one that gave the turn, and the one that started it (since step 4 only the one that started it, `askedBy`,
+§10.6.4; the notice's key keeps a later start from telling it again). One owed the report is told whoever's turn it was ("Its report to you will not come.") and woken
 unless the same quit cut it: the start drops its report mark, so it would never hear otherwise. The stop notice runs before the start brings
 the report marks and tasks in step (`takeOverFromEarlierBuild`), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
 turn through the report path (`quitNotices`, `tellAskerOfInterruption`), which woke a parent at rest that was owed nothing.
@@ -1895,7 +1895,7 @@ joins, and each is answered on its own, by a reply or by the last response at re
 
 **The stop notice** (§10.6.1) is the only path for a stop. A call still waiting has read the stop itself (`told`). The hold for an older report
 path (`held`, `oldPathEnded`, `OLD_PATH_WAIT_MS`, `mailStopTold`) and the starter's `reportOwed` branch are gone with the report marks: the starter
-told of a quit is the session that gave the turn, else the one that started it (`HostTenure.quitStarter`).
+told of a quit is the session that started the stopped one (`askedBy`, §10.6.4).
 
 **What the person sees.** The composer's choice goes (C1): the person's message is a message, as "Just asking" was. The person's own work changes
 as below (mock-ups `1948-step3-*`, the last commit of step 3, which can be dropped on its own).
@@ -1929,8 +1929,7 @@ when it could not go in. A linked machine's copy (`LinkedReports`) reports to a 
 | The composer's choice: `ReportChoice`, `agents.reportOwed`, `SendIntent`, `user_message.intent`, `takeTurn`, `personTookOver`, `took_over`, `LinkedReports.choosing` | nothing: a person's message is a message |
 | The person's own report path: `reportToPersonIfOwed`, `personReportLine`, the person's paused report and `person_report_paused:`, `personReportRecorder`, `personOwes` | the last response and the stop notice, as for any task |
 
-**Handoff** (step 5 moves it onto `handOver`): until then the smallest shim keeps a moved child's answer with the successor: its open tasks from
-the original are withdrawn and one task from the successor, with the same words, is written delivered (`MessageService.repointTasks`), where
+**Handoff**: a moved child's answer goes to the successor, its open tasks from the original moved by the mail's one move (§10.6.5), where
 the report mark moved before.
 
 **Restart, swap and older builds.** No store step (v71 stays free). This build neither reads nor writes `report_paused`, `report_turn`,
@@ -1961,6 +1960,124 @@ is still written (`mail` by the delivery and for a turn the tool opens for mail 
 and still feeds the pair's warning count and its reset. Since tasks join a running turn where each started a turn of its own before, the pair's count
 (`pairTurnsSince`) is the turns a session's mail started plus each task of the pair that joined a turn it did not start, the person's too, and a join
 is checked against it as a wake is (`MailDelivery.warnIfRunning`): two busy sessions trading tasks are warned of as before.
+
+### 10.6.4 Cards: every giver of open work is told; the answer gate stays (#1948 step 4)
+
+A turn belongs to no one (§10.6.3), so a card no longer goes to "the turn's owner". The owner's decision of 2026-11-06 (P11, B9) holds: an
+approval card is not mail. It stays a live card in the session, bound to its request, answered only by its buttons (or, for a giver the gate
+allows, by the gate's tool), and void once its turn ends or stops. What is mail is the message that tells the givers a card waits.
+
+**Who is told.** Every party with work open in the session: the sender of each task to it that is delivered, not settled and not released
+(`openTaskParties`, `mail/delegation.ts`, the one definition `MailHooks.openTasks` gives the handoff, the trash and the at-rest answer too). Each is
+told once per card by a Centralu notice (`mail/card-notices.ts`: `kind: notice`, `facts.card` = `{ session, requestId, handle, kind }`,
+`facts.about`, dedupe key `card:<giver>:<session>:<handle>`), so a card a kept CLI raises again under the next host is not told twice. The
+notice never carries the card's text: the giver reads the card as a tool result (`agent_session` status, `read_session` for the Assistant).
+A giver's call that waits on the session (`agent_session` wait, `start_agent`, `ask_project`) returns the card itself, and its notice is
+written delivered and read. Otherwise the notice is mail: it wakes a giver at rest and joins its running turn (§10.6.2). A giver whose seat
+cannot read mail is told in its conversation as before, the notice written read. The person is sent nothing: their copy is the card,
+unchanged. Two senders whose tasks are in one turn are both told (on main only the last delegation's caller was).
+
+Why a notice and not a needs-reply message (a departure from the #1948 issue body, which says "cards as needs-reply messages"; the orchestrator agreed, 2026-11-11): the card's only answers are its buttons and the gate's tool. A needs-reply row would ask the giver
+for a `mail reply` that answers nothing, and the reminder (§10.4) and the stop notice (§10.6.1) would watch a row whose answer is not mail. So
+the notice is unwatched, and what leaves nothing open behind is that it goes with its card:
+
+**A card that goes.** Once a card no longer stands (answered by anyone, or its turn ended or stopped), each of its notices that no delivery
+has begun to give is taken back (`RoutedCards.cardsEnded` at `question_resolved`, `approval_resolved` and every turn's end, and the host's
+start for every session; `withdrawEndedCards`), so no giver wakes for a card that is gone. One already given stays as read history; reading the
+card then says it no longer stands. Which notices a card has is read from the store (the notices whose `facts.card.session` is the session and
+whose card it no longer holds), so a restart, a swap or a quit that took the card with it leaves none behind (deep review: a memory-only list
+lost them at a restart).
+
+**Who may answer (floor b), re-keyed on the request.** A giver may answer a card only when all hold, read at the answer:
+1. it is the one party with work open in the session (the person's own work counts as a party);
+2. the running turn is its work alone (`StopNotices.alone`, the rule a stop notice quotes by, with `gaveIt`): work it gave started the turn (a
+   `caller` turn: `start_agent`, an `agent_session` send, `ask_project`, the Assistant's sends; not a turn the mailbox started for its task, as
+   when the session was busy at the send, where the turn owner was never set either), every message
+   the mailbox gave into it is its, and nothing else entered it (no message or card answer of the person's, no app's, no other session's).
+   Its own answer to a question card keeps the turn its alone (`TurnInputs.answerQuestion(…, 'giver')`);
+3. for an approval, #603/#606's rule as before (`RoutedCards.refusal`): the giver is `auto` and not an app's agent, the session is `normal`
+   or `auto` and not an app's agent, and Centralu did not raise the card there; allow or deny, never "always".
+
+Otherwise the giver is told and reads the card, and only the person answers; the refusal says why. A handle still names the card it was read
+by (`cardHandle`, now over the session's latest stored turn, `mail_turns.turn_seq`, which the gate reads too, instead of the delegated turn's
+random id: two turns differ though no row was stored between them). Never looser than the
+turn owner was:
+
+| Case | Before (turn owner) | Now |
+|---|---|---|
+| One giver's task opened the turn, nothing else entered it | the owner answers | the giver answers |
+| A second sender's task joined that turn | the owner answers; the other is never told | both told; neither answers |
+| A task joined the person's turn | not told; nobody answers | told; nobody answers |
+| The person wrote into the giver's turn, or answered a card in it | the owner answers | nobody but the person |
+| The giver's task reached a busy session as mail and started a turn of its own | not told; nobody answers | told; nobody answers (deep review) |
+| The Assistant's `send_to_session` without `reportBack` | told, answers as the owner | not told: it asked for nothing back, so the card is the person's |
+| A turn the person started after the work was answered | not told | not told: no work is open |
+
+**Re-keyed readers of the turn owner.**
+- The turn's starter for C8 (`mail_turns.starter`, `turnRecorder`'s `ownerId`): the session the turn's opening message names (its user row's
+  `from`), else the caller of a delegation still running there (`start_agent`'s first prompt names none).
+- The stop notice's starter for a cut turn not continued, and for a quit found at the start: the session that started the stopped one
+  (`askedBy`). "The session that gave the turn" goes with the owner; a giver of open work is owed and told by its own rows.
+- `agent_session` on another project's session reads and answers its cards while the caller has work open there (`openTasks`).
+- A task is written before its words go in for `agent_session` send, `ask_project`, `send_to_session` and `create_session` (as `start_agent`'s
+  since §10.6.3), so a card the turn raises at once finds the work open; a send that fails withdraws it.
+
+| Removed | What replaces it |
+|---|---|
+| `ChildOwnership.turnOwners`, `TurnOwner`, `ownTurn`, `releaseTurn`, `adoptTurn`, `markTurnTold`, `restoreTurns` | the open tasks (`openTaskParties`) |
+| `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; every start deletes the rows (`dropDelegatedTurns`) |
+| The relayed notice to the owner (`tellCardRaised`) and `told_cards` | the mail notice and its dedupe key; the relay only for a seat that cannot read mail |
+| `answersApproval` as the whole answer rule | the gate above (`cardGivers`' `answerer`, then `refusal`) |
+
+**What the person sees.** Nothing changes on screen. The person's card is the same card. In a giver's conversation the notice shows as from
+the session that raised the card, as the relayed notice did (`MailInput.shown`, `SessionEvents.deliverMail`, the same row a delegated task
+gets), and its first line drops "in that turn". The giver's agent reads the notice as every Centralu notice: the wake frame names it, and
+`mail read` gives its words (before, the words were the turn's input).
+
+**Restart, swap and older builds.** No store step (the next free is v70). `facts.card` is a new key of `mail.facts`, which an older build keeps
+and does not read. This build neither reads nor writes `delegated_turns`, and every start deletes its rows, so an older build after a rollback
+adopts no stale link; beta.57, which restores that table only for a turn it continues after an update, then tells a card in such a turn to the
+person alone. The notices this build wrote are Centralu notices that build delivers as any. A kept or continued turn keeps its giver's task
+open, so a card in it is told and answered as above.
+
+**Linked machines.** A child on a linked machine keeps its own card path (`RemoteAgents.cardRaised`, its relayed notice through
+`tellSession`, its caller the one that gave the turn) until mail crosses links (step 6): the second definition of "who hears of a card",
+reported, not changed. It shares the notice's words and `cardHandle`; its cards say `answerable` for a question too (always true there).
+
+### 10.6.5 A handoff is the mail's one move (#1948 step 5)
+
+Target 5 of #1948: a handoff moved marks, turns, the queue and cards by hand beside the mail's own move. Steps 2 to 4 removed the marks, the
+queue and the turn owners; this step makes `MessageService.handOver` the one move of what a session owes and is owed, and fixes #1936.
+
+**The move.** `HandoffChildren.moveChildren` decides what moves (the children, the original's delegations in another project, its standing
+start requests; a child doing work the original owes its own giver stays with an original that stays, #1932) and runs one store transaction
+(`Store.moveChildren`): the children's parent link (`asked_by_session_id`, `parent_session_id`: ownership, reach and depth read it), the start
+requests (`agent_start_requests`), then `MessageService.handOver(from, to, scope, children)`. That last call moves, as before, every unsettled
+watched row and unread message of the original in `scope` (§7.7), and now also the tasks the original gave the children that move: each task
+not settled is withdrawn and goes again from the successor with the same words, cause, facts and delivery (`deliveredAt`, `readAt`), one task
+for one task; a task a stop released stays released, so its sender is not owed it twice. Before, a shim beside it (`taskRepointer`, `MailHooks.repointTasks`) wrote one task for all of a child's open tasks, with
+the newest's words and no cause, and only for the delivered ones.
+
+**#1936, fixed.** U gives O task T1; O hands work on to child X (task T2, cause T1) and its turn ends with T1 open (§10.6.3: work handed on
+keeps it open). A handoff that removes O moved T1 to the successor H, but T2 went again from H with no cause, so nothing held T1 open: H's
+takeover turn answered U with its own last response, before X had answered. Now T2 goes again with its cause T1, so T1 stays open on H until
+X answers; X's last response answers H, its delivery wakes H with T1 as the turn's work (`handedOnFrom`), and H's last response at rest answers U.
+The same holds when O is removed after a handoff that said it goes and after one that kept it (`sessions/handoff-mail.test.ts`, case 9).
+
+**What stays, and why.** `ChildOwnership.moveOwner` stays, smaller: it moves only what memory alone holds, none of which the mail holds (the
+delegation records and the waits on them, start requests that made a child, linked machines' report waits, and the "handed over" record a
+later call of the original reads). The turn owners it moved went in step 4. The parent link is stored on the session, so it moves in the same
+transaction. The note's lines and the original's notice are unchanged.
+
+**What the person sees.** Nothing new: the note, the notices and the archive preview say what they said. U's report now comes after the
+handed-on work ends rather than at the successor's first turn.
+
+**Restart, swap and older builds.** No store step (the next free is v70). A crash before the commit leaves every row on the original, after it
+every row on the successor, the re-pointed tasks with them. The withdrawn tasks are `withdrawn` rows and the new ones ordinary task rows, which
+an older build reads as any. A child's reply to the task it was first given (the withdrawn one) goes to that task's sender, as before this step.
+
+**Linked machines.** A child on a linked machine keeps its own move (`RemoteAgents.moveCaller`, its report waits in `LinkedReports`) until mail
+crosses links (step 6): the second definition of a handoff's move, reported, not changed.
 
 ### 10.7 The state table
 

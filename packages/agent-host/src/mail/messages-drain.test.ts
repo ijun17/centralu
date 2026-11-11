@@ -257,6 +257,28 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.rowOf(renamed.id, ORC).settled).toBeNull()
   })
 
+  it('handOver gives the tasks the original gave a child that moves again from the heir, one for one, with their cause, delivery and release (#1936)', () => {
+    const w = world()
+    const upstream = w.mail.task(A, W, { text: 'land it', origin: 'start_agent', delivered: true })
+    w.startTurn(W, upstream.id)
+    const first = w.mail.task(W, C, { text: 'write the tests', origin: 'start_agent', delivered: true })
+    w.startTurn(W, null)
+    const second = w.mail.task(W, C, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    w.records.markReleased(first.id, C, w.clock.t, 'stopped')
+
+    w.mail.handOver(W, B, 'all', [C])
+    expect([first.id, second.id].map((id) => w.rowOf(id, C).settled)).toEqual(['withdrawn', 'withdrawn'])
+    const again = w.records.watchedTo(C).map((r) => ({ r, m: w.records.message(r.messageId)! }))
+    expect(again.map(({ r, m }) => [m.sender, m.body, m.causeId, m.origin, r.deliveredAt !== null, r.releasedWhy])).toEqual([
+      [B, 'write the tests', upstream.id, 'start_agent', true, 'stopped'],
+      [B, 'and the docs', null, 'agent_session', false, null],
+    ])
+    // A task to a session that does not move stays the original's
+    const other = w.mail.task(W, A, { text: 'unrelated', origin: 'mail', delivered: true })
+    w.mail.handOver(W, B, 'all', [C])
+    expect(w.rowOf(other.id, A).settled).toBeNull()
+  })
+
   it('handOver moves unsettled watched rows to the heir undelivered unless read; the heir’s own row wins; the heir is told of each, and a preview lists them first', () => {
     const w = world()
     const m1 = w.send(A, { to: [W], text: 'unread question\nsecond line' }).message

@@ -1248,7 +1248,7 @@ export class RemoteAgents {
     const r = await reader.cards(rec.sessionId)
     if (!r.ok) return []
     const turn = this.of(rec.sessionId)?.turn ?? rec.sessionId
-    const cards: RoutedCard[] = r.questions.map((q) => ({ card: cardHandle(turn, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions }))
+    const cards: RoutedCard[] = r.questions.map((q) => ({ card: cardHandle(turn, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions, answerable: true }))
     if (r.approval) cards.push({ card: cardHandle(turn, r.approval.requestId, r.approval.detail), requestId: r.approval.requestId, kind: 'approval', detail: r.approval.detail, answerable: false })
     return cards
   }
@@ -1300,7 +1300,7 @@ export class RemoteAgents {
     if (this.toldCards.has(key)) return
     this.toldCards.add(key)
     if (waited) return
-    void this.host.tellSession(rec.callerId, cardNotice(kind, rec.sessionId, cardCall('reader', rec.sessionId), false), { sessionId: rec.sessionId, name: rec.name }, true)
+    void this.host.tellSession(rec.callerId, cardNotice(kind, rec.sessionId, cardCall('reader', rec.sessionId), kind === 'question'), { sessionId: rec.sessionId, name: rec.name }, true)
   }
 
   /** Whether the child's turn end is owed to the session that started it */

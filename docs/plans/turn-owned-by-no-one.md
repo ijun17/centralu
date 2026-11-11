@@ -151,6 +151,9 @@ person's chat as the work's result, is covered by `personSince` and by the agent
 
 ### 3.4 Work handed on, and a handoff (#1936)
 
+Built in #1948 step 5 as [mailbox.md](mailbox.md) §10.6.5. Q6 went a third way: each task is withdrawn and goes again from the heir with its
+cause, as step 3's shim did without the cause, so no message's sender is rewritten and no new row fact is read.
+
 - B gives C task T2 while working on A's T1 (`cause_id = T1`). B's turn ends: B is not at rest for T1 while T2 is open
   (§2.2 item 3). C's report or reply wakes B; B answers T1 by reply, or by its last response once at rest.
 - **Handoff.** `MessageService.handOver` (`messages.ts:831`) moves `from`'s open watched rows to the heir and tells it
@@ -160,6 +163,9 @@ person's chat as the work's result, is covered by `personSince` and by the agent
   answers the upstream task.
 
 ### 3.5 Cards (questions and approvals) in a session with open requests
+
+Built in #1948 step 4 as [mailbox.md](mailbox.md) §10.6.4, with one change: "the turn is the giver's alone" is `StopNotices.alone` (the
+stop notice's quote rule), which also covers a task that joined the person's turn and a card the person answered.
 
 Today a card goes to "the turn's owner" (`RoutedCards.routeCard`, `sessions/routed-cards.ts:75`, keyed on
 `children.turnOwners`), who may read it and, for an approval, answer it within `answersApproval` (line 62: caller

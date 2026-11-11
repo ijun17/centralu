@@ -74,27 +74,12 @@ export class ChildOwnershipRecords {
     this.db.prepare(`DELETE FROM agent_start_requests WHERE request_id = ?`).run(requestId)
   }
 
-  // ── Sessions running a turn another session gave them (#676) — see migration v51 ──
-
-  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
-    const rows = this.db
-      .prepare<unknown[], { sessionId: string; callerSessionId: string; told: string; turnId: string }>(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told, turn_id as turnId FROM delegated_turns ORDER BY started_at`)
-      .all()
-    return rows.map((r) => ({ ...r, told: r.told.split(' ').filter(Boolean) }))
-  }
-
-  /** A new delegated turn: the cards told of the session's earlier one go with it */
-  setDelegatedTurn(sessionId: string, callerSessionId: string, turnId: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards, turn_id) VALUES (?, ?, ?, '', ?)
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, started_at = excluded.started_at, told_cards = '', turn_id = excluded.turn_id`,
-      )
-      .run(sessionId, callerSessionId, Date.now(), turnId)
-  }
-
-  setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
-    this.db.prepare(`UPDATE delegated_turns SET told_cards = ? WHERE session_id = ?`).run(told.join(' '), sessionId)
+  /**
+   * Sessions running a turn another session gave them (#676, migration v51): this build neither reads nor writes them (docs/plans/mailbox.md
+   * §10.6.4). Every start drops what an earlier build left, so that build, after a rollback, adopts no stale link
+   */
+  dropDelegatedTurns(): void {
+    this.db.prepare(`DELETE FROM delegated_turns`).run()
   }
 
   // ── Requests an older build held for a busy session (#677) — see migration v52; read once, as mail, and removed ──
@@ -114,14 +99,9 @@ export class ChildOwnershipRecords {
     this.db.prepare(`DELETE FROM queued_requests WHERE id = ?`).run(id)
   }
 
-  clearDelegatedTurn(sessionId: string): void {
-    this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ?`).run(sessionId)
-  }
-
   /**
    * A handoff's move of the original session's children to the session that took over (#693, #1475), in one
-   * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
-   * delegated turn it gave each (`delegated_turns`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
+   * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, and its start_agent requests still waiting for the person (`agent_start_requests`, whose
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
    * row on the new session, so the next host (a swap or a restart) reads one owner either way.
    * `then`: the rest of the handoff's move that is stored elsewhere (the mail, `MailService.handOver`), run last in the same
@@ -140,11 +120,7 @@ export class ChildOwnershipRecords {
            parent_session_id = CASE WHEN parent_session_id = @from THEN @to ELSE parent_session_id END
          WHERE id = @id`,
       )
-      const turn = this.db.prepare(`UPDATE delegated_turns SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
-      for (const id of move.sessions) {
-        owner.run({ from, to, id })
-        turn.run({ from, to, id })
-      }
+      for (const id of move.sessions) owner.run({ from, to, id })
       const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
       for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
       then?.()

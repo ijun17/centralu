@@ -880,7 +880,7 @@ export class SessionManager {
         return self.inputs.agentRuns
       },
       answerRoutedCard: (...a) => self.cards.answerRoutedCard(...a),
-      answerQuestion: (...a) => self.inputs.answerQuestion(...a),
+      giverAnswer: (...a) => self.inputs.giverAnswer(...a),
       appProjectTarget: (...a) => self.projectCreation.appProjectTarget(...a),
       registerMadeFolder: (...a) => self.projectCreation.registerMadeFolder(...a),
       applyStateHint: (...a) => self.events.applyStateHint(...a),
@@ -1008,7 +1008,6 @@ export class SessionManager {
         }
       },
       mailHandOver: (...a) => self.mail.hooks?.handOver?.(...a) ?? [],
-      mailRepointTasks: (...a) => self.mail.hooks?.repointTasks?.(...a),
       mailHandOverPreview: (from, to) => {
         try {
           return self.mail.hooks?.handOverPreview?.(from, to) ?? []

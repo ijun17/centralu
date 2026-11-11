@@ -90,17 +90,8 @@ export class DelegationFlow {
       },
       ...(agent ? { agent: true } : {}),
     }
-    // The turn is the caller's (#676): its cards go to the caller too
-    this.host.children.ownTurn(sessionId, callerId, false)
     void d.outcome.then(() => {
       if (this.host.agentRuns.get(sessionId) === wait) this.host.agentRuns.delete(sessionId)
-      /*
-       * A swap's or a quit's failed waits are not the turn's end: the next host keeps the link while a kept turn runs, and
-       * decides at its start what became of one the quit cut (told as stopped, or continued after an update, #1618)
-       */
-      if (this.host.closing) return
-      // The delegation's owner now: a handoff may have moved it (#693)
-      this.host.children.releaseTurn(sessionId, d.callerId)
     })
     this.host.agentRuns.set(sessionId, wait)
     this.host.children.setDelegation(key, d)

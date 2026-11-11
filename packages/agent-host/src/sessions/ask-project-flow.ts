@@ -316,6 +316,8 @@ export class AskProjectFlow {
     const delegatedId = chosen.id
     const d = this.host.delegationFlow.startDelegation(key, callerId, delegatedId, target, false)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
+    // Written before the words go in, so a card the turn raises at once finds the caller's work open (docs/plans/mailbox.md §10.6.4)
+    const withdraw = this.host.children.delegated(callerId, delegatedId, 'ask_project', opts.task)
     try {
       const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
       /*
@@ -327,12 +329,12 @@ export class AskProjectFlow {
       const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
       await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
     } catch (e) {
+      withdraw()
       d.wait.fail(e as Error)
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(delegatedId) === d.wait) this.host.agentRuns.delete(delegatedId)
       return { ok: false, error: `Could not hand the task to ${target.name}: ${(e as Error).message}` }
     }
-    this.host.children.delegated(callerId, delegatedId, 'ask_project', opts.task)
     return this.awaitDelegation(key, d, signal)
   }
 

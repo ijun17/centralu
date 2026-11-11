@@ -1,41 +1,32 @@
-# Cards in a delegated turn (#676)
+# Cards in a session another session gave work (#676)
 
-When a session works on a turn another session gave it, the cards it raises in that turn go to that session as
-well as to the person (owner decision 2026-10-14, the child-question rule of #561 option B, scoped tightly). The turn
-is **delegated** when another session's work starts it: `ask_project` into a session at rest, `start_agent`, an
-`agent_session` send that starts a turn, `send_to_session` to a session at rest, and `create_session`'s first
-message (#1233). Mail that joins a turn already running (the person's, or someone else's; never a task, plans/mailbox.md
-§10.6.2) gives no one that turn, and answers no one's task by itself: a task is answered by its reply or the last response (#1233, plans/mailbox.md §10.6.3).
+A card a session raises (a question, an approval) goes to the sessions whose work it has open as well as to the person (owner decision
+2026-10-14, the child-question rule of #561 option B). A turn belongs to no one (#1948): the rule reads the session's open tasks, not who started
+its turn. The design, what it replaced and what a restart and an older build do are [plans/mailbox.md](../../plans/mailbox.md) §10.6.4.
 
-- **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
-  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session` and `create_session`. A card from a later turn the
-  person starts there never goes to the caller. Written to `delegated_turns` (store v51) as well as kept in memory:
-  the next host restores the links of the sessions whose cut turn it continues after an update, ending each with
-  that turn; any other row is dropped. The continued turn may ask its caller again; `told_cards` stops a second
-  notice for a card already told.
-- **Delivery** (`routeCard`). A wait of the caller on that turn (`agent_session` wait, `start_agent` waiting,
-  `ask_project` waiting) returns `asking` with the cards. With no wait, one notice goes into the caller's
-  conversation, marked as from the session, as a report is (`tellCardRaised`): host-written words naming the
-  session's id and the call that reads the card. Never the card's text: the question, its options and an approval's
-  detail are the target's words, so the caller reads them as a **tool result** (`agent_session` status, or
-  `read_session` for a directing seat), fenced as JSON (`cardsText`), not in the person's seat.
-- **Answering** (`answerRoutedCard`). A question: `agent_session` `answer` (an ordinary session, also across
-  projects for an `ask_project` target: only status and answer there) or `answer_question` (the Assistant; a rare
-  command, so through `centralu_run` in the default tier; a coordinator only reads). `text` is the answer, one line
-  per question, `;` between a multi-select's choices, or a JSON array; a choice naming an option is that option's
-  label (`answersFrom`). The card stays in the session for the person; the first answer lands, a later one finds the
-  card gone. An approval: the caller is told, and may allow or deny only when **both** hold at the answer
-  (`answersApproval`, the rule of #603/#606): the caller's own preset is `auto` and it is not an app's agent, and the
-  session running the turn is `normal` or `auto` and not an app's agent (owner decision: an `auto` assistant may
-  approve for a `normal` session). A `safe` session's approvals stay the person's whoever gave it the work: the
-  caller's `auto` never raises the target's permissions. Never a card the host raised in that session; "always" stays
-  the person's.
-- **Which card** (#679 review). The caller reads each card by a handle, `<request id>.<digest>`, the digest over the
-  delegated turn (`turnId`, stored with the link) and what the card asks (`cardHandle`), and its answer must name
-  that handle. An adapter numbers its requests again in a new process (`req-1`, …), so a request id alone could carry
-  an answer meant for an earlier card onto a new one in the same session, or into a later turn; a handle that matches
-  no standing card is refused, and the caller reads the card again. `told_cards` keeps handles too, so a new card
-  under a reused id is told.
+- **Who is told** (`RoutedCards.routeCard`). Every sender of a task to the session that is delivered, not settled and not released
+  (`openTaskParties`): `start_agent`, `agent_session` send, `ask_project`, `send_to_session` with `reportBack`, `create_session`'s first message
+  with `reportBack`, the person's own work aside. Each is told once per card. A call of its own that waits on the session (`agent_session` wait,
+  `start_agent` waiting, `ask_project` waiting) returns `asking` with the cards; otherwise a Centralu notice (`facts.card`) is its mail, shown
+  in its conversation as from the session. Never the card's text: the question, its options and an approval's detail are the session's words,
+  so the giver reads them as a **tool result** (`agent_session` status, or `read_session` for a directing seat), fenced as JSON (`cardsText`),
+  not in the person's seat. A notice not given yet goes when its card does (answered, or its turn ended or stopped).
+- **Answering** (`answerRoutedCard`). A question: `agent_session` `answer` (an ordinary session, also across projects for an `ask_project`
+  target: only status and answer there) or `answer_question` (the Assistant; a rare command, so through `centralu_run` in the default tier; a
+  coordinator only reads). `text` is the answer, one line per question, `;` between a multi-select's choices, or a JSON array; a choice naming
+  an option is that option's label (`answersFrom`). The card stays in the session for the person; the first answer lands, a later one finds
+  the card gone. A giver may answer only when it is the one party with work open there and the running turn is its work alone
+  (`StopNotices.alone`: work it gave started the turn, not mail the mailbox delivered, and nothing of the person's, an app's or another
+  session's entered it); otherwise it is told and only the person answers.
+  An approval needs more, read at the answer (`refusal`, the rule of #603/#606): the giver's own preset is `auto` and it is not an app's
+  agent, and the session is `normal` or `auto` and not an app's agent (owner decision: an `auto` assistant may approve for a `normal` session).
+  A `safe` session's approvals stay the person's whoever gave it the work: the giver's `auto` never raises the session's permissions. Never a
+  card the host raised in that session; "always" stays the person's.
+- **Which card** (#679 review). The giver reads each card by a handle, `<request id>.<digest>`, the digest over the session's turn (the record
+  row it began after) and what the card asks (`cardHandle`), and its answer must name that handle. An adapter numbers its requests again in a
+  new process (`req-1`, …), so a request id alone could carry an answer meant for an earlier card onto a new one in the same session, or into
+  a later turn; a handle that matches no standing card is refused, and the giver reads the card again. The notice's dedupe key carries the
+  handle too, so a new card under a reused id is told.
 
 ## Requests to a busy session (#677)
 

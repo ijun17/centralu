@@ -8,7 +8,8 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { leaveForEarlierBuild, takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskRepointer, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, openTaskParties, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -46,8 +47,6 @@ export type HostMailSessions = {
   readsSession?(readerId: string, targetId: string): boolean
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
-  /** Who is told of the turn a quit cut in `id`, found by this start (`HostTenure.quitStarter`); none for a turn an earlier start found */
-  quitStarter?(id: string): string | null
   /** A session this start found at rest answers the tasks it did not answer once it is settled (`ChildReports.settleAtRest`, mailbox.md §10.6.3) */
   settleAtRest?(id: string): void
   /** Tells `receiverId`, whose seat cannot read mail, of `stoppedId`'s stop in the relayed report's words for that ending (`ChildReports.relayStop`); `told` once it went in */
@@ -76,7 +75,6 @@ export function mailSessionsOf(
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
-    quitStarter: (id) => mgr.tenure.quitStarter(id),
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
   }
@@ -250,6 +248,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
     across,
   })
+  /** Whether the card a notice names stands in its session still: the session holds that question or approval (mailbox.md §10.6.4) */
+  const cardStands = (session: string, requestId: string): boolean => {
+    const party = parseAddress(session)
+    const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
+    return s !== undefined && (s.pendingQuestions.some((q) => q.requestId === requestId) || s.pendingApproval?.requestId === requestId)
+  }
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.stops.partyGone(addressOf(id)),
@@ -258,7 +262,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     stopped: (id, why, o) =>
       void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
     leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
-    handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
+    handOver: (from, to, which, children) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
@@ -301,8 +305,16 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     requestTurnEnded: requestTurnRecorder(service, mailTurns, addressOf),
     openTasks: (id, side) => openTaskParties(store.mailbox, addressOf(id), side),
+    // A card a session raised is told to the givers of its open work, and answered by one of them only as the gate allows (§10.6.4)
+    cards: {
+      // Only a turn the giver's own work started, as the turn owner was: one the mailbox started for its task (the session was busy) is told only
+      givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver) => giver !== PERSON && service.stops.alone(addressOf(id), addressOf(giver), { gaveIt: true })),
+      // The person has the card itself: nothing is written for them
+      tell: (giverId, card, body, delivered) => (giverId === PERSON ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
+      turn: (id) => store.mailbox.nextTurnSeq(id) - 1,
+      ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
+    },
     turnInputs: (id, turn) => delivery.turnInputs(addressOf(id), turn),
-    repointTasks: taskRepointer(service, store.mailbox),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
     roleMoved: (to) => {
@@ -321,6 +333,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     hooks,
     afterReady: () => {
       try {
+        // A card the last host's end took with it (a quit, an update, a swap) no longer stands here: its notice not given yet goes
+        withdrawEndedCards(store.mailbox, null, cardStands)
+      } catch (e) {
+        console.error(`[mail] taking back the notices of ended cards failed: ${errorMessage(e)}`)
+      }
+      try {
         const moved = store.movePendingThreadMail(now(), (address) => reach.projectOf(address))
         if (moved.messages > 0) console.error(`[mail] moved ${moved.messages} pending message(s) an older build left in its threads`)
       } catch (e) {
@@ -335,8 +353,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         const stops = sessions.listSessions().flatMap((s) => {
           const why = s.interruption?.reason
           if (why !== 'quit' && why !== 'shutdown') return []
-          const starter = sessions.quitStarter?.(s.id)
-          return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter: starter ? addressOf(starter) : null }]
+          // The session that started it is told once (the notice's key): a later start that finds the same mark tells no one again
+          const starter = s.askedBy && sessions.sessionInfo(s.askedBy) ? addressOf(s.askedBy) : null
+          return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter }]
         })
         service.stops.sessionsStopped(stops)
       } catch (e) {
@@ -387,19 +406,6 @@ function openWork(service: MessageService, store: Store, address: string): { una
     else if (m.needsReply && row.answerId === null) unanswered.push(firstLineOf(m.body, 160))
   }
   return { unanswered, owed }
-}
-
-/**
- * The sessions with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's own
- * work), or its own tasks' receivers (`from`)
- */
-function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from'): string[] {
-  const rows = side === 'to' ? records.watchedTo(address) : records.watchedFrom(address)
-  return [...new Set(rows.flatMap((r) => {
-    const m = r.deliveredAt === null || r.releasedAt !== null ? undefined : records.message(r.messageId)
-    const other = m?.kind === 'task' ? parseAddress(side === 'to' ? m.sender : r.recipient) : null
-    return other?.kind === 'session' ? [other.sessionId] : other?.kind === 'person' ? [PERSON] : []
-  }))]
 }
 
 /** §7.4: a delegation out of the caller's untrusted project is refused (S15), and the record S16 is built from is written */

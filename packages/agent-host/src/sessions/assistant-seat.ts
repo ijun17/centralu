@@ -440,15 +440,14 @@ export function centraluToolsFor(
         })
         if (opts.name) host.rename(info.id, opts.name)
         if (opts.firstMessage) {
-          // This seat's turn, as a send to a session at rest is (#676): its cards come here, and more words are notes
-          host.children.ownTurn(info.id, assistantId, true)
+          // Written before the words go in, so a card the turn raises at once finds this seat's work open (docs/plans/mailbox.md §10.6.4)
+          const withdraw = reportBack ? host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage) : undefined
           try {
             await host.send(info.id, opts.firstMessage, undefined, sender)
           } catch (e) {
-            host.children.releaseTurn(info.id, assistantId)
+            withdraw?.()
             throw e
           }
-          if (reportBack) host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage)
         }
         return { ok: true, sessionId: info.id, name: host.meta.get(info.id)?.name ?? info.name }
       } catch (e) {
@@ -629,7 +628,7 @@ export function centraluToolsFor(
        */
       const start = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
       const picked = before != null ? lines.slice(-limit) : fromSeq != null ? lines.slice(0, limit) : start >= 0 ? lines.slice(start, start + limit) : lines.slice(-limit)
-      // The cards of a turn this seat gave it (#676): this read is where a directing seat finds them
+      // The cards of work this seat gave it (#676, docs/plans/mailbox.md §10.6.4): this read is where a directing seat finds them
       const cards = host.routedCards(sessionId, assistantId)
       return {
         ok: true,
@@ -642,7 +641,7 @@ export function centraluToolsFor(
       }
     },
 
-    // A card of a turn this seat gave a session in its view (#676) — the directing seats' agent_session answer
+    // A card of work this seat gave a session in its view (#676) — the directing seats' agent_session answer
     answerQuestion: async (opts) => {
       const target = host.meta.get(opts.sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(opts.sessionId) }
@@ -705,8 +704,9 @@ export function centraluToolsFor(
         return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, busy: mailed }
       }
 
-      // At rest: the turn it starts is this seat's (#676), its cards come here too, until it ends
-      host.children.ownTurn(sessionId, assistantId, true)
+      // Only comes back when asked for, silent by default: a task is the request, and its reply or last response comes back (mailbox.md §10.6.3).
+      // Written before the words go in, so a card the turn raises at once finds this seat's work open (§10.6.4)
+      const withdraw = reportBack ? host.children.delegated(assistantId, sessionId, 'send_to_session', text) : undefined
       try {
         // Tagged with its source and kept in the store/UI. The adapter's reporting gate only ever fires for
         // a lower-privilege reportBack.
@@ -716,11 +716,9 @@ export function centraluToolsFor(
           name: orch?.name ?? 'Assistant',
         })
       } catch (e) {
-        host.children.releaseTurn(sessionId, assistantId)
+        withdraw?.()
         return { ok: false, error: (e as Error).message }
       }
-      // Only comes back when asked for — silent by default: a task is the request, and its reply or last response comes back (mailbox.md §10.6.3)
-      if (reportBack) host.children.delegated(assistantId, sessionId, 'send_to_session', text)
       return { ok: true }
     },
 

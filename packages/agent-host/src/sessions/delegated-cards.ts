@@ -5,11 +5,10 @@ import { callForm, FILL } from './tool-seats.js'
 import { tryParseJson } from '../json-value.js'
 
 /**
- * Cards in a delegated turn (#676): a session P gave another session A a turn (ask_project, start_agent,
- * agent_session send, send_to_session), and A raised a card during it. P is told, reads the card through a tool and
- * may answer a question; the person may answer too, and the first answer wins. The rules live in
- * `RoutedCards.routeCard` / `answerRoutedCard` (routed-cards.ts); this module holds the pure parts: how P's answer is
- * read, and the words P is told with.
+ * Cards in a session another session gave work (#676; docs/plans/mailbox.md §10.6.4): a session P has work open in session A (ask_project,
+ * start_agent, agent_session send, send_to_session), and A raised a card. P is told, reads the card through a tool and may answer it as the gate
+ * allows; the person may answer too, and the first answer wins. The rules live in `RoutedCards` (routed-cards.ts) and a linked machine's
+ * `RemoteAgents`; this module holds the pure parts: how P's answer is read, and the words P is told with.
  */
 
 /**
@@ -77,21 +76,22 @@ export function cardCall(profile: ToolProfile | null, sessionId: string): { call
 }
 
 /**
- * What the caller is told when a card comes up in the turn it gave (#676), as the completion report is: one message in
- * its conversation, marked as from the target session. Never the card's text: that is the target's, and the caller
- * reads it as a tool result (`cardCall`), not in the person's seat.
+ * What a giver of a session's work is told when a card comes up there (#676; docs/plans/mailbox.md §10.6.4): one notice, marked as from that session.
+ * Never the card's text: that is the session's, and the giver reads it as a tool result (`cardCall`), not in the person's seat. `answerable`: the gate
+ * lets this giver answer it
  */
 export function cardNotice(kind: 'question' | 'approval', sessionId: string, how: { call: string; canAnswer: boolean }, answerable: boolean): string {
   const head = kind === 'question'
-    ? '[Centralu] The session you gave work to is asking a question in that turn.'
-    : '[Centralu] The session you gave work to is waiting on an approval in that turn.'
-  const { call } = how
+    ? '[Centralu] The session you gave work to is asking a question.'
+    : '[Centralu] The session you gave work to is waiting on an approval.'
   const who = !how.canAnswer
     ? 'Only the person can answer it here; tell them if it matters for your work.'
-    : kind === 'question'
-    ? 'You may answer it; the person may too, and the first answer counts.'
-    : answerable
-      ? 'Your permission preset is auto, so you may allow or deny it; the person may too, and the first answer counts.'
-      : 'Only the person can answer it; tell them if it matters for your work.'
-  return `${head}\nsourceSessionId: ${sessionId}\n${call}. ${who}`
+    : !answerable
+      ? 'Only the person can answer it; tell them if it matters for your work.'
+      : kind === 'question'
+        ? 'You may answer it; the person may too, and the first answer counts.'
+        : 'Your permission preset is auto, so you may allow or deny it; the person may too, and the first answer counts.'
+  return `${head}
+sourceSessionId: ${sessionId}
+${how.call}. ${who}`
 }

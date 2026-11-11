@@ -66,11 +66,11 @@ export type MailInput = {
   /** Joins the turn running (`ReceiverState.joins`); a receiver no longer in the state the delivery was planned for is `MailNotAtRest` */
   joins?: boolean
   /**
-   * The task the wake carries from a delegation tool (`agent_session` send, `ask_project`, the Assistant's `send_to_session`; docs/plans/mailbox.md
-   * §10.6.2): its sender and words, for the receiver's conversation to show as that sender's message (`SessionEvents.deliverMail`). `alone`: the
-   * wake carries nothing else. The agent reads the mail frame only
+   * What the delivery carries that the receiver's conversation shows as a session's message (`SessionEvents.deliverMail`): a delegation tool's task
+   * (`agent_session` send, `ask_project`, the Assistant's `send_to_session`; docs/plans/mailbox.md §10.6.2), its sender and words, or the notice of a
+   * card in a session it gave work (§10.6.4), from that session. `alone`: the delivery carries nothing else. The agent reads the mail frame only
    */
-  task?: { senderId: string; text: string; alone: boolean }
+  shown?: { senderId: string; text: string; alone: boolean }
   /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
   id?: string
 }
@@ -521,10 +521,10 @@ export class MailDelivery {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }
     const delivered: { at?: number } = {}
-    const task = quiet ? undefined : this.delegatedTask(drained)
+    const shown = quiet ? undefined : this.shownOf(drained)
     const inputId = joins ? randomUUID() : undefined
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(task ? { task } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -598,11 +598,24 @@ export class MailDelivery {
   }
 
   /** The work a wake starts when a delegation tool sent it (`MailInput.task`) */
-  private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): MailInput['task'] {
+  private delegatedTask(drained: Pick<DrainResult, 'workMessage'>): { senderId: string; text: string } | undefined {
     const m = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
     const from = m && parseAddress(m.sender)
     if (m?.kind !== 'task' || from?.kind !== 'session' || !SEND_ORIGINS.has(m.origin ?? '')) return undefined
-    return { senderId: from.sessionId, text: m.body, alone: drained.messageIds.length === 1 }
+    return { senderId: from.sessionId, text: m.body }
+  }
+
+  /** What the receiver's conversation shows as a session's message (`MailInput.shown`): the delegated task, else a card's notice, from its session */
+  private shownOf(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): MailInput['shown'] {
+    const alone = drained.messageIds.length === 1
+    const task = this.delegatedTask(drained)
+    if (task) return { ...task, alone }
+    for (const id of drained.messageIds) {
+      const m = this.records.message(id)
+      const about = m?.facts.card ? parseAddress(m.facts.card.session) : undefined
+      if (m && about?.kind === 'session') return { senderId: about.sessionId, text: m.body, alone }
+    }
+    return undefined
   }
 
   /**
