@@ -18,6 +18,18 @@ export function delegationRecorder(mail: MessageService, turns?: MailTurns): (ca
   }
 }
 
+/**
+ * A child this host started on a linked machine is gone with notes the hub held for it (#2114, `RemoteAgents.forget`): each is written as the task
+ * it was, never delivered, and the child's mail is released `gone` in the same write, so the stop notice tells the caller (mailbox.md §10.6.1)
+ */
+export function linkedGoneRecorder(mail: MessageService, records: MailboxRecords): (childId: string, callerId: string, notes: readonly string[]) => void {
+  return (childId, callerId, notes) =>
+    records.transaction(() => {
+      for (const text of notes) mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text, origin: 'agent_session', delivered: false })
+      mail.stops.partyGone(mail.sessionAddress(childId))
+    })
+}
+
 /** The old path's word for where work came from, as a task's origin (§5.2) */
 function delegationOrigin(origin: ThreadOrigin): DelegationOrigin {
   return origin === 'start_agent' || origin === 'agent_session' || origin === 'send_to_session' || origin === 'create_session' || origin === 'ask_project' ? origin : 'send_to_session'

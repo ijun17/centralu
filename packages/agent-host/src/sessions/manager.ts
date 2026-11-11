@@ -1171,6 +1171,7 @@ export class SessionManager {
       },
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
+      linkedChildGone: (...a) => self.mail.linkedChildGone(...a),
       toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
       canReadMail: (...a) => self.mail.canReadMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),

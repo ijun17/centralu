@@ -116,7 +116,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
+  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'closing' | 'emit' | 'linkedChildGone' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
 >
 
 /**
@@ -188,6 +188,8 @@ export class RemoteAgents {
   private readonly lastSeq = new Map<string, number>()
   /** Children whose held note is being sent now (`drain`): one at a time; true when it was asked for again meanwhile (the child freed, a note held, the link resynced), so the answer being waited on may be older than that */
   private readonly draining = new Map<string, boolean>()
+  /** Children whose deletion is under way: a note held for one is not sent (#2114) until the deletion fails; one that goes, `forget` tells of */
+  private readonly deleting = new Set<string>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -290,7 +292,7 @@ export class RemoteAgents {
    */
   forgetCaller(callerId: string): void {
     for (const r of this.records().filter((x) => x.callerId === callerId)) {
-      this.forget(r.sessionId)
+      this.forget(r.sessionId, false)
       this.owned(r.sessionId, null)
     }
   }
@@ -561,6 +563,18 @@ export class RemoteAgents {
 
   /** agent_session on a child of a linked machine (#1038): status, wait, send, stop, delete, through the link */
   async agentSession(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    if (opts.action !== 'delete') return this.act(callerId, rec, opts, signal)
+    this.deleting.add(rec.sessionId)
+    try {
+      return await this.act(callerId, rec, opts, signal)
+    } finally {
+      this.deleting.delete(rec.sessionId)
+      // Not deleted: what was held meanwhile goes now, as the child is still there
+      if (this.of(rec.sessionId)?.queued?.length) this.scheduleDrain(rec.sessionId)
+    }
+  }
+
+  private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (rec.callerId !== callerId) return { ok: false, error: `${rec.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.` }
     const reader = this.host.linkedReader
     if (!reader) return { ok: false, error: `${rec.sessionId} is on ${rec.machine}, and no machine is linked to this computer now.` }
@@ -601,6 +615,8 @@ export class RemoteAgents {
       case 'send': {
         const text = opts.text?.trim()
         if (!text) return { ok: false, error: 'Give the text to send.' }
+        // Its deletion is under way: held, so the deletion decides (#2114). It goes if the child stays, and its sender is told if it goes
+        if (this.deleting.has(rec.sessionId)) return this.hold(rec, text)
         // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)
         const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
         if (above) return { ok: false, error: above }
@@ -972,6 +988,8 @@ export class RemoteAgents {
     this.host.children.setLinkedReport(rec.sessionId, { assistantId: callerId, busy: false })
     const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
     this.pending.delete(rec.sessionId)
+    // The host is leaving and its store closes: nothing more is written. A held note stays held for the next host (`drain`)
+    if (this.host.closing) return { ok: false, error: `Centralu is restarting; "${rec.name}" on ${rec.machine} may have been given the text.` }
     if (!sent.ok) {
       if (this.host.children.linkedReports.get(rec.sessionId)?.assistantId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
       return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
@@ -1022,18 +1040,22 @@ export class RemoteAgents {
    * Sends the oldest held note as new work (#1682), as the caller's send at rest does, once the child is in no turn and its machine can
    * be read; the next waits for that turn's end. The note stays in the record until the machine has it, so a link that drops as it goes, or a
    * restart in the middle, loses none: it goes when the link is back (a restart in the middle of a send may send it twice, as a local
-   * queue's does). A note the send refuses (what it rests on is read again) is told to the caller, not kept
+   * queue's does). A note the send refuses (what it rests on is read again) is told to the caller, not kept. It ends with the host: nothing is
+   * read or written once the host is leaving, checked again after each wait. Nothing goes to a child whose deletion is under way (#2114)
    */
   private async drain(sessionId: string): Promise<void> {
+    // Before anything is read: the store of a host that is leaving may be closed already
+    if (this.host.closing) return
     const reader = this.host.linkedReader
     const head = this.of(sessionId)?.queued?.[0]
     const machineId = this.of(sessionId)?.machineId
-    if (!head || !reader || machineId === undefined || !reader.machineLinked(machineId)) return
+    if (this.deleting.has(sessionId) || !head || !reader || machineId === undefined || !reader.machineLinked(machineId)) return
     // The one under way may be waiting on a read that found the child in a turn this event has just ended: it goes round again
     if (this.draining.has(sessionId)) return void this.draining.set(sessionId, true)
     this.draining.set(sessionId, false)
     try {
       const now = await reader.read(sessionId, 1)
+      if (this.host.closing || this.deleting.has(sessionId)) return
       // A stop, a handoff or a deletion during the read: what is first now, and whose child it is now, decide
       const rec = this.of(sessionId)
       if (rec?.queued?.[0]?.id !== head.id) return
@@ -1043,7 +1065,7 @@ export class RemoteAgents {
       if (!now.ok || isInTurn(now.state) || this.busy.has(sessionId)) return
       const taken = () => this.setQueued(sessionId, (this.of(sessionId)?.queued ?? []).filter((q) => q.id !== head.id))
       const sent = await this.sendAtRest(rec, rec.callerId, head.text, labelOf(this.host.store.messages, caller), reader, taken)
-      if (sent.ok) return
+      if (sent.ok || this.host.closing) return
       // The machine could not be reached: the note stays for the link's return
       if (sent.error.includes(NOT_REACHABLE) || sent.error.includes(NOT_CONNECTED_PHRASE)) return
       taken()
@@ -1051,7 +1073,7 @@ export class RemoteAgents {
     } finally {
       const again = this.draining.get(sessionId)
       this.draining.delete(sessionId)
-      if (again) this.scheduleDrain(sessionId)
+      if (again && !this.host.closing) this.scheduleDrain(sessionId)
     }
   }
 
@@ -1445,8 +1467,13 @@ export class RemoteAgents {
     this.host.store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify(list))
   }
 
-  /** The child is gone from the machine: its record and anything owed of it go */
-  private forget(sessionId: string): void {
+  /**
+   * The child is gone from the machine: its record and anything owed of it go. A note held for it is not sent (#2114): its caller is told by the
+   * stop notice, as of any task a gone session leaves (`DelegationHost.linkedChildGone`); not a caller that is gone itself (`tell` false)
+   */
+  private forget(sessionId: string, tell = true): void {
+    const held = this.of(sessionId)
+    if (tell && held?.queued?.length) this.host.linkedChildGone(sessionId, held.callerId, held.queued.map((q) => q.text))
     if (this.records().some((r) => r.sessionId === sessionId)) this.save(this.records().filter((r) => r.sessionId !== sessionId))
     this.toldDown.delete(sessionId)
     this.whose.delete(sessionId)

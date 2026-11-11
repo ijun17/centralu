@@ -53,6 +53,8 @@ class Machine {
   onInterrupt: (() => void) | null = null
   interruptError: string | null = null
   deleteGate: Promise<void> | null = null
+  /** The error the deletion there gets */
+  deleteError: string | null = null
   private seq = 0
   private cards = 0
 
@@ -160,7 +162,7 @@ class Machine {
       },
       deleteSession: async () => {
         if (this.deleteGate) await this.deleteGate
-        return { ok: true }
+        return this.deleteError ? { ok: false, error: this.deleteError } : { ok: true }
       },
       backgroundTasks: async () => (this.reachable ? [{ sessionId: CHILD, tasks: this.live }] : null),
     } as unknown as LinkedSessions
@@ -181,6 +183,10 @@ class Hub {
   readonly meta = new Map([[caller.id, caller]])
   /** What a test puts in place of the session manager's members (its cards, its `auto` boundary), at the next boot */
   more: Record<string, unknown> = {}
+  /** The host is leaving (`DelegationHost.closing`) */
+  leaving = false
+  /** Children gone with notes held for them, as the mailbox is told (`DelegationHost.linkedChildGone`) */
+  readonly gone: { child: string; caller: string; notes: string[] }[] = []
 
   constructor(
     readonly store: Store,
@@ -216,11 +222,15 @@ class Hub {
       uiPreferences: () => ({}),
       hostCards: { askHost: async () => 'allow' },
       files: { projectOrigin: async () => 'https://github.com/me/app' },
+      linkedChildGone: (child: string, caller: string, notes: readonly string[]) => void this.gone.push({ child, caller, notes: [...notes] }),
       ...this.more,
     } as unknown as RemoteAgentsHost
+    // Read when used, as the manager's getter is
+    Object.defineProperty(host, 'closing', { get: () => this.leaving })
     // The manager's project-trust gate over this host's store and its `auto` (#2159)
     const registry = new ProjectRegistry(host as unknown as ProjectRegistryHost)
-    this.agents = new RemoteAgents({ ...host, trustGate: (...a) => registry.trustGate(...a) }, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
+    // Added to the host, not spread into a copy: `closing` is read when used
+    this.agents = new RemoteAgents(Object.assign(host, { trustGate: (...a: Parameters<typeof registry.trustGate>) => registry.trustGate(...a) }), { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
     this.agents.restore()
   }
 
@@ -822,6 +832,74 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       release()
       expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
       expect(notes()).toHaveLength(0)
+    })
+
+    // #2114: the deletion was asked for, and a note comes before it is done
+    async function heldWhileDeleting(): Promise<{ release: () => void; deleting: Promise<ChildRunResult> }> {
+      await reportedThenBusy()
+      let release!: () => void
+      machine.deleteGate = new Promise<void>((resolve) => (release = resolve))
+      machine.onInterrupt = () => machine.selfTurnEnds()
+      const deleting = hub.act('delete')
+      await flush()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      expect(notes()).toHaveLength(0)
+      return { release, deleting }
+    }
+
+    it('held while the child is being deleted, is not sent to it: once it is deleted, its sender is told it was not given', async () => {
+      const { release, deleting } = await heldWhileDeleting()
+      release()
+      expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
+      await flush()
+      expect(notes()).toHaveLength(0)
+      expect(hub.gone).toEqual([{ child: CHILD, caller: 'h1', notes: [note.text] }])
+    })
+
+    it('held while the child is being deleted, goes once the deletion fails, and nobody is told it was not given', async () => {
+      machine.deleteError = 'Box is not reachable right now'
+      const { release, deleting } = await heldWhileDeleting()
+      release()
+      expect(await deleting).toMatchObject({ ok: false })
+      await flush()
+      expect(notes()).toHaveLength(1)
+      expect(hub.gone).toEqual([])
+    })
+
+    it('held for a child deleted on its machine, is not sent: its sender is told it was not given', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      hub.observe({ type: 'session_deleted', sessionId: CHILD })
+      await flush()
+      expect(notes()).toHaveLength(0)
+      expect(hub.gone).toEqual([{ child: CHILD, caller: 'h1', notes: [note.text] }])
+    })
+
+    it('reads and writes nothing once the host is leaving, whatever it was waiting on', async () => {
+      const failed: unknown[] = []
+      const onFailure = (e: unknown) => void failed.push(e)
+      process.on('unhandledRejection', onFailure)
+      try {
+        await reportedThenBusy()
+        expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+        await flush()
+        // The child's turn ends, and the read before the held note goes is answered after the host left and closed its store
+        let answer!: () => void
+        machine.readGate = new Promise<void>((resolve) => (answer = resolve))
+        machine.selfTurnEnds()
+        await flush()
+        hub.leaving = true
+        store.close()
+        answer()
+        await flush()
+        expect(failed).toEqual([])
+        expect(notes()).toHaveLength(0)
+      } finally {
+        process.off('unhandledRejection', onFailure)
+        store = new Store()
+      }
     })
 
     const gotten = () => machine.fromHub.filter((t) => /first note|second note|third note|C-note/.test(t)).map((t) => /first|second|third|C-note/.exec(t)![0])

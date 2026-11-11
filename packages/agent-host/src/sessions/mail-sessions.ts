@@ -42,6 +42,8 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs): Promise<{ text: string; isError?: boolean }>
+  /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
+  linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
   /** How many threads a session handed on in the work it does for another are still going (§6) */
@@ -107,6 +109,19 @@ export class MailSessionsView {
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
   oldOwes(ownerId: string, childId: string): boolean {
     return this.host.children.oldOwes(ownerId, childId)
+  }
+
+  /**
+   * A child this host started on a linked machine is gone, with notes its caller had the hub hold for it (#2114): they were not given, and the
+   * stop notice tells the caller so, as of any task a gone session leaves. Never throws: the child is gone already
+   */
+  linkedChildGone(childId: string, callerId: string, notes: readonly string[]): void {
+    if (this.host.closing) return
+    try {
+      this.hooks?.linkedGone?.(childId, callerId, notes)
+    } catch (e) {
+      console.error(`[mail] ${childId.slice(0, 8)}: the notes held for it could not be told to ${callerId.slice(0, 8)} (${errorMessage(e)})`)
+    }
   }
 
   /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */

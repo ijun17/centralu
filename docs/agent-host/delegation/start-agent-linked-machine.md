@@ -62,8 +62,11 @@ work the caller owns (`sendAtRest`, the send at rest), once the child is in no t
 note stays in the record until the machine has it, so a link that drops as it goes loses none, and a restart in the middle of a send may send it twice,
 as a local queue's does. Held notes go first: a send at rest meanwhile is refused, or held behind them with `ifBusy: "queue"`. A note refused at the
 time it would go (the caller's trust or depth read again) is told to the caller, with the error's kind for the model, as a local queued request's is.
-The caller's stop drops what is held. A held note is dropped with the child when it is deleted on its machine or its machine is removed, as a local
-queue's is with a trashed session, and the caller is not told. A stop served by the build before this one during a swap leaves the field, so the
+The caller's stop drops what is held. A send while the caller's deletion of the child is under way is held, and nothing held goes until the deletion
+ends (#2114): if it fails, the notes go. A held note is never sent to a child that is gone (deleted, by the caller or on its machine, or its machine
+removed): the mailbox writes each as the task it was, never delivered, and releases it `gone` with the child's other mail, so the step-1 stop notice
+tells the caller (`MailSessionsView.linkedChildGone`, docs/plans/mailbox.md §10.6.1). Nothing is said when the caller itself is trashed. The held notes
+end with the host: once it is leaving, `drain` reads and writes nothing, checked again after each wait. A stop served by the build before this one during a swap leaves the field, so the
 note goes once the link resyncs. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
 names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id

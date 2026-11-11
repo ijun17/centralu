@@ -70,6 +70,8 @@ export type DelegationHost = {
   readonly closing: boolean
   readonly handles: Map<string, SessionHandle>
   readonly linkedReader: LinkedSessions | null
+  /** A child on a linked machine is gone with notes held for it (#2114): the stop notice tells its caller they were not given (`MailSessionsView.linkedChildGone`) */
+  linkedChildGone: (childId: string, callerId: string, notes: readonly string[]) => void
   readonly memoryGate: MemoryGate | null
   readonly meta: Map<string, SessionInfo>
   modelsWithin: (tool: ToolName, ms: number, fresh?: boolean) => Promise<{ models: ModelOption[]; cached: boolean; } | null>
