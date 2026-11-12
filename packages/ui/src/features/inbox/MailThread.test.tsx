@@ -182,6 +182,8 @@ describe('the thread in the inbox', () => {
     })
 
     it('offers only the questions the host says are open: a host of an older build, which names none, gets the box as it was, with words as a plain reply (#2233)', () => {
+      // The host names both: they are offered
+      expect(render(asking([first, second], ['m1', 'm2'])).html).toContain('data-testid="mail-answering"')
       // Two questions in the messages, and no `ask` on the thread: nothing to choose between, and nothing sent with `answers`, which an older host refuses for words that are no choice
       expect(render(view({ messages: [first, second] })).html).not.toContain('data-testid="mail-answering"')
       // One of them is not open on the host (its sender is gone): it is not offered

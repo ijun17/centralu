@@ -772,8 +772,11 @@ describe('the whole record of a tool call (#221)', () => {
       expect(out.find((e) => e.type === 'background_tasks')).toMatchObject({ ended: [{ id: 'a2', status: 'stopped' }, { id: 'sh', status: 'stopped' }] })
     })
 
-    it('a failed agent’s own notification closes the card with its report, and the line that said the same is not written', () => {
-      const out = running().push(sdk({ type: 'system', subtype: 'task_notification', task_id: 'a2', tool_use_id: 'bg', status: 'failed', summary: 'It hit a wall' }))
+    it('a failed agent’s own notification closes the card with its report, and the line that said the same is not written; a failed shell’s is', () => {
+      const stream = running()
+      const shell = stream.push(sdk({ type: 'system', subtype: 'task_notification', task_id: 'sh', status: 'failed', summary: 'exit code 1' }))
+      expect(lines(shell)).toEqual(['Background shell "npm test" failed: exit code 1'])
+      const out = stream.push(sdk({ type: 'system', subtype: 'task_notification', task_id: 'a2', tool_use_id: 'bg', status: 'failed', summary: 'It hit a wall' }))
       expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'bg', ok: false }])
       expect(lines(out)).toEqual([])
     })
