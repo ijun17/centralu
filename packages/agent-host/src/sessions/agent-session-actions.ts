@@ -193,6 +193,7 @@ export class AgentSessionActions {
   async sendWork(callerId: string, target: string, text: string, ifBusy?: IfBusy, signal?: AbortSignal): Promise<ChildRunResult | null> {
     const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
     if (remote) {
+      if (remote.callerId !== callerId) return null
       // §7.4: more work for a child on a linked machine is asked before it goes over the link
       const machine = this.host.linkedReader?.machineOf(target)
       const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })

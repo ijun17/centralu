@@ -812,7 +812,7 @@ export const MAIL_TOOLS = [
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close', 'find']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),
@@ -834,10 +834,11 @@ export const MAIL_TOOLS = [
 
 /**
  * The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md.
- * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231). 1240 → 1370 for #1948 (owner 2026-11-12, measured 1364): `ifBusy`
- * moved here from agent_session (+55), and the sentence on reports (+72), since every report an agent writes is mail. AGENT_BUDGET_CHARS fell by 70.
+ * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231). 1240 → 1355 for #1948 (owner 2026-11-12, measured 1350): `ifBusy`
+ * moved here from agent_session (+55), and the sentence on reports (+72), since every report an agent writes is mail; #2133 took " or checkpoint" from
+ * `parent` (-14). AGENT_BUDGET_CHARS fell by 70.
  */
-export const MAIL_BUDGET_CHARS = 1370
+export const MAIL_BUDGET_CHARS = 1355
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
@@ -1004,7 +1005,7 @@ export const READER_BUDGET_CHARS = 1960
  * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `assistant` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
  * #2039 (a name for `to`): the description of `to` says a session may be named by its name or id and what a shared name gets (`MAIL_BUDGET_CHARS` 1,110 → 1,170, measured 1,160, so the reader's sum rises by 60).
  * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
- * #1948 (owner 2026-11-12): `send` leaves agent_session for mail with its `ifBusy`, and mail's description gains the sentence on reports: the reader's sum rises by MAIL_BUDGET_CHARS' 130 less AGENT_BUDGET_CHARS' 70 (measured +55 on Codex; Claude defers both).
+ * #1948 (owner 2026-11-12): `send` leaves agent_session for mail with its `ifBusy`, and mail's description gains the sentence on reports: the reader's sum rises by MAIL_BUDGET_CHARS' 115 less AGENT_BUDGET_CHARS' 70 (measured +41 on Codex; Claude defers both).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   assistant: 10_180 + COMPACT_BUDGET_CHARS,

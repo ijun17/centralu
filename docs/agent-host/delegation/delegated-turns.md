@@ -35,7 +35,7 @@ task that reaches the session as a turn of its own once it is free (a task joins
 `mailed` with the task's id, and the turn's end is reported to the caller by mail. When it goes, the receiver's conversation shows it as the
 sender's message, as a direct send does; the agent reads the mail frame. The rule, what it
 replaced (the `note` / `queue` choices and the request queue) and what a restart and an older build do with it are
-[plans/mailbox.md](../../plans/mailbox.md) §10.6.2 (#1948 step 2). A fork stays an explicit choice of `agent_session` and `send_to_session`:
+[plans/mailbox.md](../../plans/mailbox.md) §10.6.2 (#1948 step 2). A fork stays an explicit choice of a `mail` send to a session the caller started (since #1948, which took it from `agent_session`) and of `send_to_session`:
 
 | `ifBusy` | What happens |
 |---|---|

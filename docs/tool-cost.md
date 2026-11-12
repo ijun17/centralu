@@ -938,20 +938,22 @@ the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), s
 loses `send`, its `ifBusy` and "messages," (521 → 449; the agent set 1,372 → 1,300, `AGENT_BUDGET_CHARS` 1,400 → 1,330): more work for a
 session the caller started is `mail` send ([plans/mailbox.md](plans/mailbox.md) §10.6.6). The mail tool gains that `ifBusy` (+55) and the
 sentence "In a report, say what each claim was checked against, and what was not." (+72), since every report an agent writes is mail:
-1,237 → 1,364, `MAIL_BUDGET_CHARS` 1,240 → 1,370. The reader's resident ceiling (the sum) rises by the net 60. Measured with `residentCost`
+and #2133 takes " or checkpoint" from `parent` in `to` (-14, below): 1,237 → 1,350, `MAIL_BUDGET_CHARS` 1,240 → 1,355. The reader's resident ceiling
+(the sum) rises by the net 45. Measured with `residentCost`
 (characters, not tokens):
 
 | Seat | Tool | Before | After |
 |---|---|---|---|
 | ordinary or child, Claude | resident (`start_agent` loaded; `mail`, `agent_session` deferred) | 3,428 | 3,428 |
-| ordinary or child, Claude | deferred | 3,006 | 3,061 |
-| ordinary or child, Codex | loaded (all) | 6,492 | 6,547 |
+| ordinary or child, Claude | deferred | 3,006 | 3,047 |
+| ordinary or child, Codex | loaded (all) | 6,492 | 6,533 |
 | Assistant, Claude / Codex | resident (mail and agent_session are commands) | 10,711 / 10,769 | 10,711 / 10,769 |
 
 `start_agent` is 851 before and after. The Assistant reads the sentence through `centralu_help(command="mail")`, which costs nothing per
 request. #2133 went into `start_agent`'s child frame rather than the mail description: the frame line grows 65 → 128 characters, once in each
 task given to a child that can mail its parent, while a description naming the parent would cost about 108 characters in every Codex request
-of every seat with mail, and would need per-session tool definitions, which do not exist (the definitions are one list per profile). Not
+of every seat with mail, and would need per-session tool definitions, which do not exist (the definitions are one list per profile). `to`
+no longer says `parent` is for "a question or checkpoint": a checkpoint is the progress report the frame says is not needed. Not
 measured live.
 
 Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say

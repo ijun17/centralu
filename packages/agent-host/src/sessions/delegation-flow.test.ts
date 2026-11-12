@@ -10,6 +10,7 @@ import type { AnswerGiven } from '../mail/delegation.js'
 import type { AgentRunWait } from './app-agents.js'
 import { ChildOwnership, type Delegation } from './child-ownership.js'
 import { DelegationFlow, type DelegationHost } from './delegation-flow.js'
+import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 import { ASSISTANT_PLACE } from './start-agent-terms.js'
 
 /*
@@ -365,5 +366,14 @@ describe("a child's turn and the call waiting on it", () => {
         error: `${id} is not a session this session started. agent_session works only on sessions start_agent started from here.`,
       })
     }
+  })
+
+  // Review of #1948: another session's child on a linked machine was asked about and refused as work, not sent as mail
+  it("mail to another session's child on a linked machine is plain mail, asked about by nobody", async () => {
+    const asked: string[] = []
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ sessionId: 'm1.c1', callerId: 'someone', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }]))
+    const flow = flowWith({ refusesDelegation: (callerId: string) => (asked.push(callerId), null) })
+    expect(await flow.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
+    expect(asked).toEqual([])
   })
 })

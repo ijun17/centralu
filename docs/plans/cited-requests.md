@@ -69,7 +69,7 @@ request's card is skipped unless the work goes to a session looser than the aski
 | `create_session` | the new session's, here or on a linked machine: `normal` at most, never above the orchestrator's (`createdPreset`) |
 | `start_agent` | the orchestrator's own: its child runs under the caller's preset (`start-agent-flow.ts`) |
 | `handoff_session` | the handed-off session's, which the new one keeps (the orchestrator's own when none is named) |
-| `send_to_session`, `agent_session` `send`, `ask_project` (`session`), `mail` `send` | the session it goes to |
+| `send_to_session`, `ask_project` (`session`), `mail` `send` (also more work for a session the caller started, which was `agent_session` `send` before #1948) | the session it goes to |
 
 A session whose preset this host does not know (one on a linked machine, a name it cannot resolve, `ask_project` with no session named) asks.
 `answer_question` and `agent_session` `stop`, `delete` and `answer` always ask: they cannot be undone, or answer for the person.

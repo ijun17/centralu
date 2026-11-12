@@ -116,8 +116,11 @@ export class MailTool {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
+      // Work first: a start request's handle or a linked child's id is no name to look for on other computers, one of which may be away
+      const work = await this.work(sessionId, me, args, signal)
+      if (work) return work
       const far = across ? await this.acrossTarget(sessionId, me, args, across) : null
-      if (!far || !across) return (await this.work(sessionId, me, args, signal)) ?? this.run(sessionId, args)
+      if (!far || !across) return this.run(sessionId, args)
       // A citation is the person's message in this computer's record, checked here for the Assistant here: the other
       // computer cannot check it, and dropping it would let the sender think the recipient reads the person's word
       if (args.cite) {

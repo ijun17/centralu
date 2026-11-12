@@ -43,6 +43,14 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
     await w.tool.call('a', { action: 'inbox' })
     expect(asked).toEqual(['b', 'ag-1234'])
   })
+
+  // Review of #1948: a handle or a linked child's id was looked for as a name on every computer first, and refused while one was away
+  it('reaches the sessions before a name is looked for on other computers, one of which is away', async () => {
+    const w = hostWorld({ work: async (_caller, target) => (target === 'ag-1234' ? { text: 'the work answer' } : null) })
+    w.across.usePeers({ selfName: () => 'here', machineDirectory: () => ({ entries: [], away: [{ name: 'studio', why: 'not reachable right now' }] }) })
+    expect(await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'and the docs' })).toEqual({ text: 'the work answer' })
+    expect((await w.tool.call('a', { action: 'send', to: 'ag-9999', text: 'x' })).text).toContain('Not asked: studio')
+  })
 })
 
 describe('send (§11.3: needsReply unless kind "note")', () => {
