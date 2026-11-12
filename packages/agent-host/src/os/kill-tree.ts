@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { powershell, systemTool, traitsFor } from '../os.js'
+import { errnoCode } from './errors.js'
 import { POWERSHELL_ARGS, READ_ONCE, tableReader, type TableReader } from './process-table.js'
 import { descendants } from '../dev-services/proc-table.js'
 
@@ -500,7 +501,7 @@ const runFile = promisify(execFile)
  * `run` is `execFile` as a promise and `table` gives the warm reader once there is one, parameters so a test can answer in
  * their place; while it gives none every read is one of its own
  */
-export const leftoverOs = (run: typeof runFile, table: () => TableReader | undefined = () => undefined): LeftoverOs => ({
+export const leftoverOs = (run: typeof runFile, table: () => TableReader | undefined = () => undefined, alive: (pid: number) => boolean = pidAlive): LeftoverOs => ({
   listProcesses: async (timeoutMs = 60_000) => {
     const warm = table()
     if (warm) {
@@ -515,9 +516,32 @@ export const leftoverOs = (run: typeof runFile, table: () => TableReader | undef
   },
   // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
   taskkill: async (pid, alone = false) => {
-    await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
+    // Already gone, as a console child's conhost.exe is with its parent: no process to start for it (under load a taskkill took 2-4 s, #2200)
+    if (!alive(pid)) throw gone(pid)
+    try {
+      await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
+    } catch (e) {
+      // It ended while taskkill was at it: that answer is "not found" in the system's language, with 128 or 255 as its exit code (measured, a
+      // console child's conhost.exe ended at that moment: 255, "could not be terminated. Reason: There is no running instance of the task"), so
+      // neither says it. That the process is no longer there does
+      if (!alive(pid)) throw gone(pid)
+      throw e
+    }
   },
 })
+
+/** Whether a process of this number still runs: signal 0 sends nothing (`EPERM`: it does, as another user's) */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return errnoCode(e) === 'EPERM'
+  }
+}
+
+/** taskkill's own answer for a process that is not there (128): the one `endInOrder` does not report */
+const gone = (pid: number) => Object.assign(new Error(`process ${pid} is already gone`), { code: 128 })
 let warmTable: TableReader | undefined
 const REAL_LEFTOVER_OS = leftoverOs(runFile, () => warmTable)
 

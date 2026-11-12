@@ -700,6 +700,35 @@ describe('leftovers of an ended process on Windows', () => {
     logged.mockRestore()
   })
 
+  // #2200: a console child's conhost.exe ends with its parent, and the stop found it in the table and ended it a moment too late
+  describe('a leftover that ended before taskkill reached it', () => {
+    // What taskkill answered on Windows 11 for a conhost.exe that ended as it was ended (measured; this is the English text, the system's language
+    // gives its own words): exit code 255, not the 128 of a process that was never there
+    const NOT_FOUND = Object.assign(new Error('Command failed: taskkill.exe /PID 200 /F\r\nERROR: The process "200" with PID 200 (child process of PID 100) could not be terminated.\r\nReason: There is no running instance of the task.\r\n'), { code: 255 })
+    const rows = async () => table('200 100 1500\n300 100 1600\n')
+
+    it('is not reported as one that could not be ended, whatever exit code taskkill gave, while one that runs on still is', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const denied = Object.assign(new Error('Command failed: taskkill\nERROR: Access is denied.'), { code: 1 })
+      const run = (async (_exe: string, args: readonly string[]) => {
+        throw args[1] === '200' ? NOT_FOUND : denied
+      }) as unknown as Parameters<typeof leftoverOs>[0]
+      // 200 was running when taskkill started and gone when it had answered; 300 runs on
+      const seen = new Map([[200, [true, false]]])
+      const alive = (pid: number) => (pid === 300 ? true : (seen.get(pid) ?? [false]).shift() ?? false)
+      expect(await collectOrphansWindows(root, { ...leftoverOs(run, undefined, alive), listProcesses: rows })).toEqual([])
+      expect(logged.mock.calls.map((x) => String(x[0]))).toEqual([expect.stringMatching(/process 300, left running by 100, could not be ended \(status 1: .*Access is denied/)])
+      logged.mockRestore()
+    })
+
+    it('starts no taskkill for a process that is no longer there', async () => {
+      const started: string[][] = []
+      const run = (async (_exe: string, args: readonly string[]) => void started.push([...args])) as unknown as Parameters<typeof leftoverOs>[0]
+      await collectOrphansWindows(root, { ...leftoverOs(run, undefined, (pid) => pid === 300), listProcesses: rows })
+      expect(started.map((a) => a[1])).toEqual(['300'])
+    })
+  })
+
   it('says on stderr which children of the root the time window turned away', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const os = { listProcesses: async () => table('200 100 1500\n300 100 5100\n400 100 999\n'), taskkill: () => {} }
