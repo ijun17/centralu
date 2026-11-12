@@ -5,6 +5,7 @@ import { gzipSync } from 'node:zlib'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 import { makeZip, type ZipSpec } from '../../apps/external/zip.test-helpers.js'
 import { agyAppFinder, agyAppPaths, agyPlatformKey, decodedLength, installAgy, isInstalled, realInstallIo, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
@@ -273,10 +274,11 @@ describe('the real download, against a server that gzips', () => {
 
 describe('the unpack', () => {
   it('stops a zip bomb as it passes its declared size, before more than that reaches the disk', async () => {
-    // 64 MB of zeros declared as 1 KB: refused either way, but a check only at the end would write the 64 MB first
+    // 8 MB of zeros declared as 1 KB: refused either way, but a check only at the end would write the 8 MB first (8,000 times what is declared;
+    // it took 64 MB here until a CI runner twice as slow took 7 s for it, #2203)
     const declared = 1024
     const zip = makeZip([
-      { name: 'agy_acp_server.par', data: Buffer.alloc(64 * 1024 * 1024), mode: 0o100755, declaredSize: declared },
+      { name: 'agy_acp_server.par', data: Buffer.alloc(8 * 1024 * 1024), mode: 0o100755, declaredSize: declared },
       { name: 'localharness_external', data: 'harness', mode: 0o100755 },
     ])
     writtenTo.clear()
@@ -310,5 +312,7 @@ describe('the unpack', () => {
     // Measured: about 320 MB held when the archive and the entry were read whole, about 64 MB streamed (garbage the GC
     // has not yet taken); the bound sits between them
     expect(peak - before).toBeLessThan(big.length * 0.7)
-  })
+    // The size is the test: what streaming leaves behind (the garbage the GC has not taken, 30-64 MB) must be a small part of the entry, so it cannot
+    // be cut without a bound of its own. It takes 1.3 s here, 5 s on a CI runner twice as slow (#2203), so the limit is its own
+  }, 30_000 * SLOW)
 })

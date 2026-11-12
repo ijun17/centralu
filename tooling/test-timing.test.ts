@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { eventually, SLOW } from './test-timing.js'
+import { eventually, SLOW, slowFor } from './test-timing.js'
 
 /* That every limit a test sets for itself is scaled by SLOW is the lint rule `test-limits/scaled-by-slow` (tooling/eslint-test-time-limits.js, #845, #1602). */
+
+describe('SLOW', () => {
+  it('is three on Windows and on a CI runner, one on a developer’s own macOS or Linux machine (#368, #2203)', () => {
+    expect(slowFor('win32', undefined)).toBe(3)
+    expect(slowFor('darwin', 'true')).toBe(3)
+    expect(slowFor('linux', '1')).toBe(3)
+    expect(slowFor('darwin', undefined)).toBe(1)
+    expect(slowFor('linux', '')).toBe(1)
+    expect(slowFor('linux', '0')).toBe(1)
+    expect(slowFor('linux', 'false')).toBe(1)
+  })
+})
 
 describe('eventually', () => {
   it('returns the first truthy value the check gives', async () => {
