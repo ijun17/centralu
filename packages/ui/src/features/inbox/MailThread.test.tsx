@@ -156,6 +156,8 @@ describe('the thread in the inbox', () => {
       expect(html).toContain('data-testid="mail-answering"')
       // The list opens from the button, and is not drawn closed
       expect(html).not.toContain('data-testid="mail-answering-list"')
+      // Once the other is answered only one is open, and the box says nothing of a target
+      expect(render(view({ messages: [first, second, mine] })).html).not.toContain('data-testid="mail-answering"')
     })
   })
 
