@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { tokenColor } from './fixtures/tokens.js'
 import { setup, newSession, injectApproval, emitEvent } from './fixtures/control.js'
 
@@ -289,6 +289,10 @@ async function hoverSummary(page: Page, name: string) {
   await line.hover()
 }
 
+/** Waits for every entrance and exit on the line to end (the ones that run for ever are left), so a chip's place is the one it keeps */
+const entrancesOver = (line: Locator) =>
+  line.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime))).map((a) => a.finished)))
+
 test("Sidebar: a marker appears on the name row when a folded project's session is waiting for approval (#205)", async ({
   page,
 }) => {
@@ -388,6 +392,8 @@ for (const motion of ['no-preference', 'reduce'] as const) {
     const stays = line.locator('[data-state="error"]')
     await expect(line.locator('[data-state="working"]')).toHaveText('1')
     await expect(stays).toHaveText('1')
+    // Both chips arrived a moment ago: where the one that stays is, is where it is once they are in
+    await entrancesOver(line)
     await page.clock.pauseAt(new Date(Date.now() + 60_000))
     const x = async () => (await stays.boundingBox())!.x
     const before = await x()
@@ -424,6 +430,85 @@ for (const motion of ['no-preference', 'reduce'] as const) {
     }
   })
 }
+
+/*
+ * The other side (#2209): a chip that arrives grows its width in as it fades in, so the chip beside it slides over to make room, where it jumped by 21px in one
+ * frame when the new one was drawn. The entrance's animation is held (paused by a style the test adds), then set half way through, so it reads what the engine
+ * draws there, not how fast the page answers. The summary is right-aligned: a chip that arrives on its right moves the one on its left.
+ */
+for (const motion of ['no-preference', 'reduce'] as const) {
+  test(`Sidebar: the chips on a project line slide over for a chip that arrives, not jump (#2209, reduced motion: ${motion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: motion })
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const working = await newSession(page, 'alpha', 'A task')
+    const failed = await newSession(page, 'alpha', 'B task')
+    const states = (a: string, b: string) =>
+      page.evaluate(
+        ({ a, b, working, failed }) =>
+          (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [working]: { ...s.sessions[working], state: a }, [failed]: { ...s.sessions[failed], state: b } } })),
+        { a, b, working, failed },
+      )
+    const line = page.getByTestId('fold-summary-alpha')
+    const stays = line.locator('[data-state="error"]')
+    const finishAll = () => line.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => Number.isFinite(Number(a.effect?.getComputedTiming().endTime))).forEach((a) => a.finish()))
+    await states('idle', 'error')
+    // The working chip the new sessions began with has to be gone, or it would come back as the same chip, not arrive
+    await expect(line.locator('[data-state="working"]')).toHaveCount(0)
+    await expect(stays).toHaveText('1')
+    await entrancesOver(line)
+    const x = async () => (await stays.boundingBox())!.x
+    const before = await x()
+
+    // The entrance is held where it starts; a chip on the right of the one that stays arrives (the order is approval, error, awaiting response, working)
+    await page.addStyleTag({ content: '.cc-chip-in { animation-play-state: paused !important; }' })
+    await states('working', 'error')
+    await expect(line.locator('[data-state="working"]')).toHaveText('1')
+    await line.evaluate((el) => {
+      for (const a of el.getAnimations({ subtree: true })) {
+        const end = Number(a.effect?.getComputedTiming().endTime)
+        if (!Number.isFinite(end)) continue
+        a.pause()
+        a.currentTime = end / 2
+      }
+    })
+    const half = await x()
+    await finishAll()
+    const after = await x()
+    // The chip's own width and the gap beside it: where the one that stays ends up once it has arrived
+    expect(after).toBeLessThan(before - 15)
+    if (motion === 'reduce') {
+      // A short fade only: the chips are where they end from the first frame
+      expect(half).toBeCloseTo(after, 0)
+    } else {
+      expect(half).toBeLessThan(before - 2)
+      expect(half).toBeGreaterThan(after + 2)
+    }
+  })
+}
+
+// #2209, "not checked": the tip on the line is open while a chip arrives; the arrival does not close it (the summary only grows, on its left, under the pointer)
+test("Sidebar: a chip that arrives on a project line leaves the line's tooltip open (#2209)", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const working = await newSession(page, 'alpha', 'A task')
+  const failed = await newSession(page, 'alpha', 'B task')
+  const states = (a: string, b: string) =>
+    page.evaluate(
+      ({ a, b, working, failed }) =>
+        (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [working]: { ...s.sessions[working], state: a }, [failed]: { ...s.sessions[failed], state: b } } })),
+      { a, b, working, failed },
+    )
+  await states('idle', 'error')
+  const line = page.getByTestId('fold-summary-alpha')
+  await expect(line).toBeVisible()
+  await hoverSummary(page, 'alpha')
+  const tip = page.getByTestId('fold-summary-tip-alpha')
+  await expect(tip).toBeVisible()
+  await states('working', 'error')
+  await expect(line.locator('[data-state="working"]')).toHaveText('1')
+  await expect(line.locator('[data-state="working"]')).toBeVisible()
+  await expect(tip).toBeVisible()
+  await expect(tip).toContainText('1 working')
+})
 
 test('Sidebar: a project keeps its count on the name row when it is open, folded, and opened again (owner, 2026-11-05)', async ({
   page,
