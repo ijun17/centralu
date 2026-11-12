@@ -39,8 +39,8 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
   it('never asks for a role, even of a session named like it', async () => {
     const asked: string[] = []
     const w = hostWorld({ extra: { k: { name: 'parent', projectId: 'p1', askedBy: 'w' } }, work: async (_caller, target) => (asked.push(target), { text: 'work' }) })
-    for (const to of ['parent', 'Assistant', 'person']) await w.tool.call('w', { action: 'send', to, text: 'x' })
-    expect(asked).toEqual([])
+    for (const to of ['parent', 'Assistant', 'person', 'k']) await w.tool.call('w', { action: 'send', to, text: 'x' })
+    expect(asked).toEqual(['k'])
   })
 
   it('is plain mail when the sessions say it is no work, and a word no session has is theirs to read first (a start request, a linked child)', async () => {
