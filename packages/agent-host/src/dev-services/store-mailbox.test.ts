@@ -34,6 +34,7 @@ function mail(over: Partial<NewMail> & { sender: string }): NewMail {
     body: `body ${n}`,
     facts: {},
     choices: null,
+    subject: null,
     dedupeKey: null,
     origin: 'mail',
     legacyThread: null,
@@ -674,6 +675,16 @@ describe('what the message service reads (M2)', () => {
     expect(box.refusedRecords('p1').map((p) => p.message.id)).toEqual([one, three])
     expect(box.refusedRecords().map((p) => p.message.id).sort()).toEqual([one, two, three].sort())
     expect(box.refusedRecords('p9')).toEqual([])
+  })
+})
+
+describe('a chain’s subject has a column of its own (v71, #2229)', () => {
+  it('round-trips as stored, never in facts, and is null where none was given', () => {
+    const { box, send, db } = world()
+    const id = send({ sender: A, subject: 'Release 2.4' }, B)
+    expect(box.message(id)).toMatchObject({ subject: 'Release 2.4', facts: {} })
+    expect(db.prepare<[string], { subject: string; facts: string }>(`SELECT subject, facts FROM mail WHERE id = ?`).get(id)).toEqual({ subject: 'Release 2.4', facts: '{}' })
+    expect(box.message(send({ sender: A }, B))?.subject).toBeNull()
   })
 })
 

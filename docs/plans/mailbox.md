@@ -747,6 +747,7 @@ sends.
 | `body` | the sender's words: up to 16,000 characters from a session or the person, 4,000 from an app |
 | `facts` | JSON only Centralu writes (§5.4) |
 | `choices` | JSON `string[]` of 2 to 6, or null: the answers a session's question to the person offers (D33, #1630, store v70). The sender's words, so a column of their own, never in `facts` |
+| `subject` | one line of at most 80 characters, or null: the subject a session's `mail` send gave the chain it starts (#2229, store v71); the Inbox names the chain by it instead of its first message's words. Set only on a chain's first message, so a reply never renames it. The sender's words, so a column of its own |
 | `dedupe_key` | unique per sender: Centralu's "once per change" (§6.5) |
 | `origin` | what produced it: `mail`, `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`, `script`, `person`, `app`, `watch`, `centralu` |
 | `legacy_thread` | the thread it was adopted from (§6.3), else null |

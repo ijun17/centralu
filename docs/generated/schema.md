@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 70, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 71, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -205,6 +205,7 @@ erDiagram
     TEXT legacy_thread
     INTEGER created_at
     TEXT choices
+    TEXT subject
   }
   mail_blockers {
     TEXT thread_id PK
@@ -722,6 +723,7 @@ Added in v65.
 | `legacy_thread` | TEXT | yes |  |  | v65 |
 | `created_at` | INTEGER | no |  |  | v65 |
 | `choices` | TEXT | yes |  |  | v70 |
+| `subject` | TEXT | yes |  |  | v71 |
 
 Indexes:
 

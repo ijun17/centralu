@@ -211,7 +211,7 @@ export class MailTool {
         return this.handled(me.address, this.target(me.address, this.need(a.thread, 'thread')))
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
-        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}) })
+        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(a.subject ? { subject: a.subject } : {}) })
         return this.sent(sent)
       }
       case 'reply': {
