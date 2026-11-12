@@ -10,6 +10,7 @@ import { ErrorBoundary } from './ErrorBoundary.jsx'
 import { applyTheme, cacheChoice, pickTheme, resolveChoice } from './theme.js'
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { CENTER_FLOOR, projectScreenOf, screenExists, usableThemeFiles, useStore, useTextZoom } from '../store/store.js'
+import { showsIntro } from '../store/screens.js'
 import { canStep } from '../store/navHistory.js'
 import { dialogOpen } from '../store/layers.js'
 import { useCounts } from '../store/selectors.js'
@@ -322,8 +323,7 @@ function OnceOpened({ open, children }: { open: boolean; children: ReactNode }) 
  * Only the evidence lane is missing: there is no project or session yet to look at.
  */
 function Body() {
-  const virgin = useStore((s) => Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0)
-  const introSeen = useStore((s) => s.introSeen)
+  const intro = useStore(showsIntro)
   // Hooks come before any early return — placing one after the intro branch below would change
   // the hook count between renders
   const view = useStore((s) => s.view)
@@ -346,7 +346,7 @@ function Body() {
     )
   }
 
-  if (virgin && !introSeen) {
+  if (intro) {
     return (
       <div className="relative flex min-h-0 flex-1">
         {/*

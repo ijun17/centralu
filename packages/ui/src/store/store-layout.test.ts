@@ -656,6 +656,48 @@ describe('view restoration', () => {
     expect(useStore.getState().view).toBe('assistant')
   })
 
+  /*
+   * #2220 (owner, 2026-11-12): when the saved screen cannot come back, the Assistant opens rather than the empty
+   * "Select a project or session". It happens before the first screen is shown, so there is no switch to animate.
+   */
+  it('a focused session that is gone opens the Assistant, saved as the screen', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { focusedSessionId: 'vw-gone', view: 'focus' }
+
+    await useStore.getState().attach(mock)
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(useStore.getState()).toMatchObject({ view: 'assistant', focusedSessionId: null })
+    expect(useStore.getState().workspaceReady).toBe(true)
+    expect(mock.workspaceSnapshot).toMatchObject({ view: 'assistant' })
+
+    // The grid does not need the session it last focused: it stays the grid
+    mock.workspaceSnapshot = { focusedSessionId: 'vw-gone', view: 'grid' }
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().view).toBe('grid')
+  })
+
+  it('a snapshot that cannot be read opens the Assistant, but not over the intro of a window with nothing yet', async () => {
+    const mock = new MockPlatform()
+    const prefs = await mock.prefs.load()
+    mock.prefs.load = async () => prefs
+    mock.workspace.load = async () => {
+      throw Object.assign(new Error('RPC timed out: workspace.load'), { code: 'timeout', retryable: true })
+    }
+
+    await useStore.getState().attach(mock)
+
+    expect(useStore.getState().view).toBe('assistant')
+
+    // A first launch has nothing to come back to: the intro stands, and the person has not passed it
+    useStore.setState({ view: 'focus', introSeen: false, projects: {}, sessions: {} })
+    const fresh = new MockPlatform()
+    fresh.prefs.load = async () => prefs
+    fresh.workspace.load = mock.workspace.load
+    await useStore.getState().attach(fresh)
+    expect(useStore.getState()).toMatchObject({ view: 'focus', introSeen: false })
+  })
+
   it('an unknown view name is ignored — a snapshot is just a file', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { view: 'hologram' }
@@ -763,6 +805,76 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, showIgnored: true })
     expect(mock.workspaceSnapshot).not.toHaveProperty('spinGrid')
     expect(mock.workspaceSnapshot).not.toHaveProperty('spinSessionIcon')
+  })
+
+  /*
+   * #2220: after an update the window came back with every project expanded and no screen. The lists `attach` reads
+   * before the restore take long then, and the host and its subscriptions are live meanwhile: a save in that time (an app list
+   * that changed notes its arrivals and saves) wrote this window's defaults over the stored snapshot, and the restore read
+   * the defaults back.
+   */
+  it('a save made while attach is still reading its lists does not write over the stored snapshot (#2220)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/restore-lists')
+    await mock.workspace.save({ focusedSessionId: null, view: 'grid', foldedProjects: [p.id], sidebarWidth: 301 } as never)
+    const list = mock.apps.list.bind(mock.apps)
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    let reading!: () => void
+    const started = new Promise<void>((r) => (reading = r))
+    mock.apps.list = async () => {
+      reading()
+      await held
+      return list()
+    }
+    useStore.setState({ foldedProjects: [], view: 'focus' })
+
+    const attaching = useStore.getState().attach(mock)
+    await started
+    useStore.getState().saveWorkspace()
+    await tick()
+    release()
+    await attaching
+    await tick()
+
+    expect(useStore.getState()).toMatchObject({ foldedProjects: [p.id], view: 'grid', sidebarWidth: 301 })
+    expect(mock.workspaceSnapshot).toMatchObject({ foldedProjects: [p.id], view: 'grid', sidebarWidth: 301 })
+  })
+
+  /*
+   * The host's first word (`connected`) arrives while the lists are still being read, and a reconnect reads an unread
+   * snapshot again (`readWorkspaceAgain`). That second read must not run beside the attach's own: it laid the snapshot
+   * without its screen and let saves through, so the save that followed stored a window with no screen.
+   */
+  it('the host connecting while attach reads its lists does not start a second read of the snapshot (#2220)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/restore-connect')
+    mock.sessions.set('rc-s1', sessionInfo('rc-s1', { projectId: p.id }))
+    await mock.workspace.save({ focusedSessionId: 'rc-s1', view: 'grid', foldedProjects: [p.id] } as never)
+    const list = mock.apps.list.bind(mock.apps)
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    let reading!: () => void
+    const started = new Promise<void>((r) => (reading = r))
+    mock.apps.list = async () => {
+      reading()
+      await held
+      return list()
+    }
+    useStore.setState({ foldedProjects: [], view: 'focus', focusedSessionId: null })
+
+    const attaching = useStore.getState().attach(mock)
+    await started
+    mock.setConnectionState('connected')
+    await tick()
+    useStore.getState().saveWorkspace()
+    await tick()
+    release()
+    await attaching
+    await tick()
+
+    expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rc-s1', view: 'grid', foldedProjects: [p.id] })
+    expect(mock.workspaceSnapshot).toMatchObject({ focusedSessionId: 'rc-s1', view: 'grid', foldedProjects: [p.id] })
   })
 
   it('a change the person makes after the restore is still saved', async () => {
