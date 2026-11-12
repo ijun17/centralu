@@ -86,7 +86,8 @@ export function resolveSide(
     // A border the file leaves out follows the token THEME_TOKENS names (the window line, the panel's edge…): its own `line` or `line-strong`,
     // never a colour the preset chose and never one mixed from other tokens
     for (const token of THEME_TOKENS) {
-      if (token.follows && !(token.cssVar in tokens)) tokens[token.cssVar] = `var(${THEME_TOKEN_BY_KEY.get(token.follows)!.cssVar})`
+      const target = token.follows ? THEME_TOKEN_BY_KEY.get(token.follows) : undefined
+      if (target && !(token.cssVar in tokens)) tokens[token.cssVar] = `var(${target.cssVar})`
     }
     return { id, name: file.name, base: file.base, preset: presetFor(file.base).id, tokens }
   }
