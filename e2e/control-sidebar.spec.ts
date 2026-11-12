@@ -278,6 +278,17 @@ test('Sidebar: folding survives a restart (#205)', async ({ page }) => {
   await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
 })
 
+/**
+ * Hovers a project's status summary once it has its final width. A chip that was counted a moment ago (the session was working) fades out beside
+ * the new one and the summary narrows when it is gone: hovered before that, the pointer is left outside the narrower summary and its tip closes
+ * (#2202: 1 run in 40 under load, with the chip still leaving at the hover).
+ */
+async function hoverSummary(page: Page, name: string) {
+  const line = page.getByTestId(`fold-summary-${name}`)
+  await expect(line.locator('[data-leaving]')).toHaveCount(0)
+  await line.hover()
+}
+
 test("Sidebar: a marker appears on the name row when a folded project's session is waiting for approval (#205)", async ({
   page,
 }) => {
@@ -296,7 +307,7 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   await expect(mark).toHaveAttribute('data-look', 'waiting')
   await expect(mark.locator('> span')).toHaveCSS('border-top-color', await tokenColor(page, '--color-ink-signal'))
   await expect(mark.locator('> span')).toHaveCSS('border-top-width', '2px')
-  await page.getByTestId('fold-summary-alpha').hover()
+  await hoverSummary(page, 'alpha')
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An open project keeps its count too (owner, 2026-11-05): beta's session is working
   await expect(page.getByTestId('fold-summary-beta').locator('[data-state="working"]')).toHaveText('1')
@@ -316,7 +327,7 @@ test('Sidebar: a session paused on its own background work has its own chip afte
   await expect(chip).toHaveAttribute('data-look', 'idle')
   await expect(chip.getByTestId('fold-summary-background-dot')).toBeVisible()
   await expect(line.locator('[data-state="working"]')).toHaveCount(0)
-  await line.hover()
+  await hoverSummary(page, 'alpha')
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 waiting on background work')
   const box = (await line.boundingBox())!
   await page.screenshot({ path: testInfo.outputPath('project-line-background.png'), clip: { x: 0, y: box.y - 10, width: box.x + box.width + 12, height: box.height + 20 } })
