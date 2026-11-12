@@ -1,5 +1,5 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
-import { isRoleVia, ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
+import { ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
@@ -82,8 +82,6 @@ export type MailToolHost = {
  */
 export class MailTool {
   private readonly now: () => number
-  /** The sessions told once that `assistant` is not their parent (#1984) */
-  private readonly hinted = new Set<string>()
 
   constructor(
     private readonly service: MessageService,
@@ -211,7 +209,7 @@ export class MailTool {
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
         const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}) })
-        return this.sent(sent) + this.parentHint(sessionId, me, to)
+        return this.sent(sent)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
@@ -295,16 +293,6 @@ export class MailTool {
       'unknown',
       `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").`,
     )
-  }
-
-  /**
-   * #1984: a session that has a parent and mails `assistant` may have meant the parent, which nothing it sees named. The answer says so once per session
-   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the Assistant itself.
-   */
-  private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
-    if (!isRoleVia(to.via) || !me.askedBy || me.askedBy === this.host.assistantId() || this.hinted.has(sessionId)) return ''
-    this.hinted.add(sessionId)
-    return ` It went to the Assistant, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */

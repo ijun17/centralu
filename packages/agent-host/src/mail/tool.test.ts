@@ -74,18 +74,12 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     })
   })
 
-  // #1984: a child told to write to its parent mailed the Assistant, the one role it could see
-  it('a session with a parent that mails "assistant" is told once that it went there, not to the parent; the mail is not rerouted', () => {
+  // #1984, #2133: a child is told in its task, before it sends, that "assistant" is not its parent (start-agent.ts); its mail to "assistant" is not rerouted
+  it('a session with a parent that mails "assistant" reaches the Assistant, and the answer says nothing more', () => {
     const w = world()
     const first = w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 1' })
-    expect(first.text).toContain('It went to the Assistant, not to your parent "alpha". If you meant your parent, use to: "parent".')
+    expect(first.text).not.toContain('parent')
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'assistant' })
-    expect(w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
-    // To the parent, or from a session with none, there is nothing to say
-    expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')
-    expect(world().run('b', { action: 'send', to: 'assistant', text: 'help' }).text).not.toContain('not to your parent')
-    // A child the Assistant started has it for its parent: nothing to correct
-    expect(world().run('o', { action: 'send', to: 'assistant', text: 'done' }).text).not.toContain('not to your parent')
   })
 
   // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer

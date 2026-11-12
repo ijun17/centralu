@@ -90,6 +90,17 @@ describe('the frame a child gets (#729)', () => {
     expect(agentNoteFrame('parent', 'use Chromium').split('\n')[0]).toContain("through Centralu's mail.")
   })
 
+  // #2133: a child that has a parent mailed "assistant" (once "orchestrator") meaning it, and mailed progress its answer carries anyway
+  it('tells a child that can mail its parent, before it sends, that progress needs no mail and "assistant" is someone else', () => {
+    for (const frame of [agentFrame('Lead', 'run the tests', [], '', true), remoteAgentFrame('Lead', 'run the tests', '', true)]) {
+      const head = frame.split('\n')[0]!
+      expect(head).toContain('"Lead", gives you this task')
+      expect(head).toContain('Your final message goes back to it as the answer')
+      expect(head).toContain('No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` ("assistant" is someone else).')
+    }
+    expect(agentFrame('Lead', 'run the tests')).not.toContain('progress reports')
+  })
+
   it('can mail its parent only when that session started it and it is in a project (a fork of the Assistant has no parent, an Assistant child no mail tool)', () => {
     expect(canMailParent({ askedBy: 'p', projectId: 'proj' }, 'p')).toBe(true)
     expect(canMailParent({ askedBy: null, projectId: 'proj' }, 'p')).toBe(false)

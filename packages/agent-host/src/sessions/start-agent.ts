@@ -38,8 +38,12 @@ export function aboveCallerError(name: string, child: PermissionPreset, caller: 
   return presetWithin(child, caller) ? null : `"${name}" now has more permissions (${child}) than this session (${caller}), so this session cannot give it work. Tell the person.`
 }
 
-/** How a child reaches its parent before it finishes (#1984): the address `mail` resolves to the session that started it, which nothing else the child sees names */
-const PARENT_MAIL = 'To write to it before you finish, call mail with `to: "parent"`. '
+/**
+ * How a child reaches its parent before it finishes (#1984): the address `mail` resolves to the session that started it, which nothing else the child
+ * sees names. Said before it sends (#2133): a child that read "assistant" as the session that gave it the job mailed progress there, and its answer
+ * reaches the parent by itself
+ */
+const PARENT_MAIL = 'No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` ("assistant" is someone else). '
 
 /**
  * Whether `child` can mail the session `senderId` as its `parent` (#1984): it was started by that session (`askedBy`) and has the mail tool, which a
@@ -121,7 +125,7 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
       `${ANSWER_GROUNDS} ` +
       (mail
-        ? 'To write to it before you answer (a question, a checkpoint), call mail with `to: "parent"`. '
+        ? PARENT_MAIL
         : // #1987: this machine's Centralu takes no mail from that computer, so the answer is the only way it hears from the child
           'Mail does not reach it from here yet: the answer is how it hears from you. ') +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',

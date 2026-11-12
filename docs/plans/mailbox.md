@@ -1788,12 +1788,6 @@ choose: what a busy target means for these three calls is that the request is ma
 (§10.6.1, `owedBy`); one not delivered yet was never its work, stays mail, and goes at its next turn. There is no second "not delivered"
 text.
 
-**What the person sees.** A new send is a mail call. Every mail card read "Mail" with no words, so the card would have lost what "Sent more
-to an agent" showed; `centraluMark` now gives a mail send "Sent mail", its subject or first line, and the session's chip when `to` is a
-session id (here or `<machine>.<id>`; a name or a role gets none, since the adapter does not resolve names), and a reply "Replied" with its
-first line (owner's wording, 2026-11-12). The other mail actions keep the card they had, and cards already in the history read as before
-(`AGENT_ACTIONS` keeps `send`).
-
 **Restart, swap and older builds.** No store step (the next free is v70). This build writes no `queued_requests` row. At every
 `ready`, `takeOverFromEarlierBuild` turns each row an older build left into an undelivered task from its requester (its text, its
 `via` as the origin) and deletes the row, in one transaction; a row whose requester or session is gone is deleted with no task, and a
@@ -2108,6 +2102,18 @@ call written as the caller's seat makes it (`agentCallsFor`: on the Assistant bo
 **What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
 `agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send by an original to a
 child that a handoff moved is plain mail now; `send` refused it naming the successor, which `agent_session status` still does.
+
+**#2133.** A child knew the address `parent` only from `to`'s description, and wrote progress reports nobody needed. `start_agent`'s frame
+(`PARENT_MAIL`) now says no progress reports are needed, and names `parent` as the address for a question before it finishes, with
+"assistant" someone else. It is in the frame, not the description: there are no per-session tool definitions, so a per-seat description
+would mean new plumbing and ride in every request of every seat; the frame rides once, in the task. #1984's per-call `parentHint` (an answer
+naming `parent` once a child that has one mailed `assistant`) is gone with it.
+
+**What the person sees.** A new send is a mail call. Every mail card read "Mail" with no words, so the card would have lost what "Sent more
+to an agent" showed; `centraluMark` now gives a mail send "Sent mail", its subject or first line, and the session's chip when `to` is a
+session id (here or `<machine>.<id>`; a name or a role gets none, since the adapter does not resolve names), and a reply "Replied" with its
+first line (owner's wording, 2026-11-12). The other mail actions keep the card they had, and cards already in the history read as before
+(`AGENT_ACTIONS` keeps `send`).
 
 **Restart, swap and older builds.** No store step and no protocol change. The delegated task keeps origin `agent_session` (the recorder's), so
 rows read as before. A recorded call of `agent_session send` replayed to this build is refused with the pointer to mail.
