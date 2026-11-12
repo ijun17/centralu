@@ -71,6 +71,9 @@ export function Inbox() {
   const placed = settleCursor(list.waiting, at, open)
   if (placed !== at) setAt(placed)
   const cursor = placed.row
+  // The choices of the card the keyboard is on, for the hint: the number keys pick on that card only, never on the one under the pointer
+  const onRow = list.waiting[cursor]
+  const choices = onRow?.kind === 'mail' ? (onRow.thread.ask?.choices?.length ?? 0) : 0
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
@@ -194,6 +197,11 @@ export function Inbox() {
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
               <Kbd>↵</Kbd> Open
+              {choices > 0 && (
+                <>
+                  <Kbd>1-{choices}</Kbd> Choose
+                </>
+              )}
               <Kbd>D</Kbd> Done
               <Kbd>esc</Kbd> Close
             </span>

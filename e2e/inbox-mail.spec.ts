@@ -212,13 +212,20 @@ test('Inbox: a question waiting on the person is a card above the rows, a pick a
   await expect(page.getByTestId('counter')).not.toHaveAttribute('data-edge', 'question')
 })
 
-test('Inbox: the number keys pick a choice on the card under the cursor (#2229)', async ({ page }) => {
+test('Inbox: the number keys pick a choice on the card the keyboard is on, never on the one under the pointer (#2229)', async ({ page }) => {
   await setup(page)
+  const under = await seed(page, { subject: 'Older question', from: PARSER, body: 'Ship it?', choices: ['Yes', 'No'] })
   const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
   await page.getByTestId('counter').click()
   await expect(page.getByTestId(`mail-ask-${asked}`)).toBeVisible()
+  // The hint names the keys while the selected card has choices
+  await expect(page.getByTestId('inbox')).toContainText('1-2 Choose')
+  // The pointer rests on the other card; the key still answers the selected one (the top, where the cursor opened)
+  await page.getByTestId(`mail-ask-${under}`).hover()
   await page.keyboard.press('2')
   await expect(page.getByTestId(`mail-ask-${asked}`)).toHaveCount(0)
+  await expect(page.getByTestId(`mail-ask-${under}`)).toBeVisible()
+  await expect(page.getByTestId(`mail-ask-choices-${under}-1`)).toBeEnabled()
   await page.getByTestId('inbox-earlier-toggle').click()
   await page.getByTestId(`mail-thread-${asked}`).click()
   await expect(page.getByTestId('mail-message-2')).toContainText('Switch now')
