@@ -1,4 +1,4 @@
-import { appKeyOf, noSuchAppText } from '@cc/protocol/client'
+import { appKeyOf, noSuchAppText, sameApp } from '@cc/protocol/client'
 import type { AppPermission, AppUsage, AppQuestion } from '@cc/protocol/client'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
@@ -65,15 +65,15 @@ export class AppSettingsMock {
      */
     /** Sharing (#371 part A) — like the host: only an app that exists, the mark in the list, then the broadcast */
     setShared: async (appId: string, projectId: string, shared: boolean): Promise<void> => {
-      const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId }))
       if (!a) throw new Error(`No such app: ${appId}`)
       if (shared) a.shared = true
       else delete a.shared
       this.sharedWrites.push({ appId, projectId, shared })
       this.emit({ type: 'external_apps_changed' })
     },
-    setSecret: async (appId: string, projectId: string | null, name: string, value: string | null): Promise<void> => {
-      const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+    setSecret: async (appId: string, projectId: string | null, name: string, value: string | null, machine?: string): Promise<void> => {
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId, machine }))
       if (!a) throw new Error(noSuchAppText({ projectId, appId }))
       const slot = a.secrets?.find((s) => s.name === name)
       if (value !== null) {

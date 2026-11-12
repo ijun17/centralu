@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
-import { MACHINE_ID_RE, RpcMethods, USER_APP_SCOPE, appKeyOf } from '@cc/protocol'
+import { MACHINE_ID_RE, RpcMethods, USER_APP_SCOPE, appKeyOf, sameApp } from '@cc/protocol'
 import type { HomeView } from './home-view.js'
 import { createHttpHandler, type HttpRoute } from '../transport/http.js'
 import { withDragRelay } from './drag-relay.js'
@@ -180,10 +180,6 @@ const REMOTE_DOC_CAP = 64
 /** The inner frame's sandbox. Neither has `allow-popups` or `allow-top-navigation` */
 const SANDBOX_OPAQUE = 'allow-scripts allow-forms'
 const SANDBOX_APP = 'allow-scripts allow-same-origin allow-forms'
-
-function sameApp(a: AppRef, b: AppRef): boolean {
-  return a.appId === b.appId && (a.projectId ?? null) === (b.projectId ?? null)
-}
 
 function fail(message: string): never {
   throw rpcError(message)

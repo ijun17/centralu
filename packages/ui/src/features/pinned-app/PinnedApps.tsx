@@ -1,5 +1,6 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { appKeyOf } from '@cc/core'
+import { sameApp } from '@cc/protocol/client'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -198,8 +199,9 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
    */
   const questions = useStore((s) => s.appQuestions)
   const asking = useMemo(
-    () => questions.find((q) => q.origin.appId === pv.appId && (q.origin.projectId ?? null) === (pv.projectId ?? null)) ?? null,
-    [questions, pv.appId, pv.projectId],
+    // The questions are this computer's own: another machine's user-folder app of the same id never matches one (`sameApp` reads the machine)
+    () => questions.find((q) => sameApp(q.origin, pv)) ?? null,
+    [questions, pv],
   )
 
   /*

@@ -1,4 +1,4 @@
-import { appKeyOf, noSuchAppText } from '@cc/protocol/client'
+import { appKeyOf, noSuchAppText, sameApp } from '@cc/protocol/client'
 import type { AppRun, ExternalAppInfo } from '@cc/protocol/client'
 import type { AppCallOrigin, AppHomeView, AppResourceResult, AppToolResult, AppViewFrame, InlineViewKept, InlineViewReopened } from '../ports/index.js'
 import type { MockClock } from './clock.js'
@@ -126,7 +126,7 @@ export class AppsMock {
       if (!owner) throw new Error('This app view is not open')
       const s = this.store.sessions.get(sessionId)
       if (!s) throw mockError('Session not found', 'session_not_found')
-      const name = this.registry.externalAppList.find((a) => a.appId === owner.appId && a.projectId === owner.projectId)?.name ?? owner.appId
+      const name = this.registry.externalAppList.find((a) => sameApp(a, { appId: owner.appId, projectId: owner.projectId }))?.name ?? owner.appId
       const fromApp = { appId: owner.appId, projectId: owner.projectId, name }
       this.viewMessages.push({ sessionId, instanceId, text })
       this.emit({ type: 'user_message', sessionId, seq: (this.store.messages.get(sessionId)?.length ?? 0) + 1, text, fromApp })
@@ -176,9 +176,9 @@ export class AppsMock {
      * opens next does that.
      */
     /** Like the real thing: only deletes a user-folder app (rejects a project app), then broadcasts the list */
-    remove: async (appId: string, projectId: string | null) => {
+    remove: async (appId: string, projectId: string | null, machine?: string) => {
       if (projectId !== null) throw new Error("A project app is part of the project's repository — remove it there")
-      const at = this.registry.externalAppList.findIndex((a) => a.appId === appId && a.projectId === null)
+      const at = this.registry.externalAppList.findIndex((a) => sameApp(a, { appId, projectId: null, machine }))
       if (at === -1) throw new Error(noSuchAppText({ projectId: null, appId }))
       this.registry.externalAppList.splice(at, 1)
       this.removedApps.push(appId)
@@ -189,9 +189,9 @@ export class AppsMock {
       if (this.appRunsProvider) return structuredClone(await this.appRunsProvider(appId, projectId, limit))
       return structuredClone((this.registry.appRuns.get(appKeyOf(projectId, appId)) ?? []).slice(0, limit))
     },
-    restart: async (appId: string, projectId: string | null) => {
+    restart: async (appId: string, projectId: string | null, machine?: string) => {
       this.restarts.push({ appId, projectId })
-      const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId, machine }))
       if (!a) throw new Error(noSuchAppText({ projectId, appId }))
       if (a.status === 'failed' || a.status === 'crashed' || a.status === 'running') Object.assign(a, { status: 'stopped', error: null })
       // Its process went, and a busy hold with it (#1236)

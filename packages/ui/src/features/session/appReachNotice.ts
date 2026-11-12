@@ -1,5 +1,5 @@
 import type { AppReach, ExternalAppInfo } from '@cc/protocol/client'
-import { appTitleOf } from '../../store/names.js'
+import { appTitleOf, machineNameOf } from '../../store/names.js'
 import { isApp } from '../../store/appKeys.js'
 import type { AppLinkDrop } from '../app-frame/dragRelay.js'
 
@@ -12,6 +12,40 @@ type Unreachable = Extract<AppReach, { reachable: false }>
 export function droppedAppTitle(apps: readonly ExternalAppInfo[], from: AppLinkDrop['from']): string {
   const app = apps.find((a) => isApp(a, from.projectId, from.appId, from.machine))
   return appTitleOf({ name: app?.name, appId: from.appId })
+}
+
+/**
+ * The quiet line for a link dragged out of a user-folder app that runs on another computer than the session (#82), or null when
+ * both are on one. The window knows both machines, so it decides, and asks no one: a user-folder app has no project to say where it
+ * is, and a host asked about it would check the same-named app of its own machine. `machines`: the linked machines, by id. A
+ * project's app is not asked about here: its project id names its machine already.
+ */
+export function otherMachineNotice(
+  from: AppLinkDrop['from'],
+  sessionMachine: string | null | undefined,
+  apps: readonly ExternalAppInfo[],
+  machines: Readonly<Record<string, { name: string }>>,
+): string | null {
+  const appMachine = from.machine ?? null
+  if (from.projectId !== null || appMachine === (sessionMachine ?? null)) return null
+  return `${droppedAppTitle(apps, from)} runs on ${appMachine === null ? 'this computer' : machineNameOf(machines, appMachine)}, and this session is on another computer.`
+}
+
+/**
+ * What the composer does with a link dragged out of an app (#308): `tell` a line of its own when the app is a user-folder app on
+ * another computer than the session's, asking no one; otherwise `ask` the host whether the session can use the app's tools
+ * (`apps.reach`). The one decision, kept out of the component so a test holds it.
+ */
+export type AppDropVerdict = { kind: 'tell'; text: string; reason: 'other-machine' } | { kind: 'ask' }
+
+export function appDropVerdict(
+  from: AppLinkDrop['from'],
+  sessionMachine: string | null | undefined,
+  apps: readonly ExternalAppInfo[],
+  machines: Readonly<Record<string, { name: string }>>,
+): AppDropVerdict {
+  const text = otherMachineNotice(from, sessionMachine, apps, machines)
+  return text === null ? { kind: 'ask' } : { kind: 'tell', text, reason: 'other-machine' }
 }
 
 /**

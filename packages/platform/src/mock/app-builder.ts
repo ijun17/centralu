@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, appIdProblemText, isAssistantKind } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, appIdProblemText, isAssistantKind, sameApp } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -81,7 +81,7 @@ export class AppBuilderMock {
         }
         dir = `${project.path}/.centralu/apps/${spec.id}`
       }
-      if (spec.projectId !== null && this.registry.externalAppList.some((a) => a.appId === spec.id && a.projectId === spec.projectId)) {
+      if (spec.projectId !== null && this.registry.externalAppList.some((a) => sameApp(a, { appId: spec.id, projectId: spec.projectId }))) {
         throw new Error(`An app "${spec.id}" already exists (${dir}) — use another id`)
       }
       const app: ExternalAppInfo = {
@@ -120,12 +120,12 @@ export class AppBuilderMock {
      * builder", and the session's app slot is that app. Broadcasts `session_created` on
      * creation.
      */
-    createBuilder: async (appId: string, projectId: string | null, tool?: ToolName): Promise<SessionInfo> => {
+    createBuilder: async (appId: string, projectId: string | null, tool?: ToolName, machine?: string): Promise<SessionInfo> => {
       const key = appKeyOf(projectId, appId)
       const have = this.registry.appBuilders.get(key)
       const held = have ? this.store.sessions.get(have) : undefined
       if (held) return structuredClone(held)
-      const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      const app = this.registry.externalAppList.find((a) => sameApp(a, { appId, projectId, machine }))
       if (!app) throw new Error(noSuchAppText({ projectId, appId }))
       if (!app.trusted) {
         throw new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
@@ -172,12 +172,12 @@ export class AppBuilderMock {
       let view: { uri: string } | null | undefined
       if (req.instanceId) {
         const inst = this.registry.pinnedInstances.get(req.instanceId)
-        view = inst && inst.appId === req.appId && inst.projectId === req.projectId ? { uri: inst.uri } : null
+        view = inst && sameApp(inst, { appId: req.appId, projectId: req.projectId }) ? { uri: inst.uri } : null
       }
       const built = builderRequestOf({
         text: req.text,
         hasAttachments: !!req.attachments?.length,
-        app: this.registry.externalAppList.find((a) => a.appId === req.appId && a.projectId === req.projectId),
+        app: this.registry.externalAppList.find((a) => sameApp(a, { appId: req.appId, projectId: req.projectId })),
         builder: builderId && this.store.sessions.has(builderId) ? builderId : null,
         view,
         latestRun: this.registry.appRuns.get(key)?.[0],
@@ -202,7 +202,7 @@ export class AppBuilderMock {
       this.reachAsks.push({ sessionId, appId, projectId })
       const s = this.store.sessions.get(sessionId)
       if (!s) throw new Error(`Session not found: ${sessionId}`)
-      const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      const app = this.registry.externalAppList.find((a) => sameApp(a, { projectId, appId }))
       if (!app) return { reachable: false, reason: 'unavailable' }
       const key = appKeyOf(projectId, appId)
       const given =
@@ -229,7 +229,7 @@ export class AppBuilderMock {
       // So a test can hold "sending" open — checking meanwhile whether the screen accepts a second click
       if (this.sendErrorGate) await this.sendErrorGate
       const key = appKeyOf(projectId, appId)
-      const info = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
+      const info = this.registry.externalAppList.find((a) => sameApp(a, { appId, projectId, machine }))
       if (!info) throw new Error('This app no longer exists')
       const builderId = this.registry.appBuilders.get(key)
       if (!builderId || !this.store.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then send the error')

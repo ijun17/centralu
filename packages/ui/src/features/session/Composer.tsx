@@ -24,7 +24,7 @@ import { composingKey } from '../../app/keys.js'
 import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
 import type { AppLinkDrop } from '../app-frame/dragRelay.js'
 import { droppedPiece, droppedText, insertAtCaret, isTextDrag, type DroppedText } from './dragLink.js'
-import { appReachNotice, droppedAppTitle } from './appReachNotice.js'
+import { appDropVerdict, appReachNotice, droppedAppTitle } from './appReachNotice.js'
 import { projectLabelOf } from '../../store/names.js'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { ComposerFooter } from './ComposerFooter.jsx'
@@ -477,7 +477,8 @@ export const Composer = memo(function Composer({
   /**
    * An item dragged out of an app view (#308). The link goes in whatever the answer, and the host
    * says whether this session can use that app's tools (`apps.reach`); if not, the quiet line says
-   * why. An older host that has no answer leaves the line off rather than guess.
+   * why. A user-folder app on another computer than the session's is told by the window, without asking
+   * (`appDropVerdict`). An older host that has no answer leaves the line off rather than guess.
    */
   const acceptAppLink = (drop: AppLinkDrop): boolean => {
     const dropped = droppedText(drop.uri, drop.text)
@@ -486,6 +487,13 @@ export const Composer = memo(function Composer({
     const ask = ++asked.current
     setAppNotice(null)
     const { appId, projectId: appProject } = drop.from
+    // A user-folder app of another computer than this session's: the window says so itself, as it knows both (no one is asked)
+    const here = useStore.getState()
+    const verdict = appDropVerdict(drop.from, here.sessions[sessionId]?.machine, here.externalApps, here.machines)
+    if (verdict.kind === 'tell') {
+      setAppNotice({ text: verdict.text, reason: verdict.reason })
+      return true
+    }
     platform.apps.reach(sessionId, appId, appProject).then(
       (r) => {
         if (ask !== asked.current || r.reachable) return
