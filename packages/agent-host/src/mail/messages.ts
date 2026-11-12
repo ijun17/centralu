@@ -76,6 +76,8 @@ export type SendInput = {
   choices?: MailChoices
   /** The person's answer is one of the choices of the question it answers, pressed in the window (`mail.reply` with `answers`); recorded in `facts.picked` (#1630) */
   picked?: true
+  /** The subject a `send` gives the chain it starts (#2229): kept on the chain's first message only, so a reply never renames it */
+  subject?: string
 }
 /**
  * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
@@ -170,6 +172,8 @@ function checkedChoices(c: MailChoices, cls: SenderClass, to: readonly string[],
   return choices
 }
 const CHOICE_CHARS = 80
+/** How long a chain's subject is, stored (`mail.subject`) or made from its words (`MailPerson`) */
+export const SUBJECT_CHARS = 80
 
 export class MessageService {
   private readonly now: () => number
@@ -299,7 +303,7 @@ export class MessageService {
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
-        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, choices: choices ?? null, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
+        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, choices: choices ?? null, subject: (!target && input.subject && oneLineText(input.subject, SUBJECT_CHARS)) || null, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -876,7 +880,7 @@ export class MessageService {
     let stored: StoredMail
     try {
       stored = this.records.insert(
-        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
+        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, subject: null, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
         rows,
       )
     } catch (e) {
@@ -1053,7 +1057,7 @@ export class MessageService {
 
   /** The line for an earlier message that is no longer kept (S5) */
   private gone(id: string): ReadItem {
-    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, choices: null, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
+    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, choices: null, subject: null, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
     return { message: stub, row: null, relation: '', phantom: 'gone' }
   }
 

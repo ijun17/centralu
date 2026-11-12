@@ -229,7 +229,7 @@ describe('guard/type-assertions', () => {
   })
   it("holds the ceilings at what the packages hold today, with no room above them", () => {
     // Today's counts: pnpm lint says where they can come down, and fails one over
-    expect(ASSERTIONS).toEqual({ 'apps/desktop': 3, 'apps/web': 6, 'packages/agent-host': 461, 'packages/core': 1, 'packages/platform': 3, 'packages/protocol': 0, 'packages/ui': 140 })
+    expect(ASSERTIONS).toEqual({ 'apps/desktop': 3, 'apps/web': 6, 'packages/agent-host': 454, 'packages/core': 1, 'packages/platform': 3, 'packages/protocol': 0, 'packages/ui': 140 })
     expect(readFileSync(join(ROOT, 'tooling/lint-allowlist.ts'), 'utf8')).not.toMatch(/ASSERTION_ROOM/)
   })
   it('lowers a ceiling to what its package holds, as pnpm lint:tighten writes it, and never raises one', () => {

@@ -3,7 +3,7 @@ import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
-import type { MailChange, MessageService } from './messages.js'
+import { SUBJECT_CHARS, type MailChange, type MessageService } from './messages.js'
 import { REFUSAL_TEXT, refuse } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
@@ -34,17 +34,19 @@ const LIST_SCAN = 1_000
 /** A chain is read whole for the window up to this many messages: its newest ones */
 const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
-const SUBJECT_CHARS = 80
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
 
 /** A message as the window reads it: a moved one with the thread kind it had, a new one in the window's thread words */
 type Shown = { m: MailRow; seq: number }
 
-/** A chain's subject: its first message's words, or for work a script started, whose words are not the person's, that script's (#1468) */
-function subjectLine(m: Pick<MailRow, 'body' | 'facts'>): string {
+/**
+ * A chain's subject: the one its sender gave (#2229), else its first message's words, or for work a script started, whose words are not the
+ * person's, that script's (#1468)
+ */
+function subjectLine(m: Pick<MailRow, 'body' | 'facts' | 'subject'>): string {
   const script = m.facts.fromScript?.credential
-  return oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
+  return m.subject ?? oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
 }
 
 /**

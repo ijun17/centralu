@@ -118,6 +118,10 @@ only what it gated before: asking a hub's projects to do work (`hub.projects`, `
 Item 1's `parent` is now a case of the general rule: a hub that offers mail takes `hub.mail` from any session on the
 machine, and only the resolution of the word `parent` (the hub's own record of whom it started) stays its own.
 
+One send is not mail since #1948 ([mailbox.md](mailbox.md) §10.6.6): a hub session's `send` to a child it started on a machine (by its
+`<machine>.<id>` or address) is more work for it, given through the link as `agent_session`'s send was (`RemoteAgents.send`), with the gates
+and the report that has. A send to any other session there is mail, as above.
+
 The hold for untrusted projects (mailbox.md §7.4) cannot hold across a link, since nothing is held there. A session of
 an untrusted project that mails a session on another computer is refused `untrusted_project` at once, with words that
 say why and that nothing was sent; the person trusts the project, and the session sends again. Mail from another

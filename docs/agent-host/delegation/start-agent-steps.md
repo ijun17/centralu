@@ -24,7 +24,7 @@ below retained for `safe` and `normal`:
    A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
    while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`); a removed machine's child holds no place,
    and one deleted there while the link was down is forgotten when the link is back (`caughtUp`). Checked before the card and again after it,
-   and for a new `agent_session send` turn. The check after the card also takes the place (#673 review,
+   and for a new turn given by `mail` send. The check after the card also takes the place (#673 review,
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
    given back if the start fails, so calls at once cannot pass the ceiling together. A fork takes its place the same way
    (`reservePlace`). Once the child's session exists, the caller's gates (`agentStartGateError`) and the preset rule
@@ -99,7 +99,7 @@ below retained for `safe` and `normal`:
    `git stash`), written once in the dialog of the project's menu, "Instructions for agents…", and said in the frame
    to be the person's, from the project's settings on that computer. They are read when the task is delivered, so a
    card that stood a while or a start queued for memory carries what is set then; the Assistant's children (no
-   project) get none, and nothing else (`agent_session send`, ask_project, a fork, which carries the conversation)
+   project) get none, and nothing else (more work by `mail` send, ask_project, a fork, which carries the conversation)
    carries them. They are kept as an app
    setting of the project (`agent_instructions:<projectId>`, at most 8,000 characters, gone with the project), not a
    column, so no store step: an older build serving the same store during a swap ignores the key, and its children
@@ -128,7 +128,7 @@ below retained for `safe` and `normal`:
    answer names inside the child's folder become readable to the caller, as ask_project's do.
    Each answer that promises the notice (`working` with the task written, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that
-   names `send` (`done`, `at_rest`) says to start a new agent for another kind of work, with the task written in full,
+   names more work by `mail` send (`done`, `at_rest`) says to start a new agent for another kind of work, with the task written in full,
    since it starts without the old one's context and the old one's name and role came from its first task (#747: a parent
    called `status` more than ten times in a row, and sent read-only research children the editing). In the answers,
    not the descriptions: an answer costs nothing until it is shown.

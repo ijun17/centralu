@@ -23,6 +23,46 @@ const world = () => {
   return { ...w, run: (id: string, args: Parameters<typeof w.tool.run>[1]) => w.tool.run(id, args) }
 }
 
+describe('a send that is work (#1948: agent_session send folded into mail)', () => {
+  it("goes to the sessions by the id its name resolves to, and their answer is the tool's; nothing is written as mail", async () => {
+    const asked: unknown[][] = []
+    const w = hostWorld({ work: async (callerId, target, text, ifBusy) => (asked.push([callerId, target, text, ifBusy]), target === 'w' ? { text: 'the work answer' } : null) })
+    expect(await w.tool.call('a', { action: 'send', to: 'worker', text: 'and the docs', ifBusy: 'fork' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
+    expect(await w.tool.call('a', { action: 'send', to: `session:${HOST}/w`, text: 'and the tests' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
+    // Review of #1948: the subject the card shows leads the words the child reads, on one line; a kind, which work has none of, is said to be mail's
+    expect((await w.tool.call('a', { action: 'send', to: 'w', kind: 'note', subject: 'Docs\nnow', text: 'and the docs' })).text).toBe('Sent as work for a session you started (kind "note" is for other mail). the work answer')
+    expect(asked).toEqual([['a', 'w', 'and the docs', 'fork'], ['a', 'w', 'and the tests', undefined], ['a', 'w', 'Docs now\n\nand the docs', undefined]])
+    expect(w.store.mailbox.feedOf(A, { limit: 5 })).toEqual([])
+  })
+
+  // Review of #1948: a role is never work, whatever a session is named: a child named "parent" does not take its parent's mail
+  it('never asks for a role, even of a session named like it', async () => {
+    const asked: string[] = []
+    const w = hostWorld({ extra: { k: { name: 'parent', projectId: 'p1', askedBy: 'w' } }, work: async (_caller, target) => (asked.push(target), { text: 'work' }) })
+    for (const to of ['parent', 'Assistant', 'person', 'k']) await w.tool.call('w', { action: 'send', to, text: 'x' })
+    expect(asked).toEqual(['k'])
+  })
+
+  it('is plain mail when the sessions say it is no work, and a word no session has is theirs to read first (a start request, a linked child)', async () => {
+    const asked: string[] = []
+    const w = hostWorld({ work: async (_caller, target) => (asked.push(target), null) })
+    expect((await w.tool.call('a', { action: 'send', to: 'beta', text: 'hi' })).text).toMatch(/^Sent /)
+    expect((await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'x' })).text).toContain('Refused (unknown)')
+    // Never asked for the person, or for a read
+    await w.tool.call('a', { action: 'send', to: 'person', text: 'x' })
+    await w.tool.call('a', { action: 'inbox' })
+    expect(asked).toEqual(['b', 'ag-1234'])
+  })
+
+  // Review of #1948: a handle or a linked child's id was looked for as a name on every computer first, and refused while one was away
+  it('reaches the sessions before a name is looked for on other computers, one of which is away', async () => {
+    const w = hostWorld({ work: async (_caller, target) => (target === 'ag-1234' ? { text: 'the work answer' } : null) })
+    w.across.usePeers({ selfName: () => 'here', machineDirectory: () => ({ entries: [], away: [{ name: 'studio', why: 'not reachable right now' }] }) })
+    expect(await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'and the docs' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
+    expect((await w.tool.call('a', { action: 'send', to: 'ag-9999', text: 'x' })).text).toContain('Not asked: studio')
+  })
+})
+
 describe('send (§11.3: needsReply unless kind "note")', () => {
   it('sends a message that waits for a reply, says so, and names the receiver; to "assistant" goes to the role', () => {
     const w = world()
@@ -52,18 +92,12 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     })
   })
 
-  // #1984: a child told to write to its parent mailed the Assistant, the one role it could see
-  it('a session with a parent that mails "assistant" is told once that it went there, not to the parent; the mail is not rerouted', () => {
+  // #1984, #2133: a child is told in its task, before it sends, that "assistant" is not its parent (start-agent.ts); its mail to "assistant" is not rerouted
+  it('a session with a parent that mails "assistant" reaches the Assistant, and the answer says nothing more', () => {
     const w = world()
     const first = w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 1' })
-    expect(first.text).toContain('It went to the Assistant, not to your parent "alpha". If you meant your parent, use to: "parent".')
+    expect(first.text).not.toContain('parent')
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'assistant' })
-    expect(w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
-    // To the parent, or from a session with none, there is nothing to say
-    expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')
-    expect(world().run('b', { action: 'send', to: 'assistant', text: 'help' }).text).not.toContain('not to your parent')
-    // A child the Assistant started has it for its parent: nothing to correct
-    expect(world().run('o', { action: 'send', to: 'assistant', text: 'done' }).text).not.toContain('not to your parent')
   })
 
   // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer

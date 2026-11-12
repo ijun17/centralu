@@ -26,7 +26,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   readonly delegationFlow: Pick<DelegationFlow, 'listAgents'>
   readonly apps: Pick<SessionAppWiring, 'requireAppAccess'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
-  mailTool: (sessionId: string, args: MailToolArgs) => Promise<{ text: string; isError?: boolean }>
+  mailTool: (sessionId: string, args: MailToolArgs, signal?: AbortSignal) => Promise<{ text: string; isError?: boolean }>
   /** The `compact_self` tool of a session (#1451) */
   readonly selfCompaction: Pick<SelfCompaction, 'request'>
   /** One step of the Assistant, asked about when a session's request is its turn (#1447) */
@@ -166,7 +166,7 @@ export class SessionTools {
       findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
-      mail: (args) => this.host.mailTool(sessionId, args),
+      mail: (args, signal) => this.host.mailTool(sessionId, args, signal),
       compactSelf: (focus, then) => this.host.selfCompaction.request(sessionId, focus, then),
     }
   }

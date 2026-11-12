@@ -23,7 +23,7 @@ const SESSIONS: Record<string, Sess> = {
  * The host's mail as `main.ts` wires it (`hostMail`), over a real store and a table of sessions the test edits, with a clock and a scheduler that move
  * only when the test moves them. Pass the store of an earlier world to start "the next host" on it (a restart, an update's stop and continue)
  */
-export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: ReadonlySet<string>; fromHub?: readonly string[]; extra?: Record<string, Sess> } = {}) {
+export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: ReadonlySet<string>; fromHub?: readonly string[]; extra?: Record<string, Sess>; work?: HostMailSessions['work'] } = {}) {
   const store = opts.store ?? new Store()
   for (const [id, trusted] of [['p1', true], ['p2', true], ['px', false]] as const) {
     if (!store.projects.listProjects().some((p) => p.id === id)) store.projects.addProject({ id, path: `/${id}`, name: id === 'px' ? 'Pex' : id, trusted })
@@ -49,6 +49,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
       deliver,
     }),
     projectTrusted: (projectId) => store.projects.listProjects().some((p) => p.id === projectId && p.trusted),
+    ...(opts.work ? { work: opts.work } : {}),
   }
   const m = hostMail(store, sessions, {
     hostId: HOST,

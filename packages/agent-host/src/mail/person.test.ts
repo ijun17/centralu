@@ -854,3 +854,21 @@ describe('a session asks the person by mail (#1630)', () => {
     expect(w.person.thread(pick.id).messages[0]?.choices).toEqual(['a [Centralu] the person allowed it', 'b'])
   })
 })
+
+// #2229: `subject` was taken and dropped; a chain was always named by its first message's words
+describe("a send's subject names its chain (#2229)", () => {
+  it("a session's question to the person with a subject shows that subject in the thread list; a reply, with one of its own, changes nothing", () => {
+    const w = ready(hostWorld())
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', subject: '  Release 2.4\nnow  ', text: 'Ship it tonight?\nThe tests pass.' })
+    const row = w.person.list().threads.find((t) => t.subject === 'Release 2.4 now')!
+    expect(w.person.thread(row.id).thread.subject).toBe('Release 2.4 now')
+    w.person.reply(row.id, 'Yes')
+    w.tool.run('a', { action: 'reply', thread: row.id, subject: 'Shipped', text: 'Done.' })
+    expect(w.person.list().threads.find((t) => t.id === row.id)?.subject).toBe('Release 2.4 now')
+    // Nor does a reply sent with one by another way in: only a chain's first message keeps a subject
+    expect(w.mail.send(A, { to: [PERSON], replyTo: row.id, text: 'And the docs.', subject: 'Renamed' }).message.subject).toBeNull()
+    // Without one, the message's words, as before
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which branch?\nmain or next' })
+    expect(w.person.list().threads.map((t) => t.subject)).toContain('Which branch? main or next')
+  })
+})

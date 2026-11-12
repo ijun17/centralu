@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
 import { PERSON } from '../mail/address.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -95,7 +95,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     await turnEnds(child, 'First answer.')
     await w.until(() => reports(task).length > 0)
     // A send to a child at rest starts its turn, and waits for it
-    const sent = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
+    const sent = sendWork(w.mgr, parent, child, 'and the docs')
     await w.until(() => read.tasks(addr(parent), child).length === 2 && w.mgr.sessionInfo(child)?.state === 'working')
     const later = read.tasks(addr(parent), child).find((t) => t.id !== task)
     await turnEnds(child, '')
@@ -155,8 +155,8 @@ describe('a task is answered by its reply or by the last response at rest (§10.
 
   it('M3: a follow-up the tool holds for a turn after is answered by that turn on its own request; the turn that never took it answers only its own task', async () => {
     const { child, task } = await childInTurn()
-    const r = await w.mgr.agentSession(w.mgr.sessionInfo(child)!.askedBy!, { sessionId: child, action: 'send', text: 'and the docs' })
-    const follow = r.ok && r.state === 'mailed' ? r.messageId : ''
+    const r = await sendWork(w.mgr, w.mgr.sessionInfo(child)!.askedBy!, child, 'and the docs')
+    const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     expect(follow).not.toBe('')
     await deliverDue(child)
     const input = handleOf(child).ids.at(-1)
@@ -184,8 +184,8 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     // A line of Centralu's ends the response's row: it is written now
     handleOf(child).event({ type: 'notice', sessionId: child, level: 'info', from: 'Centralu', label: 'mail', text: 'a line' })
     // A follow-up joins the turn after its response is written, and the turn ends with nothing more
-    const r = await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
-    const follow = r.ok && r.state === 'mailed' ? r.messageId : ''
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
+    const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     await deliverDue(child)
     expect(handleOf(child).sent.join(' ')).toContain(follow)
     handleOf(child).event({ type: 'turn_complete', sessionId: child })
@@ -212,8 +212,8 @@ describe('a task is answered by its reply or by the last response at rest (§10.
 
   it('two tasks of one sender are two requests: each gets its own answer', async () => {
     const { parent, child, task } = await childInTurn()
-    const r = await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
-    const follow = r.ok && r.state === 'mailed' ? r.messageId : ''
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
+    const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     await deliverDue(child)
     await turnEnds(child, 'Code and docs done.')
     await w.until(() => reports(task).length > 0 && reports(follow).length > 0)
@@ -224,9 +224,11 @@ describe('a task is answered by its reply or by the last response at rest (§10.
   })
 
   it("a question the tool holds for a turn after is not the stopped turn's: its stop does not release it, the stop of the turn that runs it does", async () => {
-    const { parent, child } = await childInTurn()
-    expect((await m.tool.call(parent, { action: 'send', to: child, text: 'which branch?' })).isError).toBeFalsy()
-    const [question] = read.between(addr(parent), addr(child), 'message')
+    const { child } = await childInTurn()
+    // A session that did not start the child: its mail is a question, not work (#1948)
+    const asker = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
+    expect((await m.tool.call(asker, { action: 'send', to: child, text: 'which branch?' })).isError).toBeFalsy()
+    const [question] = read.between(addr(asker), addr(child), 'message')
     await deliverDue(child)
     const input = handleOf(child).ids.at(-1)
     handleOf(child).turnInputs = () => []
@@ -239,7 +241,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom again', retryable: false } })
     await w.until(() => read.row(question!.id, addr(child))?.releasedAt != null)
-    const notices = read.between('centralu', addr(parent), 'notice')
+    const notices = read.between('centralu', addr(asker), 'notice')
     expect(notices.some((n) => n.facts.unanswered?.some((u) => u.id === question!.id))).toBe(true)
   })
 

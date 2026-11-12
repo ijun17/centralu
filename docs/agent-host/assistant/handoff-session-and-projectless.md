@@ -90,7 +90,7 @@ tool in the other tiers), and one line of its instructions says to use them rath
 - **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the Assistant's children that
   are still here, and worded as "agents you started"), the
   finish notice through the report path, a request kept across a swap (its `projectId` is the empty place id), and
-  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the Assistant and no other
+  `agent_session` status, wait, stop and delete, and more work by `mail` send, on a child whose `askedBy` is the Assistant and no other
   session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the Assistant.
 
 Characters: the Assistant's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →

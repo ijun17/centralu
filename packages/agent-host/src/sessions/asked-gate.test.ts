@@ -163,7 +163,6 @@ describe('a step that can be undone runs, cited or not, and every step that chan
     { name: 'ask_project', args: { project: 'Other', session: 's', task: 'go' } },
     { name: 'handoff_session', args: { sessionId: 's' } },
     { name: 'send_to_session', args: { sessionId: 's', text: 'hi' } },
-    { name: 'agent_session', args: { action: 'send', sessionId: 's', text: 'hi' } },
     { name: 'mail', args: { action: 'send', to: 'session:h/s2', text: 'hi' } },
   ]
 

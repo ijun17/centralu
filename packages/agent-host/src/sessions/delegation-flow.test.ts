@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionLiveDefaults, type BackgroundTask, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { RoutedCard, SessionHandle } from '../adapters/contract.js'
@@ -10,6 +11,7 @@ import type { AnswerGiven } from '../mail/delegation.js'
 import type { AgentRunWait } from './app-agents.js'
 import { ChildOwnership, type Delegation } from './child-ownership.js'
 import { DelegationFlow, type DelegationHost } from './delegation-flow.js'
+import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 import { ASSISTANT_PLACE } from './start-agent-terms.js'
 
 /*
@@ -54,7 +56,7 @@ describe('the gates read before anything is started', () => {
     const flow = new DelegationFlow(hostWith({}))
     expect(await flow.agentSession('caller', { sessionId: 'caller', action: 'stop' })).toEqual({
       ok: false,
-      error: 'agent_session cannot wait on, stop, delete or send to its own calling session.',
+      error: 'agent_session cannot wait on, stop or delete its own calling session.',
     })
   })
 
@@ -78,6 +80,13 @@ describe('what a handoff gave away', () => {
         'It answers to that session now: this session no longer follows it, and nothing was stopped.',
     })
     expect(handed(flow).handedOverAnswer('heir', 'child')).toBeUndefined()
+  })
+
+  // Review of #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
+  it('a mail send by the original that stayed hears where the work went, as agent_session did', async () => {
+    children.recordHandedOver('child', 'caller', 'heir')
+    const flow = new DelegationFlow(hostWith({ meta, children }))
+    expect(await flow.actions.sendWork('caller', 'child', 'and the docs')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child] to the session that took over from this one, "Heir" [heir].') })
   })
 
   it('a wait the move ended always has an answer, even once the record is gone', () => {
@@ -335,7 +344,7 @@ describe("a child's turn and the call waiting on it", () => {
         throw new Error('the CLI is gone')
       },
     })
-    expect(await flow.agentSession('caller', { sessionId: 'child', action: 'send', text: 'and the tests' })).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
+    expect(await flow.actions.sendWork('caller', 'child', 'and the tests')).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
     expect(joined?.finished).toBe(true)
     expect(agentRuns.size).toBe(0)
     expect(children.delegations.size).toBe(0)
@@ -365,5 +374,24 @@ describe("a child's turn and the call waiting on it", () => {
         error: `${id} is not a session this session started. agent_session works only on sessions start_agent started from here.`,
       })
     }
+  })
+
+  // Review of #1948: another session's child on a linked machine was asked about and refused as work, not sent as mail
+  it("mail to another session's child on a linked machine is plain mail, asked about by nobody", async () => {
+    const asked: string[] = []
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ sessionId: 'm1.c1', callerId: 'someone', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }]))
+    const flow = flowWith({ refusesDelegation: (callerId: string) => (asked.push(callerId), null) })
+    expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
+    expect(asked).toEqual([])
+  })
+})
+
+// Review of #1948: start_agent, ask_project, a fork and a mail send each gave work by a copy of their own; one way now, at its owner
+describe('work is given one way', () => {
+  it('no source but the flow itself registers a delegated turn: every giver goes through delegate', () => {
+    const src = fileURLToPath(new URL('..', import.meta.url))
+    const files = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts') && !/\.test(-helpers)?\.ts$/.test(f))
+    const callers = files.filter((f) => readFileSync(join(src, f), 'utf8').includes('.startDelegation('))
+    expect(callers.map((f) => f.replaceAll('\\', '/'))).toEqual(['sessions/delegation-flow.ts'])
   })
 })

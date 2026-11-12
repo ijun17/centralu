@@ -12,10 +12,10 @@ export const CLAUDE_CENTRALU_SCENARIOS: readonly HostScenario[] = [
     turns: ['Use start_agent to have a new agent do this job: Reply with exactly: pong . Give it tool claude and model haiku. Then tell me what it answered.'],
   },
   {
-    // The agent is started to stay, then spoken to: agent_session sends a message and waits for its answer
+    // The agent is started to stay, then given more work: a mail send to its id (#1948), then agent_session waits for its answer
     name: 'centralu-session',
     helpers: [],
-    turns: ['Use start_agent to start a new agent with the job: Reply with exactly: one . Give it tool claude and model haiku. Then use agent_session to send that agent the message "Reply with exactly: two" and wait for its answer. Tell me what it said.'],
+    turns: ['Use start_agent to start a new agent with the job: Reply with exactly: one . Give it tool claude and model haiku. Then use the mail tool to send that agent the message "Reply with exactly: two", and agent_session to wait for its answer. Tell me what it said.'],
   },
   {
     name: 'centralu-ask',

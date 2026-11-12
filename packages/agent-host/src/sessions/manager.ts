@@ -855,7 +855,7 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
-      mailTool: async (id, args) => (await self.mail.hooks?.tool?.(id, args)) ?? { text: 'The mailbox is not available.', isError: true },
+      mailTool: async (id, args, signal) => (await self.mail.hooks?.tool?.(id, args, signal)) ?? { text: 'The mailbox is not available.', isError: true },
       refusesDelegation: (callerId, target, call) => self.mail.hooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mail.hooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),

@@ -117,8 +117,8 @@ const HANDLERS: ToolHandlers = {
   compact_self({ focus, then }, { tools }) {
     return tools.compactSelf ? tools.compactSelf(focus, then) : { text: 'Compacting is not available in this session.', isError: true }
   },
-  mail(args, { tools }) {
-    return tools.mail ? tools.mail(args) : { text: 'The mailbox is not available in this session.', isError: true }
+  mail(args, { tools, signal }) {
+    return tools.mail ? tools.mail(args, signal) : { text: 'The mailbox is not available in this session.', isError: true }
   },
   async update_centralu({ action }, { tools, caller, signal }) {
     const r = tools.updateCentralu ? await tools.updateCentralu(action, signal) : { ok: false, error: 'Update checks are unavailable' }
@@ -178,7 +178,7 @@ const HANDLERS: ToolHandlers = {
     const branch = trimmed(args.branch)
     const name = trimmed(args.name)
     const machine = trimmed(args.machine)
-    return agentCallsFor(caller, agentRunText(
+    return agentCallsFor(caller.profile, agentRunText(
       await tools.startAgent(
         {
           task,
@@ -200,14 +200,13 @@ const HANDLERS: ToolHandlers = {
 
   async agent_session(args, { tools, signal, caller }) {
     const sessionId = trimmed(args.sessionId)
-    const { action, ifBusy } = args
-    if (action === 'list') return agentCallsFor(caller, agentListText(await tools.listAgents()))
+    const { action } = args
+    if (action === 'list') return agentCallsFor(caller.profile, agentListText(await tools.listAgents()))
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
     const text = args.text?.trim() ? args.text : undefined
-    if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
     const card = trimmed(args.card)
-    return agentCallsFor(caller, agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal)))
+    return agentCallsFor(caller.profile, agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) }, signal)))
   },
 
   async recall({ query, limit }, { tools }) {
@@ -594,13 +593,16 @@ const HANDLERS: ToolHandlers = {
 }
 
 /**
- * start_agent's answers name agent_session as a reader calls it (`agentRunText`); the Assistant reaches it through
- * centralu_run in the `commands` tier (#853), where the bare call is refused, so its answers name that form instead
+ * start_agent's answers name agent_session and mail as a reader calls them (`agentRunText`); the Assistant reaches them through
+ * centralu_run in the `commands` tier (#853), where the bare call is refused, so its answers name that form instead. Only Centralu's own
+ * words: someone else's text (a child's answer, its last step) is in them as a JSON string (`trustedJsonText`), which is passed over whole
  */
-function agentCallsFor(caller: ToolCaller, out: ToolOutput): ToolOutput {
-  if (!(commandsFor(caller.profile) as string[]).includes('agent_session')) return out
-  const text = out.text.replace(/\bagent_session\(([^)]*)\)/g, (_, inner: string) => `centralu_run(command="agent_session", args={${inner.replace(/\b(\w+)=/g, '$1: ')}})`)
-  return { ...out, text }
+export function agentCallsFor(profile: ToolCaller['profile'], out: ToolOutput): ToolOutput {
+  const commands = commandsFor(profile) as string[]
+  const text = out.text.replace(/"(?:[^"\\\n]|\\.)*"|\b(agent_session|mail)\(([^)]*)\)/g, (call: string, tool?: string, inner?: string) =>
+    tool && commands.includes(tool) ? `centralu_run(command="${tool}", args={${(inner ?? '').replace(/\b(\w+)=/g, '$1: ')}})` : call,
+  )
+  return text === out.text ? out : { ...out, text }
 }
 
 /** A command's one line in centralu_commands: its description's first sentence, without emphasis or issue numbers */

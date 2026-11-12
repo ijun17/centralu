@@ -276,7 +276,6 @@ packages/agent-host/src/rpc.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/agent-observation.test.ts @typescript-eslint/no-floating-promises 2
 packages/agent-host/src/sessions/agent-session-actions.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/agent-session-actions.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/sessions/agent-session-actions.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/agent-session-actions.ts @typescript-eslint/unbound-method 1
 packages/agent-host/src/sessions/agent-start-requests.test.ts @typescript-eslint/no-floating-promises 2
 packages/agent-host/src/sessions/agent-start-requests.ts @typescript-eslint/no-unsafe-type-assertion 2
@@ -289,7 +288,7 @@ packages/agent-host/src/sessions/app-sessions.ts @typescript-eslint/no-non-null-
 packages/agent-host/src/sessions/app-sessions.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/approval-rules.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/sessions/ask-project-flow.ts @typescript-eslint/no-non-null-assertion 9
-packages/agent-host/src/sessions/ask-project-flow.ts @typescript-eslint/no-unsafe-type-assertion 6
+packages/agent-host/src/sessions/ask-project-flow.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/sessions/ask-project.test.ts @typescript-eslint/no-floating-promises 2
 packages/agent-host/src/sessions/ask-project.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/sessions/assistant-proposals.ts @typescript-eslint/no-unsafe-type-assertion 2
@@ -308,7 +307,7 @@ packages/agent-host/src/sessions/cross-project.test-helpers.ts @typescript-eslin
 packages/agent-host/src/sessions/cross-project.test-helpers.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/delegation-flow.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-non-null-assertion 7
-packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-unsafe-type-assertion 4
+packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/external-conversations.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/external-conversations.ts @typescript-eslint/no-non-null-assertion 4
 packages/agent-host/src/sessions/external-conversations.ts @typescript-eslint/no-unsafe-type-assertion 4
@@ -371,7 +370,7 @@ packages/agent-host/src/sessions/session-trash.ts @typescript-eslint/no-unsafe-t
 packages/agent-host/src/sessions/setting-files.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/sessions/snippet.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/sessions/start-agent-flow.ts @typescript-eslint/no-non-null-assertion 1
-packages/agent-host/src/sessions/start-agent-flow.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/agent-host/src/sessions/start-agent-flow.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/start-agent.test.ts @typescript-eslint/no-floating-promises 1
 packages/agent-host/src/sessions/start-agent.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/state-rests.test.ts @typescript-eslint/no-unnecessary-type-assertion 1

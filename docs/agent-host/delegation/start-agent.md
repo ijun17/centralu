@@ -14,7 +14,7 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory ([child-workspace.md](child-workspace.md#what-a-child-costs-the-machine-code-intelligence-and-the-memory-gate-686), #686). `lsp: true` keeps the child's code intelligence ([child-workspace.md](child-workspace.md#what-a-child-costs-the-machine-code-intelligence-and-the-memory-gate-686)) |
-| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, [delegated-turns.md](delegated-turns.md), #676), `mailed` (a send to a session that cannot take it now went as a mail task, [delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677)), `queued` (a note held for a busy child on a linked machine, below), `stopped` and `deleted` (a child moved to the session archive; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, `paused (background work)` (its turn ended while its own background commands or the tool's background subagents run, #2146; `pausedOnBackground`, protocol session-state.ts; the screen shows such a session as waiting with the background dot, not running, 2026-11-10), finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+| `agent_session` | `{ sessionId?, action: status\|wait\|stop\|delete\|answer\|list, text?, card? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, [delegated-turns.md](delegated-turns.md), #676), `mailed` (a `mail` send to a session that cannot take it now went as a mail task, [delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677)), `queued` (a note held for a busy child on a linked machine, below), `stopped` and `deleted` (a child moved to the session archive; worktree cleanup also preserves local work, #608/#637). More work for a session is `mail(action="send", to=<its id>, text, ifBusy?)` since #1948 ([plans/mailbox.md](../../plans/mailbox.md) §10.6.6): it answers `working`, `mailed` or a fork as `send` did, at once, and `send` here is refused with that pointer. `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, `paused (background work)` (its turn ended while its own background commands or the tool's background subagents run, #2146; `pausedOnBackground`, protocol session-state.ts; the screen shows such a session as waiting with the background dot, not running, 2026-11-10), finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
 
 **Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
 them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
@@ -30,7 +30,7 @@ archived is gone). `agentLook` (protocol `session-state.ts`) is the one label a 
 read too. Whether a session is busy is one rule beside it (`atRest`, #2158): in a turn, a card open (`needsAnswer`), or its
 own background work running; delete, delete_session, handoff, worktree cleanup and the host's idle rule (`sessionBusy`)
 refuse or wait on it. `busyWith` is that rule written out once and names the part that holds (a card, a turn, background
-work): `atRest` reads it, and so do the checks that say why (handoff's refusal, the window's handoff note, `sessionIdle`). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+work): `atRest` reads it, and so do the checks that say why (handoff's refusal, the window's handoff note, `sessionIdle`). `list` takes `askedBy` only, as status, wait, stop and a `mail` send that is work do: a `parentSessionId`-only link is the former
 worktree manager's, which store step v48 copied into `askedBy`.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
 is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the session archive it
@@ -48,7 +48,7 @@ how far a seat reads, the preset a created session gets, the mail hold, which st
 `ProjectRegistry.projectTrusted`, through the module's host. It does not open the agent depth (#867):
 `auto` children each starting their own once ran twelve sessions at once (#862). Worktree cleanup keeps local work
 in the session archive under every preset (#608).
-`agent_session` can status, wait, send or stop any session in the same project, and delete
+`agent_session` can status, wait or stop any session in the same project (`mail` to one it did not start stays mail, §10.6.6 of plans/mailbox.md), and delete
 any worktree session there,
 including another parent's child or the person's turn; adapter mid-turn support and the
 child's own preset still apply. Deleting a session without a worktree still requires the caller to have started it
@@ -64,7 +64,7 @@ own (#646): its receipt is held, and its failure recorded, there and never on th
 so the owner still reads its own answer, not the reply to the note, and a refused note does
 not fail the owner's delegation. The observer's later `status` and `wait` read that reader (the
 reply to its note, or the refusal), never the owner's delegation; a refusal no wait is reading is
-said once in the observer's session, as a report is. Self wait, stop, delete and send are refused in
+said once in the observer's session, as a report is. Self wait, stop and delete are refused in
 all presets; self status does not create a delegation. A person's own turn or an app request
 without a delegation is also observed without registering ownership: the app's existing
 completion watcher is reused, or a temporary event reader watches the person's turn and

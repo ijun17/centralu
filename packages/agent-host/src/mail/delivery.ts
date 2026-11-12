@@ -67,7 +67,7 @@ export type MailInput = {
   joins?: boolean
   /**
    * What the delivery carries that the receiver's conversation shows as a session's message (`SessionEvents.deliverMail`): a delegation tool's task
-   * (`agent_session` send, `ask_project`, the Assistant's `send_to_session`; docs/plans/mailbox.md §10.6.2), its sender and words, or the notice of a
+   * (mail to a child of the sender's, origin `agent_session`; `ask_project`, the Assistant's `send_to_session`; docs/plans/mailbox.md §10.6.2), its sender and words, or the notice of a
    * card in a session it gave work (§10.6.4), from that session. `alone`: the delivery carries nothing else. The agent reads the mail frame only
    */
   shown?: { senderId: string; text: string; alone: boolean }

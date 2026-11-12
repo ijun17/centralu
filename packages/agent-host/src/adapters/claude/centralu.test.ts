@@ -70,12 +70,16 @@ describe(`Claude Code calling Centralu's tools through a host (${recordedVersion
     expect(of(events, 'approval_request')).toEqual([])
   })
 
-  it('centralu-session: agent_session sends the started agent a message and the call returns its answer; the tool must be looked up first as it is deferred', async () => {
+  // #1948: more work for the started agent is a mail send to its id, answered at once; agent_session waits for the answer
+  it('centralu-session: a mail send gives the started agent more work, and agent_session waits for its answer; the tools are looked up first as they are deferred', async () => {
     const { events } = await replay('centralu-session')
-    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(expect.arrayContaining(['mcp__centralu__start_agent', 'ToolSearch', 'mcp__centralu__agent_session']))
-    const send = calls(events).find((c) => c.summary.centralu?.tool === 'agent_session')!
+    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(expect.arrayContaining(['mcp__centralu__start_agent', 'ToolSearch', 'mcp__centralu__mail', 'mcp__centralu__agent_session']))
+    const send = calls(events).find((c) => c.summary.centralu?.tool === 'mail')!
     expect(send.input).toMatchObject({ action: 'send', text: 'Reply with exactly: two' })
-    expect(results(events).find((r) => r.callId === send.callId)).toMatchObject({ ok: true, summary: expect.stringContaining('two') })
+    expect(results(events).find((r) => r.callId === send.callId)).toMatchObject({ ok: true, summary: expect.stringContaining('Sent as work for a session you started.') })
+    const wait = calls(events).filter((c) => c.summary.centralu?.tool === 'agent_session').at(-1)!
+    expect(wait.input).toMatchObject({ action: 'wait' })
+    expect(results(events).find((r) => r.callId === wait.callId)).toMatchObject({ ok: true, summary: expect.stringContaining('two') })
   })
 
   it('centralu-ask: ask_project into a trusted project returns the other project’s session’s answer, as a success with no card', async () => {
@@ -102,10 +106,12 @@ describe('what the adapter hands Centralu’s tools when the CLI calls them', ()
     expect(await handed('centralu-agent')).toMatchObject([{ tool: 'start_agent', args: { task: 'Reply with exactly: pong', tool: 'claude', model: 'haiku' } }])
   })
 
-  it('centralu-session: agent_session send reaches its tool with the action, the session and the text', async () => {
+  // The mail send is not among the tools this replay's stand-ins note (the events above hold it)
+  it('centralu-session: start_agent reaches its tool with the job, and agent_session its waits', async () => {
     expect(await handed('centralu-session')).toMatchObject([
       { tool: 'start_agent', args: { task: 'Reply with exactly: one' } },
-      { tool: 'agent_session', args: { action: 'send', text: 'Reply with exactly: two', sessionId: expect.any(String) } },
+      { tool: 'agent_session', args: { action: 'wait' } },
+      { tool: 'agent_session', args: { action: 'wait' } },
     ])
   })
 

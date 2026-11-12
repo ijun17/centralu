@@ -1,6 +1,6 @@
 /**
- * Mail to a child this hub started on a linked machine (#2067): the mail tool sends it to that machine (item 2), and with no link to it the send
- * is refused at once as `link_down`, never as a session this host never had (`unknown`) or one in the archive (`gone`) while it is alive there.
+ * Mail to a child this hub started on a linked machine (#2067): the mail tool sends it to that machine (item 2; since #1948 its starter's send is
+ * more work through the link, as agent_session's send was), and with no link to it the send is refused at once, never as a session this host never had (`unknown`) or one in the archive (`gone`) while it is alive there.
  * The mailbox itself never writes to another computer's session (`elsewhere`). Delivery over a real link: links/linked-mail-across.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -40,10 +40,11 @@ afterEach(async () => {
 })
 
 describe('mail to a child on a linked machine (#2067)', () => {
-  it('by its id or address goes to its machine, and with no link to it is refused at once, written nowhere', async () => {
+  // #1948: mail to a child of the caller's is more work, here or on a linked machine, as agent_session's send was; to any other session there it is mail
+  it('by its id or address is more work through the link, and with no link to it is refused at once, written nowhere', async () => {
     for (const to of [CHILD.sessionId, addr(CHILD.sessionId)]) {
       const sent = await m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
-      expect(sent).toMatchObject({ isError: true, text: REFUSED })
+      expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('m1.c1 is on Box, and no machine is linked to this computer now.') })
     }
     expect(store.mailbox.postsSince(addr('h1'), 0)).toBe(0)
   })

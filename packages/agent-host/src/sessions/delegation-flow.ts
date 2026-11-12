@@ -1,4 +1,7 @@
+import { errorMessage } from '@cc/protocol'
 import type { Delegation } from './child-ownership.js'
+import type { DelegatedWork } from './delegation-host.js'
+import { labelOf } from './transcript-view.js'
 import { AgentRunWait } from './app-agents.js'
 import { turnAnswer } from './turn-answer.js'
 import type { DelegationHost } from './delegation-host.js'
@@ -36,7 +39,7 @@ export class DelegationFlow {
   /** Turns read by a session that does not own them, and an observer's note (observed-turns.ts) */
   private readonly observed: ObservedTurns
   /** agent_session's actions (agent-session-actions.ts) */
-  private readonly actions: AgentSessionActions
+  readonly actions: AgentSessionActions
   /** The children start_agent starts on linked machines, and agent_session on them (remote-agents.ts, #1038) */
   readonly remote: RemoteAgents
 
@@ -64,7 +67,32 @@ export class DelegationFlow {
     }
   }
 
-  /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
+  /**
+   * Gives a session the caller's work, the one way start_agent, ask_project, a fork and a mail send do: the wait on its turn, the caller's thread
+   * written before the words go in so a card the turn raises at once finds the work open (docs/plans/mailbox.md §10.6.4), and all of it undone
+   * when they do not go in, the wait failed too (#839: a wait of the caller's may have joined it while the session woke). `delivered` is the
+   * error text when they did not go in
+   */
+  delegate(w: DelegatedWork): { d: Delegation; delivered: Promise<string | null> } {
+    const d = this.startDelegation(w.key, w.callerId, w.sessionId, w.target, w.agent)
+    const withdraw = this.host.children.delegated(w.callerId, w.sessionId, w.via, w.task)
+    const caller = this.host.meta.get(w.callerId)
+    const delivered = (async () => {
+      try {
+        await this.host.deliver(w.sessionId, w.frame, undefined, { sessionId: w.callerId, name: caller ? labelOf(this.host.store.messages, caller) : w.callerId }, false, undefined, 'inline', undefined, w.stillAllowed)
+        return null
+      } catch (e) {
+        withdraw()
+        d.wait.fail(e instanceof Error ? e : new Error(errorMessage(e)))
+        this.host.children.dropDelegation(w.key, d)
+        if (this.host.agentRuns.get(w.sessionId) === d.wait) this.host.agentRuns.delete(w.sessionId)
+        return errorMessage(e)
+      }
+    })()
+    return { d, delivered }
+  }
+
+  /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`); only `delegate` calls it, tests aside */
   startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false): Delegation {
     let notice: string | undefined
     const wait = new AgentRunWait((message) => (notice = message), () => this.host.meta.get(sessionId)?.name ?? 'the session', undefined, this.answerReader(sessionId))

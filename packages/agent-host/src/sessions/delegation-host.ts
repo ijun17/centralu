@@ -1,5 +1,6 @@
 import type { WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import type { ChildOwnership } from './child-ownership.js'
+import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AgentRunWait } from './app-agents.js'
@@ -28,10 +29,13 @@ import type { SelfCompaction } from './self-compaction.js'
 /** The tool a send to another session came through, the task's origin when it goes as mail */
 export type SendOrigin = 'agent_session' | 'ask_project' | 'send_to_session'
 
+/** Work one session gives another through `DelegationFlow.delegate`: the words that go in (`frame`) and the caller's own (`task`, its thread) */
+export type DelegatedWork = { key: string; callerId: string; sessionId: string; target: { id: string; name: string; path: string }; agent: boolean; via: ThreadOrigin; task: string; frame: string; stillAllowed?: () => string | null }
+
 /** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the Assistant, or a linked machine's session */
 export type DelegationTarget = { sessionId?: string; projectId?: string | null; assistant?: boolean; linked?: boolean }
 /** The delegation call as S15 names it: the tool, the target as the sentence names it, and the words given */
-export type DelegationCall = { tool: 'start_agent' | 'create_session' | 'agent_session' | 'send_to_session' | 'ask_project'; target: string; text: string }
+export type DelegationCall = { tool: 'start_agent' | 'create_session' | 'mail' | 'send_to_session' | 'ask_project'; target: string; text: string }
 
 /**
  * What the delegation flow reaches of the session manager (#428), typed as the manager declares each member. The

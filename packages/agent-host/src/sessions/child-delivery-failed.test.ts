@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CreateSessionOpts, EventSink } from '../adapters/contract.js'
-import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossHandle, crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 
 /**
  * Work given to a child that never reaches it (#839, item 12). The delegation is registered before the work goes in,
@@ -41,7 +41,7 @@ describe('work given to a child that never reaches it (#839)', () => {
       await gate
       throw new Error('the tool would not start')
     }
-    const sent = w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'second job' })
+    const sent = sendWork(w.mgr, s, c, 'second job')
     await w.until(() => starting)
     // While it wakes, the caller waits on the work it just gave
     let waited: Awaited<ReturnType<typeof w.mgr.agentSession>> | undefined

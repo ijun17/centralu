@@ -1,5 +1,5 @@
-import { atRest, liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
-import type { AgentListRow, AgentSessionOpts, ChildRunResult } from '../adapters/contract.js'
+import { atRest, liveBackgroundTasks, isAssistantKind, type SessionInfo } from '@cc/protocol'
+import type { AgentListRow, AgentSessionOpts, ChildRunResult, IfBusy } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { taskList, type BackgroundStops } from './background-stops.js'
@@ -20,7 +20,7 @@ import { staleSessionHint } from './stale-session-id.js'
  * What agent_session reaches of the rest of the delegation flow (`DelegationFlow`): the child's run and its wait, the
  * answers, the observed turns, the stops of background work, the fork and start_agent's requests
  */
-export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'startDelegation'> &
+export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'delegate'> &
   Pick<DelegationWaits, 'agentAsking' | 'agentAtRest' | 'handedOverReply' | 'untilHandedOver'> &
   Pick<ObservedTurns, 'observeTurn'> &
   Pick<BackgroundStops, 'restingWork' | 'stopOwnWork'> &
@@ -28,7 +28,7 @@ export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking'
 
 
 /**
- * agent_session (#561): status, wait, send, stop and delete on a session the caller started or may work with, on a
+ * agent_session (#561): status, wait, stop and delete on a session the caller started or may work with, on a
  * start_agent request's handle (#673), and the list of the caller's own (#690). Moved out of `DelegationFlow` as it
  * was (#428); what it reaches of the rest of the flow is `AgentSessionDelegations`, of the manager `DelegationHost`.
  */
@@ -66,25 +66,17 @@ export class AgentSessionActions {
    *
    *   status  where it stands, without waiting (the answer, once the turn the caller gave it has ended)
    *   wait    waits on that turn up to the bound, as start_agent does
-   *   send    gives it more, including during the caller's turn on adapters that accept mid-turn input; refused
-   *           while it works on the person's own message or has a higher preset than the caller
    *   stop    stops the turn the caller gave it; a turn the person started there is theirs
    *   delete  trashes a child without a worktree, stopping it first; worktree cleanup requires an idle child (#608)
    */
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (opts.sessionId === callerId && opts.action !== 'status') {
-      return { ok: false, error: 'agent_session cannot wait on, stop, delete or send to its own calling session.' }
+      return { ok: false, error: 'agent_session cannot wait on, stop or delete its own calling session.' }
     }
     // A child start_agent started on a linked machine (#1038): followed through the link. Its id is a linked machine's,
     // `<machine>.<id>`, which no session of this host has
     const remote = opts.sessionId.includes('.') ? this.flow.remote.of(opts.sessionId) : undefined
-    if (remote) {
-      // §7.4: more work for a child on a linked machine is asked before it goes over the link
-      const machine = opts.action === 'send' ? this.host.linkedReader?.machineOf(opts.sessionId) : undefined
-      const refused = opts.action === 'send' ? this.host.refusesDelegation(callerId, { sessionId: opts.sessionId, linked: true }, { tool: 'agent_session', target: `a session on ${machine ?? 'a linked machine'}`, text: opts.text ?? '' }) : null
-      if (refused) return { ok: false, error: refused }
-      return this.flow.remote.agentSession(callerId, remote, opts, signal)
-    }
+    if (remote) return this.flow.remote.agentSession(callerId, remote, opts, signal)
     // Work a handoff gave away (#693): the original that stayed is told where it went
     const gone = this.flow.handedOverAnswer(callerId, opts.sessionId)
     if (gone) return gone
@@ -115,12 +107,11 @@ export class AgentSessionActions {
         : { ok: true, state: 'working', sessionId: child.id, sessionName: child.name, tool: child.tool, reported: false }
     }
     const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
-    const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
-    // The Assistant works on the children it started outside any project (#853), and on no other session
-    const seat = caller?.projectId ? 'project' : isAssistantKind(caller?.kind) ? 'assistant' : null
-    const owns = seat === 'assistant' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
-    if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
-      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'assistant' || s.askedBy === callerId))}` }
+    // Beyond its own: a child of the former worktree manager's link to delete (#637), or under auto any session of its project (#603)
+    const mayWork = (c: SessionInfo, ch: SessionInfo) =>
+      ownChild(c, ch) || (!!c.projectId && ch.projectId === c.projectId && (deletingWithoutWorktree ? ch.parentSessionId === callerId : this.host.autoBoundaryOpen(callerId, 'session ownership')))
+    if (!caller || !child || !mayWork(caller, child)) {
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (!!caller?.projectId || s.askedBy === callerId))}` }
     }
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
@@ -186,46 +177,6 @@ export class AgentSessionActions {
           const note = [r.note, timers.length ? `Its timers ended with its process: ${taskList(timers)}.` : ''].filter(Boolean).join(' ')
           return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside, ...(r.warning ? { warning: r.warning } : {}), ...(note ? { note } : {}) }
         }
-        case 'send': {
-          const above = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset)
-          if (above) return { ok: false, error: above }
-          // §7.4: before anything is sent, mailed or forked
-          const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'agent_session', target: child.name || child.id, text: opts.text ?? '' })
-          if (refused) return { ok: false, error: refused }
-          const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
-          // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
-          if (!this.host.takesSendNow(child.id)) {
-            if (opts.ifBusy) {
-              const f = await this.flow.forkFor(callerId, child, opts.text ?? '', opts.ifBusy === 'fork_read', 'agent_session', signal)
-              if (!f.ok) return f
-              if ('mailed' in f) return { ok: true, tool: child.tool, ...f.mailed }
-              const r = await this.flow.awaitAgent(f.key, f.d, signal)
-              return r.ok ? { ...r, via: 'fork', forkedFrom: child.id } : r
-            }
-            const mailed = this.host.mailTask(callerId, child, 'agent_session', opts.text ?? '')
-            return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, tool: child.tool, ...mailed }
-          }
-          // An answer the caller never came back for gives way to the new message
-          if (d) this.host.children.dropDelegation(key)
-          const full = this.flow.starts.agentCeilingError(callerId, child.projectId ?? '')
-          if (full) return { ok: false, error: full }
-          const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
-          const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
-          const next = this.flow.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
-          // Written before the words go in, so a card the turn raises at once finds the caller's work open (docs/plans/mailbox.md §10.6.4)
-          const withdraw = this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
-          try {
-            await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? '', [], '', canMailParent(child, callerId)), undefined, from, false)
-          } catch (e) {
-            withdraw()
-            // Its wait fails too (#839): a wait of the caller's joined it while the child woke
-            next.wait.fail(e as Error)
-            this.host.children.dropDelegation(key, next)
-            if (this.host.agentRuns.get(child.id) === next.wait) this.host.agentRuns.delete(child.id)
-            return { ok: false, error: `Could not send it: ${(e as Error).message}` }
-          }
-          return this.flow.awaitAgent(key, next, signal)
-        }
         default:
           return { ok: false, error: 'Unknown agent_session action.' }
       }
@@ -235,8 +186,66 @@ export class AgentSessionActions {
   }
 
   /**
+   * `mail` to a session agent_session works on for the caller, its start request or its linked child: new work, answered at once, its end told
+   * (docs/plans/mailbox.md §10.6.6). Null for any other target: the send is plain mail
+   */
+  async sendWork(callerId: string, target: string, text: string, ifBusy?: IfBusy, signal?: AbortSignal): Promise<ChildRunResult | null> {
+    const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
+    if (remote) {
+      if (remote.callerId !== callerId) return null
+      // §7.4: more work for a child on a linked machine is asked before it goes over the link
+      const machine = this.host.linkedReader?.machineOf(target)
+      const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
+      return refused ? { ok: false, error: refused } : this.flow.remote.send(callerId, remote, text)
+    }
+    // Work a handoff gave away (#693): the original that stayed is told where it went, as agent_session's send told it
+    const gone = this.flow.handedOverAnswer(callerId, target)
+    if (gone) return gone
+    // A start that answered "pending" (#673): its handle is the request's id until the person answers
+    const request = this.host.children.agentStarts.get(target)
+    if (request?.req.callerId === callerId) {
+      const ended = request.ended
+      if (!ended) return { ok: false, error: `No session yet: request ${target} is still waiting for ${request.lowMemory ? 'memory to start' : "the person's answer"}. Send once it has started.` }
+      if ('error' in ended) return { ok: false, error: `Request ${target} started no session: ${ended.error}` }
+      target = ended.childId
+    }
+    const caller = this.host.meta.get(callerId)
+    const child = this.host.meta.get(target)
+    // Only a session it started: under auto any session of the project is agent_session's, but mail to one (its parent too) stays mail
+    if (!caller || !child || !ownChild(caller, child)) return null
+    const above = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset)
+    if (above) return { ok: false, error: above }
+    // §7.4: before anything is sent, mailed or forked
+    const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'mail', target: child.name || child.id, text })
+    if (refused) return { ok: false, error: refused }
+    // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
+    if (!this.host.takesSendNow(child.id)) {
+      if (!ifBusy) {
+        const mailed = this.host.mailTask(callerId, child, 'agent_session', text)
+        return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, tool: child.tool, ...mailed }
+      }
+      const f = await this.flow.forkFor(callerId, child, text, ifBusy === 'fork_read', 'agent_session', signal)
+      if (!f.ok) return f
+      if ('mailed' in f) return { ok: true, tool: child.tool, ...f.mailed }
+      const working = this.flow.agentWorking(f.d)
+      return working.ok ? { ...working, via: 'fork', forkedFrom: child.id } : working
+    }
+    const key = `${callerId}>${child.id}`
+    // An answer the caller never came back for gives way to the new message
+    if (this.host.children.delegations.has(key)) this.host.children.dropDelegation(key)
+    const full = this.flow.starts.agentCeilingError(callerId, child.projectId ?? '')
+    if (full) return { ok: false, error: full }
+    const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
+    const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
+    const frame = agentFrame(labelOf(this.host.store.messages, caller), text, [], '', canMailParent(child, callerId))
+    const { d, delivered } = this.flow.delegate({ key, callerId, sessionId: child.id, target: { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, agent: true, via: 'agent_session', task: text, frame })
+    const failed = await delivered
+    return failed ? { ok: false, error: `Could not send it: ${failed}` } : this.flow.agentWorking(d)
+  }
+
+  /**
    * agent_session on a start_agent request's handle (#673). While the card stands: status says so, wait waits for the
-   * person's answer up to the bound, stop (or delete) withdraws the card, send is refused. Once the child started, the
+   * person's answer up to the bound, stop (or delete) withdraws the card. Once the child started, the
    * call goes on to that session (a wait that saw it start answers its status, so the call stays inside its bound);
    * once it ended without one, the reason.
    */
@@ -250,10 +259,6 @@ export class AgentSessionActions {
       if (action === 'stop' || action === 'delete') {
         this.flow.starts.withdrawAgentStart(id, 'The session that asked withdrew the request.', agentStartPersonText(rec.req, 'stopped'))
         return { ok: true, state: 'stopped', sessionId: id, sessionName: '', tool: rec.req.detail.tool }
-      }
-      if (action === 'send') {
-        const on = rec.lowMemory ? 'memory to start' : "the person's answer"
-        return { ok: false, error: `No session yet: request ${id} is still waiting for ${on}. Send once it has started.` }
       }
       if (action === 'wait') {
         const owner = rec.req.callerId
@@ -272,4 +277,12 @@ export class AgentSessionActions {
     if ('error' in ended) return { ok: false, error: `Request ${id} started no session: ${ended.error}` }
     return { childId: ended.childId, action }
   }
+}
+
+/**
+ * The caller's own child (#1948): started by it (`askedBy`) in its project, or for the Assistant outside any project (#853). What a `mail` send gives
+ * work to, and what agent_session works on before #637's link and `auto` widen it
+ */
+function ownChild(caller: SessionInfo, child: SessionInfo): boolean {
+  return child.askedBy === caller.id && child.projectId === caller.projectId && (!!caller.projectId || isAssistantKind(caller.kind))
 }

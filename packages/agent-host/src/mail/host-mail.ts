@@ -15,7 +15,7 @@ import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { REFUSAL_TEXT, WARNING_TEXT, firstLineOf, hourlyKey } from './rules.js'
-import { MailTool } from './tool.js'
+import { MailTool, type MailToolHost } from './tool.js'
 import { MailAcross } from './across.js'
 import { entryOf } from './find.js'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
@@ -51,6 +51,8 @@ export type HostMailSessions = {
   settleAtRest?(id: string): void
   /** Tells `receiverId`, whose seat cannot read mail, of `stoppedId`'s stop in the relayed report's words for that ending (`ChildReports.relayStop`); `told` once it went in */
   relayStop?(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void
+  /** A send to a session the caller gives work, answered (`MailSessionsView.work`, #1948), or null for plain mail */
+  work?: MailToolHost['work']
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
 }
@@ -75,6 +77,7 @@ export function mailSessionsOf(
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
+    work: (...a) => mgr.mail.work(...a),
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
   }
@@ -247,6 +250,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     askerOf: (id) => askerFacts(askedByHost, id),
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
     across,
+    ...(sessions.work ? { work: sessions.work } : {}),
   })
   /** Whether the card a notice names stands in its session still: the session holds that question or approval (mailbox.md §10.6.4) */
   const cardStands = (session: string, requestId: string): boolean => {
@@ -270,7 +274,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     // The person's warning, written as the mailbox writes its own (delivery.ts `warnIfRunning`): one a clock hour for the session, and nothing waits for it
     compactCycles: (id, count) => service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: hourlyKey(`compactcycles:${addressOf(id)}`, now()) }),
     sessionEvent: (e, ended) => mailTurns.observe(e, ended),
-    tool: (id, args) => tool.call(id, args),
+    tool: (id, args, signal) => tool.call(id, args, signal),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
     sendTask: taskSender(service),

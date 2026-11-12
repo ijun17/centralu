@@ -747,6 +747,7 @@ sends.
 | `body` | the sender's words: up to 16,000 characters from a session or the person, 4,000 from an app |
 | `facts` | JSON only Centralu writes (§5.4) |
 | `choices` | JSON `string[]` of 2 to 6, or null: the answers a session's question to the person offers (D33, #1630, store v70). The sender's words, so a column of their own, never in `facts` |
+| `subject` | one line of at most 80 characters, or null: the subject a session's `mail` send gave the chain it starts (#2229, store v71); the Inbox names the chain by it instead of its first message's words. Set only on a chain's first message, so a reply never renames it. The sender's words, so a column of its own |
 | `dedupe_key` | unique per sender: Centralu's "once per change" (§6.5) |
 | `origin` | what produced it: `mail`, `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`, `script`, `person`, `app`, `watch`, `centralu` |
 | `legacy_thread` | the thread it was adopted from (§6.3), else null |
@@ -2078,6 +2079,54 @@ an older build reads as any. A child's reply to the task it was first given (the
 
 **Linked machines.** A child on a linked machine keeps its own move (`RemoteAgents.moveCaller`, its report waits in `LinkedReports`) until mail
 crosses links (step 6): the second definition of a handoff's move, reported, not changed.
+
+### 10.6.6 More work is mail; agent_session keeps the rest (#1948)
+
+`agent_session send` and `mail send` did the same thing: they gave words to a session. Two tools for one act cost every request and made
+the model choose between them. `send` is gone from `agent_session`, whose enum now refuses it with a pointer to mail (`SEND_IS_MAIL`), and
+`mail(action="send", to=<a session the caller works on>)` does what it did (`AgentSessionActions.sendWork`, reached through `MailTool.work`).
+`start_agent` stays a tool of its own: it makes the session, mail only writes to one.
+
+**Which sends are work.** A mail send is work when its `to` is a session the caller started (`askedBy`, in the caller's project; the
+Assistant's children outside any), one of its pending start requests' handles, or its child on a linked machine. Any other `to` is plain mail
+as before. Under `auto`, `agent_session` acts on any session of the project, and `send` gave such a session work too; mail does not: a
+child's question to its parent (also `auto`, and in the same project) would otherwise become a task for the parent, and #2133 keeps mail's
+delivery as it is. Such a session still gets the words, as mail. The address is resolved the way mail resolves it (a name, an id, this host's
+prefix), so `to: "parent"` and the person are never work.
+
+**What it does.** As before: at rest the session is given a turn of the caller's at once (`DelegationFlow.delegate`, the delegated task written,
+`agentFrame`); busy, the words go as a mail task (§10.6.2) or, with `ifBusy` (now a field of mail), a fork. The gates are the ones `send` had,
+read at the send: the preset ceiling (`aboveCallerError`), S15 for an untrusted project (recorded as a `mail` call), the depth ceiling, the
+linked machine's own check. The answer is the one `start_agent wait:false` gives, "is working on it … you will be told when it ends", with the
+call written as the caller's seat makes it (`agentCallsFor`: on the Assistant both tools are commands through `centralu_run`; a child's words quoted in the answer, a JSON
+string, stay as written).
+
+**What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
+`agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send to its own child on a
+linked machine was mail across the link (#2067, [linked-mail.md](linked-mail.md) §5); it is the work `send` gave now, through the link. A send by an original to a
+child that a handoff moved is refused naming the successor, as `send` was (`handedOverAnswer`, #693). The answer starts "Sent as work for a
+session you started" (to a busy one the work goes as a task mail, which the rest of the answer names), and says a `kind` given is other mail's; a `subject` leads the words the child receives, on its own line, so the child reads what the card
+shows. A role (`parent`, `assistant`, `person`) is never work, whatever a session is named. Who counts as the caller's own is one rule
+(`ownChild`, agent-session-actions.ts), which agent_session widens for #637's delete and for `auto`, and a send does not. start_agent, ask_project, a fork and this send
+give work one way, `DelegationFlow.delegate`: the wait, the caller's thread written before the words go in (§10.6.4), and all of it undone if
+they do not go in.
+Work for one's own child does not meet the mail guards (`repeat`, `rate_limited`, mail/send-guards.ts), as agent_session send did not: it goes
+through `delegate`, not through a message send.
+
+**#2133.** A child knew the address `parent` only from `to`'s description, and wrote progress reports nobody needed. `start_agent`'s frame
+(`PARENT_MAIL`) now says no progress reports are needed, and names `parent` as the address for a question before it finishes, with
+"assistant" someone else. It is in the frame, not the description: there are no per-session tool definitions, so a per-seat description
+would mean new plumbing and ride in every request of every seat; the frame rides once, in the task. #1984's per-call `parentHint` (an answer
+naming `parent` once a child that has one mailed `assistant`) is gone with it.
+
+**What the person sees.** A new send is a mail call. Every mail card read "Mail" with no words, so the card would have lost what "Sent more
+to an agent" showed; `centraluMark` now gives a mail send "Sent mail", its subject or first line, and the session's chip when `to` is a
+session id (here or `<machine>.<id>`; a name or a role gets none, since the adapter does not resolve names), and a reply "Replied" with its
+first line (owner's wording, 2026-11-12). The other mail actions keep the card they had, and cards already in the history read as before
+(`AGENT_ACTIONS` keeps `send`).
+
+**Restart, swap and older builds.** No store step and no protocol change. The delegated task keeps origin `agent_session` (the recorder's), so
+rows read as before. A recorded call of `agent_session send` replayed to this build is refused with the pointer to mail.
 
 ### 10.7 The state table
 

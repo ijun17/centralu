@@ -1,5 +1,6 @@
 import { appServerName, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../apps/contract.js'
+import { isUuid } from './input-receipts.js'
 import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
 /**
@@ -51,6 +52,7 @@ export function stepLine(s: ToolSummary): string {
 /** What agent_session's actions do, in words (#730) */
 const AGENT_ACTIONS: Record<string, string> = {
   status: 'Checked on an agent',
+  // A recorded call from before #1948 moved more work to mail still reads as it did
   send: 'Sent more to an agent',
   wait: 'Waited for an agent',
   stop: 'Stopped an agent',
@@ -58,6 +60,12 @@ const AGENT_ACTIONS: Record<string, string> = {
   answer: "Answered an agent's card",
   list: 'Listed its agents',
 }
+
+/** A mail call that carries words (#1948: more work for a session is a mail send); the other actions keep the card they had */
+const MAIL_ACTIONS: Record<string, string> = { send: 'Sent mail', reply: 'Replied' }
+
+/** A session `to` names by its id, here or on a linked machine (`<machine>.<id>`); a name or a role ("parent", "person") has no chip */
+const sessionAddressed = (to: string | undefined): string | undefined => (to && isUuid(to.slice(to.lastIndexOf('.') + 1)) ? to : undefined)
 
 /** What Centralu's own tools do, in words (#730); one not named here reads as its name (`centraluCallLabel`) */
 const CENTRALU_LABELS: Record<string, string> = {
@@ -128,15 +136,15 @@ const CENTRALU_LABELS: Record<string, string> = {
 export function centraluMark(server: string, tool: string, args: Record<string, unknown>): { centralu: NonNullable<ToolSummary['centralu']>; title?: string } | null {
   const origin = centraluServer(server)
   if (!origin) return null
-  const sessionId = trimmed(args.sessionId)
+  const action = trimmed(args.action)
+  const sessionId = tool === 'mail' ? (action === 'send' ? sessionAddressed(trimmed(args.to)) : undefined) : trimmed(args.sessionId)
   const base = { tool, ...origin, ...(sessionId ? { sessionId } : {}) }
   if (origin.app) return { centralu: base }
   const text = (v: unknown) => {
     const t = trimmed(v)
     return t ? firstLine(t, 160) : undefined
   }
-  const action = trimmed(args.action)
-  let label = tool === 'agent_session' ? (action && AGENT_ACTIONS[action]) : CENTRALU_LABELS[tool]
+  let label = tool === 'agent_session' ? (action && AGENT_ACTIONS[action]) : tool === 'mail' ? (action && MAIL_ACTIONS[action]) : CENTRALU_LABELS[tool]
   let title: string | undefined
   switch (tool) {
     case 'start_agent': {
@@ -149,6 +157,9 @@ export function centraluMark(server: string, tool: string, args: Record<string, 
     case 'send_to_session':
     case 'answer_question':
       title = text(args.text)
+      break
+    case 'mail':
+      if (label) title = text(args.subject) ?? text(args.text)
       break
     case 'read_session':
       if (!sessionId) label = 'Listed sessions'
