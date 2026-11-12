@@ -31,7 +31,6 @@ import {
   cancelWorkflowRun,
   createBranch,
   deleteBranch,
-  dispatchWorkflow,
   FATAL,
   GitHubError,
   countsTowardLimit,
@@ -49,7 +48,8 @@ import {
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, OUTAGE_LIMIT, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
-import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, readBack, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
+import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
+import { dispatchOn, readBack, strayRun } from './dispatch.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
 import { systemNow } from './clock.mjs'
@@ -258,7 +258,7 @@ async function build(b, ctx) {
   try {
     // Landing after the fast tier (#1259): the batch runs the quick tier on what lands, the heavy jobs too when it changes the screen
     const inputs = dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier, screenInputs: CI.screen?.inputs })
-    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, inputs)
+    await dispatchOn(repo, CI.workflows.map(workflowFile), b.branch, steps.at(-1).sha, inputs)
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why
@@ -401,6 +401,18 @@ async function runCi(b, ctx) {
     return { state: 'ci' }
   }
   if (d.state === 'ci') {
+    // The dispatch may have run on the branch as GitHub still had it (#2201): started once more on the batch's commit, not waited for 15 minutes
+    const files = CI.workflows.map(workflowFile)
+    if (!runs.length && !b.redispatched && (await strayRun(repo, files, b.branch, b.head, b.startedAt))) {
+      if (!renew()) return { yielded: true }
+      await dispatchOn(repo, files, b.branch, b.head, dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier: b.tier, screenInputs: CI.screen?.inputs }))
+      save((fq, fb) => {
+        fb.redispatched = at
+        batchEvent(fq, fb, `Batch ${fb.branch}: CI started on another commit than the batch's ${short(fb.head)} (GitHub did not show the branch there yet), so it was started again.`, at)
+        Object.assign(fb, { updatedAt: at, nextAt: new Date(now + pollMs('acted')).toISOString() })
+      })
+      return { state: 'ci' }
+    }
     save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }

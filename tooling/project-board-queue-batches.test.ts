@@ -107,6 +107,36 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
   })
 
+  it("reads the branch until it shows the batch's last commit before it starts CI on it (#2201)", async () => {
+    // GitHub shows queue/batch-1 as it was made, at main, for two reads after the merges moved it
+    runtime(batchState({ headStale: { n: 2 } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+    expect(gh().headReads).toBe(3)
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual(['queue/batch-1'])
+  })
+
+  it('starts CI once more when the run that came is on another commit, says so, and does so only once', async () => {
+    // The first dispatch ran on main's commit, as run 43113309704 did: the batch's own run never comes from it
+    runtime(batchState({ dispatchStale: 5 }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchEvents().some((t) => t.includes('it was started again')), 'the second dispatch')
+    await morePolls(6)
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual(['queue/batch-1', 'queue/batch-1'])
+    expect(batchEvents().filter((t) => t.includes('it was started again'))).toEqual([`Batch queue/batch-1: CI started on another commit than the batch's batch-b (GitHub did not show the branch there yet), so it was started again.`])
+    expect(batchesOnDisk()[0].redispatched).toBeTruthy()
+  })
+
+  it('lands the batch from the run of the second dispatch', async () => {
+    runtime(batchState({ dispatchStale: 1 }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+    expect(gh().dispatched).toHaveLength(2)
+  })
+
   it('makes no batch for an hour when CI cannot be started on it, cancels none of their own runs, and lists the queue in the order it was made', async () => {
     runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -215,8 +245,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       ])
       expect(batchEvents().filter((t) => t.includes('would not merge'))).toEqual([])
       expect(batchEvents().at(-1)).toBe('Batch queue/batch-1: landed #77, #78; main at main-78 is the tree CI tested.')
-      // The head of the branch was read once, for the one lost answer
-      expect(gh().headReads).toBe(1)
+      // The head of the branch was read once, for the one lost answer, and once more before CI was started on it
+      expect(gh().headReads).toBe(2)
     })
 
     it('drops the batch when the branch cannot be read afterwards, and goes on with none of it', async () => {

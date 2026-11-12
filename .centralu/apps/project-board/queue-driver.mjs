@@ -77,6 +77,7 @@ import { judgeHead, labelReason } from './queue-integrate.mjs'
 import { classifyRun, isFetchStep } from './run-failure.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { activeBatch } from './batch.mjs'
+import { readBack } from './dispatch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { alive, listSome, plural, short, span, writeJsonAtomic } from './util.mjs'
 import { GUARD_MS, guardTick } from './main-guard.mjs'
@@ -434,20 +435,6 @@ export async function land(item, pr, ref, renew, defaultBranch, { provedAt = nul
       out.reason = { kind: 'not-merged', text: `gh pr merge answered for ${n} at ${short(pr.headRefOid)}, but GitHub does not show it merged (a merge queue or auto-merge on GitHub may hold it). Handed over with integrate, it was turned back into a draft, which also stops what GitHub held: integrate it again once that is sorted out.` }
   }
   return out
-}
-
-/**
- * What GitHub shows after a write whose answer may have been lost (gh failing on the connection with "EOF" says
- * nothing about whether GitHub carried it out): the answer of `read` (a pull request, a branch's head). Null when it
- * cannot be read now: a failure that would repeat for every call (rate limit, no network, no login) still throws.
- */
-export async function readBack(read) {
-  try {
-    return await read()
-  } catch (e) {
-    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    return null
-  }
 }
 
 /** The squash itself, on the head that was read, and GitHub's word that it merged. */
