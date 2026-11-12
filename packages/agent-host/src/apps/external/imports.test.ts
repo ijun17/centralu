@@ -710,15 +710,19 @@ describe('what never gets brought in', () => {
 
   it('an id follows the same rule as a new app — the app- prefix, the centralu prefix, a reserved id, an underscore', async () => {
     make()
-    expect(await refusal(rt.prepareImport(plantSource('a', 'app-notes')))).toEqual(expect.stringMatching(/^The app id "app-notes" cannot be used: /))
+    expect(await refusal(rt.prepareImport(plantSource('a', 'app-notes')))).toEqual(expect.stringMatching(/^"app-notes" cannot be an app id: /))
     expect(await refusal(rt.prepareImport(plantSource('b', 'centralu-x')))).toEqual(expect.stringMatching(/^centralu\.app\.json is not valid: id: /))
-    expect(await refusal(rt.prepareImport(plantSource('c', 'control')))).toBe('"control" is a reserved app id; this app cannot be imported under it')
+    expect(await refusal(rt.prepareImport(plantSource('c', 'control')))).toBe('"control" is reserved. Pick another app id.')
     expect(await refusal(rt.prepareImport(plantSource('d', 'bad_id')))).toEqual(expect.stringMatching(/^centralu\.app\.json is not valid: id: /))
     expect(await refusal(rt.prepareImport(join(src, 'nothing-here')))).toBe(`Nothing to import at ${join(src, 'nothing-here')}`)
     const noManifest = join(src, 'plain')
     mkdirSync(noManifest)
     writeFileSync(join(noManifest, 'server.mjs'), '')
     expect(await refusal(rt.prepareImport(noManifest))).toBe('There is no centralu.app.json at the top, so this is not a Centralu app')
+    // Discovery's reader reads it: a manifest that is not a file is refused the way a scan words it
+    const dirManifest = join(src, 'dir-manifest')
+    mkdirSync(join(dirManifest, 'centralu.app.json'), { recursive: true })
+    expect(await refusal(rt.prepareImport(dirManifest))).toBe('centralu.app.json is not a file')
     expect(userApps()).toEqual([])
     expect(stagingLeft()).toEqual([])
   })

@@ -2,7 +2,7 @@ import type { AppProcess } from './app-process.js'
 import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } from './errors.js'
 
 /**
- * Where an app's error bundles are kept (M4 C-6) — per app name (the runtime's `holdKey`), most
+ * Where an app's error bundles are kept (M4 C-6) — per app name (`appKeyOf`), most
  * recent first, with which ones were sent to the building session. The runtime records into it and
  * answers from it (`ExternalApps.errors`, `markErrorSent`); what a bundle holds is `errors.ts`.
  */
@@ -15,10 +15,10 @@ import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } 
 const STDERR_SETTLE_MS = 150
 
 /** The key for a sent bundle — within one app, a bundle is uniquely (kind, time). Stays the same key even after stderr is re-captured and the bundle is replaced */
-const sentKey = (holdKey: string, b: Pick<HeldErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
+const sentKey = (appKey: string, b: Pick<HeldErrorBundle, 'kind' | 'at'>): string => `${appKey}\n${b.kind}\n${b.at}`
 
 export class ErrorLog {
-  /** Recent error bundles per app name (holdKey), most recent first (C-6) — carried over even when the manifest changes and a new entry is created */
+  /** Recent error bundles per app key (`appKeyOf`), most recent first (C-6) — carried over even when the manifest changes and a new entry is created */
   private bundles = new Map<string, HeldErrorBundle[]>()
   /**
    * A bundle sent to the building session → the time it was sent (C-6). Kept separately instead of

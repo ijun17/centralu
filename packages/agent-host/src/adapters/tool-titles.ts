@@ -1,4 +1,4 @@
-import { APP_SERVER_PREFIX, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
+import { appServerName, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../apps/contract.js'
 import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
@@ -186,7 +186,7 @@ export function centraluMark(server: string, tool: string, args: Record<string, 
 export function keepAttachedAppMarks(e: NormalizedEvent, attached: () => Iterable<string>): NormalizedEvent {
   const stray = (s: ToolSummary): ToolSummary | null => {
     if (!s.centralu?.app) return null
-    const server = `${APP_SERVER_PREFIX}${s.centralu.app}`
+    const server = appServerName(s.centralu.app)
     for (const a of attached()) if (a === server) return null
     const { centralu: _gone, ...rest } = s
     return rest as ToolSummary

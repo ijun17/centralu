@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { USER_APP_SCOPE as USER_SCOPE, type ExternalAppInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import type { AppCalls } from './app-calls.js'
 import type { AppEntry } from './app-entry.js'
 import type { AppLifecycle } from './app-lifecycle.js'
@@ -97,11 +97,15 @@ export class AppStartEnv {
     return join(this.deps.dataRoot, 'app-data', this.scopeDir(ref), ref.appId)
   }
 
-  /** The scope name used as one path segment. A project id is a UUID — refused rather than written into a path if it does not look like one */
+  /** The ref, once its project id is known to be one path segment. A project id is a UUID — refused rather than written into a path if it does not look like one */
+  private pathSafe(ref: AppRef): AppRef {
+    if (ref.projectId !== null && !/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
+    return ref
+  }
+
+  /** The scope name used as one path segment */
   private scopeDir(ref: AppRef): string {
-    if (ref.projectId === null) return USER_SCOPE
-    if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
-    return ref.projectId
+    return this.pathSafe(ref).projectId ?? USER_APP_SCOPE
   }
 
   /**
@@ -114,8 +118,9 @@ export class AppStartEnv {
     return redactor(this.secrets.all(this.appKey(ref)))
   }
 
+  /** `appKeyOf`, after the check that its scope can be a path segment: carried app files are moved by this key (`carryAppFiles`) */
   appKey(ref: AppRef): string {
-    return `${this.scopeDir(ref)}/${ref.appId}`
+    return appKeyOf(this.pathSafe(ref))
   }
 
   /** Whether a value is set for each declared secret (E, the secrets section) — just the name and whether it is set. No field at all if there is no declaration */

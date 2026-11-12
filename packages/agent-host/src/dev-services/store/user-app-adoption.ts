@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { appKeyOf } from '@cc/protocol'
+import { APP_SERVER_PREFIX, appKeyOf, sameApp } from '@cc/protocol'
 import { isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
 import type { SettingsRecords } from './settings.js'
@@ -136,10 +136,10 @@ export class UserAppAdoptionRecords {
       for (const { id } of assistants) {
         const book = parseJson(this.settings.appSetting(`session_app_names:${id}`))
         const server = isObj(book) ? book[to] : undefined
-        if (typeof server !== 'string' || !server.startsWith('app-')) continue
+        if (typeof server !== 'string' || !server.startsWith(APP_SERVER_PREFIX)) continue
         const raw = parseJson(this.settings.appSetting(`${ATTACHED_PREFIX}${id}`))
         const list: unknown[] = Array.isArray(raw) ? raw : []
-        if (list.some((r) => isObj(r) && r.projectId === projectId && r.appId === appId)) continue
+        if (list.some((r) => isObj(r) && typeof r.appId === 'string' && (r.projectId === null || typeof r.projectId === 'string') && sameApp({ projectId: r.projectId, appId: r.appId }, { projectId, appId }))) continue
         list.push({ projectId, appId, server, consent: 'none', at: Date.now() })
         this.settings.setAppSetting(`${ATTACHED_PREFIX}${id}`, JSON.stringify(list))
       }

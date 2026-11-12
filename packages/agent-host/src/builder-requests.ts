@@ -1,4 +1,4 @@
-import { builderErrorFrame, builderRequestOf, type Attachment, type SessionInfo } from '@cc/protocol'
+import { builderErrorFrame, builderRequestOf, type Attachment, type SessionInfo, sameApp } from '@cc/protocol'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
 import { rpcError } from './rpc-error.js'
@@ -41,12 +41,12 @@ function refuse(message: string): never {
 }
 
 export async function askBuilder(deps: BuilderRequestDeps, req: BuilderRequest): Promise<{ sessionId: string }> {
-  const app = deps.apps.list().find((a) => a.appId === req.ref.appId && a.projectId === req.ref.projectId)
+  const app = deps.apps.list().find((a) => sameApp(a, req.ref))
   const builder = deps.builderOf(req.ref)
   let view: { uri: string } | null | undefined
   if (req.instanceId) {
     const inst = deps.views?.describe(req.instanceId) ?? null
-    view = inst && inst.app.appId === req.ref.appId && inst.app.projectId === req.ref.projectId ? inst : null
+    view = inst && sameApp(inst.app, req.ref) ? inst : null
   }
   const built = builderRequestOf({
     text: req.text,
@@ -75,7 +75,7 @@ export async function askBuilder(deps: BuilderRequestDeps, req: BuilderRequest):
  * app forwarded.
  */
 export async function sendErrorToBuilder(deps: BuilderRequestDeps, ref: AppRef, at: number): Promise<{ sessionId: string }> {
-  const info = deps.apps.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+  const info = deps.apps.list().find((a) => sameApp(a, ref))
   if (!info) refuse('This app no longer exists')
   const builder = deps.builderOf(ref)
   if (!builder) refuse('This app has no builder session yet. Start one, then send the error')

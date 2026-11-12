@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { folderFingerprint } from './fingerprint.js'
 import type { AppEntry, AppTool, Blocker } from './app-entry.js'
@@ -23,7 +24,6 @@ export type LifecycleHost = {
   /** Captures the code about to run as a version (E-1) — an app outside git's (`keepsVersions`) */
   snapshot(e: AppEntry, stamp: string): void
   find(ref: AppRef): AppEntry | undefined
-  holdKey(ref: AppRef): string
   label(ref: AppRef): string
   /** An app took a busy hold (`reason`) or let it go (`null`) (#1236) — kept so a host that starts again resumes it */
   busyRecorded(e: AppEntry, reason: string | null): void
@@ -336,7 +336,7 @@ export class AppLifecycle {
   }
 
   private viewsOf(e: AppEntry): number {
-    return this.viewHolds.get(this.host.holdKey(e.ref)) ?? 0
+    return this.viewHolds.get(appKeyOf(e.ref)) ?? 0
   }
 
   /** Stops it only after finishing a call in progress — the way an old entry's process is collected when a manifest change replaces the entry */
@@ -355,7 +355,7 @@ export class AppLifecycle {
    * never treated as an idle app — call the returned function to release the hold (close).
    */
   retainView(e: AppEntry, ref: AppRef): () => void {
-    const key = this.host.holdKey(e.ref)
+    const key = appKeyOf(e.ref)
     this.viewHolds.set(key, (this.viewHolds.get(key) ?? 0) + 1)
     this.clearIdle(e)
     let released = false

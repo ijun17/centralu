@@ -56,6 +56,8 @@ export type AppFrameProps = {
   appId: AppId
   /** An app is identified by (project, id). null means a user-folder app */
   projectId?: string | null
+  /** The linked machine of a user-folder app (#82); a drag out of the view carries it, so the session knows which app it came from */
+  machine?: string | null
   /** The view instance created by one tool call (issued by the host) */
   instanceId: string
   /** The arguments of the tool call that created the view. Sent once, per spec, once it is known */
@@ -228,7 +230,7 @@ type Phase = 'loading' | 'reconnecting' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
-  { appId, projectId = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, onFailed, fill = false, loading, className },
+  { appId, projectId = null, machine = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, onFailed, fill = false, loading, className },
   ref,
 ) {
   const platform = usePlatform()
@@ -374,7 +376,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
        * and where it ended, since the page never hears a drag from another origin (dragRelay.ts).
        * Every other notification outside the standard is ignored, as before.
        */
-      const relay = new DragRelay(() => iframe, () => ({ appId, projectId }), platform.capabilities.frameDragEndInPage)
+      const relay = new DragRelay(() => iframe, () => ({ appId, projectId, machine }), platform.capabilities.frameDragEndInPage)
       bridge.fallbackNotificationHandler = async (n) => {
         if (n.method === APP_DRAG_NOTIFICATION) relay.take(n.params)
       }
@@ -414,7 +416,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       heartbeats.clear()
       settleLink(false)
     }
-  }, [platform, appId, projectId, instanceId, askToOpen, settleLink, reload])
+  }, [platform, appId, projectId, machine, instanceId, askToOpen, settleLink, reload])
 
   /*
    * Another host lifetime: ask for the address again (see the header). A view still loading is

@@ -21,7 +21,8 @@ export const APP_LINK_DROP_EVENT = 'cc-app-link-drop'
 export type AppLinkDrop = {
   uri: string
   text: string
-  from: { appId: AppId; projectId: string | null }
+  /** `machine`: a linked machine's user-folder app, which is not this computer's of the same id (#82) */
+  from: { appId: AppId; projectId: string | null; machine?: string | null }
   landed: boolean
 }
 

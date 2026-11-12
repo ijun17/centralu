@@ -1,4 +1,4 @@
-import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX } from './app-id.js'
+import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, appServerName } from './app-id.js'
 import type { ToolSummary } from './entities/sessions.js'
 
 /**
@@ -58,7 +58,7 @@ export function centraluCallTitle(
   c: NonNullable<ToolSummary['centralu']>,
 ): string {
   if (s.title === s.tool || s.title === c.label) return ''
-  const codexName = `${c.app ? `${APP_SERVER_PREFIX}${c.app}` : RESERVED_NAME_PREFIX}: ${c.tool}`
+  const codexName = `${c.app ? appServerName(c.app) : RESERVED_NAME_PREFIX}: ${c.tool}`
   return s.title.startsWith(codexName) ? s.title.slice(codexName.length).trim() : s.title
 }
 

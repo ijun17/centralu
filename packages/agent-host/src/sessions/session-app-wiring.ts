@@ -1,6 +1,6 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind, sameApp } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
@@ -233,7 +233,7 @@ export class SessionAppWiring {
     settings.setAppSetting(key, '1')
     const book = parseJson(settings.appSetting(`${APP_NAMES_PREFIX}${sessionId}`))
     if (!isObj(book)) return null
-    const attached = new Set((this.appAccess?.attached(sessionId) ?? []).map((x) => appKeyOf(x.ref.projectId, x.ref.appId)))
+    const attached = new Set((this.appAccess?.attached(sessionId) ?? []).map((x) => appKeyOf(x.ref)))
     const hadRootApp = Object.keys(book).some((k) => !k.startsWith(`${USER_APP_SCOPE}/`) && !attached.has(k))
     return hadRootApp ? ROOT_APPS_NOTICE : null
   }
@@ -245,7 +245,7 @@ export class SessionAppWiring {
    */
   setAppShared(ref: { projectId: string; appId: string }, shared: boolean): void {
     const rt = this.requireAppsHub().rt
-    if (!rt.list().some((a) => a.projectId === ref.projectId && a.appId === ref.appId)) {
+    if (!rt.list().some((a) => sameApp(a, ref))) {
       throw rpcError(`No such app: ${ref.appId}`)
     }
     writeShared(this.host.store.settings, ref, shared)

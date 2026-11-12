@@ -1,4 +1,4 @@
-import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNameProblem } from '@cc/protocol'
+import { RESERVED_NAME_PREFIX, appIdProblemText, newAppIdProblem, serverNameProblem } from '@cc/protocol'
 
 /*
  * The host's tool contract (#97) — what a session's tools are and who called one.
@@ -67,18 +67,6 @@ export const CENTRALU_MCP_NAME = RESERVED_NAME_PREFIX
  * from being taken (closing the first). Checking reserved words first means that even if the
  * character rule is loosened later, this particular check still survives.
  */
-/**
- * The prefix for the server name an external app attaches to a session (M4 A-5) — app `notes` is
- * `app-notes` in a session, and its tools show up as `mcp__app-notes__<tool>`.
- *
- * Why the prefix is kept separate: an app's id and a proposed MCP server name follow the same
- * character rule (below), so attaching an app as bare `notes` would fight over the same slot as a
- * `notes` server the person has already approved.
- */
-export const APP_MCP_PREFIX = APP_SERVER_PREFIX
-
-export const appMcpServerName = (appId: string): string => `${APP_MCP_PREFIX}${appId}`
-
 export function mcpServerNameError(name: string): string | null {
   // Reserved words are checked first — the order of validation is enforced by protocol's serverNameProblem
   switch (serverNameProblem(name)) {
@@ -106,12 +94,10 @@ export function mcpServerNameError(name: string): string | null {
 export function proposedMcpServerNameError(name: string): string | null {
   const base = mcpServerNameError(name)
   if (base) return base
-  if (newAppIdProblem(name) === 'server-prefix') {
-    return `A name starting with "${APP_MCP_PREFIX}" is the name an external app attaches to a session — suggest a different name`
-  }
-  return null
+  // Once approved, a server becomes the user-folder app `<name>` (M4 A-7): it can never take a reserved app id, nor an `app-` name
+  const problem = newAppIdProblem(name)
+  return problem === 'server-prefix' || problem === 'builtin' ? appIdProblemText(name, problem) : null
 }
-
 
 // What the host does with how risky an app says a write is (an app tool's approval, `tool-risk.ts`)
 export { runsUnasked } from './external/tool-risk.js'

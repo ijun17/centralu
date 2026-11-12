@@ -156,6 +156,7 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
             key={view.instanceId}
             appId={view.appId}
             projectId={view.projectId}
+            machine={machine}
             instanceId={view.instanceId!}
             toolInput={view.toolInput}
             toolResult={view.toolResult}

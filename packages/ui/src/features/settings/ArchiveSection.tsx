@@ -9,7 +9,7 @@ import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './ArchiveReaderItem.jsx'
-import { ArchiveRunReader, ArchiveRuns } from './ArchiveRuns.jsx'
+import { ArchiveRunReader, ArchiveRuns, runsHaveRow } from './ArchiveRuns.jsx'
 import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsArchive.jsx'
 import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
@@ -306,7 +306,7 @@ export function ArchiveSection() {
             onRead={setReadingRun}
             onPurge={purgeRuns}
           />
-          {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
+          {rowError && runsHaveRow(runs, rowError.id) && (
             <p className="mt-1.5 px-1 text-xs leading-body text-ink" data-testid="trash-runs-error">
               {rowError.text}
             </p>

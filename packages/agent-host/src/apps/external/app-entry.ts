@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { PriorDiscovery, Tool } from '@modelcontextprotocol/client'
 import type { AppProcess } from './app-process.js'
 import type { ScannedApp } from './discovery.js'
-import type { AppManifest } from './manifest.js'
+import { appIdRefusal, type AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
 import type { AppCaller } from './runtime-types.js'
 import type { Audience } from './visibility.js'
@@ -141,9 +141,10 @@ export const invalidReason = (e: AppEntry): string => `This app's manifest is in
 /** A new entry for what discovery found — a lifecycle that has never started (`ExternalApps.rescan`) */
 export function newEntry(scope: Scope, found: ScannedApp, reservedIds: readonly string[]): AppEntry {
   let { manifest, error } = found
-  if (manifest && reservedIds.includes(manifest.id)) {
-    // A reserved id would inherit the retired control app's rows and sessions (#97, RESERVED_APP_IDS)
-    error = `"${manifest.id}" is a reserved app id — use another id`
+  // A reserved id would inherit the retired control app's rows and sessions (#97, RESERVED_APP_IDS)
+  const refusal = manifest && appIdRefusal(manifest.id, reservedIds)
+  if (refusal) {
+    error = refusal
     manifest = null
   }
   return {

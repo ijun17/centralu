@@ -17,16 +17,16 @@ export const USER_APP_SCOPE = '_user'
  * One app as a single string: `<project id | _user>/<app id>` — the UI's `externalAppKey`.
  *
  * A linked machine's user-folder app (#82) has no project to tell it from this computer's app of the same id, so its
- * key names the machine: `<machine>:_user/<app id>`. `machine` is ignored with a project, whose id already names it.
+ * key names the machine: `<machine>:_user/<app id>`. `machine` is ignored with a project, whose id already names it. A reference
+ * (a row, a request, a runtime reference) is read as it is: its `machine`, if it has one, counts.
  */
-export function appKeyOf(
-  projectId: string | null | undefined,
-  appId: string,
-  machine?: string | null,
-): string {
-  return machine && projectId == null
-    ? `${machine}:${USER_APP_SCOPE}/${appId}`
-    : `${projectId ?? USER_APP_SCOPE}/${appId}`
+export function appKeyOf(ref: AppIdent): string
+export function appKeyOf(projectId: string | null | undefined, appId: string, machine?: string | null): string
+export function appKeyOf(a: AppIdent | string | null | undefined, appId?: string, machine?: string | null): string {
+  const ref: AppIdent = typeof a === 'object' && a !== null ? a : { projectId: a, appId: appId ?? '', machine }
+  return ref.machine && ref.projectId == null
+    ? `${ref.machine}:${USER_APP_SCOPE}/${ref.appId}`
+    : `${ref.projectId ?? USER_APP_SCOPE}/${ref.appId}`
 }
 
 /**
@@ -49,6 +49,19 @@ export function parseAppKey(
       : null
   }
   return { projectId: scope === USER_APP_SCOPE ? null : scope, appId }
+}
+
+/** An app as a row, a request or a stored reference names it: `machine` is only the linked machine of a user-folder app (#82) */
+export type AppIdent = { projectId?: string | null; appId: string; machine?: string | null }
+
+/**
+ * Whether two references name one app: an app is unique per (project, id), so both have to agree. Without a project it is a
+ * user-folder app, which is also unique per machine (absent or null is this computer's, as `appKeyOf` reads it); a project's
+ * id already names its machine. The one rule behind the host's lookups and the UI's `isApp`.
+ */
+export function sameApp(a: AppIdent, b: AppIdent): boolean {
+  if (a.appId !== b.appId || (a.projectId ?? null) !== (b.projectId ?? null)) return false
+  return a.projectId != null || (a.machine ?? null) === (b.machine ?? null)
 }
 
 /**

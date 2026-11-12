@@ -70,7 +70,7 @@ export function capabilityKey(c: Capability): string {
     case 'agent':
       return `agent:${c.tool}`
     case 'app':
-      return `app:${appKeyOf(c.target.projectId, c.target.appId)}`
+      return `app:${appKeyOf(c.target)}`
     case 'host':
       return `host:${c.name}`
   }

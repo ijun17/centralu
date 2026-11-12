@@ -120,8 +120,8 @@ function subfoldersOf(root: string, appRel: string): string[] {
   }
 }
 
-/** The raw manifest text at `manifestRel` under `root`, or why it could not be read (`missing` when there is none) */
-function readManifestText(root: string, manifestRel: string): { text: string } | { missing: true } | { error: string } {
+/** The raw manifest text at `manifestRel` under `root` (through the path guard, size capped), or why it could not be read (`missing` when there is none): discovery's reader and the import's */
+export function readManifestFile(root: string, manifestRel: string): { text: string } | { missing: true } | { error: string } {
   try {
     if (!assertExistingPathSync(root, manifestRel).isFile()) return { error: `${MANIFEST_FILE} is not a file` }
     return { text: readCapped(join(root, manifestRel)) }
@@ -132,7 +132,7 @@ function readManifestText(root: string, manifestRel: string): { text: string } |
 }
 
 function readApp(root: string, folderRel: string, folder: string, dir: string): ScannedApp {
-  const read = readManifestText(root, `${folderRel}/${MANIFEST_FILE}`)
+  const read = readManifestFile(root, `${folderRel}/${MANIFEST_FILE}`)
   // A folder with no manifest might be one still being created — state what is missing instead of hiding it
   if ('missing' in read) return invalid(folder, dir, `there is no ${MANIFEST_FILE}`)
   if ('error' in read) return invalid(folder, dir, read.error)
@@ -172,7 +172,7 @@ export const BROKEN_ROOT_APP_ID = 'centralu-root'
  * keeps it, and the root app is listed invalid with the reason.
  */
 function scanRootApp(root: string, taken: readonly string[]): ScannedApp | null {
-  const read = readManifestText(root, MANIFEST_FILE)
+  const read = readManifestFile(root, MANIFEST_FILE)
   if ('missing' in read) return null
   const rootApp = (id: string, rest: Omit<ScannedApp, 'folder' | 'dir' | 'root'>): ScannedApp => ({
     folder: id,

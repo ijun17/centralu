@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { APP_ID_MAX_LENGTH, GRID_SPAN_MAX, RESERVED_NAME_PREFIX, serverNameProblem, type GridSpan } from '@cc/protocol'
+import { GRID_SPAN_MAX, appIdProblemText, newAppIdProblem, serverNameProblem, type GridSpan } from '@cc/protocol'
 import { HOST_CAPABILITIES, isHostCapability } from './capabilities.js'
 
 /**
@@ -78,16 +78,19 @@ const HOST_CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/
  */
 const AGENT_TOOL = /^[a-z][a-z0-9-]{0,31}$/
 
+/**
+ * The refusal of an app id, or null when it can be used: the one wording of every door that takes an id. `newName`: an id
+ * that is being made (a new app, an import, a proposal) also may not start with `app-`, a prefix a hand-made folder's id
+ * may have (discovery attaches it as `app-app-store`). `reservedIds` (`RESERVED_APP_IDS`): ids no app takes.
+ */
+export function appIdRefusal(id: string, reservedIds: readonly string[], { newName = false } = {}): string | null {
+  const problem = newName ? newAppIdProblem(id, reservedIds) : (serverNameProblem(id) ?? (reservedIds.includes(id) ? 'builtin' : null))
+  return problem && appIdProblemText(id, problem)
+}
+
 const appIdField = z.string().superRefine((id, ctx) => {
-  // Validation is a single function (`serverNameProblem`, #93); only the wording is attached here — this wording is what a person and the building agent read, in the app list's reason and check's report
-  const problem = serverNameProblem(id)
-  if (problem === 'reserved') ctx.addIssue({ code: 'custom', message: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself` })
-  if (problem === 'shape') {
-    ctx.addIssue({
-      code: 'custom',
-      message: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
-    })
-  }
+  const refusal = appIdRefusal(id, [])
+  if (refusal) ctx.addIssue({ code: 'custom', message: refusal })
 })
 
 const toolNameField = z.string().superRefine((name, ctx) => {

@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_DEPTH, ASSISTANT_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_AGENT_DEPTH, ASSISTANT_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences, sameApp } from '@cc/protocol'
 import type { AgentLimitChanges, TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, findProject, onMachine, readProjects, shown, whereText, type Projects } from './app-lookup.js'
@@ -392,7 +392,7 @@ export class TrustFlow {
     const refused = await this.ask(caller, question, signal, 'shared')
     if (refused) return { ok: false, error: refused }
     // Still what the card named: the same app in the same project, not shared yet, asking for the same things
-    const now = (await callWindow(rpc, 'apps.list', {})).find((x) => x.appId === a.appId && x.projectId === a.projectId && (x.machine ?? null) === (a.machine ?? null))
+    const now = (await callWindow(rpc, 'apps.list', {})).find((x) => sameApp(x, a))
     if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was shared.` }
     if (now.shared) return { ok: true, text: `${label} was shared while the card stood; nothing more changed.` }
     if (appsKey([now]) !== appsKey([a])) return { ok: false, error: `What ${label} may ask for changed while the card stood, so it is not what the card named and nothing was shared. Ask again to show the person what it asks for now.` }

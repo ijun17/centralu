@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { appKeyOf } from '@cc/core'
-import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol/client'
+import { sameApp, type AgentUse, type AppPermission, type AppRun, type AppUsage } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
@@ -77,7 +77,7 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
                 key={r.id}
                 run={r}
                 depth={depth}
-                own={r.appId === appId && r.projectId === projectId}
+                own={sameApp(r, { appId, projectId })}
                 appName={nameOf(r)}
                 sessionName={r.callerSessionId ? sessions[r.callerSessionId]?.name : undefined}
                 onOpenSession={r.sessionId && sessions[r.sessionId] ? () => focusSession(r.sessionId) : undefined}

@@ -1,4 +1,3 @@
-import { RESERVED_APP_IDS } from '@cc/protocol'
 import type { CentraluTools } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
 import { listSetting, type SettingsRecords } from '../dev-services/store/settings.js'
@@ -95,14 +94,7 @@ export class AssistantProposals {
      */
     const nameError = proposedMcpServerNameError(spec.name)
     if (nameError) return { ok: false, error: nameError }
-    /*
-     * Once approved, it becomes the user-folder app `<name>` (M4 A-7). So the name shares its slot
-     * with app ids — it can never take a reserved id, or an existing user app's id. Overwriting one
-     * is exactly swapping out a command.
-     */
-    if (RESERVED_APP_IDS.includes(spec.name)) {
-      return { ok: false, error: `"${spec.name}" is a reserved app name — propose a different name` }
-    }
+    // Once approved, it becomes the user-folder app `<name>` (M4 A-7): it cannot take an existing user app's id either. Overwriting one is exactly swapping out a command
     if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}" is already installed` }
     /*
      * A pending proposal is never replaced (#838). The person approves by name, and approval installs what is stored

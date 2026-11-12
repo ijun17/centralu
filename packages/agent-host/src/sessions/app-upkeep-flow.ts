@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, errorMessage, type ExternalAppInfo } from '@cc/protocol'
+import { ASSISTANT_CHANGE, errorMessage, sameApp, type ExternalAppInfo } from '@cc/protocol'
 import type { AppUpkeepRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, onMachine, readProjects, shown, type Projects } from './app-lookup.js'
@@ -195,7 +195,7 @@ export class AppUpkeepFlow {
     if (decision === 'deny') return { ok: false, error: 'The person did not approve it, so the app was not removed. Do not ask again unless they tell you to.' }
     if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so the app was not removed.' }
     // Still the app the card named, and still a user-folder app
-    const now = (await callWindow(rpc, 'apps.list', {})).find((x) => x.appId === app.appId && x.projectId === null && (x.machine ?? null) === (app.machine ?? null))
+    const now = (await callWindow(rpc, 'apps.list', {})).find((x) => sameApp(x, { ...app, projectId: null }))
     if (!now) return { ok: true, text: `${label} was already gone while the card stood; nothing more was done.` }
     await callWindow(rpc, 'apps.remove', { appId: app.appId, projectId: null, ...onMachine(app) })
     return { ok: true, text: `Removed ${label}: its folder is in app-trash/ ${where}, and it is detached from the sessions that had it.` }
