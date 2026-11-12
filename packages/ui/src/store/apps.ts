@@ -5,9 +5,11 @@ import type { AppState, InlineView, PinnedView, StoreGet, StoreSet } from './sta
 import { gridAppViewKey, isApp } from './appKeys.js'
 import { appKeyOf, noteAppArrivals } from '@cc/core'
 import { usesLines } from './uses-lines.js'
+import { appTitleOf } from './names.js'
 import { returnsToPanel } from './screens.js'
 import { reloadBudget } from './reloadBudget.js'
 import { viewReconnect } from './viewReconnect.js'
+import { coalescedRead } from './single-flight.js'
 
 /**
  * External apps in the store: the app list and its re-reads, the views an app stands in (a pinned
@@ -88,8 +90,8 @@ export function registerPinnedFrame(key: string, frame: InlineFrame): () => void
  * — this many within this window. Past the cap it stops reopening automatically and just marks it
  * "changed" for the person to press. See the comment on `followAppCode` for why.
  */
-export const AUTO_RELOADS = 3
-export const AUTO_RELOAD_WINDOW_MS = 60_000
+const AUTO_RELOADS = 3
+const AUTO_RELOAD_WINDOW_MS = 60_000
 const autoReloads = reloadBudget(AUTO_RELOADS, AUTO_RELOAD_WINDOW_MS)
 
 /** The app's current code as reported by the list — `null` if unknown (never came up, or an old host) */
@@ -173,15 +175,6 @@ export function capInlineViews(get: () => AppState, sessionId: string, keep: str
     void get().closeInlineView(sessionId, v.callId, `Only the ${APP_VIEWS_LIVE_PER_SESSION} most recent app views in a conversation stay open`)
   }
 }
-
-/**
- * A queue for re-reading the external app list (M4 A-8). If another "changed" arrives while a read
- * is in flight, it reads once more after the current one finishes. Overlapping reads can let a
- * late-departing answer arrive first, letting an old list overwrite the new one. This actually
- * overlaps while an app is coming up, since broadcasts arrive back to back (coming up → up).
- */
-let externalAppsReading: Promise<void> | null = null
-let externalAppsAgain = false
 
 /**
  * An in-conversation app view's slot within conversation history (M4 B-1). History only says "some
@@ -337,31 +330,19 @@ type AppActions = Pick<
 >
 
 export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
-  async refreshExternalApps() {
-    const platform = get().platform
-    if (!platform) return
-    if (externalAppsReading) {
-      externalAppsAgain = true
-      return externalAppsReading
-    }
-    externalAppsReading = (async () => {
-      do {
-        externalAppsAgain = false
-        try {
-          const externalApps = await platform.apps.list()
-          set({ externalApps })
-          noteArrivals(get, set)
-          get().pruneFoldedGroups()
-          // If an app came up again with new code, reopen that app's open views (M4 C-4)
-          followAppCode(get, set)
-        } catch {
-          // If it cannot be read, the old list stays — the next broadcast or reconnect re-reads it
-        }
-      } while (externalAppsAgain)
-    })().finally(() => {
-      externalAppsReading = null
-    })
-    return externalAppsReading
+  refreshExternalApps() {
+    return coalescedRead(
+      'externalApps',
+      get,
+      (platform) => platform.apps.list(),
+      (externalApps) => {
+        set({ externalApps })
+        noteArrivals(get, set)
+        get().pruneFoldedGroups()
+        // If an app came up again with new code, reopen that app's open views (M4 C-4)
+        followAppCode(get, set)
+      },
+    )
   },
 
   async setAppShared(projectId, appId, shared) {
@@ -703,7 +684,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     if (builder) get().dispatchEvent({ type: 'session_created', sessionId: builder.id, session: builder })
     get().openApp(app.projectId, app.appId)
     if (!builder) {
-      set({ toast: `${app.name ?? app.appId} was made, but its builder session could not start: ${made.builderError ?? 'unknown reason'}` })
+      set({ toast: `${appTitleOf(app)} was made, but its builder session could not start: ${made.builderError ?? 'unknown reason'}` })
     }
     return made
   },
@@ -723,12 +704,12 @@ export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string
  * inbox notice once. Run after the app list is read; a project whose trust changed is looked at afresh then
  * (`forgetArrivalsOf`). Saved with the workspace, so a reload does not say it again.
  */
-export function noteArrivals(get: StoreGet, set: StoreSet): void {
+function noteArrivals(get: StoreGet, set: StoreSet): void {
   const s = get()
   const trusted = new Set(Object.values(s.projects).filter((p) => p.trusted).map((p) => p.id))
   // Keyed as the catalog keys an app with a project (`appKeyOf`), titled as it titles one
   const apps = s.externalApps.flatMap((a) =>
-    a.projectId ? [{ key: appKeyOf(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: a.name ?? a.appId, asks: a.uses ? usesLines(a.uses) : [] }] : [],
+    a.projectId ? [{ key: appKeyOf(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: appTitleOf(a), asks: a.uses ? usesLines(a.uses) : [] }] : [],
   )
   const { seen, arrived } = noteAppArrivals(apps, trusted, s.appsSeen)
   const held = new Set(s.appArrivals.map((a) => a.key))

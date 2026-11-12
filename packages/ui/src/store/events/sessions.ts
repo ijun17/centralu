@@ -1,7 +1,7 @@
 import { SessionInfo, parseTolerant, type NormalizedEvent } from '@cc/protocol/client'
-import { initialSession, sessionPanelId, withPanel } from '@cc/core'
+import { sessionPanelId, withPanel } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
-import { forgetSessions, liveEventWatchers, liveFactsOf, replayPendingEvents } from '../sessionList.js'
+import { forgetSessions, liveEventWatchers, replayPendingEvents, sessionFromInfo } from '../sessionList.js'
 
 /**
  * A session's own life, apart from its conversation: its history caught up from outside, its
@@ -102,40 +102,7 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
       return true
     }
     if (ok && !held) {
-      set((st) => ({
-        sessions: {
-          ...st.sessions,
-          [s.id]: {
-            ...initialSession({
-              id: s.id,
-              projectId: s.projectId,
-              kind: s.kind,
-              appId: s.appId,
-              askedBy: s.askedBy ?? null,
-              forkedFrom: s.forkedFrom ?? null,
-              name: s.name,
-              tool: s.tool,
-              model: s.model,
-              effort: s.effort,
-              verbosity: s.verbosity,
-              serviceTier: s.serviceTier,
-              permissionPreset: s.permissionPreset,
-              worktree: s.worktree,
-              parentSessionId: s.parentSessionId,
-              merged: s.worktreeMerged,
-              pr: s.worktreePr,
-              goal: s.goal,
-            }),
-            autoNamed: s.autoNamed,
-            state: s.state,
-                live: s.live,
-            lastSeq: s.lastSeq,
-            lastReadSeq: s.lastReadSeq,
-            waitingSince: s.waitingSince,
-            ...liveFactsOf(s),
-          },
-        },
-      }))
+      set((st) => ({ sessions: { ...st.sessions, [s.id]: sessionFromInfo(s) } }))
       // If there are events held from before registration, now is the moment to replay them
       replayPendingEvents(get)
     }

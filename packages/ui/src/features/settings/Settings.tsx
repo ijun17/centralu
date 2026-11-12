@@ -18,6 +18,7 @@ import { Button } from '../../components/Button.jsx'
 import { TextInput } from '../../components/TextField.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { projectLabelOf } from '../../store/names.js'
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
@@ -386,7 +387,7 @@ function AppsSettings() {
         <div className="space-y-6" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
             // The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up
-            <SettingsGroup key={pid} title={projects[pid]?.name ?? 'Project'}>
+            <SettingsGroup key={pid} title={projectLabelOf(projects, pid)}>
               <ul className="divide-y divide-line/70">
                 {catalog.byProject[pid]!.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
@@ -415,7 +416,7 @@ function AppsSettings() {
 
 /** A linked machine's user-folder apps (#82), named by the machine */
 function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCatalogApp[] }) {
-  const name = useMachineName(machine) ?? machine
+  const name = useMachineName(machine)
   return (
     <SettingsGroup testId={`settings-machine-apps-${machine}`} title={`${name}’s apps`}>
       <ul className="divide-y divide-line/70">

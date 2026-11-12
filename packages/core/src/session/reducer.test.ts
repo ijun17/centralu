@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { applyEvent, detectFileConflicts, initialSession, markRead, rename } from './reducer.js'
+import { applyEvent, initialSession, markRead, rename } from './reducer.js'
 
 const NOW = 1_000_000
 const s0 = () => initialSession({ tool: 'claude', id: 's1', projectId: 'p1', name: 'new session' })
@@ -344,15 +344,6 @@ describe('limits, context and errors', () => {
 describe('read position', () => {
   it('the read position never moves backwards', () => {
     expect(markRead(markRead(s0(), 5), 2).lastReadSeq).toBe(5)
-  })
-
-})
-
-describe('file conflict detection (FR-2 data loss)', () => {
-  it('detects two sessions touching the same file', () => {
-    const a = applyEvent(initialSession({ tool: 'claude', id: 'a', projectId: 'p1', name: 'a' }), ev({ type: 'files_touched', paths: ['src/x.ts', 'src/a.ts'] }), NOW)
-    const b = applyEvent(initialSession({ tool: 'claude', id: 'b', projectId: 'p1', name: 'b' }), { ...ev({ type: 'files_touched', paths: ['src/x.ts'] }), sessionId: 'b' }, NOW)
-    expect(detectFileConflicts([a, b])).toEqual([{ path: 'src/x.ts', sessionIds: ['a', 'b'] }])
   })
 
 })

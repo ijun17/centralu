@@ -39,7 +39,7 @@ const S = session.id
 const T = term.terminalId
 
 /** What to send for each method. null means "cannot be called for this check" + a reason */
-const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> = {
+const CASES: Partial<Record<RpcMethodName, unknown>> = {
   'projects.list': {},
   'requests.list': {},
   'projects.add': { path: cwd },
@@ -62,7 +62,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'sessions.markRead': { sessionId: S, seq: 0 },
   'agents.interrupt': { sessionId: S },
   'agents.clearBackgroundTasks': { sessionId: S },
-  'agents.archiveSession': { sessionId: S, archived: false },
   'agents.resumeSession': { sessionId: S },
   'orchestrator.get': {},
   'orchestrator.tools': {},

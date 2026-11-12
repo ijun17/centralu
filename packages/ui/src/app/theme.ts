@@ -25,18 +25,6 @@ export type { ThemePreset }
 
 export { THEME_TOKENS }
 
-/**
- * What the accent writes over the tokens it replaces when it is on (focus and selection; the signal colour is never
- * among them). The selection stays translucent (it brightens whatever is under it, see ::selection in index.css).
- */
-export function accentTokens(accent: string): Record<string, string> {
-  const mix = (pct: number, other: string) => `color-mix(in oklab, ${accent} ${pct}%, ${other})`
-  return {
-    '--color-focus': accent,
-    '--color-selection': mix(35, 'transparent'),
-  }
-}
-
 /** Whether the browser accepts this value for this token (by its theme-file key). Anything else is never applied. */
 export function isValidTokenValue(key: string, value: string): boolean {
   const token = THEME_TOKEN_BY_KEY.get(key)
@@ -63,8 +51,6 @@ export type ResolvedTheme = {
   preset: string
   /** Inline overrides: a custom theme's tokens (none for a preset) */
   tokens: Record<string, string>
-  /** The accent colour laid over them, or null */
-  accent: string | null
 }
 
 /** The preset a side falls back to. A side with no preset of its own (light, until it has one) borrows Dark. */
@@ -89,38 +75,32 @@ export function resolveSide(
   side: ThemeBase,
   id: string,
   themeFiles: readonly ThemeFileEntry[],
-  accent: string | null,
 ): ResolvedTheme {
-  const accentOn = accent && isAccentValid(accent) ? accent : null
   const file = themeFiles.find((f) => f.id === id && !f.broken)
   if (file) {
     const tokens: Record<string, string> = {}
     for (const [key, value] of Object.entries(file.tokens)) {
       if (isValidTokenValue(key, value)) tokens[THEME_TOKEN_BY_KEY.get(key)!.cssVar] = value
     }
-    return { id, name: file.name, base: file.base, preset: presetFor(file.base).id, tokens, accent: accentOn }
+    return { id, name: file.name, base: file.base, preset: presetFor(file.base).id, tokens }
   }
   const preset = THEME_PRESETS.find((p) => p.id === id) ?? presetFor(side)
-  return { id: preset.id, name: preset.name, base: preset.base, preset: preset.id, tokens: {}, accent: accentOn }
-}
-
-function isAccentValid(accent: string): boolean {
-  return typeof CSS === 'undefined' || typeof CSS.supports !== 'function' || CSS.supports('color', accent)
+  return { id: preset.id, name: preset.name, base: preset.base, preset: preset.id, tokens: {} }
 }
 
 /** Both sides resolved, plus the mode — what the cache keeps, so first paint can pick a side before the prefs arrive. */
 export type ThemeChoice = { mode: UiPreferences['themeMode']; dark: ResolvedTheme; light: ResolvedTheme }
 
 /**
- * The stored `accent` is no longer followed (owner, 2026-10-20): Settings stopped offering it, and a value an older
+ * The stored `accent` is not followed (owner, 2026-10-20): Settings stopped offering it, and a value an older
  * build saved would otherwise colour focus and selection with no switch left to take it back. A theme file can still
  * set the same tokens itself.
  */
 export function resolveChoice(prefs: UiPreferences, themeFiles: readonly ThemeFileEntry[]): ThemeChoice {
   return {
     mode: prefs.themeMode,
-    dark: resolveSide('dark', prefs.themeDark, themeFiles, null),
-    light: resolveSide('light', prefs.themeLight, themeFiles, null),
+    dark: resolveSide('dark', prefs.themeDark, themeFiles),
+    light: resolveSide('light', prefs.themeLight, themeFiles),
   }
 }
 
@@ -143,13 +123,8 @@ export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.do
   root.style.removeProperty('color-scheme')
   root.dataset.theme = theme.preset
   root.dataset.themeBase = theme.base
-  // The accent goes on top of the theme's own tokens: when it is on, it is what focus and selection
-  // are, whichever theme is under it
-  const layers = { ...theme.tokens, ...(theme.accent ? { '--color-accent': theme.accent, ...accentTokens(theme.accent) } : {}) }
-  if (theme.accent) root.dataset.accent = ''
-  else delete root.dataset.accent
-  for (const [name, value] of Object.entries(layers)) root.style.setProperty(name, value)
-  written = Object.keys(layers)
+  for (const [name, value] of Object.entries(theme.tokens)) root.style.setProperty(name, value)
+  written = Object.keys(theme.tokens)
   window.dispatchEvent(new CustomEvent('cc-themechange'))
 }
 
@@ -177,8 +152,7 @@ export function applyCachedTheme(): void {
       const key = keyOf.get(name)
       if (key && typeof value === 'string' && isValidTokenValue(key, value)) tokens[name] = value
     }
-    // A cache an older build wrote may still carry an accent; it is not applied any more (`resolveChoice`)
-    applyTheme({ ...theme, tokens, accent: null })
+    applyTheme({ ...theme, tokens })
   } catch {
     /* a broken cache is the same as none */
   }
@@ -211,16 +185,14 @@ export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
 }
 
 /**
- * Reads what a preset sets every token to (by theme-file key), with the custom and accent layers
+ * Reads what a preset sets every token to (by theme-file key), with the custom layer
  * lifted for the moment it takes to read. Used to duplicate a preset into a theme file: the copy
  * starts from exactly what that preset puts on screen.
  */
 export function readPresetTokens(preset: string, root: HTMLElement = document.documentElement): Record<string, string> {
   const saved = written.map((name) => [name, root.style.getPropertyValue(name)] as const)
   const savedTheme = root.dataset.theme
-  const hadAccent = 'accent' in root.dataset
   for (const name of written) root.style.removeProperty(name)
-  delete root.dataset.accent
   root.dataset.theme = preset
   try {
     const style = getComputedStyle(root)
@@ -230,7 +202,6 @@ export function readPresetTokens(preset: string, root: HTMLElement = document.do
   } finally {
     if (savedTheme === undefined) delete root.dataset.theme
     else root.dataset.theme = savedTheme
-    if (hadAccent) root.dataset.accent = ''
     for (const [name, value] of saved) root.style.setProperty(name, value)
   }
 }
@@ -257,7 +228,7 @@ export const INK_ORDER = [
 export type Rgba = [number, number, number, number]
 
 /** WCAG relative luminance of an opaque sRGB colour (channels 0–255) */
-export function luminance([r, g, b]: Rgba): number {
+function luminance([r, g, b]: Rgba): number {
   const lin = (c: number) => {
     const s = c / 255
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4

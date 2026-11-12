@@ -1,11 +1,11 @@
 import { APP_ARRIVAL_ID_PREFIX, isAppArrivalId, sessionPanelId, withPanel } from '@cc/core'
 import { defaultPresetFor, errorMessage, listedModel, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol/client'
-import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
+import { markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { ifSessionStill, inOrder, stillInOrder } from '../patch.js'
 import { writingProject } from '../projects.js'
-import { liveFactsOf, replayPendingEvents } from '../sessionList.js'
+import { replayPendingEvents, sessionFromInfo } from '../sessionList.js'
 import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '../transcript.js'
 import type { Draft } from '../state/conversation.js'
 
@@ -243,39 +243,12 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
           worktreeBase: opts?.worktreeBase,
         }),
     )
+    /*
+     * Registered from the host's answer, over a row `session_created` may have registered already: the host broadcasts it
+     * before the response, and replacing that row would wind `lastSeq` back (#2171).
+     */
     set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [info.id]: {
-          ...initialSession({
-            id: info.id,
-            projectId,
-            name: info.name,
-            tool: info.tool,
-            /*
-             * The settings are also taken exactly as the host answered (the other half left unfixed
-             * by #37 — `attach` and the reconnect merge already receive everything, but this
-             * optimistic registration alone was missing it). Measured during dogfooding: a session
-             * created through a handoff had inherited its model and effort in the database, yet the
-             * menu showed Default until the app restarted — reading as if the settings had not carried
-             * over at all.
-             */
-            model: info.model,
-            effort: info.effort,
-            verbosity: info.verbosity,
-            serviceTier: info.serviceTier,
-            permissionPreset: info.permissionPreset,
-            worktree: info.worktree,
-            // Its parent is also decided by the host (#69) — missing this would put a session created under a manager at the top level until a restart
-            parentSessionId: info.parentSessionId,
-            merged: info.worktreeMerged,
-            pr: info.worktreePr,
-          }),
-          lastSeq: info.lastSeq,
-          lastReadSeq: info.lastReadSeq,
-          ...liveFactsOf(info),
-        },
-      },
+      sessions: { ...s.sessions, [info.id]: sessionFromInfo(info, s.sessions[info.id]) },
       /*
        * **The chosen tool becomes this project's default.**
        *

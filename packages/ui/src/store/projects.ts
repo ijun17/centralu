@@ -2,6 +2,7 @@ import { forgetArrivalsOf } from './apps.js'
 import type { ProjectInfo } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
+import { coalescedRead } from './single-flight.js'
 import { machinesHoldingMirror } from './machines.js'
 import { inOrder, omitKey, stillInOrder } from './patch.js'
 
@@ -39,16 +40,13 @@ export async function writingProject<T>(projectId: string, refresh: () => void, 
 }
 
 /**
- * One read of the project list, taken over the rows already listed. New projects join at the end; a listed row keeps
+ * One read of the project list (`list`, begun when the write clock stood at `began`), taken over the rows already listed. New projects join at the end; a listed row keeps
  * its place and takes the host's value of the settings another client can change (trust, commands, worktree setup,
  * defaults: #719, and whether it is a folder of the user folder: #1301) and keeps its object when none of them differs. `git` is left alone: it has its own refresh, and a
  * list read does not carry the freshest count. A project this window is writing is left as it is (`projectWrites`).
  * @returns whether a project had to be skipped after its write was already done, so one more read is due
  */
-async function readProjects(platform: NonNullable<AppState['platform']>, set: StoreSet): Promise<boolean> {
-  const began = projectWrites.clock
-  const list = await platform.projects.list().catch(() => null)
-  if (!list) return false
+function applyProjects({ list, began }: { list: ProjectInfo[]; began: number }, set: StoreSet): boolean {
   let again = false
   set((s) => {
     const next = { ...s.projects }
@@ -71,9 +69,6 @@ async function readProjects(platform: NonNullable<AppState['platform']>, set: St
   })
   return again
 }
-
-/** The one project list read at a time: a second ask waits for the first and reads once more, so reads never land out of order */
-let projectsReading: { platform: unknown; done: Promise<void>; again: boolean } | null = null
 
 /**
  * A project the person registered from this window (adding a folder, or making one, #515) joins the list, and is asked
@@ -180,26 +175,15 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
   },
 
   refreshProjects() {
-    const platform = get().platform
-    if (!platform) return Promise.resolve()
-    const running = projectsReading
-    if (running && running.platform === platform) {
-      running.again = true
-      return running.done
-    }
-    const mine: NonNullable<typeof projectsReading> = { platform, again: false, done: Promise.resolve() }
-    mine.done = (async () => {
-      try {
-        do {
-          mine.again = false
-          if (await readProjects(platform, set)) mine.again = true
-        } while (mine.again)
-      } finally {
-        if (projectsReading === mine) projectsReading = null
-      }
-    })()
-    projectsReading = mine
-    return mine.done
+    return coalescedRead(
+      'projects',
+      get,
+      async (platform) => {
+        const began = projectWrites.clock
+        return { list: await platform.projects.list(), began }
+      },
+      (read) => applyProjects(read, set),
+    )
   },
 
   askTrust(projectId) {

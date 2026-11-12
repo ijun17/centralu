@@ -4,8 +4,8 @@ import type { McpUiStyleVariableKey, McpUiTheme } from '@modelcontextprotocol/ex
  * Centralu's theme as an app view receives it (#312 step 6).
  *
  * MCP Apps names 76 style variables (ext-apps 2.0.0 `McpUiStyleVariableKey`). Each one here is
- * mapped from a semantic token in styles/index.css, so whatever theme is on (a preset, a custom
- * file, the accent) reaches the view the way it reaches our own screens. Where Centralu has no step
+ * mapped from a semantic token in styles/index.css, so whatever theme is on (a preset or a custom
+ * file) reaches the view the way it reaches our own screens. Where Centralu has no step
  * of its own (a larger heading, a bold weight), the value is written out and noted.
  *
  * The values are **read where the view sits** (`readHostStyles(el)`): the conversation lane has

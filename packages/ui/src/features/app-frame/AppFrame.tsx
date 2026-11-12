@@ -153,7 +153,7 @@ const OPENABLE = /^(https?:|mailto:)/i
  * work anyway and the result has nowhere to go. Three times within 60 seconds is an interval at
  * which even one late notification does not let the clock run out.
  */
-export const CALL_HEARTBEAT_MS = 20_000
+const CALL_HEARTBEAT_MS = 20_000
 
 /**
  * Keeps one running call alive — returns a function that stops it. If the view did not attach a
@@ -247,7 +247,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   /*
    * The side of the theme that shows, and a count of switches (app/theme.ts announces each one
    * with `cc-themechange`). The tokens are read again from the slot on every switch, so an edit to
-   * a custom theme or the accent reaches the view the same way a preset switch does.
+   * a custom theme reaches the view the same way a preset switch does.
    */
   const [theme, setTheme] = useState<McpUiTheme>(activeTheme)
   const [themeRevision, setThemeRevision] = useState(0)

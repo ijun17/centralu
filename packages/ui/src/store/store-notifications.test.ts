@@ -12,7 +12,7 @@ import { countWaiting } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { appliedVersionsText, messagesToChat, useStore } from './store.js'
-import { computeInbox } from './selectors.js'
+import { computeInbox } from './inbox.js'
 import { holdList, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)

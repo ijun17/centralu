@@ -57,7 +57,7 @@ const COPIED = [
  * The height the box needs for its text, padding and border included (the box is `border-box`),
  * or null when it cannot be measured (no layout, or the box is not shown)
  */
-export function fitHeight(el: HTMLTextAreaElement): number | null {
+function fitHeight(el: HTMLTextAreaElement): number | null {
   if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') return null
   const style = getComputedStyle(el)
   const px = (v: string) => parseFloat(v || '0') || 0
@@ -87,7 +87,7 @@ export function fitHeight(el: HTMLTextAreaElement): number | null {
 }
 
 /** The tallest the composer's text box grows before it scrolls. Must match the box's `max-h-40` */
-export const COMPOSER_MAX_H = 160
+const COMPOSER_MAX_H = 160
 
 /**
  * Fits a composer's text box to its value. The session's composer and the one before the Assistant exists both

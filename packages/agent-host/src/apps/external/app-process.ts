@@ -343,7 +343,7 @@ export class AppProcess {
  * app starts, reading its own code page's files without naming an encoding would fail. An app that sets either itself
  * keeps its choice. Other programs ignore both.
  */
-export function withUtf8Python(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function withUtf8Python(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // Windows spells names in any case, and a copy of its environment is a plain object
   const chosen = Object.entries(env).some(([k, v]) => v !== undefined && (k.toUpperCase() === 'PYTHONIOENCODING' || k.toUpperCase() === 'PYTHONUTF8'))
   return chosen ? env : { ...env, PYTHONIOENCODING: 'utf-8' }

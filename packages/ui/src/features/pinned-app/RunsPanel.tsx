@@ -4,6 +4,7 @@ import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol/cli
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
+import { appTitleOf } from '../../store/names.js'
 import { useStore } from '../../store/store.js'
 import { Badge } from '../../components/Badge.jsx'
 
@@ -45,7 +46,7 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
   const runs = read.data ?? null
   const error = read.error
   const load = read.reload
-  const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
+  const nameOf = (r: AppRun) => appTitleOf(apps.find((a) => a.appId === r.appId && a.projectId === r.projectId) ?? r)
 
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="runs-panel" aria-label="Runs">

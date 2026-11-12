@@ -19,7 +19,6 @@ selectors (all derived)                persistence (write-through → StorePort,
   inbox list and ordering (FR-15)
   global counters "2 approvals · 3 awaiting" (FR-12)
   unread (FR-16)
-  concurrent sessions, file conflicts (FR-2)
       │
       ▼
 React components (only the focus view subscribes to messages, the rest get summaries)

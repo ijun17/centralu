@@ -4,6 +4,7 @@ import { activateTab } from './panelLayout.js'
 import { FOLDED_GROUPS_MAX, deadFoldKeys, sameKeys } from './foldGroups.js'
 import { gridAppViewKey } from './appKeys.js'
 import { omitKey } from './patch.js'
+import { machineNameOf } from './names.js'
 
 /**
  * How the window is arranged: the evidence panel and the lane widths, the wide surface over the
@@ -37,7 +38,7 @@ export const SIDEBAR_DEFAULT = 240
  * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
  * creating feedback where dragging it makes it grow larger still.
  */
-export const CENTER_MIN = 360
+const CENTER_MIN = 360
 
 /**
  * The width the conversation lane keeps when the window is narrower than the two side lanes' widths allow (#1561): the
@@ -198,7 +199,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     // The file manager is this computer's; a file on a linked machine is not in it (#82)
     const machine = s.projects[projectId]?.machine
     if (machine) {
-      set({ toast: `${path} is on ${s.machines[machine]?.name ?? machine}, not on this computer` })
+      set({ toast: `${path} is on ${machineNameOf(s.machines, machine)}, not on this computer` })
       return
     }
     try {

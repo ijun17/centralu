@@ -7,9 +7,8 @@ import type { InputHTMLAttributes } from 'react'
  * click, the keyboard (Space), a screen reader and a test (`check()`, `checked`) all reach the same element they
  * reached when it was a bare box; only the look changed. The knob and the track follow the input through `peer-*`.
  *
- * On, the track takes the muted ink and the knob the floor, the way a checked box filled itself (index.css); with the
- * person's accent on, the accent (`.cc-switch` in index.css), as checked boxes do. Never the signal white: a switch
- * is not something waiting on the person.
+ * On, the track takes the muted ink and the knob the floor, the way a checked box filled itself (index.css). Never the
+ * signal white: a switch is not something waiting on the person.
  *
  * Every prop goes to the input (`checked`, `onChange`, `disabled`, `data-testid`, `aria-label`, `id`); `className`
  * places the switch.

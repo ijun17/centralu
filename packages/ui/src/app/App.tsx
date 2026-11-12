@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
@@ -13,7 +12,7 @@ import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { CENTER_FLOOR, projectScreenOf, screenExists, usableThemeFiles, useStore, useTextZoom } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
 import { dialogOpen } from '../store/layers.js'
-import { useCounts, computeInbox, currentWaitingId } from '../store/selectors.js'
+import { useCounts } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
@@ -627,7 +626,7 @@ function NavButtons() {
 function GlobalKeys() {
   const toggleInbox = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
-  const openWaiting = useStore((s) => s.openWaiting)
+  const openNextWaiting = useStore((s) => s.openNextWaiting)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -672,9 +671,7 @@ function GlobalKeys() {
       // (sorting lives in core)
       if (mod && e.shiftKey && letter === 'a') {
         e.preventDefault()
-        const st = useStore.getState()
-        const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
-        if (next) openWaiting(next)
+        openNextWaiting()
         return
       }
       // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
@@ -701,11 +698,7 @@ function GlobalKeys() {
       if (!typing && e.key === 'Escape') toggleInbox(false)
     }
     // The global shortcut (⌘⇧A pressed outside the app) comes in through the same action
-    const onExternalNext = () => {
-      const st = useStore.getState()
-      const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
-      if (next) openWaiting(next)
-    }
+    const onExternalNext = openNextWaiting
     /*
      * The mouse's side buttons (#374): back on 3, forward on 4, acting on release as a browser does. The press is
      * claimed too, so a browser running the dev UI does not also leave the page for its own history. Unlike the
@@ -732,7 +725,7 @@ function GlobalKeys() {
       window.removeEventListener('mouseup', onSideButton)
       window.removeEventListener('cc:next-waiting', onExternalNext)
     }
-  }, [toggleInbox, focusSession, openWaiting])
+  }, [toggleInbox, focusSession, openNextWaiting])
 
   return null
 }

@@ -15,7 +15,7 @@ import { TextField } from '../../components/TextField.jsx'
  * the other dialogs are (header, body, footer; `TextField`, `Button`), docs/design-system.md §11.
  */
 export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; onClose: () => void }) {
-  const name = useMachineName(machine) ?? machine
+  const name = useMachineName(machine)
   const addProject = useStore((s) => s.addProject)
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)

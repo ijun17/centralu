@@ -14,9 +14,9 @@ import type { AgentUse } from '@cc/protocol'
 /** The retention period — on every startup, anything older than this is pruned */
 export const RUN_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 /** How many failures per app keep their original text */
-export const FAILURES_KEPT = 20
+const FAILURES_KEPT = 20
 /** The length of the argument summary — one line in the runs screen */
-export const SUMMARY_CHARS = 200
+const SUMMARY_CHARS = 200
 
 export type AppRunRow = {
   id: string
@@ -233,7 +233,7 @@ export function canonicalJson(value: unknown): string {
  * (`{"token":"pa\"ss"}`) or an agent passing it as an argument: JSON.stringify escaped it a second time, and that
  * spelling matched neither the raw value nor the escaped form the redactor knows.
  */
-export function maskedJson(value: unknown, redact: (t: string) => string): string {
+function maskedJson(value: unknown, redact: (t: string) => string): string {
   return redact(JSON.stringify(maskStrings(value, redact)) ?? 'null')
 }
 

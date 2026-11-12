@@ -99,6 +99,8 @@ export type SessionsSlice = {
    * `isProposalId`), whose card stands on the Assistant's screen. The waiting list and "next waiting" use it.
    */
   openWaiting(id: string, opts?: { preferGrid?: boolean }): void
+  /** Goes to the next thing that waits on the person: approvals first, then errors, then questions (the order is core's, `nextWaitingSession`) */
+  openNextWaiting(): void
   /** Opens a search result at its stored conversation row. */
   openSearchHit(sessionId: string, seq: number): void
   /** The search result the conversation is currently holding in sight, by session. */

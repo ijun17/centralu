@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { computeInbox, projectLabelOf, sessionFolderOf } from './selectors.js'
+import { projectLabelOf } from './names.js'
+import { computeInbox } from './inbox.js'
+import { sessionFolderOf } from './selectors.js'
 import { openProjectOf } from './screens.js'
 
 describe('openProjectOf (#1416)', () => {

@@ -6,7 +6,7 @@ import { dropsLeft, moveTo } from '../sidebar/reorder.js'
  * panel, the conversation scroll that a reorder would reset, and the drag image that lifts a whole
  * panel. `place` is the ref callback of the panel with that id.
  */
-export function usePanelCards() {
+function usePanelCards() {
   /** Reference used to lift the **whole panel**, not just the header, while dragging */
   const cards = useRef(new Map<string, HTMLDivElement>())
   /** Conversation scroll positions, taken right before a reorder — see the layout effect below */

@@ -2,8 +2,8 @@
 
 ## The theme in a view (#312)
 
-A view gets the theme the person chose in Settings (light or dark, a preset, a custom theme, the
-accent; [themes.md](../themes.md)), so an app can look like Centralu without knowing which theme is on.
+A view gets the theme the person chose in Settings (light or dark, a preset or a custom theme;
+[themes.md](../themes.md)), so an app can look like Centralu without knowing which theme is on.
 
 - **`theme`** is `light` or `dark`: the side of the theme that shows.
 - **`styles.variables`** carries all 76 MCP Apps style variables, mapped from Centralu's tokens
@@ -27,7 +27,7 @@ accent; [themes.md](../themes.md)), so an app can look like Centralu without kno
   panel on the grid gets the same background roles as the session panels beside it (primary =
   the floor, secondary = raised, tertiary = the hover step); a custom theme that sets
   `surface-reading` apart is the one case where the two differ.
-- **Switches reach open views.** A theme switch, an edit to a custom theme and the accent send
+- **Switches reach open views.** A theme switch and an edit to a custom theme send
   `host-context-changed` to every open view, without reloading it. Like every change notification
   it carries only the fields that changed, so an app reads the whole context the bridge keeps
   (`app.getHostContext()`), not the notification's.
