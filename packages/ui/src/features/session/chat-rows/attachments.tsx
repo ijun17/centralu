@@ -70,7 +70,7 @@ export function UserAttachment({ att }: { att: ChatAttachment }) {
     <AttachmentThumb
       att={att}
       /* Sits next to a message bubble, so its cap is set lower than an agent image's */
-      thumbClassName="max-h-48 max-w-full rounded-lg border border-ink-faint/40"
+      thumbClassName="max-h-48 max-w-full rounded-lg border border-line-strong"
       chip={
         <span
           className="flex items-center gap-1.5 rounded-md border border-line bg-surface-raised px-2 py-1 text-xs text-ink-muted"

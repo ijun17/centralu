@@ -56,7 +56,7 @@ export function AwayNote({ machine }: { machine: string | null }) {
 export function ErrorNote({ sessionId }: { sessionId: string }) {
   const done = useStore((s) => s.markDone)
   return (
-    <p className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted" data-testid="error-note">
+    <p className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted" data-testid="error-note">
       <span className="min-w-0 flex-1 break-words">The last turn ended in an error. The reason is in the conversation.</span>
       <Button
         variant="secondary"
@@ -90,7 +90,7 @@ export function InterruptedNote({
           : 'The agent tool interrupted the last turn before it finished.'
   return (
     <p
-      className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
+      className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted"
       data-testid="interrupted-note"
       data-reason={interruption.reason}
       title={interruption.detail}
@@ -136,7 +136,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
   if (error && !waking) {
     return (
       <p
-        className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
+        className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted"
         data-testid="dormant-note"
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>

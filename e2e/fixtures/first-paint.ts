@@ -42,7 +42,7 @@ export function firstPaintTests() {
     test('with a light theme cached, the page is the light floor before any stylesheet or module loads', async ({ page }) => {
       await page.emulateMedia({ colorScheme: 'dark' })
       const shown = await beforeTheBundle(page, LIGHT_CHOICE)
-      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(240, 240, 240)', scheme: 'light' })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(255, 255, 255)', scheme: 'light' })
     })
 
     test('with a custom theme cached, the page is its floor and side before any stylesheet or module loads', async ({ page }) => {

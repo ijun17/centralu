@@ -55,7 +55,7 @@ describe('ChatRow: what the person sent', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Hello there' })
     expect(testIds(html)).toEqual(['msg-user'])
     expect(text).toBe('Hello there')
-    expect(html).toContain('border-ink-faint/40')
+    expect(html).toContain('border-line-bubble-mine')
     expect(html).not.toContain('border-dashed')
   })
 
@@ -408,7 +408,7 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
     expect(html).toContain('data-mark="centralu"')
     // A rounder card on its own tint with a stronger hairline (owner, 2026-10-18); the answer only once opened
     expect(html).toContain('bg-surface-hover/15')
-    expect(html).toContain('border-line-strong/70')
+    expect(html).toContain('border-line-strong')
     expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'centralu-call-mark', 'centralu-call-label', 'tool-card-title', 'centralu-call-open'])
     // The session it reached is a chip with its name (owner, 2026-10-18)
     expect(text).toBe('Started an agent write the parser (codex, heavy) Parser →')

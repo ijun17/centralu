@@ -103,7 +103,7 @@ export function RestartKeeperDialog({ loses, onCancel, onConfirm }: { loses: str
           Not now
         </button>
         <button
-          className="rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70"
+          className="rounded-md border border-line-strong bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger"
           data-testid="confirm-restart-keeper-yes"
           onClick={onConfirm}
         >

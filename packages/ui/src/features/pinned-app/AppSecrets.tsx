@@ -54,7 +54,7 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
  */
 function SecretsUnreadable({ movedTo, reason }: { movedTo: string | null; reason?: string }) {
   return (
-    <p className="mb-2 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" role="alert" data-testid="secrets-unreadable">
+    <p className="mb-2 rounded-md border border-danger bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" role="alert" data-testid="secrets-unreadable">
       {movedTo ? (
         <>
           The saved secrets could not be read{reason ? ` (${reason})` : ''} and were moved to <span className="font-mono">{movedTo}</span> in

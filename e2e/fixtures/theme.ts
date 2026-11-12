@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { tokenColor } from './tokens.js'
 import { INK_ORDER, READING_SURFACES, THEME_PRESETS, contrast, urgencyBreaks, type Rgba } from '../../packages/ui/src/app/theme.js'
 
 /**
@@ -20,15 +21,11 @@ type Mock = {
 
 const DARK_FLOOR = '#120e0a'
 /**
- * The rule for the three lines (docs/themes.md "The lines"): each is checked on the floor, the sidebar and a raised
- * surface, the three grounds a line is drawn on. `line` stays visible but quiet, `line-side` is a step stronger, and
- * `line-strong` is clearly stronger again.
+ * The rule for the three lines (docs/themes.md "The lines"), checked on the floor, the sidebar and a raised surface, the three
+ * grounds a line is drawn on: `line` is at least this much against each, and `line-strong` is stronger than `line-chrome`, which
+ * is stronger than `line`, strictly, on each of them (owner, 2026-11-12). 1.1 is a floor under the 1.03 that #2207 found gone.
  */
-const LINE_FLOOR = 1.2
-const LINE_SIDE_FLOOR = 1.4
-const LINE_STRONG_FLOOR = 1.7
-/** How much more contrast each line has than the one below it */
-const LINE_STEP = 0.25
+const LINE_FLOOR = 1.1
 /** The least contrast of each ink on a reading surface in every preset; the high-contrast presets hold every ink to 4.5:1 besides */
 const INK_FLOORS = [['--color-ink', 7], ['--color-ink-muted', 4.5], ['--color-ink-faint', 3]] as const
 const LINE_GROUNDS = ['--color-surface-floor', '--color-surface-side', '--color-surface-raised'] as const
@@ -98,17 +95,44 @@ async function presetColors(page: Page, names: readonly string[]): Promise<Recor
 }
 
 export function presetTests() {
+  // The window's borders are one colour a theme sets (docs/themes.md "The lines"): the top bar's, the sidebar's, a session header's, the evidence panel's edge and header
+  const chromeBorders = (page: Page) => [
+    [page.getByTestId('app-header'), 'border-bottom-color'],
+    [page.getByTestId('sidebar'), 'border-right-color'],
+    [page.getByTestId('session-name').locator('..'), 'border-bottom-color'],
+    [page.getByTestId('evidence-panel'), 'border-left-color'],
+    [page.getByTestId('evidence-project').locator('..'), 'border-bottom-color'],
+  ] as const
+
+  test('the window borders are the one colour line-chrome, and a theme file without it gets its own line (#2207)', async ({ page }) => {
+    await openDemo(page)
+    await expect(page.getByTestId('evidence-panel')).toBeVisible()
+    const chrome = await tokenColor(page, '--color-line-chrome')
+    expect(chrome).not.toBe(await tokenColor(page, '--color-line'))
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, chrome)
+
+    // A file that sets only `line`: the window borders follow that line, nothing of the preset's chrome colour is mixed in
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { line: '#aa0000' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'dark', themeDark: 'mine' }))
+    await expect.poll(() => token(page, '--color-line')).toBe('#aa0000')
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, 'rgb(170, 0, 0)')
+
+    // A file that sets the token wins
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { line: '#aa0000', 'line-chrome': '#00aa00' } })
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, 'rgb(0, 170, 0)')
+  })
+
   test('Picking Light shows the Light preset, and the window and color-scheme follow', async ({ page }) => {
     await openDemo(page)
     await openAppearance(page)
     await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
-    expect(await token(page, '--color-ink-signal')).toBe('#111111')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
+    expect(await token(page, '--color-ink-signal')).toBe('#000000')
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(240, 240, 240)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(255, 255, 255)' })
     // The conversation is on the floor, as in Dark (#362)
-    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f0f0f0')
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#ffffff')
     // The pick is the mode and that side's theme, so the stored preferences keep their shape
     expect(await prefsOf(page)).toMatchObject({ themeMode: 'light', themeLight: 'light' })
   })
@@ -137,6 +161,28 @@ export function presetTests() {
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)))
     expect(await token(page, '--color-surface-floor')).toBe('#ffffff')
     expect(await windowAppearance(page)).toMatchObject({ scheme: 'light' })
+  })
+
+  // The edges of the conversation's frames are colours the theme sets, not a rule of the Light preset that every light theme inherits
+  test('a frame edge is its token (the panel) or the line (the bubble), and a custom light theme without them follows its own line and strong line', async ({ page }) => {
+    const frames = (p: Page) => [
+      [p.locator('.cc-panel:not([data-look="answering"]):not([data-look="waiting"]):not([data-look="stopped"])').first(), '--color-line-panel'],
+      [p.locator('[data-bubble]').first(), '--color-line'],
+    ] as const
+    await page.goto('/?demo=grid')
+    await expect(page.getByTestId('app-header')).toBeVisible()
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'light', themeLight: 'light' }))
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
+    for (const [el, name] of frames(page)) await expect(el, name).toHaveCSS('border-top-color', await tokenColor(page, name))
+    // Light's own values are the ones the frames drew before they were tokens
+    expect(await tokenColor(page, '--color-line-panel')).toBe('rgb(212, 212, 212)')
+
+    // A custom light theme that sets only line and line-strong: its panel edge is its strong line, its bubble edge its line
+    await writeFile(page, 'pink', { name: 'Pink', base: 'light', tokens: { line: '#f1cddb', 'line-strong': '#dfb0c4' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'light', themeLight: 'pink' }))
+    await expect.poll(() => token(page, '--color-line-strong')).toBe('#dfb0c4')
+    await expect(frames(page)[0][0]).toHaveCSS('border-top-color', 'rgb(223, 176, 196)')
+    await expect(frames(page)[1][0]).toHaveCSS('border-top-color', 'rgb(241, 205, 219)')
   })
 
   test('Graphite is in the theme list as a dark theme, and picking it shows its floor and keeps Dark the default (#2208)', async ({ page }) => {
@@ -184,36 +230,42 @@ export function presetTests() {
     await expect.poll(() => token(page, '--color-surface-floor')).toBe('#101820')
   })
 
+  // Show a preset and read the colours it resolves to
+  const showPreset = async (page: Page, preset: (typeof THEME_PRESETS)[number], names: readonly string[]) => {
+    await openDemo(page)
+    await page.evaluate(
+      ([id, base]) => (window as any).__store.getState().setPrefs(base === 'dark' ? { themeMode: 'dark', themeDark: id } : { themeMode: 'light', themeLight: id }),
+      [preset.id, preset.base],
+    )
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
+    return presetColors(page, names)
+  }
+
   for (const preset of THEME_PRESETS) {
     test(`${preset.name} keeps the urgency order on every reading surface`, async ({ page }) => {
-      await openDemo(page)
-      await page.evaluate(
-        ([id, base]) => (window as any).__store.getState().setPrefs(base === 'dark' ? { themeMode: 'dark', themeDark: id } : { themeMode: 'light', themeLight: id }),
-        [preset.id, preset.base],
-      )
-      await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
-      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line', '--color-line-side', '--color-line-strong']
-      const colors = await presetColors(page, names)
+      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n)]
+      const colors = await showPreset(page, preset, names)
       expect(urgencyBreaks(colors)).toEqual([])
       // Every ink keeps a floor of its own on every reading surface, the ones Dark's inks keep, so no preset's quieter inks sink (#2208)
       for (const [surface] of READING_SURFACES) {
         for (const [ink, floor] of INK_FLOORS) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(floor)
+        // High contrast: every ink clears 4.5:1
+        if (preset.id.startsWith('hc-')) for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
       }
+    })
+
+    // The line decision (themes.md "The lines") is judged on its own: Light New misses it until the owner decides, and that must not read as a broken urgency order
+    test(`${preset.name} meets the line rule on the floor, the sidebar and a raised surface`, async ({ page }) => {
+      const edges = ['--color-line', '--color-line-chrome', '--color-line-strong'] as const
+      const frames = ['--color-line-panel', '--color-line-answering', '--color-line-bubble-mine'] as const
+      const colors = await showPreset(page, preset, [...LINE_GROUNDS, ...edges, ...frames])
       for (const surface of LINE_GROUNDS) {
-        const [line, side, strong] = ['--color-line', '--color-line-side', '--color-line-strong'].map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
-        expect(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
-        expect(side, `line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_SIDE_FLOOR)
-        expect(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
-        expect(side - line, `line-side over line on ${surface}`).toBeGreaterThanOrEqual(0)
-        expect(strong - side, `line-strong over line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
-      }
-      if (preset.id.startsWith('hc-')) {
-        // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
-        for (const [surface] of READING_SURFACES) {
-          for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
-          expect(contrast(colors['--color-line']!, colors[surface]!), `line on ${surface}`).toBeGreaterThanOrEqual(3)
-          expect(contrast(colors['--color-line-side']!, colors[surface]!), `line-side on ${surface}`).toBeGreaterThanOrEqual(3)
-        }
+        const [line, side, strong] = edges.map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
+        expect.soft(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
+        expect.soft(side, `line-chrome over line on ${surface}`).toBeGreaterThan(line)
+        expect.soft(strong, `line-strong over line-chrome on ${surface}`).toBeGreaterThan(side)
+        // High contrast keeps every edge at 3:1: the three lines and each frame's edge (a bubble of yours at 2.5:1 was missed when only two were checked)
+        if (preset.id.startsWith('hc-')) for (const n of [...edges, ...frames]) expect.soft(contrast(colors[n]!, colors[surface]!), `${n} on ${surface}`).toBeGreaterThanOrEqual(3)
       }
     })
   }
@@ -356,7 +408,7 @@ export function themeTests() {
     await page.evaluate(() => (window as any).__store.getState().setPrefs({ accent: '#6ea8fe' }))
     // Theme changes go through the same path an accent would; let one land each way, then read
     await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
     await pickTheme(page, 'dark')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
     expect(await token(page, '--color-focus')).toBe(focus)

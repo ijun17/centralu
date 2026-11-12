@@ -125,7 +125,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       nothing in the list.
     */
     <section
-      className={`relative border-b border-line/70 py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
+      className={`relative border-b border-line py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-machine={project.machine ?? undefined}
       data-away={away || undefined}

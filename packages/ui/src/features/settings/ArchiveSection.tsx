@@ -215,7 +215,7 @@ export function ArchiveSection() {
         {trash !== null && nothing ? (
           <SettingsEmpty testId="trash-list-empty">The session archive is empty</SettingsEmpty>
         ) : sessions.length === 0 ? null : (
-          <ul className="divide-y divide-line/70" data-testid="trash-list">
+          <ul className="divide-y divide-line" data-testid="trash-list">
             {sessions.map((s) => (
               <li key={s.id} className="px-4 py-3" data-testid={`trash-row-${s.id}`}>
                 <div className="flex items-baseline gap-2">
@@ -278,7 +278,7 @@ export function ArchiveSection() {
           </ul>
         )}
         {steps.length > 0 && (
-          <ul className="divide-y divide-line/70" data-testid="trash-steps-list">
+          <ul className="divide-y divide-line" data-testid="trash-steps-list">
             {steps.map((t) => (
               <TrashedSubagentStepsRow
                 key={`${t.machine ?? ''}/${t.sessionId}`}

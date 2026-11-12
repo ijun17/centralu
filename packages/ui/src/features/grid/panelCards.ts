@@ -94,7 +94,7 @@ export function panelClass(dragged: boolean): string {
     "highest within the panel" to actually be true, the panel has to be a fence —
     the same fence the mark's ring needed.
   */
-  return `cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
+  return `cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-panel bg-surface-floor transition-opacity ${
     dragged ? 'opacity-40' : ''
   }`
 }

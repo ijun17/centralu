@@ -50,7 +50,7 @@ export function SessionHeader({
    * doubled edge from even a 1px difference. With both at h-10, that gap never has a chance to
    * appear.
    */
-  const HEADER = 'flex h-10 items-center gap-2.5 border-b border-line px-4'
+  const HEADER = 'flex h-10 items-center gap-2.5 border-b border-line-chrome px-4'
   const header = (
     <>
       {/*

@@ -78,7 +78,7 @@ export function SettingsCard({
   testId?: string
 } & Omit<HTMLAttributes<HTMLElement>, 'className' | 'children'>) {
   return (
-    <Tag className={`divide-y divide-line/70 rounded-lg border border-line bg-surface-raised ${className}`.trim()} data-testid={testId} {...rest}>
+    <Tag className={`divide-y divide-line rounded-lg border border-line bg-surface-raised ${className}`.trim()} data-testid={testId} {...rest}>
       {children}
     </Tag>
   )

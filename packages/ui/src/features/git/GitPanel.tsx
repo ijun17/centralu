@@ -552,7 +552,7 @@ function Branches({ projectId }: { projectId: string }) {
         </div>
       )}
       {loaded.error !== null && (
-        <LoadFailed what="the branches" error={loaded.error} onRetry={load} className="border-b border-line/60 px-2.5 py-1.5" testId="git-branches-failed" />
+        <LoadFailed what="the branches" error={loaded.error} onRetry={load} className="border-b border-line px-2.5 py-1.5" testId="git-branches-failed" />
       )}
       <BranchList title="Local" branches={local} onPick={attempt} />
       <BranchList title="Remote" branches={remote} onPick={attempt} />
@@ -571,7 +571,7 @@ function BranchList({
 }) {
   if (branches.length === 0) return null
   return (
-    <div className="border-b border-line/60" data-testid={`branches-${title.toLowerCase()}`}>
+    <div className="border-b border-line" data-testid={`branches-${title.toLowerCase()}`}>
       <Badge as="h3" className="px-2.5 py-1.5">
         {title}
       </Badge>

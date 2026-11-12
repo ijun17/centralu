@@ -24,15 +24,21 @@ export type ThemeTokenDef = {
   label: string
   group: string
   kind: ThemeTokenKind
+  /**
+   * The key of the token a theme file that leaves this one out follows, instead of the preset's value: the border tokens,
+   * so that a custom theme's borders are its own `line` or `line-strong` and never a colour the preset chose.
+   */
+  follows?: string
 }
 
-const defs = (group: string, kind: ThemeTokenKind, list: [string, string][]): ThemeTokenDef[] =>
-  list.map(([key, label]) => ({
+const defs = (group: string, kind: ThemeTokenKind, list: [string, string, string?][]): ThemeTokenDef[] =>
+  list.map(([key, label, follows]) => ({
     key,
     cssVar: kind === 'color' ? `--color-${key}` : `--${key}`,
     label,
     group,
     kind,
+    ...(follows ? { follows } : {}),
   }))
 
 /**
@@ -53,7 +59,11 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
   ]),
   ...defs('Lines', 'color', [
     ['line', 'Line'],
+    ['line-chrome', 'Window line: sidebar, top bar, panel headers', 'line'],
     ['line-strong', 'Strong line'],
+    ['line-panel', 'Resting panel edge', 'line-strong'],
+    ['line-answering', 'Answering panel edge', 'ink-muted'],
+    ['line-bubble-mine', 'Your message bubble edge', 'line-strong'],
   ]),
   ...defs('Ink', 'color', [
     ['ink-signal', 'Signal: waiting for you'],
@@ -343,7 +353,7 @@ export function themeFileJsonSchema(): Record<string, unknown> {
         properties: Object.fromEntries([
           ...THEME_TOKENS.map((t): [string, object] => [
             t.key,
-            { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` },
+            { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}${t.follows ? ` Left out, it follows "${t.follows}".` : ''}` },
           ]),
           ...RETIRED_THEME_TOKENS.map((key): [string, object] => [
             key,

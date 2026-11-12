@@ -387,7 +387,7 @@ export function ToolCard({
     <div
       className={
         call
-          ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong/70'}`
+          ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong'}`
           : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line'}`
       }
       data-testid={ask ? 'ask-project-card' : 'tool-card'}
@@ -475,7 +475,7 @@ export function ToolCard({
         the title and could not be read anywhere). Only when it says more than the title row could.
       */}
       {showInput && (
-        <div className="border-t border-line/70 px-3 py-2" data-testid="tool-card-input">
+        <div className="border-t border-line px-3 py-2" data-testid="tool-card-input">
           <Badge readout className="mb-1 block tracking-wide">
             Input
           </Badge>
@@ -499,7 +499,7 @@ export function ToolCard({
 
       {/* A Centralu call folds to its sentence: the answer shows only when the card is opened (owner, 2026-10-18) */}
       {call && open && item.result && item.result.trim() && (
-        <div className="border-t border-line/70 px-3 py-2" data-testid={ask ? 'ask-project-result' : 'tool-card-output'}>
+        <div className="border-t border-line px-3 py-2" data-testid={ask ? 'ask-project-result' : 'tool-card-output'}>
           <CentraluCallBody result={item.result} open={open} onOpen={() => setOpen(true)} />
         </div>
       )}

@@ -258,7 +258,7 @@ function RunRow({
   const tool = !broker && !own ? `${appName} · ${run.tool}` : run.tool
   return (
     <li
-      className={`border-b border-l-2 border-line/60 py-1.5 pr-3 text-xs ${failed ? 'border-l-ink' : 'border-l-transparent'}`}
+      className={`border-b border-l-2 border-line py-1.5 pr-3 text-xs ${failed ? 'border-l-ink' : 'border-l-transparent'}`}
       style={{ paddingLeft: 12 + depth * 14 }}
       data-testid="run-row"
       data-status={run.status}

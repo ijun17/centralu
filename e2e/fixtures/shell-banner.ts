@@ -126,7 +126,7 @@ export function shellBannerTests(): void {
     // It hangs from the top bar on the same ground, so its bottom line is the sidebar's line too (#2207)
     test('the other-build bar draws its bottom line in the sidebar line colour', async ({ page }) => {
       await open(page, 'demo=focus&state=other')
-      const line = await tokenColor(page, '--color-line-side')
+      const line = await tokenColor(page, '--color-line-chrome')
       await expect(page.getByTestId('host-other-build')).toHaveCSS('border-bottom-color', line)
     })
 

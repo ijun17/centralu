@@ -97,7 +97,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
         */}
         {withFiles ? (
           <p
-            className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
+            className="mt-2 rounded-md border border-danger bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="delete-project-warning"
           >
             The folder itself goes to the Trash —{' '}

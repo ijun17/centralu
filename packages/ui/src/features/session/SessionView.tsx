@@ -430,7 +430,7 @@ export function SessionPane({
       />
 
       {/* Outside the composer: its height decides when a grid panel folds the composer, and a line of notice is not part of that */}
-      <UntrustedNotice projectId={session.projectId} className="shrink-0 border-b border-line px-4 py-1.5" />
+      <UntrustedNotice projectId={session.projectId} className="shrink-0 border-b border-line-chrome px-4 py-1.5" />
 
       {starting && session?.projectId && (
         <SessionStart sessionId={sessionId} projectId={session.projectId} tool={session.tool} />

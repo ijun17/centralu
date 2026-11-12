@@ -75,7 +75,7 @@ export function InlineConfirm({
   }
   return (
     <div
-      className={`mt-2 rounded-md border px-2.5 py-2 ${tone === 'danger' ? 'border-danger/40 bg-danger-bg' : 'border-line bg-surface-floor'}`}
+      className={`mt-2 rounded-md border px-2.5 py-2 ${tone === 'danger' ? 'border-danger bg-danger-bg' : 'border-line bg-surface-floor'}`}
       data-testid={testId}
     >
       <p className="text-xs leading-body text-ink" data-testid={textTestId}>

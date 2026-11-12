@@ -218,7 +218,7 @@ export function Settings() {
         onClick={(e) => e.stopPropagation()}
         data-testid="settings-panel"
       >
-        <header className="flex items-center gap-2 border-b border-line/60 py-2.5 pl-4 pr-3">
+        <header className="flex items-center gap-2 border-b border-line py-2.5 pl-4 pr-3">
           <h2 className="text-md font-medium text-ink">Settings</h2>
           <span className="ml-auto flex items-center gap-1.5 text-2xs text-ink-faint">
             <Kbd>esc</Kbd> Close
@@ -231,7 +231,7 @@ export function Settings() {
             which a scroll can only do by being short — and it will not stay short.
           */}
           <nav
-            className="w-[196px] shrink-0 space-y-px overflow-y-auto border-r border-line/60 p-2"
+            className="w-[196px] shrink-0 space-y-px overflow-y-auto border-r border-line p-2"
             data-testid="settings-nav"
             aria-label="Settings categories"
           >
@@ -388,7 +388,7 @@ function AppsSettings() {
           {projectIds.map((pid) => (
             // The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up
             <SettingsGroup key={pid} title={projectLabelOf(projects, pid)}>
-              <ul className="divide-y divide-line/70">
+              <ul className="divide-y divide-line">
                 {catalog.byProject[pid]!.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
                 ))}
@@ -397,7 +397,7 @@ function AppsSettings() {
           ))}
           {catalog.user.length > 0 && (
             <SettingsGroup title="Other apps">
-              <ul className="divide-y divide-line/70">
+              <ul className="divide-y divide-line">
                 {catalog.user.map((a) => (
                   <ExternalAppRow key={a.key} app={a} />
                 ))}
@@ -419,7 +419,7 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
   const name = useMachineName(machine)
   return (
     <SettingsGroup testId={`settings-machine-apps-${machine}`} title={`${name}’s apps`}>
-      <ul className="divide-y divide-line/70">
+      <ul className="divide-y divide-line">
         {apps.map((a) => (
           <ExternalAppRow key={a.key} app={a} />
         ))}

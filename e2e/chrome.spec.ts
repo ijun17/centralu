@@ -28,14 +28,14 @@ test('the first control never sits closer to the edge than the right side does',
 })
 
 /**
- * The top bar is drawn on the sidebar's ground, so its bottom line is the sidebar's line (`line-side`), not the plain
+ * The top bar is drawn on the sidebar's ground, so its bottom line is the sidebar's line (`line-chrome`), not the plain
  * hairline, which on that ground can vanish in a theme whose `line` sits close to `surface-side` (#2207).
  */
 test("the top bar's bottom line is the sidebar's line colour", async ({ page }) => {
   await page.goto('/?mock=1')
   const header = page.getByTestId('app-header')
   await expect(header).toBeVisible()
-  await expect(header).toHaveCSS('border-bottom-color', await tokenColor(page, '--color-line-side'))
+  await expect(header).toHaveCSS('border-bottom-color', await tokenColor(page, '--color-line-chrome'))
   // And it is not the hairline: the two differ in every preset, so the check cannot pass by both being one colour
-  expect(await tokenColor(page, '--color-line-side')).not.toBe(await tokenColor(page, '--color-line'))
+  expect(await tokenColor(page, '--color-line-chrome')).not.toBe(await tokenColor(page, '--color-line'))
 })

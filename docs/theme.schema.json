@@ -74,10 +74,30 @@
           "maxLength": 400,
           "description": "Lines: Line. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
         },
+        "line-chrome": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Window line: sidebar, top bar, panel headers. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line\"."
+        },
         "line-strong": {
           "type": "string",
           "maxLength": 400,
           "description": "Lines: Strong line. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "line-panel": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Resting panel edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line-strong\"."
+        },
+        "line-answering": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Answering panel edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"ink-muted\"."
+        },
+        "line-bubble-mine": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Lines: Your message bubble edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line-strong\"."
         },
         "ink-signal": {
           "type": "string",

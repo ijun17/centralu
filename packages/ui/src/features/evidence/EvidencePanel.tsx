@@ -99,7 +99,7 @@ export function EvidencePanel() {
    */
   return (
     <aside
-      className={`relative flex h-full min-w-0 shrink flex-col overflow-hidden border-l border-line bg-surface-side ${
+      className={`relative flex h-full min-w-0 shrink flex-col overflow-hidden border-l border-line-chrome bg-surface-side ${
         resizing ? '' : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
       }`}
       style={{ width: open ? width : RAIL_W }}
@@ -146,7 +146,7 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
    * even when their contents change.
    */
   return (
-    <DragRegion className="flex h-10 items-center gap-2 border-b border-line px-3">
+    <DragRegion className="flex h-10 items-center gap-2 border-b border-line-chrome px-3">
       {/* A name the person gave, so the UI face; the branch is git's own word, so the code face */}
       <span className="truncate text-sm text-ink" data-testid="evidence-project">
         {projectName}

@@ -35,7 +35,7 @@ export function ReaderItem({ item }: { item: ChatItem }) {
         </li>
       )
     case 'mark':
-      return <li className="border-t border-line/60 pt-1 text-center text-2xs text-ink-faint">{item.text}</li>
+      return <li className="border-t border-line pt-1 text-center text-2xs text-ink-faint">{item.text}</li>
     case 'image':
       return <li className="text-2xs text-ink-faint">[image]</li>
     case 'reasoning':

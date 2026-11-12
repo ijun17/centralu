@@ -154,7 +154,7 @@ function MenuRow({
  */
 function MenuSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
-    <div className="border-t border-line/60 p-1 first:border-t-0">
+    <div className="border-t border-line p-1 first:border-t-0">
       <p className="px-2 pb-0.5 pt-1 text-2xs text-ink-faint">{label}</p>
       {/* Why this group is different is written at the top of the group — repeating it on
       every row would make the list unreadable */}

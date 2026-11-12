@@ -86,7 +86,7 @@ export function AssistantButton() {
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active
-            ? 'border-ink-faint/50 bg-surface-hover text-ink'
+            ? 'border-line-strong bg-surface-hover text-ink'
             : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
         }`}
         // The same rule as the grid: a selection, not a toggle. To leave, choose something else

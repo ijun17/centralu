@@ -401,7 +401,7 @@ export function ChatStream({
                 inMotion ? (mine.kind === 'in' ? 'cc-fade' : 'cc-fade-out') : ''
               } ${
                 searchTarget !== null && chat[v.index]?.storedSeq === searchTarget.seq
-                  ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted/70'
+                  ? 'rounded-md bg-surface-hover/70 ring-1 ring-ink-muted'
                   : ''
               }`}
               data-search-hit={searchTarget !== null && chat[v.index]?.storedSeq === searchTarget.seq ? 'true' : undefined}
