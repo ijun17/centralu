@@ -5,6 +5,8 @@ import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, InputObserver, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import type { AgentSessionActions } from './agent-session-actions.js'
+import type { DelegationFlow } from './delegation-flow.js'
 import { SessionManager } from './manager.js'
 
 /**
@@ -173,4 +175,9 @@ export async function crossWorld(): Promise<CrossWorld> {
       rmSync(root, { recursive: true, force: true })
     },
   }
+}
+
+/** `AgentSessionActions.sendWork` of a manager, which only the mail tool reaches in the product (#1948): what a session's `mail` send to `target` does */
+export function sendWork(mgr: SessionManager, ...a: Parameters<AgentSessionActions['sendWork']>): ReturnType<AgentSessionActions['sendWork']> {
+  return (mgr as unknown as { delegationFlow: DelegationFlow }).delegationFlow.actions.sendWork(...a)
 }

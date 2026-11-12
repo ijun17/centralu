@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { ASK_WAIT_MS } from './ask-project.js'
-import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { agentRunText } from './tool-answers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
@@ -238,7 +238,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
     '%s refuses self wait/stop/delete before changing the session, and its mail to itself is no work',
     async (preset) => {
       const id = await session(preset)
-      expect(await w.mgr.sendWork(id, id, 'self work')).toBeNull()
+      expect(await sendWork(w.mgr, id, id, 'self work')).toBeNull()
       for (const action of ['wait', 'stop', 'delete'] as const) {
         expect(await w.mgr.agentSession(id, { sessionId: id, action, text: 'self work' })).toMatchObject({
           ok: false,

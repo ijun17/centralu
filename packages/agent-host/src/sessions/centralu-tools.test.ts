@@ -586,7 +586,10 @@ describe('the agent set', () => {
     expect(w.text).toContain('agent_session(sessionId="c1", action="wait")')
     // More work is mail (#1948): agent_session has no send, and its schema refuses one before anything runs
     const bad = await runCentraluTool(tools, 'agent_session', { sessionId: 'c1', action: 'send', text: 'more' }, { sessionId: 's', profile: 'reader' })
-    expect(bad).toEqual({ text: 'Wrong arguments for agent_session: action: agent_session has no "send": more work for a session you started is mail(action="send", to="<its id>", text=…).', isError: true })
+    expect(bad).toEqual({ text: 'Wrong arguments for agent_session: action: agent_session has no "send": more work for a session you started is a mail send to its id.', isError: true })
+    // The Assistant reaches agent_session through centralu_run, which reads the same schema: the words name no call form of either seat
+    const run = await runCentraluTool(tools, 'centralu_run', { command: 'agent_session', args: { sessionId: 'c1', action: 'send', text: 'more' } }, { sessionId: 'o', profile: 'assistant' })
+    expect(run.text).toContain('action: agent_session has no "send": more work for a session you started is a mail send to its id.')
   })
 })
 

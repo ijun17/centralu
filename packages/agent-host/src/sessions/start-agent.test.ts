@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runCentraluTool } from './centralu-tools.js'
 import { ANSWER_GROUNDS, ASK_WAIT_MS } from './ask-project.js'
-import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossAdapter, crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { SessionManager } from './manager.js'
@@ -494,7 +494,7 @@ describe('starting another agent in the same project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await waiting).toMatchObject({ ok: true, state: 'pending' })
     vi.useRealTimers()
-    expect(await w.mgr.sendWork(s, requestId, 'x')).toMatchObject({ ok: false, error: expect.stringContaining('No session yet') })
+    expect(await sendWork(w.mgr, s, requestId, 'x')).toMatchObject({ ok: false, error: expect.stringContaining('No session yet') })
 
     // Answered during a wait, the wait returns with the child
     const second = await session('safe')
@@ -954,7 +954,7 @@ describe('starting another agent in the same project', () => {
     handleOf(c)!.answer('ok')
     await p
     await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
-    const r = await w.mgr.sendWork(s, c, 'now delete the build folder')
+    const r = await sendWork(w.mgr, s, c, 'now delete the build folder')
     expect(r?.ok === false && r.error).toContain('more permissions (auto) than this session (normal)')
     expect(handleOf(c)?.sent ?? []).toHaveLength(1)
   })
@@ -998,7 +998,7 @@ describe('starting another agent in the same project', () => {
       expect(!r.ok && r.error).toContain('is not a session this session started')
     }
     // Its mail to that child is plain mail, not work
-    expect(await w.mgr.sendWork(other, c, 'x')).toBeNull()
+    expect(await sendWork(w.mgr, other, c, 'x')).toBeNull()
     // Nor on a session the person opened, even in the same project
     const r = await w.mgr.agentSession(s, { sessionId: other, action: 'stop' })
     expect(!r.ok && r.error).toContain('is not a session this session started')
@@ -1045,7 +1045,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     h.answer('original done')
-    expect(await w.mgr.sendWork(s, c, 'arrived just after completion')).toMatchObject({ ok: true, state: 'working', reported: true })
+    expect(await sendWork(w.mgr, s, c, 'arrived just after completion')).toMatchObject({ ok: true, state: 'working', reported: true })
     expect(h.sent).toHaveLength(2)
     expect(h.sent[1]).toContain('gives you this task')
     expect(h.sent[1]).toContain('Your final message goes back to it as the answer')
@@ -1063,7 +1063,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
-    expect(await w.mgr.sendWork(s, c, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
+    expect(await sendWork(w.mgr, s, c, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
     expect(h.sent).toHaveLength(1)
     expect(h.interrupted).toBe(0)
     h.answer('done')

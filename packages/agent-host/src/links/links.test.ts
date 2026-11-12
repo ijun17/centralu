@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
+import { sendWork } from '../sessions/cross-project.test-helpers.js'
 import { execFileSync } from 'node:child_process'
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -2646,7 +2647,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
     // `send` is the parent's `mail` to its child: more work (#1948)
     const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string) =>
-      action === 'send' ? hub.mgr.sendWork('h1', sessionId, text ?? '').then((r) => r ?? { ok: false as const, error: 'plain mail, not work' }) : hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
+      action === 'send' ? sendWork(hub.mgr, 'h1', sessionId, text ?? '').then((r) => r ?? { ok: false as const, error: 'plain mail, not work' }) : hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === id)!.name

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import type { HostMail } from '../mail/host-mail.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
@@ -55,11 +55,11 @@ describe('start_agent', () => {
     const s = await w.callerSession()
     const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
-    expect((await w.mgr.sendWork(s, child, 'use Chromium'))?.ok).toBe(true)
+    expect((await sendWork(w.mgr, s, child, 'use Chromium'))?.ok).toBe(true)
     handleOf(child)!.answer('done')
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
     // At rest, with the task it was sent in its turn still to be given (delivery is not started here): this one is mail too
-    expect(await w.mgr.sendWork(s, child, 'and the linter')).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, s, child, 'and the linter')).toMatchObject({ ok: true, state: 'mailed' })
     const tasks = read.tasks(addr(s), child)
     expect(tasks.map((t) => [t.origin, t.body])).toEqual([
       ['start_agent', 'long job'],
@@ -192,7 +192,7 @@ describe('the turns of a delegated child', () => {
     handleOf(child)!.answer('their answer')
     await w.until(() => turnsOfChild().length === 2 && turnsOfChild()[1]![2] !== null)
     // The caller’s later instruction is a task of its own, and the turn it starts is that task's
-    const again = w.mgr.sendWork(s, child, 'and the linter')
+    const again = sendWork(w.mgr, s, child, 'and the linter')
     await w.until(() => turnsOfChild().length === 3)
     handleOf(child)!.answer('linted')
     await again
@@ -219,7 +219,7 @@ describe('a fork of a busy session', () => {
     const claude = w.adapters.get('claude') as unknown as { forkConversation?: (id: string) => Promise<string>; readExternalHistory?: () => Promise<unknown[]> }
     claude.forkConversation = async (id) => `fork-of-${id}`
     claude.readExternalHistory = async () => []
-    const forking = w.mgr.sendWork(requester, busy, 'read the logs', 'fork_read')
+    const forking = sendWork(w.mgr, requester, busy, 'read the logs', 'fork_read')
     await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === busy))
     const fork = w.mgr.listSessions().find((s) => s.forkedFrom === busy)!
     await w.until(() => (handleOf(fork.id)?.sent.length ?? 0) === 1)

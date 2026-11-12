@@ -36,7 +36,7 @@ export class DelegationFlow {
   /** Turns read by a session that does not own them, and an observer's note (observed-turns.ts) */
   private readonly observed: ObservedTurns
   /** agent_session's actions (agent-session-actions.ts) */
-  private readonly actions: AgentSessionActions
+  readonly actions: AgentSessionActions
   /** The children start_agent starts on linked machines, and agent_session on them (remote-agents.ts, #1038) */
   readonly remote: RemoteAgents
 
@@ -106,11 +106,6 @@ export class DelegationFlow {
   /** `AgentSessionActions.listAgents` (agent-session-actions.ts), kept on the flow for its callers */
   listAgents(...a: Parameters<AgentSessionActions['listAgents']>): ReturnType<AgentSessionActions['listAgents']> {
     return this.actions.listAgents(...a)
-  }
-
-  /** `AgentSessionActions.sendWork` (agent-session-actions.ts): a session's `mail` to a child of its own */
-  sendWork(...a: Parameters<AgentSessionActions['sendWork']>): ReturnType<AgentSessionActions['sendWork']> {
-    return this.actions.sendWork(...a)
   }
 
   /** `AgentSessionActions.agentSession` (agent-session-actions.ts), kept on the flow for its callers */

@@ -81,6 +81,13 @@ describe('what a handoff gave away', () => {
     expect(handed(flow).handedOverAnswer('heir', 'child')).toBeUndefined()
   })
 
+  // Review of #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
+  it('a mail send by the original that stayed hears where the work went, as agent_session did', async () => {
+    children.recordHandedOver('child', 'caller', 'heir')
+    const flow = new DelegationFlow(hostWith({ meta, children }))
+    expect(await flow.actions.sendWork('caller', 'child', 'and the docs')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child] to the session that took over from this one, "Heir" [heir].') })
+  })
+
   it('a wait the move ended always has an answer, even once the record is gone', () => {
     const flow = new DelegationFlow(hostWith({ meta, children }))
     expect(handed(flow).handedOverReply('caller', 'child')).toEqual({
@@ -336,7 +343,7 @@ describe("a child's turn and the call waiting on it", () => {
         throw new Error('the CLI is gone')
       },
     })
-    expect(await flow.sendWork('caller', 'child', 'and the tests')).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
+    expect(await flow.actions.sendWork('caller', 'child', 'and the tests')).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
     expect(joined?.finished).toBe(true)
     expect(agentRuns.size).toBe(0)
     expect(children.delegations.size).toBe(0)
@@ -373,7 +380,7 @@ describe("a child's turn and the call waiting on it", () => {
     const asked: string[] = []
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ sessionId: 'm1.c1', callerId: 'someone', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }]))
     const flow = flowWith({ refusesDelegation: (callerId: string) => (asked.push(callerId), null) })
-    expect(await flow.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
+    expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
     expect(asked).toEqual([])
   })
 })

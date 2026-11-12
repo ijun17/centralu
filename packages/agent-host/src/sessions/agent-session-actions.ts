@@ -1,4 +1,4 @@
-import { atRest, liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
+import { atRest, liveBackgroundTasks, isAssistantKind, type SessionInfo } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, IfBusy } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { ASK_WAIT_MS } from './ask-project.js'
@@ -107,12 +107,11 @@ export class AgentSessionActions {
         : { ok: true, state: 'working', sessionId: child.id, sessionName: child.name, tool: child.tool, reported: false }
     }
     const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
-    const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
-    // The Assistant works on the children it started outside any project (#853), and on no other session
-    const seat = caller?.projectId ? 'project' : isAssistantKind(caller?.kind) ? 'assistant' : null
-    const owns = seat === 'assistant' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
-    if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
-      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'assistant' || s.askedBy === callerId))}` }
+    // Beyond its own: a child of the former worktree manager's link to delete (#637), or under auto any session of its project (#603)
+    const mayWork = (c: SessionInfo, ch: SessionInfo) =>
+      ownChild(c, ch) || (!!c.projectId && ch.projectId === c.projectId && (deletingWithoutWorktree ? ch.parentSessionId === callerId : this.host.autoBoundaryOpen(callerId, 'session ownership')))
+    if (!caller || !child || !mayWork(caller, child)) {
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (!!caller?.projectId || s.askedBy === callerId))}` }
     }
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
@@ -199,6 +198,9 @@ export class AgentSessionActions {
       const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
       return refused ? { ok: false, error: refused } : this.flow.remote.send(callerId, remote, text)
     }
+    // Work a handoff gave away (#693): the original that stayed is told where it went, as agent_session's send told it
+    const gone = this.flow.handedOverAnswer(callerId, target)
+    if (gone) return gone
     // A start that answered "pending" (#673): its handle is the request's id until the person answers
     const request = this.host.children.agentStarts.get(target)
     if (request?.req.callerId === callerId) {
@@ -210,7 +212,7 @@ export class AgentSessionActions {
     const caller = this.host.meta.get(callerId)
     const child = this.host.meta.get(target)
     // Only a session it started: under auto any session of the project is agent_session's, but mail to one (its parent too) stays mail
-    if (!caller || !child || child.askedBy !== callerId || child.projectId !== caller.projectId) return null
+    if (!caller || !child || !ownChild(caller, child)) return null
     const above = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset)
     if (above) return { ok: false, error: above }
     // §7.4: before anything is sent, mailed or forked
@@ -286,4 +288,12 @@ export class AgentSessionActions {
     if ('error' in ended) return { ok: false, error: `Request ${id} started no session: ${ended.error}` }
     return { childId: ended.childId, action }
   }
+}
+
+/**
+ * The caller's own child (#1948): started by it (`askedBy`) in its project, or for the Assistant outside any project (#853). What a `mail` send gives
+ * work to, and what agent_session works on before #637's link and `auto` widen it
+ */
+function ownChild(caller: SessionInfo, child: SessionInfo): boolean {
+  return child.askedBy === caller.id && child.projectId === caller.projectId && (!!caller.projectId || isAssistantKind(caller.kind))
 }

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
 import { PERSON } from '../mail/address.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -95,7 +95,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     await turnEnds(child, 'First answer.')
     await w.until(() => reports(task).length > 0)
     // A send to a child at rest starts its turn, and waits for it
-    const sent = w.mgr.sendWork(parent, child, 'and the docs')
+    const sent = sendWork(w.mgr, parent, child, 'and the docs')
     await w.until(() => read.tasks(addr(parent), child).length === 2 && w.mgr.sessionInfo(child)?.state === 'working')
     const later = read.tasks(addr(parent), child).find((t) => t.id !== task)
     await turnEnds(child, '')
@@ -155,7 +155,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
 
   it('M3: a follow-up the tool holds for a turn after is answered by that turn on its own request; the turn that never took it answers only its own task', async () => {
     const { child, task } = await childInTurn()
-    const r = await w.mgr.sendWork(w.mgr.sessionInfo(child)!.askedBy!, child, 'and the docs')
+    const r = await sendWork(w.mgr, w.mgr.sessionInfo(child)!.askedBy!, child, 'and the docs')
     const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     expect(follow).not.toBe('')
     await deliverDue(child)
@@ -184,7 +184,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     // A line of Centralu's ends the response's row: it is written now
     handleOf(child).event({ type: 'notice', sessionId: child, level: 'info', from: 'Centralu', label: 'mail', text: 'a line' })
     // A follow-up joins the turn after its response is written, and the turn ends with nothing more
-    const r = await w.mgr.sendWork(parent, child, 'and the docs')
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
     const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     await deliverDue(child)
     expect(handleOf(child).sent.join(' ')).toContain(follow)
@@ -212,7 +212,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
 
   it('two tasks of one sender are two requests: each gets its own answer', async () => {
     const { parent, child, task } = await childInTurn()
-    const r = await w.mgr.sendWork(parent, child, 'and the docs')
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
     const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
     await deliverDue(child)
     await turnEnds(child, 'Code and docs done.')

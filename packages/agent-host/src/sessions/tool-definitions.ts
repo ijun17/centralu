@@ -11,8 +11,8 @@ const IF_BUSY = z.enum(['fork', 'fork_read'] as const satisfies readonly IfBusy[
 // …and every one of them: a value the contract adds and this schema lacks would be refused before the manager saw it
 const _ifBusyComplete: IfBusy extends z.infer<typeof IF_BUSY> ? true : never = true
 
-/** What agent_session answers a `send`, which #1948 folded into mail (owner 2026-11-12) */
-const SEND_IS_MAIL = 'agent_session has no "send": more work for a session you started is mail(action="send", to="<its id>", text=…)'
+/** What agent_session answers a `send`, which #1948 folded into mail (owner 2026-11-12): in no seat's call form, as the Assistant reads it too (centralu_run) */
+const SEND_IS_MAIL = 'agent_session has no "send": more work for a session you started is a mail send to its id'
 
 /** update_centralu's actions: one enum for the Assistant's definition and the reader's */
 const UPDATE_ACTION = z.enum(['check', 'install', 'apply'])

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { hostMail, mailSessionsOf, type HostMail } from '../mail/host-mail.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, MAIL_HOST, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -125,7 +125,7 @@ describe('a turn ends, the owner reads mail', () => {
     const [t1] = tasksOf(parent, child)
     const [first] = read.reportsOn(t1!.id)
     expect(read.row(first!.id, addr(parent))).toMatchObject({ deliveredAt: null, readAt: null })
-    const again = w.mgr.sendWork(parent, child, 'and the linter')
+    const again = sendWork(w.mgr, parent, child, 'and the linter')
     await w.until(() => (handleOf(child)?.sent.length ?? 0) === 2)
     expect(await again).toMatchObject({ ok: true, state: 'working', reported: true })
     handleOf(child)!.answer('second')
@@ -242,7 +242,7 @@ describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', 
     const { parent, child } = await parentAndChild()
     scoped(parent)
     handleOf(child)!.acceptsAtOnce = true
-    expect(await w.mgr.sendWork(parent, child, 'and the docs')).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'and the docs')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'code and docs done')
@@ -405,12 +405,12 @@ describe('work handed on', () => {
     await turnEnds(helper, 'a part done')
     // The owner gives the session more work; in it, the session sends the helper more. The helper's report waits for the session, so the work
     // goes as mail too, and the delivery gives it both in one turn
-    expect(await w.mgr.sendWork(parent, child, 'now this')).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'now this')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 3)
     const now = tasksOf(parent, child)[1]!
     expect(now).toMatchObject({ body: 'now this' })
-    const sentMore = w.mgr.sendWork(child, helper, 'and a second part')
+    const sentMore = sendWork(w.mgr, child, helper, 'and a second part')
     await w.until(() => (handleOf(helper)?.sent.length ?? 0) >= 2)
     expect(tasksOf(child, helper)[1]).toMatchObject({ body: 'and a second part', causeId: now.id })
     await turnEnds(child, 'handed the second part on')
@@ -453,7 +453,7 @@ describe('work handed on', () => {
   it('a call that returns the answer while the work handed on is open does not end the work either: still open, and no report', async () => {
     const { parent, child } = await handOn()
     await turnEnds(child, 'handed the tests on')
-    const again = w.mgr.sendWork(parent, child, 'status?')
+    const again = sendWork(w.mgr, parent, child, 'status?')
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     expect(await again).toMatchObject({ ok: true, state: 'working' })
     handleOf(child)!.answer('still waiting on the tests')
@@ -470,7 +470,7 @@ describe('work handed on', () => {
     await turnEnds(grandchild, 'tests written')
     await w.until(() => read.taskRow(taskOf(child, grandchild).id, grandchild)?.settled === 'reported')
     // The grandchild's report waits for the session, so the owner's send goes as mail too, and the delivery gives it both in one turn
-    expect(await w.mgr.sendWork(parent, child, 'and then?')).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'and then?')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'all done now')

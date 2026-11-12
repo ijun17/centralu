@@ -3,7 +3,7 @@ import type { AgentAdapter } from '../adapters/contract.js'
 import type { ApprovalDetail, PermissionPreset, Question, QuestionAnswer, ToolName } from '@cc/protocol'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
-import { CrossAdapter, crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossAdapter, crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { answersFrom, decisionFrom } from './delegated-cards.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { SessionManager } from './manager.js'
@@ -444,7 +444,7 @@ describe('what a giver of work may answer (#679 review)', () => {
       handleOf(child).answer('first done')
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       await w.mgr.updateSettings(child, { permissionPreset: 'safe' })
-      const sending = w.mgr.sendWork(parent, child, 'clean the build')
+      const sending = sendWork(w.mgr, parent, child, 'clean the build')
       await w.until(() => (handleOf(child).sent.at(-1) ?? '').includes('clean the build'))
       expect(await sending).toMatchObject({ ok: true, state: 'working' })
       const cards = answering(handleOf(child))
@@ -491,7 +491,7 @@ describe('what a giver of work may answer (#679 review)', () => {
       handleOf(child).answer('first done')
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       await w.mgr.inputs.send(child, "the person's own work")
-      expect(await w.mgr.sendWork(parent, child, 'a note')).toMatchObject({ ok: true, state: 'mailed' })
+      expect(await sendWork(w.mgr, parent, child, 'a note')).toMatchObject({ ok: true, state: 'mailed' })
       handleOf(child).acceptsAtOnce = true
       await mail.deliver(child)
       expect(handleOf(child).sent.some((t) => t.includes('a note'))).toBe(true)
@@ -569,7 +569,7 @@ describe('what a giver of work may answer (#679 review)', () => {
       w.mgr.inputs.answerQuestion(child, 'req-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
       handleOf(child).answer('schema written')
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
-      const next = w.mgr.sendWork(parent, child, 'and the index')
+      const next = sendWork(w.mgr, parent, child, 'and the index')
       await w.until(() => (handleOf(child).sent.at(-1) ?? '').includes('and the index'))
       cards = answering(handleOf(child))
       cards.ask('req-1')

@@ -855,7 +855,6 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
-      sendWork: (...a) => self.sendWork(...a),
       mailTool: async (id, args, signal) => (await self.mail.hooks?.tool?.(id, args, signal)) ?? { text: 'The mailbox is not available.', isError: true },
       refusesDelegation: (callerId, target, call) => self.mail.hooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mail.hooks?.roleMoved?.(toId),
@@ -1287,11 +1286,6 @@ export class SessionManager {
   /** `DelegationFlow.agentSession` (delegation-flow.ts), kept on the manager for its callers */
   agentSession(...a: Parameters<DelegationFlow['agentSession']>): ReturnType<DelegationFlow['agentSession']> {
     return this.delegationFlow.agentSession(...a)
-  }
-
-  /** `DelegationFlow.sendWork` (delegation-flow.ts): a session's `mail` to a child of its own, kept on the manager for its callers */
-  sendWork(...a: Parameters<DelegationFlow['sendWork']>): ReturnType<DelegationFlow['sendWork']> {
-    return this.delegationFlow.sendWork(...a)
   }
 
   /**

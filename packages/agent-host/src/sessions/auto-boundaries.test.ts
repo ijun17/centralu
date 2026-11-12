@@ -3,7 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelOption, PermissionPreset } from '@cc/protocol'
-import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { wireHostMail } from './host-mail.test-helpers.js'
 import { ASK_THE_PERSON } from './start-agent-terms.js'
 
@@ -305,7 +305,7 @@ describe('auto Centralu boundaries (#603)', () => {
       state: 'working',
     })
     // Its mail to that child is mail: work by mail is only for a session the sender started (#1948)
-    expect(await w.mgr.sendWork(caller, child.sessionId, 'note')).toBeNull()
+    expect(await sendWork(w.mgr, caller, child.sessionId, 'note')).toBeNull()
     const wait = w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'wait' })
     handle(child.sessionId).answer('done')
     expect(await wait).toMatchObject({ ok: true, state: 'done', answer: 'done' })
@@ -334,7 +334,7 @@ describe('auto Centralu boundaries (#603)', () => {
     const owner = await session()
     const child = await start(owner)
     if (!child.ok) throw new Error(child.error)
-    expect(await w.mgr.sendWork(child.sessionId, owner, 'which branch?')).toBeNull()
+    expect(await sendWork(w.mgr, child.sessionId, owner, 'which branch?')).toBeNull()
     const sent = await m.hooks.tool!(child.sessionId, { action: 'send', to: 'parent', text: 'which branch?' })
     expect(sent.isError).toBeFalsy()
     expect(sent.text).not.toContain('You will be told when it ends')
@@ -348,9 +348,9 @@ describe('auto Centralu boundaries (#603)', () => {
       expect((await w.mgr.agentSession(caller, { sessionId: other, action, text: 'x' })).ok).toBe(false)
     }
     // Its mail to that session is plain mail, not work
-    expect(await w.mgr.sendWork(caller, other, 'x')).toBeNull()
+    expect(await sendWork(w.mgr, caller, other, 'x')).toBeNull()
     const own = await session('auto', caller)
-    expect(await w.mgr.sendWork(caller, own, 'x')).toMatchObject({
+    expect(await sendWork(w.mgr, caller, own, 'x')).toMatchObject({
       ok: false,
       error: expect.stringContaining('more permissions'),
     })

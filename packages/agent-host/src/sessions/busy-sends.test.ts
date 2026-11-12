@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
 import { PERSON } from '../mail/address.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
@@ -55,7 +55,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
   it('agent_session send to a child in a turn answers mailed at once, with no choice; the task joins the running turn (§10.6.3)', async () => {
     const { parent, child } = await childInTurn()
     const turns = turnsOf(w.store, child)
-    const r = await w.mgr.sendWork(parent, child, 'use Chromium')
+    const r = await sendWork(w.mgr, parent, child, 'use Chromium')
     expect(r).toMatchObject({ ok: true, state: 'mailed', sessionId: child, messageId: expect.any(String) })
     const task = read.tasks(addr(parent), child).find((t) => t.body === 'use Chromium')!
     expect(task).toMatchObject({ id: r?.ok && r.state === 'mailed' ? r.messageId : '', origin: 'agent_session' })
@@ -87,7 +87,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
       const orc = await w.mgr.assistant()
       await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build' })
       await deliverDue(child)
-      const r = await w.mgr.sendWork(parent, child, 'and the docs')
+      const r = await sendWork(w.mgr, parent, child, 'and the docs')
       const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
       await deliverDue(child)
       const [asked] = read.tasks(addr(orc.id), child)
@@ -133,7 +133,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
 
   it("option B: a delegated task given as mail shows as its sender's message in the receiver's conversation, the agent reads the mail frame once, and other mail keeps the line", async () => {
     const { parent, child } = await childInTurn()
-    const r = await w.mgr.sendWork(parent, child, 'use Chromium')
+    const r = await sendWork(w.mgr, parent, child, 'use Chromium')
     const id = r?.ok && r.state === 'mailed' ? r.messageId : ''
     handleOf(child).answer('Started.')
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
@@ -184,7 +184,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
   it('agent_session stop withdraws a mailed task that was not delivered yet', async () => {
     const { parent, child } = await childInTurn()
     w.mgr.sessionInfo(child)!.pendingApproval = { requestId: 'r1', detail: { kind: 'other', title: 'x' } } as never
-    const r = await w.mgr.sendWork(parent, child, 'later')
+    const r = await sendWork(w.mgr, parent, child, 'later')
     expect(r).toMatchObject({ state: 'mailed' })
     const task = read.tasks(addr(parent), child).find((t) => t.body === 'later')!
     w.mgr.sessionInfo(child)!.pendingApproval = null
@@ -196,7 +196,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
 
   it('a session that stops in the turn the mailed task joined releases it through the stop notice, with no report, as for any task', async () => {
     const { parent, child } = await childInTurn()
-    const r = await w.mgr.sendWork(parent, child, 'and the docs')
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
     const id = r?.ok && r.state === 'mailed' ? r.messageId : ''
     await deliverDue(child)
     expect(read.taskRow(id, child)?.deliveredAt).not.toBeNull()

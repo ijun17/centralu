@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import type { PermissionPreset } from '@cc/protocol'
-import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossAdapter, crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
@@ -72,7 +72,7 @@ describe('requests to a busy session (#677)', () => {
     it('starts from a copy of the busy session\'s conversation, in a worktree of its own, linked to the requester', async () => {
       git(w.caller.path)
       const { a, b } = await busyChild()
-      const forking = w.mgr.sendWork(b, a, 'review the schema', 'fork')
+      const forking = sendWork(w.mgr, b, a, 'review the schema', 'fork')
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
       // The copy is of A's conversation, taken from the folder A runs in; the original is left running
@@ -142,20 +142,20 @@ describe('requests to a busy session (#677)', () => {
     it('is refused by a CLI that cannot fork', async () => {
       const { a, b } = await busyChild()
       delete (claude() as { forkConversation?: unknown }).forkConversation
-      expect(await w.mgr.sendWork(b, a, 'x', 'fork')).toMatchObject({ ok: false, error: expect.stringContaining('cannot fork') })
+      expect(await sendWork(w.mgr, b, a, 'x', 'fork')).toMatchObject({ ok: false, error: expect.stringContaining('cannot fork') })
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
     })
 
     it('follows start_agent\'s gates: an untrusted project, or the per-project ceiling, refuses it', async () => {
       const { a, b } = await busyChild()
       w.mgr.setProjectTrusted(w.caller.id, false)
-      expect(await w.mgr.sendWork(b, a, 'x', 'fork_read')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
+      expect(await sendWork(w.mgr, b, a, 'x', 'fork_read')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       w.mgr.setProjectTrusted(w.caller.id, true)
       w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       // B's earlier child is at rest; one running child fills a ceiling of one
       const runner = await w.mgr.startAgent(b, { task: 'keep busy', wait: false })
       expect(runner).toMatchObject({ ok: true })
-      expect(await w.mgr.sendWork(b, a, 'x', 'fork_read')).toMatchObject({ ok: false, error: expect.stringContaining('already working') })
+      expect(await sendWork(w.mgr, b, a, 'x', 'fork_read')).toMatchObject({ ok: false, error: expect.stringContaining('already working') })
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
     })
 
@@ -163,7 +163,7 @@ describe('requests to a busy session (#677)', () => {
       const { a, b } = await busyChild('auto')
       await w.mgr.setProjectTrusted(w.caller.id, false)
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const forking = w.mgr.sendWork(b, a, 'read it', 'fork_read')
+      const forking = sendWork(w.mgr, b, a, 'read it', 'fork_read')
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
       await w.until(() => handleOf(fork.id).sent.length === 1)
@@ -195,7 +195,7 @@ describe('requests to a busy session (#677)', () => {
       w.mgr.prefs.setUiPreferences({ agentDepth: 1 })
       const setting = 'How deep agents may start agents'
       for (const ifBusy of ['fork', 'fork_read'] as const) {
-        expect(await w.mgr.sendWork(b, a, 'x', ifBusy)).toMatchObject({
+        expect(await sendWork(w.mgr, b, a, 'x', ifBusy)).toMatchObject({
           ok: false,
           error: expect.stringContaining(`No fork of "${info(a).name}": this session is 1 level below a session the person started, and "${setting}"`),
         })
@@ -203,7 +203,7 @@ describe('requests to a busy session (#677)', () => {
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
 
       w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
-      const forking = w.mgr.sendWork(b, a, 'read it', 'fork_read')
+      const forking = sendWork(w.mgr, b, a, 'read it', 'fork_read')
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
       await w.until(() => handleOf(fork.id).sent.length === 1)
@@ -221,7 +221,7 @@ describe('requests to a busy session (#677)', () => {
       const { a, b } = await busyChild('safe')
       // A safe requester with no remembered consent gets the card
       w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
-      const forking = w.mgr.sendWork(b, a, 'x', 'fork_read')
+      const forking = sendWork(w.mgr, b, a, 'x', 'fork_read')
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       void w.mgr.setProjectTrusted(w.caller.id, false)
       expect(info(b).pendingApproval).toBeFalsy()
@@ -233,7 +233,7 @@ describe('requests to a busy session (#677)', () => {
     it("refuses an approval of a fork's card that comes after the project's trust is gone", async () => {
       const { a, b } = await busyChild('safe')
       w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
-      const forking = w.mgr.sendWork(b, a, 'x', 'fork_read')
+      const forking = sendWork(w.mgr, b, a, 'x', 'fork_read')
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       // Taken away at the store, so only the read after the answer can see it
       w.store.projects.setProjectTrusted(w.caller.id, false)
@@ -263,7 +263,7 @@ describe('requests to a busy session (#677)', () => {
       git(w.caller.path)
       const { a, b } = await busyChild()
       const copy = slowCopy()
-      const forking = w.mgr.sendWork(b, a, 'review it', 'fork')
+      const forking = sendWork(w.mgr, b, a, 'review it', 'fork')
       await w.until(() => copy.started)
       // Asked for at normal, the lower of the two presets then; the requester is safe by the time the fork starts
       await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
@@ -289,7 +289,7 @@ describe('requests to a busy session (#677)', () => {
         await gate
         return make(...args)
       })
-      const forking = w.mgr.sendWork(b, a, 'review it', 'fork')
+      const forking = sendWork(w.mgr, b, a, 'review it', 'fork')
       await w.until(() => making)
       // The session is being made at normal; the requester is now safe
       await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
@@ -303,7 +303,7 @@ describe('requests to a busy session (#677)', () => {
     it("gives no task to a fork whose project lost trust while it was being made", async () => {
       const { a, b } = await busyChild()
       const copy = slowCopy()
-      const forking = w.mgr.sendWork(b, a, 'read it', 'fork_read')
+      const forking = sendWork(w.mgr, b, a, 'read it', 'fork_read')
       await w.until(() => copy.started)
       w.store.projects.setProjectTrusted(w.caller.id, false)
       copy.release()
@@ -316,8 +316,8 @@ describe('requests to a busy session (#677)', () => {
       const { a, b } = await busyChild()
       w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       const calls = [
-        w.mgr.sendWork(b, a, 'one', 'fork_read'),
-        w.mgr.sendWork(b, a, 'two', 'fork_read'),
+        sendWork(w.mgr, b, a, 'one', 'fork_read'),
+        sendWork(w.mgr, b, a, 'two', 'fork_read'),
       ]
       // One call is refused at once; the other's fork takes its task
       const results = await Promise.all(calls)

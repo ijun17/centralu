@@ -4,7 +4,7 @@ import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
-import { CITE_MS, type MessageService, type ReadItem, type SendResult } from './messages.js'
+import { CITE_MS, SUBJECT_CHARS, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
@@ -186,19 +186,26 @@ export class MailTool {
     throw refuse('ambiguous', `${n} sessions are named ${JSON.stringify(t)}: ${shown.slice(0, 8).join(', ')}${n > 8 ? ', and more' : ''}. Send to one of them by its address.`)
   }
 
-  /** `MailToolHost.work` for the session `to` names here, or for the word itself (a start request's handle, a linked child's id) */
-  private async work(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
-    if (a.action !== 'send' || !this.host.work || !a.to?.trim() || !a.text?.trim()) return null
+  /**
+   * `MailToolHost.work` for the one session `to` names here, else for the word itself (a start request's handle, a linked child's id); a role is
+   * never work. The subject leads the words, so the child reads what the card shows, and the answer says it went as work
+   */
+  private async work(sessionId: string, me: { address: string }, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
+    const t = a.to?.trim() ?? ''
+    if (a.action !== 'send' || !this.host.work || !t || [PERSON, 'assistant', 'parent'].includes(t.toLowerCase()) || !a.text?.trim()) return null
     const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
-    let target = a.to.trim()
-    try {
-      const to = this.party(sessionId, me, a.to).address
-      if (!to.startsWith(own)) return null
-      target = to.slice(own.length)
-    } catch {
-      // Not a session here by id or name: the sessions read the word as a request's handle or a linked child's id
-    }
-    return this.host.work(sessionId, target, a.text.trim(), a.ifBusy, signal)
+    const word = t.startsWith(own) ? t.slice(own.length) : t
+    const [only, other] = this.sessionsNamed(sessionId, word)
+    const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
+    const r = await this.host.work(sessionId, only && !other ? only.id : word, subject + a.text.trim(), a.ifBusy, signal)
+    return r && !r.isError ? { ...r, text: `Sent as work, not as mail${a.kind ? ` (kind "${a.kind}" is for mail)` : ''}. ${r.text}` } : r
+  }
+
+  /** The sessions here a word names: the one with that id, else those of that name but the caller (after a handoff the heir has the name of the session it replaced, and writes to that one) */
+  private sessionsNamed(sessionId: string, word: string): ReturnType<MailToolHost['sessions']> {
+    const here = this.host.sessions()
+    const exact = here.find((s) => s.id === word)
+    return exact ? [exact] : here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
   }
 
   private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
@@ -278,11 +285,7 @@ export class MailTool {
     if (absolute && !(absolute.kind === 'session' && t.startsWith(own))) return { address: t }
     const word = t.startsWith(own) ? t.slice(own.length) : t
     if (word === sessionId) throw refuse('bad_value', 'a message is for someone else')
-    const here = this.host.sessions()
-    const exact = here.find((s) => s.id === word)
-    if (exact) return { address: this.service.sessionAddress(exact.id) }
-    // (never the caller: after a handoff the heir has the name of the session it replaced, and writes to that one)
-    const named = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
+    const named = this.sessionsNamed(sessionId, word)
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
     // A child this host started on a linked machine (#2067): the service refuses it in its own words (elsewhere), not as a session it never had

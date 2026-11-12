@@ -98,7 +98,7 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | '
   /** The tools a session receives: its profile, and what it may read */
   readonly tools: SessionTools
   /** A send to a session the caller gives work (`AgentSessionActions.sendWork`), or null for plain mail */
-  sendWork: DelegationFlow['sendWork']
+  readonly delegationFlow: Pick<DelegationFlow, 'actions'>
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
   /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
@@ -266,7 +266,7 @@ export class MailSessionsView {
 
   /** `MailToolHost.work` (#1948): the answer worded as agent_session's are for the caller's seat, or null for plain mail */
   async work(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null> {
-    const r = await this.host.sendWork(callerId, target, text, ifBusy, signal)
+    const r = await this.host.delegationFlow.actions.sendWork(callerId, target, text, ifBusy, signal)
     return r && agentCallsFor(this.host.tools.toolProfileOf(callerId) ?? 'human', agentRunText(r))
   }
 

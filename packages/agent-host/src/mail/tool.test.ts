@@ -27,10 +27,20 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
   it("goes to the sessions by the id its name resolves to, and their answer is the tool's; nothing is written as mail", async () => {
     const asked: unknown[][] = []
     const w = hostWorld({ work: async (callerId, target, text, ifBusy) => (asked.push([callerId, target, text, ifBusy]), target === 'w' ? { text: 'the work answer' } : null) })
-    expect(await w.tool.call('a', { action: 'send', to: 'worker', text: 'and the docs', ifBusy: 'fork' })).toEqual({ text: 'the work answer' })
-    expect(await w.tool.call('a', { action: 'send', to: `session:${HOST}/w`, text: 'and the tests' })).toEqual({ text: 'the work answer' })
-    expect(asked).toEqual([['a', 'w', 'and the docs', 'fork'], ['a', 'w', 'and the tests', undefined]])
+    expect(await w.tool.call('a', { action: 'send', to: 'worker', text: 'and the docs', ifBusy: 'fork' })).toEqual({ text: 'Sent as work, not as mail. the work answer' })
+    expect(await w.tool.call('a', { action: 'send', to: `session:${HOST}/w`, text: 'and the tests' })).toEqual({ text: 'Sent as work, not as mail. the work answer' })
+    // Review of #1948: the subject the card shows leads the words the child reads, on one line; a kind, which work has none of, is said to be mail's
+    expect((await w.tool.call('a', { action: 'send', to: 'w', kind: 'note', subject: 'Docs\nnow', text: 'and the docs' })).text).toBe('Sent as work, not as mail (kind "note" is for mail). the work answer')
+    expect(asked).toEqual([['a', 'w', 'and the docs', 'fork'], ['a', 'w', 'and the tests', undefined], ['a', 'w', 'Docs now\n\nand the docs', undefined]])
     expect(w.store.mailbox.feedOf(A, { limit: 5 })).toEqual([])
+  })
+
+  // Review of #1948: a role is never work, whatever a session is named: a child named "parent" does not take its parent's mail
+  it('never asks for a role, even of a session named like it', async () => {
+    const asked: string[] = []
+    const w = hostWorld({ extra: { k: { name: 'parent', projectId: 'p1', askedBy: 'w' } }, work: async (_caller, target) => (asked.push(target), { text: 'work' }) })
+    for (const to of ['parent', 'Assistant', 'person']) await w.tool.call('w', { action: 'send', to, text: 'x' })
+    expect(asked).toEqual([])
   })
 
   it('is plain mail when the sessions say it is no work, and a word no session has is theirs to read first (a start request, a linked child)', async () => {
@@ -48,7 +58,7 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
   it('reaches the sessions before a name is looked for on other computers, one of which is away', async () => {
     const w = hostWorld({ work: async (_caller, target) => (target === 'ag-1234' ? { text: 'the work answer' } : null) })
     w.across.usePeers({ selfName: () => 'here', machineDirectory: () => ({ entries: [], away: [{ name: 'studio', why: 'not reachable right now' }] }) })
-    expect(await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'and the docs' })).toEqual({ text: 'the work answer' })
+    expect(await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'and the docs' })).toEqual({ text: 'Sent as work, not as mail. the work answer' })
     expect((await w.tool.call('a', { action: 'send', to: 'ag-9999', text: 'x' })).text).toContain('Not asked: studio')
   })
 })

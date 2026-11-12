@@ -8,7 +8,7 @@ import type { AgentAdapter } from '../adapters/contract.js'
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { Store } from '../dev-services/store.js'
-import { crossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, sendWork } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { SessionManager } from './manager.js'
 import { Adapter } from './fake-claude.test-helpers.js'
@@ -489,7 +489,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   async function sendPastBound(h: ReturnType<typeof host>, caller: string, child: string, text: string) {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      const sent = h.mgr.sendWork(caller, child, text)
+      const sent = sendWork(h.mgr, caller, child, text)
       for (let i = 0; i < 50 && !h.claude.handles.get(child)!.sent.some((t) => t.includes(text)); i++) await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
       expect(await sent).toMatchObject({ ok: true, state: 'working', reported: true })
