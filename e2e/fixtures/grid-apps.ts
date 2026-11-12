@@ -1,4 +1,5 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
+import { THEME_PRESETS } from '../../packages/ui/src/app/theme.js'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
 import { expectCoveredInSight, expectFrameTakesPointer, expectOutOfSight, hiddenAround, dragRow, newSession } from './project-screen.js'
 
@@ -511,14 +512,12 @@ export function gridAppTests(): void {
         return Object.assign({}, ...contexts.map((c) => c.styles?.variables ?? {})) as Record<string, string>
       }
 
-      // Dark and Light by value; the high-contrast presets only have to agree with themselves
-      const presets = [
-        { id: 'dark', base: 'dark', floor: '#120e0a', raised: '#282320' },
-        { id: 'light', base: 'light', floor: '#f0f0f0', raised: '#f9f9f9' },
-        { id: 'hc-dark', base: 'dark' },
-        { id: 'hc-light', base: 'light' },
-      ] as const
-      for (const preset of presets) {
+      // Every preset the app lists. Dark and Light are also checked by value; the others only have to agree with themselves
+      const byValue: Record<string, { floor: string; raised: string }> = {
+        dark: { floor: '#120e0a', raised: '#282320' },
+        light: { floor: '#f0f0f0', raised: '#f9f9f9' },
+      }
+      for (const preset of THEME_PRESETS) {
         await page.evaluate(
           ({ id, base }) =>
             (window as any).__store
@@ -542,7 +541,8 @@ export function gridAppTests(): void {
         })
         expect(steps.floor, preset.id).toBe(steps.rootFloor)
         expect(steps.raised, preset.id).toBe(steps.rootRaised)
-        if ('floor' in preset) expect([steps.floor, steps.raised], preset.id).toEqual([preset.floor, preset.raised])
+        const exact = byValue[preset.id]
+        if (exact) expect([steps.floor, steps.raised], preset.id).toEqual([exact.floor, exact.raised])
 
         // ...so the two panels' grounds are one colour...
         expect(await background(view), preset.id).toBe(await background(conversation))

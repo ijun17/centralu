@@ -301,25 +301,21 @@
  * projects, "Add project", row borders, the sidebar's own edge, and the top bar's and the shell banner's bottom
  * line, which hang on the same ground). Mixed from the theme's own tokens rather than set per preset, so
  * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
- * swaps this in for --color-line (SIDEBAR_VARS); the top bar and the banner name it directly, `border-(--color-line-side)`
- * (#2207), since swapping it in there would also change the plain `border-line` of what the bar holds (the inbox dropdown).
- *
- * The three lines follow one rule (themes.md "The lines"), measured as the lowest WCAG contrast over the floor, the sidebar
- * and a raised surface: `line` 1.2:1 or more, `line-side` 1.4:1, `line-strong` 1.7:1 and 0.25 over `line-side`; the
- * high-contrast presets keep 3:1. e2e/fixtures/theme.ts holds every preset to it. What each preset draws on the
- * sidebar's own ground (contrast, ΔL* in CIELAB; Light's and Graphite's `line` were raised by #2207's review):
- *   Dark      line-side #45403c 1.88:1, ΔL* 23.3 (the plain `line` #3a3531: 1.59:1, 18.3)
- *   Light     line-side #bababa 1.47:1 on #e0e0e0, ΔL* 13.7 (`line` #cbcbcb: 1.23:1; it was #d6d6d6, 1.10:1, ΔL* 3.6)
- *   Graphite  line-side #4a4a4c 1.66:1 on #28282a, ΔL* 15.3 (`line` #3a3a3c: 1.30:1; it was #38383a, 1.26:1)
- *   HC dark   line-side #797979 4.82:1; HC light #707070 4.95:1 (`line`: 4.24 and 4.54)
- * The top bar used the plain `line`, which in Light left it at 1.10:1 on its ground (a custom theme with `line`
- * #232326 on a #252528 sidebar: 1.03:1, gone).
+ * swaps this in for --color-line (SIDEBAR_VARS); the top bar and the banner name it with `border-line-side` (#2207), since
+ * swapping it in there would also change the plain `border-line` of what the bar holds (the inbox dropdown). The rule
+ * that orders the three lines, and what each preset draws, is in themes.md "The lines"; e2e/fixtures/theme.ts holds
+ * every preset to it.
  *
  * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
  * holds to it), and this is derived from two of them, never set themselves.
  */
 :root {
   --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
+}
+
+/* The token is outside @theme, so Tailwind makes no `border-line-side` of it: this is that utility, one place for the top bar and the banner */
+@utility border-line-side {
+  border-color: var(--color-line-side);
 }
 
 /*
@@ -599,9 +595,7 @@
  * Contrast of each ink on the floor / the sidebar / raised, the urgency order holding on all three:
  *   signal #ffffff 16.9 / 14.7 / 13.9    body #f5f5f7 15.5 / 13.5 / 12.8
  *   muted  #b0b0b5  7.8 /  6.8 /  6.5    faint #8e8e93  5.2 /  4.5 /  4.3
- * Lines, on the floor / the sidebar / raised: `line` #3a3a3c is 1.49 / 1.30 / 1.23:1; the sidebar's `line-side` #4a4a4c is 1.91 /
- * 1.66 / 1.58; `line-strong` #545456 is 2.23 / 1.95 / 1.84. Dark's measure 1.59 / 1.59 / 1.28, 1.88 / 1.88 / 1.52 and
- * 2.27 / 2.27 / 1.83, so Graphite's lines are the gentler of the two, as its steps are.
+ * What its lines measure, against the rule for them, is in themes.md "The lines".
  */
 [data-theme='graphite'] {
   --color-surface-floor: #1d1d1d;
