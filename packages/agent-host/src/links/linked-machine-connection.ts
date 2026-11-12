@@ -778,7 +778,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   // ── RoutedMachine ───────────────────────────────────────────────────────────────────────
 
-  call(method: string, params: unknown): Promise<unknown> {
+  call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.client) return Promise.reject(rpcError(`${this.name} is not reachable right now`, 'internal', { retryable: true }))
     // A card the hub could not read is never allowed for good from here, whatever the window offered (#844, `unreadCard`)
     if (method === 'agents.respondApproval' && isObj(params) && params.decision === 'always' && this.q.unreadCard(params.sessionId, params.requestId)) {
@@ -786,7 +786,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         rpcError(`This question from ${this.name} could not be read in full here, so it cannot be allowed always. Allow it once or deny it.`, 'internal', { retryable: false }),
       )
     }
-    return this.client.call(method, params)
+    return this.client.call(method, params, timeoutMs)
   }
 
   lastKnown(kind: 'sessions' | 'projects'): unknown[] | null {

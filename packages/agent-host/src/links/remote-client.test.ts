@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer } from '../transport/server.js'
@@ -222,6 +222,35 @@ describe('the link client (#82)', () => {
       new Promise((r) => setImmediate(() => r('still waiting'))),
     ])
     expect(outcome).toMatchObject({ retryable: true, message: expect.stringMatching(/not reachable/) })
+  })
+
+  it('waits for a call as long as the caller says, and 200 s for one that says nothing (#2170)', async () => {
+    const server = new HostServer({ port: 0, token: TOKEN, onRpc: () => new Promise(() => {}) })
+    const port = await server.listen()
+    cleanups.push(() => server.close())
+    const { c } = client(port)
+    c.connect()
+    await eventually(() => c.connected)
+    vi.useFakeTimers()
+    try {
+      const outcome = (p: Promise<unknown>) => {
+        const o = { ended: false, error: undefined as unknown }
+        p.catch((e: unknown) => ((o.ended = true), (o.error = e)))
+        return o
+      }
+      const own = outcome(c.call('git.commit', {}, 11 * 60_000))
+      const short = outcome(c.call('sessions.list', {}, 30_000))
+      const flat = outcome(c.call('host.readSession', {}))
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect([short.ended, flat.ended, own.ended]).toEqual([true, false, false])
+      expect(short.error).toMatchObject({ retryable: true, message: expect.stringMatching(/did not answer sessions.list in time/) })
+      await vi.advanceTimersByTimeAsync(170_000)
+      expect([flat.ended, own.ended]).toEqual([true, false])
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(own.ended).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('forwards a call and its answer, and a remote failure keeps its code, retry flag and data', async () => {
