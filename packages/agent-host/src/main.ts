@@ -45,6 +45,7 @@ import { copySwapMayPrompt, familyOf, installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
+import { markOwnChildren } from './dev-services/strays.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
@@ -203,6 +204,8 @@ function defaultDbPath(): string {
   return join(dir, 'store.db')
 }
 const dbPath = values.memory ? ':memory:' : (values.db ?? defaultDbPath())
+// What this host starts carries its mark from here on, the one the leftover finder knows it by (#1898)
+markOwnChildren(dbPath)
 /*
  * The data folder is its owner's only (#838), before the store or the log opens a file in it. Only the data folder
  * itself: a `--db` elsewhere (a test's temp folder, a folder of the person's) is left as it is.

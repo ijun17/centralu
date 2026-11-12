@@ -1,25 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
-import { insideAny, noTty, orphanAdopter, parseLsofCwd, parsePsRows, pickStrays, scanProcesses, stopStrays } from './strays.js'
+import { findStrays, insideAny, markAsked, markOwnChildren, noTty, OWNER_MARK, ownerMarkFor, parseLsofCwd, parsePsRows, pickStrays, scanProcesses, stopStrays } from './strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { ownProcesses } from '../process.test-helpers.js'
+import { ownProcesses, pidIn } from '../process.test-helpers.js'
+import { KILL_GRACE_MS } from '../os/kill-tree.js'
 
 /**
- * Choosing a leftover process (user request, 2026-09-07).
+ * Choosing a leftover process (user request, 2026-09-07; by owner mark since #1898).
  *
- * Measurement set the rules: a dev server an agent launched has ppid=1 with no controlling
- * terminal (`??`), while something the person launched in their own terminal has a tty
- * (`ttys005`). That line is what separates "safe to clean up" from "someone else's work." This
- * only checks that judgment — it never actually calls ps or lsof.
+ * A dev server an agent launched has no controlling terminal (`??`) and carries the host's owner mark in its environment;
+ * something the person launched in their own terminal has a tty (`ttys005`), and something the person started outside
+ * Centralu has no mark. These check that judgment on recorded tables: they never call ps, lsof or read an environment.
  */
 describe('pickStrays', () => {
   const rows = parsePsRows(
     [
-      '  100     1 ??       node /srv/dev-server.js', // left behind by an agent
+      '  100     1 ??       node /srv/dev-server.js', // left behind by an agent: carries our mark
       '  101     1 ttys005  node /srv/dev-server.js', // launched by a person in a terminal
       '  200   100 ??       node child-of-stray.js',
       '  900     1 ??       node host.mjs', // us (the host)
@@ -36,18 +36,18 @@ describe('pickStrays', () => {
     [300, '/elsewhere'],
   ])
   const roots = ['/work/proj']
+  const marked = new Set([100, 101, 901, 300])
 
-  it('picks only someone else\'s process running with no terminal in our folder', () => {
-    const picked = pickStrays(rows, cwds, roots, 900).map((s) => s.pid)
-    expect(picked).toEqual([100, 200])
+  it('picks only a marked process, and what runs under it, with no terminal in our folder', () => {
+    expect(pickStrays(rows, cwds, roots, 900, marked).map((s) => s.pid)).toEqual([100, 200])
   })
 
   /**
-   * The host no longer leaves its agents with the keeper, but a keeper of an older build that died while it held some
-   * left them behind: reparented to init, in our folder, with no terminal. Nothing holds them any more, so they are ordinary
-   * leftovers, offered with what runs under them.
+   * An earlier host on this data folder (one that crashed, or the one before an update) left an agent behind: reparented
+   * to init, in our folder, with no terminal. It carries this host's mark (one value per data folder), so it is offered
+   * with what runs under it.
    */
-  it('offers what a dead keeper left behind, and what runs under it, as leftovers', () => {
+  it('offers what an earlier host on this folder left behind, and what runs under it, as leftovers', () => {
     const left = parsePsRows(
       [
         '  700     1 ??       claude --output-format stream-json', // once held by a keeper that died, reparented
@@ -60,45 +60,42 @@ describe('pickStrays', () => {
       [701, '/work/proj'],
       [900, '/work/proj'],
     ])
-    expect(pickStrays(left, leftCwds, roots, 900).map((s) => s.pid)).toEqual([700, 701])
+    expect(pickStrays(left, leftCwds, roots, 900, new Set([700, 701])).map((s) => s.pid)).toEqual([700, 701])
   })
 
-  it('leaves alone what a person launched in a terminal — tty is the line', () => {
-    expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 101)).toBe(false)
+  it('leaves alone what a person launched in a terminal (tty is the line, mark or not)', () => {
+    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 101)).toBe(false)
   })
 
-  it('the host\'s own descendant is not on the list — the shutdown procedure already cleans up the whole tree', () => {
-    expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 901)).toBe(false)
+  it('the host\'s own descendant is not on the list: the shutdown procedure already cleans up the whole tree', () => {
+    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 901)).toBe(false)
   })
 
   it('outside our folder is someone else\'s business', () => {
-    expect(pickStrays(rows, cwds, roots, 900).some((s) => s.pid === 300)).toBe(false)
+    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 300)).toBe(false)
   })
 
   it('never invents a cwd for a process it could not read one for', () => {
-    expect(pickStrays(rows, new Map(), roots, 900)).toEqual([])
+    expect(pickStrays(rows, new Map(), roots, 900, marked)).toEqual([])
   })
 
-  it('keeps a child an orphan spawned together with it — the whole tree has to be selectable on one screen', () => {
-    // 200 is a child of the orphan (100). Since the chain only passes candidates on the way to init, it has no owner
-    expect(pickStrays(rows, cwds, roots, 900).map((s) => s.pid)).toContain(200)
+  it('offers nothing whose environment could not be read or has no mark', () => {
+    expect(pickStrays(rows, cwds, roots, 900, new Set())).toEqual([])
   })
 
   /**
-   * A process another app is **currently using** (a point raised by the user, 2026-09-10).
-   *
-   * VS Code's extensions ran straight into this: the workspace was our project, so cwd matched,
-   * and they were launched over a pipe, so they had no tty either. Measured, their parent turns
-   * out to be a living extension host (cwd `/`) — not an orphan. Rules 1 through 3 alone could
-   * not tell the difference, and the Claude extension was killed by SIGTERM when this actually ran.
+   * A process another app is **currently using** (a point raised by the user, 2026-09-10): VS Code's extensions had our
+   * project for a workspace and were launched over a pipe, so cwd and tty matched. The Claude extension was killed by
+   * SIGTERM when an early version ran. Nobody in that tree carries our mark; an agent's orphan does.
    */
-  it('a process a living app still holds is not on the list (VS Code extensions)', () => {
+  it('a process a living app holds is not on the list (VS Code extensions), nor an unmarked orphan', () => {
     const vscode = parsePsRows(
       [
-        '  700     1 ??       Code Helper (Plugin)', // the extension host — alive, and outside our folder (cwd /)
+        '  700     1 ??       Code Helper (Plugin)', // the extension host, outside our folder (cwd /)
         '  701   700 ??       claude --output-format stream-json', // launched by that extension
         '  702   700 ??       node languageServer.js',
-        '  800     1 ??       node dev-server.js', // a genuine orphan — this one is kept
+        '  800     1 ??       node dev-server.js', // an agent's orphan: marked
+        '  810     1 ??       node old-server.js', // an orphan from before the mark, or started outside Centralu
       ].join('\n'),
     )
     const cwd = new Map([
@@ -106,40 +103,18 @@ describe('pickStrays', () => {
       [701, '/work/proj'],
       [702, '/work/proj'],
       [800, '/work/proj'],
+      [810, '/work/proj'],
     ])
-    expect(pickStrays(vscode, cwd, roots, 900).map((s) => s.pid)).toEqual([800])
+    expect(pickStrays(vscode, cwd, roots, 900, new Set([800])).map((s) => s.pid)).toEqual([800])
   })
 
   /**
-   * Under a subreaper the orphan's parent is alive: WSL's `/init` session helper, a user `systemd --user`, a container's
-   * init (#1882). WSL's `/init` helper, where it adopts our orphans, counts as init; any other living parent still owns what it
-   * holds, and what started the host is never offered (the keeper, a launcher).
+   * A systemd desktop (`systemd --user` adopts what detaches, #1882): `code .` from a terminal in the project leaves the
+   * editor's main process with its cwd there, no terminal, and `systemd --user` for a parent, the same shape as an agent's
+   * orphaned dev server. Only the mark tells them apart: the editor is not offered, the dev server is, and so is the
+   * platform binary under it whose own environment macOS does not show.
    */
-  it('an orphan adopted by the machine\'s subreaper is on the list; what a living parent holds is not, and nor is what started the host', () => {
-    const wsl = parsePsRows(
-      [
-        '    1     0 ?        systemd',
-        '   60     1 ?        /init', // the subreaper: orphans land here
-        '   30    60 ??       centralu-keeper', // what started the host, in our folder, no terminal; its app has quit, so /init holds it
-        '  900    30 ??       node host.mjs',
-        '  800    60 ??       node dev-server.js', // adopted by /init after its shell ended
-        '  700    60 ??       Code Helper (Plugin)', // a sibling app, also under /init
-        '  701   700 ??       claude --output-format stream-json',
-        '   40    30 ??       claude', // an agent that runs its own tools
-        '   41    40 ??       node mcp-server.js',
-      ].join('\n'),
-    )
-    const cwd = new Map([[800, '/work/proj'], [701, '/work/proj'], [900, '/work/proj'], [30, '/work/proj'], [40, '/work/proj'], [41, '/work/proj']])
-    expect(pickStrays(wsl, cwd, roots, 900, 60).map((s) => s.pid)).toEqual([800])
-    expect(pickStrays(wsl, cwd, roots, 900).map((s) => s.pid)).toEqual([])
-  })
-
-  /**
-   * A systemd desktop (`systemd --user` adopts what detaches): `code .` from a terminal in the project leaves the editor's
-   * main process with its cwd there, no terminal, and `systemd --user` for a parent. It is not a leftover. Only WSL's
-   * `/init` is taken for init, so nothing is offered; this desktop's own leftovers are missed by choice.
-   */
-  it('an editor that detached itself under `systemd --user` is not offered, even though that process adopts orphans', async () => {
+  it('a detached editor with no mark is not offered; an orphaned marked dev server and what runs under it are', () => {
     const desktop = parsePsRows(
       [
         '    1     0 ?        /sbin/init',
@@ -147,29 +122,65 @@ describe('pickStrays', () => {
         '  900   611 ??       node host.mjs',
         '  800   611 ?        /usr/share/code/code .', // the detached editor's main process
         '  801   800 ?        /usr/share/code/code --type=zygote', // its helper
-        '  802   800 ?        /usr/share/code/code --type=renderer',
+        '  810   611 ?        node node_modules/.bin/vite', // an agent's dev server, orphaned
+        '  811   810 ?        /usr/bin/python3 -m http.server', // its child, whose environment was not readable
       ].join('\n'),
     )
-    const cwd = new Map([[800, '/work/proj'], [801, '/work/proj'], [802, '/work/proj']])
-    // The probe's orphan is 4242; where it landed (611) and what that process runs are what the machine answers
-    const probe = (adopterCommand: string) => async (file: string, args: string[]) => ({
-      stdout: file === '/bin/sh' ? '4242\n' : args[1] === 'ppid=' ? ' 611\n' : adopterCommand + '\n',
-    })
-    const ended: number[] = []
-    const systemd = await orphanAdopter(probe('/usr/lib/systemd/systemd --user'), (pid) => void ended.push(pid))
-    expect(systemd).toBeNull()
-    expect(pickStrays(desktop, cwd, roots, 900, systemd).map((s) => s.pid)).toEqual([])
-    // The same table with WSL's helper in that place: it is the machine's init, and what it holds is listed
-    const init = await orphanAdopter(probe('/init'), (pid) => void ended.push(pid))
-    expect(init).toBe(611)
-    expect(pickStrays(desktop, cwd, roots, 900, init).map((s) => s.pid)).toEqual([800, 801, 802])
-    // The probe's own process is ended each time, and only that
-    expect(ended).toEqual([4242, 4242])
+    const cwd = new Map([[800, '/work/proj'], [801, '/work/proj'], [810, '/work/proj'], [811, '/work/proj']])
+    expect(pickStrays(desktop, cwd, roots, 900, new Set([810])).map((s) => s.pid)).toEqual([810, 811])
   })
 
-  it('treats it as someone else\'s when the parent cannot be found in our own account — never fires when in doubt', () => {
+  /** The mark may sit on a process that is no candidate itself: a shell outside the project that started the server */
+  it('a candidate under a marked process outside our folder is ours', () => {
+    const chain = parsePsRows(['  500     1 ??       sh -c cd /work/proj && npm run dev', '  501   500 ??       node server.js'].join('\n'))
+    expect(pickStrays(chain, new Map([[500, '/'], [501, '/work/proj']]), roots, 900, new Set([500])).map((s) => s.pid)).toEqual([501])
+  })
+
+  /** An update: the old host started the new app, which started the keeper and this host. They carry our mark */
+  it('what started the host is never offered, marked or not', () => {
+    const update = parsePsRows(['   30     1 ??       centralu-keeper', '  900    30 ??       node host.mjs'].join('\n'))
+    expect(pickStrays(update, new Map([[30, '/work/proj'], [900, '/work/proj']]), roots, 900, new Set([30, 900]))).toEqual([])
+  })
+
+  it('treats it as someone else\'s when the parent cannot be found in our own account (never fires when in doubt)', () => {
     const rowsUnknownParent = parsePsRows('  400  399 ??       node something.js')
-    expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900)).toEqual([])
+    expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900, new Set([399]))).toEqual([])
+  })
+})
+
+describe('markAsked', () => {
+  it('reads the environment of each candidate and of what it descends from, never init, the host\'s tree or a terminal\'s', () => {
+    const rows = parsePsRows(
+      [
+        '   30     1 ??       centralu-keeper',
+        '  900    30 ??       node host.mjs',
+        '  901   900 ??       claude',
+        '  500     1 ??       sh -c npm run dev',
+        '  501   500 ??       node server.js',
+        '  101     1 ttys005  node server.js',
+      ].join('\n'),
+    )
+    const cwds = new Map([[30, '/work/proj'], [900, '/work/proj'], [901, '/work/proj'], [500, '/'], [501, '/work/proj'], [101, '/work/proj']])
+    expect(markAsked(rows, cwds, ['/work/proj'], 900)).toEqual([500, 501])
+  })
+})
+
+describe('the owner mark', () => {
+  it('is one value per data folder: the same after a restart or an update, another for another folder', () => {
+    const a = ownerMarkFor('/home/me/.centralu/store.db')
+    expect(ownerMarkFor('/home/me/.centralu/store.db')).toBe(a)
+    expect(ownerMarkFor('/tmp/e2e-1/store.db')).not.toBe(a)
+    expect(a).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('is a value of its own for each host whose store is in memory', () => {
+    expect(ownerMarkFor(':memory:')).not.toBe(ownerMarkFor(':memory:'))
+  })
+
+  it('replaces a mark the host inherited from another host\'s agent', () => {
+    const env: Record<string, string | undefined> = { [OWNER_MARK]: 'outer', PATH: '/bin' }
+    markOwnChildren('/tmp/dev/store.db', env)
+    expect(env).toEqual({ [OWNER_MARK]: ownerMarkFor('/tmp/dev/store.db'), PATH: '/bin' })
   })
 })
 
@@ -234,28 +245,42 @@ describe('stopStrays', () => {
   })
 
   /*
-   * A real leftover: started by a shell that exits at once, in a session of its own (no terminal), working in the project
-   * folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
+   * Real leftovers: each started by a shell that exits at once, in a session of its own (no terminal), working in the
+   * project folder, ignoring TERM. One carries the owner mark, as what an agent starts does; the other has none, as what
+   * the person starts outside Centralu (the test's own environment may carry a real host's mark: it is taken out). Not on
+   * Windows, which has no ps (`hasPs`) and no leftover finder.
    *
-   * Where the orphan goes is the machine's business: init, or a subreaper (WSL's /init session helper, a user systemd, a
-   * container's init). The scan and the stop are the real ones, so the orphan is judged as the machine re-parented it (#1882).
+   * Where the orphans go is the machine's business: init, or a subreaper (WSL's /init session helper, a user systemd, a
+   * container's init). The scan, the environment read and the stop are the real ones (#1882, #1898).
    */
-  it.skipIf(!hasPs())('a real leftover that ignores TERM is gone after the grace', async () => {
+  it.skipIf(!hasPs())('a real marked leftover is offered and gone after the grace; an unmarked one beside it is neither', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-stray-')))
-    const pidFile = join(dir, 'pid')
-    const script = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
-    // `detached`: a session of its own, so the leftover has no controlling terminal even when the tests run in one
-    const sh = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} </dev/null >/dev/null 2>&1 &`], { cwd: dir, detached: true, stdio: 'ignore' })
-    await new Promise((r) => sh.once('exit', r))
-    let pid = 0
-    // Once the wait below has seen the leftover end, its number is no longer ours to signal (#1308)
+    const mark = ownerMarkFor(join(dir, 'store.db'))
+    const start = async (name: string, env: Record<string, string | undefined>): Promise<void> => {
+      const pidFile = join(dir, name)
+      const script = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+      // `detached`: a session of its own, so the leftover has no controlling terminal even when the tests run in one
+      const sh = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} </dev/null >/dev/null 2>&1 &`], { cwd: dir, detached: true, stdio: 'ignore', env })
+      await new Promise((r) => sh.once('exit', r))
+    }
+    const { [OWNER_MARK]: _inherited, ...unmarked } = process.env
+    const marked = { ...unmarked }
+    markOwnChildren(join(dir, 'store.db'), marked)
+    await start('marked', marked)
+    await start('unmarked', unmarked)
+    // Once a wait below has seen a leftover end, its number is no longer ours to signal (#1308)
     const own = ownProcesses()
+    const pids: number[] = []
     try {
-      await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
-      expect(await stopStrays([pid], [dir], process.pid)).toEqual({ stopped: 1 })
-      await vi.waitFor(() => expect(own.alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
+      const [ours, theirs] = [await pidIn(join(dir, 'marked'), 10_000 * SLOW), await pidIn(join(dir, 'unmarked'), 10_000 * SLOW)]
+      pids.push(ours, theirs)
+      expect((await findStrays([dir], process.pid, mark)).map((s) => s.pid)).toEqual([ours])
+      const deps = { find: (roots: readonly string[], self?: number) => findStrays(roots, self, mark), kill: (pid: number, signal: NodeJS.Signals) => void process.kill(pid, signal), graceMs: KILL_GRACE_MS }
+      expect(await stopStrays([ours, theirs], [dir], process.pid, deps)).toEqual({ stopped: 1 })
+      await vi.waitFor(() => expect(own.alive(ours)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
+      expect(own.alive(theirs)).toBe(true)
     } finally {
-      own.end([pid])
+      own.end(pids)
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000 * SLOW)

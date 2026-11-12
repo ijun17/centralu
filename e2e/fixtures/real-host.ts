@@ -1,7 +1,7 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION, sessionLiveDefaults, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
+import { environmentValues } from '../../packages/agent-host/src/os/process-env.js'
 
 /**
  * A real Agent Host process for the recovery e2e (#82): `main.ts` exactly as `pnpm host` runs it,
@@ -196,43 +197,23 @@ const HOST_MARK = 'CENTRALU_E2E_HOST_RUN'
  */
 export function hostRun(): { env: Record<string, string>; gone(): Promise<void> } {
   const run = randomUUID()
-  return { env: { [HOST_MARK]: run }, gone: () => gone(`${HOST_MARK}=${run}`) }
+  return { env: { [HOST_MARK]: run }, gone: () => gone(run) }
 }
 
-/** The running processes that have `mark` (`NAME=value`) in their environment, at any depth below the host */
-function marked(mark: string): number[] {
-  if (process.platform === 'linux') {
-    const found: number[] = []
-    for (const pid of readdirSync('/proc')) {
-      if (!/^\d+$/.test(pid)) continue
-      try {
-        if (readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(mark)) found.push(Number(pid))
-      } catch {
-        // Ended meanwhile, or not ours to read
-      }
-    }
-    return found
-  }
-  if (process.platform !== 'darwin') return []
-  let out = ''
-  try {
-    // `-E` puts each process's environment after its command, separated by spaces
-    out = execFileSync('ps', ['-A', '-E', '-ww', '-o', 'pid=,command='], { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 * 1024 })
-  } catch {
-    return []
-  }
-  const found: number[] = []
-  for (const line of out.split('\n')) {
-    const m = /^\s*(\d+)\s(.*)$/.exec(line)
-    if (m && ` ${m[2]} `.includes(` ${mark} `)) found.push(Number(m[1]))
-  }
-  return found
+/**
+ * The running processes whose environment carries `run` as the mark, at any depth below the host (the host's one
+ * reader of another process's environment, `os/process-env.ts`). On macOS a platform binary's environment is not shown,
+ * so what the host starts as `/bin/sh` is not waited for there; its node and agent children are.
+ */
+async function marked(run: string): Promise<number[]> {
+  const values = await environmentValues(HOST_MARK, 'all').catch(() => new Map<number, string>())
+  return [...values].filter(([, value]) => value === run).map(([pid]) => pid)
 }
 
-/** Waits until no process carries `mark`; the probes give up on their own after 5 s, so 15 s is generous */
-async function gone(mark: string, timeoutMs = 15_000): Promise<void> {
+/** Waits until no process carries the mark `run`; the probes give up on their own after 5 s, so 15 s is generous */
+async function gone(run: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  for (let left = marked(mark); left.length > 0; left = marked(mark)) {
+  for (let left = await marked(run); left.length > 0; left = await marked(run)) {
     if (Date.now() > deadline) throw new Error(`what the host started (${left.join(', ')}) was still running ${timeoutMs}ms after it exited`)
     await new Promise((r) => setTimeout(r, 50))
   }

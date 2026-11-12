@@ -51,20 +51,26 @@ Platforms: macOS, Linux.
 
 **KL6. What escaped the tree is shown, not killed.**
 Happened: a dev server an agent started had ppid 1 and its own group; the VS Code Claude extension was SIGTERMed by
-an early version (4a69b96f).
-Rule: a stray is offered only when its cwd is inside a project, it has no tty, it is not under the host or a keeper
-child, it is not what started the host, and its parent chain reaches init (or WSL's `/init` helper, found by probing where
-a short-lived orphan lands and read only when its command is exactly `/init`) through other candidates; it is measured
-again right before the kill. `systemd --user` is not taken for init: it also adopts an editor that detached itself
-(`code .` from a terminal in the project), so a systemd desktop's own leftovers are missed, by choice (**UNGUARDED**
-as a miss; a positive signal that a process came from our agents would fix it).
-Guard: `host/dev-services/strays.test.ts` "picks only someone else's process running with no terminal in our
-folder"; `host/dev-services/strays.test.ts` "a process a living app still holds is not on the list (VS Code
-extensions)"; `host/dev-services/strays.test.ts` "never offers a child the keeper holds for this host, or what runs
-under it"; `host/dev-services/strays.test.ts` "an orphan adopted by the machine's subreaper is on the list; what a living
-parent holds is not, and nor is what started the host" (WSL's `/init`, #1882); `host/dev-services/strays.test.ts` "an editor
-that detached itself under `systemd --user` is not offered, even though that process adopts orphans". Measuring again
-before the kill is **UNGUARDED**.
+an early version (4a69b96f). Judging by the parent chain's shape (#1882) could not tell an agent's orphan from an
+editor detached on purpose (`code .` from a terminal in the project, adopted by `systemd --user`), so a systemd
+desktop's leftovers were missed (#1898).
+Rule: a stray is offered only when its cwd is inside a project, it has no tty, it is not under the host, it is not what
+started the host, and it or a process it descends from carries the host's owner mark in its environment
+(`CENTRALU_OWNER`, one value per data folder, so a host after an update sees what the one before it left, and a dev or
+e2e host on its own folder claims none of it); it is measured again right before the kill. The host sets the mark in
+its own environment when it has chosen its data folder, and every child inherits it. The environment is read by one
+layer module (`os/process-env.ts`), which hands out that one variable's value and nothing else of an environment that
+holds credentials: `/proc/<pid>/environ` on Linux and WSL, `ps -E -ww` on macOS. Not offered, by choice: a process
+from before the mark or started outside Centralu, one whose starter cleared its environment, and on macOS a platform
+binary of the system volume, whose environment `ps` does not show (measured on macOS 27.2: shown for node and for the
+hardened `claude`, not for `/bin/sleep`), unless it runs under a marked process.
+Guard: `host/dev-services/strays.test.ts` "picks only a marked process, and what runs under it, with no terminal in our
+folder"; `host/dev-services/strays.test.ts` "a process a living app holds is not on the list (VS Code extensions), nor
+an unmarked orphan"; `host/dev-services/strays.test.ts` "a detached editor with no mark is not offered; an orphaned
+marked dev server and what runs under it are"; `host/dev-services/strays.test.ts` "what started the host is never
+offered, marked or not"; `host/dev-services/strays.test.ts` "a real marked leftover is offered and gone after the
+grace; an unmarked one beside it is neither" (also the measuring again before the kill); `host/os/process-env.test.ts`
+"takes only the asked variable per pid: never another variable, never a process that shows none".
 Platforms: macOS, Linux.
 
 **KL7. An agent's helpers end with it.**
