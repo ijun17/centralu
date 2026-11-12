@@ -1,4 +1,4 @@
-import { oneLineText } from '@cc/protocol'
+import { oneLineText } from './app-frames.js'
 
 /** A line's own marks: a fence, a heading, a quote, a list bullet or number, a task box */
 const LINE_MARKS = /^\s*(?:`{3,}|~{3,}|#{1,6}\s+|>\s?|(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?)+/

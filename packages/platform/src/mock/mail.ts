@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import { plainLines, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -122,7 +122,7 @@ export class MailMock {
   private asking(t: Thread): MailThreadRow['ask'] {
     const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
     const newest = open.at(-1)
-    return newest ? { id: newest.id, sender: newest.sender, text: newest.body.split('\n').slice(0, 3).join('\n'), ...(newest.choices ? { choices: newest.choices } : {}), count: open.length } : null
+    return newest ? { id: newest.id, sender: newest.sender, text: plainLines(newest.body, 3, 320), ...(newest.choices ? { choices: newest.choices } : {}), count: open.length } : null
   }
 
   private touch(t: Thread): void {

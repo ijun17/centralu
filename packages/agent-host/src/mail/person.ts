@@ -1,7 +1,6 @@
-import { errorMessage, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, plainLine, plainLines, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
-import { plainLine, plainLines } from './plain-line.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
 import { SUBJECT_CHARS, type MailChange, type MessageService } from './messages.js'

@@ -1,4 +1,5 @@
 import { partyName } from '@cc/core'
+import { plainLine } from '@cc/protocol/client'
 import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
@@ -92,5 +93,5 @@ export function openQuestions(messages: readonly MailMessage[]): MailMessage[] {
 
 /** A question as one line, for the person to tell which is which: the session that asked it and its words */
 export function questionLine(m: Pick<MailMessage, 'sender' | 'body'>): string {
-  return `${partyName(m.sender)} · “${m.body.replace(/\s+/g, ' ').trim()}”`
+  return `${partyName(m.sender)} · “${plainLine(m.body, 120)}”`
 }
