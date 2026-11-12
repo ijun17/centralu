@@ -18,7 +18,7 @@ import type { AppState } from './state.js'
  * payload and the approval never shows up on screen. Not spread whole, because `SessionInfo` has
  * fields `SessionSummary` does not (`externalId`, `createdAt`, …) that must not leak in.
  */
-export function liveFactsOf(
+function liveFactsOf(
   s: SessionInfo,
 ): Pick<
   SessionSummary,
@@ -49,71 +49,42 @@ export function liveFactsOf(
 }
 
 /**
- * One session's summary from a fresh `sessions.list` row, merged over what the store already holds (`cur`).
+ * One session's summary built from a host's `SessionInfo`, merged over what the store already holds (`cur`).
  *
- * Shared by initial attach, reconnect recovery and a machine's recovery (#82):
- * two places that construct one thing have to ask for one set (#37). Only the facts the host knows are overwritten;
- * local derived state (preview, `touchedPaths`, …) belongs to the reducer and is kept.
+ * The only place a row is built from `SessionInfo`: a list read (initial attach, reconnect recovery, a machine's
+ * recovery #82), `session_created` and `createSession`'s own answer all come through here, so they cannot drift (#37).
+ * Only the facts the host knows are overwritten; local derived state (preview, `touchedPaths`, …) belongs to the
+ * reducer and is kept.
  */
-function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSummary {
-  return cur
-    ? {
-        ...cur,
-        projectId: f.projectId,
-        kind: f.kind,
-        appId: f.appId,
-        askedBy: f.askedBy ?? null,
-        forkedFrom: f.forkedFrom ?? null,
-        goal: f.goal,
-        tool: f.tool,
-        name: f.name,
-        autoNamed: f.autoNamed,
-        state: f.state,
-        live: f.live,
-        // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
-        lastSeq: Math.max(cur.lastSeq, f.lastSeq),
-        lastReadSeq: f.lastReadSeq,
-        waitingSince: f.waitingSince,
-        model: f.model,
-        effort: f.effort,
-        verbosity: f.verbosity,
-        serviceTier: f.serviceTier,
-        permissionPreset: f.permissionPreset,
-        worktree: f.worktree,
-        parentSessionId: f.parentSessionId,
-        merged: f.worktreeMerged,
-        pr: f.worktreePr,
-        ...liveFactsOf(f),
-      }
-    : {
-        ...initialSession({
-          id: f.id,
-          projectId: f.projectId,
-          kind: f.kind,
-          appId: f.appId,
-          askedBy: f.askedBy ?? null,
-          forkedFrom: f.forkedFrom ?? null,
-          goal: f.goal,
-          name: f.name,
-          tool: f.tool,
-          effort: f.effort,
-          verbosity: f.verbosity,
-          serviceTier: f.serviceTier,
-          model: f.model,
-          permissionPreset: f.permissionPreset,
-          worktree: f.worktree,
-          parentSessionId: f.parentSessionId,
-          merged: f.worktreeMerged,
-          pr: f.worktreePr,
-        }),
-        autoNamed: f.autoNamed,
-        state: f.state,
-        live: f.live,
-        lastSeq: f.lastSeq,
-        lastReadSeq: f.lastReadSeq,
-        waitingSince: f.waitingSince,
-        ...liveFactsOf(f),
-      }
+export function sessionFromInfo(f: SessionInfo, cur?: SessionSummary): SessionSummary {
+  return {
+    ...(cur ?? initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool })),
+    projectId: f.projectId,
+    kind: f.kind,
+    appId: f.appId,
+    askedBy: f.askedBy ?? null,
+    forkedFrom: f.forkedFrom ?? null,
+    goal: f.goal,
+    tool: f.tool,
+    name: f.name,
+    autoNamed: f.autoNamed,
+    state: f.state,
+    live: f.live,
+    // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
+    lastSeq: Math.max(cur?.lastSeq ?? 0, f.lastSeq),
+    lastReadSeq: f.lastReadSeq,
+    waitingSince: f.waitingSince,
+    model: f.model,
+    effort: f.effort,
+    verbosity: f.verbosity,
+    serviceTier: f.serviceTier,
+    permissionPreset: f.permissionPreset,
+    worktree: f.worktree,
+    parentSessionId: f.parentSessionId,
+    merged: f.worktreeMerged,
+    pr: f.worktreePr,
+    ...liveFactsOf(f),
+  }
 }
 
 /**
@@ -160,11 +131,11 @@ export function mergeListedSince(
   const gone = new Set<string>()
   for (const [id, cur] of Object.entries(now)) {
     if (!include(cur)) sessions[id] = cur
-    else if (listed.has(id)) sessions[id] = keepChangedSince(asked[id], cur, mergeListed(cur, listed.get(id)!), touched.get(id))
+    else if (listed.has(id)) sessions[id] = keepChangedSince(asked[id], cur, sessionFromInfo(listed.get(id)!, cur), touched.get(id))
     else if (!asked[id] || touched.has(id)) sessions[id] = cur
     else gone.add(id)
   }
-  for (const [id, f] of listed) if (!sessions[id] && !gone.has(id) && !asked[id]) sessions[id] = mergeListed(undefined, f)
+  for (const [id, f] of listed) if (!sessions[id] && !gone.has(id) && !asked[id]) sessions[id] = sessionFromInfo(f)
   return { sessions, gone }
 }
 
