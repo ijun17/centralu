@@ -341,7 +341,8 @@ async function readWorkspaceAgain(get: () => AppState, set: StoreSet, afterFailu
         workspaceUnread = false
         workspaceReadSteps.at = 0
       } finally {
-        workspaceReading = false
+        // A read from before an `attach` or a newer read settles without touching theirs
+        if (run === workspaceReadRun) workspaceReading = false
       }
     },
     current,

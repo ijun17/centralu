@@ -10,7 +10,7 @@ export type RetrySteps = { at: number }
 
 /**
  * Calls `read` until it succeeds, waiting the `RETRY_MS` steps between tries. `failed` runs after every failure
- * and `gaveUp` once the steps run out; `keepGoing` is asked after each wait. Null when it stopped without a read.
+ * and `gaveUp` once the steps run out; `keepGoing` is asked after each failure and each wait. Null when it stopped without a read.
  *
  * `steps` is the count of waits already taken (a caller that resets it on success starts over from the first wait).
  * `afterFailure` says the read already failed once, outside the ladder, so it starts with the wait instead of a try.
@@ -30,6 +30,8 @@ export async function retryLadder<T>(
         failed?.()
       }
     }
+    // Stopped while that read was out: its failure is nobody's, and takes no step from the count a newer ladder shares
+    if (!keepGoing()) return null
     const wait = RETRY_MS[steps.at]
     if (wait === undefined) {
       gaveUp?.()
