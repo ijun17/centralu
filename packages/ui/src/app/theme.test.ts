@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
 import { usableThemeFiles } from '../store/store.js'
-import { activeSide, cachedThemeFiles, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
+import { activeSide, cachedThemeFiles, contrast, pickableThemes, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -45,6 +45,27 @@ describe('resolving a side', () => {
  * A theme file a person or another build wrote (#384): the host lists unknown keys as problems and passes every value
  * on as text, so a colour this window cannot use is caught here, alone. It is never applied, and Settings says which.
  */
+describe('a custom theme named like a preset (#2214)', () => {
+  const custom = file({ id: 'graphite-2', name: 'Graphite', base: 'dark', tokens: { 'surface-floor': '#223344' } })
+
+  it('is listed beside the preset, and each applies its own tokens', () => {
+    expect(pickableThemes([custom]).filter((c) => c.name === 'Graphite').map((c) => c.id)).toEqual(['graphite', 'graphite-2'])
+    expect(resolveSide('dark', 'graphite', [custom])).toMatchObject({ id: 'graphite', preset: 'graphite', tokens: {} })
+    expect(resolveSide('dark', 'graphite-2', [custom])).toMatchObject({ id: 'graphite-2', name: 'Graphite', tokens: { '--color-surface-floor': '#223344' } })
+  })
+
+  it('a file stored under the preset id before keeps shadowing it, and is listed once, where the preset was', () => {
+    const old = file({ id: 'graphite', name: 'My graphite', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    expect(pickableThemes([old]).filter((c) => c.id === 'graphite')).toEqual([{ id: 'graphite', name: 'My graphite', base: 'dark', file: true }])
+    expect(resolveSide('dark', 'graphite', [old])).toMatchObject({ name: 'My graphite', tokens: { '--color-surface-floor': '#101820' } })
+  })
+
+  it('a file that does not read is not offered and hides no preset, as the window does not apply it', () => {
+    const broken = file({ id: 'graphite', name: 'graphite', base: 'dark', broken: true })
+    expect(pickableThemes([broken]).filter((c) => c.id === 'graphite')).toEqual([{ id: 'graphite', name: 'Graphite', base: 'dark', file: false }])
+  })
+})
+
 describe('a value a theme file holds that this window cannot use', () => {
   afterEach(() => vi.unstubAllGlobals())
 

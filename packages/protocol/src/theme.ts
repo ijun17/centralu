@@ -168,6 +168,33 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
   { id: 'graphite', name: 'Graphite', base: 'dark' },
 ]
 
+/** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
+export function themeSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'theme'
+  )
+}
+
+/**
+ * The id a new theme file named `name` gets: its slug, with a number added while `isTaken` says the id is. The one rule for the
+ * host's `themes.save` and import, the Assistant's `set_preferences` (which names the id before the file exists) and the mock.
+ *
+ * Never a preset's id (#2214): a theme file shadows a preset of the same id (the window looks for a file first), so a custom
+ * theme named "Graphite" or "Dark" would have made the preset impossible to pick. It gets `graphite-2` and keeps its name.
+ */
+export function freeThemeId(name: string, isTaken: (id: string) => boolean): string {
+  const base = themeSlug(name)
+  for (let n = 1; ; n++) {
+    const id = n === 1 ? base : `${base}-${n}`
+    if (!isTaken(id) && !THEME_PRESETS.some((p) => p.id === id)) return id
+  }
+}
+
 /** What the screen writes into a theme file (the host adds `$schema`) */
 export const ThemeFileContent = z.object({
   name: z.string().min(1).max(80),
@@ -191,6 +218,20 @@ export const ThemeFileEntry = z.object({
   broken: z.boolean(),
 })
 export type ThemeFileEntry = z.infer<typeof ThemeFileEntry>
+
+/**
+ * What a theme list offers, the screen's picker and the Assistant's `set_preferences` alike: the presets, then the theme files that
+ * read (a file that does not read is never applied, so it is not offered, and it hides no preset). A file stored under a preset's id
+ * from before #2214 keeps that id and still shadows the preset (the window looks for a file first, and the stored choice is only an id),
+ * so the preset is not offered beside it: that id is the file, once. A theme made since gets another id (`freeThemeId`), so both are here.
+ */
+export function pickableThemes(files: readonly Pick<ThemeFileEntry, 'id' | 'name' | 'base' | 'broken'>[]): { id: string; name: string; base: 'dark' | 'light'; file: boolean }[] {
+  const usable = files.filter((f) => !f.broken)
+  return [
+    ...THEME_PRESETS.filter((p) => !usable.some((f) => f.id === p.id)).map((p) => ({ id: p.id, name: p.name, base: p.base, file: false })),
+    ...usable.map((f) => ({ id: f.id, name: f.name, base: f.base, file: true })),
+  ]
+}
 
 /** The schema file written next to the themes, which `$schema` in each file points at */
 export const THEME_SCHEMA_FILE = 'theme.schema.json'

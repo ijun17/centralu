@@ -846,6 +846,17 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(await prefs()).toMatchObject({ themeMode: 'light', themeLight: 'my-theme-2' })
   })
 
+  // #2214: a file never takes a preset's id, so the preset and the file are both there and each is picked by its own id
+  it('a theme file named like a preset is filed under another id, and picked by that id in the same call; the preset stays pickable', async () => {
+    const orc = await mgr.assistant()
+    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Graphite', base: 'dark', tokens: {} }, theme: 'graphite-2' })
+    expect(made.isError).toBeFalsy()
+    expect(made.text).toContain('Wrote the theme file "Graphite" [graphite-2]')
+    expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
+    expect((await run(orc.id, 'set_preferences', { theme: 'graphite' })).isError).toBeFalsy()
+    expect(await prefs()).toMatchObject({ themeDark: 'graphite' })
+  })
+
   it('a full failure carries one "Nothing changed" prefix', async () => {
     const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 5 } })

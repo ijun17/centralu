@@ -11,6 +11,7 @@ import {
   THEME_PRESETS,
   activeSide,
   isValidTokenValue,
+  pickableThemes,
   readPresetTokens,
   resolveColors,
   resolveSide,
@@ -137,10 +138,7 @@ function ThemePicker({
   files: ThemeFileEntry[]
   onPick: (id: string, base: ThemeBase) => void
 }) {
-  const choices = [
-    ...THEME_PRESETS.map((p) => ({ id: p.id, name: p.name, base: p.base })),
-    ...files.map((f) => ({ id: f.id, name: f.name, base: f.base })),
-  ]
+  const choices = pickableThemes(files)
   return (
     <>
       <SettingsSelect

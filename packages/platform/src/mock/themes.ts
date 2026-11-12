@@ -1,5 +1,5 @@
 import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol/client'
-import { isRecord, parseThemeFile, formatThemeFile } from '@cc/protocol/client'
+import { isRecord, parseThemeFile, formatThemeFile, freeThemeId } from '@cc/protocol/client'
 import type { ThemesPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 import { readStored, writeStored } from './stored.js'
@@ -43,21 +43,13 @@ export class ThemesMock {
     return parseThemeFile(id, `/mock/data/themes/${id}.json`, this.themeFiles.get(id) ?? '')
   }
 
-  private freeThemeId(name: string): string {
-    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'theme'
-    for (let n = 1; ; n++) {
-      const id = n === 1 ? base : `${base}-${n}`
-      if (!this.themeFiles.has(id)) return id
-    }
-  }
-
   readonly themes: ThemesPort = {
     list: async () => {
       this.loadThemes()
       return [...this.themeFiles.keys()].sort().map((id) => this.themeEntry(id))
     },
     save: async (id: string | null, content: ThemeFileContent) => {
-      const target = id ?? this.freeThemeId(content.name)
+      const target = id ?? freeThemeId(content.name, (id) => this.themeFiles.has(id))
       this.writeThemeFile(target, formatThemeFile(content))
       return this.themeEntry(target)
     },
@@ -66,7 +58,7 @@ export class ThemesMock {
       if (text === undefined) throw mockError(`No such file: ${path}`)
       const parsed = parseThemeFile('import', path, text)
       if (parsed.broken) throw mockError(parsed.problems[0] ?? 'Not a theme file.')
-      const id = this.freeThemeId(parsed.name)
+      const id = freeThemeId(parsed.name, (id) => this.themeFiles.has(id))
       this.writeThemeFile(id, text)
       return this.themeEntry(id)
     },
