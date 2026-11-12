@@ -22,7 +22,7 @@ import {
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 import { MailPinned, MailThreadItem } from './MailRows.jsx'
-import { arrangeInbox, cursorIndex, rowKeyOf } from './inboxList.js'
+import { arrangeInbox, CURSOR_START, rowKeyOf, settleCursor, type InboxCursor } from './inboxList.js'
 import { Fold } from '../../components/Fold.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { mailAttention } from '../../store/mail.js'
@@ -59,19 +59,15 @@ export function Inbox() {
   const [earlierOpen, setEarlierOpen] = useState(false)
   /*
     The cursor is on a row, not on a row number: a wait that arrives goes in at the top, and the row the cursor is on
-    must not slide away from under the key they press. It takes the top row when the list opens (below) and follows
-    that row from then on; ↑ and ↓ walk the one list, mail rows included. The row number only stands in for a row that
-    has left (Done): the cursor then stays at that place, kept on the last row when it was the last.
+    must not slide away from under the key they press. It takes the top row when the list opens and follows that row
+    from then on; ↑ and ↓ walk the one list, mail rows included. `settleCursor` keeps it so on every render (state set
+    while rendering, which React redraws at once, not after a commit): a row that has left (Done) hands it to the row now
+    at its place.
   */
-  const [at, setAt] = useState<{ key: string | null; row: number }>({ key: null, row: 0 })
-  const cursor = cursorIndex(list.waiting, at)
-  useEffect(() => {
-    // Only a change is set: this runs after every commit (the list is a new array each time), and an update that
-    // changes nothing still counts as a nested one in a burst of store updates (#2059, e2e/event-burst.spec.ts)
-    if (!open) {
-      if (at.key !== null || at.row !== 0) setAt({ key: null, row: 0 })
-    } else if (at.key === null && list.waiting[0]) setAt({ key: rowKeyOf(list.waiting[0]), row: 0 })
-  }, [open, at.key, at.row, list.waiting])
+  const [at, setAt] = useState<InboxCursor>(CURSOR_START)
+  const placed = settleCursor(list.waiting, at, open)
+  if (placed !== at) setAt(placed)
+  const cursor = placed.row
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)

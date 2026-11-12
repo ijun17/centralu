@@ -202,13 +202,8 @@ export class PreferencesFlow {
         theme = found
         patch.themeMode = found.base
         patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
-        const again = UiPreferencesPatch.safeParse(patch)
-        if (again.success) toApply = again.data
-        else {
-          // After the write this is a partial success, not a refusal
-          theme = null
-          failed.push(`Theme: not picked. ${issuesOf(again.error)}.`)
-        }
+        // The ids come from the themes the window lists and the base is dark or light, so the patch still holds
+        toApply = UiPreferencesPatch.parse(patch)
       }
     }
 

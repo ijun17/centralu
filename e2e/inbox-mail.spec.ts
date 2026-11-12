@@ -350,3 +350,28 @@ test('Inbox: the cursor takes the top row on open, follows it as rows arrive, an
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('mail-thread')).toBeVisible()
 })
+
+// The cursor's place follows its row as rows arrive above it, so a row that is done hands the cursor to its neighbour, not to the new top row
+test('Inbox: a wait arriving above the cursor, then the cursor row done: the cursor lands on that row neighbour', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const done = async (id: string) =>
+    page.evaluate((sid) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: sid })
+    }, id)
+  const oldest = await newSession(page, 'alpha', 'oldest task')
+  await done(oldest)
+  const middle = await newSession(page, 'alpha', 'middle task')
+  await done(middle)
+  const arriving = await newSession(page, 'alpha', 'arriving task')
+  await page.getByTestId('counter').click()
+  const cursorOn = (id: string) => expect(page.locator('[data-cursor]').getByTestId(`inbox-item-${id}`)).toHaveCount(1)
+  await cursorOn(middle)
+  await done(arriving)
+  await expect(page.getByTestId(`inbox-item-${arriving}`)).toBeVisible()
+  await cursorOn(middle)
+  // The cursor row is done: the row at its place (the oldest), not the wait that arrived on top
+  await page.keyboard.press('d')
+  await cursorOn(oldest)
+})

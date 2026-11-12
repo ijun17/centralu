@@ -866,6 +866,20 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
   })
 
+  // The one way the pick after a write can fail: the file is gone again when it is looked up. The write stands, the rest is applied, the pick is reported
+  it('a theme file removed between its write and the pick is reported as not picked, and the rest of the call is applied', async () => {
+    const orc = await mgr.assistant()
+    const real = rpc
+    mgr.useWindowRpc(async (method, params) => {
+      const result = await real(method, params)
+      if (method === 'themes.save') await real('themes.remove', { id: (result as { id: string }).id })
+      return result
+    })
+    const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Fleeting', base: 'dark', tokens: {} }, theme: 'Fleeting', textSize: 1.25 })
+    expect(r.text).toMatch(/Theme: not picked. No theme is called "fleeting"/)
+    expect(await prefs()).toMatchObject({ textSize: 1.25, themeDark: 'dark' })
+  })
+
   // #2214: an explicit id writes to that file, so a preset's id would hide the preset; one already stored there is still edited
   it('a preset id is not taken by an explicit id; a file already stored under it is edited in place', async () => {
     const orc = await mgr.assistant()
