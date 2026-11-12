@@ -3,6 +3,7 @@ import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, is
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
+import { machineNameOf, projectMachineOf } from './names.js'
 
 /**
  * All derived state is computed here (docs/state-management.md §3) — never stored.
@@ -163,15 +164,7 @@ export function currentWaitingId(state: AppState): string | null {
  * moving files to this computer's session archive, app views (docs/plans/remote-hub.md §6).
  */
 export function useProjectMachine(projectId: string | null | undefined): string | null {
-  return useStore((s) => (projectId ? (s.projects[projectId]?.machine ?? null) : null))
-}
-
-/**
- * What names the project of a row beside it: the project's name, "Assistant" for a session that has none, and nothing
- * for a project the list does not hold (yet). The inbox, the palette and the message picker said it three ways (#428).
- */
-export function projectLabelOf(projects: Readonly<Record<string, { name: string }>>, projectId: string | null): string {
-  return (projectId ? projects[projectId]?.name : 'Assistant') ?? ''
+  return useStore((s) => projectMachineOf(s.projects, projectId))
 }
 
 /**
@@ -192,8 +185,10 @@ export function useSessionFolder(sessionId: string): string | null {
 }
 
 /** A machine's name as the person gave it, or its id until the machine list arrives; null for this computer */
+export function useMachineName(machine: string): string
+export function useMachineName(machine: string | null | undefined): string | null
 export function useMachineName(machine: string | null | undefined): string | null {
-  return useStore((s) => (machine ? (s.machines[machine]?.name ?? machine) : null))
+  return useStore((s) => (machine ? machineNameOf(s.machines, machine) : null))
 }
 
 /** Whether a session's machine is away (#82): shown dimmed, never woken (`isAway` in core) */

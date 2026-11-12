@@ -2,6 +2,7 @@ import { errorMessage, type MachineInfo } from '@cc/protocol/client'
 import { wakeable } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { omitKey } from './patch.js'
+import { machineNameOf } from './names.js'
 import { forgetSessions, mergeListedSince, replayPendingEvents, trackWorkingSince, watchLiveEvents } from './sessionList.js'
 
 /**
@@ -334,7 +335,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     // The toast counts only what this window wakes (`wakeable`)
     const toWake = wasLive.filter((x) => wakeable(get().sessions[x.id], get().machines))
     if (toWake.length === 0) return
-    const name = get().machines[machineId]?.name ?? machineId
+    const name = machineNameOf(get().machines, machineId)
     set({ toast: `${name} is back — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
     for (const x of toWake) await get().wake(x.id)
   },

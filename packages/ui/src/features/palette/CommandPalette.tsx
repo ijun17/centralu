@@ -3,7 +3,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { nextWaitingSession } from '@cc/core'
 import { newSessionProjectOf, useStore } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
-import { computeInbox, currentWaitingId, projectLabelOf } from '../../store/selectors.js'
+import { machineNameOf, projectLabelOf } from '../../store/names.js'
+import { computeInbox, currentWaitingId } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -193,9 +194,9 @@ export function CommandPalette() {
             .map<Item>((a) => {
               const machine = isRemoteUserApp(a.info) ? (a.info.machine ?? null) : null
               const sub = a.projectId
-                ? (projects[a.projectId]?.name ?? '')
+                ? projectLabelOf(projects, a.projectId)
                 : machine
-                  ? (machines[machine]?.name ?? machine)
+                  ? machineNameOf(machines, machine)
                   : 'Other apps'
               return { kind: 'app', id: a.key, label: a.title, sub, projectId: a.projectId, appId: a.appId, machine }
             })

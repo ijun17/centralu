@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { appKeyOf } from '@cc/core'
 import type { ExternalAppInfo } from '@cc/protocol/client'
 import { isApp, useStore } from './store.js'
+import { appTitleOf } from './names.js'
 
 /**
  * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
@@ -124,7 +125,7 @@ export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
       info.machine && !info.projectId ? `${info.machine}:${appKeyOf(null, info.appId)}` : appKeyOf(info.projectId, info.appId),
     appId: info.appId,
     projectId: info.projectId,
-    title: info.name ?? info.appId,
+    title: appTitleOf(info),
     info,
     status: appStatus(info),
   }))

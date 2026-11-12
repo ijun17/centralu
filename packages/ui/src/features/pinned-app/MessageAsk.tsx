@@ -2,7 +2,8 @@ import { isAssistantKind } from '@cc/protocol/client'
 import { useMemo } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
-import { projectLabelOf, useToolMeta } from '../../store/selectors.js'
+import { projectLabelOf } from '../../store/names.js'
+import { useToolMeta } from '../../store/selectors.js'
 
 /**
  * A pinned view's `ui/message` — asks the person which session to send it to (M4 B-4).

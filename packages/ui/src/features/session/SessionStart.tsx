@@ -2,7 +2,7 @@ import { isAssistantOrCoordinator } from '@cc/protocol/client'
 import { useEffect, useMemo, useState } from 'react'
 import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
-import { useTools } from '../../store/selectors.js'
+import { useProjectMachine, useTools } from '../../store/selectors.js'
 import { useLoad } from '../../app/useLoad.js'
 import { useRefusals } from '../project/useToolChoice.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
@@ -45,7 +45,7 @@ export function SessionStart({
 function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; projectId: string; tool: string }) {
   const tools = useTools()
   const platform = useStore((s) => s.platform)
-  const machine = useStore((s) => s.projects[projectId]?.machine ?? null)
+  const machine = useProjectMachine(projectId)
   // Asked on the project's machine (#82): a project on a linked machine runs that machine's CLIs
   const found = useLoad(
     () => (platform ? platform.agents.detect(machine ?? undefined) : Promise.resolve([])),

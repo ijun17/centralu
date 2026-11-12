@@ -4,6 +4,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { TextField } from '../../components/TextField.jsx'
+import { appTitleOf } from '../../store/names.js'
 import { useStore } from '../../store/store.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
 
@@ -69,7 +70,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       void refresh()
       close()
       // It lands as a project of its own (#1141): "Import" leaves that project untrusted, and trusting it is enabling it
-      setToast(enable ? `Imported and enabled ${app.name ?? app.appId}` : `Imported ${app.name ?? app.appId}. It stays off until you trust its project`)
+      setToast(enable ? `Imported and enabled ${appTitleOf(app)}` : `Imported ${appTitleOf(app)}. It stays off until you trust its project`)
       // Goes to the imported app — if it was enabled, the app itself; if not, the pre-enable confirmation stands
       openApp(app.projectId, app.appId)
     } catch (e) {

@@ -5,6 +5,7 @@ import { firstToRaise } from '../../app/notice-claim.js'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { AppState, Notice, StoreGet, StoreSet } from '../state.js'
 import { projectScreenSessions } from '../screens.js'
+import { machineNameOf } from '../names.js'
 
 /**
  * What tells the person something happened: the cards in the top right, the sweep for a turn that
@@ -196,7 +197,7 @@ export function notifyStateChange(
     const ctx = { appFocused: st.appFocused, policy: notifyPolicyOf(st.prefs) }
 
     // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
-    const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
+    const named = withSeq.machine ? `${withSeq.name} on ${machineNameOf(st.machines, withSeq.machine)}` : withSeq.name
     const notice = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
     // The card's own id names it: only a card the person answers makes one (`notificationFor`)
     const card = e.type === 'approval_request' || e.type === 'question_request' ? e.requestId : undefined

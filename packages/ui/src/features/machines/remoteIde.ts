@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { remoteIdeSupport, remoteIdeUrl } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useProjectMachine } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 
 export type RemoteIde = {
@@ -22,7 +23,7 @@ export type RemoteIde = {
  */
 export function useRemoteIde(projectId: string | null | undefined): RemoteIde | null {
   const platform = usePlatform()
-  const machineId = useStore((s) => (projectId ? (s.projects[projectId]?.machine ?? null) : null))
+  const machineId = useProjectMachine(projectId)
   // The project's root as its own machine spells it: the hub passes a remote project's path through untouched
   const root = useStore((s) => (projectId ? s.projects[projectId]?.path : undefined))
   const machine = useStore((s) => (machineId ? s.machines[machineId] : undefined))

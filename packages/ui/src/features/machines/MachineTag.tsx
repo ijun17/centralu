@@ -94,7 +94,7 @@ export function MachineBadge({
 
 /** The badge's place in a row that is itself a button: the same box, invisible, read by nothing */
 export const MachineBadgePlaceholder = forwardRef<HTMLSpanElement, { machine: string }>(function MachineBadgePlaceholder({ machine }, ref) {
-  const name = useMachineName(machine) ?? machine
+  const name = useMachineName(machine)
   return (
     <span ref={ref} aria-hidden className={`${BADGE} invisible`}>
       {name}
