@@ -55,7 +55,7 @@ the two as "the same colour" at three steps apart with the line between them, an
 with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they still are). The inks are now body `#f0ecea`, secondary `#aca7a3`
 and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
 
-**Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own, since none broke a rule here; the comment above its block in `index.css` records the measurements (every ink on every reading surface, the lines). A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
+**Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own but its `line`, one step lighter (`#3a3a3c`, from `#38383a`) to meet the hairline rule in [The lines](#the-lines); the comment above its block in `index.css` records the measurements (every ink on every reading surface, the lines). A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
 
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
@@ -144,19 +144,36 @@ panel follows with its own 1px border: `ink-muted` while answering (a lighter gr
 
 ## The lines
 
-Three tokens draw every edge: `line` (the hairline: a card's or panel's border, a divider), `line-strong` (a border that has to show) and `line-side`, a line on the sidebar's own ground. `line-side` is not set by a theme: it is `line` mixed 80% with `ink-faint` in `index.css`, so every preset and every custom theme gets a step toward the ink, lighter on a dark sidebar and darker on a light one. The sidebar swaps it in for `line` inside itself (its dividers, its row borders, its own edge); the top bar and the shell banner, which hang on the same ground, name it for their bottom line (#2207). They used the plain `line`, which in a theme whose `line` sits close to `surface-side` all but vanished: Light's `#d6d6d6` on `#e0e0e0` is 1.10:1, and a custom `line` `#232326` on a `#252528` sidebar 1.03:1 (as `line-side` it would be `#36363a`, 1.27:1).
+Three tokens draw every edge, and one rule orders them. `line` is the hairline (a card's or panel's border, a divider): visible but quiet. `line-side` is the line on the sidebar's own ground, a step stronger. `line-strong` is for what has to read (a focused or hovered field, a checkbox, a table's cells in an answer, an idle session mark), clearly stronger again.
 
-What each preset draws on the sidebar's ground (WCAG contrast of the line against `surface-side`, and ΔL* in CIELAB):
+`line-side` is not set by a theme: it is `line` mixed 80% with `ink-faint` in `index.css`, so every preset and every custom theme gets a step toward the ink, lighter on a dark sidebar and darker on a light one. The sidebar swaps it in for `line` inside itself (its dividers, row borders and its own edge); the top bar and the shell banner, which hang on the same ground, name it for their bottom line (#2207).
 
-| Preset | `line` (before, the top bar) | `line-side` (after, the whole top bar and the sidebar) |
+**The rule**, measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), the lowest of the three counting:
+
+| Token | At least | Why this number |
 |---|---|---|
-| Dark | `#3a3531` 1.59:1, ΔL* 18.3 | `#45403c` 1.88:1, ΔL* 23.3 |
-| Light | `#d6d6d6` 1.10:1, ΔL* 3.6 | `#c3c3c3` 1.34:1, ΔL* 10.4 |
-| High contrast dark | `#707070` 4.24:1 | `#797979` 4.82:1 |
-| High contrast light | `#767676` 4.54:1 | `#707070` 4.95:1 |
-| Graphite | `#38383a` 1.26:1, ΔL* 7.4 | `#48484b` 1.61:1, ΔL* 14.5 |
+| `line` | 1.2:1 | Below it a line is lost: the top bar's `line` was 1.10:1 on Light's sidebar and read as no line at all (a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone). Dark's lowest is 1.28:1 (on raised); Light's and Graphite's are 1.23:1 now, so 1.2 is a floor close to what the presets already draw, not a new look |
+| `line-side` | 1.4:1 | A step over `line` on the grounds it sits on, so the sidebar's lines and its edge stand apart from the conversation beside them. Dark's lowest is 1.52:1, Light's 1.47:1 |
+| `line-strong` | 1.7:1, and 0.25 over `line-side` | "Clearly stronger" in numbers: Dark's lowest is 1.83:1, 0.31 over its `line-side`. Light's was 1.42:1, and would have fallen under its own `line-side` once `line` rose |
 
-The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both. For the others a test holds `line-side` to 1.3:1 on the sidebar and on the floor beside it (Light's 1.34:1 is the least any preset has), so a preset cannot ship a sidebar line that disappears. A preset's other edges (a card's `line` on the floor or on raised) were not touched by #2207. Other bars and panels on `surface-side` keep the plain `line` for now: the evidence panel (its edge, its header and the overlay header that meets it in one line across the window), the versions, runs and secrets panels. They are a second side panel's lines as a set, and moving one would break the line they share with the next; whether that panel's lines should follow the sidebar's is the owner's call, and in Light they sit at 1.10:1 on their ground today.
+The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both; their `line-strong` is far above the rule. `e2e/fixtures/theme.ts` checks all of this for every preset, so a preset cannot drift back.
+
+What changed, per preset (contrast on the floor / the sidebar / a raised surface; before, then after):
+
+| Preset | `line` | `line-side` | `line-strong` |
+|---|---|---|---|
+| Dark (unchanged) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
+| Light, before | `#d6d6d6` 1.28 / 1.10 / 1.38 | `#c3c3c3` 1.55 / 1.34 / 1.67 | `#bdbdbd` 1.65 / 1.42 / 1.78 |
+| Light, after | `#cbcbcb` 1.42 / 1.23 / 1.54 | `#bababa` 1.70 / 1.47 / 1.84 | `#aaaaaa` 2.04 / 1.76 / 2.21 |
+| High contrast dark (unchanged) | `#707070` 4.24 / 4.24 / 3.87 | `#797979` 4.82 / 4.82 / 4.40 | `#a8a8a8` 8.83 / 8.83 / 8.06 |
+| High contrast light (unchanged) | `#767676` 4.54 on all | `#707070` 4.95 on all | `#4a4a4a` 8.86 on all |
+| Graphite, before | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
+| Graphite, after | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 (unchanged) |
+
+- **Light** needed its `line` raised: on the sidebar's `#e0e0e0` it was under the 1.2:1 floor. `#cbcbcb` clears 1.2:1 there, and the cards and panels that share `line` stay quiet (checked in the grid scene and a Settings page). Its `line-strong` moved with it, since the derived `line-side` would otherwise have passed it. The three edges that are softer than the hairline in Light (a resting panel's border, a message bubble's and a tool card's, owner 2026-10-19) are written as their own colours and did not move.
+- **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the rule, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. Nothing else in it broke the rule.
+- **Dark and the high-contrast presets** already kept the rule, so none of their lines changed. The top bar's and the shell banner's line in Dark is now `line-side`, as the sidebar's always was.
+- The evidence panel and the other panels drawn on the sidebar's ground keep the plain `line`: raising Light's `line` lifts them, and they sit at 1.23:1 on that ground now, not 1.10:1.
 
 ## How it is applied
 
