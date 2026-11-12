@@ -140,7 +140,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       const m = await get().platform!.machines.reconnect(machineId)
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
-      set({ toast: `Could not reconnect: ${(e as Error).message}` })
+      set({ toast: `Could not reconnect: ${errorMessage(e)}` })
     }
   },
 
@@ -149,7 +149,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       const m = await get().platform!.machines.disconnect(machineId)
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
-      set({ toast: `Could not disconnect: ${(e as Error).message}` })
+      set({ toast: `Could not disconnect: ${errorMessage(e)}` })
     }
   },
 
@@ -171,7 +171,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), autoReconnect: m.autoReconnect } } }))
       return true
     } catch (e) {
-      set({ toast: `Could not change Auto reconnect: ${(e as Error).message}` })
+      set({ toast: `Could not change Auto reconnect: ${errorMessage(e)}` })
       return false
     }
   },
@@ -210,7 +210,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       set((s) => ({ machines: withAnswered(s.machines, r.machine) }))
       return true
     } catch (e) {
-      set({ toast: `Could not turn ${on ? 'on' : 'off'} starting at boot: ${(e as Error).message}` })
+      set({ toast: `Could not turn ${on ? 'on' : 'off'} starting at boot: ${errorMessage(e)}` })
       return false
     }
   },
@@ -221,7 +221,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       set((s) => ({ machines: withAnswered(s.machines, machine) }))
       return true
     } catch (e) {
-      set({ toast: `Could not turn ${on ? 'on' : 'off'} asks from that machine: ${(e as Error).message}` })
+      set({ toast: `Could not turn ${on ? 'on' : 'off'} asks from that machine: ${errorMessage(e)}` })
       return false
     }
   },
@@ -239,7 +239,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       const m = await get().platform!.machines.acceptVersions(machineId)
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
-      set({ toast: `Could not connect: ${(e as Error).message}` })
+      set({ toast: `Could not connect: ${errorMessage(e)}` })
     }
   },
 

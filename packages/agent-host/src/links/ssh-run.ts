@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import { realOs } from '../os/real.js'
 import type { OsChild } from '../os/port.js'
 import { RUN_STOP_GRACE_MS } from '../os/run.js'
@@ -77,10 +78,6 @@ export async function endChild(child: OsChild, graceMs = RUN_STOP_GRACE_MS): Pro
   await realOs().processes.stop(child, graceMs, { sweep: false }).catch(() => {})
 }
 
-function seconds(ms: number): string {
-  return ms >= 1000 ? `${Math.round(ms / 1000)} seconds` : `${ms} ms`
-}
-
 /** Runs ssh to the end and answers what it printed, within bounds (see the file header). Rejects with `SshRunFailure` */
 export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
   const stdoutLimit = opts.stdoutLimit ?? SSH_STDOUT_LIMIT
@@ -108,7 +105,7 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
       if (kind !== 'spawn') void endChild(child)
       reject(new SshRunFailure(kind, message, stage))
     }
-    const deadline = setTimeout(() => fail('timeout', `ssh to ${opts.label} did not finish within ${seconds(opts.timeoutMs)}`), opts.timeoutMs)
+    const deadline = setTimeout(() => fail('timeout', `ssh to ${opts.label} did not finish within ${durationText(opts.timeoutMs)}`), opts.timeoutMs)
     // The lines the remote is expected to print, each from the one before; the timer of the one waited for now
     const expected = opts.expect ?? []
     let next = 0

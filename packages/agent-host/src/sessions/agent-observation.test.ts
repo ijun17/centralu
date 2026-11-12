@@ -50,8 +50,8 @@ describe("auto observes another caller's delegation without consuming it", () =>
     const { owner, child } = await start()
     handle(child).event({ type: 'tool_call', sessionId: child, callId: 'c1', summary: { tool: 'Bash', title: 'pnpm build', paths: [] } })
     const r = await w.mgr.agentSession(owner, { sessionId: child, action: 'status' })
-    expect(r).toMatchObject({ ok: true, state: 'working', progress: { quietFor: expect.stringMatching(/^\d+ s$/), lastStep: 'Bash: pnpm build' } })
-    expect(agentRunText(r).text).toMatch(/is working on it\. It last recorded something \d+ s ago; its last step, as JSON: "Bash: pnpm build"\./)
+    expect(r).toMatchObject({ ok: true, state: 'working', progress: { quietFor: expect.stringMatching(/^\d+ (?:milliseconds?|seconds?)$/), lastStep: 'Bash: pnpm build' } })
+    expect(agentRunText(r).text).toMatch(/is working on it\. It last recorded something \d+ (?:milliseconds?|seconds?) ago; its last step, as JSON: "Bash: pnpm build"\./)
   })
 
   it.each(['status', 'wait'] as const)(

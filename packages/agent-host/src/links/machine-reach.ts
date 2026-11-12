@@ -1,6 +1,9 @@
 import { oneLineText } from '@cc/protocol'
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE } from '../adapters/contract.js'
 
+/** How long a list of a machine's or a hub's projects may take before it counts as away for the call (#700, #984): a name is looked up on every ask_project, so one slow or half-open link must not hold the rest up; the link's own call timeout is much longer */
+export const LOOKUP_MS = 4000
+
 /** How a sentence about a machine that is down ends, for the call that was refused (`awaySentence`): none for a bare statement */
 export type Tail = string | null
 

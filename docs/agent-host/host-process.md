@@ -33,7 +33,7 @@ agent-host/src/
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ stream-text.ts       # text read off a child's stream: a kept tail, lines, decoded as one stream (#428)
-├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer
+├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer; durationText says a bound or a time in one rule
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ os.ts                # what differs between OSes, asked by name (architecture.md §2)
 ├─ data-dir.ts          # locating and migrating the data directory

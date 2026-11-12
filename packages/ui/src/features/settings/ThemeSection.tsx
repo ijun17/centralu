@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry } from '@cc/protocol/client'
+import { errorMessage, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry } from '@cc/protocol/client'
 import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SettingsSelect } from './OtherChoice.jsx'
@@ -57,7 +57,7 @@ export function ThemeSection() {
       await setPrefs({ [sideKey(saved.base)]: saved.id })
       setEditing(saved.id)
     } catch (e) {
-      setToast(`Could not create the theme file: ${(e as Error).message}`)
+      setToast(`Could not create the theme file: ${errorMessage(e)}`)
     }
   }
 
@@ -69,7 +69,7 @@ export function ThemeSection() {
       await useStore.getState().refreshThemes()
       setToast(`Imported “${saved.name}”`)
     } catch (e) {
-      setToast(`Could not import that theme: ${(e as Error).message}`)
+      setToast(`Could not import that theme: ${errorMessage(e)}`)
     }
   }
 
@@ -187,7 +187,7 @@ function ThemeFileRow({
   const breaks = useMemo(() => urgencyOf(shown), [shown])
 
   const remove = async () => {
-    const res = await platform.themes.remove(file.id).catch((e: Error) => ({ supported: true, reason: e.message, failed: true }))
+    const res = await platform.themes.remove(file.id).catch((e: unknown) => ({ supported: true, reason: errorMessage(e), failed: true }))
     if (!res.supported || 'failed' in res) {
       setToast(res.reason ?? 'Could not move the theme to the trash')
       return
@@ -212,7 +212,7 @@ function ThemeFileRow({
           <button
             type="button"
             className="text-ink-muted hover:text-ink"
-            onClick={() => void platform.system.openInIde(file.path).catch((e: Error) => setToast(e.message))}
+            onClick={() => void platform.system.openInIde(file.path).catch((e: unknown) => setToast(errorMessage(e)))}
             data-testid={`theme-open-${file.id}`}
           >
             Open file
@@ -280,7 +280,7 @@ function TokenEditor({ file }: { file: ThemeFileEntry }) {
       await platform.themes.save(file.id, { name: nextName, base: file.base, tokens })
       await useStore.getState().refreshThemes()
     } catch (e) {
-      setToast(`Could not save the theme: ${(e as Error).message}`)
+      setToast(`Could not save the theme: ${errorMessage(e)}`)
     }
   }
   let group = ''

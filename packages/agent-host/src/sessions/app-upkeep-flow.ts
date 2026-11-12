@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import { ASSISTANT_CHANGE, errorMessage, sameApp, type ExternalAppInfo } from '@cc/protocol'
 import type { AppUpkeepRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
@@ -179,7 +180,7 @@ export class AppUpkeepFlow {
   private async usage(rpc: WindowRpc, label: string, ref: Ref): Promise<AppUpkeepAnswer> {
     const u = await callWindow(rpc, 'apps.usage', ref)
     const line = (name: string, x: typeof u.day) =>
-      `${name}: ${plural(x.runs, 'agent run')}, ${Math.round(x.durationMs / 1000)} s${x.tokens ? `, ${x.tokens.input} tokens in and ${x.tokens.output} out` : ''}`
+      `${name}: ${plural(x.runs, 'agent run')}, ${durationText(x.durationMs)}${x.tokens ? `, ${x.tokens.input} tokens in and ${x.tokens.output} out` : ''}`
     return { ok: true, text: [`The agent use ${label} requested:`, line('Last day', u.day), line('Last 30 days', u.month)].join('\n') }
   }
 

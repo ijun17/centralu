@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
@@ -34,7 +35,7 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
             onClose()
           } catch (err) {
             // Kept in the dialog, with the typed path: a toast would vanish and take the reason with it
-            setError((err as Error).message)
+            setError(errorMessage(err))
           } finally {
             setBusy(false)
           }

@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import type { KeptDraft } from '../../store/state/conversation.js'
 import { Button } from '../../components/Button.jsx'
@@ -29,7 +30,7 @@ export function KeptDraftCard() {
         dismiss(kept.sessionId)
         setToast('Draft copied')
       },
-      (e: Error) => setToast(`Could not copy: ${e.message}`),
+      (e: unknown) => setToast(`Could not copy: ${errorMessage(e)}`),
     )
   }
   return (

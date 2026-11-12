@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -223,7 +224,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
             const picked = await platform.system.pickDirectory()
             if (picked) openNewSession((await addProject(picked)).id)
           } catch (e) {
-            setToast((e as Error).message)
+            setToast(errorMessage(e))
           } finally {
             setPicking(false)
           }

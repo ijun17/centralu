@@ -951,7 +951,7 @@ describe('when resuming hangs', () => {
       await vi.advanceTimersByTimeAsync(150_100)
       const r = await attempt
       expect(r.resumed).toBe(false)
-      expect(r.reason).toMatch(/Starting claude did not finish within 150s/)
+      expect(r.reason).toMatch(/Starting claude did not finish within 150 seconds/)
 
       // Retry does not join the stuck promise — it starts fresh, and this time the spawn succeeds normally.
       adapter.hangCreate = false

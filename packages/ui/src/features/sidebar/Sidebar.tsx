@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
@@ -48,7 +49,7 @@ export function Sidebar() {
       const picked = await platform.system.pickDirectory()
       if (picked) await addProject(picked)
     } catch (e) {
-      setToast((e as Error).message)
+      setToast(errorMessage(e))
     } finally {
       setAdding(false)
     }

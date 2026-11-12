@@ -1,3 +1,4 @@
+import { durationText } from '../../timing.js'
 import type { ReadResourceResult } from '@modelcontextprotocol/client'
 import { appLabel } from '@cc/protocol'
 import type { AppLifecycle } from './app-lifecycle.js'
@@ -66,9 +67,8 @@ export async function checkApp(host: CheckHost, ref: AppRef): Promise<AppCheckRe
     }
     const busy = e.life.inflight
     if (!(await host.lifecycle.drain(e, host.timing.checkDrainMs))) {
-      const limit = host.timing.checkDrainMs >= 1000 ? `${Math.round(host.timing.checkDrainMs / 1000)} s` : `${host.timing.checkDrainMs} ms`
       notes.push(
-        `${busy} call${busy === 1 ? ' was' : 's were'} still running after ${limit}, so the app was not restarted — ` +
+        `${busy} call${busy === 1 ? ' was' : 's were'} still running after ${durationText(host.timing.checkDrainMs)}, so the app was not restarted — ` +
           'this report is about the process that was already running, which may not have your latest code',
       )
       break

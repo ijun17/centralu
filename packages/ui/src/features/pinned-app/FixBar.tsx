@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { composingKey } from '../../app/keys.js'
@@ -121,7 +122,7 @@ export function FixBar({
       setSent(builderName ?? 'the builder')
     } catch (e) {
       // Exactly the host's own wording — the typed text and attachments are kept (so it can be sent again)
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

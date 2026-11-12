@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { appKeyOf } from '@cc/core'
 import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol/client'
+import { errorMessage, APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol/client'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { Button } from '../../components/Button.jsx'
@@ -400,7 +400,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       loadedUrl.current = frame.url
     })().catch((e: unknown) => {
       if (cancelled) return
-      const message = e instanceof Error ? e.message : String(e)
+      const message = errorMessage(e)
       setError(message)
       setPhase('error')
       onFailedRef.current?.(message)
@@ -444,7 +444,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       },
       (e: unknown) => {
         if (loadedUrl.current !== loaded) return
-        const message = e instanceof Error ? e.message : String(e)
+        const message = errorMessage(e)
         setError(message)
         setPhase('error')
         onFailedRef.current?.(message)
@@ -544,7 +544,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
           await b.teardownResource({}, { timeout: TEARDOWN_WAIT_MS })
           outcome = 'answered'
         } catch (e) {
-          outcome = /timed? ?out/i.test(String((e as Error)?.message)) ? 'timeout' : 'failed'
+          outcome = /timed? ?out/i.test(errorMessage(e)) ? 'timeout' : 'failed'
         }
         bridgeRef.current = null
         void b.close()

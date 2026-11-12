@@ -1,3 +1,4 @@
+import { durationText } from '../../timing.js'
 import { randomBytes } from 'node:crypto'
 import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -91,7 +92,7 @@ async function runNode(file: string, args: string[], cwd: string | undefined, ti
   } catch (e) {
     // A non-zero exit or a limit carries what was printed (`ExecFailure`); a program that did not start carries only its message
     if (isExecFailure(e)) {
-      if (e.ended === 'timeout') return { status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` }
+      if (e.ended === 'timeout') return { status: null, output: `it did not finish within ${durationText(timeoutMs)}` }
       return { status: e.code, output: `${e.stdout}${e.stderr}`.trim() }
     }
     return { status: null, output: e instanceof Error ? e.message : String(e) }

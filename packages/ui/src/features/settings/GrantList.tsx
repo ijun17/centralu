@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Load } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
@@ -55,7 +56,7 @@ export function GrantList<T>({
       setGone((g) => [...g, key])
       void load.reload()
     } catch (e) {
-      setError((e as Error).message || action.failed)
+      setError(errorMessage(e) || action.failed)
     } finally {
       setRunning((r) => r.filter((k) => k !== key))
     }

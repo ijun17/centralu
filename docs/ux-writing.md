@@ -108,6 +108,10 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
   (a space); durations "1.5s", "3m 20s", "2h 5m"; token counts "1.5k", "10k+"; the time under a bubble
   "3:42 PM"; a day divider "Saturday, October 18, 2026"; ages "just now", "5m ago", "3d ago"
   (`app/labelClock.ts`).
+- A duration inside a sentence a person reads is in full words, pluralised by the count: "did not answer within 20 seconds",
+  "retries this turn in 2 minutes", "within 150 milliseconds". Compact units ("20 s", "150 ms", the formats above) are for a label
+  or a log line. The host words every wait in a message through `durationText` (`agent-host/src/timing.ts`): whole minutes say minutes
+  ("2 minutes", not "120 seconds"), other times up to three minutes say seconds ("150 seconds").
 - Breaks it: "2 error", "3 limit reached" (`sidebar/marks/FoldSummary.tsx`, the state label lower-cased
   and not pluralised); "Reconnecting for 5+ min" (`components/primitives.tsx`), the one "min" among "m".
 

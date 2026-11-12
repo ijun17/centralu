@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useRef, type CSSProperties, type ReactNode } from 'react'
 import { usePlatform } from '../app/PlatformProvider.jsx'
 import { useStore } from '../store/store.js'
@@ -81,13 +82,13 @@ export function DragRegion({
           el.setAttribute('data-tauri-drag-region', 'false')
           setTimeout(() => el.setAttribute('data-tauri-drag-region', was), 0)
         }
-        void platform.system.startWindowDrag().catch((err: Error) => {
+        void platform.system.startWindowDrag().catch((err: unknown) => {
           // Does not swallow the error. This exact thing caused the window to stop moving and
           // went unnoticed three times before — if the Tauri permission
           // (core:window:allow-start-dragging) is missing, it gets rejected right here.
           if (warned.current) return
           warned.current = true
-          setToast(`Could not move window: ${err.message}`)
+          setToast(`Could not move window: ${errorMessage(err)}`)
         })
       }}
       onDoubleClick={(e) => {

@@ -62,11 +62,11 @@ export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OP
 export const ASSERTIONS: Readonly<Record<string, number>> = {
   'apps/desktop': 3,
   'apps/web': 6,
-  'packages/agent-host': 529,
+  'packages/agent-host': 461,
   'packages/core': 1,
   'packages/platform': 3,
   'packages/protocol': 0,
-  'packages/ui': 255,
+  'packages/ui': 140,
 }
 
 /** The packages above their ceiling, and the numbers a ceiling could come down to (a hint, not a failure: two changes that each lowered it by the same one merge into a ceiling one too high) */

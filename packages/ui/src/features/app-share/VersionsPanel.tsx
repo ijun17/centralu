@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSnapshot, AppVersions } from '@cc/protocol/client'
+import { errorMessage, type AppSnapshot, type AppVersions } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatClock, formatDay } from '../../app/format.js'
@@ -62,7 +62,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
       void refresh()
       void read.reload()
     } catch (e) {
-      setRestoreError((e as Error).message)
+      setRestoreError(errorMessage(e))
     } finally {
       setBusy(false)
     }

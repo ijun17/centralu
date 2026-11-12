@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { Fragment, memo, useRef, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Options, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -164,7 +165,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
                   if (!platform) return
                   e.preventDefault()
                   void platform.system.openUrl(href).catch((err: unknown) =>
-                    useStore.getState().setToast(`Could not open the link: ${err instanceof Error ? err.message : String(err)}`),
+                    useStore.getState().setToast(`Could not open the link: ${errorMessage(err)}`),
                   )
                 }}
               >

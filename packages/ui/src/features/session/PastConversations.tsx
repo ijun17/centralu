@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ExternalSession } from '@cc/protocol/client'
+import { errorMessage, type ExternalSession } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useLoad } from '../../app/useLoad.js'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
@@ -66,7 +66,7 @@ export function PastConversations({
       // Removing the empty one keeps the sidebar to the session the person chose
       discardEmpty()
     } catch (e) {
-      setToast(`Could not load that conversation: ${(e as Error).message}`)
+      setToast(`Could not load that conversation: ${errorMessage(e)}`)
     } finally {
       setBusy(null)
     }

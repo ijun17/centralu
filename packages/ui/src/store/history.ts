@@ -1,4 +1,4 @@
-import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
+import { errorMessage, SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergeBySeq, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
 import { retryLadder } from './retry.js'
@@ -158,7 +158,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       if (stale()) return
       set((s) => ({
         history: { ...s.history, [sessionId]: { ...cur, loading: false } },
-        toast: `Could not load past conversation: ${(e as Error).message}`,
+        toast: `Could not load past conversation: ${errorMessage(e)}`,
       }))
     }
   },
@@ -216,7 +216,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
         putSubagentSteps(s.subagentSteps, sessionId, callId, {
           ...(s.subagentSteps[sessionId]?.[callId] ?? cur),
           loading: false,
-          error: (e as Error).message,
+          error: errorMessage(e),
         }),
       )
     }
@@ -249,7 +249,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       })
       return null
     } catch (e) {
-      return (e as Error).message
+      return errorMessage(e)
     }
   },
 
@@ -261,7 +261,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       rereadSubagentSteps(sessionId, set, get)
       return null
     } catch (e) {
-      return (e as Error).message
+      return errorMessage(e)
     }
   },
 })

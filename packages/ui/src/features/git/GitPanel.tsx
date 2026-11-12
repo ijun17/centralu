@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { GitBranch, GitFileStatus } from '@cc/protocol/client'
+import { errorMessage, type GitBranch, type GitFileStatus } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
@@ -123,7 +123,7 @@ function Changes({
         if (hit) setSelected(hit)
       })
       // Said, as a failed diff is (#850 item 8): silent, the click looked like it did nothing. Clicking again retries
-      .catch((e: Error) => alive && setToast(`Could not load diff: ${e.message}`))
+      .catch((e: unknown) => alive && setToast(`Could not load diff: ${errorMessage(e)}`))
     return () => {
       alive = false
     }
@@ -154,7 +154,7 @@ function Changes({
                     const { path } = await platform.fs.resolve(projectId, selected.path)
                     await platform.system.openInIde(path, line)
                   } catch (e) {
-                    setToast(`Could not open in IDE: ${(e as Error).message}`)
+                    setToast(`Could not open in IDE: ${errorMessage(e)}`)
                   }
                 }
               }
@@ -481,7 +481,7 @@ function History({
                   const { path } = await platform.fs.resolve(projectId, file)
                   await platform.system.openInIde(path, line)
                 } catch (e) {
-                  setToast(`Could not open in IDE: ${(e as Error).message}`)
+                  setToast(`Could not open in IDE: ${errorMessage(e)}`)
                 }
               }
         }

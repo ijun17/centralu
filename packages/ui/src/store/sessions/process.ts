@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { isAway } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { ifSessionStill, omitKey } from '../patch.js'
@@ -46,7 +47,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       )
       return res.resumed
     } catch (err) {
-      set({ toast: `Could not resume: ${(err as Error).message}` })
+      set({ toast: `Could not resume: ${errorMessage(err)}` })
       return false
     }
   },
@@ -84,7 +85,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       } catch (e) {
         set(
           ifSessionStill(sessionId, (st) => ({
-            wakeError: { ...st.wakeError, [sessionId]: (e as Error).message },
+            wakeError: { ...st.wakeError, [sessionId]: errorMessage(e) },
             wakeLocked: omitKey(st.wakeLocked, sessionId),
           })),
         )
@@ -111,7 +112,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
             : `Could not fork: ${res.reason ?? 'unknown reason'}`,
         })))
       } catch (e) {
-        set({ toast: `Could not fork: ${(e as Error).message}` })
+        set({ toast: `Could not fork: ${errorMessage(e)}` })
       }
     })
   },
@@ -158,7 +159,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       return r.resumed
     } catch (e) {
       // Letting this throw and stop here would leave the lock stuck forever — the button would stay dead
-      set({ toast: `Could not restart: ${(e as Error).message}` })
+      set({ toast: `Could not restart: ${errorMessage(e)}` })
       return false
     } finally {
       set((s) => ({ resuming: omitKey(s.resuming, sessionId) }))
@@ -172,7 +173,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       await get().platform!.agents.interrupt(sessionId)
     } catch (err) {
       // Silence after failing to stop would leave someone believing it stopped and waiting — the exact kind of failure this project forbids
-      set((s) => ({ toast: `Could not stop: ${(err as Error).message}`, stopping: omitKey(s.stopping, sessionId) }))
+      set((s) => ({ toast: `Could not stop: ${errorMessage(err)}`, stopping: omitKey(s.stopping, sessionId) }))
     }
   },
 
@@ -181,7 +182,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       await get().platform!.agents.stopBackgroundTask(sessionId, taskId)
     } catch (err) {
       // The same rule as interrupt: a task that did not stop must not look stopped
-      set({ toast: `Could not stop the task: ${(err as Error).message}` })
+      set({ toast: `Could not stop the task: ${errorMessage(err)}` })
     }
   },
 
@@ -189,7 +190,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
     try {
       await get().platform!.agents.clearBackgroundTasks(sessionId)
     } catch (err) {
-      set({ toast: `Could not clear the list: ${(err as Error).message}` })
+      set({ toast: `Could not clear the list: ${errorMessage(err)}` })
     }
   },
 
@@ -222,7 +223,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       }))
       return true
     } catch (e) {
-      set({ toast: `Could not switch the agent: ${(e as Error).message}` })
+      set({ toast: `Could not switch the agent: ${errorMessage(e)}` })
       return false
     }
   },
@@ -273,7 +274,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
         : 'from next turn'
       set({ toast: `${changed} (${when})` })
     } catch (e) {
-      set({ toast: `Could not change settings: ${(e as Error).message}` })
+      set({ toast: `Could not change settings: ${errorMessage(e)}` })
     }
   },
 })

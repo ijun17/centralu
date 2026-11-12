@@ -1,5 +1,5 @@
 import { initialSession } from '@cc/core'
-import type { ToolName } from '@cc/protocol/client'
+import { errorMessage, type ToolName } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { syncBadge } from './events/notices.js'
 import { replayPendingEvents } from './sessionList.js'
@@ -39,7 +39,7 @@ async function recordChoice(set: StoreSet, get: StoreGet, tool: ToolName): Promi
     set({ assistantTool: tool })
     return true
   } catch (e) {
-    set({ toast: `Could not save the choice: ${(e as Error).message}` })
+    set({ toast: `Could not save the choice: ${errorMessage(e)}` })
     return false
   }
 }
@@ -77,7 +77,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
       if (!get().chat[info.id]) void get().loadHistory(info.id)
     } catch (e) {
       // If it could not be opened, the view reverts — the worst outcome is leaving an empty screen up with no explanation
-      set({ view: 'focus', toast: `Could not open the Assistant: ${(e as Error).message}` })
+      set({ view: 'focus', toast: `Could not open the Assistant: ${errorMessage(e)}` })
     }
   },
 
@@ -100,7 +100,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
         replayPendingEvents(get)
         id = info.id
       } catch (e) {
-        set({ toast: `Could not start the Assistant: ${(e as Error).message}` })
+        set({ toast: `Could not start the Assistant: ${errorMessage(e)}` })
         return false
       } finally {
         set({ assistantWaking: false })
@@ -132,7 +132,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
       try {
         id = (await platform.agents.assistantPeek())?.id ?? null
       } catch (e) {
-        set({ toast: `Could not switch the agent: ${(e as Error).message}` })
+        set({ toast: `Could not switch the agent: ${errorMessage(e)}` })
         return false
       }
     }
@@ -162,7 +162,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
           : `Dismissed MCP proposal: ${name}`,
       })
     } catch (e) {
-      set({ toast: `Could not resolve the proposal: ${(e as Error).message}` })
+      set({ toast: `Could not resolve the proposal: ${errorMessage(e)}` })
     }
     await get().refreshMcpProposals()
   },
@@ -190,7 +190,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
           : `Dismissed skill proposal: ${name}`,
       })
     } catch (e) {
-      set({ toast: `Could not resolve the proposal: ${(e as Error).message}` })
+      set({ toast: `Could not resolve the proposal: ${errorMessage(e)}` })
     }
     await get().refreshSkillProposals()
   },

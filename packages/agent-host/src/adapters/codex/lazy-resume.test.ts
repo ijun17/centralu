@@ -205,7 +205,7 @@ describe('codex lazy resume — like Claude', () => {
           sessionId: 's7',
           error: {
             code: 'adapter_crashed',
-            message: expect.stringMatching(/did not finish within 150s — 1 message\(s\) were sent while it was opening and were not delivered/),
+            message: expect.stringMatching(/did not finish within 150 seconds — 1 message\(s\) were sent while it was opening and were not delivered/),
             retryable: true,
           },
         },

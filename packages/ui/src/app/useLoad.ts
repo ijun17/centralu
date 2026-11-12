@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useCallback, useEffect, useRef, useState, type DependencyList } from 'react'
 
 /** What a screen knows about something it reads when it shows (`useLoad`) */
@@ -22,7 +23,7 @@ const IDLE: Loaded<never> = { data: undefined, error: null, loading: false }
 
 /** A failure's reason as a line a screen can print */
 export function loadErrorText(e: unknown): string {
-  const text = e instanceof Error ? e.message : String(e)
+  const text = errorMessage(e)
   return text.trim() || 'Unknown error'
 }
 

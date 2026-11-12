@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ProjectInfo } from '@cc/protocol/client'
+import { errorMessage, type ProjectInfo } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -74,7 +74,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             onClose()
           } catch (err) {
             // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the dialog instead
-            setError((err as Error).message)
+            setError(errorMessage(err))
             setBusy(false)
           }
         }}

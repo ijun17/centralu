@@ -1,4 +1,4 @@
-import { alwaysAllowKey } from '@cc/protocol/client'
+import { errorMessage, alwaysAllowKey } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 
 /** Answering what a session asks: an approval, exactly once (#158), and a question's options */
@@ -76,7 +76,7 @@ export const answerActions = (set: StoreSet, get: StoreGet): AnswerActions => ({
       const projectId = get().sessions[sessionId]?.projectId
       if (changing && projectId) get().refreshProjectGit(projectId)
     } catch (e) {
-      set({ toast: (e as Error).message || 'Could not send the approval' })
+      set({ toast: errorMessage(e) || 'Could not send the approval' })
     } finally {
       // A failure must allow pressing it again. A success already dismissed the card, so the `pendingApproval` check above blocks a repeat
       set((s) => {
@@ -92,7 +92,7 @@ export const answerActions = (set: StoreSet, get: StoreGet): AnswerActions => ({
       await get().platform!.agents.answerQuestion(sessionId, requestId, answers)
       return true
     } catch (e) {
-      set({ toast: (e as Error).message || 'Could not send the answer' })
+      set({ toast: errorMessage(e) || 'Could not send the answer' })
       return false
     }
   },

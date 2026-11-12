@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { appKeyOf } from '@cc/core'
-import { sameApp, type AgentUse, type AppPermission, type AppRun, type AppUsage } from '@cc/protocol/client'
+import { errorMessage, sameApp, type AgentUse, type AppPermission, type AppRun, type AppUsage } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
 import { appTitleOf } from '../../store/names.js'
-import { useStore } from '../../store/store.js'
+import { isApp, useStore } from '../../store/store.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
@@ -46,7 +46,7 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
   const runs = read.data ?? null
   const error = read.error
   const load = read.reload
-  const nameOf = (r: AppRun) => appTitleOf(apps.find((a) => a.appId === r.appId && a.projectId === r.projectId) ?? r)
+  const nameOf = (r: AppRun) => appTitleOf(apps.find((a) => isApp(a, r.projectId, r.appId, machine)) ?? r)
 
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="runs-panel" aria-label="Runs">
@@ -114,7 +114,7 @@ function Permissions({ appId, projectId, machine, changed }: { appId: string; pr
     try {
       await platform.apps.forgetPermission(appId, projectId, p.capability, machine)
     } catch (e) {
-      setToast(`Could not forget: ${(e as Error).message}`)
+      setToast(`Could not forget: ${errorMessage(e)}`)
     }
     setAgain((n) => n + 1)
   }

@@ -120,7 +120,7 @@ describe('a chain started from a session — that session\'s approval card', () 
     w.rt.refresh()
     const caller = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const out = brokerSaid(await w.callFromSession(caller, 'app-notes', { args: { prompt: 'x' } }))
-    expect(out.text).toContain('run_agent refused: the person did not answer within 1 second whether App notes may run an agent')
+    expect(out.text).toContain('run_agent refused: the person did not answer within 400 milliseconds whether App notes may run an agent')
     const [card] = capabilityCards(caller.id)
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'approval_resolved', sessionId: caller.id, requestId: card!.requestId, decision: 'deny' }))
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)!.pendingApproval).toBeNull()

@@ -1,6 +1,6 @@
 import { TrustProjectButton } from './TrustCard.jsx'
 import { useEffect, useState } from 'react'
-import { newAppIdProblem } from '@cc/protocol/client'
+import { errorMessage, newAppIdProblem } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
@@ -82,7 +82,7 @@ ${parent?.trim() ?? ''}`
       platform.projects
         .createPreview(problem === null ? id : '', parent?.trim() || undefined, null)
         .then((p) => live && setWhere({ ...p, asked }))
-        .catch((e: Error) => live && setWhere({ parent: parent ?? '', path: null, error: e.message, asked }))
+        .catch((e: unknown) => live && setWhere({ parent: parent ?? '', path: null, error: errorMessage(e), asked }))
     }, 150)
     return () => {
       live = false
@@ -107,7 +107,7 @@ ${parent?.trim() ?? ''}`
             onClose()
           } catch (err) {
             // Exactly the host's own wording — a toast disappears after 2.5 seconds and would look like "nothing happened when pressed." Kept inside the dialog instead
-            setError((err as Error).message)
+            setError(errorMessage(err))
           } finally {
             setBusy(false)
           }
@@ -237,7 +237,7 @@ ${parent?.trim() ?? ''}`
                         if (picked) setParent(picked)
                       } catch (e) {
                         // A picker the shell refused is said in the form, not dropped as an unhandled rejection (#972)
-                        setError((e as Error).message)
+                        setError(errorMessage(e))
                       }
                     }}
                     data-testid="new-app-pick-parent"

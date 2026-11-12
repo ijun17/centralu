@@ -1,4 +1,4 @@
-import { APP_VIEWS_LIVE_PER_SESSION } from '@cc/protocol/client'
+import { errorMessage, APP_VIEWS_LIVE_PER_SESSION } from '@cc/protocol/client'
 import type { ExternalAppInfo, NormalizedEvent, StoredMessage } from '@cc/protocol/client'
 import type { AppToolResult } from '@cc/platform/ports'
 import type { AppState, InlineView, PinnedView, StoreGet, StoreSet } from './state.js'
@@ -351,7 +351,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     try {
       await platform.apps.setShared(appId, projectId, shared)
     } catch (e) {
-      set({ toast: `Could not change sharing: ${(e as Error).message}` })
+      set({ toast: `Could not change sharing: ${errorMessage(e)}` })
     }
   },
 
@@ -362,7 +362,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       await platform.apps.remove(appId, null, machine ?? undefined)
       return true
     } catch (e) {
-      set({ toast: `Could not remove the app: ${(e as Error).message}` })
+      set({ toast: `Could not remove the app: ${errorMessage(e)}` })
       return false
     }
   },
@@ -384,7 +384,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     try {
       await platform.apps.answerQuestion(questionId, decision)
     } catch (e) {
-      set({ toast: (e as Error).message || 'Could not answer the question' })
+      set({ toast: errorMessage(e) || 'Could not answer the question' })
     }
     // Whether the answer landed or not (already closed), align to the list the host knows — so an answered question does not linger on screen
     await get().refreshAppQuestions()
@@ -431,7 +431,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       })
       capInlineViews(get, sessionId, callId)
     } catch (e) {
-      patch({ kept: false, reason: (e as Error).message })
+      patch({ kept: false, reason: errorMessage(e) })
     } finally {
       patch({ reopening: false })
     }
@@ -444,7 +444,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       await platform.apps.sendViewMessage(sessionId, instanceId, text)
       return true
     } catch (e) {
-      set({ toast: `Could not send the app's message: ${(e as Error).message}` })
+      set({ toast: `Could not send the app's message: ${errorMessage(e)}` })
       return false
     }
   },
@@ -548,7 +548,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult, codeStamp }))
     } catch (e) {
       if (get().pinnedViews.find((p) => p.key === key)?.phase === 'opening') {
-        patch((p) => ({ ...p, phase: 'failed', error: (e as Error).message }))
+        patch((p) => ({ ...p, phase: 'failed', error: errorMessage(e) }))
       }
     }
   },
@@ -600,7 +600,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       await platform.apps.restart(pv.appId, pv.projectId, pv.machine ?? undefined)
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
-      patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${(e as Error).message}` } : p))
+      patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'failed', error: `Could not restart: ${errorMessage(e)}` } : p))
     }
   },
 
@@ -615,7 +615,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     try {
       await platform.apps.restart(appId, projectId, machine ?? undefined)
     } catch (e) {
-      set({ toast: `Could not stop ${appId}: ${(e as Error).message}` })
+      set({ toast: `Could not stop ${appId}: ${errorMessage(e)}` })
     }
   },
 
@@ -675,7 +675,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
      * set here is simply replaced by that answer.
      */
     set((s) => ({
-      externalApps: s.externalApps.some((a) => a.appId === app.appId && a.projectId === app.projectId)
+      externalApps: s.externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))
         ? s.externalApps
         : [...s.externalApps, app],
     }))

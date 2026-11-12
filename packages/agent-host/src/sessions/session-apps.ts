@@ -4,7 +4,7 @@ import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { runsUnasked } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
-import { raceTimeout, withTimeout } from '../timing.js'
+import { durationText, raceTimeout, withTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -687,7 +687,7 @@ class Attachment implements SessionApps {
       const o = d.outcome
       const done = toResult(o)
       return {
-        content: [{ type: 'text', text: `Run ${runId} has finished (${o.status}, ${Math.round(o.durationMs / 1000)} s). Its result:` }, ...done.content],
+        content: [{ type: 'text', text: `Run ${runId} has finished (${o.status}, ${durationText(o.durationMs)}). Its result:` }, ...done.content],
         isError: done.isError,
         structuredContent: { runId, status: o.status, ...(done.structuredContent ? { result: done.structuredContent } : {}) },
       }

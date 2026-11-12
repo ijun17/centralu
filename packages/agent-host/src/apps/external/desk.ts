@@ -1,3 +1,4 @@
+import { durationText } from '../../timing.js'
 import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
@@ -281,14 +282,6 @@ function deniedText(tool: BrokerToolName, appName: string, text: string): string
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
 
-/** A duration for a person to read — "5 minutes", "1 second" */
-function humanDuration(ms: number): string {
-  const s = Math.max(1, Math.round(ms / 1000))
-  if (s < 60) return `${s} second${s === 1 ? '' : 's'}`
-  const m = Math.round(s / 60)
-  return `${m} minute${m === 1 ? '' : 's'}`
-}
-
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
 
 /**
@@ -565,7 +558,7 @@ export class BrokerDesk {
     const since = this.agentsRunning.get(key)
     if (since !== undefined) {
       return refuse(
-        `run_agent refused: ${app.name} already has an agent running (started ${humanDuration(Date.now() - since)} ago) — ` +
+        `run_agent refused: ${app.name} already has an agent running (started ${durationText(Date.now() - since)} ago) — ` +
           'Centralu runs one agent per app at a time. Ask again when it has finished.',
       )
     }
@@ -574,8 +567,8 @@ export class BrokerDesk {
     const recent = (this.agentStarts.get(key) ?? []).filter((t) => t > now - windowMs)
     if (recent.length >= AGENT_RUNS_PER_WINDOW) {
       return refuse(
-        `run_agent refused: ${app.name} started ${recent.length} agents within ${humanDuration(windowMs)}, the most Centralu allows — ` +
-          `ask again in ${humanDuration(recent[0]! + windowMs - now)}, or put more of the work into one prompt`,
+        `run_agent refused: ${app.name} started ${recent.length} agents within ${durationText(windowMs)}, the most Centralu allows — ` +
+          `ask again in ${durationText(recent[0]! + windowMs - now)}, or put more of the work into one prompt`,
       )
     }
     this.agentStarts.set(key, [...recent, now])
@@ -751,7 +744,7 @@ export class BrokerDesk {
     if (answer === null) {
       return refuse(
         asked.timedOut
-          ? `${tool} refused: the person did not answer within ${humanDuration(this.questionMs())} whether ${app.name} may ${text}. Nothing was remembered — Centralu asks again next time.`
+          ? `${tool} refused: the person did not answer within ${durationText(this.questionMs())} whether ${app.name} may ${text}. Nothing was remembered — Centralu asks again next time.`
           : `${tool} refused: the question to the person was withdrawn before an answer`,
       )
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { appKeyOf, type TrashedRun } from '@cc/protocol/client'
+import { errorMessage, appKeyOf, type TrashedRun } from '@cc/protocol/client'
 import { messagesToChat, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay, formatDuration } from '../../app/format.js'
@@ -163,7 +163,7 @@ export function ArchiveRunReader({ run, onBack }: { run: TrashedRun; onBack: () 
           setOldest(r.messages[0]?.seq ?? null)
           setMore(r.messages.length >= PAGE)
         })
-        .catch((e: Error) => setError(e.message))
+        .catch((e: unknown) => setError(errorMessage(e)))
     },
     [platform, run.runId, run.machine],
   )

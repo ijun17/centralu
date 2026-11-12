@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppReview } from '@cc/protocol/client'
+import { errorMessage, type AppReview } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Modal } from '../../components/Modal.jsx'
@@ -54,7 +54,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       pending.current = got.token
       setStaged(got)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setBusy(null)
     }
@@ -74,7 +74,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       // Goes to the imported app — if it was enabled, the app itself; if not, the pre-enable confirmation stands
       openApp(app.projectId, app.appId)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setBusy(null)
     }
@@ -93,7 +93,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       if (picked) setSource(picked)
     } catch (e) {
       // A picker the shell refused is said where the person is looking, not dropped as an unhandled rejection (#972)
-      setError((e as Error).message)
+      setError(errorMessage(e))
     }
   }
 

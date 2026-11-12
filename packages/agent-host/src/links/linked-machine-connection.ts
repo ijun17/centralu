@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import { randomBytes } from 'node:crypto'
 import { asObj, isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
@@ -1115,7 +1116,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.autoStarts.length >= max) this.restartsSpent = true
     if (!this.restartsSpent) return null
     return (
-      `The Centralu hosts this computer started on ${this.name} did not stay up (${max} starts within ${Math.round(windowMs / 60_000)} minutes), ` +
+      `The Centralu hosts this computer started on ${this.name} did not stay up (${max} starts within ${durationText(windowMs)}), ` +
       'so it starts no more by itself; serve.log and host.log in its data folder there say why' +
       (this.lastStartFailure ? ` (the last start: ${this.lastStartFailure})` : '') +
       '. Start tries again'

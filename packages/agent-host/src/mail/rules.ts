@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import { createHash } from 'node:crypto'
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
@@ -170,7 +171,7 @@ export const REFUSAL_TEXT = {
   not_allowed: () => 'that is not a party that takes mail',
   withheld: (id: string) => `${id} is a request: its words are shown in the turn it starts, and it is marked done there.`,
   not_yours: (id: string) => `you were not sent ${id} and did not send it.`,
-  repeat: (name: string) => `you sent the same text to ${name} less than ${REPEAT_WINDOW_MS / 60_000} minutes ago.`,
+  repeat: (name: string) => `you sent the same text to ${name} less than ${durationText(REPEAT_WINDOW_MS)} ago.`,
   ask_rate: () => `your project's sessions asked the Assistant ${ASKS_PER_HOUR} times in the last hour; wait, or write to the person.`,
   assistant_asks: () =>
     'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead',
@@ -187,7 +188,7 @@ export const WARNING_TEXT = {
   compactCycles: (session: string, cycles: number) =>
     `${session} asked to compact its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
   /** The three guards that refuse rather than warn (#1684, #2035): the person hears of the first refusal of each kind a clock hour */
-  repeat: (sender: string, to: string) => `Centralu refused mail from ${sender} to ${to}: the same text again within ${REPEAT_WINDOW_MS / 60_000} minutes. ${sender} was told; nothing else was stopped.`,
+  repeat: (sender: string, to: string) => `Centralu refused mail from ${sender} to ${to}: the same text again within ${durationText(REPEAT_WINDOW_MS)}. ${sender} was told; nothing else was stopped.`,
   rate_limited: (sender: string, limit: number) => `Centralu refused mail from ${sender}: more than ${limit} messages in a minute. ${sender} was told to wait; nothing else was stopped.`,
   ask_rate: (sender: string) => `Centralu refused a request from ${sender} to the Assistant: its project's sessions asked ${ASKS_PER_HOUR} times in the last hour. ${sender} was told to wait or write to you.`,
 } as const

@@ -112,7 +112,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
   it('does not wait on a machine that never answers its "Allow auto from a linked computer": that is the reason it gives', async () => {
     const stalled = { ...machine({}), call: () => new Promise<never>(() => {}) }
     const reader = linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 })
-    expect(await reader.hubAuto('m1')).toEqual({ ok: false, error: 'did not answer within 30 ms' })
+    expect(await reader.hubAuto('m1')).toEqual({ ok: false, error: 'did not answer within 30 milliseconds' })
   })
 
   // The Assistant's cap goes with the request (#838): a safe seat never starts a normal session on a machine
@@ -445,12 +445,12 @@ describe("a linked machine in every session's list and search (#984)", () => {
     const reader = linkedSessions(() => [slow(), fine], undefined, undefined, { lookupMs: 30 })
     const listed = await reader.list()
     expect(listed.map((s) => [s.sessionId, s.away])).toEqual([
-      ['slow.w9', 'did not answer within 30 ms'],
+      ['slow.w9', 'did not answer within 30 milliseconds'],
       ['m1.w1', undefined],
     ])
     const { hits, notSearched } = await reader.recall('found', 5)
     expect(hits.flat().map((h) => h.sessionId)).toEqual(['m1.w1'])
-    expect(notSearched).toEqual(['Slow box (did not answer within 30 ms)'])
+    expect(notSearched).toEqual(['Slow box (did not answer within 30 milliseconds)'])
   })
 
   it("tells a reader from the mirror whether a machine's session's project is trusted, and nothing of its Assistant (#1941)", () => {
@@ -513,9 +513,9 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
     const t0 = Date.now()
     const { projects, away } = await reader.projects()
     expect(Date.now() - t0).toBeLessThan(2000)
-    expect(away).toEqual([{ machine: 'Slow box', machineId: 'slow', why: 'did not answer within 30 ms' }])
+    expect(away).toEqual([{ machine: 'Slow box', machineId: 'slow', why: 'did not answer within 30 milliseconds' }])
     expect(projects.map((p) => [p.id, p.machine, p.away])).toEqual([
-      ['slow.p-old', 'Slow box', 'did not answer within 30 ms'],
+      ['slow.p-old', 'Slow box', 'did not answer within 30 milliseconds'],
       ['m1.p1', 'Box', undefined],
     ])
   })
@@ -561,7 +561,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
       const r = await mgr.runCentraluTool('orch', 'create_session', { project: 'site' })
       expect(Date.now() - t0).toBeLessThan(2000)
       expect(r.isError).toBe(true)
-      expect(r.text).toContain('More than one project is called that; give its id: site [p-here] on this computer; site [m1.p-far] on Slow box (which could not be asked just now (did not answer within 30 ms))')
+      expect(r.text).toContain('More than one project is called that; give its id: site [p-here] on this computer; site [m1.p-far] on Slow box (which could not be asked just now (did not answer within 30 milliseconds))')
       // Its id settles it, and this computer's own id asks no machine at all
       const before = asked.length
       expect(await mgr.runCentraluTool('orch', 'create_session', { project: 'p-here' })).toMatchObject({ isError: false })
@@ -571,7 +571,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
     it('names the machine that did not answer for a project only there, and sends it no create', async () => {
       const { mgr, asked } = await seat()
       const r = await mgr.runCentraluTool('orch', 'create_session', { project: 'far' })
-      expect(r).toMatchObject({ isError: true, text: 'Could not create it — far [m1.p-only] is on Slow box, which could not be asked just now (did not answer within 30 ms). Try again once its link is back.' })
+      expect(r).toMatchObject({ isError: true, text: 'Could not create it — far [m1.p-only] is on Slow box, which could not be asked just now (did not answer within 30 milliseconds). Try again once its link is back.' })
       expect(asked).toEqual(['projects.list'])
     })
   })

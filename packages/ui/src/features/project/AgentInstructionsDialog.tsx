@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AGENT_INSTRUCTIONS_MAX, type ProjectInfo } from '@cc/protocol/client'
+import { errorMessage, AGENT_INSTRUCTIONS_MAX, type ProjectInfo } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -34,7 +34,7 @@ export function AgentInstructionsDialog({ project, onClose }: { project: Project
             onClose()
           } catch (err) {
             // Kept in the dialog with the text, as the delete dialog keeps its error: a toast would lose what was typed
-            setError((err as Error).message)
+            setError(errorMessage(err))
             setBusy(false)
           }
         }}

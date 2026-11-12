@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { changedFileCount, type GitFileStatus } from '@cc/protocol/client'
+import { errorMessage, changedFileCount, type GitFileStatus } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'
@@ -55,7 +55,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
       await refresh()
     } catch (e) {
       // When the RPC throws (disconnect, timeout), nothing caught it and it looked like a success — no silent failures
-      setToast(`Could not ${verb}: ${(e as Error).message}`)
+      setToast(`Could not ${verb}: ${errorMessage(e)}`)
     } finally {
       setBusy(false)
       setCancelling(false)
@@ -73,7 +73,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
     } catch (e) {
       // The write goes on, and Cancel can be pressed again
       setCancelling(false)
-      setToast((e as Error).message)
+      setToast(errorMessage(e))
     }
   }
 

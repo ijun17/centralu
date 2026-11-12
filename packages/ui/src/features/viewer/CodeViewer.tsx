@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -96,7 +97,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     void platform.fs
       .readFile(projectId, path, sessionId ?? undefined)
       .then((f) => alive && setFile(f))
-      .catch((e: Error) => {
+      .catch((e: unknown) => {
         if (!alive) return
         /*
          * Not being at the root does not make it a dead link. An agent often writes a path
@@ -124,9 +125,9 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
               return
             }
             setCandidates(found.slice(0, 8))
-            setError(e.message)
+            setError(errorMessage(e))
             // No reason to stack a toast on top when the screen is already asking the person to pick a candidate
-            if (found.length === 0) setToast(e.message)
+            if (found.length === 0) setToast(errorMessage(e))
           })
       })
     return () => {
@@ -291,7 +292,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
               void platform.fs
                 .resolve(projectId, path, sessionId ?? undefined)
                 .then(({ path: abs }) => platform.system.openInIde(abs))
-                .catch((e) => setToast(`Could not open in IDE: ${(e as Error).message}`))
+                .catch((e) => setToast(`Could not open in IDE: ${errorMessage(e)}`))
             }}
             data-testid="viewer-open-ide"
           >

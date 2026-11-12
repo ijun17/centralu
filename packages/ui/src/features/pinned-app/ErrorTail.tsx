@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AppErrorBundle } from '@cc/protocol/client'
+import { errorMessage, type AppErrorBundle } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatClock } from '../../app/format.js'
 import { Button } from '../../components/Button.jsx'
@@ -88,7 +88,7 @@ export function ErrorTail({
       const r = await platform.apps.errors(app.appId, app.projectId, machine)
       setBundle(r.latest)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import type { AutoCompact, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import { inTurn, type SessionIdle } from '../idle.js'
 import { thenTurn, type StoredThen, type ThenKeep, type ThenStage } from './then-keep.js'
@@ -740,7 +741,7 @@ export class SelfCompaction {
   private resume(m: SessionInfo, rec: StoredThen): void {
     const id = m.id
     // Left by a host long ago (a rollback to an older build): the situation it was kept for is gone
-    if (this.now() - rec.at > THEN_KEEP_MS) return this.tell(id, rec.then, `it was kept for more than ${THEN_KEEP_MS / 60_000} minutes without going on, and what it followed is long past`)
+    if (this.now() - rec.at > THEN_KEEP_MS) return this.tell(id, rec.then, `it was kept for more than ${durationText(THEN_KEEP_MS)} without going on, and what it followed is long past`)
     if (rec.stage === 'compacted' || rec.stage === 'refused') {
       // Known done: sent now if the session can take a turn; else (a limit or a card stands) it is held, and goes as soon as it can (`sweep`)
       // (a session with no process holds nothing: only mail waiting for it is looked at, and a step waits for the turn that mail starts)
