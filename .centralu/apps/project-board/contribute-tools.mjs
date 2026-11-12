@@ -11,7 +11,7 @@ import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
 import { runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
-import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
+import { CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
@@ -119,7 +119,7 @@ async function commitCheck({ message, messages, repo }) {
 
 const SKIPPED_TIER_LINE = 'Tier: deep (pnpm pre-pr was not run, so the paths were not judged).'
 
-const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
+const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: CLOSES_HEADING }
 
 export async function openPr({ title, head, base, draft, repo, sections, dryRun, verifiedNote, labels = [], alsoWarn = [], signal, ...named }) {
   const r = repoOf(repo)

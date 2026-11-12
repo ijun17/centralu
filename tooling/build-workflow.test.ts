@@ -8,7 +8,7 @@ import { parseDocument } from 'yaml'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { SHARDS_STEP, classifyRun, jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { REPORT_STEP, SHARDS_STEP, classifyRun, jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { onlyCancelledByBatch } from '../.centralu/apps/project-board/batch.mjs'
 import { REMOTE_NODE_TESTS, balance, remoteNodeTests, timedTests } from './os-tests.js'
@@ -279,6 +279,13 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(result).toContain(`- name: ${SHARDS_STEP}\n`)
   })
 
+  // #2196: the report job's upload is named for the board, which reads its failure as its shards' (no report exists when every shard failed in setup)
+  it("names the step of `e2e report` that keeps the merged report for the board, and keeps its upload failing when there is nothing to keep", () => {
+    const body = job('e2e-report').body
+    expect(body).toContain(`- name: ${REPORT_STEP}\n        uses: actions/upload-artifact@`)
+    expect(body).toContain('if-no-files-found: error\n')
+  })
+
   /*
    * #2187, run 42934168081: the merge queue cancelled a pull request's own run for its batch, and the shards' result, run
    * under `always()`, reported that cancel as a failed `macos tests`. The queue lands such a member only when every check
@@ -429,6 +436,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           '        run: |',
           '          bash .github/scripts/stop-leftover-apt.sh',
           '          sudo dpkg --configure -a || true',
+          '          bash .github/scripts/apt-fallback-mirror.sh',
           `          pnpm exec playwright install-deps ${browser}`,
           '',
           '      - name: Keep the apt packages this run downloaded',

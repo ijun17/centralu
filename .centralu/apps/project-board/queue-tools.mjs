@@ -14,6 +14,7 @@ import { GitHubError, markDraft, prsWithHead, readPr, readRepo } from './github.
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
+import { multiClosingWarnings } from './rules.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
 import { codeAge, staleWarning } from './code-age.mjs'
 import { guardStatus, STEP_ON_READ, WORKING, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
@@ -240,6 +241,8 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   // The squash subject is "Title (#N)" and must fit (#1593: before any batch, as integrate does, #1222); a stack lands through its top
   const long = longSubject(p)
   if (long) problems.push(longSubjectText(long))
+  // "Closes #a #b" closes #a only (#2194). open_pr rewrites its Closes section to one keyword per issue; a description edited by hand, or a list in another section, still has it
+  const multiClosing = multiClosingWarnings(p.body)
   // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))
 
@@ -248,7 +251,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   const stack = under.length ? ` with ${under.map((l) => l.ref).join(', ')} under it (one squash through ${top.ref}; they close as landed)` : ''
   const by = r.item.author ? ` Author session: ${r.item.author}.` : ' No author session recorded (give author to name it).'
   const summary = `${r.replaced ? 'Queued again' : 'Queued'} ${top.ref} ${p.title}${stack}, for ${r.item.owner}.${by} ${plural(r.active, 'item')} in the queue. It merges once green; reruns a cancelled run, or failed jobs, once per head.`
-  return queuedAnswer(summary, r)
+  return queuedAnswer(multiClosing.length ? `${summary}\nWarning: ${multiClosing.join(' ')}` : summary, r)
 }
 
 /**

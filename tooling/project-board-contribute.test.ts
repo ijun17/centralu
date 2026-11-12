@@ -12,6 +12,7 @@ import {
   englishProblems,
   fillTemplate,
   foreignBareIssueWarnings,
+  multiClosingWarnings,
   normalizeWords,
   parseConventions,
   privateWordHits,
@@ -135,6 +136,62 @@ describe('the rules for public text', () => {
     expect(r.warnings).toEqual([])
     expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nTwo builds on one store: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
+  })
+
+  // #2194: #2182 wrote "Closes #2158 #2159 …" and GitHub closed the first only
+  const URL = (n: number) => `https://github.com/ijun17/centralu/issues/${n}`
+  it.each([
+    ['Closes #1 #2 #3', 'Closes #1\nCloses #2\nCloses #3'],
+    ['Closes #1, #2 and #3.', 'Closes #1\nCloses #2\nCloses #3.'],
+    ['fixes: #4 & #5', 'fixes: #4\nfixes: #5'],
+    ['Closes owner/repo#7 #8', 'Closes owner/repo#7\nCloses #8'],
+    [`Closes ${URL(1)} ${URL(2)}`, `Closes ${URL(1)}\nCloses ${URL(2)}`],
+    // A list item stays one, at its own indent, and a fenced block is left as written
+    ['- Closes #1 #2', '- Closes #1\n- Closes #2'],
+    ['* Fixes #1, #2\n  - Resolves #3 #4\n3. Closes #5 #6', '* Fixes #1\n* Fixes #2\n  - Resolves #3\n  - Resolves #4\n3. Closes #5\n3. Closes #6'],
+    ['Closes #1 #2\n```\nCloses #3 #4\n```\nCloses #5 #6', 'Closes #1\nCloses #2\n```\nCloses #3 #4\n```\nCloses #5\nCloses #6'],
+  ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
+    const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })
+    expect(r.problems).toEqual([])
+    expect(r.body.endsWith(`## Closes\n\n${written}`)).toBe(true)
+    // The same through a section keyed by the heading, as open_pr's `sections` give it
+    const { closes: _, ...rest } = SECTIONS
+    expect(fillTemplate(TEMPLATE, { ...rest, Closes: given }).body).toBe(r.body)
+  })
+
+  it('leaves a Closes section alone that is one issue, one keyword each, or prose, and warns of a list it did not rewrite', () => {
+    const fill = (closes: string) => {
+      const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes })
+      return { closes: r.body.split('## Closes\n\n')[1], warnings: r.warnings }
+    }
+    // A list is rewritten, so what stays is not left alone by a rewrite that matches everything
+    expect(fill('Closes #1 #2')).toEqual({ closes: 'Closes #1\nCloses #2', warnings: [] })
+    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```', '~~~md\nCloses #3 #4', '`Closes #1 #2` closes the first only', 'the form ``Fixes #3, #4`` is read by GitHub as one'])
+      expect(fill(same)).toEqual({ closes: same, warnings: [] })
+    // A keyword before two or more references that is not a clause of its own: GitHub closes the first only, so it is said
+    for (const [same, quoted] of [
+      ['Closes #1 and #2 stays open as a follow-up', 'Closes #1 and #2'],
+      ['Fixes #1 #2 (both)', 'Fixes #1 #2'],
+      ['Closes #1, #2 in one go', 'Closes #1, #2'],
+      [`Closes ${URL(1)}, ${URL(2)} in one go`, `Closes ${URL(1)}, ${URL(2)}`],
+    ] as const) {
+      const got = fill(same)
+      expect(got.closes).toBe(same)
+      expect(got.warnings).toHaveLength(1)
+      expect(got.warnings.join()).toContain(`The Closes section says "${quoted}"`)
+    }
+  })
+
+  it('warns of a hand-written description that closes several issues after one keyword', () => {
+    expect(multiClosingWarnings('## Closes\n\nCloses #2158 #2159 #2162')).toEqual(['The description says "Closes #2158 #2159 #2162": GitHub closes only #2158, not #2159, #2162. Give each issue its own keyword (Closes #2158, Closes #2159, Closes #2162).'])
+    expect(multiClosingWarnings('Closes #1\nCloses #2\n\nRefs #3 #4')).toEqual([])
+    // Any keyword before two or more references, in any form; not an example in a fenced block
+    expect(multiClosingWarnings('Fixes #1 #2 (both) and Resolves #3, #4 in one go')).toHaveLength(2)
+    expect(multiClosingWarnings(`Closes ${URL(1)} ${URL(2)}`)[0]).toContain(`GitHub closes only ${URL(1)}, not ${URL(2)}.`)
+    expect(multiClosingWarnings('```\nCloses #1 #2\n```\nCloses #3')).toEqual([])
+    // Nor one quoted in an inline code span, one tick or two; the same line's own keyword is still read
+    expect(multiClosingWarnings('`Closes #1 #2` and ``Fixes #3, #4`` are the forms')).toEqual([])
+    expect(multiClosingWarnings('`Closes #1` then Closes #2 #3')).toHaveLength(1)
   })
 
   it.each([undefined, '', '  ', 'N/A', 'n/a', '-', 'TBD', 'none'])('refuses "Not exercised" given as %j', (value) => {

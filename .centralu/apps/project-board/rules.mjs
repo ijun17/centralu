@@ -199,6 +199,45 @@ export function templateSections(template) {
   return out
 }
 
+/** The template's heading for the issues a pull request closes */
+export const CLOSES_HEADING = 'Closes'
+// GitHub links a closing keyword to the one reference right after it: "Closes #1 #2" closes #1 only (#2194: #2182 left six fixed issues open)
+const ISSUE_REF = String.raw`(?:https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)`
+const SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+(?:and[ \t]+|&[ \t]*)?)`
+const TICK = '`'
+const TICKS = TICK.repeat(3)
+// A fenced block, to its closing fence or the end of the text: an example in it is not a closing keyword. Read first, so it is taken whole
+const FENCE = String.raw`^[ \t]*(?:${TICKS}|~~~)[\s\S]*?(?:^[ \t]*(?:${TICKS}|~~~)[^\n]*$|(?![\s\S]))`
+// An inline code span (one tick or two), taken whole: a keyword quoted in it is an example
+const INLINE_CODE = String.raw`${TICK}${TICK}[^\n]*?${TICK}${TICK}|${TICK}[^${TICK}\n]*${TICK}`
+/** A closing keyword with the several references after it (groups: keyword, colon, references), or a fenced block or an inline code span (no groups); `after` follows the references */
+const closingLists = (after) => new RegExp(String.raw`${FENCE}|${INLINE_CODE}|\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(:?)[ \t]+(${ISSUE_REF}(?:${SEPARATOR}${ISSUE_REF})+)${after}`, 'gim')
+// Rewritten only when the list ends its clause: "Closes #1 and #2 stays open" is prose about #2, though GitHub closes #1 only, which is what the warning says
+const REWRITTEN = closingLists(String.raw`(?=[ \t]*(?:[.,;!)]|$))`)
+const ANY = closingLists('')
+const BULLET = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+$/
+const issueRefs = (list) => list.match(new RegExp(ISSUE_REF, 'g'))
+
+/**
+ * The text with each closing keyword followed by several references written once for each: "Closes #1, #2" becomes "Closes #1" and "Closes #2" on two
+ * lines, and "- Closes #1 #2" two list items. A fenced block and an inline code span are left as they are.
+ */
+export const closingPerIssue = (text) =>
+  String(text ?? '').replace(REWRITTEN, (whole, keyword, colon, list, at, all) => {
+    if (!keyword) return whole
+    const before = all.slice(all.lastIndexOf('\n', at - 1) + 1, at)
+    return issueRefs(list).map((ref) => `${keyword}${colon} ${ref}`).join(`\n${BULLET.test(before) ? before : ''}`)
+  })
+
+/** Warnings for a description with a closing keyword before several references, in any form: GitHub closes the first and leaves the rest open. A fenced block and an inline code span are not read. */
+export const multiClosingWarnings = (text, what = 'The description') =>
+  [...String(text ?? '').matchAll(ANY)]
+    .filter((m) => m[1])
+    .map((m) => {
+      const refs = issueRefs(m[3])
+      return `${what} says "${m[0]}": GitHub closes only ${refs[0]}, not ${refs.slice(1).join(', ')}. Give each issue its own keyword (${refs.map((r) => `${m[1]} ${r}`).join(', ')}).`
+    })
+
 // What "Not exercised" may not say: nothing at all, or a placeholder. "Nothing" is a real answer
 // when it is true (the template says so), so it passes.
 const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
@@ -208,7 +247,8 @@ const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
  * out is dropped (the template: "Delete any heading that does not apply"), except two kinds:
  * `required` ones, which must name something real (not "N/A"), and those whose own guidance says to
  * keep the heading (Usability: "write n/a and keep the heading"), which must say something, n/a
- * included. Both are read from the template, so a changed template changes the rule. Returns
+ * included. Both are read from the template, so a changed template changes the rule. The "Closes" section gets each issue its own
+ * keyword, whatever form the caller wrote them in (closingPerIssue), and a warning for a list it left (multiClosingWarnings). Returns
  * { body, problems, warnings }.
  */
 export function fillTemplate(template, sections, { required = ['Not exercised'] } = {}) {
@@ -223,7 +263,13 @@ export function fillTemplate(template, sections, { required = ['Not exercised'] 
       problems.push(`The template has no heading "${k}". Its headings: ${heads.map((h) => h.heading).join(', ')}.`)
       continue
     }
-    given.set(key, String(v).replace(/<!--[\s\S]*?-->/g, '').trim())
+    const text = String(v).replace(/<!--[\s\S]*?-->/g, '').trim()
+    if (key === headingKey(CLOSES_HEADING)) {
+      const per = closingPerIssue(text)
+      // What the rewrite left (a list that does not end its clause) is still one reference closed
+      warnings.push(...multiClosingWarnings(per, 'The Closes section'))
+      given.set(key, per)
+    } else given.set(key, text)
   }
   const parts = []
   for (const h of heads) {
