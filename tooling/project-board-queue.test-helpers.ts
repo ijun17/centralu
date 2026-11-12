@@ -141,7 +141,7 @@ if (args[0] === 'issue' && args[1] === 'view') {
   // dispatchStale: the first n dispatches ran on the commit the branch had before (main's), as run 43113309704 did, and the batch's own run never comes
   if (st.dispatchStale > 0) {
     st.dispatchStale--
-    st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 960, run_attempt: 1, head_sha: (st.main ?? { sha: 'main0' }).sha, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: 'success', created_at: new Date().toISOString() }] }
+    st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 960, run_attempt: 1, head_sha: (st.main ?? { sha: 'main0' }).sha, head_branch: body.ref, event: 'workflow_dispatch', status: 'in_progress', conclusion: null, created_at: new Date().toISOString() }] }
     st.writes = [...(st.writes ?? []), ['dispatch', body.ref]]
     save()
   } else write(['dispatch', body.ref])

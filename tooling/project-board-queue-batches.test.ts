@@ -11,7 +11,7 @@ import { g, githubStandIn } from './git-fixture.test-helpers.js'
 import { emptyQueue, pushEvent, quickLanded, normalize, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
-import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
+import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, ghCalls, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('the merge queue batches pull requests waiting for CI into one run (#962)', { timeout: 240_000 * SLOW }, () => {
   it('builds queue/batch-1 from main, runs CI on it once, cancels their own waiting runs, and lands each in order on the tested tree', async () => {
@@ -127,6 +127,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual(['queue/batch-1', 'queue/batch-1'])
     expect(batchEvents().filter((t) => t.includes('it was started again'))).toEqual([`Batch queue/batch-1: CI started on another commit than the batch's batch-b (GitHub did not show the branch there yet), so it was started again.`])
     expect(batchesOnDisk()[0].redispatched).toBeTruthy()
+    // The run on the old commit holds a full run's runners: cancelled, once
+    expect(writes().filter((w) => w[0] === 'cancel' && w[1] === '960')).toHaveLength(1)
   })
 
   it('lands the batch from the run of the second dispatch', async () => {
@@ -1431,6 +1433,11 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       await morePolls()
       expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'feat/unbatched']])
       expect(gh().dispatched).toEqual([{ ref: 'feat/unbatched', inputs: null }])
+      // Through the one way the queue starts CI (#2201): the branch is read before the run is started on it
+      const calls = ghCalls()
+      const read = calls.findIndex((a) => a.join(' ').includes('/commits/feat%2Funbatched'))
+      expect(read).toBeGreaterThanOrEqual(0)
+      expect(read).toBeLessThan(calls.findIndex((a) => a.join(' ').includes('/dispatches')))
       expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on feat/unbatched')
       expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
     })

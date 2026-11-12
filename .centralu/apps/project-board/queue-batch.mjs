@@ -49,7 +49,8 @@ import {
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, OUTAGE_LIMIT, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
-import { dispatchOn, readBack, strayRun } from './dispatch.mjs'
+import { cancelStray, dispatchOn, strayRuns } from './dispatch.mjs'
+import { readBack } from './read-back.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
 import { systemNow } from './clock.mjs'
@@ -67,8 +68,9 @@ const TIERS = CI.fullTier !== null
  * passes landing.
  */
 const KEEP_MIN = TIERS ? 1 : 2
-const workflowFile = (path) => path.split('/').pop()
 const list = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
+/** Starts CI on a batch's branch, once it shows `sha` (#2201), with the inputs the batch's tier needs */
+const startCi = (repo, branch, sha, tier) => dispatchOn(repo, CI.workflows, branch, sha, dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier, screenInputs: CI.screen?.inputs }))
 
 /** What a tick does for batches: `{ batch }` (the running one is due), `{ form }` (a new one), or null. */
 export function batchWork(q, now) {
@@ -257,8 +259,7 @@ async function build(b, ctx) {
   if (!renew()) return { yielded: true }
   try {
     // Landing after the fast tier (#1259): the batch runs the quick tier on what lands, the heavy jobs too when it changes the screen
-    const inputs = dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier, screenInputs: CI.screen?.inputs })
-    await dispatchOn(repo, CI.workflows.map(workflowFile), b.branch, steps.at(-1).sha, inputs)
+    await startCi(repo, b.branch, steps.at(-1).sha, tier)
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why
@@ -402,10 +403,11 @@ async function runCi(b, ctx) {
   }
   if (d.state === 'ci') {
     // The dispatch may have run on the branch as GitHub still had it (#2201): started once more on the batch's commit, not waited for 15 minutes
-    const files = CI.workflows.map(workflowFile)
-    if (!runs.length && !b.redispatched && (await strayRun(repo, files, b.branch, b.head, b.startedAt))) {
+    const strays = !runs.length && !b.redispatched ? await strayRuns(repo, CI.workflows, b.branch, b.head, b.startedAt) : []
+    if (strays.length) {
       if (!renew()) return { yielded: true }
-      await dispatchOn(repo, files, b.branch, b.head, dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier: b.tier, screenInputs: CI.screen?.inputs }))
+      await cancelStray(repo, strays)
+      await startCi(repo, b.branch, b.head, b.tier)
       save((fq, fb) => {
         fb.redispatched = at
         batchEvent(fq, fb, `Batch ${fb.branch}: CI started on another commit than the batch's ${short(fb.head)} (GitHub did not show the branch there yet), so it was started again.`, at)

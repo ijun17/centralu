@@ -548,8 +548,9 @@ default 4: the owner's, 2026-10-19, this repository's too).
   the start.
   With two or more merged, the branch is read until it shows the last step's commit (`branchShows`, dispatch.mjs: six reads a second apart),
   since a `workflow_dispatch` names a branch and GitHub resolved it to the commit before the merges in run 43113309704 (#2201: the batch
-  waited 15 minutes for a run that could not come). A run found on the branch on another commit, with none on the batch's, is started
-  once more and the batch's line says so (`strayRun`; `redispatched`). The main guard's probes start the same way. The CI
+  waited 15 minutes for a run that could not come). A run found on the branch on another commit, with none on the batch's, is cancelled (it holds a full run's runners) and CI is started
+  once more, and the batch's line says so (`strayRuns`, `cancelStray`; `redispatched`). The main guard's probes and the full tier of a pull request the queue cannot batch start the same way
+  (`dispatchOn` is the one way the queue starts CI); a probe counts its stray restart (`strays`) apart from its restart for a cancelled run (`tries`). The CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
   permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
   Then the members' own runs that have not started are cancelled (with two tiers, every one not
@@ -1194,7 +1195,8 @@ push run of CI is fully green, the full tier included (or `commit`).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
-- `dispatch.mjs` — starting CI on a branch the queue just moved (`dispatchOn`, `branchShows`, `strayRun`), and `readBack` (#2201).
+- `dispatch.mjs` — the one way the queue starts CI on a branch (`dispatchOn`, `branchShows`), and the runs that came of it on another commit (`strayRuns`, `cancelStray`) (#2201).
+- `read-back.mjs` — `readBack`: what GitHub shows after a write whose answer was lost.
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `runProgram`.
 - `system.mjs` — the app's one door for starting programs (`runProgram`, `stopTree`: gh, git, Node, the conflict commands, pre-pr's script).
   No other module imports `node:child_process` (#1599, docs/plans/os-layer.md §2.4): lint refuses it (`local/os-imports`,

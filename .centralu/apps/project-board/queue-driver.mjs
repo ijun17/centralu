@@ -21,7 +21,6 @@ import {
   closePr,
   containsCommit,
   deleteBranch,
-  dispatchWorkflow,
   FATAL,
   GitHubError,
   countsTowardLimit,
@@ -77,7 +76,8 @@ import { judgeHead, labelReason } from './queue-integrate.mjs'
 import { classifyRun, isFetchStep } from './run-failure.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { activeBatch } from './batch.mjs'
-import { readBack } from './dispatch.mjs'
+import { dispatchOn } from './dispatch.mjs'
+import { readBack } from './read-back.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { alive, listSome, plural, short, span, writeJsonAtomic } from './util.mjs'
 import { GUARD_MS, guardTick } from './main-guard.mjs'
@@ -760,7 +760,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     save({ ...base, fullDispatch: patch.fullDispatch })
     try {
       // No inputs: the full tier (a manual run with no tier asked for is full, .github/scripts/ci-changes.mjs)
-      for (const w of CI.workflows) await dispatchWorkflow(repo, w.split('/').pop(), d.action.branch)
+      await dispatchOn(repo, CI.workflows, d.action.branch, item.head)
       wait = pollMs('acted')
     } catch (e) {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
