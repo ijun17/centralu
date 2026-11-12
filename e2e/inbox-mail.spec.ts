@@ -21,8 +21,8 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
   await expect(page.getByTestId('inbox-list')).toBeVisible()
   // Mail alone is no reason for the empty state
   await expect(page.getByTestId('inbox-empty')).toHaveCount(0)
-  await expect(page.getByTestId(`mail-thread-${id}`)).toContainText('Which branch?')
-  await expect(page.getByTestId(`mail-thread-${id}`)).toContainText('Parser')
+  await expect(page.getByTestId(`mail-ask-${id}`)).toContainText('Which branch?')
+  await expect(page.getByTestId(`mail-ask-${id}`)).toContainText('Parser asks you')
 
   await page.getByTestId(`mail-thread-${id}`).click()
   await expect(page.getByTestId('mail-thread')).toBeVisible()
@@ -432,7 +432,8 @@ test('Inbox: the cursor takes the top row on open, follows it as rows arrive, an
     }, id)
   const older = await newSession(page, 'alpha', 'older task')
   await done(older)
-  const thread = await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  // A note, so it is a row among the rows: a question waiting on the person is a card, and goes first (#2229)
+  const thread = await seed(page, { subject: 'Which branch?', from: PARSER, kind: 'note', body: 'main or release?' })
   await page.getByTestId('counter').click()
   const cursorOn = (testId: string) => expect(page.locator('[data-cursor]').getByTestId(testId)).toHaveCount(1)
   // The newest is the thread: the cursor is on it, not on a session by default
