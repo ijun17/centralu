@@ -1,4 +1,4 @@
-import { plainLines, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol/client'
+import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -122,7 +122,7 @@ export class MailMock {
   private asking(t: Thread): MailThreadRow['ask'] {
     const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
     const newest = open.at(-1)
-    return newest ? { id: newest.id, sender: newest.sender, text: plainLines(newest.body, 4, 320), ...(newest.choices ? { choices: newest.choices } : {}), open: open.map((m) => m.id) } : null
+    return newest ? mailAsk(newest, newest.sender, open.map((m) => m.id)) : null
   }
 
   private touch(t: Thread): void {
@@ -165,7 +165,7 @@ export class MailMock {
       const question = answers === undefined ? open : t.messages.find((m) => m.id === answers)
       if (answers !== undefined && !question) throw mockError(`There is no message ${answers} to answer.`, 'refused')
       if (answers !== undefined && question && t.messages.some((m) => m.replyTo === question.id && m.sender.kind === 'person')) throw mockError(`${question.id} is answered already: a question is answered once. Write to say more.`, 'refused')
-      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: answers !== undefined && question?.choices?.includes(text) ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
+      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? (question ? 'answer' : 'note'), urgent: false, body: text, facts: answers !== undefined && question?.choices?.includes(text) ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
       // As the host does (`MailPerson.reply`): the answer reads what it answers and what came before it, not what came after

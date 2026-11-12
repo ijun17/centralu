@@ -1,4 +1,4 @@
-import { errorMessage, plainLine, plainLines, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, mailAsk, plainLine, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
@@ -34,9 +34,6 @@ const LIST_SCAN = 1_000
 /** A chain is read whole for the window up to this many messages: its newest ones */
 const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
-/** A question's card shows its first lines (#2229): this many, and no more than this many characters */
-const ASK_LINES = 4
-const ASK_CHARS = 320
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
 
@@ -223,11 +220,10 @@ export class MailPerson {
         }
         const working = this.workers(chain)
         // What the person reads of it: a row held out of their sight is not theirs to close
-        this.records.closeFor(
-          PERSON,
-          this.shown(r).map((s) => s.m.id),
-          now,
-        )
+        const readable = this.shown(r).map((s) => s.m.id)
+        this.records.closeFor(PERSON, readable, now)
+        // What it closes is read for them too: a closed row does not wait with mail unread (the list's Done reads nothing else)
+        this.records.markRead(PERSON, readable, now)
         // Withdrawn, not done: a request not delivered yet goes nowhere. A row an older build settled `legacy` is marked done, as it was
         const withdrawn = asked.filter((a) => this.records.settle(a.id, a.recipient, 'withdrawn', now) > 0)
         for (const m of chain) {
@@ -441,7 +437,7 @@ export class MailPerson {
       projectId: first.senderProject,
       owner: this.party(first.sender),
       assignee: assignee === undefined ? null : this.party(assignee),
-      ask: asked ? { id: asked.id, sender: this.party(asked.sender), text: plainLines(asked.body, ASK_LINES, ASK_CHARS), ...(asked.choices ? { choices: asked.choices } : {}), open: asking.map((m) => m.id) } : null,
+      ask: asked ? mailAsk(asked, this.party(asked.sender), asking.map((m) => m.id)) : null,
       unread: toPerson.filter((r) => r.readAt === null && !hiddenFromPerson(r)).length,
       held,
       blocked: 0,

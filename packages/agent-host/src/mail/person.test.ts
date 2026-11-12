@@ -770,6 +770,13 @@ describe('an answer reads what it answers (#2233)', () => {
     expect(row()).toMatchObject({ unread: 0, ask: { id: asked('First?').id, open: [asked('First?').id] } })
   })
 
+  it('Done from the list reads what it closes: the row is done with nothing unread, though the thread was never opened', () => {
+    const { w, root, row } = askTwice()
+    expect(row().unread).toBe(2)
+    w.person.close(root.id)
+    expect(row()).toMatchObject({ state: 'done', unread: 0, ask: null })
+  })
+
   it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
