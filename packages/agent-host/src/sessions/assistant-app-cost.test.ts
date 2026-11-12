@@ -115,7 +115,7 @@ function cost(profile: ToolProfile, apps: readonly AttachedApp[], capabilities: 
 describe("the Assistant's tool list as root apps are trusted (#1205)", () => {
   it('stays the same size with 0, 3 and 10 apps it has, on Claude and on Codex, for the Assistant and a project session alike (#2231)', async () => {
     for (const capabilities of [CLAUDE, CODEX]) {
-      const sizes = []
+      const sizes: { assistant: ReturnType<typeof cost>; reader: ReturnType<typeof cost> }[] = []
       for (const n of [0, 3, 10]) {
         const { hub, access } = world(n)
         const live = hub.attach(ORCH)

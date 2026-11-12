@@ -76,8 +76,8 @@ export class AssistantSlot {
     if (orch) await this.host.restartSession(orch.id, 'instructions').catch(() => {})
   }
 
-  /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app and the
-   * assistant is restarted (AssistantProposals.resolveMcpProposal) */
+  /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app the Assistant's
+   * `app` tool reaches on its next call (AssistantProposals.resolveMcpProposal) */
   async resolveMcpProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
     return this.afterProposal(this.proposals.resolveMcpProposal(name, approve))
   }

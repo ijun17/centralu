@@ -25,7 +25,7 @@ One zod schema (`manifest.ts`) judges it, for discovery, `create_app` and `check
 | Field | Meaning | Rule |
 |---|---|---|
 | `manifestVersion` | Manifest format | Must be `1`. Anything else is refused with "update Centralu": guessing at a format we do not know would run a changed field with its old meaning |
-| `id` | App id | Equal to the folder name (a root app's is the manifest's own, [What an app is](#what-an-app-is)). `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`) |
+| `id` | App id | Equal to the folder name (a root app's is the manifest's own, [What an app is](#what-an-app-is)). `^[a-z0-9][a-z0-9-]{0,31}$`, not starting with `centralu`, not a reserved id (`RESERVED_APP_IDS`: `control`, the removed control app's, #372) (#93: with no underscore, an app cannot forge the `__` separator of `mcp__app-<id>__<tool>`, the name an app tool had until #2231 and has in older records) |
 | `name`, `version`, `description` | What people and agents read | Not empty; at most 80, 64 and 2000 characters |
 | `server.command`, `server.args` | How to start the server | Run with the app folder as the working directory |
 | `home` | The tool that opens the pinned view ([views.md](views.md#pinned-in-the-main-area-centralus-way-within-the-standard)) | Optional. Must be a tool with a `ui://` view that the view may call; `check` reports it otherwise |

@@ -246,18 +246,17 @@ export class AssistantProposals {
 
   /**
    * The person's answer to a proposal (dogfooding request, option b — propose -> one-click approval
-   * -> the app installs and restarts).
+   * -> the app installs, usable at once).
    *
    * If approved, that server becomes **a viewless app in the user folder** (M4 A-7, decision 8). Once
    * it is an app, calls go through the broker (visibility, run log), it comes up only when first
    * needed and goes back down when idle, and it can be removed from the list (`apps.remove`). A
    * user-folder app is attached to the Assistant (decision 4) — the same slot a previously approved
-   * server used to attach to. In a session, its server name is `app-<name>`.
+   * server used to attach to. In a session, the `app` tool names it `<name>` (#2231).
    *
-   * And this **restarts the Assistant** — since a restart is a resume, the conversation continues.
-   * Claude's server set can change without a restart (setMcpServers), but Codex only ever receives its
-   * server set when a new thread is launched. What the person approving is waiting for is "usable
-   * now", so this goes through the same path regardless of the tool.
+   * Nothing restarts (#2231): the Assistant's `app` tool counts its apps at each call, on every CLI, so
+   * the app is callable on its next call. Until #2231 this restarted the Assistant, because a Codex
+   * thread only received its server set when it was launched.
    *
    * If the app fails to be created, the proposal is left in place — the person can see why and reject it.
    */
@@ -287,8 +286,6 @@ export class AssistantProposals {
       return { ok: false, error: `Could not install "${name}" as an app: ${(err as Error).message}`, restart: false }
     }
     dropProposal()
-
-    // Swapped even while it is running — what the person who approved this is waiting for is "usable now"
-    return { ok: true, restart: true }
+    return { ok: true, restart: false }
   }
 }

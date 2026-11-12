@@ -125,9 +125,9 @@ host. It changes where a client connects, not what it must prove:
   so a command a session ran could take it from the bridge's environment as measured above and call every RPC:
   set its own preset to auto (`agents.updateSettings`), trust a project (`projects.setTrusted`). A socket that says
   hello with a bridge credential is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast, no
-  terminal output), and may call only `assistant.tools`, `assistant.tool` (or their old names `orchestrator.*`), `apps.sessionTools` and
-  `apps.sessionCall`, each naming the credential's own session (`bridgeRefusal`); everything else is refused before
-  it reaches the handler (`server.test.ts`, `app-bridge.test.ts`). Because it is derived from the front door's token,
+  terminal output), and may call only `assistant.tools` and `assistant.tool` (or their old names `orchestrator.*`;
+  `apps.sessionTools` and `apps.sessionCall` too until #2231), each naming the credential's own session (`bridgeRefusal`); everything else is refused before
+  it reaches the handler (`server.test.ts`, `bridge-apps.test.ts`). Because it is derived from the front door's token,
   the next host after a swap accepts it with nothing handed over or stored, and a running bridge keeps working
   (`scripts/keeper-integration.mjs`, the swap scenario). What it still opens is that session's own Centralu tools and
   attached apps as that session, gated by the session's profile like the session's own calls; a process that reads

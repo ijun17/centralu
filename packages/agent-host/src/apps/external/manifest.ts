@@ -37,10 +37,10 @@ export const MAX_MANIFEST_BYTES = 64 * 1024
  * The naming rule for a tool inside an app. Returns a reason a person can read if it is broken, or
  * null if it is fine.
  *
- * `__` is forbidden for the same reason underscores are forbidden in an app id (#93): inside a
- * session, a tool name expands to `mcp__app-<id>__<tool>`, with `__` as the separator. If a tool
- * name contained `__`, one app could create an extra name segment and make its tool read as if it
- * belonged to someone else.
+ * `__` is forbidden for the same reason underscores are forbidden in an app id (#93): until #2231 a
+ * tool name expanded to `mcp__app-<id>__<tool>` inside a session, with `__` as the separator, and
+ * records of then still read so. If a tool name contained `__`, one app could create an extra name
+ * segment and make its tool read as if it belonged to someone else.
  *
  * The tool list is something the app server states while running, so it never appears in the
  * manifest — this check is instead shared between the place that reads the list (the runtime) and

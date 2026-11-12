@@ -105,10 +105,6 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
     )
   }
 
-  appAttachment(): 'attached' | 'restart' | 'failed' {
-    return 'failed'
-  }
-
   respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
     return this.wire.respondApproval(requestId, decision, matcher)
   }

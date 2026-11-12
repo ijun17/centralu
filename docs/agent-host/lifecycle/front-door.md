@@ -18,8 +18,8 @@ keeps its bridge, and only an address that outlives this host survives its resta
 session id keyed by the host's token (`transport/bridge-token.ts`), because any process of the same user can read
 the environment the bridge started with ([security-boundaries/keeper.md](../../security-boundaries/keeper.md#the-front-door)). A
 connection that says hello with one is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast,
-no terminal output), and it may call only `assistant.tools`, `assistant.tool` (or their old names `orchestrator.*`), `apps.sessionTools` and
-`apps.sessionCall`, each naming the session the credential was made for. Under a keeper the key is the front door's
+no terminal output), and it may call only `assistant.tools` and `assistant.tool` (or their old names `orchestrator.*`;
+`apps.sessionTools` and `apps.sessionCall` too until #2231), each naming the session the credential was made for. Under a keeper the key is the front door's
 token, so the next host accepts a running bridge's credential without anything being handed over.
 
 **Control lines on stdin** (`keeper-control.ts`). The keeper's pipe, and the desktop window's when it started the

@@ -40,6 +40,21 @@ then who may call it:
   `e2e/public-apps.spec.ts`). The
   session side re-checks decision 4 at every call, so a detached app cannot be reached by a stale
   tool name.
+- A session reaches its apps through one Centralu tool, `app` (#2231, [apps/attaching.md](../apps/attaching.md#apps-through-one-centralu-tool-2231)),
+  never through an MCP server of the app's: the CLI sees no app tool, so no rule or mode of the CLI's decides one. The
+  host decides at the call, with the call's arguments: `list` only reads and never asks; `call` checks the arguments
+  against the tool's schema, then runs a tool that only reads (or is declared `local`, or `routine` in the session's
+  own project) unasked, and otherwise asks per the session's preset (`safe` always; `normal` and `edits` unless the
+  person's own CLI setting bypasses approvals; `auto` never) with the host's card (`Attachment.approve`,
+  `sessions/session-apps.ts`; the rows in [approvals.md](approvals.md)). **ACP agents get apps** with this change, a
+  trust change: until #2231 an ACP session had none (`appAttachment` answered `failed`). They get the same host gate
+  and the same presets as Claude and Codex, through the same bridge credential as Centralu's other tools (it names the
+  session, and the host counts that session's apps). An ACP agent's own permission requests
+  (`session/request_permission`) cover its own tools only, and its adapter reads no bypass of the person's
+  (`bypassesApprovals` absent), so under `normal` and `edits` every app tool that does not only read asks. The request
+  gate (`whenAsked`, #1447) applies to an app call as to any step when the session is the Assistant in a turn another
+  session's request started, whatever its CLI (`bridge-apps.test.ts` "under normal, its write raises the host card and
+  runs only on Allow; a Deny runs nothing").
 - A project's session reaches another project's app only by attaching it (#371 part A, apps/other-projects-apps.md),
   and only when three things hold, each read again at every count of the session's apps and
   so at every call: the person shares that app (off by default, per app), the person allowed this
