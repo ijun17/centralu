@@ -25,6 +25,7 @@ describe('pickStrays', () => {
       '  900     1 ??       node host.mjs', // us (the host)
       '  901   900 ??       claude', // our own descendant
       '  300     1 ??       node /elsewhere/other.js', // someone else's folder
+      '  400     1 ??       node /srv/old-server.js', // an orphan with no mark: from before it, or started outside Centralu
     ].join('\n'),
   )
   const cwds = new Map([
@@ -34,6 +35,7 @@ describe('pickStrays', () => {
     [900, '/work/proj'],
     [901, '/work/proj'],
     [300, '/elsewhere'],
+    [400, '/work/proj'],
   ])
   const roots = ['/work/proj']
   const marked = new Set([100, 101, 901, 300])
