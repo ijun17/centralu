@@ -1,6 +1,7 @@
-import { errorMessage, oneLineText, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
+import { plainLine } from './plain-line.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
 import { SUBJECT_CHARS, type MailChange, type MessageService } from './messages.js'
@@ -46,7 +47,7 @@ type Shown = { m: MailRow; seq: number }
  */
 function subjectLine(m: Pick<MailRow, 'body' | 'facts' | 'subject'>): string {
   const script = m.facts.fromScript?.credential
-  return m.subject ?? oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
+  return plainLine(m.subject ?? (script === undefined ? m.body : `The script "${script}": ${m.body}`), SUBJECT_CHARS)
 }
 
 /**
@@ -80,7 +81,7 @@ export class MailPerson {
         recipient: this.party(r.recipient),
         kind: windowKind(m),
         reason: r.held,
-        preview: oneLineText(m.body, PREVIEW_CHARS),
+        preview: plainLine(m.body, PREVIEW_CHARS),
         since: m.createdAt,
       })
     }
@@ -439,7 +440,7 @@ export class MailPerson {
       working: working.length > 0,
       createdAt: first.createdAt,
       updatedAt: last.createdAt,
-      last: { sender: this.party(last.sender), kind: windowKind(last), preview: oneLineText(last.body, PREVIEW_CHARS), at: last.createdAt },
+      last: { sender: this.party(last.sender), kind: windowKind(last), preview: plainLine(last.body, PREVIEW_CHARS), at: last.createdAt },
     }
   }
 
@@ -464,7 +465,7 @@ export class MailPerson {
     const m = this.records.message(messageId)
     const row = this.records.recipient(messageId, PERSON)
     if (!m || !row || m.sender === PERSON || hiddenFromPerson(row) || row.held !== null) return undefined
-    return { messageId, from: this.party(m.sender), kind: windowKind(m), preview: oneLineText(m.body, PREVIEW_CHARS) }
+    return { messageId, from: this.party(m.sender), kind: windowKind(m), preview: plainLine(m.body, PREVIEW_CHARS) }
   }
 
   private party(address: string): MailParty {

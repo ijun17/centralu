@@ -78,6 +78,16 @@ describe('the thread in the inbox', () => {
     expect(text).toContain('State: open to running.')
   })
 
+  it('draws a body’s Markdown as the session view does (#2228): bold, a list and a code span, with no raw marks left', () => {
+    const body = '**Background** done:\n\n- one\n- two\n\nRun `pnpm verify` <script>alert(1)</script>'
+    const { html } = render(view({ messages: [{ id: 'm1', seq: 1, sender: parser, kind: 'note', urgent: false, body, facts: {}, createdAt: 1_800_000_000_000 }] }))
+    expect(html).toContain('<strong>Background</strong>')
+    expect(html).toContain('<li>one</li>')
+    expect(html).toContain('<code>pnpm verify</code>')
+    expect(html).not.toContain('**')
+    expect(html).not.toContain('<script>')
+  })
+
   it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {
     const { html, text } = render(
       view({

@@ -9,10 +9,11 @@ import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
+import { Markdown } from '../session/Markdown.js'
 import { answerTo, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
- * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
+ * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, through the session view's `Markdown` (#2228: no raw HTML, links as that view treats them);
  * the person's own are marked as theirs. Centralu's lines (a state moved, a party joined) are small and plain.
  */
 export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: string) => void }) {
@@ -146,7 +147,9 @@ function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
         {fromScript !== undefined ? `script ${fromScript}` : partyName(m.sender)} · {m.kind}
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
-      <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>{m.body}</div>
+      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>
+        <Markdown text={m.body} projectRoot={null} />
+      </div>
       {m.choices && <Choices m={m} open={open} answer={answer} onPicking={onPicking} />}
     </li>
   )

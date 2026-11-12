@@ -715,6 +715,17 @@ describe('work a script started (§8.1, #1468)', () => {
   })
 })
 
+describe('Markdown in a one-line text (#2228)', () => {
+  it('the thread subject and the row preview are the words, without the marks', () => {
+    const w = hostWorld()
+    const { person } = ready(w)
+    const sent = w.mail.send(A, { to: [PERSON], text: '**Background** #2218: see `pnpm verify`', needsReply: false }).message
+    const row = person.list().threads.find((t) => t.id === sent.id)
+    expect(row?.subject).toBe('Background #2218: see pnpm verify')
+    expect(row?.last?.preview).toBe('Background #2218: see pnpm verify')
+  })
+})
+
 describe('what the person is notified of (#1630)', () => {
   it('each new message they can read, once and of any kind; not their own, and not a change to one stored', () => {
     const w = hostWorld()
