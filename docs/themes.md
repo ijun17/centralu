@@ -48,7 +48,7 @@ conversation surfaces of its own; the presets set them to the floor and raised v
 Dark is a warm dark floor (`#120e0a`) with raised boxes (`#282320`, ΔL* 10.0 above the floor). Since 2026-11-05
 (the owner's decision) its greys carry a faint warm tint, the colours of the "Dark Warm" custom theme, with the lightness steps
 the neutral Dark had (floor `#0f0f0f`, raised `#242424`, ΔL* 9.9) within 0.1 and the same contrast. The
-sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#45403c`, the sidebar's `line-side`, as the top bar's line is since #2207)
+sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#45403c`, the sidebar's `line-chrome`, as the top bar's line is since #2207)
 parts them from the conversation. They were `#181818` (ΔL* 3.9, at the owner's ask of 2026-10-20) and `#1d1d1d` (6.5) before: a reader once saw
 the two as "the same colour" at three steps apart with the line between them, and the owner chose to let the line do it alone. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
@@ -144,23 +144,29 @@ panel follows with its own 1px border: `ink-muted` while answering (a lighter gr
 
 ## The lines
 
-Three tokens draw every edge, and one rule orders them. `line` is the hairline (a card's or panel's border, a divider): visible but quiet. `line-side` is the line on the sidebar's own ground, a step stronger. `line-strong` is for what has to read (a focused or hovered field, a checkbox, a table's cells in an answer, an idle session mark), clearly stronger again.
+Three tokens draw every edge, and one rule orders them. `line` is the hairline (a card's or panel's border, a divider): visible but quiet. `line-chrome` is the window chrome's line, a step stronger. `line-strong` is for what has to read (a focused or hovered field, a checkbox, a table's cells in an answer, an idle session mark), clearly stronger again.
 
-`line-side` is not set by a theme: it is `line` mixed 80% with `ink-faint` in `index.css`, so every preset and every custom theme gets a step toward the ink, lighter on a dark sidebar and darker on a light one. The sidebar swaps it in for `line` inside itself (its dividers, row borders and its own edge); the top bar and the shell banner, which hang on the same ground, name it for their bottom line (#2207).
+**The window chrome's line.** `line-chrome` is one colour a theme sets (it was mixed from `line` and `ink-faint` until the owner asked, 2026-11-12, for one border colour per theme). Three kinds of border are drawn in exactly it:
+
+- **The sidebar's:** its lines and its edge. The sidebar swaps it in for `line` inside itself (`SIDEBAR_VARS`).
+- **The top bar's:** its bottom line, and the shell banner's under it (`border-line-chrome`).
+- **The session panel's:** its header's bottom line (`SessionHeader.tsx`), the untrusted-project notice's and the session notes' lines, the line above a framed composer, and the pinned app panel's header (`AppPanel.tsx`, which sits beside it in the grid). With them the evidence panel's edge, its header's line and the overlay header's line, which all sit on the sidebar's ground and meet the others in one line across the window. A panel's own frame stays `line-strong` (the panel's border is brighter than any line inside it, owner 2026-09-11), and cards and dialogs keep `line`.
+
+A preset sets it to the value it drew before, so no preset changed. **A theme file that leaves it out gets its own `line`** (`resolveSide` writes `var(--color-line)`), not the preset's chrome colour and nothing mixed in: a file that sets `line` and not `line-chrome` has one colour for both. An older build reading a file with the key lists it as an unknown token and ignores it, and a newer build reads an older file as just said ([stored-shapes.md](stored-shapes.md)).
 
 **The rule**, measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), the lowest of the three counting:
 
 | Token | At least | Why this number |
 |---|---|---|
 | `line` | 1.2:1 | Below it a line is lost: the top bar's `line` was 1.10:1 on Light's sidebar and read as no line at all (a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone). Dark's lowest is 1.28:1 (on raised); Light's and Graphite's are 1.23:1 now, so 1.2 is a floor close to what the presets already draw, not a new look |
-| `line-side` | 1.4:1 | A step over `line` on the grounds it sits on, so the sidebar's lines and its edge stand apart from the conversation beside them. Dark's lowest is 1.52:1, Light's 1.47:1 |
-| `line-strong` | 1.7:1, and 0.25 over `line-side` | "Clearly stronger" in numbers: Dark's lowest is 1.83:1, 0.31 over its `line-side`. Light's was 1.42:1, and would have fallen under its own `line-side` once `line` rose |
+| `line-chrome` | 1.4:1 | A step over `line` on the grounds it sits on, so the sidebar's lines and its edge stand apart from the conversation beside them. Dark's lowest is 1.52:1, Light's 1.47:1 |
+| `line-strong` | 1.7:1, and 0.25 over `line-chrome` | "Clearly stronger" in numbers: Dark's lowest is 1.83:1, 0.31 over its `line-chrome`. Light's was 1.42:1, and would have fallen under its own `line-chrome` once `line` rose |
 
-The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both; their `line-strong` is far above the rule. `e2e/fixtures/theme.ts` checks all of this for every preset, so a preset cannot drift back.
+The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-chrome` both; their `line-strong` is far above the rule. `e2e/fixtures/theme.ts` checks all of this for every preset, so a preset cannot drift back.
 
 What changed, per preset (contrast on the floor / the sidebar / a raised surface; before, then after):
 
-| Preset | `line` | `line-side` | `line-strong` |
+| Preset | `line` | `line-chrome` | `line-strong` |
 |---|---|---|---|
 | Dark (unchanged) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
 | Light, before | `#d6d6d6` 1.28 / 1.10 / 1.38 | `#c3c3c3` 1.55 / 1.34 / 1.67 | `#bdbdbd` 1.65 / 1.42 / 1.78 |
@@ -170,9 +176,9 @@ What changed, per preset (contrast on the floor / the sidebar / a raised surface
 | Graphite, before | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
 | Graphite, after | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 (unchanged) |
 
-- **Light** needed its `line` raised: on the sidebar's `#e0e0e0` it was under the 1.2:1 floor. `#cbcbcb` clears 1.2:1 there, and the cards and panels that share `line` stay quiet (checked in the grid scene and a Settings page). Its `line-strong` moved with it, since the derived `line-side` would otherwise have passed it. The three edges that are softer than the hairline in Light (a resting panel's border, a message bubble's and a tool card's, owner 2026-10-19) are written as their own colours and did not move.
+- **Light** needed its `line` raised: on the sidebar's `#e0e0e0` it was under the 1.2:1 floor. `#cbcbcb` clears 1.2:1 there, and the cards and panels that share `line` stay quiet (checked in the grid scene and a Settings page). Its `line-strong` moved with it, since the derived `line-chrome` would otherwise have passed it. The three edges that are softer than the hairline in Light (a resting panel's border, a message bubble's and a tool card's, owner 2026-10-19) are written as their own colours and did not move.
 - **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the rule, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. Nothing else in it broke the rule.
-- **Dark and the high-contrast presets** already kept the rule, so none of their lines changed. The top bar's and the shell banner's line in Dark is now `line-side`, as the sidebar's always was.
+- **Dark and the high-contrast presets** already kept the rule, so none of their lines changed. The top bar's and the shell banner's line in Dark is now `line-chrome`, as the sidebar's always was.
 - The evidence panel and the other panels drawn on the sidebar's ground keep the plain `line`: raising Light's `line` lifts them, and they sit at 1.23:1 on that ground now, not 1.10:1.
 
 ## How it is applied

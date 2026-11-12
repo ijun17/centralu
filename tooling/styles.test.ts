@@ -137,7 +137,7 @@ describe('the built CSS actually contains styles', () => {
   it('the palette is monochrome (R=G=B) outside the allowed exceptions, the warm Dark tints among them', () => {
     const ALLOWED = new Set([
       // Dark: the warm tints of the surfaces, lines, inks and terminal greys
-      '120e0a', '282320', '393430', '46413d', '2f2a27', '3a3531', '514c48',
+      '120e0a', '282320', '393430', '46413d', '2f2a27', '3a3531', '45403c', '514c48',
       'f0ecea', 'aca7a3', '756f6b', 'a8a39f', 'b8b3af', '403b37',
       '2e2926', '1b1815', '0e0905', '201c1a', '37322e', 'd8d5d2', '5b5551', 'f1edeb',
       'b1f085', '192e16', // Dark: diff addition
@@ -175,7 +175,7 @@ describe('the built CSS actually contains styles', () => {
        * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
        * brightness alone (`ink-signal` is pure white). Listed by value, as Dark's tints are.
        */
-      '28282a', '2c2c2e', '3a3a3c', '48484a', '232325', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
+      '28282a', '2c2c2e', '3a3a3c', '48484a', '4a4a4c', '232325', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
       '30d158', '163322', 'ff9f97', '3a1d1b', // Graphite: diff, and danger
       '409cff', '0a84ff', // Graphite: the focus ring, and the selection with the terminal's blue
       'ff453a', 'ffd60a', 'bf5af2', '64d2ff', 'ff6961', '4ae070', 'ffe36b', 'da8fff', '8de1ff', // Graphite: the terminal

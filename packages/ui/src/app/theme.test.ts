@@ -28,6 +28,14 @@ describe('resolving a side', () => {
     expect(t).toMatchObject({ id: 'mine', base: 'light', tokens: { '--color-surface-floor': '#fafafa', '--shadow-modal': 'none' } })
   })
 
+  it('gives a theme file its own line as the window line unless the file sets one, and a preset keeps its own', () => {
+    // No colour from the preset or another token is mixed in: the window borders are the file's line, as it names it or inherits it
+    expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: { line: '#aa0000' } })]).tokens).toMatchObject({ '--color-line': '#aa0000', '--color-line-chrome': 'var(--color-line)' })
+    expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: {} })]).tokens).toMatchObject({ '--color-line-chrome': 'var(--color-line)' })
+    expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: { line: '#aa0000', 'line-chrome': '#00aa00' } })]).tokens['--color-line-chrome']).toBe('#00aa00')
+    expect(resolveSide('dark', 'graphite', []).tokens).toEqual({})
+  })
+
   it('falls back to the side’s preset when the id names nothing', () => {
     expect(resolveSide('dark', 'gone', [])).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
     expect(resolveSide('light', 'gone', [])).toMatchObject({ id: 'light', preset: 'light', base: 'light' })

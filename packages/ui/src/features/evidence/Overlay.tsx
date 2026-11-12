@@ -79,7 +79,7 @@ export function Overlay() {
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-surface-floor" data-testid="overlay">
       {/* The panel's header height (h-10), so the two header lines meet in one line across the window (owner, 2026-10-18) */}
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-surface-side px-3">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line-chrome bg-surface-side px-3">
         <span className="text-sm text-ink-muted">{overlay.kind === 'git' ? 'Git' : 'Files'}</span>
         <Button
           variant="ghost"

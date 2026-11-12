@@ -46,6 +46,17 @@ describe('the theme file format (#312)', () => {
     for (const key of RETIRED_THEME_TOKENS) expect(THEME_TOKENS.some((t) => t.key === key)).toBe(false)
   })
 
+  it('line-chrome reads as a token, and a token this build does not know (what an older build sees of it) is listed alone while the rest is kept', () => {
+    const file = JSON.stringify({ name: 'Mine', base: 'dark', tokens: { line: '#111111', 'line-chrome': '#222222', 'line-from-a-newer-build': '#333333' } })
+    expect(parseThemeFile('mine', '/mine', file)).toMatchObject({
+      tokens: { line: '#111111', 'line-chrome': '#222222' },
+      problems: ['Unknown token "line-from-a-newer-build" is ignored.'],
+      broken: false,
+    })
+    // An older file without line-chrome reads without a problem: the window line is the file's line (app/theme.ts resolveSide)
+    expect(parseThemeFile('old', '/old', JSON.stringify({ name: 'Old', base: 'dark', tokens: { line: '#111111' } }))).toMatchObject({ tokens: { line: '#111111' }, problems: [], broken: false })
+  })
+
   it('a file the app writes reads back the same, with $schema first', () => {
     const text = formatThemeFile({ name: 'Paper', base: 'light', tokens: { 'surface-floor': '#fafafa' } })
     expect(Object.keys(JSON.parse(text))).toEqual(['$schema', 'name', 'base', 'tokens'])

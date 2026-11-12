@@ -78,7 +78,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #120e0a; /* the app floor */
-  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone (`line-side`, #45403c) parts them from the conversation */
+  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone (`line-chrome`, #45403c) parts them from the conversation */
   --color-surface-raised: #282320; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #393430; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #46413d; /* hover and pressed; also my own message bubble */
@@ -101,6 +101,13 @@
 
   /* Lines */
   --color-line: #3a3531; /* hairline: borders, dividers, meter tracks */
+  /*
+   * The window chrome's border: the sidebar's lines and edge, the top bar's and the shell banner's bottom line, the session panel's
+   * header and dividers, and the evidence panel's edge. One colour a theme sets, a step over `line` on the sidebar's ground. A theme
+   * file that leaves it out gets its own `line` (app/theme.ts `resolveSide`). The rule for the three lines, and what each preset
+   * draws, is in themes.md "The lines"; e2e/fixtures/theme.ts holds every preset to it.
+   */
+  --color-line-chrome: #45403c;
   --color-line-strong: #514c48; /* a border that has to show: focused inputs, checkboxes, graph lanes */
 
   /* Ink — 4 steps. Brightness is urgency */
@@ -297,28 +304,6 @@
 }
 
 /*
- * The lines drawn on the sidebar's ground, a step toward the ink so they stand apart from it (dividers between
- * projects, "Add project", row borders, the sidebar's own edge, and the top bar's and the shell banner's bottom
- * line, which hang on the same ground). Mixed from the theme's own tokens rather than set per preset, so
- * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
- * swaps this in for --color-line (SIDEBAR_VARS); the top bar and the banner name it with `border-line-side` (#2207), since
- * swapping it in there would also change the plain `border-line` of what the bar holds (the inbox dropdown). The rule
- * that orders the three lines, and what each preset draws, is in themes.md "The lines"; e2e/fixtures/theme.ts holds
- * every preset to it.
- *
- * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
- * holds to it), and this is derived from two of them, never set themselves.
- */
-:root {
-  --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
-}
-
-/* The token is outside @theme, so Tailwind makes no `border-line-side` of it: this is that utility, one place for the top bar and the banner */
-@utility border-line-side {
-  border-color: var(--color-line-side);
-}
-
-/*
  * The conversation's surfaces.
  *
  * Inside the session view `surface-floor` and `surface-raised` are redefined as the reading
@@ -339,7 +324,7 @@
  * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
  * what the eye sees at the dark end better than hex steps do:
  *   Dark   sidebar #120e0a, conversation #120e0a: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
- *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#45403c, `line-side`
+ *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#45403c, `line-chrome`
  *          since #2207: the sidebar's own edge always was, and the top bar's now is) alone parts them now.
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
@@ -400,6 +385,7 @@
   --color-surface-reading-raised: #f9f9f9;
 
   --color-line: #cbcbcb;
+  --color-line-chrome: #bababa;
   --color-line-strong: #aaaaaa;
 
   --color-ink-signal: #111111;
@@ -476,6 +462,7 @@
   --color-surface-reading-raised: #0f0f0f;
 
   --color-line: #707070;
+  --color-line-chrome: #797979;
   --color-line-strong: #a8a8a8;
 
   --color-ink-signal: #ffffff;
@@ -523,6 +510,7 @@
   --color-surface-reading-raised: #ffffff;
 
   --color-line: #767676;
+  --color-line-chrome: #707070;
   --color-line-strong: #4a4a4a;
 
   --color-ink-signal: #000000;
@@ -608,6 +596,7 @@
   --color-surface-reading-raised: #2c2c2e;
 
   --color-line: #3a3a3c;
+  --color-line-chrome: #4a4a4c;
   --color-line-strong: #545456;
 
   --color-ink-signal: #ffffff;

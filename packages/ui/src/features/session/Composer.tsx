@@ -525,7 +525,7 @@ export const Composer = memo(function Composer({
 
   return (
     <form
-      className={`px-4 py-3 ${framed ? 'border-t border-line' : ''}`}
+      className={`px-4 py-3 ${framed ? 'border-t border-line-chrome' : ''}`}
       onSubmit={(e) => {
         e.preventDefault()
         const t = text.trim()

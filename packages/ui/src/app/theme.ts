@@ -1,6 +1,9 @@
 import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
+/** The window line: a theme file that does not set it gets its own `line` (resolveSide) */
+const CHROME_LINE = '--color-line-chrome'
+
 /**
  * The theme engine (#312 step 3).
  *
@@ -82,6 +85,8 @@ export function resolveSide(
     for (const [key, value] of Object.entries(file.tokens)) {
       if (isValidTokenValue(key, value)) tokens[THEME_TOKEN_BY_KEY.get(key)!.cssVar] = value
     }
+    // The window line is the theme's own `line` unless the file sets it: no colour from the preset's or another token is mixed in
+    tokens[CHROME_LINE] ??= 'var(--color-line)'
     return { id, name: file.name, base: file.base, preset: presetFor(file.base).id, tokens }
   }
   const preset = THEME_PRESETS.find((p) => p.id === id) ?? presetFor(side)

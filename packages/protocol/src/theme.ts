@@ -53,6 +53,7 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
   ]),
   ...defs('Lines', 'color', [
     ['line', 'Line'],
+    ['line-chrome', 'Window line: sidebar, top bar, panel headers (empty: the Line)'],
     ['line-strong', 'Strong line'],
   ]),
   ...defs('Ink', 'color', [

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { tokenColor } from './tokens.js'
 import { INK_ORDER, READING_SURFACES, THEME_PRESETS, contrast, urgencyBreaks, type Rgba } from '../../packages/ui/src/app/theme.js'
 
 /**
@@ -21,11 +22,11 @@ type Mock = {
 const DARK_FLOOR = '#120e0a'
 /**
  * The rule for the three lines (docs/themes.md "The lines"): each is checked on the floor, the sidebar and a raised
- * surface, the three grounds a line is drawn on. `line` stays visible but quiet, `line-side` is a step stronger, and
+ * surface, the three grounds a line is drawn on. `line` stays visible but quiet, `line-chrome` is a step stronger, and
  * `line-strong` is clearly stronger again.
  */
 const LINE_FLOOR = 1.2
-const LINE_SIDE_FLOOR = 1.4
+const LINE_CHROME_FLOOR = 1.4
 const LINE_STRONG_FLOOR = 1.7
 /** How much more contrast each line has than the one below it */
 const LINE_STEP = 0.25
@@ -98,6 +99,33 @@ async function presetColors(page: Page, names: readonly string[]): Promise<Recor
 }
 
 export function presetTests() {
+  // The window's borders are one colour a theme sets (docs/themes.md "The lines"): the top bar's, the sidebar's, a session header's, the evidence panel's edge and header
+  const chromeBorders = (page: Page) => [
+    [page.getByTestId('app-header'), 'border-bottom-color'],
+    [page.getByTestId('sidebar'), 'border-right-color'],
+    [page.getByTestId('session-name').locator('..'), 'border-bottom-color'],
+    [page.getByTestId('evidence-panel'), 'border-left-color'],
+    [page.getByTestId('evidence-project').locator('..'), 'border-bottom-color'],
+  ] as const
+
+  test('the window borders are the one colour line-chrome, and a theme file without it gets its own line (#2207)', async ({ page }) => {
+    await openDemo(page)
+    await expect(page.getByTestId('evidence-panel')).toBeVisible()
+    const chrome = await tokenColor(page, '--color-line-chrome')
+    expect(chrome).not.toBe(await tokenColor(page, '--color-line'))
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, chrome)
+
+    // A file that sets only `line`: the window borders follow that line, nothing of the preset's chrome colour is mixed in
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { line: '#aa0000' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'dark', themeDark: 'mine' }))
+    await expect.poll(() => token(page, '--color-line')).toBe('#aa0000')
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, 'rgb(170, 0, 0)')
+
+    // A file that sets the token wins
+    await writeFile(page, 'mine', { name: 'Mine', base: 'dark', tokens: { line: '#aa0000', 'line-chrome': '#00aa00' } })
+    for (const [el, prop] of chromeBorders(page)) await expect(el).toHaveCSS(prop, 'rgb(0, 170, 0)')
+  })
+
   test('Picking Light shows the Light preset, and the window and color-scheme follow', async ({ page }) => {
     await openDemo(page)
     await openAppearance(page)
@@ -192,7 +220,7 @@ export function presetTests() {
         [preset.id, preset.base],
       )
       await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
-      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line', '--color-line-side', '--color-line-strong']
+      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line', '--color-line-chrome', '--color-line-strong']
       const colors = await presetColors(page, names)
       expect(urgencyBreaks(colors)).toEqual([])
       // Every ink keeps a floor of its own on every reading surface, the ones Dark's inks keep, so no preset's quieter inks sink (#2208)
@@ -200,19 +228,19 @@ export function presetTests() {
         for (const [ink, floor] of INK_FLOORS) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(floor)
       }
       for (const surface of LINE_GROUNDS) {
-        const [line, side, strong] = ['--color-line', '--color-line-side', '--color-line-strong'].map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
+        const [line, side, strong] = ['--color-line', '--color-line-chrome', '--color-line-strong'].map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
         expect(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
-        expect(side, `line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_SIDE_FLOOR)
+        expect(side, `line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_CHROME_FLOOR)
         expect(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
-        expect(side - line, `line-side over line on ${surface}`).toBeGreaterThanOrEqual(0)
-        expect(strong - side, `line-strong over line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
+        expect(side - line, `line-chrome over line on ${surface}`).toBeGreaterThanOrEqual(0)
+        expect(strong - side, `line-strong over line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
       }
       if (preset.id.startsWith('hc-')) {
         // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
         for (const [surface] of READING_SURFACES) {
           for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
           expect(contrast(colors['--color-line']!, colors[surface]!), `line on ${surface}`).toBeGreaterThanOrEqual(3)
-          expect(contrast(colors['--color-line-side']!, colors[surface]!), `line-side on ${surface}`).toBeGreaterThanOrEqual(3)
+          expect(contrast(colors['--color-line-chrome']!, colors[surface]!), `line-chrome on ${surface}`).toBeGreaterThanOrEqual(3)
         }
       }
     })

@@ -87,7 +87,7 @@ export function AppPanel({
   return (
     <>
       <div
-        className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-line px-4 active:cursor-grabbing"
+        className="flex h-10 shrink-0 cursor-grab items-center gap-2 border-b border-line-chrome px-4 active:cursor-grabbing"
         draggable
         onDragStart={onDragStart}
         data-testid="pane-header"
