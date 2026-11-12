@@ -66,7 +66,7 @@ export function Inbox() {
   const [at, setAt] = useState<{ key: string | null; row: number }>({ key: null, row: 0 })
   const cursor = cursorIndex(list.waiting, at)
   useEffect(() => {
-    if (!open) setAt({ key: null, row: 0 })
+    if (!open) setAt((a) => (a.key === null && a.row === 0 ? a : { key: null, row: 0 }))
     else if (at.key === null && list.waiting[0]) setAt({ key: rowKeyOf(list.waiting[0]), row: 0 })
   }, [open, at.key, list.waiting])
   const panelRef = useRef<HTMLDivElement>(null)
