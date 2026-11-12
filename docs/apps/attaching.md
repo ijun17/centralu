@@ -125,10 +125,11 @@ first). `apps.reach` no longer answers `restart` or `bridge-failed` (nothing pro
 `apps.sessionCall` are removed (protocol.md §3.2): only an app bridge of an older host's Codex thread called them, and that
 thread's process goes with the host that started it.
 
-**Recordings and replay.** The Claude recordings `mcp-app.jsonl` (2.1.296, 2.1.316) keep their `mcp__app-…` calls: they
-replay as history; the live mark they had is not set any more (see above). A recording of an `app` call needs a live
-re-record on each CLI. The tool-list fixtures (`tool-prefix.test.ts`, the measured definitions) gain `app` and lose the
-app servers.
+**Recordings and replay.** The Claude recordings `mcp-app.jsonl` (2.1.296, 2.1.316) are re-recorded live with the
+`app` tool: the session lists its apps and calls `weather.forecast` through `mcp__centralu__app`, and the replay checks
+the card's mark and that no `mcp__app-…` call is left. No Codex recording of an `app` call exists yet: it needs a live
+run on a machine with Codex. The tool-list fixtures (`tool-prefix.test.ts`, the measured definitions) gain `app` and
+lose the app servers.
 
 **What is deleted.** The Claude app proxy (`app-proxy.ts`) and the server sync for apps (`setMcpServers` on every
 attach, detach and app change); the Codex app bridge (`CC_APP_SERVER` in `centralu-bridge.mjs`), the app part of

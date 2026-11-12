@@ -1039,4 +1039,23 @@ The list is the same with 0, 3 and 10 apps on both CLIs (`sessions/assistant-app
 never rebuilds a cached prefix (§4 "Cache per event": the `thread_restart` and server-change rebuilds are gone).
 
 One tool, not two (`app_list`, `app_call`): a second tool carries its own name and schema envelope, about 210 characters
-(§8), in every request. Kept as one unless a model chooses worse with it; selection is in the pull request's measurement.
+(§8), in every request. Kept as one unless a model chooses worse with it.
+
+**Selection, measured live** (Claude Code, a host on a temporary data folder, this repository's project board as the app,
+preset `safe` with every card denied so nothing reached GitHub). Eight fixed prompts, one per board tool (`ci_status`,
+`list_items`, `read_discussion`, `list_owner_answers`, `set_item_fields`, `add_item`, `comment`, `commit_check`), one
+session each; haiku twice over, sonnet once. "Reached" is a call of the wanted tool; "args" is that first call's
+arguments passing the schema.
+
+| Build | haiku: reached, args | sonnet: reached, args |
+|---|---|---|
+| Before (a server per app, the commit before #2231) | 14/16, 14/14 | 7/8, 7/7 |
+| One `app` tool, the overview naming tools only | 13/16, 11/13 | 6/8, 5/6 |
+| One `app` tool, the overview naming each tool's arguments | 12/16, 11/12 | 6/8, 6/6 |
+
+No session called a wrong tool, and none mixed up `list` and `call`. `commit_check` was reached by none, before or after
+(the models read the conventions document). The first overview cost `read_discussion` its arguments three times of
+three (a guessed key), so the overview now names each tool's arguments (`read_discussion(item, comments?)`, required
+first, optional with `?`). The misses after are `gh` run by hand for `read_discussion` (denied) and `set_item_fields`
+sessions that looked the item up and stopped; neither is a choice between two tools, so a second tool would not meet
+them. The samples are small (24 sessions an arm): the drop in reach is possible, not shown.
