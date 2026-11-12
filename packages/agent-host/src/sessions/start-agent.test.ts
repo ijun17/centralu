@@ -15,6 +15,7 @@ import type { ModelOption } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { assistantAgentsRoot, assistantHome, isAssistantAgentFolder } from './assistant-home.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { AgentRunWait } from './app-agents.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -792,6 +793,20 @@ describe('starting another agent in the same project', () => {
       expect(child).toBeDefined()
       expect(openTasks(s, child!.id)).toEqual([])
       expect(reportsTo(s, child!.id)).toEqual([])
+    })
+
+    // Review of #1948: start_agent gives work through DelegationFlow.delegate, which fails the wait as every giver's (#839)
+    it('a task that could not go in fails the wait on it, so nothing waits on a turn that never starts', async () => {
+      allowProject()
+      const s = await session()
+      vi.spyOn(w.mgr.events, 'deliver').mockRejectedValue(new Error('the tool did not start'))
+      const fail = vi.spyOn(AgentRunWait.prototype, 'fail')
+      try {
+        expect(await w.mgr.startAgent(s, { task: 'never given', wait: false })).toMatchObject({ ok: false })
+        expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: 'the tool did not start' }))
+      } finally {
+        fail.mockRestore()
+      }
     })
 
     it('a task still being handed over when the host goes is kept: the next host answers it once (#1948 step 3)', async () => {

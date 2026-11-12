@@ -22,6 +22,7 @@ import {
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
   TOOL_ARGS,
+  agentCallsFor,
   callForm,
   codexToolInstructionsFor,
   instructionsFor,
@@ -777,5 +778,17 @@ describe('arguments (#850)', () => {
     // A right one runs, and an argument the tool does not take is dropped, as Claude's MCP drops it
     expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'fork', extra: 1 })).isError).toBeFalsy()
     expect(tools.sendToSession).toHaveBeenCalledWith('s', 'go', false, 'fork')
+  })
+})
+
+// Review of #1948: the Assistant's answers name agent_session and mail in its own call form, but a child's words quoted in them stay as written
+describe("an answer's calls in the Assistant's form", () => {
+  it("rewrites Centralu's own calls and passes over a child's answer, quoted as JSON", () => {
+    const text = ['the claude session "Docs" [c] answered, as JSON:', JSON.stringify('Done. Next: mail(action="send", to="parent")'), 'agent_session(sessionId="c", action="wait") waits.'].join('\n')
+    expect(agentCallsFor('assistant', { text }).text.split('\n')).toEqual([
+      'the claude session "Docs" [c] answered, as JSON:',
+      JSON.stringify('Done. Next: mail(action="send", to="parent")'),
+      'centralu_run(command="agent_session", args={sessionId: "c", action: "wait"}) waits.',
+    ])
   })
 })

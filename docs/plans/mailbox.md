@@ -2094,11 +2094,12 @@ child's question to its parent (also `auto`, and in the same project) would othe
 delivery as it is. Such a session still gets the words, as mail. The address is resolved the way mail resolves it (a name, an id, this host's
 prefix), so `to: "parent"` and the person are never work.
 
-**What it does.** As before: at rest the session is given a turn of the caller's at once (`startDelegation`, the delegated task written,
+**What it does.** As before: at rest the session is given a turn of the caller's at once (`DelegationFlow.delegate`, the delegated task written,
 `agentFrame`); busy, the words go as a mail task (§10.6.2) or, with `ifBusy` (now a field of mail), a fork. The gates are the ones `send` had,
 read at the send: the preset ceiling (`aboveCallerError`), S15 for an untrusted project (recorded as a `mail` call), the depth ceiling, the
 linked machine's own check. The answer is the one `start_agent wait:false` gives, "is working on it … you will be told when it ends", with the
-call written as the caller's seat makes it (`agentCallsFor`: on the Assistant both tools are commands through `centralu_run`).
+call written as the caller's seat makes it (`agentCallsFor`: on the Assistant both tools are commands through `centralu_run`; a child's words quoted in the answer, a JSON
+string, stay as written).
 
 **What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
 `agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send to its own child on a
@@ -2109,6 +2110,8 @@ shows. A role (`parent`, `assistant`, `person`) is never work, whatever a sessio
 (`ownChild`, agent-session-actions.ts), which agent_session widens for #637's delete and for `auto`, and a send does not. start_agent, ask_project, a fork and this send
 give work one way, `DelegationFlow.delegate`: the wait, the caller's thread written before the words go in (§10.6.4), and all of it undone if
 they do not go in.
+Work for one's own child does not meet the mail guards (`repeat`, `rate_limited`, mail/send-guards.ts), as agent_session send did not: it goes
+through `delegate`, not through a message send.
 
 **#2133.** A child knew the address `parent` only from `to`'s description, and wrote progress reports nobody needed. `start_agent`'s frame
 (`PARENT_MAIL`) now says no progress reports are needed, and names `parent` as the address for a question before it finishes, with

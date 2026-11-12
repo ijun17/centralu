@@ -6,6 +6,7 @@ import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import type { PermissionPreset } from '@cc/protocol'
 import { CrossAdapter, crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { AgentRunWait } from './app-agents.js'
 
 /**
  * Requests to a busy session (#677): when B asks A for work while A runs a turn that is not B's, the request goes to A as
@@ -95,6 +96,32 @@ describe('requests to a busy session (#677)', () => {
     })
 
     // #1948: agent_session send is gone; a mail send to a session the caller started is the same work, ifBusy and all
+    // Review of #1948: a fork gives work through DelegationFlow.delegate, so its task is written before the words go in (§10.6.4), as every giver's
+    it('a fork that does not take the request had its task written first; the task is withdrawn and the wait failed', async () => {
+      git(w.caller.path)
+      wireHostMail(w.mgr, w.store)
+      const read = mailReader(w.store)
+      const { a, b } = await busyChild()
+      const forkOf = () => w.mgr.listSessions().find((s) => s.forkedFrom === a)
+      const open = (id: string) => read.tasks(addressOf(b), id).filter((t) => read.taskRow(t.id, id)?.settled === null)
+      const deliver = w.mgr.events.deliver.bind(w.mgr.events)
+      let openWhenGiven = -1
+      vi.spyOn(w.mgr.events, 'deliver').mockImplementation(async (id, ...rest) => {
+        if (id !== forkOf()?.id) return deliver(id, ...rest)
+        openWhenGiven = open(id).length
+        throw new Error('the fork did not start')
+      })
+      const fail = vi.spyOn(AgentRunWait.prototype, 'fail')
+      try {
+        expect(await sendWork(w.mgr, b, a, 'review the schema', 'fork')).toMatchObject({ ok: false, error: expect.stringContaining('did not take the request: the fork did not start') })
+        expect(openWhenGiven).toBe(1)
+        expect(open(forkOf()!.id)).toEqual([])
+        expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: 'the fork did not start' }))
+      } finally {
+        fail.mockRestore()
+      }
+    })
+
     it("a mail send with ifBusy forks the busy child as agent_session send did, and the fork's end is reported to the sender", async () => {
       git(w.caller.path)
       wireHostMail(w.mgr, w.store)

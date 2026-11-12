@@ -594,12 +594,13 @@ const HANDLERS: ToolHandlers = {
 
 /**
  * start_agent's answers name agent_session and mail as a reader calls them (`agentRunText`); the Assistant reaches them through
- * centralu_run in the `commands` tier (#853), where the bare call is refused, so its answers name that form instead
+ * centralu_run in the `commands` tier (#853), where the bare call is refused, so its answers name that form instead. Only Centralu's own
+ * words: someone else's text (a child's answer, its last step) is in them as a JSON string (`trustedJsonText`), which is passed over whole
  */
 export function agentCallsFor(profile: ToolCaller['profile'], out: ToolOutput): ToolOutput {
   const commands = commandsFor(profile) as string[]
-  const text = out.text.replace(/\b(agent_session|mail)\(([^)]*)\)/g, (call: string, tool: string, inner: string) =>
-    commands.includes(tool) ? `centralu_run(command="${tool}", args={${inner.replace(/\b(\w+)=/g, '$1: ')}})` : call,
+  const text = out.text.replace(/"(?:[^"\\\n]|\\.)*"|\b(agent_session|mail)\(([^)]*)\)/g, (call: string, tool?: string, inner?: string) =>
+    tool && commands.includes(tool) ? `centralu_run(command="${tool}", args={${(inner ?? '').replace(/\b(\w+)=/g, '$1: ')}})` : call,
   )
   return text === out.text ? out : { ...out, text }
 }
