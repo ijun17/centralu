@@ -172,7 +172,9 @@ about a declaration the host ignores or cannot read, and about an `askWhen` or `
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.
 
-**What the model reads from a result.** A tool result can carry both `content` (text) and
+### What the model reads from a result
+
+A tool result can carry both `content` (text) and
 `structuredContent` (JSON). The MCP specification treats the two as the same data: "For backwards
 compatibility, a tool that returns structured content SHOULD also return the serialized JSON in a
 TextContent block" (2025-06-18, Tools, Structured Content). The two agents differ in which one the

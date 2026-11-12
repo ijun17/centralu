@@ -254,7 +254,7 @@ describe('tool calls (the actual shape from the spike)', () => {
         .flatMap((e) => (e.type === 'tool_call' && e.summary.tool.startsWith('mcp__') ? [e.summary.centralu] : []))
     expect(marks('centralu-agents')).toMatchObject([{ tool: 'recall' }, { tool: 'read_session' }, { tool: 'start_agent', label: 'Started an agent' }])
     expect(marks('centralu-mail')).toMatchObject([{ tool: 'mail' }, { tool: 'mail' }])
-    expect(marks('mcp-app')).toEqual([{ tool: 'forecast', app: 'weather' }])
+    expect(marks('mcp-app')).toEqual([{ tool: 'find_apps', label: 'Looked for apps' }, { tool: 'app', label: 'Listed its apps' }, { tool: 'forecast', app: 'weather' }])
   })
 
   it('a result of text blocks reads as its text on the card, not as their JSON (#843)', () => {

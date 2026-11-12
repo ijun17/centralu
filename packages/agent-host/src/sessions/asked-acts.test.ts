@@ -58,6 +58,10 @@ describe('which steps of the Assistant ask the person when a session asked for t
     }
     expect(stepKind('some_command_added_later', {})).toBe('asks')
     expect(stepKind('Bash', {})).toBe('asks')
+    // The app tool (#2231): listing reads; a call is the app's own tool's, which asks unless it is undone or a read
+    expect(askedAct('app', { action: 'list' }, THREAD)).toBeNull()
+    expect(askedAct('app', { action: 'call', app: 'board', tool: 'comment', args: {} }, THREAD)).not.toBeNull()
+    expect(stepKind('app', { action: 'call' })).toBe('asks')
     expect(stepKind('server.tool', {})).toBe('asks')
   })
 

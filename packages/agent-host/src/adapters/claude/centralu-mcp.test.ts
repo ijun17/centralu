@@ -39,6 +39,8 @@ describe('the Claude in-process server', () => {
         find_apps: 'loaded',
         attach_app: 'deferred',
         detach_app: 'deferred',
+        // Every app through one tool (#2231): deferred, its name and the first-tools line are what the model needs to look for it
+        app: 'deferred',
         // The mailbox (#1347): the wake that delivers mail names the exact call
         mail: 'deferred',
         // Compacting at a break (#1451): loaded, its words are the instruction on when to use it
@@ -57,11 +59,13 @@ describe('the Claude in-process server', () => {
     expect(CLAUDE_SUBAGENT_TOOL).toBe('Agent')
   })
 
-  it('still loads every tool of the directing profiles, with their instructions', () => {
+  it('still loads every tool of the directing profiles but the app tool, with their instructions', () => {
     for (const profile of ['assistant', 'scoped', 'builder'] as const) {
       const { tools } = registered(profile)
       expect(Object.values(tools).length, profile).toBeGreaterThan(0)
-      expect(Object.values(tools).every((t) => t === 'loaded'), profile).toBe(true)
+      // The app tool waits behind tool search in every profile, so a session with no app pays its name only (#2231, tool-cost.md §16)
+      expect(tools.app, profile).toBe('deferred')
+      expect(Object.entries(tools).every(([name, t]) => name === 'app' || t === 'loaded'), profile).toBe(true)
     }
     expect(registered('scoped').instructions).toBe(SCOPED_INSTRUCTIONS)
   })
@@ -70,7 +74,7 @@ describe('the Claude in-process server', () => {
     const commands = registered('assistant')
     expect(Object.keys(commands.tools)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
     expect(Object.keys(commands.tools)).not.toContain('create_app')
-    expect(Object.values(commands.tools).every((t) => t === 'loaded')).toBe(true)
+    expect(Object.entries(commands.tools).every(([name, t]) => name === 'app' || t === 'loaded')).toBe(true)
     expect(commands.instructions).toContain('centralu_commands lists them')
   })
 })
