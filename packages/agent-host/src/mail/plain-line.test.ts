@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { plainLine } from './plain-line.js'
+import { plainLine, plainLines } from './plain-line.js'
 
 describe('a message body as one plain line (#2228)', () => {
   it('drops emphasis, code, link and image marks and keeps their words', () => {
@@ -16,5 +16,12 @@ describe('a message body as one plain line (#2228)', () => {
 
   it('cuts after the marks are gone, on one line', () => {
     expect(plainLine('**abcdefghij**\nklm', 5)).toBe('abcde…')
+  })
+})
+
+describe('the first lines of a body for a card (#2229)', () => {
+  it('keeps the lines as plain words, drops empty ones and cuts to the lines and characters given', () => {
+    expect(plainLines('**Which** branch?\n\n- main\n- release\nand more', 3, 100)).toBe('Which branch?\nmain\nrelease')
+    expect(plainLines('abcdefghij', 3, 5)).toBe('abcde…')
   })
 })

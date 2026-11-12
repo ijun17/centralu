@@ -86,17 +86,20 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       set({ mailThread: null })
     },
 
-    async replyMail(text, kind, answers) {
+    async replyMail(text, kind, answers, threadId) {
       const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
+      const id = threadId ?? get().mailThread?.thread.id
+      if (!platform || !id) return false
       const sent = await act('send that', async () => {
-        const view = await platform.mail.reply(open.thread.id, text, kind, answers)
+        const view = await platform.mail.reply(id, text, kind, answers)
         const now = get().mailThread
-        if (get().platform === platform && now?.thread.id === open.thread.id) set({ mailThread: merged(now, view) })
+        if (get().platform === platform && now?.thread.id === id) set({ mailThread: merged(now, view) })
         void get().loadMail()
       })
-      if (!sent && answers !== undefined) await refreshThread(get, set, open.thread.id)
+      if (!sent && answers !== undefined) {
+        await refreshThread(get, set, id)
+        void get().loadMail()
+      }
       return sent
     },
 
@@ -155,6 +158,14 @@ export function mailAttention(mail: AppState['mail']): number {
   const threads = new Set(mail.threads.filter((t) => t.unread > 0 || t.held > 0).map((t) => t.id))
   for (const h of mail.held) threads.add(h.threadId)
   return threads.size + (mail.waiting > 0 ? 1 : 0)
+}
+
+/**
+ * How many threads wait on the person's answer (#2227): a question, or a message that needs a reply, addressed to them and not answered. With the live approval cards this is
+ * what the header badge's solid edge says (`InboxPill`). Read off the host's list on every render, never kept (docs/state-management.md §3)
+ */
+export function mailAsksYou(mail: AppState['mail']): number {
+  return mail ? mail.threads.filter((t) => t.ask !== null).length : 0
 }
 
 /** The mailbox's news (`mail_changed`): the list is read again, and the thread open in the Inbox if it is the one named. True when it was one */

@@ -746,6 +746,31 @@ describe('the person finishes their own side of mail whose other party is on a l
   })
 })
 
+describe('the thread row says what waits on the person’s answer (#2229)', () => {
+  it('names the newest unanswered question with its first lines as plain words and its choices, and counts them; an answer, a close or a sender that is gone clears it', () => {
+    const w = ready(hostWorld())
+    const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
+    expect(w.person.list().threads[0]?.ask).toBeNull()
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: '**Which** branch?\n\nline two\nline three\nline four', choices: ['main', 'release'] })
+    w.clock.t += 10
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'And the tag?' })
+    const row = () => w.person.list().threads.find((t) => t.id === root.id)!
+    expect(row().ask).toMatchObject({ text: 'And the tag?', count: 2, sender: { address: A } })
+    expect(row().ask?.choices).toBeUndefined()
+    const first = w.person.thread(root.id).messages.find((m) => m.body.startsWith('**Which**'))!
+    w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
+    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three', choices: ['main', 'release'], count: 1 })
+    w.person.close(root.id)
+    expect(row().ask).toBeNull()
+  })
+
+  it('is not set for a note: nothing in it asks for an answer', () => {
+    const w = ready(hostWorld())
+    const note = w.service.send(A, { to: [PERSON], text: 'FYI.', needsReply: false }).message
+    expect(w.person.list().threads.find((t) => t.id === note.id)?.ask).toBeNull()
+  })
+})
+
 describe('Markdown in a one-line text (#2228)', () => {
   it('the thread subject and the row preview are the words, without the marks', () => {
     const w = hostWorld()

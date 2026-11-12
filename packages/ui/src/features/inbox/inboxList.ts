@@ -4,7 +4,8 @@ import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
 /**
  * What the inbox draws, in the order it draws it (owner, 2026-11-12, #2213): mail that could not be delivered pinned on
  * top, then what waits on the person, newest first, sessions and mail threads in one list, and under "Earlier" the
- * threads with nothing unread. Derived on every read from the two lists the host and the window keep
+ * threads with nothing unread. The threads that wait on the person's answer are cards (#2229) and come first in it,
+ * newest first like the rest. Derived on every read from the two lists the host and the window keep
  * (docs/state-management.md §3); nothing here is stored.
  *
  * `items` is already newest first (`buildInbox`). The keys' cursor walks this one list, mail rows included.
@@ -36,6 +37,9 @@ export function settleCursor(rows: readonly WaitingRow[], at: InboxCursor, open:
   return key === at.key && row === at.row ? at : { key, row }
 }
 
+/** Whether a row is a thread that waits on the person's answer: drawn as a card, above the rows */
+const asksYou = (row: WaitingRow): boolean => row.kind === 'mail' && row.thread.ask !== null
+
 export type InboxList = {
   /** Mail that waits for the person to say what happens to it, the one most recently held first */
   held: MailHeldRow[]
@@ -55,7 +59,7 @@ export function arrangeInbox(items: readonly InboxItem[], mail: Mail): InboxList
   return {
     held: [...(mail?.held ?? [])].sort((a, b) => b.since - a.since),
     // A stable sort: a tie keeps the sessions first, in their own order
-    waiting: rows.sort((a, b) => b.at - a.at).map((r) => r.row),
+    waiting: rows.sort((a, b) => Number(asksYou(b.row)) - Number(asksYou(a.row)) || b.at - a.at).map((r) => r.row),
     earlier: threads.filter((t) => t.unread === 0).sort((a, b) => b.updatedAt - a.updatedAt),
   }
 }

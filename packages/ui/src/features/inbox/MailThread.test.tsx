@@ -22,7 +22,7 @@ const centralu: MailParty = { address: 'centralu', kind: 'centralu', sessionId: 
 
 function view(over: Partial<MailThreadView> = {}): MailThreadView {
   return {
-    thread: { id: 't1', subject: 'Land #12', state: 'running', outcome: null, next: 'write the parser', projectId: null, owner: you, assignee: parser, unread: 0, held: 0, blocked: 0, createdAt: 0, updatedAt: 0, last: null },
+    thread: { id: 't1', subject: 'Land #12', state: 'running', outcome: null, next: 'write the parser', projectId: null, owner: you, assignee: parser, unread: 0, held: 0, blocked: 0, ask: null, createdAt: 0, updatedAt: 0, last: null },
     parties: [{ party: you, role: 'owner' }, { party: parser, role: 'assignee' }],
     blockers: [],
     messages: [],

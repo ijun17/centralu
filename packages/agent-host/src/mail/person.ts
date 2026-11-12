@@ -1,7 +1,7 @@
 import { errorMessage, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
-import { plainLine } from './plain-line.js'
+import { plainLine, plainLines } from './plain-line.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
 import { SUBJECT_CHARS, type MailChange, type MessageService } from './messages.js'
@@ -35,6 +35,9 @@ const LIST_SCAN = 1_000
 /** A chain is read whole for the window up to this many messages: its newest ones */
 const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
+/** A question's card shows its first lines (#2229): this many, and no more than this many characters */
+const ASK_LINES = 3
+const ASK_CHARS = 320
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
 
@@ -424,6 +427,8 @@ export class MailPerson {
     const working = done ? [] : this.workers(this.chainOf(root))
     // A task a stop released is not being worked on: the session can no longer answer it until the person sends it a message (§10.6.1)
     const state = done ? 'done' : working.length > 0 || tasks.some((r) => r.settled === null && r.releasedAt === null) ? 'running' : tasks.some((r) => r.settled === 'reported') ? 'review' : 'open'
+    const asking = done ? [] : this.asking(all)
+    const asked = asking.at(-1)
     const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
     return {
       id: root,
@@ -434,6 +439,7 @@ export class MailPerson {
       projectId: first.senderProject,
       owner: this.party(first.sender),
       assignee: assignee === undefined ? null : this.party(assignee),
+      ask: asked ? { id: asked.id, sender: this.party(asked.sender), text: plainLines(asked.body, ASK_LINES, ASK_CHARS), ...(asked.choices ? { choices: asked.choices } : {}), count: asking.length } : null,
       unread: toPerson.filter((r) => r.readAt === null && !hiddenFromPerson(r)).length,
       held,
       blocked: 0,
@@ -444,11 +450,22 @@ export class MailPerson {
     }
   }
 
+  /**
+   * The messages in a chain that wait on the person's answer, oldest first: a message to them that asks for one (a session's question, or one that needs a reply), not answered or settled yet,
+   * from a session that is still here (a sender that is gone cannot be answered, `replyTarget`), and that they may read
+   */
+  private asking(chain: readonly MailRow[]): MailRow[] {
+    return chain.filter((m) => {
+      const row = this.records.recipient(m.id, PERSON)
+      return m.needsReply && m.sender !== PERSON && parseAddress(m.sender)?.kind === 'session' && this.here(m.sender) && row !== undefined && !hiddenFromPerson(row) && row.answerId === null && (row.settled === null || row.settled === 'legacy')
+    })
+  }
+
   /** A chain whose every message the person may not read (held for them, then let go): a row with nothing in it */
   private emptyRow(root: string): MailThreadRow {
     const m = this.records.message(root)
     const at = m?.createdAt ?? 0
-    return { id: root, subject: m ? subjectLine(m) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
+    return { id: root, subject: m ? subjectLine(m) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, ask: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
   }
 
   // ── Shapes ──

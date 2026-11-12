@@ -66,6 +66,7 @@ export class MailMock {
       projectId: null,
       owner: spec.from,
       assignee: spec.assignee ?? null,
+      ask: null,
       unread: 1,
       held: 0,
       blocked: 0,
@@ -74,7 +75,9 @@ export class MailMock {
       updatedAt: now,
       last: { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: now },
     }
-    this.threads.set(id, { row, messages: [message], read: 0, canReply: !spec.onlyHeld })
+    const thread: Thread = { row, messages: [message], read: 0, canReply: !spec.onlyHeld }
+    row.ask = this.asking(thread)
+    this.threads.set(id, thread)
     if (spec.held) {
       this.heldRows.push({ messageId: message.id, threadId: id, subject: spec.subject, sender: spec.from, recipient: spec.held.recipient, kind: message.kind, reason: spec.held.reason, preview: spec.body.slice(0, 140), since: now })
       row.held = 1
@@ -115,7 +118,15 @@ export class MailMock {
     }
   }
 
+  /** What the thread waits on the person to answer, as the host works it out (`MailPerson.asking`): a session's questions that none of the person's messages names, until the thread is done */
+  private asking(t: Thread): MailThreadRow['ask'] {
+    const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
+    const newest = open.at(-1)
+    return newest ? { id: newest.id, sender: newest.sender, text: newest.body.split('\n').slice(0, 3).join('\n'), ...(newest.choices ? { choices: newest.choices } : {}), count: open.length } : null
+  }
+
   private touch(t: Thread): void {
+    t.row.ask = this.asking(t)
     t.row.updatedAt = this.clock.now()
     this.emit({ type: 'mail_changed', threadId: t.row.id, toPerson: false })
   }

@@ -19,11 +19,11 @@ export type MailSlice = {
   /** Back to the list */
   closeMailThread: () => void
   /**
-   * The person's words in the open thread; true when it was sent, false (with the host's words in a toast) when it was refused. `answers`: the
+   * The person's words in the open thread, or in the one `threadId` names (a pick on the list's card, which opens nothing); true when it was sent, false (with the host's words in a toast) when it was refused. `answers`: the
    * question whose choice `text` is (a pick, #1630). A pick that fails reads the thread again, whatever the failure was (another window answered
    * first, or the link dropped after the host had taken it), so the choices show what became of the question
    */
-  replyMail: (text: string, kind?: 'note' | 'answer' | 'question', answers?: string) => Promise<boolean>
+  replyMail: (text: string, kind?: 'note' | 'answer' | 'question', answers?: string, threadId?: string) => Promise<boolean>
   /**
    * Closes the open thread, or the one `threadId` names (the list's Done, which opens nothing): Mark done (`finished`) or Drop (`dropped`). A session working on it
    * is stopped and told (the host's close, 3.10). True when it closed; false, with the host's words in a toast, when it did not

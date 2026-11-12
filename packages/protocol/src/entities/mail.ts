@@ -29,6 +29,23 @@ export type MailParty = z.infer<typeof MailParty>
 export const MailChoices = z.array(z.string()).min(2).max(6)
 export type MailChoices = z.infer<typeof MailChoices>
 
+/**
+ * What a thread waits on the person to answer (#2229): the newest message to them that asks for an answer (a session's question, or a message that needs a
+ * reply), its first lines as plain words, the answers it offers to pick from, and how many such messages wait in the thread. The Inbox draws a card
+ * from it, answers a pick without opening the thread, and the header badge counts it (#2227); the host works it out, the window decides nothing.
+ */
+export const MailAsk = z.object({
+  /** The message waiting for the answer: the one a pick or words answer (`mail.reply` `answers`) */
+  id: z.string(),
+  sender: MailParty,
+  /** Its first lines, as plain words */
+  text: z.string(),
+  choices: MailChoices.optional().catch(undefined),
+  /** How many messages to the person wait for an answer in this thread */
+  count: z.number(),
+})
+export type MailAsk = z.infer<typeof MailAsk>
+
 export const MailThreadRow = z.object({
   id: z.string(),
   subject: z.string(),
@@ -40,6 +57,8 @@ export const MailThreadRow = z.object({
   assignee: MailParty.nullable().default(null),
   /** Messages to the person in this thread that the person has not read */
   unread: z.number().default(0),
+  /** What the thread waits on the person to answer; null when nothing does. Absent from a host of an older build */
+  ask: MailAsk.nullable().default(null),
   /** Mail in the thread held for the person to act on (a loop, a spent budget, a policy, a delivery that failed), for any receiver */
   held: z.number().default(0),
   /** Standing blockers: none since blockers went with threads (§12.2); kept for a window of an older build, which reads it */

@@ -6,9 +6,10 @@ import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 
-/** The thread's state as a word, with how it ended when it is done */
-export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): string {
+/** The thread's state as a word, with how it ended when it is done; a thread that waits on the person's answer says so (#2229) */
+export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'ask'>): string {
   if (t.state === 'done') return t.outcome && t.outcome !== 'finished' ? `Done (${t.outcome})` : 'Done'
+  if (t.ask) return 'Waiting on you'
   switch (t.state) {
     case 'open':
       return 'Open'

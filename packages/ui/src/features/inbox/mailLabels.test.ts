@@ -6,13 +6,20 @@ const party = (over: Partial<MailParty>): MailParty => ({ address: 'x', kind: 's
 
 describe('the thread’s state', () => {
   it('is a word, with how it ended when it is done and did not finish, and a word a newer host wrote as it wrote it', () => {
-    expect(threadStateLabel({ state: 'running', outcome: null })).toBe('Running')
-    expect(threadStateLabel({ state: 'review', outcome: null })).toBe('In review')
+    expect(threadStateLabel({ state: 'running', outcome: null, ask: null })).toBe('Running')
+    expect(threadStateLabel({ state: 'review', outcome: null, ask: null })).toBe('In review')
     // Blockers went with threads: an older host's word is shown as it wrote it, not as a state this window has
-    expect(threadStateLabel({ state: 'blocked', outcome: null })).toBe('blocked')
-    expect(threadStateLabel({ state: 'done', outcome: 'finished' })).toBe('Done')
-    expect(threadStateLabel({ state: 'done', outcome: 'dropped' })).toBe('Done (dropped)')
-    expect(threadStateLabel({ state: 'parked', outcome: null })).toBe('parked')
+    expect(threadStateLabel({ state: 'blocked', outcome: null, ask: null })).toBe('blocked')
+    expect(threadStateLabel({ state: 'done', outcome: 'finished', ask: null })).toBe('Done')
+    expect(threadStateLabel({ state: 'done', outcome: 'dropped', ask: null })).toBe('Done (dropped)')
+    expect(threadStateLabel({ state: 'parked', outcome: null, ask: null })).toBe('parked')
+  })
+
+  it('says Waiting on you for a thread whose question the person has not answered (#2229), and Open for an ordinary one; a done thread says Done whatever it asked', () => {
+    const ask = { id: 'm1', sender: party({}), text: 'Which branch?', count: 1 }
+    expect(threadStateLabel({ state: 'open', outcome: null, ask })).toBe('Waiting on you')
+    expect(threadStateLabel({ state: 'open', outcome: null, ask: null })).toBe('Open')
+    expect(threadStateLabel({ state: 'done', outcome: 'finished', ask })).toBe('Done')
   })
 })
 
