@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { Terminal as Xterm, type ITerminalOptions } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -81,7 +82,7 @@ export function mountXterm(
   const links = registerTerminalHttpLinks(term, (url) => {
     void platform.system
       .openUrl(url)
-      .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
+      .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${errorMessage(e)}`))
   })
 
   attachment = attach(term, fit)

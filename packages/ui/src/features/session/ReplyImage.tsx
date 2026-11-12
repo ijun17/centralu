@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MessageImage } from '@cc/protocol/client'
+import { errorMessage, type MessageImage } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { loadReplyImage } from './localImages.js'
 import { ZoomableImage } from './ZoomableImage.jsx'
@@ -46,7 +46,7 @@ export function ReplyImage({ path, alt, sessionId }: { path: string; alt: string
     let live = true
     loadReplyImage((sid, p) => platform.agents.messageImage(sid, p), sessionId, path).then(
       (answer) => live && setShown({ kind: 'answer', answer }),
-      (e: unknown) => live && setShown({ kind: 'failed', message: `Could not ask for this image: ${(e as Error).message}` }),
+      (e: unknown) => live && setShown({ kind: 'failed', message: `Could not ask for this image: ${errorMessage(e)}` }),
     )
     return () => {
       live = false
@@ -136,7 +136,7 @@ function ImageNotShown({
               (res) => {
                 if (!res.supported) setToast(res.reason ?? 'Showing files is not available here')
               },
-              (e: unknown) => setToast(`Could not show ${reveal}: ${(e as Error).message}`),
+              (e: unknown) => setToast(`Could not show ${reveal}: ${errorMessage(e)}`),
             )
           }}
         >

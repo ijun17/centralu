@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { TrashedRun } from '@cc/protocol/client'
+import { errorMessage, appKeyOf, type TrashedRun } from '@cc/protocol/client'
 import { messagesToChat, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay, formatDuration } from '../../app/format.js'
@@ -11,12 +11,17 @@ import { SettingsCard } from './SettingsLayout.jsx'
 /** One app's records, in the order the session archive lists them (most recently kept first) */
 type RunGroup = { key: string; name: string; projectName: string | null; runs: TrashedRun[] }
 
+/** The key of a run's app: a linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378 review) */
+const runGroupKey = (r: TrashedRun): string => appKeyOf(r.app.projectId, r.app.id, r.machine)
+
+/** Whether a row error's id names one of these runs: the run, or the app whose runs were all being deleted */
+export const runsHaveRow = (runs: readonly TrashedRun[], id: string): boolean => runs.some((r) => r.runId === id || runGroupKey(r) === id)
+
 /** The records grouped by app (#378): an app that called run_agent a few dozen times reads as one heading, not a wall */
-function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
+export function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
   const groups = new Map<string, RunGroup>()
   for (const r of runs) {
-    // A linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378 review)
-    const key = `${r.app.projectId ?? (r.machine ? `${r.machine}._user` : '_user')}/${r.app.id}`
+    const key = runGroupKey(r)
     const g = groups.get(key) ?? { key, name: r.app.name, projectName: r.app.projectName, runs: [] }
     g.runs.push(r)
     groups.set(key, g)
@@ -158,7 +163,7 @@ export function ArchiveRunReader({ run, onBack }: { run: TrashedRun; onBack: () 
           setOldest(r.messages[0]?.seq ?? null)
           setMore(r.messages.length >= PAGE)
         })
-        .catch((e: Error) => setError(e.message))
+        .catch((e: unknown) => setError(errorMessage(e)))
     },
     [platform, run.runId, run.machine],
   )

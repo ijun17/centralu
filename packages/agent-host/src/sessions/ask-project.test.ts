@@ -332,9 +332,9 @@ describe('asking another project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     const r = await asking
     vi.useRealTimers()
-    expect(r).toMatchObject({ ok: true, state: 'working', progress: { quietFor: expect.stringMatching(/^\d+ s$/), lastStep: 'Bash: pnpm test' } })
+    expect(r).toMatchObject({ ok: true, state: 'working', progress: { quietFor: expect.stringMatching(/^\d+ (?:milliseconds?|seconds?)$/), lastStep: 'Bash: pnpm test' } })
     const text = askProjectText(r).text
-    expect(text).toMatch(/It last recorded something \d+ s ago; its last step, as JSON: "Bash: pnpm test"\./)
+    expect(text).toMatch(/It last recorded something \d+ (?:milliseconds?|seconds?) ago; its last step, as JSON: "Bash: pnpm test"\./)
     h.answer('passed')
     expect(await w.mgr.askProject(caller, { project: w.target.id })).toMatchObject({ ok: true, state: 'done', answer: 'passed' })
   })

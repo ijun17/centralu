@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { isolatedListeners } from './isolated-listeners.js'
-import { DEFAULT_UI_PREFERENCES, notifyPolicyOf, parseUiPreferences } from '@cc/protocol/client'
+import { errorMessage, DEFAULT_UI_PREFERENCES, notifyPolicyOf, parseUiPreferences } from '@cc/protocol/client'
 import type {
   AppQuestion,
   ToolStatus,
@@ -307,7 +307,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
       try {
         set({ sleepPolicy: await platform.agents.setSleepPolicy(afterMinutes) })
       } catch (e) {
-        set({ toast: `Could not save that: ${(e as Error).message}` })
+        set({ toast: `Could not save that: ${errorMessage(e)}` })
       }
     },
 
@@ -367,7 +367,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
         }))
       } catch (e) {
         // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
-        set({ toast: `Could not save that: ${(e as Error).message}` })
+        set({ toast: `Could not save that: ${errorMessage(e)}` })
       } finally {
         prefsSaved(get)
       }
@@ -383,7 +383,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
       prefsSaves++
       platform.prefs
         .save({ notifyPolicy: changed })
-        .catch((e: Error) => set({ toast: `Could not save that: ${e.message}` }))
+        .catch((e: unknown) => set({ toast: `Could not save that: ${errorMessage(e)}` }))
         .finally(() => prefsSaved(get))
     },
 

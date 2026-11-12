@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { RETRY_NOTE } from '../adapters/input-receipts.js'
 import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
@@ -52,10 +53,6 @@ export type OverloadRetryHost = {
 /** What a send is given: whether the retry still stands, and the word that the tool is being handed the note (from then on the turn is the tool's) */
 export type RetrySend = { live(): boolean; handed(): void }
 
-function waitWords(ms: number): string {
-  return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`
-}
-
 /** Where a retry is: waiting for its time, being sent (a restart or a wake waited out first), or handed to the tool, which runs the turn */
 export type RetryPhase = 'waiting' | 'sending' | 'handed'
 
@@ -99,7 +96,7 @@ export class OverloadRetry {
       level: 'warning',
       from: 'Centralu',
       label: 'retry',
-      text: `The model's servers are at capacity, which is not your usage limit. Centralu retries this turn in ${waitWords(wait)} (retry ${tries + 1} of ${DELAYS_MS.length}). Stop cancels it.`,
+      text: `The model's servers are at capacity, which is not your usage limit. Centralu retries this turn in ${durationText(wait)} (retry ${tries + 1} of ${DELAYS_MS.length}). Stop cancels it.`,
     }
   }
 

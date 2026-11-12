@@ -1,5 +1,7 @@
 import {
+  HANDSHAKE_TIMEOUT_MS,
   PROTOCOL_VERSION,
+  callBudgetMs,
   SHOWS_HOST_REQUESTS,
   errorMessage,
   isRecord,
@@ -61,83 +63,14 @@ type Pending = {
  * leaves room for the largest single call, a pasted attachment (base64 inflates a 20 MiB file to
  * about 27 MiB), queued while the host is away.
  */
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 const DEFAULT_MAX_PENDING_CALLS = 512
 const DEFAULT_MAX_QUEUED_BYTES = 64 * 1024 * 1024
 
 /** Every error a call rejects with, the host's and the client's own, is built here: an Error with the protocol's `code` and `retryable` (#972 item 7) */
 const rpcError = (message: string, code: string, retryable: boolean) => Object.assign(new Error(message), { code, retryable })
 
-/** The default RPC response timeout. Session creation and git reads also finish within this (measured at a few seconds) */
-const DEFAULT_CALL_TIMEOUT_MS = 30_000
-
-/**
- * Calls that **can revive a session** get a different budget (dogfooding: a "resource upload"
- * session — codex's thread/resume rereads its whole rollout file, and a 550MB thread took
- * 13.5 seconds, with larger threads going over 25. Under the 30-second default, a large thread
- * becomes a session that can never wake up). Since the file only ever grows, the cap has to be
- * a value that can scale with size — 180 seconds covers up to the 7GB class at the measured
- * ratio (550MB ≈ 13.5s). The manager's own stage limit (150 seconds) sits inside this, so even
- * when time runs out, a named reason reaches the screen.
- */
-const LONG_CALL_TIMEOUT_MS = 180_000
-const LONG_CALLS = new Set<string>([
-  'agents.resumeSession', // An explicit wake-up
-  'agents.send', // If the session is asleep, revives it first, then sends — pays the same cost
-  'agents.createSession', // When picking up a previous conversation via resumeExternalId
-  'agents.restartSession', // Swaps out the process and revives it again
-  'agents.exportHandoffRecord', // Can scan a rollout hundreds of MB in size (#78)
-  /*
-   * Calls that end in a revival (#164) — while these were missing here, the host would apply
-   * and restart on a large conversation, but the screen showed "RPC timed out" (reading what
-   * succeeded as a failure). Add a new RPC that ends in a revival here too.
-   */
-  'agents.updateSettings', // Swaps out the process if a resting session's settings change (restartSession)
-  'agents.forkConversation', // Revives as a forked copy
-  'machines.update', // Installs beside and waits for the sessions there to finish (#1399); a wait that outlasts it is the row's to show
-  'agents.resolveMcpProposal', // Restarts the Assistant on approval
-  'agents.resolveSkillProposal', // Same
-  'agents.deleteOrchestratorSkill', // Same
-  'agents.deleteAssistantSkill', // Same
-  /*
-   * A new project can be a clone (#515), which takes as long as the repository does. The host gives a clone 10
-   * minutes; past this budget the screen says it is still cloning, and the project joins the list when it lands
-   * (`projects_changed`), or nothing is left if it fails.
-   */
-  'projects.create',
-])
-
-/**
- * **A git write the person asked for** (#982 review): stage, commit, switch and push run the repository's hooks (a
- * pre-commit type check, a pre-push test run) and the credential helper, which may wait on a sign-in. The host gives
- * each 10 minutes (`WRITE_TIMEOUT_MS`, dev-services/git.ts). Under the 30-second default the screen said "RPC timed
- * out" while git still held `index.lock`, unlocked its buttons, and a second click started a second commit. This
- * budget is past the host's, so the screen hears the host's own answer, a timeout included.
- */
-const GIT_WRITE_CALL_TIMEOUT_MS = 11 * 60_000
-const GIT_WRITE_CALLS = new Set<string>(['git.stage', 'git.commit', 'git.checkout', 'git.push'])
-
-/**
- * The budget for an app tool a screen calls (`apps.invoke`) (M4 D-4). That call can wait on a
- * person — the first time an app tries to use a capability, the host asks that app's pinned
- * screen and waits up to 5 minutes for an answer (the runtime's capabilityQuestionMs). After
- * that, the agent may run for a few more minutes. With the 30-second default, the screen's
- * call would cut off first while the person is still reading and answering, so even clicking
- * the answer would find the screen already holding a failure. 15 minutes is the question's cap
- * (5 minutes) plus the host-to-app call's cap (10 minutes, reset by progress notifications).
- * The waiting on the screen's side is kept alive by AppFrame's progress notifications.
- */
-const APP_CALL_TIMEOUT_MS = 15 * 60_000
-
 /** An endpoint in the one spelling `URL` gives it, so two spellings of one address compare equal */
 const endpointUrl = (url: string): string => new URL(url).toString()
-
-/** How long a call waits for the host before it is cut */
-function callBudget(method: string): number {
-  if (method === 'apps.invoke') return APP_CALL_TIMEOUT_MS
-  if (GIT_WRITE_CALLS.has(method)) return GIT_WRITE_CALL_TIMEOUT_MS
-  return LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS
-}
 
 export class RpcClient {
   private ws: WebSocket | null = null
@@ -248,7 +181,7 @@ export class RpcClient {
      * A host that accepts the socket but never answers hello (wedged, or not ours) would otherwise
      * hold the client in 'connecting' forever, with calls queued behind it (#82).
      */
-    this.handshakeTimer = setTimeout(() => this.lost(ws), this.opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS)
+    this.handshakeTimer = setTimeout(() => this.lost(ws), this.opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS)
 
     ws.onopen = () => {
       if (this.ws !== ws) return
@@ -490,7 +423,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         if (!this.take(id)) return
         reject(rpcError(`RPC timed out: ${method}`, 'timeout', true))
-      }, this.opts.callTimeoutMs ?? callBudget(method))
+      }, this.opts.callTimeoutMs ?? callBudgetMs(method))
       // Sent now if the host is ready, otherwise after the next hello_ok
       const ws = this.ready ? this.ws : null
       const viewRead = ['apps.viewFrame', 'apps.recoverView', 'apps.inlineReopen', 'apps.inlineViews', 'apps.holdViews'].includes(method) ||

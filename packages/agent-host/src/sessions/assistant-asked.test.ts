@@ -600,7 +600,7 @@ describe('a request’s citation is evidence for the Assistant, checked by the h
     const late = await sessionIn(await project('Late', true))
     await personSays(late, 'set it up on the laptop')
     clock.t += 31 * 60_000
-    expect((await cite(late, 'c')).text).toContain('minutes old, and a citation may be 30 at most')
+    expect((await cite(late, 'c')).text).toContain('minutes old, and a citation may be 30 minutes at most')
     clock.t -= 62 * 60_000
     expect((await cite(late, 'd')).text).toContain('is dated later than now')
     clock.t = Date.now()

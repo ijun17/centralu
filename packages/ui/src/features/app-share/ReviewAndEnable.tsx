@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppReview } from '@cc/protocol/client'
+import { errorMessage, type AppReview } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
@@ -40,7 +40,7 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
       void refresh()
     } catch (e) {
       // It changed in the meantime — show the reason and read the new window (the person sees what changed and enables it again)
-      setEnableError((e as Error).message)
+      setEnableError(errorMessage(e))
       void read.reload()
     } finally {
       setBusy(false)

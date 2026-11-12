@@ -1,3 +1,4 @@
+import { APP_CALL_TIMEOUT_MS, APP_CAPABILITY_QUESTION_MS } from '@cc/protocol'
 import type { CallToolResult } from '@modelcontextprotocol/client'
 import { BROKER_KEEPALIVE_MS } from './broker.js'
 import type { CapabilityBook } from './capabilities.js'
@@ -135,13 +136,13 @@ export const DEFAULT_TIMING: RuntimeTiming = {
   probeTimeoutMs: 10_000,
   connectTimeoutMs: 30_000,
   startExitWaitMs: 250,
-  callTimeoutMs: 10 * 60_000,
+  callTimeoutMs: APP_CALL_TIMEOUT_MS,
   logMaxBytes: 1024 * 1024,
   checkDrainMs: 30_000,
   reloadQuietMs: 2_000,
   turnEndDebounceMs: 300,
   brokerKeepaliveMs: BROKER_KEEPALIVE_MS,
-  capabilityQuestionMs: 5 * 60_000,
+  capabilityQuestionMs: APP_CAPABILITY_QUESTION_MS,
   resumeBusyMs: 3_000,
   agentRateWindowMs: 60_000,
 }

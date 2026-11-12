@@ -1,5 +1,5 @@
 import { forgetArrivalsOf } from './apps.js'
-import type { ProjectInfo } from '@cc/protocol/client'
+import { errorMessage, type ProjectInfo } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
 import { coalescedRead } from './single-flight.js'
@@ -151,7 +151,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         await platform.projects.setWorktreeTrunk(projectId, baseBranch)
       } catch (e) {
         // Returned to the dialog, which keeps the typed branch and the reason in place (#180)
-        throw new Error(`Could not set the trunk: ${(e as Error).message}`)
+        throw new Error(`Could not set the trunk: ${errorMessage(e)}`)
       }
       set((s) => {
         const p = s.projects[projectId]
@@ -216,7 +216,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
         if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
       } catch (e) {
-        set({ toast: `Could not change trust: ${(e as Error).message}` })
+        set({ toast: `Could not change trust: ${errorMessage(e)}` })
       }
     })
   },
@@ -404,7 +404,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
           const now = s.projects[projectId]
           return {
             ...(now ? { projects: { ...s.projects, [projectId]: { ...now, commands: before.commands } } } : {}),
-            toast: `Could not save commands: ${(e as Error).message}`,
+            toast: `Could not save commands: ${errorMessage(e)}`,
           }
         })
       }
@@ -450,7 +450,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       }))
     } catch (e) {
       // No silent failures — believing it started when it did not leaves someone waiting on a log that never comes
-      set({ toast: `Could not run: ${(e as Error).message}` })
+      set({ toast: `Could not run: ${errorMessage(e)}` })
     }
   },
 
@@ -479,7 +479,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     } catch (e) {
       // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
       mark(false)
-      set({ toast: `Could not stop: ${(e as Error).message}` })
+      set({ toast: `Could not stop: ${errorMessage(e)}` })
     }
   },
 
@@ -497,7 +497,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
        */
       if (watchFailureSaid.has(projectId)) return
       watchFailureSaid.add(projectId)
-      set({ toast: `The file tree will not follow changes made outside it: ${(e as Error).message}` })
+      set({ toast: `The file tree will not follow changes made outside it: ${errorMessage(e)}` })
     }
   },
 
@@ -526,7 +526,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
        */
       set((s) => ({
         ...(stillInOrder(s.projects, orderedIds) ? { projects: inOrder(s.projects, Object.keys(before)) } : {}),
-        toast: `Could not save order: ${(e as Error).message}`,
+        toast: `Could not save order: ${errorMessage(e)}`,
       }))
     }
   },

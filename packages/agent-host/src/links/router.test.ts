@@ -12,6 +12,7 @@ class FakeMachine implements RoutedMachine {
   reachable = true
   waitsForPerson = false
   calls: { method: string; params: unknown }[] = []
+  timeouts: Record<string, number | undefined> = {}
   answers: Record<string, unknown> = {}
   mirror: Record<'sessions' | 'projects', unknown[] | null> = { sessions: null, projects: null }
   constructor(
@@ -21,8 +22,9 @@ class FakeMachine implements RoutedMachine {
   ) {
     this.q = new Qualifier(id, slot)
   }
-  async call(method: string, params: unknown) {
+  async call(method: string, params: unknown, timeoutMs?: number) {
     this.calls.push({ method, params })
+    this.timeouts[method] = timeoutMs
     const a = this.answers[method]
     if (a instanceof Error) throw a
     return typeof a === 'function' ? (a as (p: unknown) => unknown)(params) : (a ?? { ok: true })
@@ -95,6 +97,25 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       { method: 'agents.models', params: { tool: 'claude' } },
     ])
     expect(m1.calls).toEqual([])
+  })
+
+  it('forwards a window’s call with its method’s own time limit, not one flat bound for all (#2170)', async () => {
+    const { router, m1 } = rig()
+    const window = { client: 1, rights: 'full', window: true } as const
+    await router.handle('git.commit', { projectId: 'm1.p1', message: 'x' }, window)
+    await router.handle('apps.invoke', { projectId: 'm1.p1', appId: 'a', tool: 't', args: {} }, window)
+    await router.handle('agents.resumeSession', { sessionId: 'm1.s1' }, window)
+    await router.handle('git.status', { projectId: 'm1.p1' }, window)
+    expect(m1.timeouts).toEqual({ 'git.commit': 11 * 60_000, 'apps.invoke': 15 * 60_000, 'agents.resumeSession': 180_000, 'git.status': 30_000 })
+  })
+
+  it('leaves the link’s own 200 s to a call the hub made itself: no window waits on it, and a delete there can outlast a window’s 30 s (#2170)', async () => {
+    const { router, m1 } = rig()
+    // No ctx: the Assistant's flows, an agent's call and the linked views go through the router this way
+    await router.handle('agents.deleteAgentChild', { sessionId: 'm1.s1' })
+    await router.handle('git.status', { projectId: 'm1.p1' })
+    expect(m1.timeouts).toEqual({ 'agents.deleteAgentChild': undefined, 'git.status': undefined })
+    expect(Object.keys(m1.timeouts)).toHaveLength(2)
   })
 
   it('an id whose prefix names no linked machine is the hub’s own', async () => {

@@ -10,7 +10,7 @@ import { Tail } from '../stream-text.js'
 import { endChild, runSsh, SshRunFailure, type SshExpectedLine, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
 import { systemTool } from '../os.js'
-import { sleep } from '../timing.js'
+import { durationText, sleep } from '../timing.js'
 
 /**
  * The way from the hub to a linked machine's host (docs/plans/remote-hub.md §2).
@@ -933,18 +933,17 @@ export class SshTunnel implements Tunnel {
     const markers: readonly string[] = typeof command === 'string' ? [] : (command.expect ?? [])
     const readyMs = this.opts.stdinReadyMs ?? SSH_STDIN_READY_MS
     const ackMs = this.opts.stdinAckMs ?? SSH_STDIN_ACK_MS
-    const sec = (ms: number) => `${Math.round(ms / 1000)} seconds`
     const expect: SshExpectedLine[] = markers.map((marker, i) =>
       i === 0
         ? {
             marker,
             withinMs: readyMs,
-            message: `${this.opts.target} did not start this step's PowerShell within ${sec(readyMs)} (ssh connecting, login and PowerShell starting)`,
+            message: `${this.opts.target} did not start this step's PowerShell within ${durationText(readyMs)} (ssh connecting, login and PowerShell starting)`,
           }
         : {
             marker,
             withinMs: ackMs,
-            message: `PowerShell on ${this.opts.target} did not confirm within ${sec(ackMs)} that it had read this step's input, so the step did not start`,
+            message: `PowerShell on ${this.opts.target} did not confirm within ${durationText(ackMs)} that it had read this step's input, so the step did not start`,
             endedMessage: `PowerShell on ${this.opts.target} ended before it had read this step's input (its own time for that ran out, or the input was cut), so the step did not start`,
             // The reader's own exits (cut input, its time); a dropped link (255) or a signal is not, and is not sent again
             endedCodes: [STDIN_EXIT_CUT, STDIN_EXIT_LATE],

@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppLifecycle } from './app-lifecycle.js'
 import { resetLife, type AppEntry, type Blocker } from './app-entry.js'
 import { folderFingerprint } from './fingerprint.js'
@@ -10,7 +11,6 @@ export type ReflectHost = {
   disposed(): boolean
   readonly lifecycle: AppLifecycle
   find(ref: AppRef): AppEntry | undefined
-  holdKey(ref: AppRef): string
   label(ref: AppRef): string
   blocker(e: AppEntry, opts?: { fresh?: boolean }): Blocker | null
   appsChanged(): void
@@ -30,7 +30,7 @@ export type ReflectHost = {
  * (`reloadIfChanged`).
  */
 export class ChangeReflector {
-  /** Timers for reflecting changes (C-4) — per app name (holdKey). Carried over even when the manifest changes and a new entry is created */
+  /** Timers for reflecting changes (C-4) — per app name (`appKeyOf`). Carried over even when the manifest changes and a new entry is created */
   private turnEndTimers = new Map<string, NodeJS.Timeout>()
   private quietTimers = new Map<string, NodeJS.Timeout>()
   /** Apps whose started entry a scan replaced (new manifest) while their turn-end timer was pending — the timer finds only a never-started entry and must still start it */
@@ -54,7 +54,7 @@ export class ChangeReflector {
    * note it would take it for an app nobody ever used and leave it stopped.
    */
   manifestReplaced(ref: AppRef, prev: AppEntry): void {
-    const key = this.host.holdKey(ref)
+    const key = appKeyOf(ref)
     if (prev.life.stamp !== null && this.turnEndTimers.has(key)) this.replacedBeforeTurnEnd.add(key)
   }
 
@@ -73,7 +73,7 @@ export class ChangeReflector {
    */
   builderTurnEnded(ref: AppRef): void {
     if (this.host.disposed()) return
-    const key = this.host.holdKey(ref)
+    const key = appKeyOf(ref)
     clearTimeout(this.turnEndTimers.get(key))
     const t = setTimeout(() => {
       this.turnEndTimers.delete(key)
@@ -112,7 +112,7 @@ export class ChangeReflector {
    */
   folderChanged(e: AppEntry): void {
     if (this.host.builderBusy(e.ref)) return
-    const key = this.host.holdKey(e.ref)
+    const key = appKeyOf(e.ref)
     clearTimeout(this.quietTimers.get(key))
     const ref = e.ref
     const t = setTimeout(() => {
@@ -136,7 +136,7 @@ export class ChangeReflector {
    * An open screen also receives "changed".
    */
   reloadIfChanged(ref: AppRef, opts: { startIfStopped: boolean; why: string }): Promise<boolean> {
-    const key = this.host.holdKey(ref)
+    const key = appKeyOf(ref)
     const running = this.reloading.get(key)
     if (running) return running
     const p = (async () => {

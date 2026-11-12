@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol/client'
+import { errorMessage, type NormalizedEvent } from '@cc/protocol/client'
 import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type NotifyRequest, type SessionSummary } from '@cc/core'
 import { notifyPolicyOf } from '@cc/protocol/client'
 import { firstToRaise } from '../../app/notice-claim.js'
@@ -33,10 +33,10 @@ export function alertPerson(notice: NotifyRequest, event: string | undefined, se
     if (!first || !st.platform) return
     // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
     // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
-    void st.platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
+    void st.platform.system.notify(notice.title, notice.body).catch((e: unknown) => set({ toast: errorMessage(e) }))
     // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
     const kind = notice.kind === 'mail' ? 'done' : notice.kind
-    void st.platform.system.alert(kind, notifyPolicyOf(st.prefs).sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
+    void st.platform.system.alert(kind, notifyPolicyOf(st.prefs).sound).catch((e: unknown) => set({ toast: `Could not alert: ${errorMessage(e)}` }))
   })
 }
 
@@ -150,7 +150,7 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
           if (!first) return
           void get()
             .platform?.system.alert('done', policy.sound)
-            .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
+            .catch((err: unknown) => set({ toast: `Could not alert: ${errorMessage(err)}` }))
         })
       }
     }

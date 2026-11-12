@@ -201,7 +201,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       get().askComposerFocus(created.id)
     } catch (e) {
       get().openNewSession(projectId)
-      get().setToast(`Could not start a session: ${(e as Error).message}`)
+      get().setToast(`Could not start a session: ${errorMessage(e)}`)
     } finally {
       startingNow.delete(projectId)
     }
@@ -356,7 +356,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       set({ toast: `Restored: ${session.name}` })
       return null
     } catch (e) {
-      return (e as Error).message
+      return errorMessage(e)
     }
   },
 
@@ -378,7 +378,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     try {
       await get().platform!.agents.rename(sessionId, next)
     } catch (e) {
-      set({ toast: `Could not rename: ${(e as Error).message}` })
+      set({ toast: `Could not rename: ${errorMessage(e)}` })
       return
     }
     set(
@@ -401,7 +401,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
        * the waiting list), so a rejection here was an unhandled one. Said, not thrown: the session stays unread, which is
        * what the host still holds, and Done that seemed to do nothing says why.
        */
-      set({ toast: `Could not mark as read: ${(e as Error).message}` })
+      set({ toast: `Could not mark as read: ${errorMessage(e)}` })
       return
     }
     set(
@@ -419,7 +419,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     try {
       result = await platform.agents.clearError(sessionId, s.lastSeq)
     } catch (e) {
-      set({ toast: `Could not clear the error: ${(e as Error).message}` })
+      set({ toast: `Could not clear the error: ${errorMessage(e)}` })
       return
     }
     /*
@@ -473,7 +473,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         ...(stillInOrder(st.sessions, orderedIds)
           ? { sessions: inOrder(st.sessions, Object.keys(before)) }
           : {}),
-        toast: `Could not save order: ${(e as Error).message}`,
+        toast: `Could not save order: ${errorMessage(e)}`,
       }))
     }
   },

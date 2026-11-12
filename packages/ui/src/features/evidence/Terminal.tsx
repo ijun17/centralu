@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal as Xterm } from '@xterm/xterm'
-import type { CommandRunInfo, TerminalInfo } from '@cc/protocol/client'
+import { errorMessage, type CommandRunInfo, type TerminalInfo } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon, RestartIcon, StopIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -97,7 +97,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       // The line says what the last thing tried did: an answer clears the reason an earlier one failed (#1143 U19)
       setError(null)
     } catch (e) {
-      if (gen === loadGen.current) setError((e as Error).message)
+      if (gen === loadGen.current) setError(errorMessage(e))
     }
   }, [platform, projectId])
 
@@ -127,7 +127,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
       setTerminals((prev) => [...(prev ?? []), t])
       setError(null)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorMessage(e))
     }
   }
 
@@ -344,7 +344,7 @@ function TerminalView({
       term.reset()
       if (next.history) term.write(next.history)
     } catch (e) {
-      if (termRef.current === term) term.write(`\r\n\x1b[2m— could not restart: ${(e as Error).message} —\x1b[0m\r\n`)
+      if (termRef.current === term) term.write(`\r\n\x1b[2m— could not restart: ${errorMessage(e)} —\x1b[0m\r\n`)
     } finally {
       restarting.current = false
     }

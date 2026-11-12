@@ -1,10 +1,10 @@
 import { createListeners } from '@cc/common'
-import { APP_ID_MAX_LENGTH, appKeyOf, isAssistantKind } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, appKeyOf, appServerName, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
-import { appMcpServerName, runsUnasked } from '../apps/contract.js'
+import { runsUnasked } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
-import { raceTimeout, withTimeout } from '../timing.js'
+import { durationText, raceTimeout, withTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -186,7 +186,7 @@ const nameSlug = (name: string) =>
  * `mcp__<server>__<tool>`, which tools cap at 64 characters, so a name qualified by its project or numbered never leaves
  * a tool less room than a plain `app-<id>` does: at most 43 characters before the tool, 21 for it.
  */
-export const SERVER_NAME_MAX = appMcpServerName('x'.repeat(APP_ID_MAX_LENGTH)).length
+export const SERVER_NAME_MAX = appServerName('x'.repeat(APP_ID_MAX_LENGTH)).length
 
 /**
  * `app-<id>` when `taken` does not hold it; else, with a `qualifier` (a project's slug), `app-<id>-<qualifier>`, then
@@ -195,7 +195,7 @@ export const SERVER_NAME_MAX = appMcpServerName('x'.repeat(APP_ID_MAX_LENGTH)).l
  */
 export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[], qualifier?: string): string {
   const has = (name: string) => (Array.isArray(taken) ? taken.includes(name) : (taken as ReadonlySet<string>).has(name))
-  const base = appMcpServerName(appId)
+  const base = appServerName(appId)
   if (!has(base)) return base
   const stem = qualifier ? `${base}-${qualifier}` : base
   for (let n = qualifier ? 1 : 2; ; n++) {
@@ -373,8 +373,8 @@ export class SessionAppsHub {
      */
     const taken = new Set(hits.map((h) => h.server))
     for (const x of this.opts.onDemand?.attached(session.id) ?? []) {
-      const app = usable.find((a) => a.appId === x.ref.appId && a.projectId === x.ref.projectId)
-      if (!app || taken.has(x.server) || hits.some((h) => sameRef(h.ref, x.ref))) continue
+      const app = usable.find((a) => sameApp(a, x.ref))
+      if (!app || taken.has(x.server) || hits.some((h) => sameApp(h.ref, x.ref))) continue
       if (!this.opts.onDemand!.allowed(session, app)) continue
       hits.push({ ref: x.ref, server: x.server })
       taken.add(x.server)
@@ -407,7 +407,7 @@ export class SessionAppsHub {
       const key = appKeyOf(a.projectId, a.appId)
       let server = book[key]
       if (!server) {
-        const base = appMcpServerName(a.appId)
+        const base = appServerName(a.appId)
         const slug = a.projectId ? nameSlug(this.opts.projectName?.(a.projectId) ?? '') || a.projectId.slice(0, 8).toLowerCase() : 'user'
         server = !taken.has(base) ? base : freeServerName(a.appId, taken, slug)
         book[key] = server
@@ -438,7 +438,7 @@ export class SessionAppsHub {
    */
   claimAttachName(sessionId: string, ref: AppRef, inUse: readonly string[]): string {
     const book = this.bookOf(sessionId)
-    const key = appKeyOf(ref.projectId, ref.appId)
+    const key = appKeyOf(ref)
     const taken = new Set([...inUse, ...Object.entries(book).filter(([k]) => k !== key).map(([, server]) => server)])
     const had = book[key]
     const server = had && !taken.has(had) ? had : freeServerName(ref.appId, taken)
@@ -460,10 +460,10 @@ export class SessionAppsHub {
    * has not is reachable (#1205): its agent attaches it with `attach_app`, and the person has nothing to do.
    */
   reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
-    const app = this.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+    const app = this.rt.list().find((a) => sameApp(a, ref))
     if (!app) return { reachable: false, reason: 'unavailable' }
     // An app the session attached itself (#371 part A) counts like one the rule gives, under the name it was given
-    const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
+    const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameApp(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     // A root app the Assistant has not attached (#1205): it attaches it itself, with nothing for the person to do
     const selfServed = !!session && !own && isAssistantKind(session.kind) && app.root === true && !!this.opts.onDemand
@@ -475,7 +475,7 @@ export class SessionAppsHub {
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
     if (selfServed && !this.opts.onDemand!.allowed(session, app)) return { reachable: false, reason: 'other-project' }
     if (selfServed) return { reachable: true }
-    const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameRef(h.ref, ref))?.server ?? appMcpServerName(app.appId)) : own!.server
+    const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameApp(h.ref, ref))?.server ?? appServerName(app.appId)) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }
     if (attached === 'failed') return { reachable: false, reason: 'bridge-failed' }
@@ -687,7 +687,7 @@ class Attachment implements SessionApps {
       const o = d.outcome
       const done = toResult(o)
       return {
-        content: [{ type: 'text', text: `Run ${runId} has finished (${o.status}, ${Math.round(o.durationMs / 1000)} s). Its result:` }, ...done.content],
+        content: [{ type: 'text', text: `Run ${runId} has finished (${o.status}, ${durationText(o.durationMs)}). Its result:` }, ...done.content],
         isError: done.isError,
         structuredContent: { runId, status: o.status, ...(done.structuredContent ? { result: done.structuredContent } : {}) },
       }
@@ -824,10 +824,6 @@ class Attachment implements SessionApps {
 }
 
 type RuntimeTool = Awaited<ReturnType<ExternalApps['tools']>>[number]
-
-function sameRef(a: AppRef, b: AppRef): boolean {
-  return a.appId === b.appId && a.projectId === b.projectId
-}
 
 /**
  * The comparison key for arguments — JSON that ignores key order. The arguments the adapter sees

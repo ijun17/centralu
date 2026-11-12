@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useStore } from '../store/store.js'
 import { WindowCloseIcon, WindowMaxIcon, WindowMinIcon } from '../components/icons.jsx'
 import type { WindowAction } from '@cc/platform/ports'
@@ -12,7 +13,7 @@ import type { WindowAction } from '@cc/platform/ports'
 export function WindowControls() {
   const act = (action: WindowAction) => {
     const platform = useStore.getState().platform
-    void platform?.system.windowAction(action).catch((e: Error) => useStore.getState().setToast(e.message))
+    void platform?.system.windowAction(action).catch((e: unknown) => useStore.getState().setToast(errorMessage(e)))
   }
   const base = 'flex h-full w-[46px] items-center justify-center text-ink-muted transition-colors'
   return (

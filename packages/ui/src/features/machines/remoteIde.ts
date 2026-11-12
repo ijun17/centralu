@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useMemo } from 'react'
 import { remoteIdeSupport, remoteIdeUrl } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -40,7 +41,7 @@ export function useRemoteIde(projectId: string | null | undefined): RemoteIde | 
         try {
           await platform.system.openUrl(target.url)
         } catch (e) {
-          setToast(`Could not open in VS Code: ${(e as Error).message}`)
+          setToast(`Could not open in VS Code: ${errorMessage(e)}`)
         }
       },
     }

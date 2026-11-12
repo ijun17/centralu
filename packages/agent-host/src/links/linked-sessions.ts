@@ -5,10 +5,10 @@ import { isOrdinary } from '../sessions/tool-profiles.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
-import { awaySentence, notReachable, TAIL, type Tail } from './machine-reach.js'
+import { awaySentence, LOOKUP_MS, notReachable, TAIL, type Tail } from './machine-reach.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj, tryParseJson } from '../json-value.js'
-import { raceTimeout } from '../timing.js'
+import { durationText, withTimeout } from '../timing.js'
 import { rpcError } from '../rpc-error.js'
 
 /** Without a router (the reading tests), nothing that acts is reachable */
@@ -68,19 +68,8 @@ function fencedLine(line: string): string {
   return NOT_ONE_LINE.test(line) ? trustedJsonText(line) : line
 }
 
-/**
- * How long a name is resolved against a machine's project list before that machine is counted as not answering. A
- * name is looked up on every ask_project call, so one slow or half-open link must not hold up the asks that name a
- * project on this computer or on another machine; the link's own call timeout is much longer
- */
-const LOOKUP_MS = 4000
-/** What a linked machine's lookup answers past its bound (`raceTimeout`) */
-const TIMED_OUT = Symbol('timed out')
-
 /** A machine past its lookup bound, in the words the model reads */
-function notWithin(ms: number): string {
-  return `did not answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`
-}
+const notWithin = (ms: number): string => `did not answer within ${durationText(ms)}`
 
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
 function cause(err: unknown): string {
@@ -155,11 +144,7 @@ export function linkedSessions(
   /** The row of a machine's session list that `id` (the machine's own, stripped) names */
   const rowOf = async (m: RoutedMachine, id: string): Promise<unknown> => (await listOf(m, 'sessions.list')).find((s) => isObj(s) && s.id === id)
   /** A machine's answer within `lookupMs` (#700): past it, an error that says so (`notWithin`) */
-  const boundedAsk = async (m: RoutedMachine, method: string, params: unknown): Promise<unknown> => {
-    const answer = await raceTimeout(m.call(method, params), lookupMs, TIMED_OUT)
-    if (answer === TIMED_OUT) throw new Error(notWithin(lookupMs))
-    return answer
-  }
+  const boundedAsk = (m: RoutedMachine, method: string, params: unknown): Promise<unknown> => withTimeout(m.call(method, params), lookupMs, notWithin)
   /** A project row a machine answered, in the hub's terms; null when it is not a project row */
   const projectOf = (m: RoutedMachine, raw: unknown): LinkedProject | null => {
     const p = m.q.project(raw)

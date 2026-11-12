@@ -151,7 +151,7 @@ describe('agent', () => {
     for (const r of releases.slice(1)) r()
     expect(second).toMatchObject({ isError: true })
     expect((second as { text: string }).text).toMatch(
-      /^run_agent refused: App notes already has an agent running \(started \d+ seconds? ago\) — Centralu runs one agent per app at a time\. Ask again when it has finished\.$/,
+      /^run_agent refused: App notes already has an agent running \(started \d+ (?:milliseconds?|seconds?) ago\) — Centralu runs one agent per app at a time\. Ask again when it has finished\.$/,
     )
     expect(releases).toHaveLength(1)
     releases[0]!()
@@ -168,7 +168,7 @@ describe('agent', () => {
     make({ runAgent: async () => ({ sessionId: `s${++ran}`, text: 'ok' }) }, { agentRateWindowMs: 1_500 })
     for (let i = 0; i < 5; i++) expect((await call('notes', { mode: 'run', tool: 'run_agent', args: { prompt: `n${i}` } })).isError).toBe(false)
     const sixth = await call('notes', { mode: 'run', tool: 'run_agent', args: { prompt: 'n5' } })
-    expect(sixth.text).toMatch(/^run_agent refused: App notes started 5 agents within 2 seconds, the most Centralu allows — ask again in \d seconds?, or put more of the work into one prompt$/)
+    expect(sixth.text).toMatch(/^run_agent refused: App notes started 5 agents within 2 seconds, the most Centralu allows — ask again in \d+ (?:milliseconds?|seconds?), or put more of the work into one prompt$/)
     expect((await call('notes', { mode: 'run', tool: 'run_agent', args: { prompt: 'n6' } })).isError).toBe(true)
     expect(ran).toBe(5)
     await new Promise((r) => setTimeout(r, 1_600))

@@ -18,8 +18,23 @@ describe('withTimeout', () => {
     vi.useFakeTimers()
     const p = withTimeout(new Promise(() => {}), 150, 'Starting claude')
     vi.advanceTimersByTime(150)
-    await expect(p).rejects.toThrow('Starting claude did not finish within 150ms')
-    expect(durationText(150_000)).toBe('150s')
+    await expect(p).rejects.toThrow('Starting claude did not finish within 150 milliseconds')
+  })
+
+  it('words the whole message itself when given a function of the bound', async () => {
+    vi.useFakeTimers()
+    const p = withTimeout(new Promise(() => {}), 4000, (ms) => `no answer within ${durationText(ms)}`)
+    vi.advanceTimersByTime(4000)
+    await expect(p).rejects.toThrow('no answer within 4 seconds')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('durationText', () => {
+  it('says a bound or a measured time in full words, in one rule: whole minutes as minutes, other seconds up to three minutes, minutes up to three hours', () => {
+    expect([0, 1, 30, 999, 1000, 1500, 59_000, 60_000, 90_000, 120_000, 150_000, 180_000, 181_000, 300_000, 600_000, 3 * 3_600_000, 3 * 3_600_000 + 60_000, 5 * 3_600_000].map(durationText)).toEqual([
+      '0 seconds', '1 millisecond', '30 milliseconds', '999 milliseconds', '1 second', '2 seconds', '59 seconds', '1 minute', '90 seconds', '2 minutes', '150 seconds', '3 minutes', '3 minutes', '5 minutes', '10 minutes', '180 minutes', '3 hours', '5 hours',
+    ])
   })
 })
 

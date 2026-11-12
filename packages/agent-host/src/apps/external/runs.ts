@@ -1,3 +1,4 @@
+import { sameApp } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/client'
 import type { AgentUse } from '@cc/protocol'
@@ -116,7 +117,7 @@ export function announcingLedger(inner: RunLedger, announce: (app: { projectId: 
       inner.begin(row)
       const apps: App[] = [{ projectId: row.projectId, appId: row.appId }]
       for (const up of row.parentRunId ? (open.get(row.parentRunId) ?? []) : []) {
-        if (!apps.some((a) => a.projectId === up.projectId && a.appId === up.appId)) apps.push(up)
+        if (!apps.some((a) => sameApp(a, up))) apps.push(up)
       }
       open.set(row.id, apps)
       tell(apps)

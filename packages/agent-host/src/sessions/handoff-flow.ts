@@ -6,7 +6,7 @@ import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './centralu-tools.js'
 import { presetWithin } from './start-agent.js'
-import { raceBound } from '../timing.js'
+import { raceBound, durationText } from '../timing.js'
 import { isOrdinary } from './tool-profiles.js'
 
 /**
@@ -274,7 +274,7 @@ export class HandoffFlow {
     const name = trustedJsonText(target.name)
     try {
       const r = await raceBound(turn.done.then(() => null, (e: Error) => e), this.timings.noteMs)
-      if (r === 'bound' || r === 'aborted') return { ok: false, error: `${name} wrote no note in ${Math.round(this.timings.noteMs / 60_000)} minutes; nothing was handed off.` }
+      if (r === 'bound' || r === 'aborted') return { ok: false, error: `${name} wrote no note in ${durationText(this.timings.noteMs)}; nothing was handed off.` }
       if (r) return { ok: false, error: `${name} did not write its note: ${r.message}; nothing was handed off. Hand it off from the record (mode "record").` }
       const cur = this.host.meta.get(target.id)
       if (!cur) return { ok: false, error: `${name} disappeared while writing its note; nothing was handed off.` }

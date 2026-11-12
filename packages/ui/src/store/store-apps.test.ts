@@ -71,6 +71,28 @@ describe('an external app\'s change signal (M4 B-5)', () => {
   })
 })
 
+describe('an app the person just made (#2173)', () => {
+  it('is listed at once even when a linked machine has a user-folder app of the same id', async () => {
+    const mock = new MockPlatform()
+    mock.externalAppList = [appInfo('notes', { projectId: null, machine: 'm1' })]
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().externalApps).toHaveLength(1)
+    // The list is re-read only after this one is placed: hold the read
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const before = mock.apps.list.bind(mock.apps)
+    const hold = vi.spyOn(mock.apps, 'list').mockImplementation(async (...a) => (await gate, before(...a)))
+    const made = vi.spyOn(mock.apps, 'create').mockResolvedValue({ app: appInfo('notes', { projectId: null }), builder: null })
+    await useStore.getState().createApp({ name: 'Notes', id: 'notes' } as Parameters<typeof mock.apps.create>[0])
+    const listed = useStore.getState().externalApps.map((a) => [a.appId, a.machine ?? null])
+    release()
+    await vi.waitFor(() => expect(hold).toHaveBeenCalled())
+    hold.mockRestore()
+    made.mockRestore()
+    expect(listed).toEqual([['notes', 'm1'], ['notes', null]])
+  })
+})
+
 /**
  * The external app list (M4 A-8): the store holds a copy of the host's `apps.list`. The broadcast
  * (`external_apps_changed`) never carries what changed, so the whole list is re-read. While an app is

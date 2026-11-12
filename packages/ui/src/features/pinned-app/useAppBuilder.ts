@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useCallback, useEffect, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
@@ -54,7 +55,7 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
       useStore.getState().dispatchEvent({ type: 'session_created', sessionId: b.id, session: b })
       setId(b.id)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setStarting(false)
     }

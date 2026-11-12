@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
-import { wireParent } from '@cc/protocol/client'
+import { errorMessage, wireParent } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
@@ -238,7 +238,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
           const res = await platform.fs.reveal(projectId, target.path)
           if (!res.supported) setToast(res.reason ?? 'Showing files is not available here')
         } catch (e) {
-          setToast(`Could not show ${target.name}: ${(e as Error).message}`)
+          setToast(`Could not show ${target.name}: ${errorMessage(e)}`)
         }
       },
       trash: async (target: MenuTarget) => {
@@ -248,7 +248,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
           refresh(wireParent(target.path))
           setToast(`Moved to Trash: ${target.name} — put it back from there`)
         } catch (e) {
-          setToast(`Could not delete ${target.name}: ${(e as Error).message}`)
+          setToast(`Could not delete ${target.name}: ${errorMessage(e)}`)
         }
       },
       move: async (from: string, toDir: string) => {
@@ -257,7 +257,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
           // moved:false means it was dropped back where it already was — a missed drop, not a failure, so nothing is said
           if (res.moved) refresh(wireParent(from), toDir)
         } catch (e) {
-          setToast((e as Error).message)
+          setToast(errorMessage(e))
         }
       },
       importFiles: async (files: File[], toDir: string) => {
@@ -266,7 +266,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
             await platform.fs.importFile(projectId, toDir, file.name, await readBase64(file))
             refresh(toDir)
           } catch (e) {
-            setToast((e as Error).message)
+            setToast(errorMessage(e))
           }
         }
       },

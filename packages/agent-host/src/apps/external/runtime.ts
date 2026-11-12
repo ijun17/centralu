@@ -47,13 +47,6 @@ import type { Audience } from './visibility.js'
  * copy still answers "yes" after trust has been turned off.
  */
 
-/**
- * The scope name for a user-folder app — a key in memory, and also one segment of the data and log
- * folders (`USER_APP_SCOPE`, the same name every app key carries).
- * A project id is a UUID, so it never collides with this name.
- */
-const USER_SCOPE = USER_APP_SCOPE
-
 export type { AppRef } from './ref.js'
 /** The file that makes a folder an app — the host's core asks whether a folder has one (#1141) */
 export { MANIFEST_FILE } from './manifest.js'
@@ -94,9 +87,9 @@ export class ExternalApps {
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = createListeners((err) => console.error('[apps] apps-changed listener failed:', err))
   private appsNotePending = false
-  /** Recent error bundles per app name (holdKey) and which were sent (C-6) — `error-log.ts` */
+  /** Recent error bundles per app key (`appKeyOf`) and which were sent (C-6) — `error-log.ts` */
   private errorLog = new ErrorLog(() => this.appsChanged())
-  /** Apps being removed (`removeUserApp`, by `holdKey`) — none of them starts again while its folder moves */
+  /** Apps being removed (`removeUserApp`, by `appKeyOf`) — none of them starts again while its folder moves */
   private removing = new Set<string>()
   /**
    * The broker desk (D) — the one place that resolves what an app requests over fd 3. A call between
@@ -134,27 +127,25 @@ export class ExternalApps {
       blocker: (e) => this.blocker(e),
       spawnSpec: (e, pipeId) => this.startEnv.spawnSpec(e, pipeId),
       snapshot: (e, stamp) => {
-        if (keepsVersions(e)) this.handover.snapshot(this.holdKey(e.ref), e.dir, 'started', stamp)
+        if (keepsVersions(e)) this.handover.snapshot(appKeyOf(e.ref), e.dir, 'started', stamp)
       },
       find: (ref) => this.find(ref),
-      holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
       busyRecorded: (e, reason) =>
-        this.busyBook.set(this.holdKey(e.ref), reason === null ? null : { projectId: e.ref.projectId, appId: e.ref.appId, reason, at: Date.now() }),
+        this.busyBook.set(appKeyOf(e.ref), reason === null ? null : { projectId: e.ref.projectId, appId: e.ref.appId, reason, at: Date.now() }),
     })
     this.reflector = new ChangeReflector({
       timing: this.timing,
       disposed: () => this.disposed,
       lifecycle: this.lifecycle,
       find: (ref) => this.find(ref),
-      holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
       blocker: (e, opts) => this.blocker(e, opts),
       appsChanged: () => this.appsChanged(),
       emitChanged: (ref) => this.deps.emitChanged?.(ref),
       builderBusy: (ref) => this.deps.builderBusy?.(ref) ?? false,
       rescanNow: (ref) => {
-        const scopeKey = ref.projectId ?? USER_SCOPE
+        const scopeKey = ref.projectId ?? USER_APP_SCOPE
         if (this.scopes.has(scopeKey) && !this.disposed) this.rescan(scopeKey, { now: ref.appId })
       },
     })
@@ -223,7 +214,7 @@ export class ExternalApps {
    */
   errors(ref: AppRef): { latest: SentErrorBundle | null; recent: SentErrorBundle[] } {
     ref = this.resolve(ref)
-    return this.errorLog.errors(this.holdKey(ref))
+    return this.errorLog.errors(appKeyOf(ref))
   }
 
   /**
@@ -238,17 +229,17 @@ export class ExternalApps {
    */
   markErrorSent(ref: AppRef, at: number): HeldErrorBundle | 'sent' | null {
     ref = this.resolve(ref)
-    return this.errorLog.markSent(this.holdKey(ref), at)
+    return this.errorLog.markSent(appKeyOf(ref), at)
   }
 
   unmarkErrorSent(ref: AppRef, at: number): void {
     ref = this.resolve(ref)
-    this.errorLog.unmarkSent(this.holdKey(ref), at)
+    this.errorLog.unmarkSent(appKeyOf(ref), at)
   }
 
   /** Records one error bundle for this app (`ErrorLog.record`) */
   private recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc: AppProcess | null = null): void {
-    this.errorLog.record(this.holdKey(e.ref), `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`, b, proc)
+    this.errorLog.record(appKeyOf(e.ref), `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`, b, proc)
   }
 
   /**
@@ -310,7 +301,7 @@ export class ExternalApps {
   refresh(): void {
     if (this.disposed) return
     const want = new Map<string, Scope>()
-    want.set(USER_SCOPE, { key: USER_SCOPE, projectId: null, root: this.deps.dataRoot, trusted: true })
+    want.set(USER_APP_SCOPE, { key: USER_APP_SCOPE, projectId: null, root: this.deps.dataRoot, trusted: true })
     for (const p of this.deps.projects()) {
       want.set(p.id, { key: p.id, projectId: p.id, root: p.path, trusted: p.trusted })
     }
@@ -342,7 +333,7 @@ export class ExternalApps {
     if (this.disposed) return
     for (const rec of this.busyBook.list()) {
       const ref = { projectId: rec.projectId, appId: rec.appId }
-      this.busyBook.set(this.holdKey(ref), null)
+      this.busyBook.set(appKeyOf(ref), null)
       const e = this.find(ref)
       if (!e || this.blocker(e) || !e.manifest?.uses.background) continue
       console.error(`[apps] ${this.label(ref)} was busy (${rec.reason}) when Centralu last stopped — starting it again`)
@@ -494,7 +485,7 @@ export class ExternalApps {
     const e = this.require(ref)
     await this.lifecycle.halt(e, 'restart requested')
     // The person stopped it: a busy hold it had is not resumed by the next host either (#1236)
-    this.busyBook.set(this.holdKey(e.ref), null)
+    this.busyBook.set(appKeyOf(e.ref), null)
     resetLife(e.life)
     // A stopped app had been detached from sessions — announce so it can attach again. A crashed app's
     // reason is also cleared, changing its status in the list (A-8)
@@ -536,7 +527,7 @@ export class ExternalApps {
         timing: this.timing,
         lifecycle: this.lifecycle,
         rescanNow: (r) => {
-          const key = r.projectId ?? USER_SCOPE
+          const key = r.projectId ?? USER_APP_SCOPE
           // A check is a request to read the current files right now — even a manifest change deferred because it was mid-turn is read now (C-4, `rescan`'s `now`)
           if (this.scopes.has(key)) this.rescan(key, { now: r.appId })
           else this.refresh()
@@ -590,7 +581,6 @@ export class ExternalApps {
       require: (ref) => this.require(ref),
       info: (e) => this.info(e),
       dataDirOf: (ref) => this.startEnv.dataDirOf(ref),
-      holdKey: (ref) => this.holdKey(ref),
       removing: this.removing,
       lifecycle: this.lifecycle,
       forgetImport: (appId) => this.handover.forget(appId),
@@ -604,7 +594,7 @@ export class ExternalApps {
 
   /** Rescans the scope an app lives in right now — scans everything if it has never scanned it before */
   private rescanScopeOf(ref: AppRef, opts: { now?: string } = {}): void {
-    const key = ref.projectId ?? USER_SCOPE
+    const key = ref.projectId ?? USER_APP_SCOPE
     if (this.scopes.has(key)) this.rescan(key, opts)
     else this.refresh()
   }
@@ -759,7 +749,7 @@ export class ExternalApps {
     ref = this.resolve(ref)
     this.rescanScopeOf(ref)
     const e = this.find(ref)
-    if (e && keepsVersions(e)) this.handover.snapshot(this.holdKey(ref), e.dir, 'imported')
+    if (e && keepsVersions(e)) this.handover.snapshot(appKeyOf(ref), e.dir, 'imported')
   }
 
   cancelImport(token: string): void {
@@ -798,7 +788,7 @@ export class ExternalApps {
     ref = this.resolve(ref)
     this.rescanScopeOf(ref)
     if (!this.keepsVersions(ref)) throw new AppUnavailableError('Project apps are versioned by git')
-    return this.handover.versionsOf(this.holdKey(ref), this.require(ref).dir)
+    return this.handover.versionsOf(appKeyOf(ref), this.require(ref).dir)
   }
 
   /**
@@ -814,7 +804,7 @@ export class ExternalApps {
     this.rescanScopeOf(ref)
     if (!this.keepsVersions(ref)) throw new AppUnavailableError("A project app's versions are its git history; restore it with git")
     const before = this.require(ref)
-    this.handover.restore(this.holdKey(ref), id, before.dir, { root: before.found.root === true })
+    this.handover.restore(appKeyOf(ref), id, before.dir, { root: before.found.root === true })
     // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
     this.rescanScopeOf(ref, { now: ref.appId })
     const e = this.require(ref)
@@ -848,14 +838,9 @@ export class ExternalApps {
     this.reflector.builderTurnEnded(ref)
   }
 
-  /** The key for an open screen. Since this is never used in a path, it does not care about a project id's shape (unlike scopeDir) */
-  private holdKey(ref: AppRef): string {
-    return appKeyOf(ref.projectId, ref.appId)
-  }
-
   /** An app that is gone takes its error bundles with it (`ErrorLog.forget`) */
   private forgetErrors(ref: AppRef): void {
-    this.errorLog.forget(this.holdKey(ref))
+    this.errorLog.forget(appKeyOf(ref))
   }
 
   private label(ref: AppRef): string {
@@ -872,7 +857,7 @@ export class ExternalApps {
    * takes a ref resolves it first, so trust and every other rule apply to the app it reaches, as to its new key.
    */
   resolve(ref: AppRef): AppRef {
-    if (ref.projectId !== null || this.scopes.get(USER_SCOPE)?.apps.has(ref.appId)) return ref
+    if (ref.projectId !== null || this.scopes.get(USER_APP_SCOPE)?.apps.has(ref.appId)) return ref
     const projectId = this.deps.adoptedProjectOf?.(ref.appId)
     const e = projectId ? this.scopes.get(projectId)?.apps.get(ref.appId) : undefined
     return e?.found.root ? e.ref : ref
@@ -885,12 +870,12 @@ export class ExternalApps {
   }
 
   private find(ref: AppRef): AppEntry | undefined {
-    return this.scopes.get(ref.projectId ?? USER_SCOPE)?.apps.get(ref.appId)
+    return this.scopes.get(ref.projectId ?? USER_APP_SCOPE)?.apps.get(ref.appId)
   }
 
   private info(e: AppEntry): ExternalAppInfo {
     const m = e.manifest
-    const lastErrorAt = this.errorLog.lastAt(this.holdKey(e.ref))
+    const lastErrorAt = this.errorLog.lastAt(appKeyOf(e.ref))
     return {
       appId: e.ref.appId,
       projectId: e.ref.projectId,
@@ -958,7 +943,7 @@ export class ExternalApps {
     }
     const held = this.held(e)
     if (held) return { kind: 'unconfirmed', reason: held }
-    if (this.removing.has(this.holdKey(e.ref))) return { kind: 'removing', reason: 'This app is being removed' }
+    if (this.removing.has(appKeyOf(e.ref))) return { kind: 'removing', reason: 'This app is being removed' }
     if (e.life.gaveUp && !opts.fresh) {
       return {
         kind: 'failed',

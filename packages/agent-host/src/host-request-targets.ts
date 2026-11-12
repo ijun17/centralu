@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { RpcMethods, errorMessage } from '@cc/protocol'
+import { RpcMethods, errorMessage, sameApp } from '@cc/protocol'
 import type { WindowRpc } from './sessions/window-rpc.js'
 import { plainQuoted } from './sessions/tool-answers.js'
 
@@ -89,9 +89,10 @@ export async function namedTargets(rpc: WindowRpc, params: unknown): Promise<{ o
       machineNamed ||= !!r.machine
     }
     if (typeof p.appId === 'string') {
+      const appId = p.appId
       const machine = typeof p.machine === 'string' ? p.machine : undefined
       const projectId = typeof p.projectId === 'string' ? p.projectId : null
-      const a = (await list('apps.list', AppRow, machine ? { machine } : {})).find((x) => x.appId === p.appId && x.projectId === projectId)
+      const a = (await list('apps.list', AppRow, machine ? { machine } : {})).find((x) => sameApp(x, { appId, projectId, machine }))
       if (!a) return { ok: false, why: 'it names an app this computer does not have' }
       parts.push(`the app ${quoted(a.name ?? a.appId)} [${a.appId}]${on(a.machine)}`)
       machineNamed ||= !!a.machine

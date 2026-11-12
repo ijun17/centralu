@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { MANIFEST_VERSION, parseManifest, toolNameError } from './manifest.js'
+import { MANIFEST_VERSION, appIdRefusal, parseManifest, toolNameError } from './manifest.js'
 
 /**
  * Manifest validation (M4 A-1). The rules are a single set of zod schemas, and these tests check
  * that the set rejects with a reason a person can read, and does not reject unknown fields.
  */
+
+const APP_ID_SHAPE = `an app id is lowercase letters, digits and hyphens (up to 32), starting with a letter or digit, with no underscores ("__" separates names in a session's tool names)`
 
 const base = {
   manifestVersion: MANIFEST_VERSION,
@@ -180,5 +182,25 @@ describe('tool naming rule', () => {
     expect(toolNameError('get_state')).toBeNull()
     expect(toolNameError('a__b')).toMatch(/__/)
     expect(toolNameError('')).not.toBeNull()
+  })
+})
+
+describe('the refusal of an app id (#2173)', () => {
+  it('words the shape, the centralu prefix and a reserved id once, with the id', () => {
+    expect(appIdRefusal('notes', ['control'])).toBeNull()
+    expect(appIdRefusal('bad_id', [])).toBe(`"bad_id" cannot be an app id: ${APP_ID_SHAPE}. Pick another.`)
+    expect(appIdRefusal('centralu-x', [])).toBe('"centralu-x" cannot be an app id: ids starting with "centralu" belong to Centralu itself. Pick another.')
+    expect(appIdRefusal('control', ['control'])).toBe('"control" is reserved. Pick another app id.')
+  })
+
+  it('refuses the app- prefix only for a name that is being made', () => {
+    expect(appIdRefusal('app-store', [])).toBeNull()
+    expect(appIdRefusal('app-store', [], { newName: true })).toBe('"app-store" cannot be an app id: ids starting with "app-" are how apps attach to sessions. Pick another.')
+  })
+
+  it('is the wording a manifest’s id is refused with', () => {
+    const r = parse({ id: 'bad_id' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain(`"bad_id" cannot be an app id: ${APP_ID_SHAPE}. Pick another.`)
   })
 })

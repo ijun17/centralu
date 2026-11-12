@@ -89,7 +89,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
     } catch (e) {
       if (answer.stale()) return
       // A version check must never break the screen — the app matters more than the check itself
-      set({ toast: `Could not check for updates: ${(e as Error).message}` })
+      set({ toast: `Could not check for updates: ${errorMessage(e)}` })
     }
   },
 
@@ -100,7 +100,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
     try {
       answer.seat(await platform.updates.setAuto(enabled))
     } catch (e) {
-      set({ toast: `Could not save that: ${(e as Error).message}` })
+      set({ toast: `Could not save that: ${errorMessage(e)}` })
     }
   },
 
@@ -112,7 +112,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
       answer.seat(await platform.updates.setAutoApply(enabled))
     } catch (e) {
       // Say so rather than leave the box ticked
-      set({ toast: `Could not save that: ${(e as Error).message}` })
+      set({ toast: `Could not save that: ${errorMessage(e)}` })
     }
   },
 
@@ -124,7 +124,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
       answer.seat(await platform.updates.apply())
     } catch (e) {
       if (answer.stale()) return
-      set({ toast: `Could not update: ${(e as Error).message}` })
+      set({ toast: `Could not update: ${errorMessage(e)}` })
     }
   },
 
@@ -135,8 +135,8 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
       await relaunch.relaunch()
       return null
     } catch (e) {
-      set({ toast: `Could not apply the update: ${(e as Error).message}` })
-      return (e as Error).message
+      set({ toast: `Could not apply the update: ${errorMessage(e)}` })
+      return errorMessage(e)
     }
   },
 
@@ -221,7 +221,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
     try {
       set({ agentVersions: await platform.agents.setAutoApplyVersions(enabled) })
     } catch (e) {
-      set({ toast: `Could not save that: ${(e as Error).message}` })
+      set({ toast: `Could not save that: ${errorMessage(e)}` })
     }
   },
 
@@ -232,7 +232,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
       const { restarted, busy } = await platform.agents.applyVersions(machine)
       set({ toast: appliedVersionsText(restarted.length, busy.length) })
     } catch (e) {
-      set({ toast: `Could not restart the sessions: ${(e as Error).message}` })
+      set({ toast: `Could not restart the sessions: ${errorMessage(e)}` })
     }
   },
 })

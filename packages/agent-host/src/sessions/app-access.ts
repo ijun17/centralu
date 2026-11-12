@@ -1,5 +1,4 @@
-import { appKeyOf, type ExternalAppInfo, isAssistantKind } from '@cc/protocol'
-import { appMcpServerName } from '../apps/contract.js'
+import { APP_SERVER_PREFIX, appKeyOf, type ExternalAppInfo, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from '../timing.js'
@@ -108,7 +107,7 @@ export type AttachOutcome =
 export type DetachOutcome = { ok: true; server: string; when: 'now' | 'next_turn' } | { ok: false; error: string }
 
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
-const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref.projectId, ref.appId)}`
+const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref)}`
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 /** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
@@ -148,7 +147,7 @@ export class AppAccess implements OnDemandApps {
     // Another project's root app follows its project's trust (owner, #1141): never one of an untrusted project, even under auto
     if (app.root === true && app.projectId !== from) return app.status !== 'untrusted'
     if (app.projectId === from || app.shared !== true) return false
-    const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
+    const r = this.records(session.id).find((x) => sameApp(x, app))
     if (!r) return false
     // "Once" was this attachment's own answer; "always" holds only while the person keeps it (revoking detaches)
     return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.permissions.getProjectConsent(from, app.projectId, 'apps')
@@ -178,9 +177,9 @@ export class AppAccess implements OnDemandApps {
     if (!named.ok) return named
     const app = named.app
     const target: AppRef = { projectId: app.projectId, appId: app.appId }
-    const has = already.find((h) => h.ref.appId === target.appId && h.ref.projectId === target.projectId)
+    const has = already.find((h) => sameApp(h.ref, target))
     if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), when: 'now', already: true }
-    if (!this.candidates(session).some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
+    if (!this.candidates(session).some((a) => sameApp(a, app))) {
       return { ok: false, error: this.whyNot(session, app) }
     }
 
@@ -198,13 +197,13 @@ export class AppAccess implements OnDemandApps {
       // The person may have taken a while: the app could have stopped being shared, or this session gone, meanwhile
       const again = this.gate(sessionId)
       if (!again.ok) return again
-      if (!this.candidates(again.session).some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
+      if (!this.candidates(again.session).some((a) => sameApp(a, app))) {
         return { ok: false, error: this.whyNot(again.session, app) }
       }
     }
 
     // A record the person's revoked "always" left hidden is replaced, not doubled
-    const kept = this.records(sessionId).filter((r) => !(r.appId === app.appId && r.projectId === app.projectId))
+    const kept = this.records(sessionId).filter((r) => !(sameApp(r, app)))
     // Nor a name the session's book gives another app, one gone for the moment included (#1141): it gets that name back
     const inUse = [...this.deps.hub.refsFor(session).map((h) => h.server), ...kept.map((r) => r.server)]
     const server = this.deps.hub.claimAttachName(sessionId, target, inUse)
@@ -320,7 +319,7 @@ export class AppAccess implements OnDemandApps {
       // An untrusted project's apps attach nowhere, auto included (owner, #1141)
       .filter((a) => !UNUSABLE.has(a.status))
       .filter((a) => a.projectId === null || (assistant ? a.root === true : a.projectId !== session.projectId && (a.shared === true || a.root === true)))
-      .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
+      .filter((a) => !have.some((h) => sameApp(h.ref, a)))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
   }
 
@@ -339,7 +338,7 @@ export class AppAccess implements OnDemandApps {
     const slash = want.lastIndexOf('/')
     let app: ExternalAppInfo | undefined
     if (slash === -1) {
-      const id = want.startsWith(appMcpServerName('')) && !all.some((a) => a.appId === want) ? want.slice(appMcpServerName('').length) : want
+      const id = want.startsWith(APP_SERVER_PREFIX) && !all.some((a) => a.appId === want) ? want.slice(APP_SERVER_PREFIX.length) : want
       // A user-folder app by its id; else the one root app of that id (#1141: a user-folder app moved into a project keeps answering to it)
       const roots = all.filter((a) => a.root === true && a.appId === id)
       app = all.find((a) => a.projectId === null && a.appId === id) ?? (roots.length === 1 ? roots[0] : undefined)
@@ -423,7 +422,7 @@ function isRecord(x: Record<string, unknown>): boolean {
     (typeof x.projectId === 'string' || x.projectId === null) &&
     typeof x.appId === 'string' &&
     typeof x.server === 'string' &&
-    x.server.startsWith(appMcpServerName('')) &&
+    x.server.startsWith(APP_SERVER_PREFIX) &&
     (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto')
   )
 }

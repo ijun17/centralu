@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults, STOP_NOT_CONFIRMED_LABEL } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- tests use MockPlatform rather than ad-hoc mocking (platform/src/mock/index.ts)
@@ -81,5 +81,13 @@ describe('a Stop waiting for the tool (#1060)', () => {
     await useStore.getState().interrupt('stop-c')
     expect(useStore.getState().toast).toBe('Could not stop: session not found')
     expect(useStore.getState().stopping['stop-c']).toBeUndefined()
+  })
+
+  it.each([['a string', 'host gone', 'host gone'], ['nothing', null, 'null']])('a Stop refused with %s still says why, instead of "undefined" or a TypeError', async (_, thrown, said) => {
+    const mock = await working('stop-e')
+    mock.agents.interrupt = vi.fn().mockRejectedValue(thrown)
+    await useStore.getState().interrupt('stop-e')
+    expect(useStore.getState().toast).toBe(`Could not stop: ${said}`)
+    expect(useStore.getState().stopping['stop-e']).toBeUndefined()
   })
 })

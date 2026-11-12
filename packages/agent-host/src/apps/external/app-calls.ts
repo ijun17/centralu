@@ -1,3 +1,4 @@
+import { sameApp, appKeyOf } from '@cc/protocol'
 import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/client'
 import type { AppLifecycle } from './app-lifecycle.js'
@@ -96,12 +97,12 @@ export class AppCalls {
    * through `call_app` is held as its caller is. A parent that already ended is `unknown`
    */
   agentCallers(ref: AppRef, seen = new Set<string>()): AgentCaller[] {
-    const key = `${ref.projectId ?? ''}/${ref.appId}`
+    const key = appKeyOf(ref)
     if (seen.has(key)) return []
     seen.add(key)
     const out: AgentCaller[] = []
     for (const run of this.openRuns.values()) {
-      if (run.entry.ref.appId !== ref.appId || run.entry.ref.projectId !== ref.projectId) continue
+      if (!sameApp(run.entry.ref, ref)) continue
       const c = run.caller
       if (c.kind === 'session') out.push({ kind: 'session', sessionId: c.sessionId })
       else if (c.kind === 'view') out.push(c.sessionId ? { kind: 'session', sessionId: c.sessionId } : { kind: 'person' })

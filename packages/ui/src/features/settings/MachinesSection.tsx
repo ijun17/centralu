@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useCopied } from '../../app/useCopied.js'
-import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol/client'
+import { errorMessage, type HostActivity, type MachineAskConsent, type MachineInfo } from '@cc/protocol/client'
 import {
   asksRow,
   autostartRow,
@@ -150,10 +150,10 @@ export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCatego
                 busy={removing}
                 onYes={() => {
                   setRemoving(true)
-                  void remove(m.id).catch((e: Error) => {
+                  void remove(m.id).catch((e: unknown) => {
                     setRemoving(false)
                     setConfirming(false)
-                    setToast(`Could not remove ${m.name}: ${e.message}`)
+                    setToast(`Could not remove ${m.name}: ${errorMessage(e)}`)
                   })
                 }}
                 onNo={() => setConfirming(false)}
@@ -507,7 +507,7 @@ function HubAutoSwitch({ m }: { m: MachineInfo }) {
       .hubAuto(m.id, allowed)
       .then(
         (next) => setSet({ state: next, status: m.status }),
-        (err: unknown) => setFailed(err instanceof Error ? err.message : String(err)),
+        (err: unknown) => setFailed(errorMessage(err)),
       )
       .finally(() => setPending(false))
   }

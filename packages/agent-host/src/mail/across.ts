@@ -5,6 +5,7 @@ import { CENTRALU, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
+import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
 
 /**
@@ -639,7 +640,7 @@ export class MailAcross {
         if (!h.you) return away.push({ name: h.name, why: 'it runs an older Centralu; update it there' })
         if (!h.reachable) return away.push({ name: h.name, why: 'not reachable right now' })
         try {
-          const raw = await Promise.race([h.call('hub.find', { query, limit: exact ? 50 : FIND_LIMIT, ...(exact ? { exact: true } : {}) } satisfies HubFindParams), timeout(ms)])
+          const raw = await withTimeout(h.call('hub.find', { query, limit: exact ? 50 : FIND_LIMIT, ...(exact ? { exact: true } : {}) } satisfies HubFindParams), ms, noAnswer)
           const r = HubFindResult.safeParse(raw)
           if (!r.success) return away.push({ name: h.name, why: 'its answer could not be read' })
           for (const e of r.data.entries) {
@@ -713,9 +714,4 @@ function pickState(r: MailRowState): Omit<MailRowState, 'sender'> {
   return stateOf(r)
 }
 
-function timeout(ms: number): Promise<never> {
-  return new Promise((_, reject) => {
-    const t = setTimeout(() => reject(new Error(`no answer within ${ms / 1000} s`)), ms)
-    t.unref?.()
-  })
-}
+const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`

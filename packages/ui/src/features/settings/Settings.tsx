@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, notifyPolicyOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol/client'
+import { errorMessage, MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, notifyPolicyOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol/client'
 import { appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -666,7 +666,7 @@ export function AssistantSkills() {
                 void platform.agents
                   .deleteAssistantSkill(s.name)
                   .then(load)
-                  .catch((e: Error) => setToast(e.message))
+                  .catch((e: unknown) => setToast(errorMessage(e)))
               }}
             >
               Delete
@@ -1112,7 +1112,7 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
           return port
             .set(next)
             .then(setSaved)
-            .catch((err: Error) => setError(err.message))
+            .catch((err: unknown) => setError(errorMessage(err)))
         }}
         label="Keep agents running after Centralu quits"
         hint="Closing the window leaves the agent host and its running sessions going."

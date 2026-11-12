@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, isAssistantKind } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, appIdProblemText, isAssistantKind } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -59,8 +59,7 @@ export class AppBuilderMock {
     create: async (spec: NewAppSpec): Promise<AppCreated> => {
       this.createdApps.push(structuredClone(spec))
       const idProblem = newAppIdProblem(spec.id)
-      if (idProblem === 'builtin') throw new Error(`"${spec.id}" cannot be an app id — that id is reserved — pick another`)
-      if (idProblem) throw new Error(`"${spec.id}" cannot be an app id — ${idProblem}`)
+      if (idProblem) throw new Error(appIdProblemText(spec.id, idProblem))
       const name = spec.name.replace(/\s+/g, ' ').trim()
       if (!name) throw new Error('The app needs a name')
       let dir = `/mock/data/apps/${spec.id}`

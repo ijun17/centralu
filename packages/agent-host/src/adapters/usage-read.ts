@@ -1,3 +1,4 @@
+import { raceTimeout } from '../timing.js'
 import { isFromTheFuture } from '../usage-clock.js'
 import type { LocalUsage } from './contract.js'
 
@@ -94,16 +95,8 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
     // The last answer, when it may stand in while the read goes on: returned at once, as provisional, unless the asker settles
     const held = value && (o.staleOk?.(value.v) ?? true) ? { v: value.v } : null
     if (held && !ask.settle) return { value: held.v, provisional: true }
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const soft = new Promise<SoftAnswer<T>>((resolve) => {
-      timer = setTimeout(() => resolve({ value: held ? held.v : o.fallback(), provisional: true }), ask.settle ? (o.settleMs ?? 20_000) : o.softMs)
-      timer.unref?.()
-    })
-    try {
-      return await Promise.race([run.then((v): SoftAnswer<T> => ({ value: v, provisional: false })), soft])
-    } finally {
-      clearTimeout(timer)
-    }
+    const soft: SoftAnswer<T> = { value: held ? held.v : o.fallback(), provisional: true }
+    return raceTimeout(run.then((v): SoftAnswer<T> => ({ value: v, provisional: false })), ask.settle ? (o.settleMs ?? 20_000) : o.softMs, soft)
   }
 }
 

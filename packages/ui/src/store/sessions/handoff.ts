@@ -1,5 +1,5 @@
 import { gridSessionIds, isAway, isInTurn, type SessionSummary } from '@cc/core'
-import { busyWith, handoffOpening, handoffPrompt } from '@cc/protocol/client'
+import { errorMessage, busyWith, handoffOpening, handoffPrompt } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
 
@@ -155,7 +155,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
           got = await s.platform.agents.exportHandoffNote(sessionId, before)
         } catch (e) {
           if (get().connection !== 'connected') continue
-          throw new Error(`could not save the handoff note: ${(e as Error).message}`)
+          throw new Error(`could not save the handoff note: ${errorMessage(e)}`)
         }
         if (got) {
           note = got.text
@@ -233,7 +233,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     } catch (e) {
       // The next card after a live failure is record mode — the app tells the person instead of switching silently on its own (#78)
       const hint = mode === 'agent' ? ' — if the agent cannot respond, retry with "From the record"' : ''
-      set({ toast: `Handoff failed: ${(e as Error).message}${hint}` })
+      set({ toast: `Handoff failed: ${errorMessage(e)}${hint}` })
     } finally {
       handoffInFlight.delete(sessionId)
     }

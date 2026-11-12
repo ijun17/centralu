@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { GIT_WRITE_TIMEOUT_MS } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /** The bound a call gets when it names none: a read's. Shortened here so a hook can outlast it in seconds, not 10 s */
@@ -24,7 +25,7 @@ vi.mock('./git-exec.js', async (importOriginal) => {
   }
 })
 
-const { WRITE_TIMEOUT_MS, gitCommit, gitPush, gitStage } = await import('./git-write.js')
+const { gitCommit, gitPush, gitStage } = await import('./git-write.js')
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -94,7 +95,6 @@ describe('a write outlasts the bound of a read (#980)', () => {
     expect(await gitCommit(repo, 'first')).toEqual({ ok: true })
     expect(await gitPush(repo)).toEqual({ ok: true })
 
-    expect(WRITE_TIMEOUT_MS).toBe(10 * 60_000)
-    for (const sub of ['add', 'commit', 'push']) expect(asked.get(sub), sub).toBe(10 * 60_000)
+    for (const sub of ['add', 'commit', 'push']) expect(asked.get(sub), sub).toBe(GIT_WRITE_TIMEOUT_MS)
   })
 })

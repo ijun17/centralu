@@ -1,5 +1,6 @@
 import { HubAskResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
+import { LOOKUP_MS } from './machine-reach.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -17,9 +18,6 @@ import { NOT_REACHABLE } from '../adapters/contract.js'
  *     for asks says, and a session it started here mails its parent there through it (`mail`), through that hub only.
  *     Its projects are listed and asked only while that switch is on.
  */
-
-/** How long a list of a hub's projects may take before that hub counts as away for the call (as `LOOKUP_MS`, #984) */
-const LOOKUP_MS = 4000
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
 type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; you: string | null }

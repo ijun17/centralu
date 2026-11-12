@@ -15,7 +15,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
-import { appKeyOf, atRest, noSuchAppText } from '@cc/protocol'
+import { appKeyOf, atRest, noSuchAppText, sameApp } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
@@ -36,7 +36,7 @@ import { rpcError } from '../rpc-error.js'
 import { realOs } from '../os/real.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
-const builderKey = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
+const builderKey = (ref: AppRef): string => appKeyOf(ref)
 
 /**
  * One builder session per app (M4 C-2) — `<projectId | _user>/<appId>` -> session id. A single JSON
@@ -241,7 +241,7 @@ export class AppSessions {
   private async standUpBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const rt = this.host.appsHub?.rt
     if (!rt) throw rpcError('External apps are unavailable')
-    const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+    const app = rt.list().find((a) => sameApp(a, ref))
     if (!app) throw rpcError(noSuchAppText(ref))
     if (!app.trusted) {
       throw rpcError('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')

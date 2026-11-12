@@ -233,7 +233,7 @@ setTimeout(() => {}, 60_000);`
     const started = Date.now()
     const msg = await message(new ClaudeLinks({ platform: 'win32', root: () => root, log: (l) => log.push(l), installerTimeoutMs: 1000 }))
     expect(Date.now() - started).toBeLessThan(30_000)
-    expect(msg).toContain('it did not finish the copy: it did not finish within 1 seconds')
+    expect(msg).toContain('it did not finish the copy: it did not finish within 1 second')
     expect(msg).toContain('not the 3000002 bytes')
     expect(log.join('\n')).toContain('not proven to be the program')
     expect(existsSync(join(root, 'tools'))).toBe(false)

@@ -13,7 +13,7 @@ import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, t
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
-import { raceTimeout, sleep } from '../timing.js'
+import { durationText, sleep, withTimeout } from '../timing.js'
 
 /**
  * A linked machine (links.ts): its connection (linked-machine-connection.ts), and what the person
@@ -475,13 +475,10 @@ export class LinkedMachine extends LinkedMachineConnection {
     const client = this.client
     if (!client?.connected) return 'unreachable'
     const ms = this.deps.hubAutoReadMs ?? HUB_AUTO_READ_MS
-    const timedOut = Symbol('timed out')
     try {
       return await askHubAuto(async (method, params) => {
         if (allowed !== undefined) return client.call(method, params)
-        const answer = await raceTimeout(client.call(method, params), ms, timedOut)
-        if (answer === timedOut) throw new Error(`no answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`)
-        return answer
+        return withTimeout(client.call(method, params), ms, (t) => `no answer within ${durationText(t)}`)
       }, allowed)
     } catch (err) {
       if (!client.connected) return 'unreachable'

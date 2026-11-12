@@ -88,7 +88,7 @@ describe('discovery', () => {
 
     expect(byId('broken')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is not JSON') })
     expect(byId('renamed')).toMatchObject({ status: 'invalid', error: expect.stringContaining('the folder name (renamed)') })
-    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is a reserved app id') })
+    expect(byId('control')).toMatchObject({ status: 'invalid', error: expect.stringContaining('is reserved') })
     expect(byId('half-made')).toMatchObject({ status: 'invalid', error: expect.stringContaining(`there is no ${MANIFEST_FILE}`) })
     expect(rt.list().map((a) => a.appId).sort()).toEqual(['broken', 'control', 'half-made', 'renamed'])
   })

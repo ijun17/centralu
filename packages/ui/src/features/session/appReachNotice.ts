@@ -1,6 +1,18 @@
-import type { AppReach } from '@cc/protocol/client'
+import type { AppReach, ExternalAppInfo } from '@cc/protocol/client'
+import { appTitleOf } from '../../store/names.js'
+import { isApp } from '../../store/appKeys.js'
+import type { AppLinkDrop } from '../app-frame/dragRelay.js'
 
 type Unreachable = Extract<AppReach, { reachable: false }>
+
+/**
+ * The name the quiet line gives the app a link was dragged from: the app of the list that the drop names, and a linked
+ * machine's user-folder app is not this computer's of the same id (#82), so the machine is part of the match.
+ */
+export function droppedAppTitle(apps: readonly ExternalAppInfo[], from: AppLinkDrop['from']): string {
+  const app = apps.find((a) => isApp(a, from.projectId, from.appId, from.machine))
+  return appTitleOf({ name: app?.name, appId: from.appId })
+}
 
 /**
  * The quiet line under a link dropped from an app whose tools this session cannot use (#308).

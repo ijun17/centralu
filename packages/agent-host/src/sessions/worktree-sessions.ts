@@ -49,7 +49,7 @@ import { prepareWorktreeDependencies } from '../dev-services/worktree-dependenci
 import { RestartPolicy } from './restart-policy.js'
 import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
-import { sleep } from '../timing.js'
+import { durationText, sleep } from '../timing.js'
 import { realOs } from '../os/real.js'
 
 /** How long a project's setup command may run in a new worktree */
@@ -470,7 +470,7 @@ export class WorktreeSessions {
       console.error(`[worktree] setup ok (${worktree.branch}): ${setup.command}`)
     } else {
       // Continues even on failure — the reason is in the comment above
-      const why = ran.ended ? `it did not finish within ${SETUP_TIMEOUT_MS / 1000} seconds` : `exit ${String(ran.code ?? ran.signal)}`
+      const why = ran.ended ? `it did not finish within ${durationText(SETUP_TIMEOUT_MS)}` : `exit ${String(ran.code ?? ran.signal)}`
       const stderr = ran.stderr.toString('utf8')
       console.error(`[worktree] setup failed (${worktree.branch}): ${why}\n${stderr.slice(0, 2000)}`)
       // The session's line carries the end of stderr, where a failing command says why

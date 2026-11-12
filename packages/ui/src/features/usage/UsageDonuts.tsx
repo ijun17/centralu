@@ -1,7 +1,7 @@
 import { LEAVE_MS, usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
-import type { CacheStats, MachineInfo, ToolName, ToolStatus, UsageSnapshot } from '@cc/protocol/client'
+import { errorMessage, type CacheStats, type MachineInfo, type ToolName, type ToolStatus, type UsageSnapshot } from '@cc/protocol/client'
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useWhileVisible } from '../../app/useWhileVisible.js'
@@ -212,8 +212,8 @@ export function UsageDonuts() {
             void platform.agents
               .usage(tool, on)
               .then(take)
-              .catch((e: Error) => {
-                failed(e.message)
+              .catch((e: unknown) => {
+                failed(errorMessage(e))
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
                 retries.current.push(
                   setTimeout(() => {

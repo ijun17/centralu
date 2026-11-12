@@ -6,10 +6,10 @@ import { errnoCode } from '../../os/errors.js'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, canonicalPath, isInside } from '../../dev-services/path-guard.js'
 import { isThisMachineHost } from '../../this-machine.js'
-import { proposedMcpServerNameError } from '../contract.js'
+import { readManifestFile } from './discovery.js'
 import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
 import { reviewKey } from './import-book.js'
-import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
+import { MANIFEST_FILE, appIdRefusal, parseManifest, type AppManifest } from './manifest.js'
 import { ZipError, readZipEntries, readZipEntry, type ZipEntry } from './zip.js'
 
 /**
@@ -433,22 +433,14 @@ function zipParts(name: string, limits: ImportLimits): string[] {
  * reserved id (`RESERVED_APP_IDS`).
  */
 export function readStagedManifest(dir: string, reservedIds: readonly string[]): { manifest: AppManifest; warnings: string[] } {
-  const path = join(dir, MANIFEST_FILE)
-  let size: number
-  try {
-    const st = lstatSync(path)
-    if (!st.isFile()) throw new Error('not a file')
-    size = st.size
-  } catch {
-    throw new ImportRefused(`There is no ${MANIFEST_FILE} at the top, so this is not a Centralu app`)
-  }
-  if (size > MAX_MANIFEST_BYTES) throw new ImportRefused(`${MANIFEST_FILE} is larger than ${MAX_MANIFEST_BYTES} bytes`)
-  const parsed = parseManifest(readFileSync(path, 'utf8'))
+  const file = readManifestFile(dir, MANIFEST_FILE)
+  if ('missing' in file) throw new ImportRefused(`There is no ${MANIFEST_FILE} at the top, so this is not a Centralu app`)
+  if ('error' in file) throw new ImportRefused(file.error)
+  const parsed = parseManifest(file.text)
   if (!parsed.ok) throw new ImportRefused(`${MANIFEST_FILE} is not valid: ${parsed.error}`)
   const id = parsed.manifest.id
-  const idProblem = proposedMcpServerNameError(id)
-  if (idProblem) throw new ImportRefused(`The app id "${id}" cannot be used: ${idProblem}`)
-  if (reservedIds.includes(id)) throw new ImportRefused(`"${id}" is a reserved app id; this app cannot be imported under it`)
+  const refusal = appIdRefusal(id, reservedIds, { newName: true })
+  if (refusal) throw new ImportRefused(refusal)
   return { manifest: parsed.manifest, warnings: parsed.warnings }
 }
 

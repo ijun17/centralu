@@ -142,7 +142,7 @@ describe('waiting', () => {
     make({ capabilityQuestionMs: 400 })
     const out = await ask('notes', 'run_agent', { prompt: 'x' })
     expect(out.isError).toBe(true)
-    expect(out.text).toContain('run_agent refused: the person did not answer within 1 second whether App notes may run an agent')
+    expect(out.text).toContain('run_agent refused: the person did not answer within 400 milliseconds whether App notes may run an agent')
     expect(out.text).toContain('Nothing was remembered — Centralu asks again next time.')
     expect(asked[0]!.withdrawn).toBe(true)
     expect(rt.permissions(ref('notes'))).toEqual([])

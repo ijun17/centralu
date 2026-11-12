@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
 import { formatBytes } from '../../app/format.js'
 import type { AppState, Draft, StoreGet, StoreSet } from '../state.js'
@@ -207,7 +208,7 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
       // An image draws its thumbnail immediately from the bytes just read — no round trip to the host is needed
       return saved.kind === 'image' ? { ...saved, data: b64 } : saved
     } catch (e) {
-      set({ toast: `Could not attach: ${(e as Error).message}` })
+      set({ toast: `Could not attach: ${errorMessage(e)}` })
       return null
     } finally {
       count(-1)

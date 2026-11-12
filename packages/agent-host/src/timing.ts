@@ -8,9 +8,21 @@
  * its timer however the race ends, and unrefs it: a bound is never what keeps the host running.
  */
 
-/** A duration as a timeout message says it: `150ms`, `20s` */
+/**
+ * A duration as a sentence says it, to a person or a model, in full words (ux-writing.md §1): `20 milliseconds`, `20 seconds`,
+ * `2 minutes`, `4 hours`. Seconds under a minute and up to three minutes (a bound of 150 s says `150 seconds`), unless
+ * the time is a whole number of minutes (`2 minutes`, not `120 seconds`); then minutes up to three hours, rounded; then hours.
+ * Every wait's words, a bound and a measured time alike, are written here. Compact units (`20 s`) are for a label or a log
+ * line the person does not read as a sentence; no host message here is one.
+ */
 export function durationText(ms: number): string {
-  return ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`
+  const unit = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
+  if (ms === 0) return '0 seconds'
+  if (ms < 1000) return unit(ms, 'millisecond')
+  const s = Math.round(ms / 1000)
+  if (s <= 180 && (s < 60 || s % 60 !== 0)) return unit(s, 'second')
+  const min = Math.round(s / 60)
+  return min <= 180 ? unit(min, 'minute') : unit(Math.round(min / 60), 'hour')
 }
 
 /** Blocks this thread for `ms` without spinning: for a start with nothing to serve yet, and a few-millisecond retry at a hello */
@@ -50,17 +62,17 @@ function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
 /**
  * Do not let a call that never answers hold the screen hostage.
  *
- * The `label` is the diagnosis. An unnamed timeout only ever surfaced as the outer RPC's 30-second
+ * The `label` is the diagnosis (or a function of the bound that words the whole message). An unnamed timeout only ever surfaced as the outer RPC's 30-second
  * "RPC timed out: agents.resumeSession", and that message does not say **where** it stopped — when
  * an actual session died that way, there was no way to find out after the fact. If each stage
  * fails carrying its own name, the next occurrence of the same incident is its own diagnosis.
  */
-export function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T> {
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string | ((ms: number) => string) = 'A call'): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([
     p,
     new Promise<T>((_, reject) => {
-      timer = unrefTimer(() => reject(new Error(`${label} did not finish within ${durationText(ms)}`)), ms)
+      timer = unrefTimer(() => reject(new Error(typeof label === 'string' ? `${label} did not finish within ${durationText(ms)}` : label(ms))), ms)
     }),
   ]).finally(() => clearTimeout(timer))
 }

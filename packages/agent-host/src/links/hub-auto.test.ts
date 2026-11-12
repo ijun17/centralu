@@ -30,7 +30,7 @@ describe('the window asking a machine for its "Allow auto from a linked computer
   // A link that is up and never answers: the read says so after the bound, not after the client's whole call limit.
   // The set is not bound: the machine applies a change when it gets to it, and the row shows what it then answered
   it('says a machine that never answers did not, for the read within the bound, and waits for a slow set', async () => {
-    await expect(machine(() => new Promise<never>(() => {})).hubAuto()).rejects.toThrow('Box did not answer for its "Allow auto from a linked computer": no answer within 30 ms')
+    await expect(machine(() => new Promise<never>(() => {})).hubAuto()).rejects.toThrow('Box did not answer for its "Allow auto from a linked computer": no answer within 30 milliseconds')
     const slow = machine(() => new Promise((resolve) => setTimeout(() => resolve({ allowed: true }), 90)))
     expect(await slow.hubAuto(true)).toBe('on')
   })

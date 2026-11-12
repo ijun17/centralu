@@ -32,6 +32,9 @@ export const RESERVED_NAME_PREFIX = 'centralu'
  */
 export const APP_SERVER_PREFIX = 'app-'
 
+/** The server name app `appId` is attached to a session under */
+export const appServerName = (appId: string): string => `${APP_SERVER_PREFIX}${appId}`
+
 /**
  * App ids no external app may take (#97).
  *
@@ -95,4 +98,19 @@ export function newAppIdProblem(
   if (id.startsWith(APP_SERVER_PREFIX)) return 'server-prefix'
   if (reservedIds.includes(id)) return 'builtin'
   return null
+}
+
+/**
+ * Why an id cannot be an app id, worded once for every door that takes one (a manifest, a new app, an import, the Assistant's
+ * proposal, the mock): `"x" cannot be an app id: <why>. Pick another.`, and for a reserved id `"x" is reserved. Pick another app id.`
+ * The judgment is `newAppIdProblem` (the new-app dialog words the same result its own way).
+ */
+export function appIdProblemText(id: string, problem: NewAppIdProblem): string {
+  if (problem === 'builtin') return `"${id}" is reserved. Pick another app id.`
+  const why: Record<Exclude<NewAppIdProblem, 'builtin'>, string> = {
+    shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit, with no underscores ("__" separates names in a session's tool names)`,
+    reserved: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself`,
+    'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions`,
+  }
+  return `"${id}" cannot be an app id: ${why[problem]}. Pick another.`
 }

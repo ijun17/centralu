@@ -1,3 +1,4 @@
+import { durationText } from '../../timing.js'
 import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/server/validators/ajv'
@@ -17,7 +18,7 @@ import {
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
 import { RunRow, type AgentTokens, type RunLedger } from './runs.js'
-import { appKeyOf } from '@cc/protocol'
+import { appKeyOf, sameApp } from '@cc/protocol'
 
 /**
  * The broker desk (M4 D) — the **one place** that resolves what an app requests over fd 3.
@@ -281,17 +282,6 @@ function deniedText(tool: BrokerToolName, appName: string, text: string): string
   return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
 }
 
-/** The slot name for one app — runaway prevention counts per app under this */
-const slotOf = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
-
-/** A duration for a person to read — "5 minutes", "1 second" */
-function humanDuration(ms: number): string {
-  const s = Math.max(1, Math.round(ms / 1000))
-  if (s < 60) return `${s} second${s === 1 ? '' : 's'}`
-  const m = Math.round(s / 60)
-  return `${m} minute${m === 1 ? '' : 's'}`
-}
-
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
 
 /**
@@ -478,7 +468,7 @@ export class BrokerDesk {
     const body = text.trim()
     if (!body) return refuse('notify refused: the text is empty')
     if (body.length > NOTICE_MAX_CHARS) return refuse(`notify refused: ${body.length} characters, over ${NOTICE_MAX_CHARS}; say less and point at where the rest is`)
-    const key = appKeyOf(app.ref.projectId, app.ref.appId)
+    const key = appKeyOf(app.ref)
     const now = Date.now()
     const recent = (this.noticeTimes.get(key) ?? []).filter((t) => now - t < 60_000)
     if (recent.length >= NOTICES_PER_MINUTE) {
@@ -564,11 +554,11 @@ export class BrokerDesk {
     if (denied) return denied
 
     // Runaway prevention (D-5) — no awaiting happens between counting and claiming the slot: if two requests from the same app arrive together, only one gets through
-    const key = slotOf(app.ref)
+    const key = appKeyOf(app.ref)
     const since = this.agentsRunning.get(key)
     if (since !== undefined) {
       return refuse(
-        `run_agent refused: ${app.name} already has an agent running (started ${humanDuration(Date.now() - since)} ago) — ` +
+        `run_agent refused: ${app.name} already has an agent running (started ${durationText(Date.now() - since)} ago) — ` +
           'Centralu runs one agent per app at a time. Ask again when it has finished.',
       )
     }
@@ -577,8 +567,8 @@ export class BrokerDesk {
     const recent = (this.agentStarts.get(key) ?? []).filter((t) => t > now - windowMs)
     if (recent.length >= AGENT_RUNS_PER_WINDOW) {
       return refuse(
-        `run_agent refused: ${app.name} started ${recent.length} agents within ${humanDuration(windowMs)}, the most Centralu allows — ` +
-          `ask again in ${humanDuration(recent[0]! + windowMs - now)}, or put more of the work into one prompt`,
+        `run_agent refused: ${app.name} started ${recent.length} agents within ${durationText(windowMs)}, the most Centralu allows — ` +
+          `ask again in ${durationText(recent[0]! + windowMs - now)}, or put more of the work into one prompt`,
       )
     }
     this.agentStarts.set(key, [...recent, now])
@@ -654,7 +644,7 @@ export class BrokerDesk {
     // Runaway prevention (D-5) — before asking the person: they are never bothered with a request that would be refused anyway
     const path = this.apps.chain(call.parentRunId)
     const shown = [...path, { ref: target, tool }].map((p) => `${p.ref.appId}.${p.tool}`).join(' → ')
-    if (path.some((p) => p.ref.appId === target.appId && p.ref.projectId === target.projectId && p.tool === tool)) {
+    if (path.some((p) => sameApp(p.ref, target) && p.tool === tool)) {
       return refuse(`call_app refused: ${id}.${tool} is already running in this chain (${shown}) — calling it again would go round in a loop`)
     }
     if (path.length >= CHAIN_DEPTH_MAX) {
@@ -701,7 +691,7 @@ export class BrokerDesk {
     const host = this.host
     if (!host) return refuse('the broker is unavailable: there is no one to ask for permission')
 
-    const slot = `${slotOf(app.ref)} ${key}`
+    const slot = `${appKeyOf(app.ref)} ${key}`
     let q = this.asking.get(slot)
     if (!q) {
       const withdraw = new AbortController()
@@ -754,7 +744,7 @@ export class BrokerDesk {
     if (answer === null) {
       return refuse(
         asked.timedOut
-          ? `${tool} refused: the person did not answer within ${humanDuration(this.questionMs())} whether ${app.name} may ${text}. Nothing was remembered — Centralu asks again next time.`
+          ? `${tool} refused: the person did not answer within ${durationText(this.questionMs())} whether ${app.name} may ${text}. Nothing was remembered — Centralu asks again next time.`
           : `${tool} refused: the question to the person was withdrawn before an answer`,
       )
     }

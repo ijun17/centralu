@@ -153,7 +153,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
     expect(errors(id)).toHaveLength(0)
     expect(a.session(id).state).toBe('working')
     expect(retryLines(id)).toHaveLength(1)
-    expect(retryLines(id)[0]!.text).toMatch(/not your usage limit.*in 30 s \(retry 1 of 4\)/)
+    expect(retryLines(id)[0]!.text).toMatch(/not your usage limit.*in 30 seconds \(retry 1 of 4\)/)
     expect(a.adapter.last.sent).toHaveLength(0)
 
     await vi.advanceTimersByTimeAsync(DELAYS_MS[0] - 1)
@@ -169,6 +169,8 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
       a.adapter.last.emit(overloaded(id))
       expect(retryLines(id)).toHaveLength(i + 1)
       expect(retryLines(id)[i]!.text).toContain(`(retry ${i + 1} of ${DELAYS_MS.length})`)
+      // The wait in words a person reads: 30 seconds, then whole minutes (never `120 s`)
+      expect(retryLines(id)[i]!.text).toContain(`in ${['30 seconds', '2 minutes', '5 minutes', '10 minutes'][i]} (retry`)
       await vi.advanceTimersByTimeAsync(DELAYS_MS[i]!)
       expect(a.adapter.last.sent).toHaveLength(i + 1)
     }
@@ -190,7 +192,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
     a.adapter.last.emit({ type: 'turn_complete', sessionId: id })
     a.adapter.last.emit({ type: 'state_change', sessionId: id, state: 'working' })
     a.adapter.last.emit(overloaded(id))
-    expect(retryLines(id).at(-1)!.text).toContain('in 30 s (retry 1 of 4)')
+    expect(retryLines(id).at(-1)!.text).toContain('in 30 seconds (retry 1 of 4)')
   })
 
   it.each([

@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Badge } from '../../components/Badge.jsx'
@@ -92,7 +93,7 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
       void refresh()
     } catch (e) {
       // Exactly the host's own wording — that wording never contains the value (the host never carries it)
-      setError((e as Error).message)
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

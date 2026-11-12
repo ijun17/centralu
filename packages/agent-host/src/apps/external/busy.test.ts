@@ -200,7 +200,6 @@ describe('a hold belongs to the process that made it (#1236)', () => {
     const host = {
       timing: { ...DEFAULT_TIMING, idleMs: 60_000 },
       appsChanged: () => {},
-      holdKey: (r: AppRef) => r.appId,
       busyRecorded: (_e: AppEntry, reason: string | null) => void recordedHolds.push(reason),
     } as unknown as LifecycleHost
     const lifecycle = new AppLifecycle(host)

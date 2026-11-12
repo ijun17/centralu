@@ -531,6 +531,7 @@ function Body({
           fill
           appId={pv.appId}
           projectId={pv.projectId}
+          machine={pv.machine}
           instanceId={pv.instanceId}
           toolInput={pv.toolInput}
           toolResult={pv.toolResult}

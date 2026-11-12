@@ -1,5 +1,5 @@
 import type { AppArrival } from '@cc/core'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol/client'
+import { errorMessage, DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol/client'
 import type {
   ExternalAppInfo,
   GridPanel,
@@ -567,7 +567,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     } catch (e) {
       // The app works normally even with no snapshot, but it is said, not saved over (`workspaceUnread`), and read again
       workspaceUnread = true
-      set({ toast: `Could not read the window layout (${(e as Error).message}); it is shown as the defaults, and not saved over until it is read again` })
+      set({ toast: `Could not read the window layout (${errorMessage(e)}); it is shown as the defaults, and not saved over until it is read again` })
       void readWorkspaceAgain(get, set, true)
     } finally {
       restoringWorkspace = false

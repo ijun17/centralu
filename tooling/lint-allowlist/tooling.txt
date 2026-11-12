@@ -7,4 +7,3 @@ tooling/e2e-web-server.test.ts @typescript-eslint/no-unnecessary-type-assertion 
 tooling/launcher-serve.test.ts @typescript-eslint/no-unnecessary-type-assertion 8
 tooling/launcher-serve.test.ts @typescript-eslint/prefer-promise-reject-errors 1
 tooling/project-board-release.test.ts @typescript-eslint/no-misused-promises 1
-tooling/project-board-release.test.ts @typescript-eslint/no-unnecessary-type-assertion 1

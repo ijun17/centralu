@@ -1,4 +1,4 @@
-import type { ExternalAppInfo } from '@cc/protocol/client'
+import { sameApp, type ExternalAppInfo } from '@cc/protocol/client'
 import { appKeyOf } from '@cc/core'
 
 /**
@@ -11,8 +11,7 @@ import { appKeyOf } from '@cc/core'
  * (#82): absent or null is this computer's, a machine id is that linked machine's.
  */
 export function isApp(a: ExternalAppInfo, projectId: string | null | undefined, appId: string, machine?: string | null): boolean {
-  if (a.appId !== appId || a.projectId !== (projectId ?? null)) return false
-  return projectId ? true : (a.machine ?? null) === (machine ?? null)
+  return sameApp(a, { projectId, appId, machine })
 }
 
 /**

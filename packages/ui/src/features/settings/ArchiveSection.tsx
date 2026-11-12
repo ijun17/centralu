@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { StoredMessage, SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol/client'
+import { errorMessage, type StoredMessage, type SubagentStepsHeld, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol/client'
 import { messagesToChat, useStore } from '../../store/store.js'
 import { mergeBySeq } from '../../store/historyPages.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -9,7 +9,7 @@ import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './ArchiveReaderItem.jsx'
-import { ArchiveRunReader, ArchiveRuns } from './ArchiveRuns.jsx'
+import { ArchiveRunReader, ArchiveRuns, runsHaveRow } from './ArchiveRuns.jsx'
 import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsArchive.jsx'
 import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
@@ -68,7 +68,7 @@ export function ArchiveSection() {
         setHeld(h)
         setHeldError(null)
       })
-      .catch((e: Error) => setHeldError(e.message))
+      .catch((e: unknown) => setHeldError(errorMessage(e)))
   }, [platform])
   const { reload } = list
   const load = useCallback(() => {
@@ -105,14 +105,14 @@ export function ArchiveSection() {
     act(`steps:${t.sessionId}`, () =>
       purgeStepsOf(t).then(
         () => null,
-        (e: Error) => e.message,
+        (e: unknown) => errorMessage(e),
       ),
     )
   const purge = (s: TrashedSession) =>
     act(s.id, () =>
       platform.trash.purge(s.id).then(
         () => null,
-        (e: Error) => e.message,
+        (e: unknown) => errorMessage(e),
       ),
     )
   /** One call per machine (#378 review): a linked machine's records are deleted there */
@@ -125,7 +125,7 @@ export function ArchiveSection() {
     act(at, () =>
       purgeRunsOf(list).then(
         () => null,
-        (e: Error) => e.message,
+        (e: unknown) => errorMessage(e),
       ),
     )
   /*
@@ -143,12 +143,12 @@ export function ArchiveSection() {
           (r) => {
             if (r.failed.length) failed.push(`${r.failed.length} stayed in the session archive: ${r.failed.map((f) => `${f.name} — ${f.error}`).join('; ')}`)
           },
-          (e: Error) => failed.push(e.message),
+          (e: unknown) => failed.push(errorMessage(e)),
         )
       }
-      if (listed.length) await purgeRunsOf(listed).catch((e: Error) => failed.push(`The app runs stayed: ${e.message}`))
+      if (listed.length) await purgeRunsOf(listed).catch((e: unknown) => failed.push(`The app runs stayed: ${errorMessage(e)}`))
       for (const t of listedSteps) {
-        await purgeStepsOf(t).catch((e: Error) => failed.push(`The subagent steps of ${t.name} stayed: ${e.message}`))
+        await purgeStepsOf(t).catch((e: unknown) => failed.push(`The subagent steps of ${t.name} stayed: ${errorMessage(e)}`))
       }
       return failed.length ? failed.join(' ') : null
     })
@@ -306,7 +306,7 @@ export function ArchiveSection() {
             onRead={setReadingRun}
             onPurge={purgeRuns}
           />
-          {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
+          {rowError && runsHaveRow(runs, rowError.id) && (
             <p className="mt-1.5 px-1 text-xs leading-body text-ink" data-testid="trash-runs-error">
               {rowError.text}
             </p>
@@ -393,7 +393,7 @@ function ArchiveReader({ session, onBack }: { session: TrashedSession; onBack: (
           setMore(got.length >= PAGE)
           setError(null)
         })
-        .catch((e: Error) => setError(e.message))
+        .catch((e: unknown) => setError(errorMessage(e)))
         .finally(() => {
           inFlight.current = false
         })

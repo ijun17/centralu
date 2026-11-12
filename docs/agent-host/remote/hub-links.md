@@ -27,6 +27,13 @@ The three choke points of remote-hub.md §5 are where it sits: the router is the
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
 the same lane as local ones. A host with no linked machine routes every call to its own handler, as before.
 
+**How long a forwarded call waits (#2170).** The router waits for a linked machine as long as the window waits for its own host: one table in
+`packages/protocol/src/call-budget.ts` (`callBudgetMs`, 30 s; 180 s for a call that can revive a session; the host's 10 minutes plus one
+for a git write; the person's answer plus the app's own bound for `apps.invoke`), read by `RpcClient` and by the router, whose
+`call(method, params, timeoutMs)` hands it to `RemoteClient`. Only a call a window started (the router's `ctx` is set) gets its table
+bound. A call the hub made itself (the Assistant's flows, an agent's call, the linked views, `host.*`, `hub.*`, the first lists) keeps the
+client's 200 s: no window waits on it, and a delete on a linked machine can outlast 30 s. No frame carries a budget, so an older hub keeps the flat 200 s and an older window its own table; each side reads its own build's.
+
 **The transport.** Two ssh commands, the person's own `ssh`, keys and `~/.ssh/config`:
 
 ```

@@ -39,7 +39,7 @@ empty first, by the same rules, and then `git clone -- <url> <folder>` runs into
 | No submodules | no `--recurse-submodules`: their addresses are the repository's to choose, past the one the person approved |
 | Name | an empty `name` is the repository's own (`repoNameOf`: the last path segment without `.git`) |
 | Failure leaves nothing | the folder made for it is removed and no project is registered; each failure is one sentence (`cloneFailure`: a missing sign-in, branch, host or repository, no git, or over the 10-minute limit) |
-| Time | the host stops a clone after 10 minutes. The window's call waits 180 s (`LONG_CALLS`) and a linked machine's hop 200 s; past that the dialog says it is still cloning, and the project joins the list when it lands (`projects_changed`) |
+| Time | the host stops a clone after 10 minutes. The window's call waits 180 s (`LONG_CALLS`, `callBudgetMs`) and the hub's hop to a linked machine the same; past that the dialog says it is still cloning, and the project joins the list when it lands (`projects_changed`) |
 
 Tested end to end against a local bare repository served over https (git's dumb protocol from a static server, a
 self-signed certificate trusted through `GIT_SSL_CAINFO`, the person's git configuration left out), including a

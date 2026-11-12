@@ -1,7 +1,6 @@
 import { resolveSettings, filterEscalatingDefaultMode, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
-import type { Question } from '@cc/protocol'
-import { APP_MCP_PREFIX } from '../../apps/contract.js'
+import { APP_SERVER_PREFIX, mcpNameParts, type Question } from '@cc/protocol'
 import type { CreateSessionOpts } from '../contract.js'
 import { CENTRALU_MCP_NAME } from './centralu-mcp.js'
 
@@ -36,6 +35,12 @@ export function parseQuestions(input: unknown): Question[] {
   return out
 }
 
+/** A Claude tool name's server and tool, when the tool part holds no `__`: with one, the name is another server's, however it begins (#93) */
+function ownServerTool(toolName: string): { server: string; tool: string } | null {
+  const parts = mcpNameParts(toolName)
+  return parts && !parts.tool.includes('__') ? parts : null
+}
+
 /**
  * Is this tool one belonging to **our own in-process server** (the judgment behind the approval
  * exception)?
@@ -45,30 +50,28 @@ export function parseQuestions(input: unknown): Question[] {
  * `centralu__pw` producing `mcp__centralu__pw__navigate` also passed that check, and that tool
  * bypassed `canUseTool` entirely (measured, #93).
  *
- * This counts segments and judges by **the full server name** instead. None of our own tool
- * names contain `__` (list_sessions, propose_mcp_server, and so on all use a single underscore),
- * so there are exactly three segments. The name is already blocked on the naming side
+ * This reads the name the one way the screen does (`mcpNameParts`) and judges by **the full server name** instead.
+ * None of our own tool names contain `__` (list_sessions, propose_mcp_server, and so on all use a single underscore),
+ * so a name whose tool part has one is another server's (`ownServerTool`). The name is already blocked on the naming side
  * (`mcpServerNameError`), but a place that grants trust must not rely on another layer's check —
  * it has to be correct on its own.
  */
 export function isCentraluToolName(toolName: string): boolean {
-  const parts = toolName.split('__')
-  return parts.length === 3 && parts[0] === 'mcp' && parts[1] === CENTRALU_MCP_NAME
+  return ownServerTool(toolName)?.server === CENTRALU_MCP_NAME
 }
 
 /**
  * If this tool belongs to an external app's proxy server, its server and tool name (M4 A-5) —
  * `mcp__app-<id>__<tool>`.
  *
- * This counts segments for the same reason as above. An app id never contains an underscore and
+ * This reads the name for the same reason as above. An app id never contains an underscore and
  * an app's own tool names never contain `__` (two rules enforced in manifest.ts), so a tool that
- * is ours has exactly three segments. This never grants anything based on the name alone —
+ * is ours has no `__` in its tool part. This never grants anything based on the name alone —
  * whether it is read-only is asked of the attached app's own list (`SessionApps.readOnly`).
  */
 export function appToolOf(toolName: string): { server: string; tool: string } | null {
-  const parts = toolName.split('__')
-  if (parts.length !== 3 || parts[0] !== 'mcp' || !parts[1]!.startsWith(APP_MCP_PREFIX)) return null
-  return { server: parts[1]!, tool: parts[2]! }
+  const parts = ownServerTool(toolName)
+  return parts?.server.startsWith(APP_SERVER_PREFIX) ? parts : null
 }
 
 /** The tools that only read — the ones a read grant (#371, `CreateSessionOpts.mayRead`) lets through without a card */

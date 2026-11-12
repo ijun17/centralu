@@ -2,7 +2,7 @@ import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
 import type { z } from 'zod'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type RpcMethodName, sameApp } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -564,7 +564,7 @@ export function createRpcHandler(
       }
       const ref = owner?.ref ?? views?.describe(instanceId)?.app ?? null
       if (!ref) throw rpcError('This app view is not open')
-      const name = externalApps?.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)?.name
+      const name = externalApps?.list().find((a) => sameApp(a, ref))?.name
       await mgr.inputs.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
     },
@@ -628,7 +628,7 @@ export function createRpcHandler(
       // A user-folder app, or a root app outside git (#1141): the copies Centralu keeps. Otherwise git's history
       if (apps.keepsVersions({ appId, projectId })) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
       const project = (await mgr.projectRegistry.listProjects()).find((x) => x.id === projectId)
-      const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
+      const app = apps.list().find((a) => sameApp(a, { appId, projectId }))
       if (!project || !app) throw rpcError(noSuchAppText({ projectId, appId }))
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
       return { kind: 'git' as const, repo, commits }

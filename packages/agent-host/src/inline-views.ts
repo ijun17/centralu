@@ -1,5 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/client'
-import { APP_VIEWS_LIVE_PER_SESSION, appLabel, type NormalizedEvent } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, appLabel, type NormalizedEvent, sameApp } from '@cc/protocol'
 import { resourceUriOf, type AppRef, type ExternalApps } from './apps/external/runtime.js'
 import type { SessionAppCall, SessionAppsHub } from './sessions/session-apps.js'
 import type { ViewHost } from './views/view-host.js'
@@ -165,7 +165,7 @@ export class InlineViews {
       const gone = this.unavailable(v.ref)
       if (gone) refuse(gone)
       // An app stopped after repeated failures does not start on its own — opening the view leaves nowhere to call it (Restart is on the fixed view)
-      if (this.deps.rt.list().find((a) => a.appId === v.ref.appId && a.projectId === v.ref.projectId)?.status === 'failed') {
+      if (this.deps.rt.list().find((a) => sameApp(a, v.ref))?.status === 'failed') {
         refuse('This app stopped after failing repeatedly. Restart it, then reopen this view')
       }
       const refusal = await this.refusal(v.ref, v.uri)
@@ -450,7 +450,7 @@ export class InlineViews {
    * language, since it stands as is in the view.
    */
   private unavailable(ref: AppRef): string | null {
-    const info = this.deps.rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
+    const info = this.deps.rt.list().find((a) => sameApp(a, ref))
     if (!info) return 'This app was removed'
     if (info.status === 'untrusted') return "This app's project is no longer trusted"
     // An imported app waiting for review (E-3) — if what runs after enabling it changed, the view's HTML is also code from before the person reviewed it again

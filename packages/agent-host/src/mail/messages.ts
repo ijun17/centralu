@@ -1,3 +1,4 @@
+import { durationText } from '../timing.js'
 import { createListeners } from '@cc/common'
 import { errorMessage, oneLineText, type MailChoices } from '@cc/protocol'
 import { asObj } from '../json-value.js'
@@ -351,7 +352,7 @@ export class MessageService {
     const age = now - said.ts
     // A clock set back makes a message look newer than it is
     if (age < 0) return "the person's last message here is dated later than now"
-    if (age > CITE_MS) return `the person's last message here is ${Math.round(age / 60_000)} minutes old, and a citation may be ${CITE_MS / 60_000} at most`
+    if (age > CITE_MS) return `the person's last message here is ${durationText(age)} old, and a citation may be ${durationText(CITE_MS)} at most`
     if (this.records.hasDedupe(sender, citeKey(said.seq))) return "the person's last message here was cited by an earlier request already"
     return { seq: said.seq, at: said.ts }
   }

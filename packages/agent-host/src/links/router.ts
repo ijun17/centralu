@@ -1,4 +1,4 @@
-import { RpcMethods, unheard, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, callBudgetMs, unheard, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, findMachine, qualifiedMachine } from './machine-ids.js'
 import { awaySentence, windowAwaySentence } from './machine-reach.js'
 import type { Qualifier } from './qualifier.js'
@@ -27,8 +27,8 @@ export interface RoutedMachine {
   readonly q: Qualifier
   /** The link is up and answered hello: calls go through */
   readonly reachable: boolean
-  /** One call on the remote, in the remote's terms */
-  call(method: string, params: unknown): Promise<unknown>
+  /** One call on the remote, in the remote's terms. `timeoutMs`: how long it may take; absent: the link's own default */
+  call(method: string, params: unknown, timeoutMs?: number): Promise<unknown>
   /**
    * The remote's own lists, as it last gave them (raw, the remote's terms), for when it cannot be
    * asked: the headers mirror (mirror.ts). Null when the hub has never seen them.
@@ -62,6 +62,14 @@ export interface RoutedMachine {
   /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
 }
+
+/**
+ * A window's call on a linked machine waits as long as it waits on this host (`callBudgetMs`, #2170): the link's flat bound cut a
+ * long one and held a short one. A call the hub made itself (`ctx` absent: the Assistant's, an agent's) keeps the link's flat 200 s,
+ * as it did: no window is waiting on it, and a delete that takes longer than a window's 30 s is still the Assistant's to wait for.
+ */
+const callOn = (m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> =>
+  m.call(method, params, ctx === undefined ? undefined : callBudgetMs(method))
 
 /**
  * The person's project order across machines (#734), in the hub's terms: hub ids and machine-qualified ids in one list.
@@ -165,7 +173,7 @@ export class Router {
      */
     if (!m.reachable && ctx === undefined) await m.reachForCall?.()
     if (!m.reachable) throw new MachineUnreachableError(m, ctx?.window === true)
-    return m.call(method, params)
+    return callOn(m, method, params, ctx)
   }
 
   private async byKey(
@@ -259,13 +267,13 @@ export class Router {
     const tool = params.tool
     if (typeof tool !== 'string' || params.limits === false) return undefined
     try {
-      const [mine, theirs] = await Promise.all([this.opts.local('agents.account', { tool }), m.call('agents.account', { tool })])
+      const [mine, theirs] = await Promise.all([this.opts.local('agents.account', { tool }), callOn(m, 'agents.account', { tool }, ctx)])
       const a = isObj(mine) ? mine.fingerprint : null
       const b = isObj(theirs) ? theirs.fingerprint : null
       if (typeof a !== 'string' || a === '' || a !== b) return undefined
       const own = await this.opts.local(method, { tool }, ctx)
       if (!isObj(own) || own.supported !== true || !own.usage) return undefined
-      const there = await m.call(method, { tool, limits: false })
+      const there = await callOn(m, method, { tool, limits: false }, ctx)
       const cache = isObj(there) ? there.cache : undefined
       return { supported: true, usage: own.usage, sameAccountAsHub: true, ...(cache ? { cache } : {}) }
     } catch {
@@ -286,33 +294,33 @@ export class Router {
     const machines = [...this.opts.machines()]
     switch (method) {
       case 'sessions.list':
-        return this.mergeLists(machines, 'sessions', params)
+        return this.mergeLists(machines, 'sessions', params, ctx)
       case 'projects.list':
-        return this.mergeLists(machines, 'projects', params)
+        return this.mergeLists(machines, 'projects', params, ctx)
       case 'projects.reorder':
         return this.reorderProjects(machines, params, ctx)
       case 'approvals.deleteRule':
         return this.deleteRule(machines, params, ctx)
       default:
-        return this.mergeSimple(method, machines, params)
+        return this.mergeSimple(method, machines, params, ctx)
     }
   }
 
-  private async mergeLists(machines: RoutedMachine[], kind: 'sessions' | 'projects', params: unknown): Promise<unknown> {
+  private async mergeLists(machines: RoutedMachine[], kind: 'sessions' | 'projects', params: unknown, ctx?: RpcContext): Promise<unknown> {
     const method = kind === 'sessions' ? 'sessions.list' : 'projects.list'
     const [local, ...remote] = await Promise.all([
       this.opts.local(method, params) as Promise<unknown[]>,
-      ...machines.map((m) => this.listOf(m, kind)),
+      ...machines.map((m) => this.listOf(m, kind, ctx)),
     ])
     const all = [...local, ...remote.flat()]
     return kind === 'projects' && machines.length > 0 ? this.inPersonsOrder(all) : all
   }
 
   /** One machine's list in the hub's terms: asked when it can be, else its mirror, marked `unreachable` */
-  private async listOf(m: RoutedMachine, kind: 'sessions' | 'projects'): Promise<unknown[]> {
+  private async listOf(m: RoutedMachine, kind: 'sessions' | 'projects', ctx?: RpcContext): Promise<unknown[]> {
     if (m.reachable) {
       try {
-        const list = (await m.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})) as unknown[]
+        const list = (await callOn(m, kind === 'sessions' ? 'sessions.list' : 'projects.list', {}, ctx)) as unknown[]
         if (Array.isArray(list)) {
           m.observe(kind, list)
           return this.present(m, kind, list, false)
@@ -380,7 +388,7 @@ export class Router {
       ...machines.map(async (m) => {
         const ordered = perMachine.get(m)
         // A machine the order names none of is not asked to reorder anything; its list still belongs in the answer
-        if (!ordered) return this.listOf(m, 'projects')
+        if (!ordered) return this.listOf(m, 'projects', ctx)
         try {
           return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds: ordered }, ctx)) as unknown[]
         } catch {
@@ -406,7 +414,7 @@ export class Router {
   }
 
   /** The other merges: every reachable machine, each answer in the hub's terms, combined by kind */
-  private async mergeSimple(method: RpcMethodName, machines: RoutedMachine[], params: unknown): Promise<unknown> {
+  private async mergeSimple(method: RpcMethodName, machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
     const local = await this.opts.local(method, params)
     const missed: RoutedMachine[] = machines.filter((m) => !m.reachable)
     const answers = await Promise.all(
@@ -414,7 +422,7 @@ export class Router {
         .filter((m) => m.reachable)
         .map(async (m) => {
           try {
-            return { m, r: await m.call(method, params) }
+            return { m, r: await callOn(m, method, params, ctx) }
           } catch {
             // One machine failing does not fail the list; it is simply not in it this time
             missed.push(m)

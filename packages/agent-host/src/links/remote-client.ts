@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { CANCEL_CALL_METHOD, errorMessage, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
+import { CANCEL_CALL_METHOD, HANDSHAKE_TIMEOUT_MS, errorMessage, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
 import { proofNonce, provesCredential, provesToken } from '../transport/host-proof.js'
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
@@ -67,7 +67,7 @@ export type RemoteClientOptions = {
   WebSocketImpl?: typeof WebSocket
   /** How long an open socket may go without `hello_ok` before it is dropped and retried */
   handshakeTimeoutMs?: number
-  /** One call's bound. Generous: a forwarded resume can take minutes (the UI's own budget is 180 s) */
+  /** Every call's bound, when it is not each method's own (`call`'s `timeoutMs`, else this, else `DEFAULT_CALL_TIMEOUT_MS`). Tests, and the probe */
   callTimeoutMs?: number
   maxBackoffMs?: number
   /**
@@ -117,8 +117,7 @@ export type RemoteClientEvents = {
 /** How many calls from the remote may run on the hub at once (#550): one past it is refused, not queued */
 export const MAX_INCOMING_CALLS = 16
 
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
-
+/** The hub's own calls (`host.*`, `hub.*`, the first lists): generous. A window's call forwarded through the router has its method's own budget (`callBudgetMs`) */
 const DEFAULT_CALL_TIMEOUT_MS = 200_000
 
 const linkError = (message: string, retryable: boolean) => rpcError(message, 'internal', { retryable })
@@ -167,7 +166,7 @@ export class RemoteClient {
     this.proving = null
     const ws = new this.WS(this.opts.url)
     this.ws = ws
-    this.handshakeTimer = setTimeout(() => this.lost(ws, 'no answer to hello'), this.opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS)
+    this.handshakeTimer = setTimeout(() => this.lost(ws, 'no answer to hello'), this.opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS)
     ws.on('open', () => {
       if (this.ws !== ws) return
       if (this.opts.proveHost) {
@@ -281,13 +280,13 @@ export class RemoteClient {
     return this.opts.credential
   }
 
-  call(method: string, params: unknown): Promise<unknown> {
+  call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.closed) return Promise.reject(linkError('The link is closed', false))
     // Fails now rather than waiting for a machine that may not come back (see the header)
     if (!this.ready || !this.ws) return Promise.reject(linkError('The machine is not reachable right now', true))
     const ws = this.ws
     const id = String(this.nextId++)
-    const answer = this.pending.wait(id, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, () =>
+    const answer = this.pending.wait(id, this.opts.callTimeoutMs ?? timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, () =>
       rpcError(`The machine did not answer ${method} in time`, 'internal', { retryable: true }),
     )
     try {

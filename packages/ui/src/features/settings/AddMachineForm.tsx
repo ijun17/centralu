@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protocol/client'
+import { errorMessage, type MachineProbe, type RemoteShell, type SshHost, type SshHostList } from '@cc/protocol/client'
 import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineChoice } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useLoad } from '../../app/useLoad.js'
@@ -138,7 +138,7 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
           onDone()
         } catch (err) {
           // Kept in the form with what was chosen: the host says which field it refused and why
-          setError((err as Error).message)
+          setError(errorMessage(err))
         } finally {
           setBusy(false)
         }

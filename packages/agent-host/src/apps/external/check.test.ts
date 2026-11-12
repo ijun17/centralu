@@ -288,7 +288,7 @@ describe('a check never leaves the app in a strange state', () => {
     await until(() => (r as unknown as { calls: { openRuns: Map<string, unknown> } }).calls.openRuns.size, (n) => n === 1)
     const rep = await r.check(ref('slow'))
     expect(rep.text).toContain(
-      '- note: 1 call was still running after 200 ms, so the app was not restarted — this report is about the process that was already running, which may not have your latest code',
+      '- note: 1 call was still running after 200 milliseconds, so the app was not restarted — this report is about the process that was already running, which may not have your latest code',
     )
     expect(rep.text).toContain('the process that was already running')
     writeFileSync(gate, '')

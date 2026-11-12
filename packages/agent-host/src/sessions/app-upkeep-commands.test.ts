@@ -241,8 +241,8 @@ describe('restart_app, check_app and the reads', () => {
     expect((await run(orc.id, 'list_app_runs', { app: 'notes' })).text).toBe('"App notes" (id "notes") in the user folder has no recorded run.')
     expect((await run(orc.id, 'list_app_errors', { app: 'notes' })).text).toBe('"App notes" (id "notes") in the user folder has no error since this host started.')
     const usage = await run(orc.id, 'app_usage', { app: 'notes' })
-    expect(usage.text).toContain('Last day: 0 agent runs, 0 s')
-    expect(usage.text).toContain('Last 30 days: 0 agent runs, 0 s')
+    expect(usage.text).toContain('Last day: 0 agent runs, 0 seconds')
+    expect(usage.text).toContain('Last 30 days: 0 agent runs, 0 seconds')
     expect(card(orc.id)).toBeUndefined()
   })
 

@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
-import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, newAppIdProblem, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type ExternalAppInfo } from '@cc/protocol'
 import type { AppLifecycle } from './app-lifecycle.js'
 import type { AppEntry } from './app-entry.js'
-import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest } from './manifest.js'
+import { MANIFEST_FILE, MANIFEST_VERSION, appIdRefusal, parseManifest } from './manifest.js'
 import { AppFolderTaken, nameTaken, placeAppFolder } from './placement.js'
 import type { AppRef } from './ref.js'
 import type { ExternalAppsDeps } from './runtime-types.js'
@@ -20,8 +20,6 @@ import { realOs } from '../../os/real.js'
  * it is written is `placement.ts`.
  */
 
-const USER_SCOPE = USER_APP_SCOPE
-
 /** What these doors reach in the runtime (`ExternalApps.folderHost`) */
 export type FoldersHost = {
   disposed(): boolean
@@ -35,8 +33,7 @@ export type FoldersHost = {
   require(ref: AppRef): AppEntry
   info(e: AppEntry): ExternalAppInfo
   dataDirOf(ref: AppRef): string
-  holdKey(ref: AppRef): string
-  /** Apps being removed, by `holdKey` — none of them starts again while its folder moves (`blocker`) */
+  /** Apps being removed, by `appKeyOf` — none of them starts again while its folder moves (`blocker`) */
   readonly removing: Set<string>
   readonly lifecycle: AppLifecycle
   /** Drops the imported-app mark (E-3) */
@@ -47,19 +44,6 @@ export type UserAppSpec = { id: string; name: string; description: string; serve
 export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string }
 /** Where a new app project goes (#1141): its folder, checked free by the caller, and whether its parent is the default one to make */
 export type AppProjectTarget = { path: string; isDefault: boolean }
-
-/**
- * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
- * one single function (`newAppIdProblem`, @cc/protocol) — only the wording is attached here. The new
- * app dialog attaches its own wording to the same validation result (`appIdHint`), while the
- * Assistant's `create_app` reads this wording as-is.
- */
-const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
-  shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
-  reserved: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself`,
-  'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions — pick another`,
-  builtin: 'that id is reserved — pick another',
-}
 
 /**
  * Creates a screen-less app in the user folder (M4 A-7, decision 8) — where an MCP server a person
@@ -89,7 +73,8 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
  */
 export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAppInfo {
   if (host.disposed()) throw new AppUnavailableError('The app runtime has shut down')
-  if (host.deps.reservedIds.includes(spec.id)) throw new AppUnavailableError(`"${spec.id}" is a reserved app id — use another name`)
+  const refusal = appIdRefusal(spec.id, host.deps.reservedIds)
+  if (refusal) throw new AppUnavailableError(refusal)
   const text = JSON.stringify(
     {
       manifestVersion: MANIFEST_VERSION,
@@ -176,7 +161,7 @@ export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo 
     }
     root = project.path
   }
-  const key = spec.projectId ?? USER_SCOPE
+  const key = spec.projectId ?? USER_APP_SCOPE
   if (host.hasScope(key)) host.rescan(key)
   else host.refresh()
 
@@ -204,8 +189,8 @@ export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo 
 
 /** The checks every new app passes before anything is written (C-1b): its id, its name; and the one-line texts it gets */
 function newAppText(host: Pick<FoldersHost, 'deps'>, spec: { id: string; name: string; description?: string }): { name: string; description: string } {
-  const idProblem = newAppIdProblem(spec.id, host.deps.reservedIds)
-  if (idProblem) throw new AppUnavailableError(`"${spec.id}" cannot be an app id — ${APP_ID_PROBLEM[idProblem]}`)
+  const refusal = appIdRefusal(spec.id, host.deps.reservedIds, { newName: true })
+  if (refusal) throw new AppUnavailableError(refusal)
   const name = oneLine(spec.name)
   if (!name) throw new AppUnavailableError('The app needs a name')
   return { name, description: oneLine(spec.description ?? '') || `${name} (a Centralu app)` }
@@ -276,7 +261,7 @@ export async function removeUserApp(host: FoldersHost, ref: AppRef): Promise<voi
   }
   host.rescanUser()
   const e = host.require(ref)
-  const key = host.holdKey(ref)
+  const key = appKeyOf(ref)
   host.removing.add(key)
   try {
     await host.lifecycle.halt(e, 'app removed', { awaitTree: true })

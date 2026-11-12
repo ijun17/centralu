@@ -1,3 +1,4 @@
+import { GIT_WRITE_TIMEOUT_MS } from '@cc/protocol'
 import { execFailure } from './exec-error.js'
 import { isGitCancelled, runGit } from './git-exec.js'
 import { assertCanonicalGitPath, gitBranches, gitRevParse, gitStatusFiles, isRepo, literalPathspec, type GitTrust } from './git.js'
@@ -10,19 +11,16 @@ import { assertCanonicalGitPath, gitBranches, gitRevParse, gitStatusFiles, isRep
  * committed (an LFS pointer, a git-crypt file), which is worse than not committing at all.
  * docs/security-boundaries/project-trust.md lists this as a limit.
  *
- * It gets a bound of its own (`WRITE_TIMEOUT_MS`), not a read's 10 s (#980): a write runs the repository's hooks (a
+ * It gets a bound of its own (`GIT_WRITE_TIMEOUT_MS`), not a read's 10 s (#980): a write runs the repository's hooks (a
  * pre-commit type check, a pre-push test run) and the person's credential helper, which can wait on a sign-in.
  * Because that can be long, the person can end one sooner (`signal`, #1007): git is ended as a timeout ends it.
  */
 export function gitWrite(cwd: string, args: string[], signal?: AbortSignal): Promise<string> {
-  return runGit(cwd, args, { allowRepoPrograms: true, timeout: WRITE_TIMEOUT_MS, signal })
+  return runGit(cwd, args, { allowRepoPrograms: true, timeout: GIT_WRITE_TIMEOUT_MS, signal })
 }
 
 /** What a write answers when it did not go through: git's own words, or that the person cancelled it (#1007) */
 export type GitWriteResult = { ok: boolean; message?: string; cancelled?: true }
-
-/** How long a write the person asked for may take before git is stopped: the clone's bound (`CLONE_TIMEOUT_MS`) */
-export const WRITE_TIMEOUT_MS = 10 * 60_000
 
 /**
  * Checks out a branch. A dirty state does **not block** this — the result is shown first

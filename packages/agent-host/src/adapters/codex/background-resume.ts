@@ -1,3 +1,4 @@
+import { durationText } from '../../timing.js'
 import type { EventSink } from '../contract.js'
 
 /** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
@@ -29,7 +30,7 @@ export function watchBackgroundResume(host: ResumeWatchHost): void {
       sessionId: host.sessionId,
       error: {
         code: 'adapter_crashed',
-        message: `Resuming codex did not finish within ${BACKGROUND_RESUME_CAP_MS / 1000}s${host.unsentNote()}`,
+        message: `Resuming codex did not finish within ${durationText(BACKGROUND_RESUME_CAP_MS)}${host.unsentNote()}`,
         retryable: true,
       },
     })

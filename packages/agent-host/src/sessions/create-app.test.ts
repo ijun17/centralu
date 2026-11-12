@@ -129,7 +129,7 @@ describe('apps.create', () => {
       'my_app': /lowercase letters, digits and hyphens \(up to 32\)/,
       'a__b': /lowercase letters, digits and hyphens \(up to 32\)/,
       Notes: /lowercase letters, digits and hyphens \(up to 32\)/,
-      control: /that id is reserved/,
+      control: /"control" is reserved. Pick another app id./,
     }
     for (const [id, why] of Object.entries(refused)) {
       await expect(create({ projectId, id, name: 'X' }), id).rejects.toThrow(why)

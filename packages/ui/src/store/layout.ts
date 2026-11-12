@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol/client'
 import { appKeyOf, gridPanelKey, sanitizeGridPanels, withPanelSpan } from '@cc/core'
 import type { AppState, Overlay, StoreGet, StoreSet } from './state.js'
 import { activateTab } from './panelLayout.js'
@@ -206,7 +207,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
       const res = await s.platform.fs.reveal(projectId, path, sessionId ?? undefined)
       if (!res.supported) set({ toast: res.reason ?? 'Showing files is not available here' })
     } catch (e) {
-      set({ toast: `Could not show ${path}: ${(e as Error).message}` })
+      set({ toast: `Could not show ${path}: ${errorMessage(e)}` })
     }
   },
 
@@ -333,7 +334,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
       if (mine === foldSaveSeq && sameKeys(get().prefs.foldedGroups, next)) {
         set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
       }
-      set({ toast: `Could not save that: ${(e as Error).message}` })
+      set({ toast: `Could not save that: ${errorMessage(e)}` })
     })
   },
 
@@ -394,7 +395,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     try {
       set({ gridPanels: sanitizeGridPanels(await platform.agents.setGridView(panels)) })
     } catch (e) {
-      set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
+      set({ gridPanels: before, toast: `Could not save layout: ${errorMessage(e)}` })
     }
   },
 
