@@ -161,13 +161,11 @@ Rows that differ by session:
 The **Codex `normal` + bypass** cell follows the person's policy, as Claude's does (owner decision
 2026-10-11, #382). With `writes`, the person's `approval_policy = "never"` turned "needs approval"
 into a refusal ("requires approval, but approval policy is never", codex source `mcp_tool_call.rs`).
-So under `normal` the adapter asks Codex for the policy before it loads the app bridges
-(`config/read`, `personsApprovalPolicy`) and gives them `approve` when it resolves to `never`, `writes`
-otherwise. Which layers count follows what the thread loads, measured with codex-cli 0.160.0 in a
-scratch `CODEX_HOME` (the person's policy and a repository's `.codex/config.toml` set to opposite
-values): `config/read` without a folder returns the person's layers only, and with the folder adds the
-repository's only when Codex trusts that folder, as `thread/start` does. A session whose repository
-files are kept out (an untrusted project, the Assistant, coordinators) reads without the folder, so
-a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thread's own
-`approvalPolicy` is compared afterwards and a difference logged. The refusal itself is still from
-Codex source, and no logged-in app call was run.
+Until #2231, under `normal` the adapter asked Codex for the policy before it loaded the app bridges
+(`config/read`, `personsApprovalPolicy`) and gave them `approve` or `writes`. Since #2231 no app is a server of the
+thread: the host asks at the call, and under `normal` and `edits` it reads the person's bypass from the policy the
+thread itself reports at `thread/start` and `thread/resume` (`CodexServers.noteThreadPolicy`, `policyIsNever`,
+`CodexSession.bypassesApprovals`). That is the policy the CLI's own commands run under, so an app call is let through
+unasked exactly when Codex would run a command unasked; a repository's `.codex/config.toml` counts only where Codex
+itself loads it (a folder Codex trusts), as for those commands. `safe` and `auto` never read it. No logged-in Codex
+app call was run (#2231: Codex was not installed where it was built).

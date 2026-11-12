@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isInTurn, transition, type AdapterCapabilities, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
+import type { SessionApps } from '../contract/session-apps.js'
 import { failureSentence, isNetworkFailure } from '../../sessions/interruptions.js'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
@@ -286,6 +287,21 @@ describe('the ACP session against a scripted agent', () => {
     await w.event((e) => e.type === 'tool_call')
     await s.dispose()
     expect(w.events.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'call-1', ok: false }])
+  })
+
+  /*
+   * An ACP agent reaches apps through the bridge's `app` tool since #2231, and it sends no cancellation for one: the Stop and the
+   * close stop the session's app calls at the host, a standing card included, as on Claude and Codex
+   */
+  it("the Stop cancels the session's app calls even with no turn running, and the close closes its apps", async () => {
+    const seen: string[] = []
+    const apps: SessionApps = { current: () => [], noteCall: () => {}, callEnded: () => {}, cancelAll: () => seen.push('cancelAll'), close: () => seen.push('close') }
+    const w = world(base, { apps })
+    const s = await w.start()
+    s.interrupt()
+    expect(seen).toEqual(['cancelAll'])
+    await s.dispose()
+    expect(seen).toEqual(['cancelAll', 'close'])
   })
 
   describe('a tool whose /compact leaves no protocol frame', () => {

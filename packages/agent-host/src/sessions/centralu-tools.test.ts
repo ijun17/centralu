@@ -807,6 +807,21 @@ describe('the app tool (#2231)', () => {
     expect(calls[0]![3]).toEqual({ callId: 'toolu_1', waitMs: 5_000 })
   })
 
+  it('refuses args that are not an object, as text that does not parse to one or as another value, and runs nothing', async () => {
+    const calls: unknown[][] = []
+    const tools = toolsWith({ apps: () => appsWith(calls) })
+    for (const bad of ['{"to":', '[1]', 'to=3']) {
+      const out = await runCentraluTool(tools, 'app', { action: 'call', app: 'notes', tool: 'poke', args: bad }, { sessionId: 's', profile: 'reader' })
+      expect(out, bad).toMatchObject({ isError: true, text: expect.stringContaining('args is not a JSON object. Nothing ran.') })
+    }
+    // Neither an object nor text: the tool's own argument check refuses it before the handler
+    for (const bad of [7, ['to']]) {
+      const out = await runCentraluTool(tools, 'app', { action: 'call', app: 'notes', tool: 'poke', args: bad }, { sessionId: 's', profile: 'reader' })
+      expect(out.isError, JSON.stringify(bad)).toBe(true)
+    }
+    expect(calls).toEqual([])
+  })
+
   it('refuses an app the session does not have, naming the ones it has, and a call with no tool', async () => {
     const tools = toolsWith({ apps: () => appsWith() })
     const missing = await runCentraluTool(tools, 'app', { action: 'call', app: 'board', tool: 'x' }, { sessionId: 's', profile: 'reader' })

@@ -54,7 +54,9 @@ then who may call it:
   (`bypassesApprovals` absent), so under `normal` and `edits` every app tool that does not only read asks. The request
   gate (`whenAsked`, #1447) applies to an app call as to any step when the session is the Assistant in a turn another
   session's request started, whatever its CLI (`bridge-apps.test.ts` "under normal, its write raises the host card and
-  runs only on Allow; a Deny runs nothing").
+  runs only on Allow; a Deny runs nothing"). Its Stop cancels the session's app calls and withdraws a card standing for
+  one, with or without a turn running, and closing the session closes its apps, as on Claude and Codex
+  (`acp/session.test.ts` "the Stop cancels the session's app calls…").
 - A project's session reaches another project's app only by attaching it (#371 part A, apps/other-projects-apps.md),
   and only when three things hold, each read again at every count of the session's apps and
   so at every call: the person shares that app (off by default, per app), the person allowed this

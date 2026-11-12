@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CentraluTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
-import { jsonObject, trimmed } from '../json-value.js'
+import { isObj, jsonObject, trimmed, tryParseJson } from '../json-value.js'
 import { appGuide } from './app-guide.js'
 import { appNameOf, namedApp } from './session-apps.js'
 import { toolLinesOf } from './session-lines.js'
@@ -561,6 +561,10 @@ const HANDLERS: ToolHandlers = {
     }
     const tool = trimmed(args.tool)
     if (!entry || !tool || !live) return { text: 'Give app and tool: app(action="list") names them.', isError: true }
+    // JSON text of an object is read as the object (TOOL_ARGS takes nothing else); text that is not one is refused, never read as no arguments
+    if (typeof args.args === 'string' && !isObj(tryParseJson(args.args))) {
+      return { text: 'args is not a JSON object. Nothing ran. Give the arguments as an object, as app(action="list", app=...) shows them.', isError: true }
+    }
     const callArgs = jsonObject(args.args)
     return toolOutputOf(await live.call(entry.server, tool, callArgs, { ...(signal ? { signal } : {}), ...(callId ? { callId } : {}), ...(waitMs ? { waitMs } : {}) }))
   },

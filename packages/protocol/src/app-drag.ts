@@ -51,6 +51,8 @@ export type AppDragMessage = z.infer<typeof AppDragMessage>
  *   restart         a Codex thread started before the app was attached: Codex does not take new
  *                   servers into a running thread, so the session has to restart
  *   bridge-failed   the app's bridge for this session failed to start (Codex reported it)
+ *                   (restart and bridge-failed come only from a host before #2231: since then every app is reached
+ *                   through the `app` tool, so nothing produces them; kept for an older host, protocol.md §4)
  *   unavailable     the host has no apps, or the app is gone
  */
 export const AppReach = z.discriminatedUnion('reachable', [
