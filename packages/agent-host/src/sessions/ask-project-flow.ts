@@ -62,7 +62,7 @@ export type HubsReader = {
  */
 export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
-    readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
+    readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'delegate'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
   }
@@ -303,7 +303,7 @@ export class AskProjectFlow {
     /*
      * Read again after the card (#839): another call of this caller's with a task for this session may have gone in
      * meanwhile. Its turn is the caller's own, so the busy check below lets this one through, and its delegation would be
-     * replaced. Nothing is awaited from here to `startDelegation`.
+     * replaced. Nothing is awaited from here to `delegate`.
      */
     const current = this.host.children.delegations.get(key)
     if (current && current !== pending && !current.settled) return stillWorking
@@ -313,29 +313,18 @@ export class AskProjectFlow {
       return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, project: target.name, ...mailed }
     }
     if (pending) this.host.children.dropDelegation(key)
-    const delegatedId = chosen.id
-    const d = this.host.delegationFlow.startDelegation(key, callerId, delegatedId, target, false)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
-    // Written before the words go in, so a card the turn raises at once finds the caller's work open (docs/plans/mailbox.md §10.6.4)
-    const withdraw = this.host.children.delegated(callerId, delegatedId, 'ask_project', opts.task)
-    try {
-      const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
-      /*
-       * Read again once the session is awake: waking or restarting it takes seconds, and the gates can close meanwhile.
-       * An untrusted project's `auto` boundary was logged by the read after the card, with no wait since; one that lost
-       * its trust during the wake is logged then
-       */
-      const logged = !this.host.projectTrusted(callerProjectId)
-      const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
-      await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
-    } catch (e) {
-      withdraw()
-      d.wait.fail(e as Error)
-      this.host.children.dropDelegation(key, d)
-      if (this.host.agentRuns.get(delegatedId) === d.wait) this.host.agentRuns.delete(delegatedId)
-      return { ok: false, error: `Could not hand the task to ${target.name}: ${(e as Error).message}` }
-    }
-    return this.awaitDelegation(key, d, signal)
+    /*
+     * Read again once the session is awake: waking or restarting it takes seconds, and the gates can close meanwhile.
+     * An untrusted project's `auto` boundary was logged by the read after the card, with no wait since; one that lost
+     * its trust during the wake is logged then
+     */
+    const logged = !this.host.projectTrusted(callerProjectId)
+    const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
+    const frame = askFrame(callerProject, opts.task, { name: labelOf(this.host.store.messages, caller), sessionId: callerId })
+    const { d, delivered } = this.host.delegationFlow.delegate({ key, callerId, sessionId: chosen.id, target, agent: false, via: 'ask_project', task: opts.task, frame, stillAllowed })
+    const failed = await delivered
+    return failed ? { ok: false, error: `Could not hand the task to ${target.name}: ${failed}` } : this.awaitDelegation(key, d, signal)
   }
 
   /**

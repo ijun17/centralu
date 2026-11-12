@@ -2106,7 +2106,9 @@ linked machine was mail across the link (#2067, [linked-mail.md](linked-mail.md)
 child that a handoff moved is refused naming the successor, as `send` was (`handedOverAnswer`, #693). The answer starts "Sent as work for a
 session you started" (to a busy one the work goes as a task mail, which the rest of the answer names), and says a `kind` given is other mail's; a `subject` leads the words the child receives, on its own line, so the child reads what the card
 shows. A role (`parent`, `assistant`, `person`) is never work, whatever a session is named. Who counts as the caller's own is one rule
-(`ownChild`, agent-session-actions.ts), which agent_session widens for #637's delete and for `auto`, and a send does not.
+(`ownChild`, agent-session-actions.ts), which agent_session widens for #637's delete and for `auto`, and a send does not. start_agent, ask_project, a fork and this send
+give work one way, `DelegationFlow.delegate`: the wait, the caller's thread written before the words go in (§10.6.4), and all of it undone if
+they do not go in.
 
 **#2133.** A child knew the address `parent` only from `to`'s description, and wrote progress reports nobody needed. `start_agent`'s frame
 (`PARENT_MAIL`) now says no progress reports are needed, and names `parent` as the address for a question before it finishes, with

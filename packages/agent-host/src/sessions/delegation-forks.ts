@@ -15,7 +15,7 @@ const NO_PROJECT = 'it works outside any project, so there is nothing to fork it
 const noFork = (target: SessionInfo, why: string) => `No fork of "${target.name}": ${why.replace(/\.$/, '')}.`
 
 /** What a fork reaches of the rest of the delegation flow (`DelegationFlow`): start_agent's gates and the child's run */
-export type ForkDelegations = Pick<StartAgentDelegations, 'startDelegation'> & { readonly starts: AgentStartFlow }
+export type ForkDelegations = Pick<StartAgentDelegations, 'delegate'> & { readonly starts: AgentStartFlow }
 
 /**
  * A sub-session forked from a busy session's conversation for a requester (`ifBusy: "fork"`), behind start_agent's
@@ -155,18 +155,12 @@ export class DelegationForks {
       if (late) return this.flow.starts.abandonChild(child, late, worktree ? undefined : `Fork of ${target.name}`.slice(0, 48))
       if (!worktree) this.host.rename(child.id, `Fork of ${target.name}`.slice(0, 48))
       const key = `${callerId}>${child.id}`
-      const d = this.flow.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? this.host.cwdFor(child) }, true)
+      const frame = agentFrame(labelOf(this.host.store.messages, caller), text, [], '', canMailParent(child, callerId))
+      const { d, delivered } = this.flow.delegate({ key, callerId, sessionId: child.id, target: { id: project.id, name: project.name, path: child.worktree?.path ?? this.host.cwdFor(child) }, agent: true, via, task: text, frame })
       // The delegation counts the fork now
       place.release()
-      try {
-        await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), text, [], '', canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
-      } catch (e) {
-        d.wait.fail(e as Error)
-        this.host.children.dropDelegation(key, d)
-        return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
-      }
-      this.host.children.delegated(callerId, child.id, via, text)
-      return { ok: true, key, d, fork: child }
+      const failed = await delivered
+      return failed ? { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${failed}` } : { ok: true, key, d, fork: child }
     } finally {
       place.release()
     }

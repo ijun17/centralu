@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionLiveDefaults, type BackgroundTask, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { RoutedCard, SessionHandle } from '../adapters/contract.js'
@@ -382,5 +383,15 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith({ refusesDelegation: (callerId: string) => (asked.push(callerId), null) })
     expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
     expect(asked).toEqual([])
+  })
+})
+
+// Review of #1948: start_agent, ask_project, a fork and a mail send each gave work by a copy of their own; one way now, at its owner
+describe('work is given one way', () => {
+  it('no source but the flow itself registers a delegated turn: every giver goes through delegate', () => {
+    const src = fileURLToPath(new URL('..', import.meta.url))
+    const files = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts') && !/\.test(-helpers)?\.ts$/.test(f))
+    const callers = files.filter((f) => readFileSync(join(src, f), 'utf8').includes('.startDelegation('))
+    expect(callers.map((f) => f.replaceAll('\\', '/'))).toEqual(['sessions/delegation-flow.ts'])
   })
 })

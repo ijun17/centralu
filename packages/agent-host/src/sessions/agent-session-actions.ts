@@ -20,7 +20,7 @@ import { staleSessionHint } from './stale-session-id.js'
  * What agent_session reaches of the rest of the delegation flow (`DelegationFlow`): the child's run and its wait, the
  * answers, the observed turns, the stops of background work, the fork and start_agent's requests
  */
-export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'startDelegation'> &
+export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'delegate'> &
   Pick<DelegationWaits, 'agentAsking' | 'agentAtRest' | 'handedOverReply' | 'untilHandedOver'> &
   Pick<ObservedTurns, 'observeTurn'> &
   Pick<BackgroundStops, 'restingWork' | 'stopOwnWork'> &
@@ -237,21 +237,10 @@ export class AgentSessionActions {
     if (full) return { ok: false, error: full }
     const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
     const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
-    const next = this.flow.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
-    // Written before the words go in, so a card the turn raises at once finds the caller's work open (docs/plans/mailbox.md §10.6.4)
-    const withdraw = this.host.children.delegated(callerId, child.id, 'agent_session', text)
-    const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
-    try {
-      await this.host.deliver(child.id, agentFrame(from.name, text, [], '', canMailParent(child, callerId)), undefined, from, false)
-    } catch (e) {
-      withdraw()
-      // Its wait fails too (#839): a wait of the caller's joined it while the child woke
-      next.wait.fail(e as Error)
-      this.host.children.dropDelegation(key, next)
-      if (this.host.agentRuns.get(child.id) === next.wait) this.host.agentRuns.delete(child.id)
-      return { ok: false, error: `Could not send it: ${(e as Error).message}` }
-    }
-    return this.flow.agentWorking(next)
+    const frame = agentFrame(labelOf(this.host.store.messages, caller), text, [], '', canMailParent(child, callerId))
+    const { d, delivered } = this.flow.delegate({ key, callerId, sessionId: child.id, target: { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, agent: true, via: 'agent_session', task: text, frame })
+    const failed = await delivered
+    return failed ? { ok: false, error: `Could not send it: ${failed}` } : this.flow.agentWorking(d)
   }
 
   /**
