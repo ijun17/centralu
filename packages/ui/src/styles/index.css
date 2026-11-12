@@ -57,7 +57,7 @@
  * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
  * run time, which is what lets a theme switch by changing variables alone.
  *
- * **These values are the Dark preset.** Light and the two high-contrast presets are
+ * **These values are the Dark preset.** Light, the two high-contrast presets and Graphite are
  * `[data-theme='…']` blocks below that set the same names; a custom theme is the person's copy of a preset, written as inline
  * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
  * too, or themes cannot reach it (a unit test checks the two lists agree).
@@ -78,7 +78,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #120e0a; /* the app floor */
-  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone parts them from the conversation */
+  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone (`line-side`, #45403c) parts them from the conversation */
   --color-surface-raised: #282320; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #393430; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #46413d; /* hover and pressed; also my own message bubble */
@@ -302,7 +302,7 @@
  * line, which hang on the same ground). Mixed from the theme's own tokens rather than set per preset, so
  * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
  * swaps this in for --color-line (SIDEBAR_VARS); the top bar and the banner name it directly, `border-(--color-line-side)`
- * (#2207), since swapping it in there would also change a session mark's line.
+ * (#2207), since swapping it in there would also change the plain `border-line` of what the bar holds (the inbox dropdown).
  *
  * Measured against the sidebar's own ground, and against the floor beside it (WCAG contrast, ΔL* in CIELAB):
  *   Dark      #45403c  1.88:1, ΔL* 23.3 (the plain `line` #3a3531: 1.59:1, 18.3)
@@ -341,8 +341,8 @@
  * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
  * what the eye sees at the dark end better than hex steps do:
  *   Dark   sidebar #120e0a, conversation #120e0a: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
- *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#3a3531)
- *          alone parts them now.
+ *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#45403c, `line-side`
+ *          since #2207: the sidebar's own edge always was, and the top bar's now is) alone parts them now.
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; in Light it sits beside the step.
@@ -583,6 +583,78 @@
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.16);
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 0 rgb(0 0 0 / 0.25);
   --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 2px rgb(0 0 0 / 0.1), 0 1px 0 rgb(0 0 0 / 0.2);
+}
+
+/*
+ * Graphite (#2208): a neutral grey dark preset in the style of macOS, the owner's "Dark Graphite" custom theme made a
+ * built-in. Greys a step bluer than neutral, with no warm tint, and Apple's system colours for the focus ring, the selection and the terminal.
+ * Every value is the owner's file as it was: none broke a rule of themes.md. It leaves what Dark already gives the
+ * same value (the scrim, the glow, the scrollbar track and every shadow) to the `@theme` block.
+ *
+ * Steps (ΔL*): the sidebar #28282a is 5.4 above the floor #1d1d1d and raised #2c2c2e 7.3 (Dark: 0 and 10.0).
+ * Contrast of each ink on the floor / the sidebar / raised, the urgency order holding on all three:
+ *   signal #ffffff 16.9 / 14.7 / 13.9    body #f5f5f7 15.5 / 13.5 / 12.8
+ *   muted  #b0b0b5  7.8 /  6.8 /  6.5    faint #8e8e93  5.2 /  4.5 /  4.3
+ * Lines: `line` #38383a is 1.44:1 on the floor, 1.26 on the sidebar and 1.19 on raised; the sidebar's `line-side`
+ * #48484b is 1.85, 1.61 and 1.53; `line-strong` #545456 is 2.23, 1.95 and 1.84. Dark's measure 1.59, 1.88 and 2.27 on the
+ * floor, so Graphite's lines are the gentler of the two, as its steps are.
+ */
+[data-theme='graphite'] {
+  --color-surface-floor: #1d1d1d;
+  --color-surface-side: #28282a;
+  --color-surface-raised: #2c2c2e;
+  --color-surface-selected: #3a3a3c;
+  --color-surface-hover: #48484a;
+  --color-surface-deck: #232325;
+  --color-surface-reading: #1d1d1d;
+  --color-surface-reading-raised: #2c2c2e;
+
+  --color-line: #38383a;
+  --color-line-strong: #545456;
+
+  --color-ink-signal: #ffffff;
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #b0b0b5;
+  --color-ink-faint: #8e8e93;
+  --color-mark-waiting: #a1a1a6;
+
+  --color-diff-add: #30d158;
+  --color-diff-add-bg: #163322;
+  --color-diff-del: #ff9f97;
+  --color-diff-del-bg: #3a1d1b;
+  --color-danger: #ff9f97;
+  --color-danger-bg: #3a1d1b;
+
+  --color-focus: #409cff;
+  --color-selection: #0a84ff4d;
+  --color-scrollbar-thumb: #48484a;
+  --color-scrollbar-thumb-hover: #636366;
+
+  --color-keycap-top: #3a3a3c;
+  --color-keycap-bottom: #2c2c2e;
+  --color-keycap-border: #0d0d0d;
+
+  --color-term-bg: #232325;
+  --color-term-log-bg: #2c2c2e;
+  --color-term-fg: #f5f5f7;
+  --color-term-cursor: #f5f5f7;
+  --color-term-selection: #48484a;
+  --color-term-black: #3a3a3c;
+  --color-term-red: #ff453a;
+  --color-term-green: #30d158;
+  --color-term-yellow: #ffd60a;
+  --color-term-blue: #0a84ff;
+  --color-term-magenta: #bf5af2;
+  --color-term-cyan: #64d2ff;
+  --color-term-white: #d1d1d6;
+  --color-term-bright-black: #636366;
+  --color-term-bright-red: #ff6961;
+  --color-term-bright-green: #4ae070;
+  --color-term-bright-yellow: #ffe36b;
+  --color-term-bright-blue: #409cff;
+  --color-term-bright-magenta: #da8fff;
+  --color-term-bright-cyan: #8de1ff;
+  --color-term-bright-white: #ffffff;
 }
 
 @layer base {
@@ -1711,76 +1783,4 @@ html[data-accent] .cc-switch input:checked ~ .cc-switch-track {
   .cc-donut-out {
     animation: cc-donut-out-still 100ms linear forwards;
   }
-}
-
-/*
- * Graphite (#2208): a neutral grey dark preset in the style of macOS, the owner's "Dark Graphite" custom theme made a
- * built-in. Cool greys with no warm tint, and Apple's system colours for the focus ring, the selection and the terminal.
- * Every value is the owner's file as it was: none broke a rule of themes.md. It leaves what Dark already gives the
- * same value (the scrim, the glow, the scrollbar track and every shadow) to the `@theme` block.
- *
- * Steps (ΔL*): the sidebar #28282a is 5.4 above the floor #1d1d1d and raised #2c2c2e 7.3 (Dark: 0 and 10.0).
- * Contrast of each ink on the floor / the sidebar / raised, the urgency order holding on all three:
- *   signal #ffffff 16.9 / 14.7 / 13.9    body #f5f5f7 15.5 / 13.5 / 12.8
- *   muted  #b0b0b5  7.8 /  6.8 /  6.5    faint #8e8e93  5.2 /  4.5 /  4.3
- * Lines: `line` #38383a is 1.44:1 on the floor, 1.26 on the sidebar and 1.19 on raised; the sidebar's `line-side`
- * #48484b is 1.85, 1.61 and 1.53; `line-strong` #545456 is 2.23, 1.95 and 1.84. Dark's measure 1.59, 1.88 and 2.27 on the
- * floor, so Graphite's lines are the gentler of the two, as its steps are.
- */
-[data-theme='graphite'] {
-  --color-surface-floor: #1d1d1d;
-  --color-surface-side: #28282a;
-  --color-surface-raised: #2c2c2e;
-  --color-surface-selected: #3a3a3c;
-  --color-surface-hover: #48484a;
-  --color-surface-deck: #232325;
-  --color-surface-reading: #1d1d1d;
-  --color-surface-reading-raised: #2c2c2e;
-
-  --color-line: #38383a;
-  --color-line-strong: #545456;
-
-  --color-ink-signal: #ffffff;
-  --color-ink: #f5f5f7;
-  --color-ink-muted: #b0b0b5;
-  --color-ink-faint: #8e8e93;
-  --color-mark-waiting: #a1a1a6;
-
-  --color-diff-add: #30d158;
-  --color-diff-add-bg: #163322;
-  --color-diff-del: #ff9f97;
-  --color-diff-del-bg: #3a1d1b;
-  --color-danger: #ff9f97;
-  --color-danger-bg: #3a1d1b;
-
-  --color-focus: #409cff;
-  --color-selection: #0a84ff4d;
-  --color-scrollbar-thumb: #48484a;
-  --color-scrollbar-thumb-hover: #636366;
-
-  --color-keycap-top: #3a3a3c;
-  --color-keycap-bottom: #2c2c2e;
-  --color-keycap-border: #0d0d0d;
-
-  --color-term-bg: #232325;
-  --color-term-log-bg: #2c2c2e;
-  --color-term-fg: #f5f5f7;
-  --color-term-cursor: #f5f5f7;
-  --color-term-selection: #48484a;
-  --color-term-black: #3a3a3c;
-  --color-term-red: #ff453a;
-  --color-term-green: #30d158;
-  --color-term-yellow: #ffd60a;
-  --color-term-blue: #0a84ff;
-  --color-term-magenta: #bf5af2;
-  --color-term-cyan: #64d2ff;
-  --color-term-white: #d1d1d6;
-  --color-term-bright-black: #636366;
-  --color-term-bright-red: #ff6961;
-  --color-term-bright-green: #4ae070;
-  --color-term-bright-yellow: #ffe36b;
-  --color-term-bright-blue: #409cff;
-  --color-term-bright-magenta: #da8fff;
-  --color-term-bright-cyan: #8de1ff;
-  --color-term-bright-white: #ffffff;
 }

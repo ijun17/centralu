@@ -291,7 +291,7 @@ export function appThemeTests() {
     expect(await styleOf(v, 'button', 'borderTopLeftRadius')).toBe('6px')
   })
 
-  for (const [preset, side] of [['dark', 'dark'], ['light', 'light'], ['hc-dark', 'dark'], ['hc-light', 'light']] as const) {
+  for (const [preset, side] of [['dark', 'dark'], ['light', 'light'], ['hc-dark', 'dark'], ['hc-light', 'light'], ['graphite', 'dark']] as const) {
     test(`the project board takes its colours, type and shape from the theme: ${preset}`, async ({ page }) => {
       await showBoard(page)
       const v = view(page)

@@ -48,7 +48,7 @@ conversation surfaces of its own; the presets set them to the floor and raised v
 Dark is a warm dark floor (`#120e0a`) with raised boxes (`#282320`, ΔL* 10.0 above the floor). Since 2026-11-05
 (the owner's decision) its greys carry a faint warm tint, the colours of the "Dark Warm" custom theme, with the lightness steps
 the neutral Dark had (floor `#0f0f0f`, raised `#242424`, ΔL* 9.9) within 0.1 and the same contrast. The
-sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#3a3531`)
+sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#45403c`, the sidebar's `line-side`, as the top bar's line is since #2207)
 parts them from the conversation. They were `#181818` (ΔL* 3.9, at the owner's ask of 2026-10-20) and `#1d1d1d` (6.5) before: a reader once saw
 the two as "the same colour" at three steps apart with the line between them, and the owner chose to let the line do it alone. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
@@ -56,6 +56,7 @@ with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they st
 and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
 
 **Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own, since none broke a rule here; the comment above its block in `index.css` records the measurements (every ink on every reading surface, the lines). A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
+
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
 is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
@@ -155,7 +156,7 @@ What each preset draws on the sidebar's ground (WCAG contrast of the line agains
 | High contrast light | `#767676` 4.54:1 | `#707070` 4.95:1 |
 | Graphite | `#38383a` 1.26:1, ΔL* 7.4 | `#48484b` 1.61:1, ΔL* 14.5 |
 
-The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both. For the others a test holds `line-side` to 1.3:1 on the sidebar and on the floor beside it (Light's 1.34:1 is the least any preset has), so a preset cannot ship a sidebar line that disappears. A preset's other edges (a card's `line` on the floor or on raised) were not touched by #2207.
+The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both. For the others a test holds `line-side` to 1.3:1 on the sidebar and on the floor beside it (Light's 1.34:1 is the least any preset has), so a preset cannot ship a sidebar line that disappears. A preset's other edges (a card's `line` on the floor or on raised) were not touched by #2207. Other bars and panels on `surface-side` keep the plain `line` for now: the evidence panel (its edge, its header and the overlay header that meets it in one line across the window), the versions, runs and secrets panels. They are a second side panel's lines as a set, and moving one would break the line they share with the next; whether that panel's lines should follow the sidebar's is the owner's call, and in Light they sit at 1.10:1 on their ground today.
 
 ## How it is applied
 

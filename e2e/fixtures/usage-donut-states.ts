@@ -190,7 +190,7 @@ export function usageDonutStatesTests(): void {
       expect(parseFloat(still.duration)).toBeGreaterThan(0)
     })
 
-    for (const theme of ['light', 'dark', 'hc-light', 'hc-dark'] as const) {
+    for (const theme of ['light', 'dark', 'hc-light', 'hc-dark', 'graphite'] as const) {
       test(`${theme} theme: the unsupported ring is drawn clear of the top bar, and its letter is the full ink`, async ({ page }) => {
         const side = theme.endsWith('light') ? 'light' : 'dark'
         await setup(page, { projects: ['/tmp/alpha'] })

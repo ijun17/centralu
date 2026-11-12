@@ -171,7 +171,7 @@ describe('the built CSS actually contains styles', () => {
       'c42b1c',
       /*
        * Graphite (#2208, the owner's "Dark Graphite" file made a preset): macOS's greys, each a step or two bluer than
-       * neutral (a chroma of about 0.004), and Apple's system colours for the diff, danger, the focus ring, the selection
+       * neutral (a chroma of 0.003 to 0.007), and Apple's system colours for the diff, danger, the focus ring, the selection
        * and the terminal. The greys add no hue to the chrome, and the focus ring and selection are the interaction
        * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
        * brightness alone (`ink-signal` is pure white). Listed by value, as Dark's tints are.
