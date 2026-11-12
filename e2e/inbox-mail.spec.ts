@@ -192,6 +192,39 @@ test('Inbox: Done on a mail row closes the thread from the list, and a failed cl
   await expect(page.getByTestId('mail-thread')).toHaveCount(0)
 })
 
+test('Inbox: a question waiting on the person is a card above the rows, a pick answers it without opening, and the card leaves (#2229)', async ({ page }) => {
+  await setup(page)
+  const note = await seed(page, { subject: 'Release notes', from: PARSER, kind: 'note', body: 'Drafted. Nothing for you to do.' })
+  const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  const card = page.getByTestId(`mail-ask-${asked}`)
+  await expect(card).toContainText('Parser asks you')
+  await expect(page.getByTestId(`mail-state-${asked}`)).toHaveText('Waiting on you')
+  // The ordinary thread stays a row, below the card, and says Open
+  await expect(page.getByTestId(`mail-state-${note}`)).toHaveText('Open')
+  expect(await page.locator('[data-testid^="mail-ask-"], [data-testid^="mail-thread-"]').first().getAttribute('data-testid')).toBe(`mail-ask-${asked}`)
+  // The badge's edge is solid while the answer waits
+  await expect(page.getByTestId('counter')).toHaveAttribute('data-edge', 'question')
+  // A pick answers it from the list: nothing opens, and the card is gone once the host has the answer
+  await page.getByTestId(`mail-ask-choices-${asked}-2`).click()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+  await expect(page.getByTestId('counter')).not.toHaveAttribute('data-edge', 'question')
+})
+
+test('Inbox: the number keys pick a choice on the card under the cursor (#2229)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toBeVisible()
+  await page.keyboard.press('2')
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toHaveCount(0)
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await page.getByTestId(`mail-thread-${asked}`).click()
+  await expect(page.getByTestId('mail-message-2')).toContainText('Switch now')
+  await expect(page.getByTestId('mail-choices-1-2')).toHaveAttribute('aria-pressed', 'true')
+})
+
 test('Mail: closing a thread ends the reply box, and a thread left open is not there the next time', async ({ page }) => {
   await setup(page)
   const id = await seed(page, { subject: 'Land #12', from: PARSER, body: 'ready for review', kind: 'report' })

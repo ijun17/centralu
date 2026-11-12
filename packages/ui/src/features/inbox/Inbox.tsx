@@ -26,6 +26,7 @@ import { arrangeInbox, CURSOR_START, rowKeyOf, settleCursor, type InboxCursor } 
 import { Fold } from '../../components/Fold.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { mailAttention } from '../../store/mail.js'
+import { useLeavingCards } from './useLeavingCards.js'
 import { MailThread } from './MailThread.jsx'
 
 /**
@@ -55,6 +56,7 @@ export function Inbox() {
   const closeMailThread = useStore((s) => s.closeMailThread)
   const mail = useStore((s) => s.mail)
   const list = useMemo(() => arrangeInbox(items, mail), [items, mail])
+  const shownRows = useLeavingCards(list.waiting)
   // Nothing to act on: what is read is folded under Earlier, which is no reason for the list to look as if something waited
   const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
   const [earlierOpen, setEarlierOpen] = useState(false)
@@ -125,6 +127,10 @@ export function Inbox() {
         if (item && doneable(item)) void markDone(item.id)
         // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`)
         else if (row?.kind === 'mail') void (row.thread.working === true ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
+      } else if (action === 'choose') {
+        // The number is the choice's own, on the card under the cursor: the key presses its button, so it answers exactly what a click would, and never a card that has taken a press already
+        const button = row?.kind === 'mail' ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-testid="mail-ask-choices-${CSS.escape(row.thread.id)}-${e.key}"]`) : null
+        if (button && !button.disabled) button.click()
       } else if (action === 'allow' || action === 'deny') {
         /*
          * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
@@ -210,9 +216,9 @@ export function Inbox() {
             {nothingWaiting && <Nothing />}
             {list.waiting.length > 0 && (
               <ul className="flex flex-col gap-0.5 p-1">
-                {list.waiting.map((row, place) =>
+                {shownRows.map(({ row, place }) =>
                   row.kind === 'mail' ? (
-                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} />
+                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} leaving={place === null} />
                   ) : (
                     <SessionRow
                       key={row.item.id}

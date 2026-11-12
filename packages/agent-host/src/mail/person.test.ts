@@ -751,7 +751,7 @@ describe('the thread row says what waits on the person’s answer (#2229)', () =
     const w = ready(hostWorld())
     const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
     expect(w.person.list().threads[0]?.ask).toBeNull()
-    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: '**Which** branch?\n\nline two\nline three\nline four', choices: ['main', 'release'] })
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: '**Which** branch?\n\nline two\nline three\nline four\nline five', choices: ['main', 'release'] })
     w.clock.t += 10
     w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'And the tag?' })
     const row = () => w.person.list().threads.find((t) => t.id === root.id)!
@@ -759,7 +759,7 @@ describe('the thread row says what waits on the person’s answer (#2229)', () =
     expect(row().ask?.choices).toBeUndefined()
     const first = w.person.thread(root.id).messages.find((m) => m.body.startsWith('**Which**'))!
     w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
-    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three', choices: ['main', 'release'], count: 1 })
+    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three\nline four', choices: ['main', 'release'], count: 1 })
     w.person.close(root.id)
     expect(row().ask).toBeNull()
   })

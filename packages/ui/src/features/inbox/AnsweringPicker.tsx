@@ -83,4 +83,3 @@ export function AnsweringPicker({
   )
 }
 
-const oneLine = (body: string) => body.replace(/\s+/g, ' ').trim()

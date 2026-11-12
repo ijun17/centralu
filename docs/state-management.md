@@ -52,7 +52,8 @@ The do-not-store list — the following **must not exist as fields** and must be
 
 | Derived value | Computed from | Reasoning |
 |---|---|---|
-| Inbox list and order | sessions' state + when the wait started + unread | Storing it means synchronising on every state change → ghost item bugs |
+| Inbox list and order | sessions' state + when the wait started + unread; mail threads' `ask` (what waits on the person's answer). Cards for such threads come first, newest first, then sessions, then ordinary rows: what blocks a session comes first (`arrangeInbox`, #2229) | Storing it means synchronising on every state change → ghost item bugs |
+| The header mail badge's solid edge (a mail question or an approval card waits on the person's answer) | the host's thread list (`ask`) + the sessions' approvals (`mailAsksYou`, `countWaiting`; #2227) | A stored flag would outlive the answer that cleared it |
 | Global counters | 〃 | 〃 |
 | Unread or not | `lastMessageSeq > lastReadSeq` | It is just a comparison of two numbers |
 | Project aggregate badge | the states of the sessions in it | 〃 |

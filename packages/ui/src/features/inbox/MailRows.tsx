@@ -23,9 +23,9 @@ export function MailPinned({ held, waiting }: { held: MailHeldRow[]; waiting: nu
 }
 
 /** One thread of the person's mailbox in the inbox's list: a card when it waits on the person's answer (#2229), else a row */
-export function MailThreadItem({ thread: t, dim, active }: { thread: MailThreadRow; dim?: boolean; active?: boolean }) {
+export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: MailThreadRow; dim?: boolean; active?: boolean; leaving?: boolean }) {
   const open = useStore((s) => s.openMailThread)
-  if (t.ask) return <AskCard thread={t} ask={t.ask} active={active} />
+  if (t.ask) return <AskCard thread={t} ask={t.ask} active={active} leaving={leaving} />
   return (
     <li data-cursor={active || undefined} className={`rounded-field transition-colors ${active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'} ${dim ? 'opacity-80' : ''}`}>
       <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>

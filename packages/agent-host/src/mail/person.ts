@@ -35,7 +35,7 @@ const LIST_SCAN = 1_000
 const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
 /** A question's card shows its first lines (#2229): this many, and no more than this many characters */
-const ASK_LINES = 3
+const ASK_LINES = 4
 const ASK_CHARS = 320
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
