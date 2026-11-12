@@ -491,7 +491,7 @@ function TopBar() {
    */
   return (
     <DragRegion
-      className="flex h-9 shrink-0 items-center gap-4 border-b border-line bg-surface-side pr-4 relative"
+      className="flex h-9 shrink-0 items-center gap-4 border-b border-(--color-line-side) bg-surface-side pr-4 relative"
       /*
        * Inset is 0 wherever there are no traffic lights (web and mock report it that way —
        * correct, since there is no button to make room for). But using it as-is would remove the

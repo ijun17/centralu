@@ -19,6 +19,8 @@ type Mock = {
 }
 
 const DARK_FLOOR = '#120e0a'
+/** The least a preset's sidebar line may have on the sidebar and on the floor: Light's 1.34:1 on its sidebar is the weakest of the presets (docs/themes.md, "The lines") */
+const LINE_SIDE_FLOOR = 1.3
 
 export async function token(page: Page, name: string): Promise<string> {
   return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
@@ -134,14 +136,19 @@ export function presetTests() {
         [preset.id, preset.base],
       )
       await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
-      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line']
+      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line', '--color-line-side']
       const colors = await presetColors(page, names)
       expect(urgencyBreaks(colors)).toEqual([])
+      // The sidebar's and the top bar's line stands off the ground it is drawn on, and off the conversation beside it (#2207)
+      for (const surface of ['--color-surface-side', '--color-surface-floor']) {
+        expect(contrast(colors['--color-line-side']!, colors[surface]!), `line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_SIDE_FLOOR)
+      }
       if (preset.id.startsWith('hc-')) {
         // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
         for (const [surface] of READING_SURFACES) {
           for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
           expect(contrast(colors['--color-line']!, colors[surface]!), `line on ${surface}`).toBeGreaterThanOrEqual(3)
+          expect(contrast(colors['--color-line-side']!, colors[surface]!), `line-side on ${surface}`).toBeGreaterThanOrEqual(3)
         }
       }
     })

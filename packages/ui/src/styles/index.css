@@ -297,10 +297,21 @@
 }
 
 /*
- * The sidebar's lines, a step toward the ink so they stand apart from its background (dividers between
- * projects, "Add project", row borders). Mixed from the theme's own tokens rather than set per preset, so
+ * The lines drawn on the sidebar's ground, a step toward the ink so they stand apart from it (dividers between
+ * projects, "Add project", row borders, the sidebar's own edge, and the top bar's and the shell banner's bottom
+ * line, which hang on the same ground). Mixed from the theme's own tokens rather than set per preset, so
  * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
- * swaps this in for --color-line (SIDEBAR_VARS).
+ * swaps this in for --color-line (SIDEBAR_VARS); the top bar and the banner name it directly, `border-(--color-line-side)`
+ * (#2207), since swapping it in there would also change a session mark's line.
+ *
+ * Measured against the sidebar's own ground, and against the floor beside it (WCAG contrast, ΔL* in CIELAB):
+ *   Dark      #45403c  1.88:1, ΔL* 23.3 (the plain `line` #3a3531: 1.59:1, 18.3)
+ *   Light     #c3c3c3  1.34:1 on #e0e0e0, ΔL* 10.4; 1.55:1 on the floor, 16.0 (`line` #d6d6d6: 1.10:1, 3.6)
+ *   Graphite  #48484b  1.61:1 on #28282a, ΔL* 14.5; 1.85:1 on the floor, 19.9 (`line` #38383a: 1.26:1, 7.4)
+ *   HC dark   #797979  4.82:1; HC light #707070 4.95:1 (`line`: 4.24 and 4.54; the 3:1 hairline rule holds)
+ * Light's is the weakest of the presets and the least a preset's may be: e2e/fixtures/theme.ts holds every preset to 1.3:1
+ * on the sidebar and on the floor, and the high-contrast ones to 3:1. The top bar used the plain `line`, which in
+ * Light left it at 1.10:1 on its ground (a custom theme with `line` #232326 on a #252528 sidebar: 1.03:1, gone).
  *
  * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
  * holds to it), and this is derived from two of them, never set themselves.

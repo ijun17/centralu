@@ -53,6 +53,7 @@ the two as "the same colour" at three steps apart with the line between them, an
 `#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
 with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they still are). The inks are now body `#f0ecea`, secondary `#aca7a3`
 and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
+
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
 is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
@@ -137,6 +138,22 @@ looks: idle (the chip's own `line-strong` border), answering (a 1.5px `ink-muted
 (the same ring dashed, the chip on `surface-selected`: an error, an interruption or a limit) and
 waiting (the solid ring, the chip on `surface-selected`: an approval or a question). A grid or project
 panel follows with its own 1px border: `ink-muted` while answering (a lighter grey, `#9e9e9e`, in Light), `ink-signal` while waiting, dashed `ink-signal` when stopped.
+
+## The lines
+
+Three tokens draw every edge: `line` (the hairline: a card's or panel's border, a divider), `line-strong` (a border that has to show) and `line-side`, a line on the sidebar's own ground. `line-side` is not set by a theme: it is `line` mixed 80% with `ink-faint` in `index.css`, so every preset and every custom theme gets a step toward the ink, lighter on a dark sidebar and darker on a light one. The sidebar swaps it in for `line` inside itself (its dividers, its row borders, its own edge); the top bar and the shell banner, which hang on the same ground, name it for their bottom line (#2207). They used the plain `line`, which in a theme whose `line` sits close to `surface-side` all but vanished: Light's `#d6d6d6` on `#e0e0e0` is 1.10:1, and a custom `line` `#232326` on a `#252528` sidebar 1.03:1 (as `line-side` it would be `#36363a`, 1.27:1).
+
+What each preset draws on the sidebar's ground (WCAG contrast of the line against `surface-side`, and ΔL* in CIELAB):
+
+| Preset | `line` (before, the top bar) | `line-side` (after, the whole top bar and the sidebar) |
+|---|---|---|
+| Dark | `#3a3531` 1.59:1, ΔL* 18.3 | `#45403c` 1.88:1, ΔL* 23.3 |
+| Light | `#d6d6d6` 1.10:1, ΔL* 3.6 | `#c3c3c3` 1.34:1, ΔL* 10.4 |
+| High contrast dark | `#707070` 4.24:1 | `#797979` 4.82:1 |
+| High contrast light | `#767676` 4.54:1 | `#707070` 4.95:1 |
+| Graphite | `#38383a` 1.26:1, ΔL* 7.4 | `#48484b` 1.61:1, ΔL* 14.5 |
+
+The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-side` both. For the others a test holds `line-side` to 1.3:1 on the sidebar and on the floor beside it (Light's 1.34:1 is the least any preset has), so a preset cannot ship a sidebar line that disappears. A preset's other edges (a card's `line` on the floor or on raised) were not touched by #2207.
 
 ## How it is applied
 

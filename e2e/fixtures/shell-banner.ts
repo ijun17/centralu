@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
+import { tokenColor } from './tokens.js'
 
 /**
  * The shell's banner (the desktop keeper's "other build" bar) covers nothing (#326).
@@ -120,6 +121,14 @@ export function shellBannerTests(): void {
       // The lanes gave up the banner's height rather than pushing the composer off the bottom
       const composer = await box(page, 'composer-shell')
       expect(composer.y + composer.height).toBeLessThanOrEqual(page.viewportSize()!.height)
+    })
+
+    // It hangs from the top bar on the same ground, so its bottom line is the sidebar's line too (#2207)
+    test('the other-build bar draws its line in the sidebar line colour, as the top bar does', async ({ page }) => {
+      await open(page, 'demo=focus&state=other')
+      const line = await tokenColor(page, '--color-line-side')
+      await expect(page.getByTestId('host-other-build')).toHaveCSS('border-bottom-color', line)
+      await expect(page.getByTestId('app-header')).toHaveCSS('border-bottom-color', line)
     })
 
     // The sidebar stands under the banner, so the search field does too: the palette hangs under the field, not under the bar's row

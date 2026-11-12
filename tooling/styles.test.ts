@@ -388,7 +388,7 @@ describe('Tauri permissions', () => {
    */
   it('the top bar height agrees across the config, Rust and the screen', () => {
     const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
-    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-line bg-surface-side/.exec(header)
+    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b /.exec(header)
     expect(m, 'could not find the top bar\'s h-* class').toBeTruthy()
     const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
     const BUTTON = 12 // the diameter of a macOS traffic light

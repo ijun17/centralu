@@ -26,7 +26,7 @@ export function ShellBanner({
 }) {
   return (
     <div
-      className="flex h-8 min-w-0 shrink-0 items-center gap-3 border-b border-line bg-surface-side px-4 text-xs text-ink-muted"
+      className="flex h-8 min-w-0 shrink-0 items-center gap-3 border-b border-(--color-line-side) bg-surface-side px-4 text-xs text-ink-muted"
       data-testid={testId}
       role={role}
     >

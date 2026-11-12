@@ -50,7 +50,7 @@ Every corner is a step of this scale. Tailwind's own radii are cleared, so `roun
 |---|---|---|
 | `line` | the hairline: a card's or panel's border, dividers, a footer's top rule, meter tracks | Separates without drawing the eye |
 | `line-strong` | a border that has to show: a focused or hovered field, checkboxes, graph lanes, an idle session mark, **every cell of a table in an answer (1px)** | The answer sits in a bubble on `surface-raised` with a `line` border, so hairline cells faded into the bubble (*owner, 2026-10-18*, `.cc-md th, td`; 2px was tried and reverted) |
-| `line-side` | lines inside the sidebar (between projects, row borders) | Derived from `line` and `ink-faint`, so it stands apart on the sidebar's own ground in every theme (`:root` in `index.css`) |
+| `line-side` | lines on the sidebar's ground: inside the sidebar (between projects, row borders, its edge), the top bar's and the shell banner's bottom line (`border-(--color-line-side)`) | Derived from `line` and `ink-faint`, so it stands apart on the sidebar's own ground in every theme (`:root` in `index.css`). The top bar is drawn on `surface-side`, and the plain `line` there all but vanished in a theme whose `line` is close to it (*owner, 2026-11-12*, #2207; [themes.md](themes.md#the-lines)) |
 
 Borders are 1px. A session mark that says something is 2px (`.cc-mark`), because at 17px a 1px change
 of ink is too small to read. A table header takes half a hover step (`surface-hover` 50%), so it reads as
