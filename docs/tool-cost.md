@@ -1039,6 +1039,8 @@ Measured without a model, as §12: each profile's served list on each CLI, Centr
 (`servedDefinitions`, `definitionChars`; on Claude a deferred tool counts its name), with 0, 3 and 10 of the apps
 `create_app` makes attached (`show`, `increment`, the host's `run_status`). Before is the commit before #2231 with the app
 servers' tools counted as the CLI received them (Codex the whole definition, Claude the name behind tool search).
+Both columns were measured on the same base (the commit before #2231); #2232, merged after, changes the `mail` and
+`agent_session` definitions in both alike (its own measurement is in its section).
 
 | Profile, CLI | Before: 0 / 3 / 10 apps | After: 0 / 3 / 10 apps | Tools before → after |
 |---|---|---|---|
