@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows } from './kill-tree.js'
+import { collectAllOrphansWindows, pidAlive, stopTree, stopTreeWindows, stopTreesWindows } from './kill-tree.js'
 import {
   killHandle,
   spawnGrouped,
@@ -499,14 +499,7 @@ const realOsValue: Os = {
       ),
     stop,
     stopAll,
-    alive: (pid) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch (e) {
-        return errnoCode(e) === 'EPERM'
-      }
-    },
+    alive: pidAlive,
     signal: (pid, signal) => {
       const refused = signalRefusal(signal, HOST_FAMILY)
       if (refused === 'ERR_UNKNOWN_SIGNAL') throw signalError(signal, refused)
