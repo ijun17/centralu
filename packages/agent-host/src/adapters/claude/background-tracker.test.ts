@@ -100,3 +100,35 @@ describe('the Claude background events, by the rule both adapters share (#843)',
     expect(ended[0]!.type === 'background_tasks' && ended[0].ended?.[0]?.summary).toBe(summary.slice(0, BACKGROUND_SUMMARY_CHARS))
   })
 })
+
+describe('a task that ends failed or stopped leaves one line in the conversation, of any kind (#2230)', () => {
+  const start = (t: ClaudeBackgroundTracker, id: string, type: string, description: string) => {
+    t.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: id, task_type: type, description }] })
+  }
+  const notices = (events: ReturnType<ClaudeBackgroundTracker['push']>) => events.flatMap((e) => (e.type === 'notice' ? [e.text] : []))
+
+  it('a shell that failed and one that was stopped each leave exactly one line, with the reason when the tool gave one; one that completed leaves none', () => {
+    const t = new ClaudeBackgroundTracker('s1')
+    start(t, 'b1', 'local_bash', 'npm test')
+    expect(notices(t.push({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'failed', summary: 'exit code 1' }))).toEqual(['Background shell "npm test" failed: exit code 1'])
+    start(t, 'b2', 'local_bash', 'npm run dev')
+    expect(notices(t.push({ type: 'system', subtype: 'task_notification', task_id: 'b2', status: 'stopped' }))).toEqual(['Background shell "npm run dev" stopped'])
+    start(t, 'b3', 'local_bash', 'npm run build')
+    expect(notices(t.push({ type: 'system', subtype: 'task_notification', task_id: 'b3', status: 'completed', summary: 'exited 0' }))).toEqual([])
+  })
+
+  it('every kind goes through the one place: an agent, an MCP task and another task say it the same way', () => {
+    const t = new ClaudeBackgroundTracker('s1')
+    for (const [id, type, word] of [['a1', 'local_agent', 'agent'], ['m1', 'monitor_mcp', 'MCP task'], ['o1', 'workflow', 'task']] as const) {
+      start(t, id, type, 'the work')
+      expect(notices(t.push({ type: 'system', subtype: 'task_notification', task_id: id, status: 'failed' }))).toEqual([`Background ${word} "the work" failed`])
+    }
+  })
+
+  it('a process that goes away says each task it took as stopped, once', () => {
+    const t = new ClaudeBackgroundTracker('s1')
+    start(t, 'b1', 'local_bash', 'tail -f log')
+    expect(notices(t.release('The session ended'))).toEqual(['Background shell "tail -f log" stopped: The session ended'])
+    expect(notices(t.release('The session ended'))).toEqual([])
+  })
+})

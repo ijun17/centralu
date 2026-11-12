@@ -1,4 +1,4 @@
-import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
+import { oneLineText, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 
 /**
  * How much of how a background task ended its entry carries, the same for both tools (#843): Claude's
@@ -11,6 +11,28 @@ export const BACKGROUND_SUMMARY_CHARS = 300
 export function endedSummary(text: string | undefined): { summary?: string } {
   const summary = (text ?? '').slice(0, BACKGROUND_SUMMARY_CHARS)
   return summary ? { summary } : {}
+}
+
+const KIND_WORDS: Record<BackgroundTask['kind'], string> = { agent: 'agent', shell: 'shell', mcp: 'MCP task', other: 'task' }
+
+/**
+ * The conversation's one line for a task that ended failed or stopped (#2230), whatever its kind: which task, how it ended and
+ * the reason when the tool gave one. A task that completed leaves none. The list of background work shows only the current burst,
+ * so this line is what remains of an ended task.
+ */
+function endedNotice(sessionId: string, t: BackgroundTask): NormalizedEvent[] {
+  if (t.status !== 'failed' && t.status !== 'stopped') return []
+  const why = t.summary ? `: ${oneLineText(t.summary, BACKGROUND_SUMMARY_CHARS)}` : ''
+  return [
+    {
+      type: 'notice',
+      sessionId,
+      level: t.status === 'failed' ? 'warning' : 'info',
+      text: `Background ${KIND_WORDS[t.kind]} "${oneLineText(t.description, 80)}" ${t.status}${why}`,
+      from: 'Centralu',
+      label: 'background task',
+    },
+  ]
 }
 
 /**
@@ -36,6 +58,7 @@ export class BackgroundEvents {
         live,
         ...(ended.length ? { ended } : {}),
       },
+      ...ended.flatMap((t) => endedNotice(this.sessionId, t)),
     ]
   }
 }

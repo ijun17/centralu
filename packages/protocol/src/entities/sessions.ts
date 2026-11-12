@@ -138,8 +138,9 @@ export const BACKGROUND_ENDED_KEPT = 10
  * so the three cannot drift apart.
  *
  * `live` replaces every running entry (REPLACE semantics: a missed edge cannot leave a stale "running"). `ended`
- * adds tasks that just left, with their status; an ended task stays listed until `clearEnded` or until it is pushed
- * out by newer ones (`BACKGROUND_ENDED_KEPT`). A task that leaves the live set with no `ended` entry simply
+ * adds tasks that just left, with their status; an ended task stays listed until `clearEnded`, until it is pushed
+ * out by newer ones (`BACKGROUND_ENDED_KEPT`), or until the next burst starts: work that begins while nothing ran
+ * (`liveBackgroundTasks`) opens a list of its own, and the tasks that ended before it are in the conversation (#2230). A task that leaves the live set with no `ended` entry simply
  * disappears — the adapter did not say how it ended, and nothing here guesses.
  */
 export function applyBackgroundTasks(
@@ -150,7 +151,8 @@ export function applyBackgroundTasks(
   const liveIds = new Set(live.map((t) => t.id))
   const fresh = (e.ended ?? []).filter((t) => !liveIds.has(t.id) && t.status !== 'running')
   const freshIds = new Set(fresh.map((t) => t.id))
-  const kept = e.clearEnded
+  const newBurst = liveBackgroundTasks(live).length > 0 && liveBackgroundTasks(prev).length === 0
+  const kept = e.clearEnded || newBurst
     ? []
     : prev.filter((t) => t.status !== 'running' && !liveIds.has(t.id) && !freshIds.has(t.id))
   return [...live, ...[...kept, ...fresh].slice(-BACKGROUND_ENDED_KEPT)]
