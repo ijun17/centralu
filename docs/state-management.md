@@ -110,6 +110,17 @@ only update suggestions; they never restore the composer's text.
   try, the snapshot the window holds is saved in its place, said once, so a row that never reads cannot stop saving
   for good. A row that is not a JSON object reads as none on the host, which names it on stderr with what it held
   ([stored-shapes.md](stored-shapes.md)).
+- **The stored snapshot is unread from the start of `attach`** (#2220). Between the host answering and the restore reading the
+  snapshot, `attach` reads the lists, which take long after an update, while the host and its subscriptions are live. A save in that
+  time (an app list that changed notes its arrivals and saves) wrote this window's defaults over the stored row, and the restore
+  read the defaults back: every project expanded and no screen. `workspaceUnread` is therefore set when `attach` begins and cleared
+  by a read of the snapshot (the restore's own, or the later one of a failed read, which waits until the restore's is over: `workspaceReading`).
+- **A screen that cannot come back opens the Assistant** (owner, 2026-11-12, #2220). When the snapshot cannot be read, or its focus view names a session that
+  is gone, or its pinned view names an app that is gone, the restore opens the Assistant instead of the empty "Select a project or
+  session". A window with no snapshot at all (a first launch) is not that case and keeps the intro. At the first attach the switch happens before any
+  screen is shown (`workspaceReady`), so it is a screen chosen, not a view switching in front of the person, and has nothing to animate;
+  a window that attaches again to another host already shows a screen, and the Assistant comes in with the usual view switch
+  (design-system §9). A window with nothing yet that cannot read its snapshot keeps the intro. A snapshot read late never switches the screen.
 - **Startup and reconnect recovery read the session list while live events keep arriving.** The list can be older than
   them (the hub answers once every linked machine has), so it is merged against the sessions as they were when it
   was asked for (`mergeListedSince`): a field the store changed since then keeps the store's value. State and liveness

@@ -158,6 +158,11 @@ export function returnsToPanel(
   return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)
 }
 
+/** Whether the intro stands in the middle: a window with no project and no session that has not passed it yet (#63) */
+export function showsIntro(s: Pick<AppState, 'projects' | 'sessions' | 'introSeen'>): boolean {
+  return Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0 && !s.introSeen
+}
+
 /**
  * The screen on now, as history records it (#374), or null for one that is not a place to return to (nothing
  * picked yet, the intro). Settings is a layer over the screen under it, and counts as a screen of its own.

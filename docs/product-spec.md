@@ -239,6 +239,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - Save a workspace snapshot on exit: project list, layout, and per project the open session IDs, tools, names and read positions.
 - On restart:
   - UI and layout restored immediately
+  - If the screen it was on cannot come back (the workspace cannot be read, the focused session is gone, or the pinned app is gone), the Assistant opens, not an empty screen (owner, 2026-11-12, #2220)
   - Conversation record loaded immediately from local logs/SQLite (shown read-only first)
   - Session processes are **resumed where resume is possible** (Claude Agent SDK resume, `codex resume`); where not, offer "view the record only + start a new session"
 - Make explicit that an agent turn that was in flight is interrupted when the process dies (restore is "continue the conversation", not "continue the turn").

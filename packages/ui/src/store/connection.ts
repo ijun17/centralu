@@ -21,7 +21,7 @@ import type { AppState, StoreGet, StoreSet } from './state.js'
 import { sanitizeLayout } from './panelLayout.js'
 import { EMPTY_NAV } from './navHistory.js'
 import { isApp } from './appKeys.js'
-import { screenOf } from './screens.js'
+import { screenOf, showsIntro } from './screens.js'
 import {
   forgetSessions,
   mergeListedSince,
@@ -57,7 +57,8 @@ import { RETRY_MS, retryLadder, type RetrySteps } from './retry.js'
 export let restoringWorkspace = false
 
 /**
- * True when the last `attach` could not read the workspace snapshot, or its restore threw partway (#384).
+ * True when the stored workspace snapshot has not been read: from the start of `attach` until its restore has read it
+ * (#2220), and when that read failed or the restore threw partway (#384).
  * `saveWorkspace` does nothing then, until an attach reads it: the screen is on its defaults, and a save would write
  * them over the stored snapshot, which holds settings as well as the layout (the notification switches, the app
  * spans, `introSeen`). A layout changed meanwhile is not kept; the stored one comes back with the next read.
@@ -178,8 +179,12 @@ export function goodThemes(
  * Lays a stored snapshot onto the window (C-3), field by field. With `screen`, it also goes back to the screen the
  * snapshot names (the focused session, the view, the pinned app); a snapshot read late (#384, `readWorkspaceAgain`)
  * brings back the settings and the layout only, because the person is already working on some screen.
+ *
+ * Answers whether the screen the snapshot names could be brought back. It cannot when the focused session is gone or the
+ * pinned app is gone (#2220): the caller then opens the Assistant rather than leave the empty screen.
  */
-function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): void {
+function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): boolean {
+  let screenBack = true
   /*
    * Folded projects are restored **first of all** (#205). `focusSession` right below this
    * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
@@ -230,6 +235,7 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
      */
     get().focusSession(snap.focusedSessionId, { reveal: false })
   }
+  const sessionGone = screen && !!snap.focusedSessionId && !get().sessions[snap.focusedSessionId]
   /*
    * The view comes back *after* the session, on purpose: focusSession forces
    * view:'focus' (selecting a session must show it), so restoring in the other
@@ -249,6 +255,8 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    */
   if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
   const savedView = screen ? (snap as { view?: unknown }).view : undefined
+  // A session that is gone leaves nothing to show in the focus view; the grid and the Assistant do not need it
+  if (sessionGone && savedView !== 'grid' && savedView !== 'assistant' && savedView !== 'orchestrator' && savedView !== 'app') screenBack = false
   if (savedView === 'grid') set({ view: 'grid' })
   // 'orchestrator': a workspace a build before #2133 saved
   else if (savedView === 'assistant' || savedView === 'orchestrator') void get().openAssistant()
@@ -256,13 +264,13 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
     /*
      * The app that was being viewed as a pinned view (B-2). The list is already loaded from
      * the first snapshot above — if the app no longer exists (its folder disappeared, its
-     * project was deleted), it is not restored and the focus view is left as is. Opening it
+     * project was deleted), it is not restored and the caller opens the Assistant (#2220). Opening it
      * has the host call `home`: what comes back to that spot is a single app process.
      */
     const app = snap.focusedApp
     if (app && get().externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))) {
       get().openApp(app.projectId, app.appId, { machine: app.machine })
-    }
+    } else screenBack = false
   }
   /*
    * Layout prefs come back even when the focused session is gone (#20). They used
@@ -302,6 +310,7 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    * `foldComposer` (the "fold the message box" switch) is no longer read (owner, 2026-10-20): a grid or project panel
    * folds its composer by its own height now (SessionPane's `foldWhenShort`). A snapshot that still carries it is fine.
    */
+  return screenBack
 }
 
 /** Bumped by every attach and every new read, so an older one stops once its wait is over */
@@ -377,7 +386,20 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     resetWorkspaceSave()
     workspaceReadRun++
     workspaceReadSteps.at = 0
-    workspaceReading = false
+    /*
+     * This attach's own read of the snapshot is on its way from here (`workspaceReading`): the reconnect that follows the host's
+     * first word (`recoverAfterReconnect`) must not start another beside it, which would clear `workspaceUnread` while the
+     * lists are still being read, and its `finally` would end the restore's hold on saving (#2220).
+     */
+    workspaceReading = true
+    /*
+     * The stored snapshot is unread from here until the restore below has read it (#2220). The lists read in between take long
+     * after an update, and the host and the subscriptions are live meanwhile: anything that saves in that time (an app list that
+     * changed notes its arrivals and saves) would write this window's defaults over the stored snapshot, and the restore would then
+     * read the defaults back. A read that fails leaves it unread, as before (`readWorkspaceAgain`); an attach that fails before it
+     * leaves it unread too, and the next reconnect reads it.
+     */
+    workspaceUnread = true
     set({ platform })
     subscriptions.push(
       platform.agents.subscribe((e, id) => get().dispatchEvent(e, id)),
@@ -495,7 +517,13 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
          * that was not read, and is said (#841 item 10): the sidebar would show no machine where one is linked
          */
         platform.machines.list().catch(orEmpty('the linked machines', [] as MachineInfo[])),
-      ]).finally(watch.stop)
+      ])
+        .finally(watch.stop)
+        // An attach that fails before its read leaves the snapshot unread, and the next reconnect reads it
+        .catch((e: unknown) => {
+          workspaceReading = false
+          throw e
+        })
     set((st) => {
       // Recovery or re-attachment may have updated the window while startup reads were pending (#640).
       const { sessions: known } = mergeListedSince(asked, st.sessions, sessions, watch.touched)
@@ -560,18 +588,26 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     restoringWorkspace = true
+    // The saved screen could not be brought back: the Assistant opens instead of the empty screen (#2220, owner decision)
+    let screenLost = false
     try {
       const snap = await platform.workspace.load()
       workspaceUnread = false
-      if (snap) applyWorkspaceSnapshot(snap, get, set, true)
+      if (snap) screenLost = !applyWorkspaceSnapshot(snap, get, set, true)
     } catch (e) {
+      // The intro is the screen of a window with nothing yet, not an empty one
+      screenLost = screenOf(get()) === null && !showsIntro(get())
+      workspaceReading = false
       // The app works normally even with no snapshot, but it is said, not saved over (`workspaceUnread`), and read again
       workspaceUnread = true
       set({ toast: `Could not read the window layout (${errorMessage(e)}); it is shown as the defaults, and not saved over until it is read again` })
       void readWorkspaceAgain(get, set, true)
     } finally {
       restoringWorkspace = false
+      workspaceReading = false
     }
+    // The view changes before the screen is first shown (`workspaceReady` below), so it is not a visible switch
+    if (screenLost) void get().openAssistant()
     // History starts at the screen the restore left (#374): the steps it took to get there are not the person's
     const restored = screenOf(get())
     set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV, workspaceReady: true })

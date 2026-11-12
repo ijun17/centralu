@@ -395,7 +395,7 @@ describe('a pinned view (M4 B-2)', () => {
     expect(pinned()[0]).toMatchObject({ phase: 'open', instanceId: expect.not.stringMatching(old!) })
   })
 
-  it('a pinned view that was being viewed is restored — an app not in the list leaves the focus view instead', async () => {
+  it('a pinned view that was being viewed is restored — an app not in the list opens the Assistant instead (#2220)', async () => {
     const mock = new MockPlatform()
     mock.externalAppList = [appInfo('slider')]
     mock.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
@@ -408,7 +408,7 @@ describe('a pinned view (M4 B-2)', () => {
     gone.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
     useStore.setState({ pinnedViews: [], focusedApp: null, view: 'focus' })
     await useStore.getState().attach(gone)
-    expect(useStore.getState().view).toBe('focus')
+    expect(useStore.getState()).toMatchObject({ view: 'assistant', focusedApp: null })
     expect(pinned()).toEqual([])
   })
 })
