@@ -2103,8 +2103,8 @@ call written as the caller's seat makes it (`agentCallsFor`: on the Assistant bo
 **What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
 `agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send to its own child on a
 linked machine was mail across the link (#2067, [linked-mail.md](linked-mail.md) §5); it is the work `send` gave now, through the link. A send by an original to a
-child that a handoff moved is refused naming the successor, as `send` was (`handedOverAnswer`, #693). The answer starts "Sent as work, not as
-mail", and says a `kind` given is mail's; a `subject` leads the words the child receives, on its own line, so the child reads what the card
+child that a handoff moved is refused naming the successor, as `send` was (`handedOverAnswer`, #693). The answer starts "Sent as work for a
+session you started" (to a busy one the work goes as a task mail, which the rest of the answer names), and says a `kind` given is other mail's; a `subject` leads the words the child receives, on its own line, so the child reads what the card
 shows. A role (`parent`, `assistant`, `person`) is never work, whatever a session is named. Who counts as the caller's own is one rule
 (`ownChild`, agent-session-actions.ts), which agent_session widens for #637's delete and for `auto`, and a send does not.
 

@@ -198,7 +198,7 @@ export class MailTool {
     const [only, other] = this.sessionsNamed(sessionId, word)
     const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
     const r = await this.host.work(sessionId, only && !other ? only.id : word, subject + a.text.trim(), a.ifBusy, signal)
-    return r && !r.isError ? { ...r, text: `Sent as work, not as mail${a.kind ? ` (kind "${a.kind}" is for mail)` : ''}. ${r.text}` } : r
+    return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
   }
 
   /** The sessions here a word names: the one with that id, else those of that name but the caller (after a handoff the heir has the name of the session it replaced, and writes to that one) */
