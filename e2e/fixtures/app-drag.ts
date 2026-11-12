@@ -189,6 +189,43 @@ export function appDragTests(): void {
       await expect(notice(page, alpha)).toContainText('Restart the session to attach it.')
     })
 
+    /**
+     * A drop out of a user-folder app (#82): the app has no project to say which computer it is on, so the window compares the app's
+     * machine with the session's and says so itself, asking no one. The drop is the event the relay dispatches on the pane.
+     */
+    async function dropFrom(page: Page, sessionId: string, from: { appId: string; projectId: null; machine?: string }, sessionMachine?: string) {
+      await page.evaluate(
+        ({ id, from, sessionMachine }) => {
+          const w = window as any
+          w.__store.setState({ machines: { m1: { id: 'm1', name: 'Box' } } })
+          if (sessionMachine) w.__store.setState((s: any) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], machine: sessionMachine } } }))
+          const target = document.querySelector(`[data-testid="grid-panel-${id}"] textarea`)!
+          target.dispatchEvent(new CustomEvent('cc-app-link-drop', { bubbles: true, detail: { uri: 'https://example.test/x', text: 'x', from, landed: false } }))
+        },
+        { id: sessionId, from, sessionMachine },
+      )
+    }
+
+    test('a user-folder app of a linked machine, dropped on a session of another computer, says so without asking anyone', async ({ page }) => {
+      const { alpha } = await boardBesideSessions(page)
+      await dropFrom(page, alpha, { appId: 'notes', projectId: null, machine: 'm1' })
+      await expect(notice(page, alpha)).toHaveAttribute('data-reason', 'other-machine')
+      await expect(notice(page, alpha)).toHaveText('notes runs on Box, and this session is on another computer.')
+      expect(await reachAsks(page)).toBe(0)
+      // This computer's own user-folder app, dropped on a session of the linked machine: the same line, the other way
+      await notice(page, alpha).getByTestId('composer-app-notice-dismiss').click()
+      await dropFrom(page, alpha, { appId: 'notes', projectId: null }, 'm1')
+      await expect(notice(page, alpha)).toHaveText('notes runs on this computer, and this session is on another computer.')
+      expect(await reachAsks(page)).toBe(0)
+    })
+
+    test('a user-folder app dropped on a session of its own computer is asked about once, as before', async ({ page }) => {
+      const { alpha } = await boardBesideSessions(page)
+      await dropFrom(page, alpha, { appId: 'notes', projectId: null, machine: 'm1' }, 'm1')
+      await expect.poll(() => reachAsks(page)).toBe(1)
+      await expect(notice(page, alpha)).not.toHaveAttribute('data-reason', 'other-machine')
+    })
+
     test('a view that only says a drag happened, with no press in it, puts nothing into a composer', async ({ page, browserName }) => {
       const { pid, alpha } = await boardBesideSessions(page)
       const target = await middle(page.getByTestId(`grid-panel-${alpha}`).getByTestId('session-view'))

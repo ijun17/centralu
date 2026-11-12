@@ -132,7 +132,10 @@ runtimes and apps built for other hosts included, and the contract stays the sta
 host whether this session can use the app's tools (`apps.reach`). If not, a quiet line under the
 composer names the app, why, and what fixes it; it goes on send, on dismiss, on the next drop, or
 when the composer shows another session. The host answers from decision 4 ([attaching.md](attaching.md#which-session-gets-which-apps-decision-4)) and then from the
-live agent:
+live agent. One case the window decides itself, asking no one: a user-folder app has no project to say which computer it is on, so the
+composer compares the app's machine (the drag carries it) with the session's, and when they differ the line is "<app> runs on <machine>, and
+this session is on another computer." (`data-reason="other-machine"`; "this computer" for the hub's own app dropped on a linked machine's
+session). When they match, the host is asked as above, with no machine in the request.
 
 | `reason` | When | The line says |
 |---|---|---|

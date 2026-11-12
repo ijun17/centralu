@@ -1,4 +1,4 @@
-import { appKeyOf } from '@cc/protocol/client'
+import { appKeyOf, sameApp } from '@cc/protocol/client'
 import type { AppReview, AppVersions, ExternalAppInfo, ProjectInfo } from '@cc/protocol/client'
 import type { MockClock } from './clock.js'
 import type { AppRegistry } from './app-registry.js'
@@ -87,7 +87,7 @@ export class AppImportsMock {
       return structuredClone(r)
     },
     enable: async (appId: string, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo> => {
-      const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId }))
       const r = this.appReviews.get(appKeyOf(projectId, appId))
       if (!a) throw new Error(`No app named "${appId}" in your apps`)
       if (!a.imported || !r) throw new Error('This app was not imported, so it needs no enabling')
@@ -108,11 +108,11 @@ export class AppImportsMock {
       if (v) return structuredClone(v)
       return projectId === null ? { kind: 'snapshots', snapshots: [] } : { kind: 'git', repo: true, commits: [] }
     },
-    restoreVersion: async (appId: string, projectId: string | null, id: string): Promise<ExternalAppInfo> => {
+    restoreVersion: async (appId: string, projectId: string | null, id: string, machine?: string): Promise<ExternalAppInfo> => {
       if (projectId !== null) throw new Error("A project app's versions are its git history; restore it with git")
       const key = appKeyOf(null, appId)
       const v = this.appVersions.get(key)
-      const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === null)
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId: null, machine }))
       if (!a || !v || v.kind !== 'snapshots' || !v.snapshots.some((s) => s.id === id)) throw new Error('That version is no longer kept')
       /*
        * Like the host (`capture`, 'before restore'): the current files are kept as a version first, unless a kept version

@@ -154,7 +154,7 @@ export type OnDemandApps = {
 function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
   return (
     (isAssistantKind(session.kind) ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
-    (session.builderOf?.appId === app.appId && session.builderOf.projectId === app.projectId)
+    (session.builderOf != null && sameApp(session.builderOf, app))
   )
 }
 
