@@ -235,10 +235,11 @@ describe("auto observes another caller's delegation without consuming it", () =>
   )
 
   it.each(['safe', 'normal', 'auto'] as const)(
-    '%s refuses self wait/stop/delete/send before changing the session',
+    '%s refuses self wait/stop/delete before changing the session, and its mail to itself is no work',
     async (preset) => {
       const id = await session(preset)
-      for (const action of ['wait', 'stop', 'delete', 'send'] as const) {
+      expect(await w.mgr.sendWork(id, id, 'self work')).toBeNull()
+      for (const action of ['wait', 'stop', 'delete'] as const) {
         expect(await w.mgr.agentSession(id, { sessionId: id, action, text: 'self work' })).toMatchObject({
           ok: false,
           error: expect.stringContaining('own calling session'),

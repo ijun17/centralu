@@ -981,7 +981,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     h.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom', retryable: true } })
     await eventually(() => info(b, child).state === 'error')
     // New work from the parent: the turn that runs it answers, and it was not cut
-    const sent = b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
+    const sent = b.mgr.sendWork(parent, child, 'and the docs')
     await eventually(() => info(b, child).state === 'working')
     h.answer('Docs done.')
     await sent

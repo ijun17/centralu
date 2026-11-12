@@ -30,7 +30,16 @@ export type MailToolArgs = {
   cite?: boolean | undefined
   /** A question to the person: the answers it offers to pick from (#1630) */
   choices?: string[] | undefined
+  ifBusy?: IfBusy | undefined
 }
+
+/**
+ * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): it goes as a mail task, which waits until the
+ * session is free and reaches it as a turn of its own. `fork` asks for something else instead: a sub-session started from a
+ * copy of the session's conversation now, linked to the requester, in a worktree of its own (`fork_read`: read-only
+ * work, in the session's folder, under at most `safe`). Taken by mail's send to a session the caller gives work (#1948) and send_to_session
+ */
+export type IfBusy = 'fork' | 'fork_read'
 
 export type MailToolResult = { text: string; isError?: boolean }
 
@@ -58,6 +67,8 @@ export type MailToolHost = {
    * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
    */
   across?: Pick<MailAcross, 'send' | 'foreign' | 'find' | 'named'>
+  /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
+  work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   now?: () => number
 }
 
@@ -98,7 +109,7 @@ export class MailTool {
    * session on another computer goes to that computer, which writes it or refuses it (#2067 items 2 and 3,
    * docs/plans/linked-mail.md §6 to §8). Nothing is written here unless it took the message
    */
-  async call(sessionId: string, args: MailToolArgs): Promise<MailToolResult> {
+  async call(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult> {
     const me = this.host.caller(sessionId)
     const across = this.host.across
     if (!me) return this.run(sessionId, args)
@@ -108,7 +119,7 @@ export class MailTool {
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
       const far = across ? await this.acrossTarget(sessionId, me, args, across) : null
-      if (!far || !across) return this.run(sessionId, args)
+      if (!far || !across) return (await this.work(sessionId, me, args, signal)) ?? this.run(sessionId, args)
       // A citation is the person's message in this computer's record, checked here for the Assistant here: the other
       // computer cannot check it, and dropping it would let the sender think the recipient reads the person's word
       if (args.cite) {
@@ -172,6 +183,21 @@ export class MailTool {
     ]
     const n = shown.length
     throw refuse('ambiguous', `${n} sessions are named ${JSON.stringify(t)}: ${shown.slice(0, 8).join(', ')}${n > 8 ? ', and more' : ''}. Send to one of them by its address.`)
+  }
+
+  /** `MailToolHost.work` for the session `to` names here, or for the word itself (a start request's handle, a linked child's id) */
+  private async work(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
+    if (a.action !== 'send' || !this.host.work || !a.to?.trim() || !a.text?.trim()) return null
+    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
+    let target = a.to.trim()
+    try {
+      const to = this.party(sessionId, me, a.to).address
+      if (!to.startsWith(own)) return null
+      target = to.slice(own.length)
+    } catch {
+      // Not a session here by id or name: the sessions read the word as a request's handle or a linked child's id
+    }
+    return this.host.work(sessionId, target, a.text.trim(), a.ifBusy, signal)
   }
 
   private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {

@@ -4,6 +4,7 @@ import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import { crossWorld, type CrossAdapter, type CrossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { runCentraluTool } from './centralu-tools.js'
+import { agentRunText } from './tool-answers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
@@ -100,7 +101,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(text).toMatch(/^queued: low memory/)
       expect(text).toContain(handle)
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
-      expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'send', text: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('waiting for memory') })
+      expect(await w.mgr.sendWork(s, handle, 'x')).toMatchObject({ ok: false, error: expect.stringContaining('waiting for memory') })
       // Stored as allowed: a host that takes it over waits for memory, never asks the person again
       expect(w.store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId: handle, request: expect.objectContaining({ allowed: true, lsp: true }) })])
 
@@ -178,17 +179,16 @@ describe('child sessions and the machine (#686)', () => {
       fake.readExternalHistory = async () => []
 
       free = 1 * GB
-      const r = await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'review the schema', ifBusy: 'fork_read' })
+      const r = await w.mgr.sendWork(b, a, 'review the schema', 'fork_read')
       expect(r).toMatchObject({ ok: true, state: 'mailed', sessionId: a, messageId: expect.any(String), lowMemory: expect.stringContaining('1.0 GB free') })
       expect(w.store.mailbox.newestTask(addressOf(b), addressOf(a))).toMatchObject({ body: 'review the schema', origin: 'agent_session' })
       expect(forks).toBe(0)
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
-      const text = (await runCentraluTool({ agentSession: async () => r } as unknown as CentraluTools, 'agent_session', { sessionId: a, action: 'send', text: 'x' }, { sessionId: b, profile: 'reader' })).text
-      expect(text).toMatch(/^Not forked: memory is low/)
+      expect(agentRunText(r!).text).toMatch(/^Not forked: memory is low/)
 
       // With memory, the fork goes ahead, and the copy starts without code intelligence
       free = 8 * GB
-      const forked = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read the logs', ifBusy: 'fork_read' })
+      const forked = w.mgr.sendWork(b, a, 'read the logs', 'fork_read')
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
       expect(handleOf(fork.id).opts.noCodeIntelligence).toBe(true)

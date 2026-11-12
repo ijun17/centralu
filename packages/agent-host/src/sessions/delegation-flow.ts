@@ -108,6 +108,11 @@ export class DelegationFlow {
     return this.actions.listAgents(...a)
   }
 
+  /** `AgentSessionActions.sendWork` (agent-session-actions.ts): a session's `mail` to a child of its own */
+  sendWork(...a: Parameters<AgentSessionActions['sendWork']>): ReturnType<AgentSessionActions['sendWork']> {
+    return this.actions.sendWork(...a)
+  }
+
   /** `AgentSessionActions.agentSession` (agent-session-actions.ts), kept on the flow for its callers */
   agentSession(...a: Parameters<AgentSessionActions['agentSession']>): ReturnType<AgentSessionActions['agentSession']> {
     return this.actions.agentSession(...a)

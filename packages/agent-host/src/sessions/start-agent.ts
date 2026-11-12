@@ -132,9 +132,9 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
   ].join('\n')
 }
 
-/** A follow-up carries the parent's words without replacing the task or promising an independent answer. */
-export function agentNoteFrame(parentName: string, text: string, mailParent = false): string {
-  return `[A note from the parent session "${frameField(parentName)}" through Centralu's agent_session. These are the parent's words about your ongoing work.${mailParent ? ' To write to it, call mail with `to: "parent"`.' : ''}]\n\n${text}`
+/** A follow-up to a child on a linked machine carries the parent's words without replacing the task or promising an independent answer. */
+export function agentNoteFrame(parentName: string, text: string): string {
+  return `[A note from the parent session "${frameField(parentName)}" through Centralu's mail. These are the parent's words about your ongoing work.]\n\n${text}`
 }
 
 /**

@@ -23,6 +23,28 @@ const world = () => {
   return { ...w, run: (id: string, args: Parameters<typeof w.tool.run>[1]) => w.tool.run(id, args) }
 }
 
+describe('a send that is work (#1948: agent_session send folded into mail)', () => {
+  it("goes to the sessions by the id its name resolves to, and their answer is the tool's; nothing is written as mail", async () => {
+    const asked: unknown[][] = []
+    const w = hostWorld({ work: async (callerId, target, text, ifBusy) => (asked.push([callerId, target, text, ifBusy]), target === 'w' ? { text: 'the work answer' } : null) })
+    expect(await w.tool.call('a', { action: 'send', to: 'worker', text: 'and the docs', ifBusy: 'fork' })).toEqual({ text: 'the work answer' })
+    expect(await w.tool.call('a', { action: 'send', to: `session:${HOST}/w`, text: 'and the tests' })).toEqual({ text: 'the work answer' })
+    expect(asked).toEqual([['a', 'w', 'and the docs', 'fork'], ['a', 'w', 'and the tests', undefined]])
+    expect(w.store.mailbox.feedOf(A, { limit: 5 })).toEqual([])
+  })
+
+  it('is plain mail when the sessions say it is no work, and a word no session has is theirs to read first (a start request, a linked child)', async () => {
+    const asked: string[] = []
+    const w = hostWorld({ work: async (_caller, target) => (asked.push(target), null) })
+    expect((await w.tool.call('a', { action: 'send', to: 'beta', text: 'hi' })).text).toMatch(/^Sent /)
+    expect((await w.tool.call('a', { action: 'send', to: 'ag-1234', text: 'x' })).text).toContain('Refused (unknown)')
+    // Never asked for the person, or for a read
+    await w.tool.call('a', { action: 'send', to: 'person', text: 'x' })
+    await w.tool.call('a', { action: 'inbox' })
+    expect(asked).toEqual(['b', 'ag-1234'])
+  })
+})
+
 describe('send (§11.3: needsReply unless kind "note")', () => {
   it('sends a message that waits for a reply, says so, and names the receiver; to "assistant" goes to the role', () => {
     const w = world()

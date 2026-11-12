@@ -1,24 +1,26 @@
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
-import type { BusyAnswer } from '../adapters/contract.js'
+import type { BusyAnswer, IfBusy } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
-import type { MailToolArgs } from '../mail/tool.js'
+import type { MailToolArgs, MailToolResult } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { TurnInputs } from '../mail/delivery.js'
 import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { ChildReports, SessionLastResponse } from './child-reports.js'
-import type { DelegationHost } from './delegation-flow.js'
+import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
 import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
 import { seatHas } from './tool-seats.js'
+import { agentCallsFor } from './centralu-tools.js'
+import { agentRunText } from './tool-answers.js'
 
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
@@ -44,7 +46,7 @@ export type MailHooks = {
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
-  tool?(sessionId: string, args: MailToolArgs): Promise<{ text: string; isError?: boolean }>
+  tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
   /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
   linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
@@ -95,6 +97,8 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | '
   readonly reports: ChildReports
   /** The tools a session receives: its profile, and what it may read */
   readonly tools: SessionTools
+  /** A send to a session the caller gives work (`AgentSessionActions.sendWork`), or null for plain mail */
+  sendWork: DelegationFlow['sendWork']
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
   /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
@@ -258,6 +262,12 @@ export class MailSessionsView {
   takesSendNow(id: string): boolean {
     const run = this.host.agentRuns.get(id)
     return this.takesTurn(id) && !(run && !run.finished) && this.hooks?.waiting?.(id) !== true
+  }
+
+  /** `MailToolHost.work` (#1948): the answer worded as agent_session's are for the caller's seat, or null for plain mail */
+  async work(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null> {
+    const r = await this.host.sendWork(callerId, target, text, ifBusy, signal)
+    return r && agentCallsFor(this.host.tools.toolProfileOf(callerId) ?? 'human', agentRunText(r))
   }
 
   /** A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2) */

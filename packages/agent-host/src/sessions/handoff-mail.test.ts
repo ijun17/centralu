@@ -310,7 +310,7 @@ describe("a handoff moves the original's mail to the session that took over (#15
     await eventually(() => read.reportsOn(first.id).length === 1)
     const heir = await handOff(h, project, parent)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const sent = h.mgr.agentSession(heir, { sessionId: child, action: 'send', text: 'now changelog' })
+    const sent = h.mgr.sendWork(heir, child, 'now changelog')
     for (let i = 0; i < 50 && !h.claude.handles.get(child)!.sent.some((q) => q.includes('changelog')); i++) await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await sent).toMatchObject({ ok: true })

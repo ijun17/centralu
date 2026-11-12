@@ -86,7 +86,7 @@ export function progressText(p: TurnProgress | undefined): string {
  * A send that went as mail to a session that could not take it now (docs/plans/mailbox.md §10.6.2): it waits until the session is free
  * and starts a turn of its own, whose end is reported by mail. `tool`: the call that sent it, which names the fork a caller may want instead
  */
-export function mailedText(m: { sessionName: string; sessionId: string; messageId: string; lowMemory?: string }, tool: 'agent_session' | 'ask_project' | 'send_to_session'): string {
+export function mailedText(m: { sessionName: string; sessionId: string; messageId: string; lowMemory?: string }, tool: 'mail' | 'ask_project' | 'send_to_session'): string {
   // A fork turned into mail (#686): said first, so the caller does not wait for a fork that never came
   const instead = m.lowMemory ? `Not forked: memory is low (${m.lowMemory}), so it was sent as mail instead, which starts no new process. ` : ''
   const fork = tool === 'ask_project' ? '' : ' ifBusy "fork" starts a copy of it on work that cannot wait.'
@@ -226,7 +226,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
           `agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…) answers it. ${ANSWER_FORM}`,
       }
     case 'mailed':
-      return { text: `${mailedText(r, 'agent_session')} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it until it is delivered.` }
+      return { text: `${mailedText(r, 'mail')} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it until it is delivered.` }
     case 'queued':
       return { text: `${queuedText(r)} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it.` }
     case 'answered':
@@ -252,7 +252,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
         text:
           `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
           (r.notice ? `${r.notice}\n` : '') +
-          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}` +
+          `mail(action="send", to="${r.sessionId}", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}` +
           (r.cleanUp ? `\n${cleanUpLine(r.sessionId)}` : ''),
       }
     case 'done': {
@@ -260,7 +260,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       if (r.notice) lines.push(r.notice)
       if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
       if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
-      lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it. ${NEW_ROLE_NEW_AGENT}`)
+      lines.push(`mail(action="send", to="${r.sessionId}", text=…) continues with it. ${NEW_ROLE_NEW_AGENT}`)
       if (r.cleanUp) lines.push(cleanUpLine(r.sessionId))
       return { text: lines.join('\n') }
     }

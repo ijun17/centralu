@@ -2079,6 +2079,33 @@ an older build reads as any. A child's reply to the task it was first given (the
 **Linked machines.** A child on a linked machine keeps its own move (`RemoteAgents.moveCaller`, its report waits in `LinkedReports`) until mail
 crosses links (step 6): the second definition of a handoff's move, reported, not changed.
 
+### 10.6.6 More work is mail; agent_session keeps the rest (#1948)
+
+`agent_session send` and `mail send` did the same thing: they gave words to a session. Two tools for one act cost every request and made
+the model choose between them. `send` is gone from `agent_session`, whose enum now refuses it with a pointer to mail (`SEND_IS_MAIL`), and
+`mail(action="send", to=<a session the caller works on>)` does what it did (`AgentSessionActions.sendWork`, reached through `MailTool.work`).
+`start_agent` stays a tool of its own: it makes the session, mail only writes to one.
+
+**Which sends are work.** A mail send is work when its `to` is a session the caller started (`askedBy`, in the caller's project; the
+Assistant's children outside any), one of its pending start requests' handles, or its child on a linked machine. Any other `to` is plain mail
+as before. Under `auto`, `agent_session` acts on any session of the project, and `send` gave such a session work too; mail does not: a
+child's question to its parent (also `auto`, and in the same project) would otherwise become a task for the parent, and #2133 keeps mail's
+delivery as it is. Such a session still gets the words, as mail. The address is resolved the way mail resolves it (a name, an id, this host's
+prefix), so `to: "parent"` and the person are never work.
+
+**What it does.** As before: at rest the session is given a turn of the caller's at once (`startDelegation`, the delegated task written,
+`agentFrame`); busy, the words go as a mail task (§10.6.2) or, with `ifBusy` (now a field of mail), a fork. The gates are the ones `send` had,
+read at the send: the preset ceiling (`aboveCallerError`), S15 for an untrusted project (recorded as a `mail` call), the depth ceiling, the
+linked machine's own check. The answer is the one `start_agent wait:false` gives, "is working on it … you will be told when it ends", with the
+call written as the caller's seat makes it (`agentCallsFor`: on the Assistant both tools are commands through `centralu_run`).
+
+**What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
+`agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send by an original to a
+child that a handoff moved is plain mail now; `send` refused it naming the successor, which `agent_session status` still does.
+
+**Restart, swap and older builds.** No store step and no protocol change. The delegated task keeps origin `agent_session` (the recorder's), so
+rows read as before. A recorded call of `agent_session send` replayed to this build is refused with the pointer to mail.
+
 ### 10.7 The state table
 
 The columns are kinds of row to the session:

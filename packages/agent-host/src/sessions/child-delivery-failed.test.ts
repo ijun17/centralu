@@ -41,7 +41,7 @@ describe('work given to a child that never reaches it (#839)', () => {
       await gate
       throw new Error('the tool would not start')
     }
-    const sent = w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'second job' })
+    const sent = w.mgr.sendWork(s, c, 'second job')
     await w.until(() => starting)
     // While it wakes, the caller waits on the work it just gave
     let waited: Awaited<ReturnType<typeof w.mgr.agentSession>> | undefined

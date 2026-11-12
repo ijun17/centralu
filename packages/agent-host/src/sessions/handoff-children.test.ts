@@ -333,18 +333,20 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const project = await h.mgr.projectCreation.addProject(root)
     h.mgr.setProjectTrusted(project.id, true)
     store.permissions.setProjectConsent(project.id, project.id, 'agents')
-    // An auto session gives work to a session the person opened: the turn is its own, the session is not its child
+    /*
+     * A session under it that it did not start: a row an older build's worktree manager left (#561 part 3). Before #1948 an auto session also
+     * reached one by agent_session send; mail to a session it did not start is mail now (docs/plans/mailbox.md §10.6.6)
+     */
     const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'auto' })).id
     const other = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    h.mgr.sessionInfo(other)!.parentSessionId = parent
     h.mgr.rename(other, 'Docs')
-    const sent = h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy the docs' })
+    await h.mgr.inputs.send(other, 'tidy the docs')
     await eventually(() => h.mgr.listSessions().find((s) => s.id === other)?.state === 'working')
     const heir = await handOff(h, project.id, parent, false)
-    // The call that gave the work was still waiting: it hears where the work went
-    expect(await sent).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
     const note = readFileSync(handoffNotePath(project.id, parent), 'utf8')
-    expect(note).toContain(`"Docs" — working — handle: ${other}. Its report and its cards come to you. You did not start it, so agent_session works on it only with the auto preset.`)
-    expect(owner(other) ?? null).toBeNull()
+    expect(note).toContain(`"Docs" — working — handle: ${other}. Nothing about it comes to you unless you ask. You did not start it, so agent_session works on it only with the auto preset.`)
+    expect(store.sessions.listSessions().find((s) => s.id === other)).toMatchObject({ askedBy: null, parentSessionId: heir })
   })
 
   it('moves a start queued for memory (#686): it starts as the new session\'s child when memory recovers', async () => {
@@ -487,7 +489,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   async function sendPastBound(h: ReturnType<typeof host>, caller: string, child: string, text: string) {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      const sent = h.mgr.agentSession(caller, { sessionId: child, action: 'send', text })
+      const sent = h.mgr.sendWork(caller, child, text)
       for (let i = 0; i < 50 && !h.claude.handles.get(child)!.sent.some((t) => t.includes(text)); i++) await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
       expect(await sent).toMatchObject({ ok: true, state: 'working', reported: true })

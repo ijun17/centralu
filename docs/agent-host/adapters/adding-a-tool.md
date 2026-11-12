@@ -60,8 +60,8 @@
    `COMPACT_FLOOR_TOKENS` by four commands' output so `compact_self` really compacts (`centralu-compact-real`: the nudge steered into a
    running turn, refused by the app-server when the turn was ending, then `thread/compact/start` and the context falling from 124k to 6k;
    a bulky output is cut in the recording, `cutText`; the recording goes on past the compaction turn's own end into one more short turn,
-   `after`, which shows the context read again from the summary); a session woken by mail (`centralu-wake`); `agent_session` send and
-   wait, and stop then delete of a child that is still working (`centralu-agent-stop`); and `ask_project` to a second project, refused
+   `after`, which shows the context read again from the summary); a session woken by mail (`centralu-wake`); `agent_session` send (recorded before
+   #1948 made more work mail: replayed now, it is refused with the pointer to mail) and wait, and stop then delete of a child that is still working (`centralu-agent-stop`); and `ask_project` to a second project, refused
    while the project is untrusted and answered once trusted and once the other project has a session. `codex/centralu.test.ts` plays
    the host's part at the point of the recording where it acted.
    **Codex's own automatic compaction is not recordable on 0.160.0 with the limits tried:** the run reached 233k of the 258,400-token

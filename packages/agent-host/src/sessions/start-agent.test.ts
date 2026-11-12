@@ -75,19 +75,19 @@ describe('the frame a child gets (#729)', () => {
   })
 
   // #1984: a child told to share checkpoints with "the parent" mailed the Assistant; nothing it saw named the address
-  it('names the address that reaches the parent, in the task and in a later note, when the child can mail it', () => {
+  it('names the address that reaches the parent in the task, when the child can mail it', () => {
     expect(agentFrame('parent', 'run the tests', [], '', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
-    expect(agentNoteFrame('parent', 'use Chromium', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
     // A child on a linked machine, or one that cannot mail its parent, is not told to
     expect(agentFrame('parent', 'run the tests')).not.toContain('call mail')
-    expect(agentNoteFrame('parent', 'use Chromium')).not.toContain('call mail')
     // A child started from a linked computer is told mail does not reach its parent, not to mail it (#1987)
     expect(remoteAgentFrame('parent', 'run the tests')).not.toContain('call mail')
     expect(remoteAgentFrame('parent', 'run the tests').split('\n')[0]).toContain('Mail does not reach it from here yet: the answer is how it hears from you.')
     // A machine that said it takes mail from the hub (#2067 item 2): its child is told to mail its parent, not that it cannot
     const mails = remoteAgentFrame('parent', 'run the tests', '', true).split('\n')[0]
-    expect(mails).toContain('To write to it before you answer (a question, a checkpoint), call mail with `to: "parent"`.')
+    expect(mails).toContain('call mail with `to: "parent"`')
     expect(mails).not.toContain('Mail does not reach it')
+    // A later note to a child on a linked machine came through agent_session send; more work is mail now (#1948)
+    expect(agentNoteFrame('parent', 'use Chromium').split('\n')[0]).toContain("through Centralu's mail.")
   })
 
   it('can mail its parent only when that session started it and it is in a project (a fork of the Assistant has no parent, an Assistant child no mail tool)', () => {
@@ -483,7 +483,7 @@ describe('starting another agent in the same project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await waiting).toMatchObject({ ok: true, state: 'pending' })
     vi.useRealTimers()
-    expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'send', text: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('No session yet') })
+    expect(await w.mgr.sendWork(s, requestId, 'x')).toMatchObject({ ok: false, error: expect.stringContaining('No session yet') })
 
     // Answered during a wait, the wait returns with the child
     const second = await session('safe')
@@ -943,8 +943,8 @@ describe('starting another agent in the same project', () => {
     handleOf(c)!.answer('ok')
     await p
     await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
-    const r = await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'now delete the build folder' })
-    expect(!r.ok && r.error).toContain('more permissions (auto) than this session (normal)')
+    const r = await w.mgr.sendWork(s, c, 'now delete the build folder')
+    expect(r?.ok === false && r.error).toContain('more permissions (auto) than this session (normal)')
     expect(handleOf(c)?.sent ?? []).toHaveLength(1)
   })
 
@@ -982,10 +982,12 @@ describe('starting another agent in the same project', () => {
     const s = await session()
     const c = await startRunning(s)
     const other = await session()
-    for (const action of ['status', 'wait', 'stop', 'send'] as const) {
+    for (const action of ['status', 'wait', 'stop'] as const) {
       const r = await w.mgr.agentSession(other, { sessionId: c, action, text: 'x' })
       expect(!r.ok && r.error).toContain('is not a session this session started')
     }
+    // Its mail to that child is plain mail, not work
+    expect(await w.mgr.sendWork(other, c, 'x')).toBeNull()
     // Nor on a session the person opened, even in the same project
     const r = await w.mgr.agentSession(s, { sessionId: other, action: 'stop' })
     expect(!r.ok && r.error).toContain('is not a session this session started')
@@ -1032,10 +1034,8 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     h.answer('original done')
-    let settled = false
-    const next = w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'arrived just after completion' }).then((r) => { settled = true; return r })
-    await w.until(() => h.sent.length === 2)
-    expect(settled).toBe(false)
+    expect(await w.mgr.sendWork(s, c, 'arrived just after completion')).toMatchObject({ ok: true, state: 'working', reported: true })
+    expect(h.sent).toHaveLength(2)
     expect(h.sent[1]).toContain('gives you this task')
     expect(h.sent[1]).toContain('Your final message goes back to it as the answer')
     // #1984: the started child is told how to reach the session that started it, in the task and in a later send
@@ -1043,7 +1043,7 @@ describe('starting another agent in the same project', () => {
     expect(h.sent[1]).toContain('call mail with `to: "parent"`')
     expect(h.sent[1]).not.toContain('A note from the parent session')
     h.answer('new answer')
-    expect(await next).toMatchObject({ ok: true, state: 'done', answer: 'new answer' })
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'new answer' })
   })
 
   it('mid-turn send preserves the permission gate, without stopping or losing the wait', async () => {
@@ -1052,7 +1052,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
-    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
+    expect(await w.mgr.sendWork(s, c, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
     expect(h.sent).toHaveLength(1)
     expect(h.interrupted).toBe(0)
     h.answer('done')
@@ -1117,20 +1117,19 @@ describe('starting another agent in the same project', () => {
       })
     })
 
-    it('auto ownership cannot delete a turn delegated by another caller', async () => {
+    // A turn that is not the caller's: the person's (another auto session's mail to it is mail since #1948, not a turn of that session's)
+    it('auto ownership cannot delete a turn that is not its own', async () => {
       const s = await session('auto')
-      const other = await session('auto')
       const c = await startRunning(s)
       const child = handleOf(c)!
       child.answer('done')
       await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
-      const working = w.mgr.agentSession(other, { sessionId: c, action: 'send', text: 'Another caller\'s task' })
+      await w.mgr.inputs.send(c, "the person's own task")
       await w.until(() => child.sent.length === 2)
       try {
         expect(await w.mgr.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
       } finally {
         child.answer('done')
-        await working
       }
     })
 

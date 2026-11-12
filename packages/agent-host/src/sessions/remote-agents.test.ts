@@ -424,7 +424,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     const ra = following()
     state = 'idle'
     // The send goes, but no record of it comes back as this hub's instruction
-    const r = await ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action: 'send', text: 'do X' } as never)
+    const r = await ra.send('h1', ra.of(child.sessionId)!, 'do X')
     expect(r).toMatchObject({ ok: true, state: 'working', reported: false, notice: expect.stringContaining('did not go in as a turn of its own') })
     expect(reportOwed()).toBe(false)
   })

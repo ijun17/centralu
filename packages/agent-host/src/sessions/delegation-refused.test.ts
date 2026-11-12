@@ -120,15 +120,15 @@ describe('agent_session send', () => {
     const sent = handleOf(child)!.sent.length
     refusal = S15
     expect(await w.mgr.agentSession(s, { sessionId: child, action: 'status' })).toMatchObject({ ok: true })
-    expect(await w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'and the linter' })).toEqual({ ok: false, error: S15 })
+    expect(await w.mgr.sendWork(s, child, 'and the linter')).toEqual({ ok: false, error: S15 })
     expect(handleOf(child)!.sent).toHaveLength(sent)
     const name = w.mgr.sessionInfo(child)!.name
-    expect(asked).toEqual([{ callerId: s, target: { sessionId: child, projectId: w.caller.id }, call: { tool: 'agent_session', target: name, text: 'and the linter' } }])
+    expect(asked).toEqual([{ callerId: s, target: { sessionId: child, projectId: w.caller.id }, call: { tool: 'mail', target: name, text: 'and the linter' } }])
   })
 
   it('let go: the words reach the child as before', async () => {
     const { s, child } = await restingChild()
-    const sending = w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'and the linter' })
+    const sending = w.mgr.sendWork(s, child, 'and the linter')
     await w.until(() => handleOf(child)!.sent.some((t) => t.includes('and the linter')))
     handleOf(child)!.answer('linted')
     expect(await sending).toMatchObject({ ok: true })

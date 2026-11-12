@@ -34,7 +34,7 @@ hub's question and the start starts nothing there: the child made without a card
 machine's session archive. The child is never above its caller (#1273 review): the preset is decided from the caller as it is once
 the machine has answered, so the card states the preset the child will get; the caller is read again after the card
 (a caller lowered while it stood starts nothing) and once the machine has made the child (one made above the caller as
-it is then is given no task and goes to that machine's session archive); and `agent_session send` refuses work to a child whose
+it is then is given no task and goes to that machine's session archive); and more work by `mail` send is refused to a child whose
 preset (kept in the hub's record, `RemoteAgent.preset`) is above the caller's, as a local child's send does. The child's session header shows its preset on both machines (`SessionInfo.startedFromHub`).
 **Turning the switch on asks nothing** (owner decision 2026-11-05, #1988): neither `prefs.set` here nor
 `machines.hubAuto` for a linked machine raises a card, with the limited credential too. So an `auto` agent on the hub

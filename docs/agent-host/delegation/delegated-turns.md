@@ -5,7 +5,7 @@ A card a session raises (a question, an approval) goes to the sessions whose wor
 its turn. The design, what it replaced and what a restart and an older build do are [plans/mailbox.md](../../plans/mailbox.md) §10.6.4.
 
 - **Who is told** (`RoutedCards.routeCard`). Every sender of a task to the session that is delivered, not settled and not released
-  (`openTaskParties`): `start_agent`, `agent_session` send, `ask_project`, `send_to_session` with `reportBack`, `create_session`'s first message
+  (`openTaskParties`): `start_agent`, a `mail` send that is work (plans/mailbox.md §10.6.6), `ask_project`, `send_to_session` with `reportBack`, `create_session`'s first message
   with `reportBack`, the person's own work aside. Each is told once per card. A call of its own that waits on the session (`agent_session` wait,
   `start_agent` waiting, `ask_project` waiting) returns `asking` with the cards; otherwise a Centralu notice (`facts.card`) is its mail, shown
   in its conversation as from the session. Never the card's text: the question, its options and an approval's detail are the session's words,
@@ -30,7 +30,7 @@ its turn. The design, what it replaced and what a restart and an older build do 
 
 ## Requests to a busy session (#677)
 
-A send to a session that cannot take it now (`agent_session` send, `ask_project` to an existing session, `send_to_session`) is a mail
+A send to a session that cannot take it now (a `mail` send to a session the sender started, `ask_project` to an existing session, `send_to_session`) is a mail
 task that reaches the session as a turn of its own once it is free (a task joins no running turn until #1948 step 3); the call answers
 `mailed` with the task's id, and the turn's end is reported to the caller by mail. When it goes, the receiver's conversation shows it as the
 sender's message, as a direct send does; the agent reads the mail frame. The rule, what it

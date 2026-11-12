@@ -102,11 +102,9 @@ describe('what the adapter hands Centralu’s tools when the CLI calls them', ()
     expect(await handed('centralu-agent')).toMatchObject([{ tool: 'start_agent', args: { task: 'Reply with exactly: pong', tool: 'claude', model: 'haiku' } }])
   })
 
-  it('centralu-session: agent_session send reaches its tool with the action, the session and the text', async () => {
-    expect(await handed('centralu-session')).toMatchObject([
-      { tool: 'start_agent', args: { task: 'Reply with exactly: one' } },
-      { tool: 'agent_session', args: { action: 'send', text: 'Reply with exactly: two', sessionId: expect.any(String) } },
-    ])
+  // #1948 folded agent_session's send into mail: the recorded send is refused by today's schema, before any tool runs
+  it('centralu-session: start_agent reaches its tool; the recorded agent_session send, which mail replaced, reaches none', async () => {
+    expect(await handed('centralu-session')).toMatchObject([{ tool: 'start_agent', args: { task: 'Reply with exactly: one' } }])
   })
 
   it('centralu-ask: ask_project reaches its tool with the project and the task', async () => {

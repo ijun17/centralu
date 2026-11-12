@@ -51,6 +51,7 @@ export function stepLine(s: ToolSummary): string {
 /** What agent_session's actions do, in words (#730) */
 const AGENT_ACTIONS: Record<string, string> = {
   status: 'Checked on an agent',
+  // A recorded call from before #1948 moved more work to mail still reads as it did
   send: 'Sent more to an agent',
   wait: 'Waited for an agent',
   stop: 'Stopped an agent',

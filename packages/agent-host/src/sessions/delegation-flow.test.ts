@@ -54,7 +54,7 @@ describe('the gates read before anything is started', () => {
     const flow = new DelegationFlow(hostWith({}))
     expect(await flow.agentSession('caller', { sessionId: 'caller', action: 'stop' })).toEqual({
       ok: false,
-      error: 'agent_session cannot wait on, stop, delete or send to its own calling session.',
+      error: 'agent_session cannot wait on, stop or delete its own calling session.',
     })
   })
 
@@ -335,7 +335,7 @@ describe("a child's turn and the call waiting on it", () => {
         throw new Error('the CLI is gone')
       },
     })
-    expect(await flow.agentSession('caller', { sessionId: 'child', action: 'send', text: 'and the tests' })).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
+    expect(await flow.sendWork('caller', 'child', 'and the tests')).toEqual({ ok: false, error: 'Could not send it: the CLI is gone' })
     expect(joined?.finished).toBe(true)
     expect(agentRuns.size).toBe(0)
     expect(children.delegations.size).toBe(0)
