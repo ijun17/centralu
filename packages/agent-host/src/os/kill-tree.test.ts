@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, ownGroupPids, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
+import type { TableReader } from './process-table.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from '../dev-services/process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -705,7 +706,12 @@ describe('leftovers of an ended process on Windows', () => {
     // What taskkill answered on Windows 11 for a conhost.exe that ended as it was ended (measured; this is the English text, the system's language
     // gives its own words): exit code 255, not the 128 of a process that was never there
     const NOT_FOUND = Object.assign(new Error('Command failed: taskkill.exe /PID 200 /F\r\nERROR: The process "200" with PID 200 (child process of PID 100) could not be terminated.\r\nReason: There is no running instance of the task.\r\n'), { code: 255 })
-    const rows = async () => table('200 100 1500\n300 100 1600\n')
+    const TABLE = '200 100 1500\n300 100 1600\n'
+    /** The table's reader: each read answers the next of `texts`, the last one again and again */
+    const reader = (...texts: string[]): (() => TableReader) => {
+      const r = { read: async () => (texts.length > 1 ? texts.shift()! : texts[0]!), warm: () => {}, stop: () => {} }
+      return () => r
+    }
 
     it('is not reported as one that could not be ended, whatever exit code taskkill gave, while one that runs on still is', async () => {
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -716,7 +722,7 @@ describe('leftovers of an ended process on Windows', () => {
       // 200 was running when taskkill started and gone when it had answered; 300 runs on
       const seen = new Map([[200, [true, false]]])
       const alive = (pid: number) => (pid === 300 ? true : (seen.get(pid) ?? [false]).shift() ?? false)
-      expect(await collectOrphansWindows(root, { ...leftoverOs(run, undefined, alive), listProcesses: rows })).toEqual([])
+      expect(await collectOrphansWindows(root, leftoverOs(run, reader(TABLE), alive))).toEqual([])
       expect(logged.mock.calls.map((x) => String(x[0]))).toEqual([expect.stringMatching(/process 300, left running by 100, could not be ended \(status 1: .*Access is denied/)])
       logged.mockRestore()
     })
@@ -724,8 +730,32 @@ describe('leftovers of an ended process on Windows', () => {
     it('starts no taskkill for a process that is no longer there', async () => {
       const started: string[][] = []
       const run = (async (_exe: string, args: readonly string[]) => void started.push([...args])) as unknown as Parameters<typeof leftoverOs>[0]
-      await collectOrphansWindows(root, { ...leftoverOs(run, undefined, (pid) => pid === 300), listProcesses: rows })
+      await collectOrphansWindows(root, leftoverOs(run, reader(TABLE), (pid) => pid === 300))
       expect(started.map((a) => a[1])).toEqual(['300'])
+    })
+
+    // #2206: a number is given to another process once its own has ended. Only its creation time says it is not the one the table showed
+    it('ends no process that has another creation time than the table showed it with, whose number it has now', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const started: string[][] = []
+      const run = (async (_exe: string, args: readonly string[]) => void started.push([...args])) as unknown as Parameters<typeof leftoverOs>[0]
+      // The sweep reads 200 and 300; by the time 200 is to be ended, an unrelated process (created at 9999) has its number, and 300 is as it was
+      const answers = reader(TABLE, '200 4 9999\n300 100 1600\n')
+      expect(await collectOrphansWindows(root, leftoverOs(run, answers, () => true))).toEqual([300])
+      expect(started.map((a) => a[1])).toEqual(['300'])
+      expect(logged).not.toHaveBeenCalled()
+      logged.mockRestore()
+    })
+
+    it('leaves a process alone, and says so, when the table cannot be read to tell it from another with its number', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const run = vi.fn(async () => ({ stdout: '' })) as unknown as Parameters<typeof leftoverOs>[0]
+      const r = { read: vi.fn(async () => TABLE), warm: () => {}, stop: () => {} }
+      r.read.mockResolvedValueOnce(TABLE).mockRejectedValue(Object.assign(new Error('timed out'), { killed: true }))
+      expect(await collectOrphansWindows(root, leftoverOs(run, () => r, () => true))).toEqual([])
+      expect(run).not.toHaveBeenCalled()
+      expect(logged.mock.calls.map((x) => String(x[0]))).toEqual([expect.stringMatching(/process 200, left running by 100, could not be ended/), expect.stringMatching(/process 300, left running by 100, could not be ended/)])
+      logged.mockRestore()
     })
   })
 
