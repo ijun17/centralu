@@ -441,7 +441,8 @@ export class ClaudeStreamNormalizer {
     const type = msg.type
     const subagent = 'parent_tool_use_id' in msg && str(msg.parent_tool_use_id) !== ''
     this.unmapped.note(msg.type === 'system' ? `system/${str(msg.subtype)}` : type)
-    const tasks = this.tasks.push(msg)
+    // An ending that closes a background agent's card leaves no line of its own: the card says it
+    const tasks = this.tasks.push(msg, this.background)
 
     if (msg.type === 'system' && msg.subtype === 'task_notification') {
       const callId = str(msg.tool_use_id)
@@ -572,9 +573,9 @@ export class ClaudeStreamNormalizer {
     const out: NormalizedEvent[] = [...this.releaseRequest(), ...this.deferred.splice(0)]
     this.held = null
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
+    // The reason above names an agent's card; a background shell went the same way, so its ending says what happened. An agent's card says it already
+    out.push(...this.tasks.release('Ended with the session process', this.background))
     this.background.clear()
-    // The reason above names an agent's card; a background shell went the same way, so its ending says what happened
-    out.push(...this.tasks.release('Ended with the session process'))
     return out
   }
 }

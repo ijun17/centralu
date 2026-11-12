@@ -30,7 +30,7 @@ describe('the list', () => {
     expect(useStore.getState().mail).toEqual({ threads: [], held: [], waiting: 0 })
     expect(mailAttention(useStore.getState().mail)).toBe(0)
 
-    const id = platform.seedMail({ subject: 'Which branch?', from: worker, body: 'main or release?' })
+    const id = platform.seedMail({ subject: 'Which branch?', from: worker, body: 'main or release?', kind: 'note' })
     await vi.waitFor(() => expect(useStore.getState().mail?.threads.map((t) => t.id)).toEqual([id]))
     expect(mailAttention(useStore.getState().mail)).toBe(1)
 
@@ -186,13 +186,24 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread?.messages.map((m) => m.body)).toEqual(['which?'])
   })
 
+  it('a question read but not answered still counts, in the badge and its edge, until it is answered (#2233)', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })
+    await useStore.getState().openMailThread(id)
+    await vi.waitFor(() => expect(useStore.getState().mail?.threads[0]?.unread).toBe(0))
+    expect(mailAttention(useStore.getState().mail)).toBe(1)
+    expect(mailAsksYou(useStore.getState().mail)).toBe(1)
+    expect(await useStore.getState().replyMail('main')).toBe(true)
+    await vi.waitFor(() => expect(mailAttention(useStore.getState().mail)).toBe(0))
+  })
+
   it('answers a question the list’s card names without opening the thread, and the badge asks only while one waits (#2229, #2227)', async () => {
     const platform = attached()
     const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?', choices: ['main', 'release'] })
     await useStore.getState().loadMail()
     expect(mailAsksYou(useStore.getState().mail)).toBe(1)
     const question = useStore.getState().mail!.threads[0]!.ask!
-    expect(question).toMatchObject({ text: 'which?', choices: ['main', 'release'], count: 1 })
+    expect(question).toMatchObject({ text: 'which?', choices: ['main', 'release'], open: [question.id] })
     expect(await useStore.getState().replyMail('release', 'answer', question.id, id)).toBe(true)
     expect(useStore.getState().mailThread).toBeNull()
     await vi.waitFor(() => expect(mailAsksYou(useStore.getState().mail)).toBe(0))

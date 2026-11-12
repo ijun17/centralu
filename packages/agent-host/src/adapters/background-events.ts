@@ -13,6 +13,8 @@ export function endedSummary(text: string | undefined): { summary?: string } {
   return summary ? { summary } : {}
 }
 
+const NONE: ReadonlySet<string> = new Set()
+
 const KIND_WORDS: Record<BackgroundTask['kind'], string> = { agent: 'agent', shell: 'shell', mcp: 'MCP task', other: 'task' }
 
 /**
@@ -46,7 +48,11 @@ export class BackgroundEvents {
 
   constructor(private readonly sessionId: string) {}
 
-  event(live: BackgroundTask[], ended: BackgroundTask[] = [], snapshot = false): NormalizedEvent[] {
+  /**
+   * `carded`: the launch cards that carry the ending of their own task as they close with it (a background agent's card marked failed with the reason when the process
+   * goes away). A task whose card is one of them leaves no line of its own: its ending is said once
+   */
+  event(live: BackgroundTask[], ended: BackgroundTask[] = [], snapshot = false, carded: ReadonlySet<string> = NONE): NormalizedEvent[] {
     const key = JSON.stringify(live)
     if (key === this.last && ended.length === 0 && !snapshot) return []
     this.last = key
@@ -58,7 +64,7 @@ export class BackgroundEvents {
         live,
         ...(ended.length ? { ended } : {}),
       },
-      ...ended.flatMap((t) => endedNotice(this.sessionId, t)),
+      ...ended.flatMap((t) => (t.parentCallId !== undefined && carded.has(t.parentCallId) ? [] : endedNotice(this.sessionId, t))),
     ]
   }
 }

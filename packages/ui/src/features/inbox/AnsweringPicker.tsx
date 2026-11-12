@@ -20,6 +20,8 @@ export function AnsweringPicker({
   onTarget: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // The named question may have been answered elsewhere since (it is then not in the list): the others are the ones open besides it
+  const others = questions.filter((q) => q.id !== target.id).length
   const button = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLUListElement>(null)
   useDismiss({ open, onClose: () => setOpen(false), refs: [button, list], returnFocusTo: button })
@@ -48,9 +50,11 @@ export function AnsweringPicker({
           <ChevronIcon open={open} size={10} />
         </span>
       </Button>
-      <span className="shrink-0 text-ink-faint" data-testid="mail-answering-others">
-        {questions.length - 1} other open
-      </span>
+      {others > 0 && (
+        <span className="shrink-0 text-ink-faint" data-testid="mail-answering-others">
+          {others} other open
+        </span>
+      )}
       {shown && (
         <ul
           ref={list}

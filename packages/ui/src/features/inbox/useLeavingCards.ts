@@ -15,12 +15,15 @@ const isCard = (r: WaitingRow) => r.kind === 'mail' && r.thread.ask !== null
  * Decided while rendering, like `usePresence`, so the card keeps its state (the pick it shows) through the change and does not blink.
  */
 export function useLeavingCards(rows: readonly WaitingRow[]): ShownRow[] {
-  const [before, setBefore] = useState(rows)
+  // The list is derived on every render (`arrangeInbox`, over a clock that moves each time), so its rows are never the same array twice: a change is a change of the
+  // rows' keys, not of the array. Comparing by identity here set state on every pass of a render and never settled
+  const keys = JSON.stringify(rows.map(rowKeyOf))
+  const [before, setBefore] = useState({ keys, rows })
   const [ghosts, setGhosts] = useState<Ghost[]>([])
-  if (before !== rows) {
-    setBefore(rows)
+  if (before.keys !== keys) {
+    setBefore({ keys, rows })
     const now = new Set(rows.map(rowKeyOf))
-    const gone = before.flatMap((row, at) => (isCard(row) && !now.has(rowKeyOf(row)) ? [{ row, at }] : []))
+    const gone = before.rows.flatMap((row, at) => (isCard(row) && !now.has(rowKeyOf(row)) ? [{ row, at }] : []))
     // A card that came back is no longer on its way out
     const stay = ghosts.filter((g) => !now.has(rowKeyOf(g.row)))
     if (gone.length > 0 || stay.length !== ghosts.length) setGhosts([...stay, ...gone])

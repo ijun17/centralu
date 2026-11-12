@@ -19,13 +19,15 @@ import { choicesLabel, threadStateLabel } from './mailLabels.js'
 export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThreadRow; ask: NonNullable<MailThreadRow['ask']>; active?: boolean; leaving?: boolean }) {
   const open = useStore((s) => s.openMailThread)
   const reply = useStore((s) => s.replyMail)
-  // The choice pressed, while its answer is on its way: one press is one answer, and the list says which it was
-  const [picked, setPicked] = useState<number | null>(null)
+  // The choice pressed, while its answer is on its way: one press is one answer to one question, and the list says which it was. It is the question's, not the thread's:
+  // once this one is answered the thread's next question shows on the same card, unpressed
+  const [press, setPress] = useState<{ ask: string; index: number } | null>(null)
+  const picked = press?.ask === ask.id ? press.index : null
   const pick = async (choice: string, index: number) => {
     if (picked !== null) return
-    setPicked(index)
+    setPress({ ask: ask.id, index })
     // A refused answer leaves the choices to press again, with the host's words in a toast
-    if (!(await reply(choice, 'answer', ask.id, t.id))) setPicked(null)
+    if (!(await reply(choice, 'answer', ask.id, t.id))) setPress((p) => (p?.ask === ask.id ? null : p))
   }
   return (
     <li
@@ -60,7 +62,7 @@ export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThrea
         />
       )}
       <div className="flex items-center gap-1.5">
-        {ask.count > 1 && <span className="text-xs text-ink-faint">{ask.count - 1} other waiting in this thread</span>}
+        {ask.open.length > 1 && <span className="text-xs text-ink-faint">{ask.open.length - 1} other waiting in this thread</span>}
         {/* A button, not the row's plain word: the row's "Open" is the state it is in, this one is what to press for words of one's own */}
         <Button size="sm" variant="quiet" className="ml-auto" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
           Open

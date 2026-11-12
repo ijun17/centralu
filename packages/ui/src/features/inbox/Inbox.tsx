@@ -128,8 +128,8 @@ export function Inbox() {
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
-        // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`)
-        else if (row?.kind === 'mail') void (row.thread.working === true ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
+        // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`). So does a card: a question is answered, never closed by a key
+        else if (row?.kind === 'mail') void (row.thread.working === true || row.thread.ask !== null ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
       } else if (action === 'choose') {
         // The number is the choice's own, on the card under the cursor: the key presses its button, so it answers exactly what a click would, and never a card that has taken a press already
         const button = row?.kind === 'mail' ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-testid="mail-ask-choices-${CSS.escape(row.thread.id)}-${e.key}"]`) : null

@@ -750,6 +750,34 @@ describe('the whole record of a tool call (#221)', () => {
     expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, RESULT_SUMMARY_CHARS))
     expect(done?.output).toBe(`2 tool uses · 9s\n\n${report}`)
   })
+
+  describe('an ending its launch card already says leaves no line of its own (#2233)', () => {
+    const running = () => {
+      const stream = new ClaudeStreamNormalizer(SID)
+      stream.push(sdk({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'bg', content: [{ type: 'text', text: 'Async agent launched successfully.' }] }] },
+        tool_use_result: { status: 'async_launched', agentId: 'a2' },
+      }))
+      stream.push(sdk({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'a2', task_type: 'local_agent', description: 'review the diff' }, { task_id: 'sh', task_type: 'local_bash', description: 'npm test' }] }))
+      stream.push(sdk({ type: 'system', subtype: 'task_started', task_id: 'a2', tool_use_id: 'bg', task_type: 'local_agent' }))
+      return stream
+    }
+    const lines = (events: NormalizedEvent[]) => events.flatMap((e) => (e.type === 'notice' ? [e.text] : []))
+
+    it('a process that goes away closes the agent’s card with the reason and says nothing more of it; a shell, which has no card, still has its line', () => {
+      const out = running().release('The session ended')
+      expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'bg', ok: false, summary: 'The session ended' }])
+      expect(lines(out)).toEqual(['Background shell "npm test" stopped: Ended with the session process'])
+      expect(out.find((e) => e.type === 'background_tasks')).toMatchObject({ ended: [{ id: 'a2', status: 'stopped' }, { id: 'sh', status: 'stopped' }] })
+    })
+
+    it('a failed agent’s own notification closes the card with its report, and the line that said the same is not written', () => {
+      const out = running().push(sdk({ type: 'system', subtype: 'task_notification', task_id: 'a2', tool_use_id: 'bg', status: 'failed', summary: 'It hit a wall' }))
+      expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'bg', ok: false }])
+      expect(lines(out)).toEqual([])
+    })
+  })
 })
 
 describe('unmapped message types (#58)', () => {

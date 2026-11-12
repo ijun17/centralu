@@ -11,11 +11,11 @@ import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
 import { Markdown } from '../session/Markdown.js'
 import { AnsweringPicker } from './AnsweringPicker.js'
-import { answerTo, choicesLabel, closeStopsWork, openQuestions, replyKind, threadStateLabel } from './mailLabels.js'
+import { answerTo, answeringTarget, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, through the session view's `Markdown` (#2228: no raw HTML, links as that view treats them);
- * the person's own are marked as theirs. Centralu's lines (a state moved, a party joined) are small and plain.
+ * the person's own are marked as theirs and stay plain text. Centralu's lines (a state moved, a party joined) are small and plain.
  */
 export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: string) => void }) {
   const view = useStore((s) => s.mailThread)
@@ -148,8 +148,9 @@ function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
         {fromScript !== undefined ? `script ${fromScript}` : partyName(m.sender)} · {m.kind}
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
-      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>
-        <Markdown text={m.body} projectRoot={null} />
+      {/* The person's own words stay as they typed them, as in the session view's `ChatRow`; others' are Markdown (#2228) */}
+      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'whitespace-pre-wrap border-line-strong bg-surface-hover/40' : 'border-line'}`}>
+        {mine ? m.body : <Markdown text={m.body} projectRoot={null} />}
       </div>
       {m.choices && <Choices m={m} open={open} answer={answer} onPicking={onPicking} />}
     </li>
@@ -203,9 +204,7 @@ function Reply({ blocked }: { blocked: boolean }) {
   // Which question the words answer, once the person has named one (#2191): else the newest, as it was before
   const [chosen, setChosen] = useState<string | null>(null)
   if (!view) return null
-  // With more than one question waiting the box says which one its words answer; with one, nothing changes
-  const questions = openQuestions(view.messages)
-  const target = questions.length > 1 ? (questions.find((q) => q.id === chosen) ?? questions.at(-1)) : undefined
+  const { questions, target } = answeringTarget(view, chosen)
   const send = async () => {
     const words = text.trim()
     if (!words || sending || blocked) return
@@ -213,7 +212,10 @@ function Reply({ blocked }: { blocked: boolean }) {
     const ok = await (target ? reply(words, 'answer', target.id) : reply(words, replyKind(view.messages)))
     setSending(false)
     // What was refused stays in the box, with the host's words in the toast
-    if (ok) setText('')
+    if (ok) {
+      setText('')
+      setChosen(null)
+    }
   }
   return (
     <div className="border-t border-line">

@@ -31,7 +31,7 @@ export type MailChoices = z.infer<typeof MailChoices>
 
 /**
  * What a thread waits on the person to answer (#2229): the newest message to them that asks for an answer (a session's question, or a message that needs a
- * reply), its first lines as plain words, the answers it offers to pick from, and how many such messages wait in the thread. The Inbox draws a card
+ * reply), its first lines as plain words, the answers it offers to pick from, and the ids of all such messages in the thread. The Inbox draws a card
  * from it, answers a pick without opening the thread, and the header badge counts it (#2227); the host works it out, the window decides nothing.
  */
 export const MailAsk = z.object({
@@ -41,8 +41,8 @@ export const MailAsk = z.object({
   /** Its first lines, as plain words */
   text: z.string(),
   choices: MailChoices.optional().catch(undefined),
-  /** How many messages to the person wait for an answer in this thread */
-  count: z.number(),
+  /** Every message to the person that waits for an answer in this thread, oldest first, `id` being the last: the host's one rule for an open question, which a window reads and never works out (#2233). */
+  open: z.array(z.string()),
 })
 export type MailAsk = z.infer<typeof MailAsk>
 

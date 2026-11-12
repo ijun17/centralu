@@ -1,5 +1,5 @@
 import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
-import type { MailThreadView, NormalizedEvent } from '@cc/protocol/client'
+import type { MailThreadRow, MailThreadView, NormalizedEvent } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
@@ -151,11 +151,17 @@ function merged(now: MailThreadView, read: MailThreadView, earlier = false): Mai
   return { ...read, older: earlier ? read.older : now.older, messages: [...now.messages, ...read.messages.filter((m) => !seen.has(m.seq))].sort((a, b) => a.seq - b.seq) }
 }
 
-/** How many things want the person: threads with mail unread for them or mail held for them to act on, and the crowd question (the inbox's count) */
+/**
+ * Whether a thread waits on the person: it has mail unread for them, or a question to answer (#2233: a question read but not answered still waits). The one
+ * predicate of the list's order (`arrangeInbox`: waiting, or under Earlier), of the badge's count (`mailAttention`) and of its edge (`mailAsksYou`)
+ */
+export const threadWaits = (t: Pick<MailThreadRow, 'unread' | 'ask'>): boolean => t.unread > 0 || t.ask !== null
+
+/** How many things want the person: threads that wait on them (`threadWaits`) or hold mail for them to act on, and the crowd question (the inbox's count) */
 export function mailAttention(mail: AppState['mail']): number {
   if (!mail) return 0
   // Mail held in a thread the person is not in is theirs to act on too, and so is the question about sleeping sessions (one)
-  const threads = new Set(mail.threads.filter((t) => t.unread > 0 || t.held > 0).map((t) => t.id))
+  const threads = new Set(mail.threads.filter((t) => threadWaits(t) || t.held > 0).map((t) => t.id))
   for (const h of mail.held) threads.add(h.threadId)
   return threads.size + (mail.waiting > 0 ? 1 : 0)
 }

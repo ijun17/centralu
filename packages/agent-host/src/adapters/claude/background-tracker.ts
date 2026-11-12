@@ -92,7 +92,8 @@ export class ClaudeBackgroundTracker {
     return this.schedules.prune() ? this.event() : []
   }
 
-  push(m: Json): NormalizedEvent[] {
+  /** `cards`: the launch cards still open, which an ending closes with it (`BackgroundEvents.event`) */
+  push(m: Json, cards?: ReadonlySet<string>): NormalizedEvent[] {
     if (str(m.type) === 'assistant' || str(m.type) === 'user') {
       const changed = this.schedules.push(m)
       return changed ? this.event() : []
@@ -152,7 +153,7 @@ export class ClaudeBackgroundTracker {
       this.live = this.live.filter((x) => x !== id)
       const raw = str(m.status)
       const status = raw === 'failed' || raw === 'stopped' ? raw : 'completed'
-      return this.event([{ ...this.entry(id, known), status, ...endedSummary(str(m.summary)) }])
+      return this.event([{ ...this.entry(id, known), status, ...endedSummary(str(m.summary)) }], undefined, cards)
     }
     return []
   }
@@ -162,8 +163,8 @@ export class ClaudeBackgroundTracker {
     return this.live.length > 0
   }
 
-  /** The process went away and took its tasks with it — each live one ends as stopped, with the reason. */
-  release(why: string): NormalizedEvent[] {
+  /** The process went away and took its tasks with it — each live one ends as stopped, with the reason. `cards`: the launch cards that close with it */
+  release(why: string, cards?: ReadonlySet<string>): NormalizedEvent[] {
     const timers = this.schedules.release().map((t) => ({ ...t, status: 'stopped' as const, summary: why }))
     if (this.live.length === 0 && timers.length === 0) {
       this.info.clear()
@@ -174,7 +175,7 @@ export class ClaudeBackgroundTracker {
     this.live = []
     this.info.clear()
     this.seen.clear()
-    return this.event(ended)
+    return this.event(ended, undefined, cards)
   }
 
   private entry(id: string, i: TaskInfo | undefined): BackgroundTask {
@@ -192,7 +193,7 @@ export class ClaudeBackgroundTracker {
     }
   }
 
-  private event(ended?: BackgroundTask[], snapshot?: true): NormalizedEvent[] {
-    return this.events.event([...this.live.map((id) => this.entry(id, this.info.get(id))), ...this.schedules.live()], ended, snapshot)
+  private event(ended?: BackgroundTask[], snapshot?: true, cards?: ReadonlySet<string>): NormalizedEvent[] {
+    return this.events.event([...this.live.map((id) => this.entry(id, this.info.get(id))), ...this.schedules.live()], ended, snapshot, cards)
   }
 }

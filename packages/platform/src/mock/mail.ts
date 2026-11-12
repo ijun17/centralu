@@ -122,7 +122,7 @@ export class MailMock {
   private asking(t: Thread): MailThreadRow['ask'] {
     const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
     const newest = open.at(-1)
-    return newest ? { id: newest.id, sender: newest.sender, text: plainLines(newest.body, 4, 320), ...(newest.choices ? { choices: newest.choices } : {}), count: open.length } : null
+    return newest ? { id: newest.id, sender: newest.sender, text: plainLines(newest.body, 4, 320), ...(newest.choices ? { choices: newest.choices } : {}), open: open.map((m) => m.id) } : null
   }
 
   private touch(t: Thread): void {
@@ -168,8 +168,9 @@ export class MailMock {
       const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: answers !== undefined && question?.choices?.includes(text) ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
-      // As the host does: the reply reads the thread to its end for the person
-      t.row.unread = 0
+      // As the host does (`MailPerson.reply`): the answer reads what it answers and what came before it, not what came after
+      const answered = (question ?? t.messages.findLast((m) => m.sender.kind !== 'person'))?.seq ?? 0
+      t.row.unread = Math.min(t.row.unread, t.messages.filter((m) => m.sender.kind !== 'person' && m.seq > answered).length)
       t.row.last = { sender: PERSON, kind: message.kind, preview: text.slice(0, 140), at: message.createdAt }
       this.touch(t)
       return this.view(t, [message])

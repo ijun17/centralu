@@ -112,7 +112,7 @@ export class MailPerson {
       page = upTo.slice(-Math.min(opts.tail ?? THREAD_PAGE, THREAD_PAGE))
     } else page = all
     // Read for the person: every window's list hears it
-    if (this.records.markRead(PERSON, page.flatMap((s) => (this.records.recipient(s.m.id, PERSON)?.readAt === null ? [s.m.id] : [])), Date.now()) > 0) this.service.announce()
+    this.readFor(page)
     const first = page[0]?.seq
     const last = page.at(-1)?.seq
     const legacy = this.legacyOf(all[0]?.m)
@@ -142,8 +142,17 @@ export class MailPerson {
     const { target, to } = found
     // A pick is one of the question's own choices; any other words to a question the window names are the person's own answer to it (#2191)
     const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers !== undefined && target.choices?.includes(text) ? { picked: true } : {}) })
-    const at = this.shown(target.rootId).find((s) => s.m.id === sent.message.id)?.seq ?? 1
+    const shown = this.shown(target.rootId)
+    // An answer is a read of what it answers, and of what came before it: the row leaves the list of what waits on the person (#2233)
+    const answered = shown.find((s) => s.m.id === target.id)?.seq ?? 0
+    this.readFor(shown.filter((s) => s.seq <= answered))
+    const at = shown.find((s) => s.m.id === sent.message.id)?.seq ?? 1
     return this.thread(target.rootId, { after: at - 1 })
+  }
+
+  /** What was shown the person is read for them, and every window's list hears it */
+  private readFor(shown: readonly Shown[]): void {
+    if (this.records.markRead(PERSON, shown.flatMap((s) => (this.records.recipient(s.m.id, PERSON)?.readAt === null ? [s.m.id] : [])), Date.now()) > 0) this.service.announce()
   }
 
   /**
@@ -155,14 +164,8 @@ export class MailPerson {
       .flatMap((root) => this.shown(root).map((s) => s.m))
       .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     // Only what was sent to the person is theirs to answer: a message held for them to act on is not
-    const toPerson = chain.filter((m) => {
-      const row = this.records.recipient(m.id, PERSON)
-      return m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu' && row !== undefined && !hiddenFromPerson(row) && this.here(m.sender)
-    })
-    const open = toPerson.findLast((m) => {
-      const row = this.records.recipient(m.id, PERSON)
-      return m.needsReply && row !== undefined && row.answerId === null && (row.settled === null || row.settled === 'legacy')
-    })
+    const toPerson = this.toPerson(chain)
+    const open = this.asking(chain).at(-1)
     const theirs = open ?? toPerson.at(-1)
     const mine = chain.findLast((m) => m.sender === PERSON && this.records.recipients(m.id).some((r) => this.here(r.recipient)))
     const target = theirs ?? mine
@@ -438,7 +441,7 @@ export class MailPerson {
       projectId: first.senderProject,
       owner: this.party(first.sender),
       assignee: assignee === undefined ? null : this.party(assignee),
-      ask: asked ? { id: asked.id, sender: this.party(asked.sender), text: plainLines(asked.body, ASK_LINES, ASK_CHARS), ...(asked.choices ? { choices: asked.choices } : {}), count: asking.length } : null,
+      ask: asked ? { id: asked.id, sender: this.party(asked.sender), text: plainLines(asked.body, ASK_LINES, ASK_CHARS), ...(asked.choices ? { choices: asked.choices } : {}), open: asking.map((m) => m.id) } : null,
       unread: toPerson.filter((r) => r.readAt === null && !hiddenFromPerson(r)).length,
       held,
       blocked: 0,
@@ -449,14 +452,23 @@ export class MailPerson {
     }
   }
 
-  /**
-   * The messages in a chain that wait on the person's answer, oldest first: a message to them that asks for one (a session's question, or one that needs a reply), not answered or settled yet,
-   * from a session that is still here (a sender that is gone cannot be answered, `replyTarget`), and that they may read
-   */
-  private asking(chain: readonly MailRow[]): MailRow[] {
+  /** The messages in a chain sent to the person, in its order: not by Centralu, from a sender that is still here (one that is gone cannot be answered), and that they may read */
+  private toPerson(chain: readonly MailRow[]): MailRow[] {
     return chain.filter((m) => {
       const row = this.records.recipient(m.id, PERSON)
-      return m.needsReply && m.sender !== PERSON && parseAddress(m.sender)?.kind === 'session' && this.here(m.sender) && row !== undefined && !hiddenFromPerson(row) && row.answerId === null && (row.settled === null || row.settled === 'legacy')
+      return m.sender !== PERSON && parseAddress(m.sender)?.kind !== 'centralu' && row !== undefined && !hiddenFromPerson(row) && this.here(m.sender)
+    })
+  }
+
+  /**
+   * The messages in a chain that wait on the person's answer, oldest first: the one definition of an open question. A message to them that asks for an
+   * answer (a session's question, or one that needs a reply) and is not answered or settled yet. The row's `ask` (#2229), the reply box's target
+   * (`replyTarget`) and the thread's `ask.open` all come from here; a window works nothing out of its own
+   */
+  private asking(chain: readonly MailRow[]): MailRow[] {
+    return this.toPerson(chain).filter((m) => {
+      const row = this.records.recipient(m.id, PERSON)
+      return m.needsReply && row !== undefined && row.answerId === null && (row.settled === null || row.settled === 'legacy')
     })
   }
 

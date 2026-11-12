@@ -27,12 +27,13 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
   await page.getByTestId(`mail-thread-${id}`).click()
   await expect(page.getByTestId('mail-thread')).toBeVisible()
   await expect(page.getByTestId('mail-message-1')).toContainText('main or release?')
-  // Read for the person: the count falls
-  await expect(page.getByTestId('count-waiting')).toHaveText('0')
+  // Read, but still a question waiting for an answer: it stays counted until it is answered
+  await expect(page.getByTestId('count-waiting')).toHaveText('1')
 
   await page.getByTestId('mail-reply').fill('the release branch')
   await page.getByTestId('mail-send').click()
   await expect(page.getByTestId('mail-message-2')).toContainText('the release branch')
+  await expect(page.getByTestId('count-waiting')).toHaveText('0')
   // The person's words are marked as theirs, and the box is empty again
   await expect(page.getByTestId('mail-message-2')).toContainText('You · answer')
   await expect(page.getByTestId('mail-reply')).toHaveValue('')
@@ -172,7 +173,8 @@ test('Mail: switching the question the reply box answers sends the words to that
 
 test('Inbox: Done on a mail row closes the thread from the list, and a failed close says why (#2226)', async ({ page }) => {
   await setup(page)
-  const id = await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  // A note: Done on a card (a question waiting on the person) opens it instead, see below
+  const id = await seed(page, { subject: 'Which branch?', from: PARSER, kind: 'note', body: 'main or release?' })
   await page.getByTestId('counter').click()
   await expect(page.getByTestId(`mail-thread-${id}`)).toBeVisible()
   await page.evaluate(() => {
@@ -230,6 +232,43 @@ test('Inbox: the number keys pick a choice on the card the keyboard is on, never
   await page.getByTestId(`mail-thread-${asked}`).click()
   await expect(page.getByTestId('mail-message-2')).toContainText('Switch now')
   await expect(page.getByTestId('mail-choices-1-2')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('Inbox: D on a card opens the thread and closes nothing: a question is answered, not closed by a key (#2233)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toBeVisible()
+  await page.keyboard.press('d')
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await expect(page.getByTestId('mail-thread-state')).not.toContainText('Done')
+  await expect(page.getByTestId('mail-reply')).toBeVisible()
+})
+
+test('Inbox: a question read but not answered stays a card, and a second question in its thread takes the card, unlocked, once the first is answered (#2233)', async ({ page }) => {
+  await setup(page)
+  const other = { ...PARSER, address: 'session:mock/s2', sessionId: 's2', name: 'Builder' }
+  const id = await seed(page, { subject: 'Two questions', from: PARSER, body: 'Which branch?', choices: ['main', 'release'] })
+  await page.evaluate(([thread, from]) => (window as any).__mock.seedMailMessage(thread, { from, body: 'Keep the old format?', choices: ['Keep it', 'Switch now'] }), [id, other] as const)
+  await page.getByTestId('counter').click()
+  const card = page.getByTestId(`mail-ask-${id}`)
+  await expect(card).toContainText('Keep the old format?')
+  await expect(card).toContainText('1 other waiting in this thread')
+  // Opened and left again: read, and still waiting on an answer, so still a card above the rows, never under Earlier
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-back').click()
+  await expect(card).toBeVisible()
+  await expect(page.getByTestId('inbox-earlier-toggle')).toHaveCount(0)
+  await expect(page.getByTestId('count-waiting')).toHaveText('1')
+  // A click answers the newest; the card then shows the first question, with its choices to press
+  await page.getByTestId(`mail-ask-choices-${id}-2`).click()
+  await expect(card).toContainText('Which branch?')
+  await expect(page.getByTestId(`mail-ask-choices-${id}-1`)).toBeEnabled()
+  await expect(page.getByTestId(`mail-ask-choices-${id}-2`)).toBeEnabled()
+  // And so does a key
+  await page.keyboard.press('2')
+  await expect(card).toHaveCount(0)
+  await expect(page.getByTestId('count-waiting')).toHaveText('0')
 })
 
 test('Mail: closing a thread ends the reply box, and a thread left open is not there the next time', async ({ page }) => {
@@ -380,10 +419,10 @@ test('Mail: a pile of threads and held mail scrolls inside the panel, and nothin
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
 })
 
-// #2213: nothing waits when every thread is read; they are folded under Earlier, and the list says so
+// #2213: nothing waits when every thread is read (a note: a question not answered yet still waits, #2233); they are folded under Earlier, and the list says so
 test('Inbox: with only read threads, the list says nothing waits and keeps them under Earlier', async ({ page }) => {
   await setup(page)
-  const id = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  const id = await seed(page, { subject: 'Already read', from: PARSER, kind: 'note', body: 'x' })
   await page.getByTestId('counter').click()
   await page.getByTestId(`mail-thread-${id}`).click()
   await page.getByTestId('mail-back').click()
@@ -399,7 +438,7 @@ test('Inbox: with only read threads, the list says nothing waits and keeps them 
 test('Inbox: undelivered mail is pinned on top of the list, and a read thread folds under Earlier (order among rows: inboxList.test.ts)', async ({ page }) => {
   await setup(page)
   const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
-  const read = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  const read = await seed(page, { subject: 'Already read', from: PARSER, kind: 'note', body: 'x' })
   const fresh = await seed(page, { subject: 'Fresh question', from: PARSER, body: 'y' })
   await seed(page, { subject: 'Do the thing', from: boss, body: 'please', kind: 'assign', onlyHeld: true, held: { reason: 'failed', recipient: PARSER } })
   await page.getByTestId('counter').click()

@@ -724,11 +724,11 @@ describe('the thread row says what waits on the person’s answer (#2229)', () =
     w.clock.t += 10
     w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'And the tag?' })
     const row = () => w.person.list().threads.find((t) => t.id === root.id)!
-    expect(row().ask).toMatchObject({ text: 'And the tag?', count: 2, sender: { address: A } })
+    expect(row().ask).toMatchObject({ text: 'And the tag?', open: [expect.any(String), expect.any(String)], sender: { address: A } })
     expect(row().ask?.choices).toBeUndefined()
     const first = w.person.thread(root.id).messages.find((m) => m.body.startsWith('**Which**'))!
     w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
-    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three\nline four', choices: ['main', 'release'], count: 1 })
+    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three\nline four', choices: ['main', 'release'], open: [first.id] })
     w.person.close(root.id)
     expect(row().ask).toBeNull()
   })
@@ -737,6 +737,53 @@ describe('the thread row says what waits on the person’s answer (#2229)', () =
     const w = ready(hostWorld())
     const note = w.service.send(A, { to: [PERSON], text: 'FYI.', needsReply: false }).message
     expect(w.person.list().threads.find((t) => t.id === note.id)?.ask).toBeNull()
+  })
+})
+
+describe('an answer reads what it answers (#2233)', () => {
+  const askTwice = () => {
+    const w = ready(hostWorld())
+    const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'First?', choices: ['x', 'y'] })
+    w.clock.t += 10
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'Second?' })
+    const row = () => w.person.list().threads.find((t) => t.id === root.id)!
+    const asked = (body: string) => w.store.mailbox.feedOf(PERSON, { limit: 50 }).find((m) => m.body === body)!
+    return { w, root, row, asked }
+  }
+
+  it('the row of a question answered from the list is read and no longer asks: unread is 0 and it leaves the waiting list; a later question stays unread until its own answer', () => {
+    const { w, root, row, asked } = askTwice()
+    expect(row()).toMatchObject({ unread: 2, ask: { open: [asked('First?').id, asked('Second?').id] } })
+    // The list's card answers without the thread ever being opened: `thread()` has not read anything
+    w.person.reply(root.id, 'x', 'answer', asked('First?').id)
+    expect(row()).toMatchObject({ unread: 1, ask: { id: asked('Second?').id, open: [asked('Second?').id] } })
+    expect(w.row(asked('First?').id, PERSON)?.readAt).not.toBeNull()
+    w.person.reply(root.id, 'my own words', 'answer', asked('Second?').id)
+    expect(row().unread).toBe(0)
+    expect(row().ask).toBeNull()
+  })
+
+  it('the reply box’s free reply reads what it answers too: the newest question and what came before it, and the older question still asks', () => {
+    const { w, root, row, asked } = askTwice()
+    w.person.reply(root.id, 'for the newest')
+    expect(row()).toMatchObject({ unread: 0, ask: { id: asked('First?').id, open: [asked('First?').id] } })
+  })
+
+  it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(30), owner: A, at: t }, [
+      { id: mid(30), sender: at('gone'), kind: 'question', body: 'from a session since trashed', receipts: [{ recipient: PERSON }] },
+      { id: mid(31), sender: A, kind: 'question', body: 'held for its depth', receipts: [{ recipient: PERSON, held: 'loop' }] },
+      { id: mid(32), sender: A, kind: 'note', body: 'only a note', receipts: [{ recipient: PERSON }] },
+      { id: mid(33), sender: A, kind: 'question', body: 'Which one?', receipts: [{ recipient: PERSON }] },
+    ])
+    const r = ready(w)
+    const view = r.person.thread(tid(30))
+    expect(view.thread.ask?.open).toEqual([mid(33)])
+    // The same question is the one a free reply answers
+    expect(r.person.reply(tid(30), 'this one').messages.find((m) => m.body === 'this one')).toMatchObject({ replyTo: mid(33) })
   })
 })
 

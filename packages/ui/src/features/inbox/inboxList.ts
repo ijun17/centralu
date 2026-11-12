@@ -1,10 +1,11 @@
 import { waitedAt, type InboxItem } from '@cc/core'
 import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
+import { threadWaits } from '../../store/mail.js'
 
 /**
  * What the inbox draws, in the order it draws it (owner, 2026-11-12, #2213): mail that could not be delivered pinned on
  * top, then what waits on the person, newest first, sessions and mail threads in one list, and under "Earlier" the
- * threads with nothing unread. The threads that wait on the person's answer are cards (#2229) and come first in it,
+ * threads with nothing unread nor asked. The threads that wait on the person's answer are cards (#2229) and come first in it,
  * newest first like the rest. Derived on every read from the two lists the host and the window keep
  * (docs/state-management.md §3); nothing here is stored.
  *
@@ -44,7 +45,7 @@ export type InboxList = {
   /** Mail that waits for the person to say what happens to it, the one most recently held first */
   held: MailHeldRow[]
   waiting: WaitingRow[]
-  /** Threads with nothing unread: read, or finished, newest first */
+  /** Threads that do not wait on the person (`threadWaits`): read and answered, or finished, newest first */
   earlier: MailThreadRow[]
 }
 
@@ -54,12 +55,12 @@ export function arrangeInbox(items: readonly InboxItem[], mail: Mail): InboxList
   const threads = mail?.threads ?? []
   const rows: { at: number; row: WaitingRow }[] = [
     ...items.map((item) => ({ at: waitedAt(item), row: { kind: 'session', item } as const })),
-    ...threads.filter((t) => t.unread > 0).map((thread) => ({ at: thread.updatedAt, row: { kind: 'mail', thread } as const })),
+    ...threads.filter(threadWaits).map((thread) => ({ at: thread.updatedAt, row: { kind: 'mail', thread } as const })),
   ]
   return {
     held: [...(mail?.held ?? [])].sort((a, b) => b.since - a.since),
     // A stable sort: a tie keeps the sessions first, in their own order
     waiting: rows.sort((a, b) => Number(asksYou(b.row)) - Number(asksYou(a.row)) || b.at - a.at).map((r) => r.row),
-    earlier: threads.filter((t) => t.unread === 0).sort((a, b) => b.updatedAt - a.updatedAt),
+    earlier: threads.filter((t) => !threadWaits(t)).sort((a, b) => b.updatedAt - a.updatedAt),
   }
 }

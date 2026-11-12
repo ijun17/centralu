@@ -88,6 +88,24 @@ describe('the thread in the inbox', () => {
     expect(html).not.toContain('<script>')
   })
 
+  it('the person’s own words stay as typed (no Markdown), while others’ are drawn as Markdown (#2228)', () => {
+    const at = 1_800_000_000_000
+    const body = '**bold** and `code`\n- not a list'
+    const { html } = render(
+      view({
+        messages: [
+          { id: 'm1', seq: 1, sender: parser, kind: 'note', urgent: false, body, facts: {}, createdAt: at },
+          { id: 'm2', seq: 2, sender: you, kind: 'answer', urgent: false, body, facts: {}, createdAt: at },
+        ],
+      }),
+    )
+    const mineHtml = html.slice(html.indexOf('data-testid="mail-message-2"'))
+    expect(html.slice(0, html.indexOf('data-testid="mail-message-2"'))).toContain('<strong>bold</strong>')
+    expect(mineHtml).toContain('**bold** and `code`')
+    expect(mineHtml).not.toContain('<strong>')
+    expect(mineHtml).toContain('whitespace-pre-wrap')
+  })
+
   it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {
     const { html, text } = render(
       view({
@@ -149,15 +167,25 @@ describe('the thread in the inbox', () => {
     const second = q('m2', 2, builder, 'Keep the old settings format?')
     const mine = { id: 'm3', seq: 3, sender: you, kind: 'answer', urgent: false, body: 'main', facts: { picked: true }, replyTo: 'm1', createdAt: 1_800_000_000_000 }
 
+    // The host names the questions that are open (`ask.open`); the window offers those
+    const asking = (messages: ReturnType<typeof q>[], open: string[]) => view({ messages, thread: { ...view().thread, ask: { id: open.at(-1) ?? '', sender: parser, text: '', open } } })
+
     it('says which one the words answer, the newest by default, and how many others are open, once two are', () => {
-      const { html, text } = render(view({ messages: [first, second] }))
+      const { html, text } = render(asking([first, second], ['m1', 'm2']))
       expect(text).toContain('Answering Builder · “Keep the old settings format?”')
       expect(text).toContain('1 other open')
       expect(html).toContain('data-testid="mail-answering"')
       // The list opens from the button, and is not drawn closed
       expect(html).not.toContain('data-testid="mail-answering-list"')
       // Once the other is answered only one is open, and the box says nothing of a target
-      expect(render(view({ messages: [first, second, mine] })).html).not.toContain('data-testid="mail-answering"')
+      expect(render(asking([first, second, mine], ['m2'])).html).not.toContain('data-testid="mail-answering"')
+    })
+
+    it('offers only the questions the host says are open: a host of an older build, which names none, gets the box as it was, with words as a plain reply (#2233)', () => {
+      // Two questions in the messages, and no `ask` on the thread: nothing to choose between, and nothing sent with `answers`, which an older host refuses for words that are no choice
+      expect(render(view({ messages: [first, second] })).html).not.toContain('data-testid="mail-answering"')
+      // One of them is not open on the host (its sender is gone): it is not offered
+      expect(render(asking([first, second], ['m2'])).html).not.toContain('data-testid="mail-answering"')
     })
   })
 

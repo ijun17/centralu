@@ -84,11 +84,23 @@ export function choicesLabel(answered: boolean, picked: boolean, open: boolean):
 }
 
 /**
- * The questions to the person in a thread that wait for their answer (#2191): a session's question that none of their messages names (`answerTo`), oldest first.
- * A reply box offers a choice of which one its words answer when there is more than one; with one, the words answer it as before
+ * The questions to the person in a thread that wait for their answer (#2191), oldest first, as the host names them (`thread.ask.open`: its one rule, which
+ * decides who can still be answered and what the person may read), the ones this view holds. A reply box offers a choice of which one its words answer when there is more than one; with one, the words answer it as before
  */
-export function openQuestions(messages: readonly MailMessage[]): MailMessage[] {
-  return messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && answerTo(messages, m) === null)
+export function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>): MailMessage[] {
+  const open = view.thread.ask?.open ?? []
+  return view.messages.filter((m) => open.includes(m.id))
+}
+
+/**
+ * The question the reply box's words answer, and the open ones to switch between. With more than one question waiting the box says which one its words answer (the
+ * newest by default); with one, nothing changes (no target, the words answer it as before). A question the person named stays the one named until their words are
+ * sent: if another window answered it meanwhile, the host refuses these words ("answered") and the toast says so, and they do not go to another question unseen
+ */
+export function answeringTarget(view: Pick<MailThreadView, 'thread' | 'messages'>, chosen: string | null): { questions: MailMessage[]; target: MailMessage | undefined } {
+  const questions = openQuestions(view)
+  const named = chosen === null ? undefined : view.messages.find((m) => m.id === chosen)
+  return { questions, target: named ?? (questions.length > 1 ? questions.at(-1) : undefined) }
 }
 
 /** A question as one line, for the person to tell which is which: the session that asked it and its words */
