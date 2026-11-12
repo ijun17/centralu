@@ -1147,6 +1147,20 @@ describe("a session's background tasks (#290)", () => {
     ])
   })
 
+  it('the next burst starts a list of its own: what ended before it is not brought back (#2230)', () => {
+    let list = applyBackgroundTasks([], { live: [task('a'), task('b')] })
+    list = applyBackgroundTasks(list, { live: [task('b')], ended: [task('a', { status: 'failed' })] })
+    // Still the same burst: the ended one stays beside the running one
+    expect(list.map((t) => [t.id, t.status])).toEqual([['b', 'running'], ['a', 'failed']])
+    list = applyBackgroundTasks(list, { live: [], ended: [task('b', { status: 'stopped' })] })
+    expect(list.map((t) => t.id)).toEqual(['a', 'b'])
+    list = applyBackgroundTasks(list, { live: [task('c')] })
+    expect(list.map((t) => [t.id, t.status])).toEqual([['c', 'running']])
+    // Only an ambient task running starts nothing
+    const idle = applyBackgroundTasks([], { live: [], ended: [task('x', { status: 'failed' })] })
+    expect(applyBackgroundTasks(idle, { live: [task('w', { ambient: true })] }).map((t) => t.id)).toEqual(['w', 'x'])
+  })
+
   it('a task back in the live set is running again, not listed as ended too', () => {
     const ended = applyBackgroundTasks([], { live: [], ended: [task('a', { status: 'stopped' })] })
     expect(applyBackgroundTasks(ended, { live: [task('a')] }).map((t) => [t.id, t.status])).toEqual([

@@ -915,4 +915,16 @@ describe('a spawnAgent card held open while its child runs (#843)', () => {
       { type: 'tool_result', sessionId: S, callId: 'spawn', ok: false, summary: 'Ended with the session process' },
     ])
   })
+
+  it('a child whose held card closes with the process leaves no line of its own, as the card says it; a child with no held card does (#2233)', () => {
+    const tracker = new CodexChildTracker(S)
+    tracker.link('a', 'spawn', 'review the diff')
+    tracker.link('b', 'other', 'run the tests')
+    tracker.push('a', { method: 'turn/started', params: { turn: { id: 'ta' } } })
+    tracker.push('b', { method: 'turn/started', params: { turn: { id: 'tb' } } })
+    expect(tracker.hold(result, ['a'])).toBe(true)
+    const out = tracker.release('Ended with the session process')
+    expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'spawn', ok: false }])
+    expect(out.flatMap((e) => (e.type === 'notice' ? [e.text] : []))).toEqual(['Background agent "run the tests" stopped: Ended with the session process'])
+  })
 })

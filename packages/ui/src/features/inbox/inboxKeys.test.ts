@@ -67,3 +67,12 @@ describe('Enter on a focused control (#842 item 2)', () => {
     expect(inboxKeyAction(key('Escape'), { ...FREE, onButton: true })).toBe('close')
   })
 })
+
+describe('the number keys (#2229)', () => {
+  it('1 to 6 choose on the card under the cursor, with no modifier and no held key, and no other digit does', () => {
+    for (const n of ['1', '2', '6']) expect(inboxKeyAction(key(n), FREE)).toBe('choose')
+    for (const n of ['0', '7', '9']) expect(inboxKeyAction(key(n), FREE)).toBeNull()
+    for (const m of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }]) expect(inboxKeyAction(key('1', m), FREE), JSON.stringify(m)).toBeNull()
+    expect(inboxKeyAction(key('1'), { ...FREE, typing: true })).toBeNull()
+  })
+})

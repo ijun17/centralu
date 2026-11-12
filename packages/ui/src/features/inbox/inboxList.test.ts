@@ -7,7 +7,7 @@ const party = { address: 'person', kind: 'person', sessionId: null, name: null, 
 const session = (id: string, waitingSince: number | null): InboxItem =>
   ({ id, projectId: 'p', name: id, state: 'waiting_input', waitingSince, lastSeq: 1, lastReadSeq: 0, unread: true, waitingMs: 0 })
 const thread = (id: string, updatedAt: number, unread: number): MailThreadRow =>
-  ({ id, subject: id, state: 'open', outcome: null, next: null, projectId: null, owner: party, assignee: null, unread, held: 0, blocked: 0, createdAt: 0, updatedAt, last: null })
+  ({ id, subject: id, state: 'open', outcome: null, next: null, projectId: null, owner: party, assignee: null, unread, held: 0, blocked: 0, ask: null, createdAt: 0, updatedAt, last: null })
 const held = (messageId: string, since: number): MailHeldRow =>
   ({ messageId, threadId: 't', subject: messageId, sender: party, recipient: party, kind: 'task', reason: 'failed', preview: '', since })
 
@@ -15,6 +15,12 @@ describe('the inbox list (#2213)', () => {
   it('lists sessions and unread threads in one list, newest first', () => {
     const list = arrangeInbox([session('s-new', 900), session('s-old', 100)], { threads: [thread('m-mid', 500, 1)], held: [] })
     expect(list.waiting.map((r) => (r.kind === 'session' ? r.item.id : r.thread.id))).toEqual(['s-new', 'm-mid', 's-old'])
+  })
+
+  it('puts the threads that wait on the person’s answer first, newest first, above the rows (#2229), and keeps them in the cursor’s one list', () => {
+    const asking = (id: string, updatedAt: number): MailThreadRow => ({ ...thread(id, updatedAt, 1), ask: { id: `${id}-q`, sender: party, text: 'Which?', open: [`${id}-q`] } })
+    const list = arrangeInbox([session('s-new', 900)], { threads: [thread('m-row', 800, 1), asking('q-old', 100), asking('q-new', 500)], held: [] })
+    expect(list.waiting.map(rowKeyOf)).toEqual(['mail:q-new', 'mail:q-old', 's-new', 'mail:m-row'])
   })
 
   // The cursor walks the one list: mail between two sessions is a stop of its own
@@ -55,6 +61,13 @@ describe('the inbox list (#2213)', () => {
     const list = arrangeInbox([], { threads: [thread('old', 100, 0), thread('read', 300, 0), thread('new', 200, 2)], held: [] })
     expect(list.waiting.map((r) => (r.kind === 'mail' ? r.thread.id : ''))).toEqual(['new'])
     expect(list.earlier.map((t) => t.id)).toEqual(['read', 'old'])
+  })
+
+  it('a question read but not answered still waits: a card above the rows, never under Earlier; answered and read, it folds (#2233)', () => {
+    const asking = (id: string, unread: number): MailThreadRow => ({ ...thread(id, 100, unread), ask: { id: `${id}-q`, sender: party, text: 'Which?', open: [`${id}-q`] } })
+    const list = arrangeInbox([], { threads: [asking('read-asked', 0), thread('row', 500, 1), thread('read', 300, 0)], held: [] })
+    expect(list.waiting.map(rowKeyOf)).toEqual(['mail:read-asked', 'mail:row'])
+    expect(list.earlier.map((t) => t.id)).toEqual(['read'])
   })
 
   it('pins mail that was not delivered apart from the list, the latest first', () => {

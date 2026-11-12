@@ -1,5 +1,5 @@
 import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
-import type { MailThreadView, NormalizedEvent } from '@cc/protocol/client'
+import type { MailThreadRow, MailThreadView, NormalizedEvent } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
@@ -86,27 +86,31 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       set({ mailThread: null })
     },
 
-    async replyMail(text, kind, answers) {
+    async replyMail(text, kind, answers, threadId) {
       const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
+      const id = threadId ?? get().mailThread?.thread.id
+      if (!platform || !id) return false
       const sent = await act('send that', async () => {
-        const view = await platform.mail.reply(open.thread.id, text, kind, answers)
+        const view = await platform.mail.reply(id, text, kind, answers)
         const now = get().mailThread
-        if (get().platform === platform && now?.thread.id === open.thread.id) set({ mailThread: merged(now, view) })
+        if (get().platform === platform && now?.thread.id === id) set({ mailThread: merged(now, view) })
         void get().loadMail()
       })
-      if (!sent && answers !== undefined) await refreshThread(get, set, open.thread.id)
+      if (!sent && answers !== undefined) {
+        await refreshThread(get, set, id)
+        void get().loadMail()
+      }
       return sent
     },
 
-    async closeMail(outcome) {
+    async closeMail(outcome, threadId) {
       const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
+      const id = threadId ?? get().mailThread?.thread.id
+      if (!platform || !id) return false
+      // The host's own act on the person's mailbox: it needs no other machine to answer, so a thread whose other party is away closes as any (#2226)
       return act('close this mail', async () => {
-        await platform.mail.close(open.thread.id, outcome)
-        await refreshThread(get, set, open.thread.id)
+        await platform.mail.close(id, outcome)
+        await refreshThread(get, set, id)
         void get().loadMail()
       })
     },
@@ -147,13 +151,27 @@ function merged(now: MailThreadView, read: MailThreadView, earlier = false): Mai
   return { ...read, older: earlier ? read.older : now.older, messages: [...now.messages, ...read.messages.filter((m) => !seen.has(m.seq))].sort((a, b) => a.seq - b.seq) }
 }
 
-/** How many things want the person: threads with mail unread for them or mail held for them to act on, and the crowd question (the inbox's count) */
+/**
+ * Whether a thread waits on the person: it has mail unread for them, or a question to answer (#2233: a question read but not answered still waits). The one
+ * predicate of the list's order (`arrangeInbox`: waiting, or under Earlier), of the badge's count (`mailAttention`) and of its edge (`mailAsksYou`)
+ */
+export const threadWaits = (t: Pick<MailThreadRow, 'unread' | 'ask'>): boolean => t.unread > 0 || t.ask !== null
+
+/** How many things want the person: threads that wait on them (`threadWaits`) or hold mail for them to act on, and the crowd question (the inbox's count) */
 export function mailAttention(mail: AppState['mail']): number {
   if (!mail) return 0
   // Mail held in a thread the person is not in is theirs to act on too, and so is the question about sleeping sessions (one)
-  const threads = new Set(mail.threads.filter((t) => t.unread > 0 || t.held > 0).map((t) => t.id))
+  const threads = new Set(mail.threads.filter((t) => threadWaits(t) || t.held > 0).map((t) => t.id))
   for (const h of mail.held) threads.add(h.threadId)
   return threads.size + (mail.waiting > 0 ? 1 : 0)
+}
+
+/**
+ * How many threads wait on the person's answer (#2227): a question, or a message that needs a reply, addressed to them and not answered. With the live approval cards this is
+ * what the header badge's solid edge says (`InboxPill`). Read off the host's list on every render, never kept (docs/state-management.md §3)
+ */
+export function mailAsksYou(mail: AppState['mail']): number {
+  return mail ? mail.threads.filter((t) => t.ask !== null).length : 0
 }
 
 /** The mailbox's news (`mail_changed`): the list is read again, and the thread open in the Inbox if it is the one named. True when it was one */
