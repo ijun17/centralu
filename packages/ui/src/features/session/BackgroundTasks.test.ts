@@ -22,9 +22,4 @@ describe('the count in the background list matches the capsule', () => {
   it('counts every running task that is activity', () => {
     expect(listCount([task('a'), task('b')])).toBe('2 running')
   })
-
-  it('counts the listed rows once nothing is running', () => {
-    expect(listCount([task('a', { status: 'completed' }), task('b', { status: 'failed' })])).toBe('2')
-    expect(listCount([task('quiet', { ambient: true }), task('a', { status: 'stopped' })])).toBe('2')
-  })
 })

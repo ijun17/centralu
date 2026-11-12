@@ -11,18 +11,24 @@ const s = (id: string, state: SessionState, opts: Partial<InboxCandidate> = {}):
 })
 
 describe('inbox order (FR-15)', () => {
-  it('urgency first: approval → error → awaiting response', () => {
-    const inbox = buildInbox([s('a', 'waiting_input'), s('b', 'error'), s('c', 'waiting_approval')], NOW)
-    expect(inbox.map((i) => i.id)).toEqual(['c', 'b', 'a'])
-  })
-
-  it('within the same urgency, unread comes first', () => {
-    // Approvals keep a read one listed (#669), so the order is observable here
+  it('newest first, whatever the state (#2213)', () => {
     const inbox = buildInbox(
-      [s('read', 'waiting_approval', { lastSeq: 5, lastReadSeq: 5 }), s('unread', 'waiting_approval', { lastSeq: 5, lastReadSeq: 2 })],
+      [
+        s('a', 'waiting_input', { waitingSince: NOW - 1000 }),
+        s('b', 'error', { waitingSince: NOW - 3000 }),
+        s('c', 'waiting_approval', { waitingSince: NOW - 2000 }),
+      ],
       NOW,
     )
-    expect(inbox.map((i) => i.id)).toEqual(['unread', 'read'])
+    expect(inbox.map((i) => i.id)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('a row with no start time has just arrived, so it is first', () => {
+    const inbox = buildInbox(
+      [s('old', 'waiting_approval', { waitingSince: NOW - 99_000 }), s('proposal', 'waiting_approval', { waitingSince: null }), s('new', 'waiting_approval', { waitingSince: NOW - 1000 })],
+      NOW,
+    )
+    expect(inbox.map((i) => i.id)).toEqual(['proposal', 'new', 'old'])
   })
 
   it('lists a waiting_input session only while unread (#669)', () => {
@@ -44,14 +50,6 @@ describe('inbox order (FR-15)', () => {
       NOW,
     )
     expect(inbox.map((i) => i.id)).toEqual(['ap', 'er'])
-  })
-
-  it('with the same urgency and the same read state, the longest wait comes first', () => {
-    const inbox = buildInbox(
-      [s('new', 'waiting_approval', { waitingSince: NOW - 1000 }), s('old', 'waiting_approval', { waitingSince: NOW - 99_000 })],
-      NOW,
-    )
-    expect(inbox.map((i) => i.id)).toEqual(['old', 'new'])
   })
 
   it('working and idle sessions are not in the inbox', () => {
@@ -99,7 +97,7 @@ describe('global counters (FR-12: never summed)', () => {
 })
 
 describe('go to the next waiting item (FR-17)', () => {
-  const inbox = buildInbox([s('a', 'waiting_approval'), s('b', 'error'), s('c', 'waiting_input')], NOW)
+  const inbox = buildInbox([s('a', 'waiting_approval', { waitingSince: NOW - 1000 }), s('b', 'error', { waitingSince: NOW - 2000 }), s('c', 'waiting_input', { waitingSince: NOW - 3000 })], NOW)
 
   it('the first item when there is no current one', () => {
     expect(nextWaitingSession(inbox, null)).toBe('a')
@@ -124,9 +122,9 @@ describe('stopped turns in the inbox (#698)', () => {
   const quit = { reason: 'quit' as const, at: NOW - 30_000 }
 
   it('an idle session a quit stopped is listed while its line is unread, as urgent as an error, and waits since it stopped', () => {
-    const inbox = buildInbox([s('done', 'waiting_input'), s('quit', 'idle', { waitingSince: null, interruption: quit })], NOW)
+    const inbox = buildInbox([s('done', 'waiting_input', { waitingSince: NOW - 90_000 }), s('quit', 'idle', { waitingSince: null, interruption: quit })], NOW)
     expect(inbox.map((i) => i.id)).toEqual(['quit', 'done'])
-    expect(inbox[0]).toMatchObject({ urgency: 1, waitingSince: quit.at, waitingMs: 30_000 })
+    expect(inbox[0]).toMatchObject({ waitingSince: quit.at, waitingMs: 30_000 })
     expect(buildInbox([s('quit', 'idle', { waitingSince: null, interruption: quit, lastSeq: 4, lastReadSeq: 4 })], NOW)).toEqual([])
     // An idle session nothing stopped is not waiting on anyone
     expect(buildInbox([s('idle', 'idle', { waitingSince: null })], NOW)).toEqual([])
@@ -141,7 +139,6 @@ describe('stopped turns in the inbox (#698)', () => {
     const interrupted = s('codex', 'waiting_input', { interruption: { reason: 'interrupted', at: NOW } })
     const all = [s('quit', 'idle', { waitingSince: null, interruption: quit }), s('net', 'error', { interruption: { reason: 'network', at: NOW } }), interrupted]
     expect(countWaiting(all)).toEqual({ approval: 0, error: 3, input: 0 })
-    expect(buildInbox([interrupted], NOW)[0]).toMatchObject({ urgency: 1 })
   })
 })
 
@@ -149,9 +146,9 @@ describe('stopped turns in the inbox (#698)', () => {
 describe('pending proposals', () => {
   const proposals = proposalCandidates(pendingProposals({ mcpProposals: [{ name: 'playwright' }], skillProposals: [{ name: 'weekly' }] }))
 
-  it('are listed as approvals, after the approvals that have a start time, and counted with them', () => {
+  it('are listed as approvals, as the newest since they have no start time, and counted with them', () => {
     const inbox = buildInbox([...proposals, s('a', 'waiting_approval'), s('b', 'error')], NOW)
-    expect(inbox.map((i) => i.id)).toEqual(['a', 'proposal:mcp:playwright', 'proposal:skill:weekly', 'b'])
+    expect(inbox.map((i) => i.id)).toEqual(['proposal:mcp:playwright', 'proposal:skill:weekly', 'a', 'b'])
     expect(countWaiting([...proposals, s('a', 'waiting_approval')])).toEqual({ approval: 3, error: 0, input: 0 })
   })
 

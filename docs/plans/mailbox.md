@@ -3260,7 +3260,7 @@ The PR's **Not exercised** lists what was not available.
 
 - `packages/ui/src/store/mail.ts`: reads `mail.inbox` and `mail.chain`, sends with `mail.send` and `mail.done`,
   refreshes on `mail_changed`. The old `mail.list` and `mail.thread` calls go.
-- `packages/ui/src/features/inbox/MailSection.tsx`: two parts. "Waiting on you": `waiting`, then one guidance row per
+- `packages/ui/src/features/inbox/MailRows.tsx` (it was `MailSection.tsx` before #2213): two parts. "Waiting on you": `waiting`, then one guidance row per
   `heldByProject` entry (its `Trust project…` opens `TrustCard` for that project; `Dismiss` calls
   `mail.dismissProject {projectId}` after its confirm line), then today's held (`uncertain`, `failed`) rows, the
   depth-held rows (`loop`) with **Resume** (`mail.resume {messageId}`), and the sleeping rows. "Everything": `feed`, newest first, paged with `before`.
@@ -3269,7 +3269,7 @@ The PR's **Not exercised** lists what was not available.
   the opened message; D3), and "Open session". Where the Inbox starts a new message (`mail.send` without `id`), the
   toggle is on by default.
 - `mailLabels.ts`: the thread-state labels go; the labels of §12.4 come in once the owner approves Q2.
-- Tests: `MailSection.test.tsx`, `MailChain.test.tsx` (replacing `MailThread.test.tsx`), `mailLabels.test.ts`, and the
+- Tests: `MailChain.test.tsx` (replacing `MailThread.test.tsx`), `mailLabels.test.ts`, and the
   e2e spec `inbox-mail.spec.ts`.
 
 **Must not change.** The Waiting list's other rows (approvals, questions, errors, apps), `Inbox.tsx`'s layout around

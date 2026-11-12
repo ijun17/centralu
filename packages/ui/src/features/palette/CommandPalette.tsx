@@ -157,7 +157,7 @@ export function CommandPalette() {
         kind: 'action',
         id: 'next-waiting',
         label: 'Jump to next waiting',
-        sub: `${sc('mod', '⇧A')} · approvals first`,
+        sub: `${sc('mod', '⇧A')} · newest first`,
         run: () => useStore.getState().openNextWaiting(),
       },
     ]

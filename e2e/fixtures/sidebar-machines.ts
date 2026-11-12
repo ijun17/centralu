@@ -559,9 +559,10 @@ export function sidebarMachinesTests(): void {
 
       // Opening it says who asked, with the way back
       await page.getByTestId('session-row-box.child-1').click()
-      await expect(page.getByTestId('asked-by-badge')).toContainText('Asked by alpha')
+      await page.getByTestId('session-more').click()
+      await expect(page.getByTestId('asked-by-back')).toContainText('in alpha')
       await expect(page.getByTestId('project-cc')).toHaveAttribute('data-selected', 'true')
-      await page.getByTestId('asked-by-badge').click()
+      await page.getByTestId('asked-by-back').click()
       await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
     })
 

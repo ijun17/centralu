@@ -1,9 +1,9 @@
 import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
-/** The person's mailbox (#1347): the Inbox's Mail section and the thread open in it. */
+/** The person's mailbox (#1347): the threads the Inbox lists among its rows and the thread open in it. */
 export type MailSlice = {
   /**
-   * The mailbox as the Inbox lists it: the threads the person is in (unread first), the mail held for them to act on, and how
+   * The mailbox as the Inbox lists it: the threads the person is in, the mail held for them to act on, and how
    * many sleeping sessions wait for their word. A copy of the host's answer, read again when `mail_changed` says something
    * moved. Null until read.
    */

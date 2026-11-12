@@ -1,10 +1,10 @@
 import { useStore, type ChatItem } from '../../../store/store.js'
-import { Button } from '../../../components/Button.jsx'
+import { ActionRow } from '../../sidebar/menus/ActionRow.jsx'
 import { BranchIcon } from '../../../components/icons.jsx'
 
 /*
- * The row and the badge that point at another session or project: a manager's worktree proposal (#69) and the
- * header's mark on the session another project asked (#371). The call that asked is a Centralu call's card
+ * The rows that point at another session or project: a manager's worktree proposal (#69) and the
+ * header menu's way back to the session that asked (#371). The call that asked is a Centralu call's card
  * (`CentraluCall.tsx`), as every other call to Centralu's tools is.
  */
 
@@ -40,46 +40,27 @@ export function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 
 }
 
 /**
- * The header's mark on a session another project asked for (#371 part B): who asked, and the way back. The caller
- * may since have been deleted; the mark then says so rather than disappearing, since the session still did that
- * project's work.
+ * The way back to the session that asked for this one (#371 part B), a row of the header's ⋯ menu (#2213; it was a badge
+ * beside the name). The caller may since have been deleted; the row then says so, not pressable, rather than disappearing,
+ * since the session still did that asker's work. A session of the same project started this one with start_agent (#561):
+ * the session, not the project, is named; one of another project is named with its project.
  */
-export function AskedByBadge({ callerId, projectId }: { callerId: string; projectId: string | null }) {
+export function AskedByRow({ callerId, projectId, onDone }: { callerId: string; projectId: string | null; onDone: () => void }) {
   const caller = useStore((s) => s.sessions[callerId])
   const projectName = useStore((s) => (caller?.projectId ? s.projects[caller.projectId]?.name : undefined))
   const focus = useStore((s) => s.focusSession)
-  if (!caller) {
-    return (
-      <span className="shrink-0 text-2xs text-ink-faint" data-testid="asked-by-badge">
-        Asked by a session no longer here
-      </span>
-    )
-  }
-  // A session of the same project started this one with start_agent (#561): the session, not the project, is named
-  if (caller.projectId && caller.projectId === projectId) {
-    return (
-      <Button
-        variant="quiet"
-        size="xs"
-        className="min-w-0 shrink truncate"
-        onClick={() => focus(callerId)}
-        data-testid="asked-by-badge"
-        title={`Go back to ${caller.name}`}
-      >
-        ↩ Started by {caller.name}
-      </Button>
-    )
-  }
+  if (!caller) return <ActionRow label="The session that asked is gone" onClick={onDone} testId="asked-by-back" disabled />
+  const sameProject = !!caller.projectId && caller.projectId === projectId
+  const label = sameProject || !projectName ? `Go back to ${caller.name}` : `Go back to ${caller.name} in ${projectName}`
   return (
-    <Button
-      variant="quiet"
-      size="xs"
-      className="min-w-0 shrink truncate"
-      onClick={() => focus(callerId)}
-      data-testid="asked-by-badge"
-      title={`Go back to ${caller.name}`}
-    >
-      ↩ Asked by {projectName ?? caller.name}
-    </Button>
+    <ActionRow
+      label={label}
+      title={label}
+      testId="asked-by-back"
+      onClick={() => {
+        focus(callerId)
+        onDone()
+      }}
+    />
   )
 }

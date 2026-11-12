@@ -187,7 +187,7 @@ export function backgroundTasksTests(): void {
       await expect(page.getByTestId(`background-task-${SHELL.id}`)).toBeVisible()
     })
 
-    test('with only ended tasks left the header still opens them, and says how they ended', async ({ page }) => {
+    test('with only ended tasks left the header has no badge (owner, 2026-11-12: it shows only while work runs)', async ({ page }) => {
       const id = await start(page)
       await emit(page, id, {
         type: 'background_tasks',
@@ -197,17 +197,9 @@ export function backgroundTasksTests(): void {
           { ...SHELL, status: 'stopped' },
         ],
       })
-      const badge = page.getByTestId('background-badge')
-      await expect(badge).toHaveAttribute('data-count', '0')
-      await expect(badge).toHaveAttribute('aria-label', 'background · 1 failed · 1 stopped')
-      await expect(badge).toHaveText('1 failed')
-      await expect(badge.getByTestId('background-running-dot')).toHaveCount(0)
+      // An ambient watcher alone is not activity, and what ended is not running: nothing is drawn, and the dot is gone too
+      await expect(page.getByTestId('background-badge')).toHaveCount(0)
       await expect(page.getByTestId(`background-mark-${id}`)).toHaveCount(0)
-      await badge.click()
-      await expect(page.getByTestId(`background-note-${AGENT.id}`)).toHaveText('API Error: 529 overloaded')
-      // Clearing everything ended takes the badge away — an ambient watcher alone is not activity
-      await page.getByTestId('background-clear').click()
-      await expect(badge).toHaveCount(0)
     })
 
     /*

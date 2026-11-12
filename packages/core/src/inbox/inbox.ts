@@ -1,10 +1,12 @@
 import type { Interruption, SessionState } from '@cc/protocol/client'
-import { URGENCY, isWaiting } from '../session/state-machine.js'
+import { isWaiting } from '../session/state-machine.js'
 import { isUnread, type ReadTracked } from '../unread/unread.js'
 
 /**
  * The inbox is derived state (docs/state-management.md §3). It is never stored.
- * Order: urgency → unread → when the wait started, ascending (the longest wait first).
+ * Order: newest first, by when the wait started (owner, 2026-11-12, #2213; it was urgency, then the longest wait). A row
+ * with no start time (a pending proposal, an app arrival) has just arrived, so it is first. The counters still tell the
+ * states apart.
  *
  * **What is listed** (#669): approvals and errors while the session is in that state, and a
  * `waiting_input` session only while it is unread. A finished turn the person has already read
@@ -14,7 +16,7 @@ import { isUnread, type ReadTracked } from '../unread/unread.js'
  *
  * **A stopped turn is listed too** (#698): a session whose last turn the network, a quit or its tool cut short rests in
  * a state that says nothing of it (`idle` after a quit, `waiting_input` after an interrupt). It is listed like a
- * finished turn, while unread, with the urgency of an error; the line Centralu writes for a quit makes it unread.
+ * finished turn, while unread, and counted with the errors; the line Centralu writes for a quit makes it unread.
  * A tool reconnecting for too long is listed while it lasts, though the session is still working.
  *
  * **A pending assistant proposal (an MCP server or a skill, #703) is listed like an approval.** It is not a session
@@ -111,7 +113,7 @@ export function pendingProposals(lists: { mcpProposals: readonly { name: string 
 
 /**
  * The pending proposals as inbox candidates (#703). They wait in the `waiting_approval` state. A proposal carries no start
- * time, so it has no `waitingSince` and sorts after the approvals that do.
+ * time, so it has no `waitingSince` and is listed as the newest.
  */
 export function proposalCandidates(pending: readonly PendingProposal[]): InboxCandidate[] {
   return pending.map((p) => ({
@@ -128,7 +130,6 @@ export function proposalCandidates(pending: readonly PendingProposal[]): InboxCa
 
 export type InboxItem = InboxCandidate & {
   unread: boolean
-  urgency: number
   waitingMs: number
 }
 
@@ -139,10 +140,8 @@ export function isListedWaiting(s: { state: SessionState; interruption?: Interru
   return s.state === 'waiting_input' ? isUnread(s) : isWaiting(s.state)
 }
 
-/** A stopped turn waits on the person as an error does (#698): only an approval blocks the agent more */
-export function urgencyOf(s: { state: SessionState; interruption?: Interruption | null }): number {
-  return s.interruption ? Math.min(URGENCY[s.state], URGENCY.error) : URGENCY[s.state]
-}
+/** When a row's wait began, for the order: a row with no start time came just now */
+const waitedAt = (s: { waitingSince: number | null }): number => s.waitingSince ?? Number.MAX_SAFE_INTEGER
 
 export function buildInbox(sessions: readonly InboxCandidate[], now: number): InboxItem[] {
   return sessions
@@ -152,16 +151,9 @@ export function buildInbox(sessions: readonly InboxCandidate[], now: number): In
       // An idle session stopped by a quit has no wait of its own; it has waited since it stopped
       waitingSince: s.waitingSince ?? s.interruption?.at ?? null,
       unread: isUnread(s),
-      urgency: urgencyOf(s),
     }))
     .map((s) => ({ ...s, waitingMs: s.waitingSince == null ? 0 : Math.max(0, now - s.waitingSince) }))
-    .sort(
-      (a, b) =>
-        a.urgency - b.urgency ||
-        Number(b.unread) - Number(a.unread) ||
-        (a.waitingSince ?? Infinity) - (b.waitingSince ?? Infinity) ||
-        a.id.localeCompare(b.id),
-    )
+    .sort((a, b) => waitedAt(b) - waitedAt(a) || a.id.localeCompare(b.id))
 }
 
 /** The global counters — never summed (FR-12: "2 approvals · 3 awaiting response") */
@@ -172,7 +164,7 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
   for (const s of sessions) {
     if (!isListedWaiting(s)) continue
     if (s.state === 'waiting_approval') c.approval++
-    // A stopped turn, or a tool reconnecting for too long, counts with the errors (#698), as `urgencyOf` orders it
+    // A stopped turn, or a tool reconnecting for too long, counts with the errors (#698)
     else if (s.state === 'error' || s.interruption) c.error++
     else if (s.state === 'waiting_input') c.input++
   }
@@ -181,7 +173,7 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
 
 /**
  * "Go to the next waiting item" (FR-17). Cycles to the item after the current session.
- * It follows the inbox order exactly, so the order is approval → error → awaiting response.
+ * It follows the inbox order exactly: the newest wait first.
  */
 export function nextWaitingSession(inbox: readonly InboxItem[], currentId: string | null): string | null {
   const first = inbox[0]

@@ -20,16 +20,6 @@ export {
   type SessionStateStep,
 } from '@cc/protocol/client'
 
-/** Urgency: what the inbox order and the notification policy are based on. Lower is more urgent. */
-export const URGENCY: Record<SessionState, number> = {
-  waiting_approval: 0, // The agent is blocked — nothing happens unless I press something
-  error: 1,
-  waiting_input: 2, // The turn has ended — not urgent
-  limited: 3,
-  working: 9,
-  idle: 9,
-}
-
 /**
  * The state a session is listed, counted and drawn under. A card the person answers (`needsAnswer`: an approval, or an open
  * question, owner 2026-10-18) is listed as an approval: the inbox, its counters and a folded project's line all keep it until

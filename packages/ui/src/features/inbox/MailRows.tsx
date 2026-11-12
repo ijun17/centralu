@@ -6,50 +6,43 @@ import { RelativeAge } from '../../components/RelativeAge.js'
 import { crowdText, heldLabel, heldResume, threadStateLabel } from './mailLabels.js'
 
 /**
- * The Mail section of the inbox (#1347, docs/plans/mailbox.md §10.1): the threads the person is in with the unread first, the
- * mail held for them to act on, and the one question about sleeping sessions after a long stop. Under the sessions that
- * wait; nothing here takes the list's keys, so Move, Open and Done still mean what they meant for the sessions above it.
+ * The mailbox's parts of the inbox (#1347, docs/plans/mailbox.md §10.1), drawn by `Inbox` in the order `arrangeInbox` gives
+ * (#2213): the mail the person has to act on pinned on top, a thread as a row of the list. Nothing here takes the list's
+ * keys, so Move, Open and Done still mean what they meant for the sessions among them.
  */
-export function MailSection() {
-  const mail = useStore((s) => s.mail)
-  const open = useStore((s) => s.openMailThread)
-  if (!mail || (mail.threads.length === 0 && mail.held.length === 0 && mail.waiting === 0)) return null
+
+/** What is pinned above the list: the question about sleeping sessions, and the mail that was not delivered */
+export function MailPinned({ held, waiting }: { held: MailHeldRow[]; waiting: number }) {
   return (
-    <section className="flex min-h-0 flex-col border-t border-line/60" aria-label="Mail" data-testid="inbox-mail">
-      <header className="flex shrink-0 items-baseline gap-2 px-4 py-2">
-        <h3 className="text-sm font-medium text-ink">Mail</h3>
-        <span className="readout text-xs text-ink-faint">{mail.threads.length}</span>
-      </header>
-      {/* However much mail there is, this part keeps to its height and scrolls inside it; the rest of the panel stays put (#1772) */}
-      <div className="flex min-h-0 max-h-[calc(32vh/var(--text-zoom))] flex-col overflow-y-auto">
-        {mail.waiting > 0 && <CrowdCard waiting={mail.waiting} />}
-        {mail.held.length > 0 && <HeldList rows={mail.held} />}
-        {mail.threads.length > 0 && (
-          <ul className="flex flex-col gap-0.5 p-1">
-            {mail.threads.map((t) => (
-              <li key={t.id} className="rounded-field transition-colors hover:bg-surface-hover/25">
-                <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
-                  <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
-                    ●
-                  </span>
-                  <span className={`truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
-                  <span className="truncate text-xs text-ink-faint">{peopleOf(t)}</span>
-                  <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                    {t.last && <span className="max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
-                    <span className="text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
-                      {threadStateLabel(t)}
-                    </span>
-                    <span className="readout w-12 text-right text-xs text-ink-faint">
-                      <RelativeAge when={t.updatedAt} />
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
+    <>
+      {waiting > 0 && <CrowdCard waiting={waiting} />}
+      {held.length > 0 && <HeldList rows={held} />}
+    </>
+  )
+}
+
+/** One thread of the person's mailbox as a row of the inbox's list */
+export function MailThreadItem({ thread: t, dim }: { thread: MailThreadRow; dim?: boolean }) {
+  const open = useStore((s) => s.openMailThread)
+  return (
+    <li className={`rounded-field transition-colors hover:bg-surface-hover/25 ${dim ? 'opacity-80' : ''}`}>
+      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
+        <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
+          ●
+        </span>
+        <span className={`truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
+        <span className="truncate text-xs text-ink-faint">{peopleOf(t)}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {t.last && <span className="max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
+          <span className="text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
+            {threadStateLabel(t)}
+          </span>
+          <span className="readout w-12 text-right text-xs text-ink-faint">
+            <RelativeAge when={t.updatedAt} />
+          </span>
+        </span>
+      </button>
+    </li>
   )
 }
 

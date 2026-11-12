@@ -18,7 +18,7 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
 
   await expect(page.getByTestId('count-waiting')).toHaveText('1')
   await page.getByTestId('counter').click()
-  await expect(page.getByTestId('inbox-mail')).toBeVisible()
+  await expect(page.getByTestId('inbox-list')).toBeVisible()
   // Mail alone is no reason for the empty state
   await expect(page.getByTestId('inbox-empty')).toHaveCount(0)
   await expect(page.getByTestId(`mail-thread-${id}`)).toContainText('Which branch?')
@@ -263,7 +263,7 @@ test('Mail: a pile of threads and held mail scrolls inside the panel, and nothin
     })
   const before = await frame()
   await page.getByTestId('counter').click()
-  await expect(page.getByTestId('inbox-mail')).toBeVisible()
+  await expect(page.getByTestId('inbox-list')).toBeVisible()
 
   const after = await frame()
   // The panel ends inside the window, the page itself does not scroll, and the top bar stays where it was
@@ -271,7 +271,47 @@ test('Mail: a pile of threads and held mail scrolls inside the panel, and nothin
   expect(after.doc.height).toBeLessThanOrEqual(after.doc.view)
   expect(after.doc.top).toBe(0)
   expect(after.counter).toEqual(before.counter)
-  // The mail is what scrolls: the thread list holds more than it shows
-  const list = page.getByTestId('inbox-mail').locator('ul').last().locator('..')
+  // The list is what scrolls: it holds more than it shows, and the header above it stays
+  const list = page.getByTestId('inbox-list')
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+})
+
+// #2213: nothing waits when every thread is read; they are folded under Earlier, and the list says so
+test('Inbox: with only read threads, the list says nothing waits and keeps them under Earlier', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-back').click()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+  await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
+  await expect(page.getByTestId('inbox-earlier-toggle')).toContainText('Earlier')
+  await expect(page.getByTestId(`mail-thread-${id}`)).toHaveCount(0)
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await expect(page.getByTestId(`mail-thread-${id}`)).toBeVisible()
+})
+
+// #2213 (owner, 2026-11-12): newest first, mail that was not delivered pinned on top, what is read folded under Earlier
+test('Inbox: undelivered mail is pinned on top of the list, and a read thread folds under Earlier (order among rows: inboxList.test.ts)', async ({ page }) => {
+  await setup(page)
+  const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
+  const read = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  const fresh = await seed(page, { subject: 'Fresh question', from: PARSER, body: 'y' })
+  await seed(page, { subject: 'Do the thing', from: boss, body: 'please', kind: 'assign', onlyHeld: true, held: { reason: 'failed', recipient: PARSER } })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${read}`).click()
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await page.getByTestId('mail-back').click()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+
+  const y = async (testId: string) => (await page.getByTestId(testId).boundingBox())!.y
+  // The held mail is above the thread that waits
+  await expect(page.getByTestId('mail-held')).toBeVisible()
+  expect(await y('mail-held')).toBeLessThan(await y(`mail-thread-${fresh}`))
+  // The read thread is not in the list until Earlier is opened, and then it is below the rest
+  await expect(page.getByTestId(`mail-thread-${read}`)).toHaveCount(0)
+  await expect(page.getByTestId('inbox-earlier-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await expect(page.getByTestId('inbox-earlier')).toHaveAttribute('data-fold', 'open')
+  expect(await y(`mail-thread-${read}`)).toBeGreaterThan(await y(`mail-thread-${fresh}`))
 })

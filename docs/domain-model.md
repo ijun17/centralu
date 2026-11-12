@@ -104,7 +104,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Term | Meaning | Defined in |
 |---|---|---|
 | Focus view | The main layout: sidebar plus one session | product-spec §5.1 |
-| Inbox | Everything waiting on the person, across projects, most urgent first: sessions, and the Assistant's MCP-server and skill proposals not yet answered (listed and counted like an approval; they have no session, the jump goes to the Assistant's screen where the card stands, #703); and an app a trusted project gained since the window last looked, said once (#1141) | `packages/ui/src/features/inbox/`; product-spec FR-15 |
+| Inbox | Everything waiting on the person, across projects, newest first (undelivered mail pinned on top, what is read folded under Earlier): sessions, and the Assistant's MCP-server and skill proposals not yet answered (listed and counted like an approval; they have no session, the jump goes to the Assistant's screen where the card stands, #703); and an app a trusted project gained since the window last looked, said once (#1141) | `packages/ui/src/features/inbox/`; product-spec FR-15 |
 | Grid | Several panels at once: sessions and apps | `packages/ui/src/features/grid/`; product-spec §5.4 |
 | Project screen | A project's page: explicitly added session and app panels, plus git; starts empty | `packages/ui/src/features/project/`; product-spec §5.5 |
 | Workspace | The UI's own state as one snapshot (layout, open sessions), saved on every change and restored at start | `Store.saveWorkspace`; [state-management.md](state-management.md) §5 |
@@ -482,8 +482,8 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
   it (#428).
 - The host's own statements (a resume, a tool change, a failed re-attach, a card's rest) go out as `state_change` and
   are applied to its copy through the same rules (`settleState`), not written by hand.
-- `waiting_input` means the turn ended. It counts as waiting (`isWaiting`), so it stands in the inbox, but its
-  urgency is below `error` (`URGENCY`): an approval blocks the agent, a finished turn does not.
+- `waiting_input` means the turn ended. It counts as waiting (`isWaiting`), so it stands in the inbox. The inbox orders by
+  when the wait began, not by state (owner, 2026-11-12, #2213); the counters tell the states apart.
 - An `approval_request` or `question_request` is applied in **any** state: it is a fact the host received, not an
   inference, and a table that swallowed one would leave the agent blocked unseen. Only inferred moves are checked
   against the table; an illegal one is ignored and logged.

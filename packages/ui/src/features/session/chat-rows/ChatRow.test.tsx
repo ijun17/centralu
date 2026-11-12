@@ -23,7 +23,7 @@ vi.mock('../../../store/store.js', async (importOriginal) => {
 
 const { ChatRow } = await import('./ChatRow.jsx')
 const { AttachmentStrip } = await import('./attachments.jsx')
-const { AskedByBadge } = await import('./delegation.jsx')
+const { AskedByRow } = await import('./delegation.jsx')
 
 beforeEach(() => {
   state = {}
@@ -353,19 +353,19 @@ describe('ChatRow: rows that point elsewhere', () => {
   })
 })
 
-describe('AskedByBadge', () => {
-  it('says the caller is gone rather than disappearing', () => {
-    const { html, text } = render(<AskedByBadge callerId="gone" projectId="p1" />)
-    expect(testIds(html)).toEqual(['asked-by-badge'])
-    expect(text).toBe('Asked by a session no longer here')
-    expect(html).not.toContain('<button')
+describe('AskedByRow', () => {
+  const noop = () => undefined
+  it('says the caller is gone rather than disappearing, and cannot be pressed', () => {
+    const { html, text } = render(<AskedByRow callerId="gone" projectId="p1" onDone={noop} />)
+    expect(testIds(html)).toEqual(['asked-by-back'])
+    expect(text).toBe('The session that asked is gone')
+    expect(html).toContain('disabled')
   })
 
-  it('names the session when it is of the same project, and the project otherwise', () => {
+  it('names the session when it is of the same project, and adds the project otherwise', () => {
     state = { projects: { p2: project('p2', 'Docs') }, sessions: { c1: session('c1', { projectId: 'p1' }), c2: session('c2', { projectId: 'p2' }) } }
-    expect(render(<AskedByBadge callerId="c1" projectId="p1" />).text).toBe('↩ Started by Session c1')
-    expect(render(<AskedByBadge callerId="c2" projectId="p1" />).text).toBe('↩ Asked by Docs')
-    expect(render(<AskedByBadge callerId="c2" projectId="p1" />).html).toContain('title="Go back to Session c2"')
+    expect(render(<AskedByRow callerId="c1" projectId="p1" onDone={noop} />).text).toBe('Go back to Session c1')
+    expect(render(<AskedByRow callerId="c2" projectId="p1" onDone={noop} />).text).toBe('Go back to Session c2 in Docs')
   })
 })
 

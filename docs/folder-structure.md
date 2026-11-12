@@ -65,7 +65,7 @@ centralu/
 │  ├─ core/                     # pure domain. No IO, no React
 │  │  └─ src/
 │  │     ├─ session/            # session reducer (the transition rules are protocol's session-state.ts)
-│  │     ├─ inbox/              # ordering and urgency rules, a mail party's name (all pure functions)
+│  │     ├─ inbox/              # ordering rules, a mail party's name (all pure functions)
 │  │     ├─ grid/               # grid panels, spans and layout
 │  │     ├─ git/                # the commit graph's lanes
 │  │     ├─ notify/             # which events raise an OS notification

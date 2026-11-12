@@ -5,23 +5,16 @@
  */
 import { describe, expect, it } from 'vitest'
 import { nextStateFor, type NormalizedEvent, type SessionState } from '@cc/protocol'
-import { URGENCY, canTransition, isWaiting, listedState, needsAnswer, transition } from './state-machine.js'
+import { canTransition, isWaiting, listedState, needsAnswer, transition } from './state-machine.js'
+
+const STATES: SessionState[] = ['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error']
 
 const ev = (e: Partial<NormalizedEvent> & { type: NormalizedEvent['type'] }) =>
   ({ sessionId: 's1', ...e }) as NormalizedEvent
 
 describe('matches the FR-12 spec', () => {
-  it('exactly the six states exist', () => {
-    const spec: SessionState[] = ['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error']
-    expect(Object.keys(URGENCY).sort()).toEqual([...spec].sort())
-  })
-
-  it('waiting_approval is more urgent than waiting_input (the reason the badges are split)', () => {
-    expect(URGENCY.waiting_approval).toBeLessThan(URGENCY.waiting_input)
-  })
-
   it('the inbox holds three kinds: approval, error and awaiting response', () => {
-    const waiting = (['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error'] as SessionState[])
+    const waiting = STATES
       .filter(isWaiting)
     expect(waiting.sort()).toEqual(['error', 'waiting_approval', 'waiting_input'])
   })
@@ -103,7 +96,7 @@ describe('blocking illegal transitions', () => {
   })
 
   it('a transition to the same state is always legal (idempotent)', () => {
-    for (const s of Object.keys(URGENCY) as SessionState[]) expect(canTransition(s, s)).toBe(true)
+    for (const s of STATES) expect(canTransition(s, s)).toBe(true)
   })
 
   it('working can go to every waiting state', () => {

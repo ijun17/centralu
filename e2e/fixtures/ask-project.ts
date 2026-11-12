@@ -142,7 +142,7 @@ export function askProjectTests(): void {
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('delegated-1')
       await expect(page.getByText('Export sprites', { exact: false })).toBeVisible()
       await expect(page.getByTestId('msg-user-from')).toHaveText('consumer session ⤷')
-      await expect(page.getByTestId('asked-by-badge')).toHaveCount(0)
+      await expect(page.getByTestId('session-more')).toHaveCount(0)
       await page.evaluate((id) => (window as any).__store.getState().focusSession(id), caller)
 
       // The answer lands: the card says so, and the model's text is one click away
@@ -349,8 +349,9 @@ export function askProjectTests(): void {
         ['child-1', consumer, caller] as const,
       )
       await page.evaluate(() => (window as any).__store.getState().focusSession('child-1'))
-      const back = page.getByTestId('asked-by-badge')
-      await expect(back).toContainText('Started by')
+      await page.getByTestId('session-more').click()
+      const back = page.getByTestId('asked-by-back')
+      await expect(back).toContainText('Go back to')
       await back.click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(caller)
     })
