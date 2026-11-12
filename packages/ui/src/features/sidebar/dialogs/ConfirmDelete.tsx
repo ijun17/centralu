@@ -102,7 +102,7 @@ export function ConfirmDelete({
           // Opens downward in place (cc-expand, 180ms, none under reduced motion) and takes no press: the answer arrives after the dialog
           <div className="cc-expand mt-2 grid">
             <div className="min-h-0 overflow-hidden">
-              <div className="rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
+              <div className="rounded-md border border-danger bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
                 <p>Archiving it drops these, and Undo does not bring them back:</p>
                 <ul className="mt-1 list-disc space-y-0.5 pl-4">
                   {losses.map((line) => (
@@ -119,7 +119,7 @@ export function ConfirmDelete({
         </p>
         {deleteExternal ? (
           <p
-            className="mt-1 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink"
+            className="mt-1 rounded-md border border-danger bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink"
             data-testid="delete-external-warning"
           >
             When it is deleted for good,{' '}

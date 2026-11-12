@@ -110,17 +110,15 @@
   --color-line-chrome: #45403c;
   --color-line-strong: #514c48; /* a border that has to show: focused inputs, checkboxes, graph lanes */
   /*
-   * The edges of the conversation's frames, each a colour the theme sets. A panel's edge is brighter than any line inside it; the
-   * answering look is the grey ring; a message bubble's and a tool call card's are the hairline or softer, and yours a step stronger.
-   * A theme file that leaves one out follows the token THEME_TOKENS names (`follows`): the panel's `line-strong`, the ring's
-   * `ink-muted`, the bubble's and the card's `line`, your bubble's `line-strong`. Dark's values are what these were drawn with
-   * before (the answering ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`, as a solid colour).
+   * The edges of the conversation's frames that are not the hairline, each a colour the theme sets: a resting panel's, the answering
+   * ring's and your own bubble's. The agent's bubble and a tool call card draw the plain `line`. A theme file that leaves one out
+   * follows the token THEME_TOKENS names (`follows`): the panel's and your bubble's `line-strong`, the ring's `ink-muted`. Dark's
+   * values are what these were drawn with before (the ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`,
+   * as a solid colour). The high-contrast presets hold all three to 3:1 (e2e/fixtures/theme.ts).
    */
   --color-line-panel: #514c48;
   --color-line-answering: #aca7a3;
-  --color-line-bubble: #3a3531;
   --color-line-bubble-mine: #59534f;
-  --color-line-tool: #3a3531;
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
@@ -401,9 +399,7 @@
   --color-line-strong: #c6c6cb;
   --color-line-panel: #d4d4d4;
   --color-line-answering: #9e9e9e;
-  --color-line-bubble: #e6e6e6;
   --color-line-bubble-mine: #cdcdcd;
-  --color-line-tool: #e2e2e2;
 
   --color-ink-signal: #000000;
   --color-ink: #1d1d1f;
@@ -483,9 +479,7 @@
   --color-line-strong: #a8a8a8;
   --color-line-panel: #a8a8a8;
   --color-line-answering: #c8c8c8;
-  --color-line-bubble: #707070;
-  --color-line-bubble-mine: #616161;
-  --color-line-tool: #707070;
+  --color-line-bubble-mine: #a8a8a8;
 
   --color-ink-signal: #ffffff;
   --color-ink: #f0f0f0;
@@ -536,9 +530,7 @@
   --color-line-strong: #4a4a4a;
   --color-line-panel: #4a4a4a;
   --color-line-answering: #3a3a3a;
-  --color-line-bubble: #767676;
-  --color-line-bubble-mine: #a2a2a2;
-  --color-line-tool: #767676;
+  --color-line-bubble-mine: #4a4a4a;
 
   --color-ink-signal: #000000;
   --color-ink: #121212;
@@ -627,9 +619,7 @@
   --color-line-strong: #545456;
   --color-line-panel: #545456;
   --color-line-answering: #b0b0b5;
-  --color-line-bubble: #3a3a3c;
   --color-line-bubble-mine: #646467;
-  --color-line-tool: #3a3a3c;
 
   --color-ink-signal: #ffffff;
   --color-ink: #f5f5f7;
@@ -1587,7 +1577,6 @@
 .cc-panel[data-look='stopped'] {
   border-style: dashed;
 }
-
 
 /*
  * The gust that sweeps across the screen once, when a response finishes.

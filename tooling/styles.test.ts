@@ -540,16 +540,20 @@ describe('icon script', () => {
 /**
  * A border is a colour the theme sets, never a blend of one with whatever lies under it (owner, 2026-11-12): `border-line/60` was
  * `line` at 60% over the ground, 1.06:1 to 1.27:1 in Dark, Light and Graphite and half the high-contrast hairline, under the line rule
- * in themes.md "The lines". A source file that draws a border or a divider with a token at a part of its opacity fails here.
+ * in themes.md "The lines". A source file that draws a border, a divider, a ring or an outline with any colour token at a part of its
+ * opacity fails here (`border-danger/40` and `ring-ink-muted/70` were two more).
  */
 describe('borders are solid tokens', () => {
-  it('no border or divider class in the UI puts an opacity on a line or ink token', () => {
-    const uiSrc = join(ROOT, 'packages/ui/src')
+  it('no border, divider, ring or outline class puts an opacity on a colour token', () => {
     const found: string[] = []
-    for (const f of readdirSync(uiSrc, { recursive: true, encoding: 'utf8' })) {
-      if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f)) continue
-      const text = readFileSync(join(uiSrc, f), 'utf8')
-      for (const m of text.matchAll(/\b(?:border|divide)(?:-[lrtbxy])?-(?:line[a-z-]*|ink[a-z-]*)\/\d+/g)) found.push(`${f}: ${m[0]}`)
+    for (const dir of ['packages/ui/src', 'apps/desktop/src', 'apps/web/src']) {
+      const src = join(ROOT, dir)
+      if (!existsSync(src)) continue
+      for (const f of readdirSync(src, { recursive: true, encoding: 'utf8' })) {
+        if (!/\.tsx?$/.test(f) || /\.test\.tsx?$/.test(f)) continue
+        const text = readFileSync(join(src, f), 'utf8')
+        for (const m of text.matchAll(/\b(?:border|divide|ring|outline)(?:-[lrtbxyse])?-(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*|\[[^\]]+\])\/\d+/g)) found.push(dir + '/' + f + ': ' + m[0])
+      }
     }
     expect(found).toEqual([])
   })

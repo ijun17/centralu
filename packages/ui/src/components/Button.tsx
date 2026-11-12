@@ -42,7 +42,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary: 'border border-line text-ink enabled:hover:border-line-strong',
   quiet: 'border border-line text-ink-muted enabled:hover:border-line-strong enabled:hover:text-ink',
   subtle: 'border border-line text-ink-faint enabled:hover:border-line-strong enabled:hover:text-ink',
-  danger: 'border border-danger/40 bg-danger-bg text-danger enabled:hover:border-danger/70',
+  danger: 'border border-line-strong bg-danger-bg text-danger enabled:hover:border-danger',
   ghost: 'text-ink-faint enabled:hover:text-ink',
   choice: 'border border-line-strong text-ink enabled:hover:bg-surface-selected aria-pressed:bg-surface-selected aria-pressed:disabled:opacity-100',
 }

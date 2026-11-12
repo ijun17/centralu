@@ -37,13 +37,11 @@ describe('resolving a side', () => {
   })
 
   it('has every border a file leaves out follow the token THEME_TOKENS names, and a file that sets one keeps it', () => {
-    const tokens = resolveSide('light', 'mine', [file({ tokens: { line: '#f1cddb', 'line-strong': '#dfb0c4', 'line-tool': '#eeeeee' } })]).tokens
+    const tokens = resolveSide('light', 'mine', [file({ tokens: { line: '#f1cddb', 'line-strong': '#dfb0c4', 'line-answering': '#eeeeee' } })]).tokens
     expect(tokens).toMatchObject({
       '--color-line-panel': 'var(--color-line-strong)',
-      '--color-line-answering': 'var(--color-ink-muted)',
-      '--color-line-bubble': 'var(--color-line)',
+      '--color-line-answering': '#eeeeee',
       '--color-line-bubble-mine': 'var(--color-line-strong)',
-      '--color-line-tool': '#eeeeee',
     })
   })
 

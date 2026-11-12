@@ -94,20 +94,10 @@
           "maxLength": 400,
           "description": "Lines: Answering panel edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"ink-muted\"."
         },
-        "line-bubble": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Lines: Message bubble edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line\"."
-        },
         "line-bubble-mine": {
           "type": "string",
           "maxLength": 400,
           "description": "Lines: Your message bubble edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line-strong\"."
-        },
-        "line-tool": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Lines: Tool call card edge. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() … Left out, it follows \"line\"."
         },
         "ink-signal": {
           "type": "string",

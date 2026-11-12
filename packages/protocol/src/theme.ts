@@ -63,9 +63,7 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
     ['line-strong', 'Strong line'],
     ['line-panel', 'Resting panel edge', 'line-strong'],
     ['line-answering', 'Answering panel edge', 'ink-muted'],
-    ['line-bubble', 'Message bubble edge', 'line'],
     ['line-bubble-mine', 'Your message bubble edge', 'line-strong'],
-    ['line-tool', 'Tool call card edge', 'line'],
   ]),
   ...defs('Ink', 'color', [
     ['ink-signal', 'Signal: waiting for you'],

@@ -388,7 +388,7 @@ export function ToolCard({
       className={
         call
           ? `rounded-lg border bg-surface-hover/15 ${item.ok === false ? 'border-dashed border-ink-muted' : 'border-line-strong'}`
-          : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line-tool'}`
+          : `rounded-lg border bg-surface-raised/40 ${item.ok === false ? 'border-dashed border-line-strong' : 'border-line'}`
       }
       data-testid={ask ? 'ask-project-card' : 'tool-card'}
       data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}

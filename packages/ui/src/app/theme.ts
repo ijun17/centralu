@@ -1,7 +1,6 @@
 import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
-
 /**
  * The theme engine (#312 step 3).
  *
