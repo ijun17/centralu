@@ -58,7 +58,7 @@ The do-not-store list — the following **must not exist as fields** and must be
 | Project aggregate badge | the states of the sessions in it | 〃 |
 | "N concurrent sessions" | the number of active sessions with the same cwd | 〃 |
 
-Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering and urgency rules live in core, the unit tests run without React.
+Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering rules live in core, the unit tests run without React.
 
 ### Relative-time labels (#615)
 

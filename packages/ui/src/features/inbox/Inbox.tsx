@@ -1,8 +1,8 @@
 import { usePresence } from '../../components/presence.js'
-import { isInTurn } from '@cc/core'
+import { isInTurn, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useKeepInView } from '../../app/useKeepInView.js'
 import { isTextEntry, pressesItself } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
@@ -21,13 +21,18 @@ import {
 } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
-import { MailSection } from './MailSection.jsx'
+import { MailPinned, MailThreadItem } from './MailRows.jsx'
+import { arrangeInbox, CURSOR_START, rowKeyOf, settleCursor, type InboxCursor } from './inboxList.js'
+import { Fold } from '../../components/Fold.jsx'
+import { ChevronIcon } from '../../components/icons.jsx'
+import { mailAttention } from '../../store/mail.js'
 import { MailThread } from './MailThread.jsx'
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
- * Ignores project structure and shows only "what is waiting on me right now," in order of
- * urgency.
+ * Ignores project structure and shows only "what is waiting on me right now": the sessions and the mail in one list,
+ * newest first, with the mail that was not delivered pinned on top and what is read or finished folded under
+ * "Earlier" (owner, 2026-11-12, #2213).
  *
  * **It is a dropdown hanging below the top-bar number** (user request, 2026-09-09). While it was
  * a modal in the middle of the screen, the place clicked and the place it opened were far apart,
@@ -40,17 +45,29 @@ export function Inbox() {
   // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
+  const openMailThread = useStore((s) => s.openMailThread)
   const markDone = useStore((s) => s.markDone)
-  const send = useStore((s) => s.send)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
-  // The person's mailbox (#1347): its list sits under the sessions that wait, and a thread takes the panel while it is open
+  // The person's mailbox (#1347): its threads are rows of the same list, and a thread takes the panel while it is open
   const mailThread = useStore((s) => s.mailThread)
   const closeMailThread = useStore((s) => s.closeMailThread)
-  const hasMail = useStore((s) => !!s.mail && (s.mail.threads.length > 0 || s.mail.held.length > 0 || s.mail.waiting > 0))
-  const [rawCursor, setCursor] = useState(0)
-  // Done removes a row, so the cursor can end up past the end: keep it on the last row
-  const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
+  const mail = useStore((s) => s.mail)
+  const list = useMemo(() => arrangeInbox(items, mail), [items, mail])
+  // Nothing to act on: what is read is folded under Earlier, which is no reason for the list to look as if something waited
+  const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
+  const [earlierOpen, setEarlierOpen] = useState(false)
+  /*
+    The cursor is on a row, not on a row number: a wait that arrives goes in at the top, and the row the cursor is on
+    must not slide away from under the key they press. It takes the top row when the list opens and follows that row
+    from then on; ↑ and ↓ walk the one list, mail rows included. `settleCursor` keeps it so on every render (state set
+    while rendering, which React redraws at once, not after a commit): a row that has left (Done) hands it to the row now
+    at its place.
+  */
+  const [at, setAt] = useState<InboxCursor>(CURSOR_START)
+  const placed = settleCursor(list.waiting, at, open)
+  if (placed !== at) setAt(placed)
+  const cursor = placed.row
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
@@ -60,7 +77,10 @@ export function Inbox() {
 
   // The list is what it opens on: a thread left open when it closed is not waiting there the next time
   useEffect(() => {
-    if (!open) closeMailThread()
+    if (!open) {
+      closeMailThread()
+      setEarlierOpen(false)
+    }
   }, [open, closeMailThread])
 
   useEffect(() => {
@@ -89,14 +109,16 @@ export function Inbox() {
         }
         return
       }
-      const item = items[cursor]
-      if (action === 'down') setCursor((c) => Math.min(c + 1, items.length - 1))
-      else if (action === 'up') setCursor((c) => Math.max(c - 1, 0))
+      const row = list.waiting[cursor]
+      const item = row?.kind === 'session' ? row.item : undefined
+      const moveTo = (to: number) => setAt({ key: list.waiting[to] ? rowKeyOf(list.waiting[to]) : null, row: to })
+      if (action === 'down') moveTo(Math.min(cursor + 1, list.waiting.length - 1))
+      else if (action === 'up') moveTo(Math.max(cursor - 1, 0))
       else if (action === 'open') {
         if (item) {
           openWaiting(item.id, { preferGrid: true })
           toggle(false)
-        }
+        } else if (row?.kind === 'mail') void openMailThread(row.thread.id)
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
@@ -117,7 +139,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, openWaiting, toggle, markDone, mailThread, closeMailThread])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -156,7 +178,9 @@ export function Inbox() {
         {!mailThread && (
           <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
             <h2 className="text-sm font-medium text-ink">Waiting</h2>
-            <span className="readout text-xs text-ink-faint">{items.length}</span>
+            <span className="readout text-xs text-ink-faint" data-testid="inbox-count">
+              {items.length + mailAttention(mail)}
+            </span>
             <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
@@ -174,101 +198,150 @@ export function Inbox() {
               toggle(false)
             }}
           />
-        ) : items.length === 0 ? (
-          hasMail ? null : (
-          <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
-            Nothing waiting
-            <span className="mt-1 block text-xs text-ink-faint">Finished agents collect here</span>
-          </p>
-          )
+        ) : nothingWaiting && list.earlier.length === 0 ? (
+          <Nothing />
         ) : (
-          <ul className="flex max-h-[calc(56vh/var(--text-zoom))] min-h-0 flex-col gap-0.5 overflow-y-auto p-1">
-            {items.map((it, i) => (
-              <li
-                key={it.id}
-                data-cursor={i === cursor || undefined}
-                className={`rounded-field transition-colors ${
-                  i === cursor ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
-                }`}
-              >
-                <div className="flex items-center">
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left"
-                    onClick={() => {
-                      openWaiting(it.id, { preferGrid: true })
-                      toggle(false)
-                    }}
-                    data-testid={`inbox-item-${it.id}`}
-                  >
-                    <StateDot state={it.state} />
-                    <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
-                      {it.name}
-                    </span>
-                    <span className="truncate text-xs text-ink-faint">
-                      {projectLabelOf(projects, it.projectId)}
-                    </span>
-                    {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
-                    {!it.proposal && !it.arrival && (
-                      <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
-                    )}
-                    <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                      <span
-                        className="max-w-64 truncate text-xs text-ink-faint"
-                        title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
-                        data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
-                      >
-                        {it.arrival ? arrivalAsks(it.arrival.asks) : inboxStateLabel(it)}
-                      </span>
-                      {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
-                      <WaitingTime since={it.waitingSince} />
-                    </span>
-                  </button>
-                  {/*
-                    Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
-                    still has its conversation. Never sent by itself: a resent turn can repeat a push or a release.
-                  */}
-                  {canContinue(it.interruption) && !isInTurn(it.state) && (
-                    <button
-                      className="mr-1.5 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink transition-colors hover:bg-surface-hover"
-                      onClick={() => void send(it.id, CONTINUE_TEXT)}
-                      aria-label={`Continue: ${it.name}`}
-                      title={`Sends "${CONTINUE_TEXT}"`}
-                      data-testid={`inbox-continue-${it.id}`}
-                    >
-                      Continue
-                    </button>
-                  )}
-                  {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
-                  {doneable(it) && (
-                    <button
-                      className="mr-2 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
-                      onClick={() => void markDone(it.id)}
-                      aria-label={`Done: ${it.name}`}
-                      data-testid={`inbox-done-${it.id}`}
-                    >
-                      Done
-                    </button>
-                  )}
-                </div>
-                {/* What the approval asks, and Allow / Deny where the card's question is a plain yes or no (#543) */}
-                {it.state === 'waiting_approval' && !it.proposal && (
-                  <RowApproval
-                    sessionId={it.id}
-                    keys={i === cursor}
-                    settled={settled}
-                    onOpen={() => {
-                      openWaiting(it.id, { preferGrid: true })
-                      toggle(false)
-                    }}
-                  />
+          // However much there is, the list keeps to the panel and scrolls inside it (#1772); the header stays put
+          <div className="flex min-h-0 flex-col overflow-y-auto" data-testid="inbox-list">
+            <MailPinned held={list.held} waiting={mail?.waiting ?? 0} />
+            {nothingWaiting && <Nothing />}
+            {list.waiting.length > 0 && (
+              <ul className="flex flex-col gap-0.5 p-1">
+                {list.waiting.map((row, place) =>
+                  row.kind === 'mail' ? (
+                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} />
+                  ) : (
+                    <SessionRow
+                      key={row.item.id}
+                      it={row.item}
+                      project={projectLabelOf(projects, row.item.projectId)}
+                      active={place === cursor}
+                      settled={settled}
+                      onOpen={() => {
+                        openWaiting(row.item.id, { preferGrid: true })
+                        toggle(false)
+                      }}
+                    />
+                  ),
                 )}
-              </li>
-            ))}
-          </ul>
+              </ul>
+            )}
+            {list.earlier.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 px-4 py-2 text-left text-xs text-ink-faint transition-colors hover:text-ink-muted"
+                  aria-expanded={earlierOpen}
+                  onClick={() => setEarlierOpen((o) => !o)}
+                  data-testid="inbox-earlier-toggle"
+                >
+                  <ChevronIcon open={earlierOpen} />
+                  Earlier
+                  <span className="readout">{list.earlier.length}</span>
+                </button>
+                <Fold open={earlierOpen} testId="inbox-earlier">
+                  <ul className="flex flex-col gap-0.5 p-1">
+                    {list.earlier.map((t) => (
+                      <MailThreadItem key={t.id} thread={t} dim />
+                    ))}
+                  </ul>
+                </Fold>
+              </>
+            )}
+          </div>
         )}
-        {!mailThread && <MailSection />}
       </div>
     </>
+  )
+}
+
+/** What the list says when nothing waits */
+function Nothing() {
+  return (
+    <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
+      Nothing waiting
+      <span className="mt-1 block text-xs text-ink-faint">Finished agents collect here</span>
+    </p>
+  )
+}
+
+/** A session of the list: what it waits for, its time, Continue and Done, and the approval it asks, when it is a plain one */
+function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; project: string; active: boolean; settled: boolean; onOpen: () => void }) {
+  const markDone = useStore((s) => s.markDone)
+  const send = useStore((s) => s.send)
+  return (
+    <li
+      data-cursor={active || undefined}
+      className={`rounded-field transition-colors ${
+        active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
+      }`}
+    >
+      <div className="flex items-center">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left"
+          onClick={onOpen}
+          data-testid={`inbox-item-${it.id}`}
+        >
+          <StateDot state={it.state} />
+          <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+            {it.name}
+          </span>
+          <span className="truncate text-xs text-ink-faint">
+            {project}
+          </span>
+          {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
+          {!it.proposal && !it.arrival && (
+            <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-2.5">
+            <span
+              className="max-w-64 truncate text-xs text-ink-faint"
+              title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
+              data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
+            >
+              {it.arrival ? arrivalAsks(it.arrival.asks) : inboxStateLabel(it)}
+            </span>
+            {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
+            <WaitingTime since={it.waitingSince} />
+          </span>
+        </button>
+        {/*
+          Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
+          still has its conversation. Never sent by itself: a resent turn can repeat a push or a release.
+        */}
+        {canContinue(it.interruption) && !isInTurn(it.state) && (
+          <button
+            className="mr-1.5 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink transition-colors hover:bg-surface-hover"
+            onClick={() => void send(it.id, CONTINUE_TEXT)}
+            aria-label={`Continue: ${it.name}`}
+            title={`Sends "${CONTINUE_TEXT}"`}
+            data-testid={`inbox-continue-${it.id}`}
+          >
+            Continue
+          </button>
+        )}
+        {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
+        {doneable(it) && (
+          <button
+            className="mr-2 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+            onClick={() => void markDone(it.id)}
+            aria-label={`Done: ${it.name}`}
+            data-testid={`inbox-done-${it.id}`}
+          >
+            Done
+          </button>
+        )}
+      </div>
+      {/* What the approval asks, and Allow / Deny where the card's question is a plain yes or no (#543) */}
+      {it.state === 'waiting_approval' && !it.proposal && (
+        <RowApproval
+          sessionId={it.id}
+          keys={active}
+          settled={settled}
+          onOpen={onOpen}
+        />
+      )}
+    </li>
   )
 }
 

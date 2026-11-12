@@ -1,4 +1,4 @@
-import { THEME_PRESETS, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
+import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
 /**
@@ -23,7 +23,7 @@ export type ThemeBase = 'dark' | 'light'
 export { THEME_PRESETS }
 export type { ThemePreset }
 
-export { THEME_TOKENS }
+export { THEME_TOKENS, pickableThemes }
 
 /** Whether the browser accepts this value for this token (by its theme-file key). Anything else is never applied. */
 export function isValidTokenValue(key: string, value: string): boolean {

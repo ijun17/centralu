@@ -5,7 +5,10 @@ import { basename, join } from 'node:path'
 import {
   THEME_SCHEMA_FILE,
   formatThemeFile,
+  freeThemeId,
+  isPresetThemeId,
   parseThemeFile,
+  presetIdRefusal,
   themeFileJsonSchema,
   type ThemeFileContent,
   type ThemeFileEntry,
@@ -18,18 +21,6 @@ import { rpcError } from './rpc-error.js'
 const MAX_FILE_BYTES = 256 * 1024
 /** Editors save in bursts (write, rename, chmod); one refetch per burst is enough */
 const SETTLE_MS = 100
-
-/** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
-export function themeSlug(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .normalize('NFKD')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 48) || 'theme'
-  )
-}
 
 /** Where `remove` keeps what it took out of the folder */
 const REMOVED_DIR = '.removed'
@@ -132,6 +123,8 @@ export class ThemeFiles {
     // The reader refuses a bigger file (read), so writing one would list a theme that never applies
     if (Buffer.byteLength(text) > MAX_FILE_BYTES) throw rpcError('The theme is too large to be a theme file.')
     const target = id ?? (await this.freeId(content.name))
+    // An explicit id is an edit of that file: under a preset's id it is only one that is stored there already (#2214)
+    if (id !== null && isPresetThemeId(id) && !(await stat(this.pathOf(id)).then(() => true, () => false))) throw rpcError(presetIdRefusal(id))
     await mkdir(this.dir, { recursive: true })
     // On a filesystem that ignores case, `paper` would overwrite a hand-written Paper.json the list does not show
     const names = await readdir(this.dir).catch(() => [] as string[])
@@ -177,16 +170,10 @@ export class ThemeFiles {
     return join(this.dir, `${id}.json`)
   }
 
+  /** The id a new file named `name` goes under (`freeThemeId`): not one of the files here, not a preset's */
   private async freeId(name: string): Promise<string> {
-    const base = themeSlug(name)
-    for (let n = 1; n < 1000; n++) {
-      const id = n === 1 ? base : `${base}-${n}`
-      const taken = await stat(this.pathOf(id)).then(
-        () => true,
-        () => false,
-      )
-      if (!taken) return id
-    }
-    return `${base}-${randomBytes(4).toString('hex')}`
+    // Lowercased: on a filesystem that ignores case `Paper.json` takes `paper` too (see `save`)
+    const names = new Set((await readdir(this.dir).catch((): string[] => [])).map((n) => n.toLowerCase()))
+    return freeThemeId(name, (id) => names.has(`${id}.json`))
   }
 }

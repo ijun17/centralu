@@ -9,11 +9,11 @@ export type AssistantSlice = {
    * → the app registers it and restarts the Assistant). The list here is a copy; the host holds
    * the truth.
    */
-  mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
+  mcpProposals: { name: string; command: string; args: string[]; why?: string; at?: number }[]
   refreshMcpProposals(): Promise<void>
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
   /** The Assistant's skill suggestion (#71) — the same suggest-then-one-click-approve rail */
-  skillProposals: { name: string; content: string; why?: string }[]
+  skillProposals: { name: string; content: string; why?: string; at?: number }[]
   refreshSkillProposals(): Promise<void>
   resolveSkillProposal(name: string, approve: boolean): Promise<void>
   /** The Assistant session id (`null` if never created — the screen shows an empty conversation plus suggested questions) */

@@ -1239,9 +1239,43 @@
   overflow: hidden;
   animation: cc-chip-out 150ms ease-out forwards;
 }
+/*
+ * The same row, the other way (#2209): a chip that arrives grows its width and the gap beside it from nothing in 150ms while it fades in (ease-in, the exit reversed), so the chips
+ * that stay slide over to make room, as they do for one that leaves. The wrapper takes this class only for the entrance and is `contents` again
+ * after it (FoldSummary.tsx), so the chip's overhang (the background dot) is not clipped at rest. Reduced motion: a short fade, the chips move at once.
+ */
+@keyframes cc-chip-in {
+  from {
+    max-width: 0;
+    margin-right: -0.25rem;
+    opacity: 0;
+  }
+  to {
+    max-width: 2.5rem;
+    margin-right: 0;
+    opacity: 1;
+  }
+}
+@keyframes cc-chip-in-still {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-chip-in {
+  display: flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  animation: cc-chip-in 150ms ease-in;
+}
 @media (prefers-reduced-motion: reduce) {
   .cc-chip-out {
     animation: cc-chip-out-still 100ms linear forwards;
+  }
+  .cc-chip-in {
+    animation: cc-chip-in-still 100ms linear;
   }
 }
 

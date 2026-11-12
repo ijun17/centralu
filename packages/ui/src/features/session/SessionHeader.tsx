@@ -12,7 +12,7 @@ import { AgentVersionNotice } from './AgentVersionNotice.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { PresetTag } from './PresetTag.jsx'
 import { SubagentSteps } from './chat-rows/ChatRow.jsx'
-import { AskedByBadge } from './chat-rows/delegation.jsx'
+import { SessionHeaderMenu } from './SessionHeaderMenu.jsx'
 
 /**
  * A session pane's header (#428): the name, the machine, the badges, Run and Restart.
@@ -76,9 +76,6 @@ export function SessionHeader({
       {/* Started from a linked computer (#1273): the preset it runs under, on both computers */}
       <PresetTag preset={session.permissionPreset} startedFromHub={session.startedFromHub} testId="session-preset" />
 
-      {/* Another project's session asked for this one (#371) — the way back to it */}
-      {session.askedBy && <AskedByBadge callerId={session.askedBy} projectId={session.projectId ?? null} />}
-
       {session.limit && (
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
@@ -137,6 +134,7 @@ export function SessionHeader({
           in and no terminal to run it in. So it gets no button rather than an empty menu:
           an entry that could never have anything in it is a worse answer than no entry.
         */}
+        <SessionHeaderMenu session={session} />
         {session.projectId && <RunMenu projectId={session.projectId} open={runOpen} onOpenChange={setRunOpen} />}
         {/* Creating a new session when the tool locks up would cut off context — this swaps
         only the process */}

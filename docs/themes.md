@@ -79,7 +79,7 @@ that must stand out. (There is no accent setting any more; see [Choosing](#choos
 
 Each custom theme is one file: `<data>/themes/<id>.json`, where `<data>` is `~/.centralu`
 (`~/.centralu-dev` for a development build, `CC_DATA_DIR` in tests). The id is the file name:
-lowercase letters, digits and hyphens.
+lowercase letters, digits and hyphens. A theme the app files by its name never takes a preset's id (a custom "Graphite" is `graphite-2`, keeping its name), so both can be picked; a file you name `graphite.json` yourself takes the preset's place in the picker.
 
 ```json
 {

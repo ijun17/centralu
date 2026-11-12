@@ -9,7 +9,7 @@ import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked }
  * becomes a feature that hides signal instead. So the folded row keeps the state of the hidden rows
  * **as counts**.
  *
- * There are five states counted, in the same order of urgency as the inbox (approval → error →
+ * There are five states counted, in the order the counters are read in (approval → error →
  * waiting for input, then working, then `background`: a turn that ended while its own background work runs, #2146). Error was not part of the original request, but it cannot be
  * dropped: it is a state that the inbox and ⌘⇧A count as a waiting session (core `isWaiting`), and if a
  * session stalled inside a folded project disappears with no indication at all, folding has just done

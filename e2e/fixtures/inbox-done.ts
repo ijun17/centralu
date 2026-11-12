@@ -173,10 +173,11 @@ export function inboxDoneTests() {
     await page.evaluate(
       ({ a, e }) => {
         const m = (window as any).__mock as Mock
-        void m.requestApproval(a, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' })
         m.emit({ type: 'state_change', sessionId: e, state: 'working' })
         m.emit({ type: 'message_delta', sessionId: e, role: 'assistant', text: 'about to fail' })
         m.emit({ type: 'error', sessionId: e, error: { code: 'internal', message: 'boom', retryable: false } })
+        // The approval comes last, so it is the newest row and the one under the cursor (newest first, #2213)
+        void m.requestApproval(a, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' })
       },
       { a: approval, e: error },
     )

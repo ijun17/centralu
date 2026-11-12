@@ -152,6 +152,38 @@ export function presetTests() {
     expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('dark')
   })
 
+  // #2214 (owner, 2026-11-12): a custom theme's id is made from its name, and never a preset's, so both stay selectable
+  test('a custom theme named like a preset gets its own id; both are in the picker, and each applies its own tokens (#2214)', async ({ page }) => {
+    await openDemo(page)
+    const saved = await page.evaluate(() =>
+      (window as any).__store.getState().platform.themes.save(null, { name: 'Graphite', base: 'dark', tokens: { 'surface-floor': '#223344' } }),
+    )
+    expect(saved.id).toBe('graphite-2')
+    await openAppearance(page)
+    const pick = page.getByTestId('settings-theme-pick')
+    await expect(pick.locator('option[value="graphite"]')).toHaveText('Graphite')
+    await expect(pick.locator('option[value="graphite-2"]')).toHaveText('Graphite')
+
+    await pickTheme(page, 'graphite')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
+    await pickTheme(page, 'graphite-2')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#223344')
+    expect(await prefsOf(page)).toMatchObject({ themeDark: 'graphite-2' })
+    await pickTheme(page, 'graphite')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
+  })
+
+  test('a theme file stored under a preset id before then keeps working, listed once as the custom theme it is (#2214)', async ({ page }) => {
+    await openDemo(page)
+    await writeFile(page, 'dark', { name: 'My dark', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    await openAppearance(page)
+    const pick = page.getByTestId('settings-theme-pick')
+    await expect(pick.locator('option[value="dark"]')).toHaveText('My dark')
+    await expect(pick.locator('option[value="dark"]')).toHaveCount(1)
+    await pickTheme(page, 'dark')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#101820')
+  })
+
   for (const preset of THEME_PRESETS) {
     test(`${preset.name} keeps the urgency order on every reading surface`, async ({ page }) => {
       await openDemo(page)

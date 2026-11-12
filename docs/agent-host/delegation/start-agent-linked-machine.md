@@ -15,7 +15,7 @@ is made over the link (`agents.createSession` there) under the caller's preset c
 over a link, #838, which carries an `auto` one the same way) with the caller's preset carried beside it (`fromHub`), which the machine turns into `auto` only for
 an `auto` caller while its switch is on, read again at that start (`presetFromHub`); a child made without a card that
 did not get `auto` (the switch went off meanwhile) is deleted before it is given its task. The machine marks it
-`startedFromHub`, and its header shows its preset there and on the hub (its sidebar row stopped showing it: `auto` is the default, so the tag was noise, owner 2026-11-05). It is made with the model, effort and worktree
+`startedFromHub`, and its header shows its preset there and on the hub unless it is `auto`, the default (its sidebar row stopped showing it: the tag was noise, owner 2026-11-05; the header too, 2026-11-12, #2213). It is made with the model, effort and worktree
 branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
 the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
 task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
@@ -157,9 +157,9 @@ reads the child: a turn that ended meanwhile is reported then, one still running
 before: a link slow to come up would otherwise settle that work as ended. The Assistant's own linked reports still live in memory. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's session archive clears its
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
-the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
+the sessions there and with a way back to its caller in the header's ⋯ menu (#2213), since a project on another machine is a project of its own
 (#1416; #1038 first drew it under its caller, in the caller's project). The caller's row carries no pointer to it
-(owner, 2026-10-26: the "2 on win-pc" pointer of #1416 was removed); the child keeps its row, its mark and its inbox entry. The hub names the
+(owner, 2026-10-26: the "2 on win-pc" pointer of #1416 was removed); the child keeps its row, its way back and its inbox entry. The hub names the
 caller as its `askedBy` in that machine's rows and owner events (`LinkDeps.ownerOf`, `LinkedHost.remoteAgentParent`)
 and sends `session_owner` when it records the child, hands it to an heir, or forgets it with its caller; the mark
 follows `askedBy`, so it moves with the heir and goes when the caller does.

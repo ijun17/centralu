@@ -276,7 +276,7 @@ describe('MCP server suggestions', () => {
 
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals).toEqual([
-        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser' },
+        { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser', at: expect.any(Number) },
       ])
     })
   })
@@ -355,7 +355,7 @@ describe('MCP server suggestions', () => {
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals).toEqual([])
       expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
-      expect(computeInbox(useStore.getState()).map((i) => i.proposal)).toEqual([{ kind: 'skill', name: 'weekly-report' }])
+      expect(computeInbox(useStore.getState()).map((i) => i.proposal?.name)).toEqual(['weekly-report'])
     })
     expect(mock.badge).toBe(1)
   })
@@ -417,7 +417,7 @@ describe('skill suggestions', () => {
     mock.saveProposal({ skill: { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' } })
     await vi.waitFor(() => {
       expect(useStore.getState().skillProposals).toEqual([
-        { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' },
+        { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request', at: expect.any(Number) },
       ])
     })
 
@@ -441,9 +441,10 @@ describe('pending proposals wait on the person', () => {
     await vi.waitFor(() => expect(computeInbox(useStore.getState())).toHaveLength(2))
 
     const items = computeInbox(useStore.getState())
-    expect(items.map((i) => [i.state, i.proposal])).toEqual([
-      ['waiting_approval', { kind: 'mcp', name: 'playwright' }],
-      ['waiting_approval', { kind: 'skill', name: 'weekly-report' }],
+    // Newest first by when the window first saw each, so the order of two read in one tick is not asserted here
+    expect(items.map((i) => [i.state, i.proposal?.name]).sort()).toEqual([
+      ['waiting_approval', 'playwright'],
+      ['waiting_approval', 'weekly-report'],
     ])
     expect(countWaiting([...items])).toMatchObject({ approval: 2 })
     // The dock badge counts them too

@@ -135,14 +135,14 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
     await newSession(page, proj, name)
   }
 
-  // 2 approvals + 3 replies waiting
+  // 3 replies waiting, then 2 approvals: the list is newest first (#2213), so the approvals are the first two rows
+  for (const idx of [1, 2, 4]) await finishTurnUnread(page, idx)
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
   await injectApproval(page, 3, { kind: 'command', command: 'pytest', cwd: '/tmp/beta' })
-  for (const idx of [1, 2, 4]) await finishTurnUnread(page, idx)
 
   await expect(page.getByTestId('count-waiting')).toHaveText('5')
 
-  // Open the inbox — it must be sorted by urgency
+  // Open the inbox: the newest waits are first
   await page.keyboard.press('Meta+i')
   await expect(page.getByTestId('inbox')).toBeVisible()
   const rows = page.locator('[data-testid^="inbox-item-"]')
@@ -183,14 +183,37 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
   await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
 })
 
-test('The "jump to next waiting" shortcut cycles through approvals first (T5-5, FR-17)', async ({ page }) => {
+// #2213: a wait that arrives goes in at the top, and the row the person moved the cursor to stays the one the keys act on
+test('Inbox: a newer wait arriving above the cursor does not move the cursor to another session', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  for (const name of ['First task', 'Second task', 'Third task']) await newSession(page, 'alpha', name)
+  await finishTurnUnread(page, 0)
+  await finishTurnUnread(page, 1)
+  await page.keyboard.press('Meta+i')
+  const rows = page.locator('[data-testid^="inbox-item-"]')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first()).toContainText('Second task')
+  await page.keyboard.press('ArrowDown')
+  // The cursor is on the older wait; a newer one comes in above it
+  await finishTurnUnread(page, 2)
+  await expect(rows).toHaveCount(3)
+  await expect(rows.first()).toContainText('Third task')
+  // Done acts on the row the cursor was moved to, not on the one that slid under it
+  await page.keyboard.press('d')
+  await expect(rows).toHaveCount(2)
+  await expect(page.getByTestId('inbox-list')).not.toContainText('First task')
+  await expect(page.getByTestId('inbox-list')).toContainText('Second task')
+  await expect(page.getByTestId('inbox-list')).toContainText('Third task')
+})
+
+test('The "jump to next waiting" shortcut goes from a session that waits for nothing to the one that waits (T5-5, FR-17; the order among several is in core inbox.test.ts)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'Awaiting-reply session')
   await newSession(page, 'alpha', 'Awaiting-approval session')
   await emitEvent(page, 0, { type: 'turn_complete' })
   await injectApproval(page, 1, { kind: 'command', command: 'x', cwd: '/tmp' })
 
-  // Even starting from the reply-waiting session, cycling follows urgency order (approvals first)
+  // A finished turn with nothing to read is not listed, so only the approval waits, whichever session the person starts from
   const firstId = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...(m as any).sessions.values()][0].id

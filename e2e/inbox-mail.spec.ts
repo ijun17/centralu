@@ -18,7 +18,7 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
 
   await expect(page.getByTestId('count-waiting')).toHaveText('1')
   await page.getByTestId('counter').click()
-  await expect(page.getByTestId('inbox-mail')).toBeVisible()
+  await expect(page.getByTestId('inbox-list')).toBeVisible()
   // Mail alone is no reason for the empty state
   await expect(page.getByTestId('inbox-empty')).toHaveCount(0)
   await expect(page.getByTestId(`mail-thread-${id}`)).toContainText('Which branch?')
@@ -263,7 +263,7 @@ test('Mail: a pile of threads and held mail scrolls inside the panel, and nothin
     })
   const before = await frame()
   await page.getByTestId('counter').click()
-  await expect(page.getByTestId('inbox-mail')).toBeVisible()
+  await expect(page.getByTestId('inbox-list')).toBeVisible()
 
   const after = await frame()
   // The panel ends inside the window, the page itself does not scroll, and the top bar stays where it was
@@ -271,7 +271,107 @@ test('Mail: a pile of threads and held mail scrolls inside the panel, and nothin
   expect(after.doc.height).toBeLessThanOrEqual(after.doc.view)
   expect(after.doc.top).toBe(0)
   expect(after.counter).toEqual(before.counter)
-  // The mail is what scrolls: the thread list holds more than it shows
-  const list = page.getByTestId('inbox-mail').locator('ul').last().locator('..')
+  // The list is what scrolls: it holds more than it shows, and the header above it stays
+  const list = page.getByTestId('inbox-list')
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+})
+
+// #2213: nothing waits when every thread is read; they are folded under Earlier, and the list says so
+test('Inbox: with only read threads, the list says nothing waits and keeps them under Earlier', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-back').click()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+  await expect(page.getByTestId('inbox-empty')).toContainText('Nothing waiting')
+  await expect(page.getByTestId('inbox-earlier-toggle')).toContainText('Earlier')
+  await expect(page.getByTestId(`mail-thread-${id}`)).toHaveCount(0)
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await expect(page.getByTestId(`mail-thread-${id}`)).toBeVisible()
+})
+
+// #2213 (owner, 2026-11-12): newest first, mail that was not delivered pinned on top, what is read folded under Earlier
+test('Inbox: undelivered mail is pinned on top of the list, and a read thread folds under Earlier (order among rows: inboxList.test.ts)', async ({ page }) => {
+  await setup(page)
+  const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
+  const read = await seed(page, { subject: 'Already read', from: PARSER, body: 'x' })
+  const fresh = await seed(page, { subject: 'Fresh question', from: PARSER, body: 'y' })
+  await seed(page, { subject: 'Do the thing', from: boss, body: 'please', kind: 'assign', onlyHeld: true, held: { reason: 'failed', recipient: PARSER } })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${read}`).click()
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await page.getByTestId('mail-back').click()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+
+  const y = async (testId: string) => (await page.getByTestId(testId).boundingBox())!.y
+  // The held mail is above the thread that waits
+  await expect(page.getByTestId('mail-held')).toBeVisible()
+  expect(await y('mail-held')).toBeLessThan(await y(`mail-thread-${fresh}`))
+  // The read thread is not in the list until Earlier is opened, and then it is below the rest
+  await expect(page.getByTestId(`mail-thread-${read}`)).toHaveCount(0)
+  await expect(page.getByTestId('inbox-earlier-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await expect(page.getByTestId('inbox-earlier')).toHaveAttribute('data-fold', 'open')
+  expect(await y(`mail-thread-${read}`)).toBeGreaterThan(await y(`mail-thread-${fresh}`))
+})
+
+// #2213 follow-up: one cursor over the one list. It takes the top row when the list opens and stays on that row as waits arrive above
+// it; ↑ and ↓ stop on mail rows too, and ↵ opens the row it is on, a thread as well as a session
+test('Inbox: the cursor takes the top row on open, follows it as rows arrive, and walks the mail rows too', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const done = async (id: string) =>
+    page.evaluate((sid) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: sid })
+    }, id)
+  const older = await newSession(page, 'alpha', 'older task')
+  await done(older)
+  const thread = await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  const cursorOn = (testId: string) => expect(page.locator('[data-cursor]').getByTestId(testId)).toHaveCount(1)
+  // The newest is the thread: the cursor is on it, not on a session by default
+  await cursorOn(`mail-thread-${thread}`)
+
+  // A wait arrives above it: the cursor stays on the thread
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('inbox')).toBeHidden()
+  const newer = await newSession(page, 'alpha', 'newer task')
+  await done(newer)
+  await page.getByTestId('counter').click()
+  await cursorOn(`inbox-item-${newer}`)
+  await page.keyboard.press('j')
+  await cursorOn(`mail-thread-${thread}`)
+  await page.keyboard.press('j')
+  await cursorOn(`inbox-item-${older}`)
+  await page.keyboard.press('k')
+  await cursorOn(`mail-thread-${thread}`)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+})
+
+// The cursor's place follows its row as rows arrive above it, so a row that is done hands the cursor to its neighbour, not to the new top row
+test('Inbox: a wait arriving above the cursor, then the cursor row done: the cursor lands on that row neighbour', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const done = async (id: string) =>
+    page.evaluate((sid) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: sid })
+    }, id)
+  const oldest = await newSession(page, 'alpha', 'oldest task')
+  await done(oldest)
+  const middle = await newSession(page, 'alpha', 'middle task')
+  await done(middle)
+  const arriving = await newSession(page, 'alpha', 'arriving task')
+  await page.getByTestId('counter').click()
+  const cursorOn = (id: string) => expect(page.locator('[data-cursor]').getByTestId(`inbox-item-${id}`)).toHaveCount(1)
+  await cursorOn(middle)
+  await done(arriving)
+  await expect(page.getByTestId(`inbox-item-${arriving}`)).toBeVisible()
+  await cursorOn(middle)
+  // The cursor row is done: the row at its place (the oldest), not the wait that arrived on top
+  await page.keyboard.press('d')
+  await cursorOn(oldest)
 })

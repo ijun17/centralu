@@ -667,8 +667,7 @@ function GlobalKeys() {
         toggleInbox()
         return
       }
-      // Jump to the next waiting item: approval → error → waiting-for-input, in that order
-      // (sorting lives in core)
+      // Jump to the next waiting item, in the inbox's order: the newest wait first (sorting lives in core)
       if (mod && e.shiftKey && letter === 'a') {
         e.preventDefault()
         openNextWaiting()

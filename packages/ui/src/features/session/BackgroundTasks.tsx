@@ -16,7 +16,8 @@ import { useStore } from '../../store/store.js'
  * On 2026-10-04 two background subagents stopped when the person interrupted the turn to rephrase a message, and
  * nothing on screen said they were gone; it took four hours for anyone to notice. So what runs behind the turn is
  * counted where the session is named (the header, the sidebar row), and the list it opens keeps a
- * task that ended — stopped, failed or completed — with how it ended, until the person clears it.
+ * task that ended — stopped, failed or completed — with how it ended, for as long as one still runs. When the last one ends
+ * the badge goes with the list (owner, 2026-11-12, #2213), and what ended is in the conversation.
  *
  * The count leaves out what the tool calls ambient (housekeeping, not activity), and ended tasks: it answers "is
  * something still running back there".
@@ -35,32 +36,21 @@ const STATUS: Record<BackgroundTask['status'], string> = {
   stopped: 'stopped',
 }
 
-/** What the badge says: the running count, or — once nothing runs — how the listed ones ended */
-function badgeText(tasks: readonly BackgroundTask[]): string {
-  const n = backgroundCount(tasks)
-  if (n > 0) return `${n} background`
-  const failed = tasks.filter((t) => t.status === 'failed').length
-  const stopped = tasks.filter((t) => t.status === 'stopped').length
-  const parts = [failed > 0 && `${failed} failed`, stopped > 0 && `${stopped} stopped`].filter(Boolean)
-  return `background · ${parts.length > 0 ? parts.join(' · ') : 'done'}`
-}
-
 /**
  * What the list's header counts: the tasks running, by the same rule as the capsule's number (ambient ones are left
- * out), or how many are listed once none runs. The header used to count every running row, so a session with one real
+ * out). The list is only open while work runs (#2213). The header used to count every running row, so a session with one real
  * and one ambient task said "1" on the capsule and "2 running" in the list (#1143 U25).
  */
 export function listCount(tasks: readonly BackgroundTask[]): string {
-  const running = backgroundCount(tasks)
-  return running > 0 ? `${running} running` : `${tasks.length}`
+  return `${backgroundCount(tasks)} running`
 }
 
 /**
- * The header's count, and the list it opens. Drawn only while there is something to show: a running task that is
- * activity, or an ended one still listed.
+ * The header's count, and the list it opens. Drawn only while work runs behind the turn (owner, 2026-11-12, #2213): a running
+ * task that is activity. When the last one ends it fades out, with the count it had, and the ended ones it listed go with it.
  *
  * `renderSteps` draws an agent's recorded steps (#222) under its row — the same record its launch card opens in the
- * conversation, so a stopped agent's last steps are one click from the list that says it stopped.
+ * conversation.
  */
 export function BackgroundTasksBadge({
   sessionId,
@@ -74,9 +64,12 @@ export function BackgroundTasksBadge({
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const count = backgroundCount(tasks)
-  const ended = tasks.filter((t) => t.status !== 'running')
-  const shown = count > 0 || ended.length > 0
+  const running = backgroundCount(tasks) > 0
+  // What it showed while work ran, for its exit: once nothing runs there is nothing to say, so it goes as it was and does not turn into a record
+  const [last, setLast] = useState(tasks)
+  if (running && last !== tasks) setLast(tasks)
+  const shownTasks = running ? tasks : last
+  const count = backgroundCount(shownTasks)
 
   /*
    * Closes on an outside click, Esc or the window losing focus (useDismiss), like the session settings menu — an open
@@ -84,36 +77,31 @@ export function BackgroundTasksBadge({
    * button's box in the DOM any more.
    */
   useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, listRef], returnFocusTo: buttonRef })
-  // The last one cleared — nothing left to hold open
+  // The last one ended: nothing left to hold open
   useEffect(() => {
-    if (!shown) setOpen(false)
-  }, [shown])
+    if (!running) setOpen(false)
+  }, [running])
 
-  // The list comes down from the capsule and goes back up (usePresence keeps it for its exit)
+  // The capsule fades in and out, and the list comes down from it and goes back up (usePresence keeps each for its exit)
+  const capsule = usePresence(running)
   const { shown: listShown, leaving } = usePresence(open)
 
-  if (!shown) return null
-  const running = count > 0
-  const failed = ended.filter((t) => t.status === 'failed').length
+  if (!capsule.shown) return null
   return (
-    <span className="flex shrink-0 items-center">
+    <span className={`${capsule.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} flex shrink-0 items-center`}>
       {/*
         The top bar's capsule shape (owner, 2026-10-18): an icon and a number, the words in the tooltip. Running work
         has the plain hairline (owner, twice: a brighter border stood out too much) and brighter ink with its count; no
-        dot (owner, 2026-10-18: it drew the eye to something that needs nothing). Ended work stays quiet until it is
-        cleared. A failure is dashed, as an error is on the
-        inbox's capsule.
+        dot (owner, 2026-10-18: it drew the eye to something that needs nothing). Nothing is drawn once no work runs.
       */}
       <Tooltip
         align="right"
         content={
           <span className="block">
             <span className="block text-ink">
-              {running ? `${count} background task${count === 1 ? '' : 's'} running` : 'Background tasks'}
+              {`${count} background task${count === 1 ? '' : 's'} running`}
             </span>
-            <span className="mt-1 block text-ink-faint">
-              {running ? 'Open the list to follow or stop them' : badgeText(tasks)}
-            </span>
+            <span className="mt-1 block text-ink-faint">Open the list to follow or stop them</span>
           </span>
         }
       >
@@ -122,26 +110,14 @@ export function BackgroundTasksBadge({
           type="button"
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={badgeText(tasks)}
+          aria-label={`${count} background`}
           onClick={() => setOpen((o) => !o)}
           data-testid="background-badge"
           data-count={count}
-          className={`flex h-6 shrink-0 items-center gap-1.5 rounded-full border bg-surface-hover/30 px-2 transition-colors hover:bg-surface-hover/60 hover:text-ink ${
-            failed > 0 && !running
-              ? 'border-dashed border-line-strong text-ink-muted'
-              : running
-                ? 'border-line text-ink'
-                : 'border-line/60 text-ink-faint'
-          } ${open ? 'bg-surface-hover/60' : ''}`}
+          className={`flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface-hover/30 px-2 text-ink transition-colors hover:bg-surface-hover/60 hover:text-ink ${open ? 'bg-surface-hover/60' : ''}`}
         >
           <BackgroundIcon />
-          {running ? (
-            <span className="readout translate-y-px text-xs leading-none">{count}</span>
-          ) : (
-            <span className="readout translate-y-px text-2xs leading-none">
-              {failed > 0 ? `${failed} failed` : 'done'}
-            </span>
-          )}
+          <span className="readout translate-y-px text-xs leading-none">{count}</span>
         </button>
       </Tooltip>
       {/*
@@ -152,7 +128,7 @@ export function BackgroundTasksBadge({
         createPortal(
           <BackgroundTaskList
             sessionId={sessionId}
-            tasks={tasks}
+            tasks={shownTasks}
             renderSteps={renderSteps}
             anchorRef={buttonRef}
             listRef={listRef}
@@ -322,7 +298,7 @@ function BackgroundTaskRow({
 
 /**
  * What the sidebar row's tool mark says of background work (#290): how many tasks run and what they are, or null when
- * nothing runs (an ended task is the session's own business, read in its header). The mark's dot shows that something
+ * nothing runs (an ended task is the session's own business, read in its conversation). The mark's dot shows that something
  * runs; this is its words.
  *
  * It names what runs, and that it keeps the session awake (#568): a session whose process holds work, a `/loop`

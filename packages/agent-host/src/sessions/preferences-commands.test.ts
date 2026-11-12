@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ASSISTANT_CHANGE, type AgentVersions, type SleepPolicy, type ToolName, type UpdateStatus } from '@cc/protocol'
@@ -846,6 +846,52 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(await prefs()).toMatchObject({ themeMode: 'light', themeLight: 'my-theme-2' })
   })
 
+  // #2214: a file never takes a preset's id, so the preset and the file are both there and each is picked by its own id
+  it('a theme file named like a preset is filed under another id, and picked by that id in the same call; the preset stays pickable', async () => {
+    const orc = await mgr.assistant()
+    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Graphite', base: 'dark', tokens: {} }, theme: 'graphite-2' })
+    expect(made.isError).toBeFalsy()
+    expect(made.text).toContain('Wrote the theme file "Graphite" [graphite-2]')
+    expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
+    expect((await run(orc.id, 'set_preferences', { theme: 'graphite' })).isError).toBeFalsy()
+    expect(await prefs()).toMatchObject({ themeDark: 'graphite' })
+  })
+
+  // #2214: the name of the file made in the call is that file's, not the same-named preset's (the id lookup finds the preset first)
+  it('a theme file and its own name in one call picks the new file, not the preset of that name', async () => {
+    const orc = await mgr.assistant()
+    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Graphite', base: 'dark', tokens: {} }, theme: 'Graphite' })
+    expect(made.isError).toBeFalsy()
+    expect(made.text).toContain('[graphite-2]')
+    expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
+  })
+
+  // The one way the pick after a write can fail: the file is gone again when it is looked up. The write stands, the rest is applied, the pick is reported
+  it('a theme file removed between its write and the pick is reported as not picked, and the rest of the call is applied', async () => {
+    const orc = await mgr.assistant()
+    const real = rpc
+    mgr.useWindowRpc(async (method, params) => {
+      const result = await real(method, params)
+      if (method === 'themes.save') await real('themes.remove', { id: (result as { id: string }).id })
+      return result
+    })
+    const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Fleeting', base: 'dark', tokens: {} }, theme: 'Fleeting', textSize: 1.25 })
+    expect(r.text).toMatch(/Theme: not picked. No theme is called "fleeting"/)
+    expect(await prefs()).toMatchObject({ textSize: 1.25, themeDark: 'dark' })
+  })
+
+  // #2214: an explicit id writes to that file, so a preset's id would hide the preset; one already stored there is still edited
+  it('a preset id is not taken by an explicit id; a file already stored under it is edited in place', async () => {
+    const orc = await mgr.assistant()
+    const refused = await run(orc.id, 'set_preferences', { themeFile: { id: 'graphite', name: 'Mine', base: 'dark', tokens: {} } })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toContain("graphite is a preset's id")
+    expect(readdirSync(themesDir())).not.toContain('graphite.json')
+    writeFileSync(join(themesDir(), 'light.json'), JSON.stringify({ name: 'My light', base: 'light', tokens: {} }))
+    const edited = await run(orc.id, 'set_preferences', { themeFile: { id: 'light', name: 'My light', base: 'light', tokens: { 'surface-floor': '#101820' } } })
+    expect(edited.isError).toBeFalsy()
+  })
+
   it('a full failure carries one "Nothing changed" prefix', async () => {
     const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 5 } })
@@ -865,14 +911,15 @@ describe('theme files and the models for started agents (#1978)', () => {
     expect(await rpc('themes.list', {})).toEqual([])
   })
 
-  it('a theme that cannot be found after the file is written is a partial success, said so', async () => {
+  // Two files of one name: the theme named in the call that writes the second is the second (it was ambiguous before #2214 and the call picked nothing)
+  it('the name of the file written in the call picks that file, also when an older file has the same name', async () => {
     const orc = await mgr.assistant()
     await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'dark', tokens: {} } })
     const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'light', tokens: {} }, theme: 'twin peaks', textSize: 1.1 })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('Wrote the theme file "Twin Peaks" [twin-peaks-2]')
-    expect(r.text).toMatch(/Not changed: Theme: not picked\. Several themes are called "twin peaks"/)
-    expect(await prefs()).toMatchObject({ textSize: 1.1, themeDark: 'dark' })
+    expect(r.text).not.toContain('Not changed')
+    expect(await prefs()).toMatchObject({ textSize: 1.1, themeMode: 'light', themeLight: 'twin-peaks-2' })
   })
 
   it('refuses a theme file the reader would not read (too large) before writing', async () => {

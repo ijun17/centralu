@@ -1,5 +1,4 @@
-import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
-import { themeSlug } from '../themes.js'
+import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, freeThemeId, isPresetThemeId, presetIdRefusal, pickableThemes, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -89,7 +88,7 @@ export class PreferencesFlow {
     ])
     if (prefs.status === 'rejected') return { ok: false, error: `Could not read the preferences: ${prefs.reason instanceof Error ? prefs.reason.message : String(prefs.reason)}` }
     const p = prefs.value
-    const choices = themes.status === 'fulfilled' ? themeChoices(themes.value) : themeChoices([])
+    const choices = pickableThemes(themes.status === 'fulfilled' ? themes.value : [])
     const named = (id: string) => {
       const c = choices.find((x) => x.id === id)
       return c ? `${plainQuoted(c.name)} [${c.id}]` : `[${plainQuoted(id)}] (no such theme; the stylesheet's own is shown)`
@@ -144,6 +143,9 @@ export class PreferencesFlow {
     if (file !== undefined) {
       const bad = themeFileRefusal(file)
       if (bad) return { ok: false, error: bad }
+      // A preset's id is not taken by a new file (#2214); a file stored under it already is edited in place
+      const named = file.id?.trim()
+      if (named && isPresetThemeId(named) && !(await callWindow(rpc, 'themes.list', {})).some((f) => f.id === named)) return { ok: false, error: `themeFile.id: ${presetIdRefusal(named)}` }
     }
     if (changes.theme !== undefined) {
       const found = await this.theme(rpc, changes.theme)
@@ -181,9 +183,11 @@ export class PreferencesFlow {
       return { ok: false, error: `idleSleepMinutes is ${SLEEP_CHOICES}.` }
     }
 
+    let written: ThemeFileEntry | null = null
     if (file !== undefined) {
       try {
         const saved = await callWindow(rpc, 'themes.save', { id: file.id?.trim() || null, content: { name: file.name.trim(), base: file.base, tokens: file.tokens } })
+        written = saved
         done.push(themeFileWritten(saved))
       } catch (e) {
         return { ok: false, error: errorMessage(e) }
@@ -191,19 +195,15 @@ export class PreferencesFlow {
     }
     let toApply = parsed.data
     if (changes.theme !== undefined) {
-      const found = await this.theme(rpc, changes.theme)
+      // The name of the file made in this call is that file's, also when a preset has the same name (#2214): its id, not the name, is looked up
+      const found = await this.theme(rpc, written && changes.theme.trim().toLowerCase() === written.name.toLowerCase() ? written.id : changes.theme)
       if (typeof found === 'string') failed.push(`Theme: not picked. ${found}`)
       else {
         theme = found
         patch.themeMode = found.base
         patch[found.base === 'dark' ? 'themeDark' : 'themeLight'] = found.id
-        const again = UiPreferencesPatch.safeParse(patch)
-        if (again.success) toApply = again.data
-        else {
-          // After the write this is a partial success, not a refusal
-          theme = null
-          failed.push(`Theme: not picked. ${issuesOf(again.error)}.`)
-        }
+        // The ids come from the themes the window lists and the base is dark or light, so the patch still holds
+        toApply = UiPreferencesPatch.parse(patch)
       }
     }
 
@@ -427,12 +427,7 @@ export class PreferencesFlow {
     const named = file.id?.trim().toLowerCase()
     if (named) return named
     const taken = new Set((await callWindow(rpc, 'themes.list', {})).map((f) => f.id))
-    const base = themeSlug(file.name.trim())
-    for (let n = 1; n < 1000; n++) {
-      const id = n === 1 ? base : `${base}-${n}`
-      if (!taken.has(id)) return id
-    }
-    return base
+    return freeThemeId(file.name.trim(), (id) => taken.has(id))
   }
 
   /** The session header's action: idle sessions on an older agent CLI restart on the installed one, and the busy ones are named */
@@ -449,7 +444,7 @@ export class PreferencesFlow {
     const wanted = ref.trim()
     if (!wanted) return 'theme is empty; get_preferences lists the themes to choose from.'
     if (HIDDEN.test(wanted)) return 'theme has a control or formatting character in it; give its id or name as plain text.'
-    const choices = themeChoices(await callWindow(rpc, 'themes.list', {}))
+    const choices = pickableThemes(await callWindow(rpc, 'themes.list', {}))
     const byId = choices.find((c) => c.id === wanted.toLowerCase())
     if (byId) return byId
     const byName = choices.filter((c) => c.name.toLowerCase() === wanted.toLowerCase())
@@ -522,14 +517,6 @@ function agentModelsText(models: UiPreferences['agentModels']): string {
     Object.entries(levels).flatMap(([level, c]) => (c ? [`${plainQuoted(tool, 80)} ${level}: ${plainQuoted(c.model, 200)}${c.effort ? ` (${plainQuoted(c.effort, 80)})` : ''}`] : [])),
   )
   return parts.length ? parts.join('; ') : 'none chosen (each project keeps its last choice)'
-}
-
-/** The presets, then the theme files that read cleanly: what a window's theme list offers */
-function themeChoices(files: readonly { id: string; name: string; base: 'dark' | 'light'; broken: boolean }[]): ThemeChoice[] {
-  return [
-    ...THEME_PRESETS.map((p) => ({ id: p.id, name: p.name, base: p.base, file: false })),
-    ...files.filter((f) => !f.broken).map((f) => ({ id: f.id, name: f.name, base: f.base, file: true })),
-  ]
 }
 
 /** What `prefs.set` left, for the fields this call set: the record the host wrote, not what was asked */

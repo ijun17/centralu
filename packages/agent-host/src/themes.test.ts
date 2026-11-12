@@ -66,6 +66,32 @@ describe('the themes folder (#312)', () => {
     expect((await files.save(null, { name: 'Night Owl', base: 'light', tokens: {} })).id).toBe('night-owl-2')
   })
 
+  // #2214: a file under a preset's id shadows the preset in the window, so a new theme never takes one
+  it('never files a new theme under a preset id: a theme named like a preset keeps its name and gets a number, and a file already under one still works', async () => {
+    const graphite = await files.save(null, { name: 'Graphite', base: 'dark', tokens: {} })
+    expect(graphite).toMatchObject({ id: 'graphite-2', name: 'Graphite' })
+    expect((await files.save(null, { name: 'Dark', base: 'dark', tokens: {} })).id).toBe('dark-2')
+    expect((await files.save(null, { name: 'High contrast light', base: 'light', tokens: {} })).id).toBe('high-contrast-light')
+    expect((await files.save(null, { name: 'hc-dark', base: 'dark', tokens: {} })).id).toBe('hc-dark-2')
+    expect(readdirSync(dir)).not.toContain('graphite.json')
+    // A file stored under a preset id before this rule keeps working as the custom theme it is, and is saved in place
+    writeFileSync(join(dir, 'light.json'), JSON.stringify({ name: 'My light', base: 'light', tokens: { 'surface-floor': '#101820' } }))
+    expect(await files.list()).toContainEqual(expect.objectContaining({ id: 'light', name: 'My light', broken: false, tokens: { 'surface-floor': '#101820' } }))
+    expect(await files.save('light', { name: 'My light', base: 'light', tokens: { 'surface-floor': '#112233' } })).toMatchObject({ id: 'light', tokens: { 'surface-floor': '#112233' } })
+    expect(readdirSync(dir).filter((n) => n.startsWith('light'))).toEqual(['light.json'])
+  })
+
+  it('refuses an explicit id that is a preset id unless a file is stored under it already (#2214)', async () => {
+    await expect(files.save('graphite', { name: 'Mine', base: 'dark', tokens: {} })).rejects.toThrow("graphite is a preset's id")
+    expect(readdirSync(dir)).not.toContain('graphite.json')
+  })
+
+  it('a file imported under a preset name gets its own id too', async () => {
+    const source = join(root, 'Light.json')
+    writeFileSync(source, JSON.stringify({ name: 'Light', base: 'light', tokens: { 'surface-floor': '#fafafa' } }))
+    expect((await files.importFrom(source)).id).toBe('light-2')
+  })
+
   it('lists a file that does not read, with the reason, instead of dropping it', async () => {
     writeFileSync(join(dir, 'half.json'), '{ "name": "Half", "base": ')
     const [entry] = await files.list()

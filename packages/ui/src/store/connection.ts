@@ -210,10 +210,13 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   }
   const savedArrivals = (snap as { appArrivals?: unknown }).appArrivals
   if (Array.isArray(savedArrivals)) {
-    const ok = savedArrivals.filter(
-      (a): a is AppArrival =>
-        !!a && typeof a === 'object' && typeof a.key === 'string' && typeof a.projectId === 'string' && typeof a.appId === 'string' && typeof a.title === 'string' && Array.isArray(a.asks),
-    )
+    const ok = savedArrivals
+      .filter(
+        (a): a is Omit<AppArrival, 'at'> & { at?: unknown } =>
+          !!a && typeof a === 'object' && typeof a.key === 'string' && typeof a.projectId === 'string' && typeof a.appId === 'string' && typeof a.title === 'string' && Array.isArray(a.asks),
+      )
+      // A snapshot from before the order by arrival has no time: it is the time it was read, and saved so from then on
+      .map((a): AppArrival => ({ ...a, at: typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : Date.now() }))
     const held = new Set(get().appArrivals.map((a) => a.key))
     set({ appArrivals: [...get().appArrivals, ...ok.filter((a) => !held.has(a.key))] })
   }
