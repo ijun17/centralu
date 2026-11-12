@@ -405,8 +405,8 @@ export const REPLAYS: Replay[] = [
     tool: 'claude',
     scenario: 'centralu-mail',
     async shows(page) {
-      // Each call is drawn as what it did, under the mark of Centralu's tools
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(["Mail","Mail"])
+      // Each call is drawn as what it did, under the mark of Centralu's tools: a send says so since #1948
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(["Mail","Sent mail"])
     },
   },
   { tool: 'claude', scenario: 'image' },
@@ -605,7 +605,8 @@ export const REPLAYS: Replay[] = [
     tool: 'codex',
     scenario: 'centralu-mail',
     async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Listed sessions', 'Mail', 'Mail'])
+      // A send says so since #1948; the inbox read stays "Mail"
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Listed sessions', 'Sent mail', 'Mail'])
     },
   },
   {

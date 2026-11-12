@@ -2101,7 +2101,8 @@ linked machine's own check. The answer is the one `start_agent wait:false` gives
 call written as the caller's seat makes it (`agentCallsFor`: on the Assistant both tools are commands through `centralu_run`).
 
 **What changes for the sender.** `send` waited up to `ASK_WAIT_MS` (240 s) for the turn to end; the mail send returns at once, and
-`agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send by an original to a
+`agent_session wait` waits, as after `start_agent wait:false`. The report reaches the sender as before (§10.6.3). A send to its own child on a
+linked machine was mail across the link (#2067, [linked-mail.md](linked-mail.md) §5); it is the work `send` gave now, through the link. A send by an original to a
 child that a handoff moved is plain mail now; `send` refused it naming the successor, which `agent_session status` still does.
 
 **#2133.** A child knew the address `parent` only from `to`'s description, and wrote progress reports nobody needed. `start_agent`'s frame
