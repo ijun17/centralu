@@ -16,6 +16,10 @@ import { KILL_GRACE_MS } from '../os/kill-tree.js'
  * something the person launched in their own terminal has a tty (`ttys005`), and something the person started outside
  * Centralu has no mark. These check that judgment on recorded tables: they never call ps, lsof or read an environment.
  */
+/** This host's mark in the tables below, and the marks a read found: these pids carry ours */
+const MARK = 'aaaa000011112222'
+const ours = (...pids: number[]): Map<number, string> => new Map(pids.map((pid) => [pid, MARK]))
+
 describe('pickStrays', () => {
   const rows = parsePsRows(
     [
@@ -38,10 +42,10 @@ describe('pickStrays', () => {
     [400, '/work/proj'],
   ])
   const roots = ['/work/proj']
-  const marked = new Set([100, 101, 901, 300])
+  const marked = ours(100, 101, 901, 300)
 
   it('picks only a marked process, and what runs under it, with no terminal in our folder', () => {
-    expect(pickStrays(rows, cwds, roots, 900, marked).map((s) => s.pid)).toEqual([100, 200])
+    expect(pickStrays(rows, cwds, roots, 900, marked, MARK).map((s) => s.pid)).toEqual([100, 200])
   })
 
   /**
@@ -62,27 +66,27 @@ describe('pickStrays', () => {
       [701, '/work/proj'],
       [900, '/work/proj'],
     ])
-    expect(pickStrays(left, leftCwds, roots, 900, new Set([700, 701])).map((s) => s.pid)).toEqual([700, 701])
+    expect(pickStrays(left, leftCwds, roots, 900, ours(700, 701), MARK).map((s) => s.pid)).toEqual([700, 701])
   })
 
   it('leaves alone what a person launched in a terminal (tty is the line, mark or not)', () => {
-    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 101)).toBe(false)
+    expect(pickStrays(rows, cwds, roots, 900, marked, MARK).some((s) => s.pid === 101)).toBe(false)
   })
 
   it('the host\'s own descendant is not on the list: the shutdown procedure already cleans up the whole tree', () => {
-    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 901)).toBe(false)
+    expect(pickStrays(rows, cwds, roots, 900, marked, MARK).some((s) => s.pid === 901)).toBe(false)
   })
 
   it('outside our folder is someone else\'s business', () => {
-    expect(pickStrays(rows, cwds, roots, 900, marked).some((s) => s.pid === 300)).toBe(false)
+    expect(pickStrays(rows, cwds, roots, 900, marked, MARK).some((s) => s.pid === 300)).toBe(false)
   })
 
   it('never invents a cwd for a process it could not read one for', () => {
-    expect(pickStrays(rows, new Map(), roots, 900, marked)).toEqual([])
+    expect(pickStrays(rows, new Map(), roots, 900, marked, MARK)).toEqual([])
   })
 
   it('offers nothing whose environment could not be read or has no mark', () => {
-    expect(pickStrays(rows, cwds, roots, 900, new Set())).toEqual([])
+    expect(pickStrays(rows, cwds, roots, 900, ours(), MARK)).toEqual([])
   })
 
   /**
@@ -107,7 +111,7 @@ describe('pickStrays', () => {
       [800, '/work/proj'],
       [810, '/work/proj'],
     ])
-    expect(pickStrays(vscode, cwd, roots, 900, new Set([800])).map((s) => s.pid)).toEqual([800])
+    expect(pickStrays(vscode, cwd, roots, 900, ours(800), MARK).map((s) => s.pid)).toEqual([800])
   })
 
   /**
@@ -129,24 +133,42 @@ describe('pickStrays', () => {
       ].join('\n'),
     )
     const cwd = new Map([[800, '/work/proj'], [801, '/work/proj'], [810, '/work/proj'], [811, '/work/proj']])
-    expect(pickStrays(desktop, cwd, roots, 900, new Set([810])).map((s) => s.pid)).toEqual([810, 811])
+    expect(pickStrays(desktop, cwd, roots, 900, ours(810), MARK).map((s) => s.pid)).toEqual([810, 811])
   })
 
   /** The mark may sit on a process that is no candidate itself: a shell outside the project that started the server */
   it('a candidate under a marked process outside our folder is ours', () => {
     const chain = parsePsRows(['  500     1 ??       sh -c cd /work/proj && npm run dev', '  501   500 ??       node server.js'].join('\n'))
-    expect(pickStrays(chain, new Map([[500, '/'], [501, '/work/proj']]), roots, 900, new Set([500])).map((s) => s.pid)).toEqual([501])
+    expect(pickStrays(chain, new Map([[500, '/'], [501, '/work/proj']]), roots, 900, ours(500), MARK).map((s) => s.pid)).toEqual([501])
+  })
+
+  /**
+   * A host started in one of our agents (`pnpm host` while this repository is developed inside Centralu), its shell gone:
+   * it started with our mark, which is what a read shows of it, and gives its own children its own (#2221 review). The
+   * nearest mark decides: that host is what our agent left, and its live agent and what runs under it are its own.
+   */
+  it('a host started under ours is offered by its own mark; what runs under it, marked by that host, is not', () => {
+    const nested = parsePsRows(
+      [
+        '  600     1 ??       node packages/agent-host/src/main.ts', // the inner host, reparented
+        '  601   600 ??       claude --output-format stream-json', // its live agent
+        '  602   601 ??       node server.js', // what that agent runs
+      ].join('\n'),
+    )
+    const cwd = new Map([[600, '/work/proj'], [601, '/work/proj'], [602, '/work/proj']])
+    const marks = new Map([[600, MARK], [601, 'bbbb333344445555'], [602, 'bbbb333344445555']])
+    expect(pickStrays(nested, cwd, roots, 900, marks, MARK).map((s) => s.pid)).toEqual([600])
   })
 
   /** An update: the old host started the new app, which started the keeper and this host. They carry our mark */
   it('what started the host is never offered, marked or not', () => {
     const update = parsePsRows(['   30     1 ??       centralu-keeper', '  900    30 ??       node host.mjs'].join('\n'))
-    expect(pickStrays(update, new Map([[30, '/work/proj'], [900, '/work/proj']]), roots, 900, new Set([30, 900]))).toEqual([])
+    expect(pickStrays(update, new Map([[30, '/work/proj'], [900, '/work/proj']]), roots, 900, ours(30, 900), MARK)).toEqual([])
   })
 
   it('treats it as someone else\'s when the parent cannot be found in our own account (never fires when in doubt)', () => {
     const rowsUnknownParent = parsePsRows('  400  399 ??       node something.js')
-    expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900, new Set([399]))).toEqual([])
+    expect(pickStrays(rowsUnknownParent, new Map([[400, '/work/proj']]), roots, 900, ours(399), MARK)).toEqual([])
   })
 })
 

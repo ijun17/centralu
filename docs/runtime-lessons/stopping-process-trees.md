@@ -55,9 +55,10 @@ an early version (4a69b96f). Judging by the parent chain's shape (#1882) could n
 editor detached on purpose (`code .` from a terminal in the project, adopted by `systemd --user`), so a systemd
 desktop's leftovers were missed (#1898).
 Rule: a stray is offered only when its cwd is inside a project, it has no tty, it is not under the host, it is not what
-started the host, and it or a process it descends from carries the host's owner mark in its environment
-(`CENTRALU_OWNER`, one value per data folder, so a host after an update sees what the one before it left, and a dev or
-e2e host on its own folder claims none of it); it is measured again right before the kill. The host sets the mark in
+started the host, and the nearest owner mark up its parent chain, its own first, is the host's (`CENTRALU_OWNER`, in
+the environment; one value per data folder, so a host after an update sees what the one before it left, and a dev or
+e2e host on its own folder claims none of it: a read of that host shows the mark it started with, so it may be offered
+as what an agent left, but what runs under it carries its own mark, #2221 review); it is measured again right before the kill. The host sets the mark in
 its own environment when it has chosen its data folder, and every child inherits it. The environment is read by one
 layer module (`os/process-env.ts`), which hands out that one variable's value and nothing else of an environment that
 holds credentials: `/proc/<pid>/environ` on Linux and WSL, `ps -E -ww` on macOS. Not offered, by choice: a process
@@ -70,7 +71,8 @@ marked; the switch that stops the list is off by default.
 Guard: `host/dev-services/strays.test.ts` "picks only a marked process, and what runs under it, with no terminal in our
 folder"; `host/dev-services/strays.test.ts` "a process a living app holds is not on the list (VS Code extensions), nor
 an unmarked orphan"; `host/dev-services/strays.test.ts` "a detached editor with no mark is not offered; an orphaned
-marked dev server and what runs under it are"; `host/dev-services/strays.test.ts` "what started the host is never
+marked dev server and what runs under it are"; `host/dev-services/strays.test.ts` "a host started under ours is offered by its own mark; what runs
+under it, marked by that host, is not"; `host/dev-services/strays.test.ts` "what started the host is never
 offered, marked or not"; `host/dev-services/strays.test.ts` "a real marked leftover is offered and gone after the
 grace; an unmarked one beside it is neither" (also the measuring again before the kill); `host/os/process-env.test.ts`
 "takes only the asked variable per pid: never another variable, never a process that shows none";

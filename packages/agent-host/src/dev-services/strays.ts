@@ -32,8 +32,8 @@ import { ancestors, descendants } from './proc-table.js'
  *     runs in it got mixed into the list, this feature would be unusable.
  *  3. **It is not our own descendant, nor what started us** — the shutdown procedure already cleans up the host's
  *     descendants as a whole tree. What this carries is only what that cleanup cannot reach.
- *  4. **We started it** (#1898, the owner's decision of 2026-11-12): it, or a process it descends from, carries this
- *     host's owner mark in its environment (`OWNER_MARK`). The host puts the mark in its own environment, so every
+ *  4. **We started it** (#1898, the owner's decision of 2026-11-12): the nearest owner mark up its parent chain, its own
+ *     first, is this host's (`OWNER_MARK`, in the environment). The host puts the mark in its own environment, so every
  *     agent, terminal and command it starts inherits it, and so does whatever those start, however it is re-parented
  *     later. The parent chain's shape no longer decides: it could not tell a dev server an agent left behind from an
  *     editor the person detached on purpose (`code .` from a terminal in the project: cwd in the project, no terminal,
@@ -66,7 +66,9 @@ export function ownerMarkFor(dbPath: string): string {
 
 /**
  * Puts the owner mark in this host's environment, which every child inherits (`takeLaunchEnv`'s note), before anything
- * is spawned for the person. A host started inside another host's agent replaces that host's mark with its own.
+ * is spawned for the person. A host started inside another host's agent replaces that host's mark with its own for its
+ * children; a read of the host process itself still shows the mark it started with (the environment it was given), so
+ * the outer host may offer that host as its agent's leftover, and never what runs under it (rule 4: the nearest mark).
  */
 export function markOwnChildren(dbPath: string, env: Record<string, string | undefined> = process.env): void {
   env[OWNER_MARK] = ownerMarkFor(dbPath)
@@ -151,22 +153,28 @@ export function markAsked(rows: readonly PsRow[], cwdOf: ReadonlyMap<number, str
 }
 
 /**
- * Builds the list by applying the four rules (pure — this is as far as a test needs to look). `marked` holds the pids
- * whose environment was read and carries this host's owner mark.
+ * Builds the list by applying the four rules (pure — this is as far as a test needs to look). `marks` holds the owner
+ * mark of each pid whose environment was read and carries one, whoever's it is; `mark` is this host's.
  */
 export function pickStrays(
   rows: readonly PsRow[],
   cwdOf: ReadonlyMap<number, string>,
   roots: readonly string[],
   selfPid: number,
-  marked: ReadonlySet<number>,
+  marks: ReadonlyMap<number, string>,
+  mark: string,
 ): StrayProcess[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]))
-  // Rule 4: it, or a process up its parent chain, carries our mark. A parent missing from our own account's table ends the walk
+  /*
+   * Rule 4: the nearest mark up its parent chain, its own first, is ours. A host started inside another host's agent
+   * starts with that host's mark and gives its children its own: what runs under it is that host's, not ours (#2221
+   * review). A parent missing from our own account's table ends the walk
+   */
   const ourStart = (pid: number): boolean => {
     const seen = new Set<number>()
     for (let row = byPid.get(pid); row && row.pid > 1 && !seen.has(row.pid); row = byPid.get(row.ppid)) {
-      if (marked.has(row.pid)) return true
+      const found = marks.get(row.pid)
+      if (found !== undefined) return found === mark
       seen.add(row.pid)
     }
     return false
@@ -230,14 +238,13 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
   return { rows, cwdOf }
 }
 
-/** Which of `pids` carry `mark` as their owner mark; environments that could not be read are said on stderr */
-async function carryingMark(pids: readonly number[], mark: string): Promise<Set<number>> {
+/** The owner mark each of `pids` carries, whoever's it is; environments that could not be read are said on stderr */
+async function ownerMarks(pids: readonly number[]): Promise<Map<number, string>> {
   try {
-    const values = await environmentValues(OWNER_MARK, pids)
-    return new Set([...values].filter(([, value]) => value === mark).map(([pid]) => pid))
+    return await environmentValues(OWNER_MARK, pids)
   } catch (e) {
     unread('the processes\' owner marks', e)
-    return new Set()
+    return new Map()
   }
 }
 
@@ -251,8 +258,8 @@ export async function findStrays(
   if (!hasPs() || roots.length === 0 || !mark) return []
   const { rows, cwdOf } = await scanProcesses()
   const resolved = resolveRoots(roots)
-  const marked = await carryingMark(markAsked(rows, cwdOf, resolved, selfPid), mark)
-  return pickStrays(rows, cwdOf, resolved, selfPid, marked)
+  const marks = await ownerMarks(markAsked(rows, cwdOf, resolved, selfPid))
+  return pickStrays(rows, cwdOf, resolved, selfPid, marks, mark)
 }
 
 /**
