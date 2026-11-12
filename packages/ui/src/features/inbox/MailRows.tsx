@@ -22,10 +22,10 @@ export function MailPinned({ held, waiting }: { held: MailHeldRow[]; waiting: nu
 }
 
 /** One thread of the person's mailbox as a row of the inbox's list */
-export function MailThreadItem({ thread: t, dim }: { thread: MailThreadRow; dim?: boolean }) {
+export function MailThreadItem({ thread: t, dim, active }: { thread: MailThreadRow; dim?: boolean; active?: boolean }) {
   const open = useStore((s) => s.openMailThread)
   return (
-    <li className={`rounded-field transition-colors hover:bg-surface-hover/25 ${dim ? 'opacity-80' : ''}`}>
+    <li data-cursor={active || undefined} className={`rounded-field transition-colors ${active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'} ${dim ? 'opacity-80' : ''}`}>
       <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
         <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
           ●

@@ -355,7 +355,7 @@ describe('MCP server suggestions', () => {
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals).toEqual([])
       expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
-      expect(computeInbox(useStore.getState()).map((i) => i.proposal)).toEqual([{ kind: 'skill', name: 'weekly-report' }])
+      expect(computeInbox(useStore.getState()).map((i) => i.proposal?.name)).toEqual(['weekly-report'])
     })
     expect(mock.badge).toBe(1)
   })

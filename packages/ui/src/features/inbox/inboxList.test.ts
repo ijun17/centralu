@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { InboxItem } from '@cc/core'
 import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
-import { arrangeInbox } from './inboxList.js'
+import { arrangeInbox, cursorIndex, rowKeyOf } from './inboxList.js'
 
 const party = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
 const session = (id: string, waitingSince: number | null): InboxItem =>
@@ -17,9 +17,18 @@ describe('the inbox list (#2213)', () => {
     expect(list.waiting.map((r) => (r.kind === 'session' ? r.item.id : r.thread.id))).toEqual(['s-new', 'm-mid', 's-old'])
   })
 
-  it('a session row knows its place among the sessions, whatever mail sits between', () => {
-    const list = arrangeInbox([session('a', 900), session('b', 100)], { threads: [thread('m', 500, 1)], held: [] })
-    expect(list.waiting.flatMap((r) => (r.kind === 'session' ? [r.index] : []))).toEqual([0, 1])
+  // The cursor walks the one list: mail between two sessions is a stop of its own
+  it('the cursor keeps to its row as rows arrive above it, steps over mail rows, and stays at the place of a row that left', () => {
+    const rows = arrangeInbox([session('a', 900), session('b', 100)], { threads: [thread('m', 500, 1)], held: [] }).waiting
+    expect(rows.map(rowKeyOf)).toEqual(['a', 'mail:m', 'b'])
+    expect(cursorIndex(rows, { key: 'mail:m', row: 1 })).toBe(1)
+    // A wait that arrived on top: the cursor stays on the row it was on
+    const arrived = arrangeInbox([session('new', 950), session('a', 900), session('b', 100)], { threads: [thread('m', 500, 1)], held: [] }).waiting
+    expect(cursorIndex(arrived, { key: 'mail:m', row: 1 })).toBe(2)
+    // The row left: the place it had, and the last row when that was the last
+    expect(cursorIndex(rows, { key: 'gone', row: 1 })).toBe(1)
+    expect(cursorIndex(rows, { key: 'gone', row: 7 })).toBe(2)
+    expect(cursorIndex([], { key: null, row: 0 })).toBe(0)
   })
 
   it('a session with no start time has just arrived: first', () => {

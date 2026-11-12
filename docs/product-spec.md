@@ -370,7 +370,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 | `limited` | Blocked by a usage limit, waiting for the reset time | informational | stopped: a dashed white ring on a grey chip (+ expected reset) |
 | `error` | Process error etc. | urgent | stopped |
 
-- **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon, ordering and notification policy are all separate.
+- **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon and notification policy are separate; the inbox's order is not (one list, the newest wait first, #2213).
 - The global counter is split too: **"2 approvals · 3 awaiting response"** (a combined "5 waiting" is forbidden).
 - Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals notify immediately, awaiting-response is badge only. The "all done" notification (once, when every session had finished its work) and the error notification were retired on 2026-10-20 (#1429): the window no longer raises them, and the stored `error` and `allDone` switches stay readable for older builds (`docs/agent-host/assistant/window-parity.md`).
 - The **"go to the next waiting item"** shortcut: cycles in the inbox's order, the newest wait first (→ FR-15, FR-17).

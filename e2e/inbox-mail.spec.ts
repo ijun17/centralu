@@ -315,3 +315,38 @@ test('Inbox: undelivered mail is pinned on top of the list, and a read thread fo
   await expect(page.getByTestId('inbox-earlier')).toHaveAttribute('data-fold', 'open')
   expect(await y(`mail-thread-${read}`)).toBeGreaterThan(await y(`mail-thread-${fresh}`))
 })
+
+// #2213 follow-up: one cursor over the one list. It takes the top row when the list opens and stays on that row as waits arrive above
+// it; ↑ and ↓ stop on mail rows too, and ↵ opens the row it is on, a thread as well as a session
+test('Inbox: the cursor takes the top row on open, follows it as rows arrive, and walks the mail rows too', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const done = async (id: string) =>
+    page.evaluate((sid) => {
+      const m = (window as any).__mock
+      m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: sid })
+    }, id)
+  const older = await newSession(page, 'alpha', 'older task')
+  await done(older)
+  const thread = await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  const cursorOn = (testId: string) => expect(page.locator('[data-cursor]').getByTestId(testId)).toHaveCount(1)
+  // The newest is the thread: the cursor is on it, not on a session by default
+  await cursorOn(`mail-thread-${thread}`)
+
+  // A wait arrives above it: the cursor stays on the thread
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('inbox')).toBeHidden()
+  const newer = await newSession(page, 'alpha', 'newer task')
+  await done(newer)
+  await page.getByTestId('counter').click()
+  await cursorOn(`inbox-item-${newer}`)
+  await page.keyboard.press('j')
+  await cursorOn(`mail-thread-${thread}`)
+  await page.keyboard.press('j')
+  await cursorOn(`inbox-item-${older}`)
+  await page.keyboard.press('k')
+  await cursorOn(`mail-thread-${thread}`)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+})

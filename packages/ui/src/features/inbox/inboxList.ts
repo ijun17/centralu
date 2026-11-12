@@ -7,10 +7,21 @@ import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
  * threads with nothing unread. Derived on every read from the two lists the host and the window keep
  * (docs/state-management.md §3); nothing here is stored.
  *
- * `items` is already newest first (`buildInbox`); a row of the list that is a session keeps its place among the
- * sessions, so the keys' cursor, which counts sessions, and "next waiting" agree with what is on screen.
+ * `items` is already newest first (`buildInbox`). The keys' cursor walks this one list, mail rows included.
  */
-export type WaitingRow = { kind: 'session'; item: InboxItem; index: number } | { kind: 'mail'; thread: MailThreadRow }
+export type WaitingRow = { kind: 'session'; item: InboxItem } | { kind: 'mail'; thread: MailThreadRow }
+
+/** What names a row for the cursor: a session's id, or `mail:` and a thread's. The cursor follows the row, not its place, as rows arrive above it */
+export const rowKeyOf = (row: WaitingRow): string => (row.kind === 'session' ? row.item.id : `mail:${row.thread.id}`)
+
+/**
+ * Where the cursor stands in `rows`: on the row it names, and when that row has left (Done, answered) at the place it
+ * was, kept on the last row when that was the last.
+ */
+export function cursorIndex(rows: readonly WaitingRow[], at: { key: string | null; row: number }): number {
+  const found = at.key === null ? -1 : rows.findIndex((r) => rowKeyOf(r) === at.key)
+  return found >= 0 ? found : Math.min(at.row, Math.max(rows.length - 1, 0))
+}
 
 export type InboxList = {
   /** Mail that waits for the person to say what happens to it, the one most recently held first */
@@ -25,7 +36,7 @@ type Mail = { threads: readonly MailThreadRow[]; held: readonly MailHeldRow[] } 
 export function arrangeInbox(items: readonly InboxItem[], mail: Mail): InboxList {
   const threads = mail?.threads ?? []
   const rows: { at: number; row: WaitingRow }[] = [
-    ...items.map((item, index) => ({ at: waitedAt(item), row: { kind: 'session', item, index } as const })),
+    ...items.map((item) => ({ at: waitedAt(item), row: { kind: 'session', item } as const })),
     ...threads.filter((t) => t.unread > 0).map((thread) => ({ at: thread.updatedAt, row: { kind: 'mail', thread } as const })),
   ]
   return {

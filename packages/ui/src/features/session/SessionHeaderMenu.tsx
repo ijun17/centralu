@@ -20,7 +20,7 @@ export function SessionHeaderMenu({ session }: { session: SessionSummary }) {
     <span ref={anchor} className="flex shrink-0 items-center">
       <button
         type="button"
-        aria-label="More actions"
+        aria-label={`Actions for ${session.name}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

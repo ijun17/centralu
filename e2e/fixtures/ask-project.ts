@@ -349,6 +349,8 @@ export function askProjectTests(): void {
         ['child-1', consumer, caller] as const,
       )
       await page.evaluate(() => (window as any).__store.getState().focusSession('child-1'))
+      // Named like every other ⋯: by the session it acts on
+      await expect(page.getByTestId('session-more')).toHaveAttribute('aria-label', 'Actions for write the parser')
       await page.getByTestId('session-more').click()
       const back = page.getByTestId('asked-by-back')
       await expect(back).toContainText('Go back to')

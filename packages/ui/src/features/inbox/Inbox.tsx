@@ -22,7 +22,7 @@ import {
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 import { MailPinned, MailThreadItem } from './MailRows.jsx'
-import { arrangeInbox } from './inboxList.js'
+import { arrangeInbox, cursorIndex, rowKeyOf } from './inboxList.js'
 import { Fold } from '../../components/Fold.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { mailAttention } from '../../store/mail.js'
@@ -45,6 +45,7 @@ export function Inbox() {
   // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
+  const openMailThread = useStore((s) => s.openMailThread)
   const markDone = useStore((s) => s.markDone)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
@@ -57,13 +58,17 @@ export function Inbox() {
   const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
   const [earlierOpen, setEarlierOpen] = useState(false)
   /*
-    The cursor is on a session, not on a row number: a wait that arrives goes in at the top, and the row the person
-    chose must not slide away from under the key they press. The row number only stands in for a row that has left
-    (Done): the cursor then stays at that place, kept on the last row when it was the last.
+    The cursor is on a row, not on a row number: a wait that arrives goes in at the top, and the row the cursor is on
+    must not slide away from under the key they press. It takes the top row when the list opens (below) and follows
+    that row from then on; ↑ and ↓ walk the one list, mail rows included. The row number only stands in for a row that
+    has left (Done): the cursor then stays at that place, kept on the last row when it was the last.
   */
-  const [at, setAt] = useState({ id: null as string | null, row: 0 })
-  const found = items.findIndex((it) => it.id === at.id)
-  const cursor = found >= 0 ? found : Math.min(at.row, Math.max(items.length - 1, 0))
+  const [at, setAt] = useState({ key: null as string | null, row: 0 })
+  const cursor = cursorIndex(list.waiting, at)
+  useEffect(() => {
+    if (!open) setAt({ key: null, row: 0 })
+    else if (at.key === null && list.waiting[0]) setAt({ key: rowKeyOf(list.waiting[0]), row: 0 })
+  }, [open, at.key, list.waiting])
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
@@ -105,15 +110,16 @@ export function Inbox() {
         }
         return
       }
-      const item = items[cursor]
-      const moveTo = (row: number) => setAt({ id: items[row]?.id ?? null, row })
-      if (action === 'down') moveTo(Math.min(cursor + 1, items.length - 1))
+      const row = list.waiting[cursor]
+      const item = row?.kind === 'session' ? row.item : undefined
+      const moveTo = (to: number) => setAt({ key: list.waiting[to] ? rowKeyOf(list.waiting[to]) : null, row: to })
+      if (action === 'down') moveTo(Math.min(cursor + 1, list.waiting.length - 1))
       else if (action === 'up') moveTo(Math.max(cursor - 1, 0))
       else if (action === 'open') {
         if (item) {
           openWaiting(item.id, { preferGrid: true })
           toggle(false)
-        }
+        } else if (row?.kind === 'mail') void openMailThread(row.thread.id)
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
@@ -134,7 +140,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, openWaiting, toggle, markDone, mailThread, closeMailThread])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -202,15 +208,15 @@ export function Inbox() {
             {nothingWaiting && <Nothing />}
             {list.waiting.length > 0 && (
               <ul className="flex flex-col gap-0.5 p-1">
-                {list.waiting.map((row) =>
+                {list.waiting.map((row, place) =>
                   row.kind === 'mail' ? (
-                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} />
+                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} />
                   ) : (
                     <SessionRow
                       key={row.item.id}
                       it={row.item}
                       project={projectLabelOf(projects, row.item.projectId)}
-                      active={row.index === cursor}
+                      active={place === cursor}
                       settled={settled}
                       onOpen={() => {
                         openWaiting(row.item.id, { preferGrid: true })
