@@ -16,6 +16,7 @@ import { acquireInstanceLock } from '../dev-services/instance-lock.js'
 import { Store } from '../dev-services/store.js'
 import { SYSTEM_END_FILE } from './system-end.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
+import { OWNER_MARK, ownerMarkFor } from '../dev-services/strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { alive, pidIn } from '../process.test-helpers.js'
@@ -172,6 +173,8 @@ describe('the host process, started for real', () => {
     const names = probe.split('\n').map((line) => line.split('=')[0])
     expect(names.filter((n) => (LAUNCH_VARIABLES as readonly string[]).includes(n!))).toEqual([])
     expect(probe.includes('launcher-token-not-for-children')).toBe(false)
+    // #1898: and it carries this host's owner mark, not one the runner inherited from a host it runs under
+    expect(probe.split('\n')).toContain(`${OWNER_MARK}=${ownerMarkFor(s.db)}`)
     host.p.kill('SIGTERM')
     expect(await host.exited).toBe(0)
   }, 60_000 * SLOW)
@@ -225,6 +228,8 @@ describe('the host process, started for real', () => {
       // Compared by name: a failure must not print the test runner's own environment
       expect(Object.keys(seen.env).filter((n) => (LAUNCH_VARIABLES as readonly string[]).includes(n.toUpperCase()))).toEqual([])
       expect(Object.values(seen.env).some((v) => v.includes(token))).toBe(false)
+      // #1898: and it carries this host's owner mark
+      expect(seen.env[OWNER_MARK]).toBe(ownerMarkFor(s.db))
     }
     host.p.stdin!.end()
     expect(await host.exited).toBe(0)

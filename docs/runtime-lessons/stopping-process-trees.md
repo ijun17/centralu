@@ -61,16 +61,21 @@ e2e host on its own folder claims none of it); it is measured again right before
 its own environment when it has chosen its data folder, and every child inherits it. The environment is read by one
 layer module (`os/process-env.ts`), which hands out that one variable's value and nothing else of an environment that
 holds credentials: `/proc/<pid>/environ` on Linux and WSL, `ps -E -ww` on macOS. Not offered, by choice: a process
-from before the mark or started outside Centralu, one whose starter cleared its environment, and on macOS a platform
+from before the mark or started outside Centralu, one whose starter cleared its environment, an app server and what it
+starts (an app gets no `CC_` or `CENTRALU_` variable, `app-start-env.ts`; its group is ended with it, KL10), and on macOS a platform
 binary of the system volume, whose environment `ps` does not show (measured on macOS 27.2: shown for node and for the
-hardened `claude`, not for `/bin/sleep`), unless it runs under a marked process.
+hardened `claude`, not for `/bin/sleep`), unless it runs under a marked process. Offered, by the same rule: what the
+person started in a Centralu terminal that detached itself (`code .`, `nohup`, `tmux new -d`), which the host's shell
+marked; the switch that stops the list is off by default.
 Guard: `host/dev-services/strays.test.ts` "picks only a marked process, and what runs under it, with no terminal in our
 folder"; `host/dev-services/strays.test.ts` "a process a living app holds is not on the list (VS Code extensions), nor
 an unmarked orphan"; `host/dev-services/strays.test.ts` "a detached editor with no mark is not offered; an orphaned
 marked dev server and what runs under it are"; `host/dev-services/strays.test.ts` "what started the host is never
 offered, marked or not"; `host/dev-services/strays.test.ts` "a real marked leftover is offered and gone after the
 grace; an unmarked one beside it is neither" (also the measuring again before the kill); `host/os/process-env.test.ts`
-"takes only the asked variable per pid: never another variable, never a process that shows none".
+"takes only the asked variable per pid: never another variable, never a process that shows none";
+`host/lifecycle/host-process.test.ts` "the first child the host spawns sees none of the launcher's variables, the token
+least of all (ST16)" (it carries the host's mark).
 Platforms: macOS, Linux.
 
 **KL7. An agent's helpers end with it.**

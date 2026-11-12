@@ -41,7 +41,8 @@ import { ancestors, descendants } from './proc-table.js'
  *     in our folder, had an owner (it was SIGTERMed when an early version ran, 4a69b96f).
  *
  *     A process whose environment cannot be read, or that has no mark, is never offered: one from before the mark,
- *     one started outside Centralu, one whose starter cleared its environment, and on macOS a platform binary of the
+ *     one started outside Centralu, one whose starter cleared its environment, an app server (an app gets no `CENTRALU_`
+ *     variable but its own, `app-start-env.ts`), and on macOS a platform binary of the
  *     system volume, whose environment `ps` does not show (`environmentValues`) unless a process it descends from
  *     carries the mark.
  *
@@ -181,7 +182,7 @@ export function pickStrays(
 /**
  * How long `ps` or `lsof` may take. On a saturated machine either can take far longer than a quiet one's tens of ms (#1793);
  * a listing that does not finish is not "no leftovers", it is said on stderr. Two listings run one after the other and the
- * screen gives a call 30 s, so each gets 12 s
+ * screen gives a call 30 s, so each gets 12 s; the owner marks are read after them in 5 s at most (`environmentValues`)
  */
 const LIST_TIMEOUT_MS = 12_000
 

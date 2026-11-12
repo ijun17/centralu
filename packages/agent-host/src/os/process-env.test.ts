@@ -42,6 +42,23 @@ describe('environmentValues', () => {
     await expect(environmentValues('A=B', [1])).rejects.toThrow(/not a variable name/)
   })
 
+  /** What `execText` rejects with: the program ran and failed, and carries what it printed */
+  const failure = (fields: { code: number | null; ended?: 'timeout' }, stdout: string) =>
+    Object.assign(new Error('ps failed'), { stdout, stderr: '', ...fields })
+  const printed = '  501 node server.js CC_HOST_CREDENTIAL=s3cret-credential CENTRALU_OWNER=1a2b3c\n'
+
+  it('macOS: takes what `ps` printed when a listed pid ended meanwhile (it exits 1 and prints the others)', async () => {
+    const values = await environmentValues('CENTRALU_OWNER', [501, 502], 'darwin', () => Promise.reject(failure({ code: 1 }, printed)))
+    expect([...values]).toEqual([[501, '1a2b3c']])
+  })
+
+  it('macOS: a listing that failed rejects with why, and with nothing of what it read', async () => {
+    const e: unknown = await environmentValues('CENTRALU_OWNER', 'all', 'darwin', () => Promise.reject(failure({ code: null, ended: 'timeout' }, printed))).catch((x: unknown) => x)
+    expect(e).toBeInstanceOf(Error)
+    expect(JSON.stringify(e, Object.getOwnPropertyNames(e))).not.toContain('s3cret')
+    expect(String(e)).toMatch(/timeout/)
+  })
+
   it('reads nothing on Windows, where nothing needs another process\'s environment', async () => {
     expect(await environmentValues('PATH', 'all', 'win32')).toEqual(new Map())
   })

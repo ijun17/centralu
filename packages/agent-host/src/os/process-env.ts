@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { HOST_PLATFORM, type Platform } from '../os.js'
-import { execText } from './exec.js'
+import { errorMessage } from '@cc/protocol'
+import { execText, isExecFailure } from './exec.js'
 
 /**
  * One variable of other processes' environments (#1898): the one reader of it, for the leftover finder's owner mark
@@ -21,17 +22,35 @@ import { execText } from './exec.js'
  *   to: there is no leftover finder there (`hasPs`), and a stop sweeps by parent and creation time (`kill-tree.ts`).
  *
  * A process missing from the answer could not be read or does not have the variable; the two are one answer on purpose,
- * since neither says the process is ours. A listing that failed as a whole (macOS `ps`) rejects.
+ * since neither says the process is ours. A listing that failed as a whole (macOS `ps`) rejects, with why and nothing it read.
  */
-export async function environmentValues(name: string, pids: readonly number[] | 'all', platform: Platform = HOST_PLATFORM): Promise<Map<number, string>> {
+export async function environmentValues(
+  name: string,
+  pids: readonly number[] | 'all',
+  platform: Platform = HOST_PLATFORM,
+  run: typeof execText = execText,
+): Promise<Map<number, string>> {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`not a variable name: ${name}`)
   if (platform === 'linux') return procValues(name, pids)
   if (platform !== 'darwin') return new Map()
   if (pids !== 'all' && pids.length === 0) return new Map()
   const which = pids === 'all' ? ['-A'] : ['-p', pids.join(',')]
-  const { stdout } = await execText('ps', ['-E', '-ww', '-o', 'pid=,command=', ...which], { timeoutMs: 12_000, maxBuffer: 64 * 1024 * 1024 })
-  return psEnvironmentValues(stdout, name)
+  try {
+    const { stdout } = await run('ps', ['-E', '-ww', '-o', 'pid=,command=', ...which], { timeoutMs: PS_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 })
+    return psEnvironmentValues(stdout, name)
+  } catch (e) {
+    // `ps -p` exits 1 when a listed pid has ended since it was listed, and still prints the others: that is an answer
+    if (isExecFailure(e) && typeof e.code === 'number' && !e.ended) return psEnvironmentValues(e.stdout, name)
+    // A failure carries what `ps` printed, every environment it read: only why it failed goes on
+    throw new Error(`ps could not list environments: ${isExecFailure(e) ? (e.ended ?? `exit ${String(e.code)}`) : errorMessage(e)}`)
+  }
 }
+
+/**
+ * How long the macOS listing may take: it ran in 30 ms for all 868 processes of a Mac (2026-11-12), and the leftover
+ * finder's other two listings take 12 s each of the 30 s the screen gives its call
+ */
+const PS_TIMEOUT_MS = 5_000
 
 async function procValues(name: string, pids: readonly number[] | 'all'): Promise<Map<number, string>> {
   const all = pids === 'all' ? (await readdir('/proc')).filter((d) => /^\d+$/.test(d)).map(Number) : pids
