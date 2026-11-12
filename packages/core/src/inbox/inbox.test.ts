@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { appArrivalCandidates, buildInbox, countWaiting, isAppArrivalId, isProposalId, noteAppArrivals, nextWaitingSession, pendingProposals, proposalCandidates, type InboxCandidate } from './inbox.js'
+import { appArrivalCandidates, buildInbox, countWaiting, isAppArrivalId, isProposalId, noteAppArrivals, nextWaitingSession, pendingProposals, proposalCandidates, stampProposals, type InboxCandidate } from './inbox.js'
 
 const NOW = 1_000_000
 
@@ -152,6 +152,21 @@ describe('pending proposals', () => {
     expect(countWaiting([...proposals, s('a', 'waiting_approval')])).toEqual({ approval: 3, error: 0, input: 0 })
   })
 
+  // The inbox is newest first: a proposal or an app that arrived is placed by when this window first saw it, not on top for good
+  it('are placed by the time the window first saw them, among the sessions', () => {
+    const stamped = proposalCandidates(pendingProposals({ mcpProposals: [{ name: 'playwright', at: NOW - 5000 }], skillProposals: [] }))
+    const arrival = appArrivalCandidates([{ key: 'p1/board', projectId: 'p1', appId: 'board', title: 'Board', asks: [], at: NOW - 50_000 }])
+    const inbox = buildInbox([...stamped, ...arrival, s('new', 'waiting_approval', { waitingSince: NOW - 1000 }), s('old', 'waiting_approval', { waitingSince: NOW - 99_000 })], NOW)
+    expect(inbox.map((i) => i.id)).toEqual(['new', 'proposal:mcp:playwright', 'app-arrival:p1/board', 'old'])
+  })
+
+  it('keep the time of the read that first saw them', () => {
+    const first = stampProposals([], [{ name: 'a' }, { name: 'b' }], 100)
+    expect(first.map((p) => p.at)).toEqual([100, 100])
+    const again = stampProposals(first, [{ name: 'b' }, { name: 'c' }], 900)
+    expect(again).toEqual([{ name: 'b', at: 100 }, { name: 'c', at: 900 }])
+  })
+
   it('carry what they are, and an id no session has', () => {
     expect(proposals.map((p) => p.proposal)).toEqual([{ kind: 'skill', name: 'weekly' }, { kind: 'mcp', name: 'playwright' }])
     expect(proposals.every((p) => isProposalId(p.id))).toBe(true)
@@ -168,22 +183,24 @@ describe('pending proposals', () => {
 describe('apps a trusted project gains (#1141)', () => {
   const app = (projectId: string, appId: string) => ({ key: `${projectId}/${appId}`, projectId, appId, title: appId, asks: [] })
   it('a project seen for the first time gives no notice; an app it gains after does, once', () => {
-    const first = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {})
+    const first = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {}, NOW)
     expect(first).toEqual({ seen: { p1: ['p1/notes'] }, arrived: [] })
-    const later = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), first.seen)
+    const later = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), first.seen, NOW + 5)
     expect(later.arrived.map((a) => a.key)).toEqual(['p1/board'])
-    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), later.seen).arrived).toEqual([])
+    // The time the window noted it, which orders its row
+    expect(later.arrived[0]?.at).toBe(NOW + 5)
+    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), later.seen, NOW).arrived).toEqual([])
   })
 
   it('an untrusted project is not watched, and trusting it again starts afresh', () => {
-    const seen = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {}).seen
-    const untrusted = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(), seen)
+    const seen = noteAppArrivals([app('p1', 'notes')], new Set(['p1']), {}, NOW).seen
+    const untrusted = noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(), seen, NOW)
     expect(untrusted).toEqual({ seen: {}, arrived: [] })
-    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), untrusted.seen).arrived).toEqual([])
+    expect(noteAppArrivals([app('p1', 'notes'), app('p1', 'board')], new Set(['p1']), untrusted.seen, NOW).arrived).toEqual([])
   })
 
   it('stands in the inbox as unread and waiting, under its own id', () => {
-    const [row] = buildInbox(appArrivalCandidates([{ key: 'p1/board', projectId: 'p1', appId: 'board', title: 'Board', asks: [] }]), 0)
+    const [row] = buildInbox(appArrivalCandidates([{ key: 'p1/board', projectId: 'p1', appId: 'board', title: 'Board', asks: [], at: 0 }]), 0)
     expect(row).toMatchObject({ id: 'app-arrival:p1/board', name: 'New app: Board', unread: true, state: 'waiting_input' })
     expect(isAppArrivalId(row!.id)).toBe(true)
   })

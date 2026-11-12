@@ -1,4 +1,4 @@
-import type { InboxItem } from '@cc/core'
+import { waitedAt, type InboxItem } from '@cc/core'
 import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
 
 /**
@@ -22,13 +22,10 @@ export type InboxList = {
 
 type Mail = { threads: readonly MailThreadRow[]; held: readonly MailHeldRow[] } | null
 
-/** When a row's wait began: a session row with no start time (a proposal, an app that arrived) came just now */
-const sessionAt = (it: InboxItem): number => it.waitingSince ?? Number.MAX_SAFE_INTEGER
-
 export function arrangeInbox(items: readonly InboxItem[], mail: Mail): InboxList {
   const threads = mail?.threads ?? []
   const rows: { at: number; row: WaitingRow }[] = [
-    ...items.map((item, index) => ({ at: sessionAt(item), row: { kind: 'session', item, index } as const })),
+    ...items.map((item, index) => ({ at: waitedAt(item), row: { kind: 'session', item, index } as const })),
     ...threads.filter((t) => t.unread > 0).map((thread) => ({ at: thread.updatedAt, row: { kind: 'mail', thread } as const })),
   ]
   return {

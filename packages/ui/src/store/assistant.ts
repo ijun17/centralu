@@ -1,4 +1,4 @@
-import { initialSession } from '@cc/core'
+import { initialSession, stampProposals } from '@cc/core'
 import { errorMessage, type ToolName } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { syncBadge } from './events/notices.js'
@@ -144,7 +144,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
     if (!platform) return
     try {
       const r = await platform.agents.mcpProposals()
-      set({ mcpProposals: r.proposals })
+      set((s) => ({ mcpProposals: stampProposals(s.mcpProposals, r.proposals, Date.now()) }))
       syncBadge(get)
     } catch {
       /* The app is fine even if the suggestion list fails to load — the next event calls it again */
@@ -172,7 +172,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
     if (!platform) return
     try {
       const r = await platform.agents.skillProposals()
-      set({ skillProposals: r.proposals })
+      set((s) => ({ skillProposals: stampProposals(s.skillProposals, r.proposals, Date.now()) }))
       syncBadge(get)
     } catch {
       /* The app is fine even if this fails to load — the next event calls it again */

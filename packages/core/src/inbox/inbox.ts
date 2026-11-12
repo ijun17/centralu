@@ -47,9 +47,10 @@ export type InboxCandidate = {
 /**
  * An app a project already trusted gained since the window last looked (#1141), say a manifest a `git pull` brought: it
  * is trusted with the project (owner), so the inbox says so once, with what it declares it may ask for (`asks`, plain
- * words, empty for nothing beyond its own tools). Dismissed by opening it or with Done.
+ * words, empty for nothing beyond its own tools). Dismissed by opening it or with Done. `at` is when the window noted it, the
+ * time its row is ordered by (a snapshot from before it gets the time it was read).
  */
-export type AppArrival = { key: string; projectId: string; appId: string; title: string; asks: string[] }
+export type AppArrival = { key: string; projectId: string; appId: string; title: string; asks: string[]; at: number }
 
 /** The id prefix of a row that stands for an app arrival: `app-arrival:<app key>`. No session id has it. */
 export const APP_ARRIVAL_ID_PREFIX = 'app-arrival:'
@@ -63,7 +64,7 @@ export function appArrivalCandidates(arrivals: readonly AppArrival[]): InboxCand
     projectId: a.projectId,
     name: `New app: ${a.title}`,
     state: 'waiting_input' as const,
-    waitingSince: null,
+    waitingSince: a.at,
     lastSeq: 1,
     lastReadSeq: 0,
     arrival: a,
@@ -83,20 +84,26 @@ export function noteAppArrivals(
   apps: readonly { key: string; projectId: string | null; appId: string; title: string; asks: string[] }[],
   trusted: ReadonlySet<string>,
   seen: Readonly<Record<string, readonly string[]>>,
+  now: number,
 ): { seen: Record<string, string[]>; arrived: AppArrival[] } {
   const next: Record<string, string[]> = {}
   const arrived: AppArrival[] = []
   for (const projectId of trusted) {
     const mine = apps.filter((a) => a.projectId === projectId)
     const before = seen[projectId]
-    if (before) for (const a of mine) if (!before.includes(a.key)) arrived.push({ key: a.key, projectId, appId: a.appId, title: a.title, asks: a.asks })
+    if (before) for (const a of mine) if (!before.includes(a.key)) arrived.push({ key: a.key, projectId, appId: a.appId, title: a.title, asks: a.asks, at: now })
     next[projectId] = [...new Set([...(before ?? []), ...mine.map((a) => a.key)])].sort()
   }
   return { seen: next, arrived }
 }
 
 /** An Assistant proposal waiting for the person's answer, by the name it was proposed under */
-export type PendingProposal = { kind: 'mcp' | 'skill'; name: string }
+export type PendingProposal = { kind: 'mcp' | 'skill'; name: string; at?: number }
+
+/** The proposals of a fresh read, each with the time this window first saw it (the earlier read's, for one still there), for the inbox's order */
+export function stampProposals<T extends { name: string }>(prev: readonly { name: string; at?: number }[], next: readonly T[], now: number): (T & { at: number })[] {
+  return next.map((p) => ({ ...p, at: prev.find((x) => x.name === p.name)?.at ?? now }))
+}
 
 /** The id prefix of a row that stands for a pending proposal: `proposal:<kind>:<name>`. No session id has it. */
 export const PROPOSAL_ID_PREFIX = 'proposal:'
@@ -104,16 +111,16 @@ export const PROPOSAL_ID_PREFIX = 'proposal:'
 export const isProposalId = (id: string): boolean => id.startsWith(PROPOSAL_ID_PREFIX)
 
 /** The pending proposals of the two lists the host keeps, skills, then MCP servers */
-export function pendingProposals(lists: { mcpProposals: readonly { name: string }[]; skillProposals: readonly { name: string }[] }): PendingProposal[] {
+export function pendingProposals(lists: { mcpProposals: readonly { name: string; at?: number }[]; skillProposals: readonly { name: string; at?: number }[] }): PendingProposal[] {
   return [
-    ...lists.skillProposals.map((p) => ({ kind: 'skill' as const, name: p.name })),
-    ...lists.mcpProposals.map((p) => ({ kind: 'mcp' as const, name: p.name })),
+    ...lists.skillProposals.map((p) => ({ kind: 'skill' as const, name: p.name, at: p.at })),
+    ...lists.mcpProposals.map((p) => ({ kind: 'mcp' as const, name: p.name, at: p.at })),
   ]
 }
 
 /**
  * The pending proposals as inbox candidates (#703). They wait in the `waiting_approval` state. A proposal carries no start
- * time, so it has no `waitingSince` and is listed as the newest.
+ * time of its own, so the window stamps the one it first saw it (`stampProposals`) and orders it by that.
  */
 export function proposalCandidates(pending: readonly PendingProposal[]): InboxCandidate[] {
   return pending.map((p) => ({
@@ -121,7 +128,7 @@ export function proposalCandidates(pending: readonly PendingProposal[]): InboxCa
     projectId: null,
     name: p.kind === 'mcp' ? `Install MCP server ${p.name}` : `Save skill ${p.name}`,
     state: 'waiting_approval' as const,
-    waitingSince: null,
+    waitingSince: p.at ?? null,
     lastSeq: 0,
     lastReadSeq: 0,
     proposal: p,
@@ -140,8 +147,8 @@ export function isListedWaiting(s: { state: SessionState; interruption?: Interru
   return s.state === 'waiting_input' ? isUnread(s) : isWaiting(s.state)
 }
 
-/** When a row's wait began, for the order: a row with no start time came just now */
-const waitedAt = (s: { waitingSince: number | null }): number => s.waitingSince ?? Number.MAX_SAFE_INTEGER
+/** When a row's wait began, for the order: a row with no start time came just now. The inbox list orders its mail threads with it too */
+export const waitedAt = (s: { waitingSince: number | null }): number => s.waitingSince ?? Number.MAX_SAFE_INTEGER
 
 export function buildInbox(sessions: readonly InboxCandidate[], now: number): InboxItem[] {
   return sessions

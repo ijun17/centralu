@@ -711,7 +711,7 @@ function noteArrivals(get: StoreGet, set: StoreSet): void {
   const apps = s.externalApps.flatMap((a) =>
     a.projectId ? [{ key: appKeyOf(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: appTitleOf(a), asks: a.uses ? usesLines(a.uses) : [] }] : [],
   )
-  const { seen, arrived } = noteAppArrivals(apps, trusted, s.appsSeen)
+  const { seen, arrived } = noteAppArrivals(apps, trusted, s.appsSeen, Date.now())
   const held = new Set(s.appArrivals.map((a) => a.key))
   const fresh = arrived.filter((a) => !held.has(a.key))
   const kept = s.appArrivals.filter((a) => trusted.has(a.projectId) && apps.some((x) => x.key === a.key))
