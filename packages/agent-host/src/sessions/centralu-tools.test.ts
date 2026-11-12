@@ -785,10 +785,11 @@ describe('the app tool (#2231)', () => {
     }
   }
 
-  it("lists the session's apps, then one app's tools with the read-only mark and schemas, and names the next call", async () => {
+  it("lists the session's apps with each tool's argument names, then one app's tools with the read-only mark and schemas, and names the next call", async () => {
     const tools = toolsWith({ apps: () => appsWith() })
     const list = await runCentraluTool(tools, 'app', { action: 'list' }, { sessionId: 's', profile: 'reader' })
-    expect(list.text).toContain('- notes: "Notes" "Keeps notes"\n    tools: peek (reads), poke')
+    // The argument names, so a call made after the overview alone does not guess them (measured: tool-cost.md §16)
+    expect(list.text).toContain('- notes: "Notes" "Keeps notes"\n    tools: peek() (reads), poke(to?)')
     expect(list.text).toContain('app(action="call", app=…, tool=…, args={…}) calls one')
     expect(list.text).toContain('find_apps() finds apps it can attach')
     const one = await runCentraluTool(tools, 'app', { action: 'list', app: 'notes' }, { sessionId: 's', profile: 'reader' })

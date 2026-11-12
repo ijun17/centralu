@@ -279,6 +279,18 @@ export function issuesText(error: z.ZodError): string {
 /** A tool's name as the `app` listing writes it (#2231): marked when the app says it only reads, so it is never asked about */
 const toolName = (t: AppToolSpec): string => (t.annotations?.readOnlyHint === true ? `${t.name} (reads)` : t.name)
 
+/**
+ * A tool in the apps overview with its argument names, `read_discussion(item, comments?) (reads)` (#2231): measured on the project
+ * board, a model that called after the overview alone guessed the arguments' names (3 of 3 first calls of read_discussion refused),
+ * so the overview names them; the types and descriptions stay in one app's list
+ */
+function toolWithArgs(t: AppToolSpec): string {
+  const props = t.inputSchema.properties
+  const required = new Set(Array.isArray(t.inputSchema.required) ? t.inputSchema.required.filter((r): r is string => typeof r === 'string') : [])
+  const names = props && typeof props === 'object' && !Array.isArray(props) ? Object.keys(props).map((k) => (required.has(k) ? k : `${k}?`)) : []
+  return toolName({ ...t, name: `${t.name}(${names.join(', ')})` })
+}
+
 /** The first line of an app author's text, JSON-quoted: their words, not ours (#121) */
 const authorLine = (text: string | undefined): string => trustedJsonText((text ?? '').split('\n')[0]!.trim())
 
@@ -297,7 +309,7 @@ export function appsText(apps: readonly SessionAppEntry[], find: string | undefi
   const lines = apps.map(
     (a) =>
       `- ${a.name}: ${trustedJsonText(a.title)}${a.description ? ` ${authorLine(a.description)}` : ''}\n` +
-      `    tools: ${a.tools ? a.tools.map(toolName).join(', ') || '(none)' : '(listed with app(action="list", app=…))'}`,
+      `    tools: ${a.tools ? a.tools.map(toolWithArgs).join(', ') || '(none)' : '(listed with app(action="list", app=…))'}`,
   )
   return `${lines.join('\n')}\napp(action="list", app=…) gives one app's tools and arguments; app(action="call", app=…, tool=…, args={…}) calls one.${more}`
 }
