@@ -9,6 +9,8 @@ import {
   AGENT_TOOLS,
   APP_ACCESS_BUDGET_CHARS,
   APP_ACCESS_TOOLS,
+  APP_BUDGET_CHARS,
+  APP_TOOLS,
   MAIL_BUDGET_CHARS,
   MAIL_TOOLS,
   COMPACT_BUDGET_CHARS,
@@ -253,7 +255,7 @@ describe("a reader's list and reads across projects (#984)", () => {
 describe('the reader set', () => {
   it('holds reading, consented updates, delegation and app access without the Assistant\'s directing tools', () => {
     // The app-access set (#371 part A) changes only the calling session's own tools
-    expect(centraluToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail', 'compact_self'])
+    expect(centraluToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'app', 'mail', 'compact_self'])
     for (const t of CENTRALU_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['update_centralu', 'read_session', 'recall', 'app_guide'].includes(t.name))
     }
@@ -359,7 +361,13 @@ describe('the reader set', () => {
   it(`keeps the app-access set within ${APP_ACCESS_BUDGET_CHARS} characters, beside the reader set`, () => {
     expect(sentChars(APP_ACCESS_TOOLS)).toBeLessThanOrEqual(APP_ACCESS_BUDGET_CHARS)
     // Everything the reader seat is sent is in one counted set or another — nothing rides uncounted
-    expect(centraluToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].map((t) => t.name).sort())
+    expect(centraluToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...APP_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].map((t) => t.name).sort())
+  })
+
+  it(`keeps the app tool within ${APP_BUDGET_CHARS} characters, in every profile, deferred on Claude where its set is loaded tool by tool (#2231)`, () => {
+    expect(sentChars(APP_TOOLS)).toBeLessThanOrEqual(APP_BUDGET_CHARS)
+    expect(APP_TOOLS.every((t) => t.deferred)).toBe(true)
+    for (const profile of TOOL_PROFILES) expect(centraluToolSchemas(profile).some((t) => t.name === 'app'), profile).toBe(true)
   })
 
   it(`keeps the mail tool within ${MAIL_BUDGET_CHARS} characters, deferred on Claude and loaded on Codex, an ordinary session’s alone`, () => {
@@ -590,9 +598,9 @@ describe('the resident cost of each profile', () => {
     }
   }
 
-  it('counts the reader seat on Codex as exactly its five counted sets, and on Claude only the ones not deferred', () => {
-    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS) + sentChars(MAIL_TOOLS) + sentChars(COMPACT_TOOLS))
-    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => !('deferred' in t && t.deferred))
+  it('counts the reader seat on Codex as exactly its counted sets, and on Claude only the ones not deferred', () => {
+    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS) + sentChars(APP_TOOLS) + sentChars(MAIL_TOOLS) + sentChars(COMPACT_TOOLS))
+    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...APP_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => !('deferred' in t && t.deferred))
     expect(residentCost('reader', DEFERRED_SERVER).residentChars).toBe(sentChars(loaded))
   })
 })
@@ -675,7 +683,7 @@ function bare(schema: z.ZodType): { properties: Record<string, unknown>; require
 }
 
 /** Arguments the runner reads otherwise than a seat is shown them, each on purpose and said in TOOL_ARGS */
-const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centralu_run.args'])
+const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centralu_run.args', 'app.args'])
 
 describe('arguments (#850)', () => {
   it('every tool a seat is shown has one schema to run by, and the keys it is shown are that schema\'s', () => {
@@ -759,5 +767,64 @@ describe('arguments (#850)', () => {
     // A right one runs, and an argument the tool does not take is dropped, as Claude's MCP drops it
     expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'fork', extra: 1 })).isError).toBeFalsy()
     expect(tools.sendToSession).toHaveBeenCalledWith('s', 'go', false, 'fork')
+  })
+})
+
+describe('the app tool (#2231)', () => {
+  const peek = { name: 'peek', description: 'Reads it\nmore', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } }
+  const poke = { name: 'poke', description: 'Writes it', inputSchema: { type: 'object', properties: { to: { type: 'number' } } } }
+  function appsWith(calls: unknown[][] = []) {
+    const entry = { name: 'notes', server: 'app-notes', appId: 'notes', title: 'Notes', description: 'Keeps notes\nsecond line', tools: [peek, poke] }
+    return {
+      current: () => [entry],
+      tools: async () => [peek, poke],
+      call: async (...a: unknown[]) => {
+        calls.push(a)
+        return { content: [{ type: 'text', text: 'poked' }], isError: false, structuredContent: { value: 1 } }
+      },
+    }
+  }
+
+  it("lists the session's apps, then one app's tools with the read-only mark and schemas, and names the next call", async () => {
+    const tools = toolsWith({ apps: () => appsWith() })
+    const list = await runCentraluTool(tools, 'app', { action: 'list' }, { sessionId: 's', profile: 'reader' })
+    expect(list.text).toContain('- notes: "Notes" "Keeps notes"\n    tools: peek (reads), poke')
+    expect(list.text).toContain('app(action="call", app=…, tool=…, args={…}) calls one')
+    expect(list.text).toContain('find_apps() finds apps it can attach')
+    const one = await runCentraluTool(tools, 'app', { action: 'list', app: 'notes' }, { sessionId: 's', profile: 'reader' })
+    expect(one.text).toContain('- peek (reads): "Reads it"\n    args: {"type":"object","properties":{}}')
+    expect(one.text).toContain('- poke: "Writes it"')
+  })
+
+  it("calls one tool, by the listed name or the server name of before, and hands back the app's own result; JSON text args are read", async () => {
+    const calls: unknown[][] = []
+    const tools = toolsWith({ apps: () => appsWith(calls) })
+    const out = await runCentraluTool(tools, 'app', { action: 'call', app: 'notes', tool: 'poke', args: { to: 1 } }, { sessionId: 's', profile: 'builder' }, undefined, { callId: 'toolu_1', waitMs: 5_000 })
+    expect(out).toEqual({ text: 'poked', content: [{ type: 'text', text: 'poked' }], isError: false, structuredContent: { value: 1 } })
+    await runCentraluTool(tools, 'app', { action: 'call', app: 'app-notes', tool: 'poke', args: '{"to":2}' }, { sessionId: 's', profile: 'assistant' })
+    expect(calls.map((c) => c.slice(0, 3))).toEqual([['app-notes', 'poke', { to: 1 }], ['app-notes', 'poke', { to: 2 }]])
+    expect(calls[0]![3]).toEqual({ callId: 'toolu_1', waitMs: 5_000 })
+  })
+
+  it('refuses an app the session does not have, naming the ones it has, and a call with no tool', async () => {
+    const tools = toolsWith({ apps: () => appsWith() })
+    const missing = await runCentraluTool(tools, 'app', { action: 'call', app: 'board', tool: 'x' }, { sessionId: 's', profile: 'reader' })
+    expect(missing).toMatchObject({ isError: true, text: expect.stringContaining('This session has no app named "board". Its apps: notes.') })
+    const noTool = await runCentraluTool(tools, 'app', { action: 'call', app: 'notes' }, { sessionId: 's', profile: 'reader' })
+    expect(noTool.isError).toBe(true)
+    const none = await runCentraluTool(toolsWith({ apps: () => null }), 'app', { action: 'list' }, { sessionId: 's', profile: 'scoped' })
+    expect(none.text).toBe('This session has no apps.')
+  })
+
+  it("is not put through the request gate by the runner: the hub's call asks, knowing whether the app's tool only reads", async () => {
+    const whenAsked = vi.fn(async (_c: unknown, _s: unknown, run: () => Promise<{ text: string }>) => run())
+    await runCentraluTool(toolsWith({ apps: () => appsWith(), whenAsked }), 'app', { action: 'list' }, { sessionId: 's', profile: 'assistant' })
+    expect(whenAsked).not.toHaveBeenCalled()
+  })
+
+  it("find_apps names the session's own apps when it finds nothing to attach", async () => {
+    const tools = toolsWith({ apps: () => appsWith(), findApps: async () => ({ ok: true, apps: [] }) })
+    const out = await runCentraluTool(tools, 'find_apps', { query: 'notes' }, { sessionId: 's', profile: 'reader' })
+    expect(out.text).toContain('This session\'s own apps, which app(action="list") gives: notes.')
   })
 })

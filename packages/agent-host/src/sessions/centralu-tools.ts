@@ -21,7 +21,7 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
  * may run which (tool-seats.ts), the texts the answers are built from (tool-answers.ts), and here the runner both
  * paths call. The names the callers still import are re-exported from here.
  */
-export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, assistantInstructions, CENTRALU_TOOLS, READER_BUDGET_CHARS, READER_TOOLS, REPO_WORK_FIRST, readerFirst, readerInstructions, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
+export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, APP_BUDGET_CHARS, APP_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, assistantInstructions, CENTRALU_TOOLS, READER_BUDGET_CHARS, READER_TOOLS, REPO_WORK_FIRST, readerFirst, readerInstructions, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
 export { callForm, codexToolInstructionsFor, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, centraluToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
@@ -500,12 +500,15 @@ const HANDLERS: ToolHandlers = {
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.apps.length === 0) {
+      // The session's own apps are not in this list: say they are there (#2231, where "no app" misled a session that had one)
+      const own = tools.apps?.()?.current().map((a) => a.name) ?? []
+      const mine = own.length ? ` This session's own apps, which app(action="list") gives: ${own.join(', ')}.` : ''
       return {
-        text: query
+        text: (query
           ? `No app matches ${trustedJsonText(query)}. Try ${namedCall(caller.profile, 'find_apps', {})} with no query to see every app you can attach.`
           : caller.profile === 'assistant'
             ? "No app can be attached: no trusted project is an app, and the person's own apps are attached already."
-            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
+            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).") + mine,
       }
     }
     return {

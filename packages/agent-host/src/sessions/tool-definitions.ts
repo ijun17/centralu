@@ -916,7 +916,7 @@ export const APP_ACCESS_BUDGET_CHARS = 900
 export const APP_TOOLS = [
   {
     name: 'app',
-    description: "This session's Centralu apps. list: the apps, or one app's tools and arguments. call: one tool of one app.",
+    description: "Lists this session's apps or one app's tools (list), or calls a tool (call).",
     schema: z.object({
       action: z.enum(['list', 'call']),
       app: z.string().optional(),
@@ -929,8 +929,11 @@ export const APP_TOOLS = [
 
 export type AppToolName = (typeof APP_TOOLS)[number]['name']
 
-/** The ceiling for APP_TOOLS, counted like READER_BUDGET_CHARS; it rides in every profile (#2231) */
-export const APP_BUDGET_CHARS = 450
+/**
+ * The ceiling for APP_TOOLS, counted like READER_BUDGET_CHARS; it rides in every profile (#2231), and each profile's ceiling
+ * rises by it: the per-app tools it replaces rode outside every ceiling. Measured 467 (docs/tool-cost.md §16)
+ */
+export const APP_BUDGET_CHARS = 500
 
 /**
  * Repository work by hand (#957 follow-up, owner decision 2026-10-17): an attached app such as the project board serves
@@ -966,7 +969,7 @@ export function readerFirst(subagentTool?: string): readonly string[] {
   return [
     'recall for earlier conversations',
     'read_session for other sessions',
-    "app for this session's apps, find_apps for another project's",
+    "app for apps (find_apps: other projects')",
     'update_centralu to update Centralu',
     'ask_project to have another project do work',
     /*
@@ -1066,7 +1069,7 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences archive".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the Assistant attaches the one it needs
-  'Your apps: the app tool lists and calls them. Projects that are apps attach on demand: the find_apps command lists them.',
+  'Apps: the app tool lists and calls yours; projects that are apps attach on demand (the find_apps command).',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
   'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',

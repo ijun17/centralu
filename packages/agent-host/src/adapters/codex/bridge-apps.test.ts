@@ -17,6 +17,7 @@ import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract
 import { bridgeAddress } from '../../keeper-control.js'
 import { bridgeToken } from '../../transport/bridge-token.js'
 import { bridgePath } from '../bridge-path.js'
+import { AcpSession } from '../acp/session.js'
 
 /**
  * Tests the stdio bridge Codex and ACP agents reach Centralu through, **as a whole bridge**, for apps (#2231) — a real bridge
@@ -41,7 +42,7 @@ class Handle implements SessionHandle {
 
 /** An adapter that only stands up a handle — the bridge's gate only opens for a live session */
 class NullAdapter implements AgentAdapter {
-  tool: ToolName = 'codex'
+  constructor(readonly tool: ToolName = 'codex') {}
   descriptor = { name: 'codex', label: 'Codex', mark: 'X', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: true, backgroundTasks: false,
@@ -112,7 +113,8 @@ beforeEach(async () => {
   plantApp(join(dataRoot, 'apps'), 'helper', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
 
   store = new Store()
-  const adapters = new Map<ToolName, AgentAdapter>([['codex', new NullAdapter()]])
+  // `opencode` stands for an ACP agent, which reaches Centralu's tools through the same bridge (#2231)
+  const adapters = new Map<ToolName, AgentAdapter>([['codex', new NullAdapter()], ['opencode', new NullAdapter('opencode')]])
   // The host's own wiring (main.ts): each session's bridge gets its own credential, not TOKEN
   mgr = new SessionManager(store, adapters, () => {}, (sessionId) => bridgeAddress(undefined, port, TOKEN, sessionId))
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], runs: storeRunLedger(store) })
@@ -135,8 +137,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const worker = async (permissionPreset: 'normal' | 'auto' = 'normal') =>
-  (await mgr.createSession({ projectId, cwd: root, tool: 'codex', permissionPreset })) as SessionInfo
+const worker = async (permissionPreset: 'normal' | 'auto' = 'normal', tool: ToolName = 'codex') =>
+  (await mgr.createSession({ projectId, cwd: root, tool, permissionPreset })) as SessionInfo
 
 /** An `app` call as Codex sends it through the bridge */
 const appCall = (app: string, tool: string, args: Record<string, unknown> = {}) => ({ name: 'app', arguments: { action: 'call', app, tool, args } })
@@ -194,6 +196,25 @@ describe("the bridge — apps through Centralu's app tool, end to end, seen from
     expect(rt.runs({ projectId, appId: 'notes' }).map((r) => r.tool)).toEqual(['peek'])
     await call('agents.respondApproval', { sessionId: s.id, requestId: card!.requestId, decision: 'allow' })
     expect((await pending).result).toMatchObject({ content: [{ type: 'text', text: 'poked 4' }], isError: false })
+  })
+})
+
+/**
+ * An ACP agent (opencode, gemini and the like) is given Centralu's tools through this same bridge, so since #2231 it reaches
+ * the project's apps as Codex does, under the same host gate and the same presets. Its handle cannot say whether the person
+ * bypasses approvals (`AcpSession` has no `bypassesApprovals`), so under `normal` its writes ask.
+ */
+describe('the bridge — an ACP agent reaches apps through the same host gate and card (#2231)', () => {
+  it('under normal, its write raises the host card and runs only on Allow; a Deny runs nothing', async () => {
+    expect('bypassesApprovals' in AcpSession.prototype).toBe(false)
+    const s = await worker('normal', 'opencode')
+    const { request } = bridge(s.id)
+    await request('initialize', {})
+    const denied = request('tools/call', appCall('notes', 'poke', { to: 6 }))
+    const card = await until(() => mgr.meta.get(s.id)?.pendingApproval, (c) => c !== undefined && c !== null, 10_000)
+    await call('agents.respondApproval', { sessionId: s.id, requestId: card!.requestId, decision: 'deny' })
+    expect((await denied).result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'The person denied this call. Nothing ran.' }] })
+    expect(rt.runs({ projectId, appId: 'notes' })).toEqual([])
   })
 })
 
