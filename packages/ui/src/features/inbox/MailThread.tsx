@@ -40,7 +40,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const unique = [...new Map(parties.filter((p) => p.sessionId !== null).map((p) => [p.address, p])).values()]
   return (
     <div className="flex min-h-0 flex-col" data-testid="mail-thread">
-      <header className="flex items-center gap-2 border-b border-line/60 px-4 py-2.5">
+      <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         <button className="shrink-0 rounded-full px-2 py-0.5 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink" onClick={back} aria-label="Back to the list" data-testid="mail-back">
           ←
         </button>
@@ -82,7 +82,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
 
       {/* Closing takes the reply box and the two acts away and brings the note in, each folding and fading for a moment (reduced motion: a fade), so nothing under them jumps */}
       <Fold open={done}>
-        <p className="border-t border-line/60 px-4 py-3 text-sm text-ink-faint" data-testid="mail-done-note">
+        <p className="border-t border-line px-4 py-3 text-sm text-ink-faint" data-testid="mail-done-note">
           This is done. Open a follow-up from a session to go on.
         </p>
       </Fold>
@@ -93,7 +93,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         </Fold>
         {/* The row folds in and out like the reply box; its text does not depend on the outcome asked, so it stays whole while it folds closed */}
         <Fold open={confirming !== null}>
-          <div className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
+          <div className="flex items-center gap-2 border-t border-line px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
             <span className="min-w-0">{thread.assignee ? partyName(thread.assignee) : 'The session'} is working on this. Stop its work and close this?</span>
             <Button
               size="sm"
@@ -115,7 +115,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
           </div>
         </Fold>
         {/* Closing is at once: the session that was working on it is told, and its turn is not stopped (only a host of an older build stops it, and asks first) */}
-        <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
+        <div className="flex items-center gap-1.5 border-t border-line px-4 py-2">
           <Button size="sm" variant="quiet" onClick={() => (closeStopsWork(view) ? setConfirming('finished') : void close('finished'))} data-testid="mail-finish">
             Mark done
           </Button>
@@ -207,7 +207,7 @@ function Reply({ blocked }: { blocked: boolean }) {
     if (ok) setText('')
   }
   return (
-    <div className="flex items-end gap-2 border-t border-line/60 px-4 py-2">
+    <div className="flex items-end gap-2 border-t border-line px-4 py-2">
       <textarea
         rows={2}
         value={text}

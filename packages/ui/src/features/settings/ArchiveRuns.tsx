@@ -93,7 +93,7 @@ export function ArchiveRuns({
               />
             </div>
           )}
-          <ul className="divide-y divide-line/70">
+          <ul className="divide-y divide-line">
             {g.runs.map((r) => (
               <li key={r.runId} className="px-4 py-3" data-testid={`trash-run-${r.runId}`}>
                 <div className="flex items-baseline gap-2">
@@ -199,7 +199,7 @@ export function ArchiveRunReader({ run, onBack }: { run: TrashedRun; onBack: () 
           )}
         </dl>
       )}
-      <p className="mt-3 border-t border-line/60 pt-2 text-2xs text-ink-faint">The conversation</p>
+      <p className="mt-3 border-t border-line pt-2 text-2xs text-ink-faint">The conversation</p>
       {more && oldest !== null && (
         <button type="button" className="mt-2 text-xs text-ink-faint hover:text-ink" onClick={() => page(oldest)} data-testid="trash-reader-older">
           Load earlier messages

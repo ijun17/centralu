@@ -158,6 +158,20 @@ Three tokens draw every edge, and one rule orders them. `line` is the hairline (
 
 A preset sets it to the value it drew before, so no preset changed. **A theme file that leaves it out gets its own `line`** (`resolveSide` writes `var(--color-line)`), not the preset's chrome colour and nothing mixed in: a file that sets `line` and not `line-chrome` has one colour for both. An older build reading a file with the key lists it as an unknown token and ignores it, and a newer build reads an older file as just said ([stored-shapes.md](stored-shapes.md)).
 
+**The conversation's frames** are tokens of their own, each a colour the theme sets (the owner's goal, 2026-11-12: every border on screen is a theme colour, never a mix and never a hard-coded value that ignores the theme):
+
+| Token | Draws | Left out, it follows |
+|---|---|---|
+| `line-panel` | a resting session or app panel's frame, in the grid and on a project screen | `line-strong` |
+| `line-answering` | the same frame while its session answers, with its half-pixel ring and glow | `ink-muted` |
+| `line-bubble` | the agent's answer bubble, and a relayed message's | `line` |
+| `line-bubble-mine` | the person's own bubble | `line-strong` |
+| `line-tool` | a tool call's card (a failed one keeps its dashed `line-strong`, a Centralu call its `line-strong`) | `line` |
+
+Light used to draw these in colours of its own that every light theme inherited (a resting panel `#d4d4d4`, answering `#9e9e9e`, the bubbles `#e6e6e6` and `#cdcdcd`, the card `#e2e2e2`, owner 2026-10-19), so a custom light theme such as Pink had grey frames. Those values are the Light preset's tokens now; the dark and high-contrast presets set the colours these were drawn with (`line-strong`, `ink-muted`, `line`, and the person's bubble as `ink-faint` at 40% over `surface-hover`, written out as a solid colour). A theme file that leaves one out follows the token in the table (`follows` in `THEME_TOKENS`; `resolveSide` writes the `var()`), so Pink's frames are its own `line` and `line-strong`.
+
+**No border is a part of a colour.** `border-line/60` and its kind (43 uses) drew `line` at 60 or 70% over the ground, so the line was a blend with whatever lay under it: 1.06 to 1.27:1 in Dark, Light and Graphite (under the rule below) and 2.1 to 2.6:1 in the high-contrast presets (under their 3:1). They are the solid `line` now (or `line-strong` for the selected chip's and the attachment's edge, which were `ink-faint` or `ink-muted` at 40 to 50%), and `tooling/styles.test.ts` fails on a border or divider class with an opacity on a line or ink token. Where one wanted to be lighter than `line`, it is not: `line` already is the quiet hairline, and the rule puts the floor at 1.2:1.
+
 **The rule**, measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), the lowest of the three counting:
 
 | Token | At least | Why this number |

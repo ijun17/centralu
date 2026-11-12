@@ -112,7 +112,7 @@ export function ThemeSection() {
       />
 
       {themeFiles.length > 0 && (
-        <ul className="divide-y divide-line/70" data-testid="theme-files">
+        <ul className="divide-y divide-line" data-testid="theme-files">
           {themeFiles.map((file) => (
             <ThemeFileRow
               key={file.id}
@@ -312,7 +312,7 @@ function TokenEditor({ file }: { file: ThemeFileEntry }) {
             <TokenRow
               key={token.key}
               tokenKey={token.key}
-              label={token.label}
+              label={token.follows ? `${token.label} (empty: follows ${THEME_TOKEN_BY_KEY.get(token.follows)?.label ?? token.follows})` : token.label}
               kind={token.kind}
               value={file.tokens[token.key] ?? ''}
               onCommit={(value) => {

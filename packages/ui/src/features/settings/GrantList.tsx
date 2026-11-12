@@ -86,7 +86,7 @@ export function GrantList<T>({
       ) : list.length === 0 ? (
         <SettingsEmpty testId={testIds.empty}>{empty}</SettingsEmpty>
       ) : (
-        <ul className="divide-y divide-line/70" data-testid={testIds.list}>
+        <ul className="divide-y divide-line" data-testid={testIds.list}>
           {list.map((item) => (
             <li key={keyOf(item)} className="flex items-center gap-2 px-4 py-2.5" data-testid={testIds.row?.(item)}>
               {row(item)}

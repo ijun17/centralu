@@ -176,7 +176,7 @@ export function Inbox() {
           keys are on filled (no edge bar), the row's actions as capsules.
         */}
         {!mailThread && (
-          <header className="flex items-baseline gap-2 border-b border-line/60 px-4 py-2.5">
+          <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
             <h2 className="text-sm font-medium text-ink">Waiting</h2>
             <span className="readout text-xs text-ink-faint" data-testid="inbox-count">
               {items.length + mailAttention(mail)}

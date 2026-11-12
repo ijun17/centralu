@@ -107,7 +107,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
             {snaps.length === 0 && <p className="px-3 py-3 text-xs text-ink-faint">No versions yet. One is kept the first time the app starts.</p>}
             <ol className="mt-2">
               {snaps.map((s) => (
-                <li key={s.id} className="border-b border-line/60 px-3 py-1.5 text-xs" data-testid="version-row" data-current={s.current || undefined}>
+                <li key={s.id} className="border-b border-line px-3 py-1.5 text-xs" data-testid="version-row" data-current={s.current || undefined}>
                   <div className="flex items-baseline gap-2">
                     <time className="readout shrink-0 text-ink-faint" dateTime={new Date(s.at).toISOString()}>
                       {when(s.at)}
@@ -154,7 +154,7 @@ function GitHistory({ versions }: { versions: Extract<AppVersions, { kind: 'git'
       {versions.repo && versions.commits.length === 0 && <p className="px-3 py-3 text-xs text-ink-faint">No commits touch this app yet.</p>}
       <ol className="mt-2">
         {versions.commits.map((c) => (
-          <li key={c.sha} className="border-b border-line/60 px-3 py-1.5 text-xs" data-testid="version-commit">
+          <li key={c.sha} className="border-b border-line px-3 py-1.5 text-xs" data-testid="version-commit">
             <div className="flex items-baseline gap-2">
               <span className="readout shrink-0 text-ink-faint">{c.shortSha}</span>
               <span className="min-w-0 truncate text-ink-muted" title={c.subject}>

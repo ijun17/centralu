@@ -218,7 +218,7 @@ export function CommandRunnerOverlay({
           leaving ? 'cc-drop-out' : 'cc-drop'
         }`}
       >
-        <header className="flex shrink-0 items-center gap-2 border-b border-line/60 py-2 pl-3 pr-2">
+        <header className="flex shrink-0 items-center gap-2 border-b border-line py-2 pl-3 pr-2">
           <h2 className="text-sm font-medium text-ink">Commands</h2>
           {hasCommands && (
             /* Each key stays with its word, and the pairs stand apart, so a narrow window drops whole pairs at the end
@@ -288,7 +288,7 @@ export function CommandRunnerOverlay({
         </ul>
 
         {/* Adding, below a hairline: where the list ends is the boundary. The command comes first, the name after it */}
-        <div className="shrink-0 border-t border-line/60 p-2">
+        <div className="shrink-0 border-t border-line p-2">
           <div className="flex items-center gap-1">
             <TextInput
               ref={addRef}
@@ -557,7 +557,7 @@ function CommandRow({
           data-leaving={log.leaving || undefined}
         >
         <div className="min-h-0 overflow-hidden pb-1">
-          <div className="h-56 overflow-hidden rounded-md border border-line/60">
+          <div className="h-56 overflow-hidden rounded-md border border-line">
             {r ? (
               <CommandLogView
                 key={r.runId}

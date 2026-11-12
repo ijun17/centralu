@@ -42,7 +42,7 @@ export function ShortcutTable() {
   const sc = useShortcut()
   const nav = useNavShortcut()
   return (
-    <ul className="divide-y divide-line/70" data-testid="shortcut-list">
+    <ul className="divide-y divide-line" data-testid="shortcut-list">
       {SHORTCUTS.map(([keys, label]) => (
         <li key={label} className="flex items-center gap-4 px-4 py-2">
           <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">{label}</span>

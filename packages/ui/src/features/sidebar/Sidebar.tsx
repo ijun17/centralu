@@ -96,7 +96,7 @@ export function Sidebar() {
         off from the doors, and a divider under it, the same hairline as between projects, sets it over the list (owner,
         2026-10-19).
       */}
-      <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line/70 pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
+      <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-faint">Projects</span>
         <span ref={addAnchor} className="flex">
           <IconButton
@@ -163,7 +163,7 @@ export function Sidebar() {
         (none on this computer once its host has moved them into projects).
       */}
       <div
-        className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line/70 empty:hidden"
+        className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line empty:hidden"
         data-testid="sidebar-bottom"
       >
         <UserApps />
@@ -196,7 +196,7 @@ function SidebarSkeleton() {
       data-testid="sidebar-skeleton"
     >
       {[0, 1].map((i) => (
-        <div key={i} className="flex flex-col gap-2.5 border-b border-line/70 px-4 py-3.5">
+        <div key={i} className="flex flex-col gap-2.5 border-b border-line px-4 py-3.5">
           <div className="h-3 w-1/3 animate-pulse rounded-md bg-surface-hover/50" />
           {[0, 1].map((r) => (
             <div key={r} className="flex items-center gap-2 pl-6">

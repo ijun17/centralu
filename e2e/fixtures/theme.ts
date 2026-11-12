@@ -167,6 +167,31 @@ export function presetTests() {
     expect(await windowAppearance(page)).toMatchObject({ scheme: 'light' })
   })
 
+  // The edges of the conversation's frames are colours the theme sets, not a rule of the Light preset that every light theme inherits
+  test('a frame edge is its token (the panel and the bubble), and a custom light theme without them follows its own line and strong line', async ({ page }) => {
+    const frames = (p: Page) => [
+      [p.locator('.cc-panel:not([data-look="answering"]):not([data-look="waiting"]):not([data-look="stopped"])').first(), '--color-line-panel'],
+      [p.locator('[data-bubble]').first(), '--color-line-bubble'],
+    ] as const
+    await page.goto('/?demo=grid')
+    await expect(page.getByTestId('app-header')).toBeVisible()
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'light', themeLight: 'light' }))
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
+    for (const [el, name] of frames(page)) await expect(el, name).toHaveCSS('border-top-color', await tokenColor(page, name))
+    // Light's own values are the ones the frames drew before they were tokens
+    expect(await tokenColor(page, '--color-line-panel')).toBe('rgb(212, 212, 212)')
+    expect(await tokenColor(page, '--color-line-bubble')).toBe('rgb(230, 230, 230)')
+    expect(await tokenColor(page, '--color-line-tool')).toBe('rgb(226, 226, 226)') // the tool card's, not open in this scene
+
+    // A custom light theme that sets only line and line-strong: its panel edge is its strong line, its bubble and card edges its line
+    await writeFile(page, 'pink', { name: 'Pink', base: 'light', tokens: { line: '#f1cddb', 'line-strong': '#dfb0c4' } })
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'light', themeLight: 'pink' }))
+    await expect.poll(() => token(page, '--color-line-strong')).toBe('#dfb0c4')
+    await expect(frames(page)[0][0]).toHaveCSS('border-top-color', 'rgb(223, 176, 196)')
+    await expect(frames(page)[1][0]).toHaveCSS('border-top-color', 'rgb(241, 205, 219)')
+    expect(await tokenColor(page, '--color-line-tool')).toBe('rgb(241, 205, 219)')
+  })
+
   test('Graphite is in the theme list as a dark theme, and picking it shows its floor and keeps Dark the default (#2208)', async ({ page }) => {
     await openDemo(page)
     expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)

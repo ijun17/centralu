@@ -505,7 +505,7 @@ function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: nu
   return (
     <>
       {/* flow-root: a first child's top margin (a heading's) stays inside the piece instead of opening a hole above it (#1706) */}
-      <div className={`flow-root min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
+      <div className={`flow-root min-w-0 border-line-bubble bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
         {children}
       </div>
       {/* When the answer was said, under its last bubble only (`answerEnds`), as a chat app writes it */}

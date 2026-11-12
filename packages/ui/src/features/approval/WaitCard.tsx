@@ -46,7 +46,7 @@ export function WaitFooter({ question = false, children }: { question?: boolean;
       className={
         question
           ? 'mt-3 flex items-center gap-2 border-t border-line px-3 py-2'
-          : 'mt-3 flex items-center gap-1.5 border-t border-line/70 px-3 py-2'
+          : 'mt-3 flex items-center gap-1.5 border-t border-line px-3 py-2'
       }
     >
       {children}

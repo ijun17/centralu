@@ -97,8 +97,8 @@ export function Intro() {
                       ? // Dimmed only before it is installed: installed and waiting for a sign-in it is the person's next step, so not faded
                         t.installed
                         ? 'cursor-default border-line bg-surface-raised'
-                        : 'cursor-default border-line/60 bg-surface-raised/40'
-                      : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
+                        : 'cursor-default border-line bg-surface-raised/40'
+                      : 'cursor-not-allowed border-line bg-surface-raised/40 opacity-40'
                 }`}
               >
                 <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>

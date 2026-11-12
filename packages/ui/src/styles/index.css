@@ -109,6 +109,18 @@
    */
   --color-line-chrome: #45403c;
   --color-line-strong: #514c48; /* a border that has to show: focused inputs, checkboxes, graph lanes */
+  /*
+   * The edges of the conversation's frames, each a colour the theme sets. A panel's edge is brighter than any line inside it; the
+   * answering look is the grey ring; a message bubble's and a tool call card's are the hairline or softer, and yours a step stronger.
+   * A theme file that leaves one out follows the token THEME_TOKENS names (`follows`): the panel's `line-strong`, the ring's
+   * `ink-muted`, the bubble's and the card's `line`, your bubble's `line-strong`. Dark's values are what these were drawn with
+   * before (the answering ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`, as a solid colour).
+   */
+  --color-line-panel: #514c48;
+  --color-line-answering: #aca7a3;
+  --color-line-bubble: #3a3531;
+  --color-line-bubble-mine: #59534f;
+  --color-line-tool: #3a3531;
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
@@ -387,6 +399,11 @@
   --color-line: #e3e3e6;
   --color-line-chrome: #ceced1;
   --color-line-strong: #c6c6cb;
+  --color-line-panel: #d4d4d4;
+  --color-line-answering: #9e9e9e;
+  --color-line-bubble: #e6e6e6;
+  --color-line-bubble-mine: #cdcdcd;
+  --color-line-tool: #e2e2e2;
 
   --color-ink-signal: #000000;
   --color-ink: #1d1d1f;
@@ -464,6 +481,11 @@
   --color-line: #707070;
   --color-line-chrome: #797979;
   --color-line-strong: #a8a8a8;
+  --color-line-panel: #a8a8a8;
+  --color-line-answering: #c8c8c8;
+  --color-line-bubble: #707070;
+  --color-line-bubble-mine: #616161;
+  --color-line-tool: #707070;
 
   --color-ink-signal: #ffffff;
   --color-ink: #f0f0f0;
@@ -512,6 +534,11 @@
   --color-line: #767676;
   --color-line-chrome: #707070;
   --color-line-strong: #4a4a4a;
+  --color-line-panel: #4a4a4a;
+  --color-line-answering: #3a3a3a;
+  --color-line-bubble: #767676;
+  --color-line-bubble-mine: #a2a2a2;
+  --color-line-tool: #767676;
 
   --color-ink-signal: #000000;
   --color-ink: #121212;
@@ -598,6 +625,11 @@
   --color-line: #3a3a3c;
   --color-line-chrome: #4a4a4c;
   --color-line-strong: #545456;
+  --color-line-panel: #545456;
+  --color-line-answering: #b0b0b5;
+  --color-line-bubble: #3a3a3c;
+  --color-line-bubble-mine: #646467;
+  --color-line-tool: #3a3a3c;
 
   --color-ink-signal: #ffffff;
   --color-ink: #f5f5f7;
@@ -1542,24 +1574,11 @@
  * any width and the content box does not move. No fill: a panel is a screen to read.
  */
 .cc-panel[data-look='answering'] {
-  border-color: var(--color-ink-muted);
+  border-color: var(--color-line-answering);
   /* A half pixel more of the border's own colour, drawn outside so the content box does not move (owner, 2026-10-19) */
   box-shadow:
-    0 0 0 0.5px var(--color-ink-muted),
-    0 0 8px 0 color-mix(in srgb, var(--color-ink-muted) 25%, transparent);
-}
-/* Light only: a resting panel's edge a step off the deck and its own floor, not line-strong, which drew every panel as
-   a dark frame there (owner, 2026-10-19). The looks below keep their colours */
-[data-theme='light'] .cc-panel:not([data-look='answering'], [data-look='waiting'], [data-look='stopped']) {
-  border-color: #d4d4d4;
-}
-/* Light only: answering in a lighter grey than ink-muted, which read as a dark frame there (owner, 2026-10-19); still
-   well apart from a resting panel's #d4d4d4 */
-[data-theme='light'] .cc-panel[data-look='answering'] {
-  border-color: #9e9e9e;
-  box-shadow:
-    0 0 0 0.5px #9e9e9e,
-    0 0 8px 0 rgb(158 158 158 / 0.25);
+    0 0 0 0.5px var(--color-line-answering),
+    0 0 8px 0 color-mix(in srgb, var(--color-line-answering) 25%, transparent);
 }
 .cc-panel[data-look='stopped'],
 .cc-panel[data-look='waiting'] {
@@ -1569,26 +1588,6 @@
   border-style: dashed;
 }
 
-/*
- * Light only: a bubble's border a step darker than its own fill, not the hairline every raised surface uses, so a
- * message reads as one soft shape instead of a boxed form (owner, 2026-10-19). Dark keeps the shared line, which
- * already sits close to its fill there. The agent's answer bubble carries `data-bubble`, mine `data-mine-bubble`
- * (the person's message, and the same message pinned at the top). A relayed message
- * (`data-relayed`: from a session, an app or a script) is drawn as the agent's bubble is (the same fill and edge), so it
- * takes this softer edge too.
- */
-[data-theme='light'] [data-bubble],
-[data-theme='light'] [data-relayed] {
-  border-color: #e6e6e6;
-}
-[data-theme='light'] [data-mine-bubble]:not([data-relayed]) {
-  border-color: #cdcdcd;
-}
-/* A tool call's card, the same way: softer than the hairline (owner, 2026-10-19). A failed call keeps its dashed
-   line-strong, and a Centralu call its stronger edge, since those say something */
-[data-theme='light'] [data-testid='tool-card']:not([data-centralu-call], .border-dashed) {
-  border-color: #e2e2e2;
-}
 
 /*
  * The gust that sweeps across the screen once, when a response finishes.

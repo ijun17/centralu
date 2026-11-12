@@ -16,7 +16,7 @@ export function UserApps() {
   const apps = useUserApps()
   if (apps.length === 0) return null
   return (
-    <section className="border-b border-line/70 py-2.5" data-testid="user-apps">
+    <section className="border-b border-line py-2.5" data-testid="user-apps">
       {/* Its title stands in the column a project's name does (32px), so its apps are one step in from it like a project's rows */}
       <header className={`flex items-center gap-2 ${NAME_PAD} pr-3`}>
         <span className="text-md font-medium tracking-tight text-ink">Other apps</span>

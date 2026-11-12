@@ -73,7 +73,7 @@ export function AssistantView() {
           </div>
           <button
             type="button"
-            className="shrink-0 rounded-md border border-ink-muted/50 bg-surface-hover px-2.5 py-1 text-xs text-ink transition-colors hover:border-ink-muted"
+            className="shrink-0 rounded-md border border-line-strong bg-surface-hover px-2.5 py-1 text-xs text-ink transition-colors hover:border-ink-muted"
             onClick={() => void resolveSkillProposal(p.name, true)}
             data-testid={`skill-approve-${p.name}`}
           >
@@ -106,7 +106,7 @@ export function AssistantView() {
           </div>
           <button
             type="button"
-            className="shrink-0 rounded-md border border-ink-muted/50 bg-surface-hover px-2.5 py-1 text-xs text-ink transition-colors hover:border-ink-muted"
+            className="shrink-0 rounded-md border border-line-strong bg-surface-hover px-2.5 py-1 text-xs text-ink transition-colors hover:border-ink-muted"
             onClick={() => void resolveMcpProposal(p.name, true)}
             data-testid={`mcp-approve-${p.name}`}
           >
