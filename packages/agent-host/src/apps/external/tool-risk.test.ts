@@ -5,7 +5,7 @@ const tool = (risk: unknown, annotations: RiskTool['annotations'] = {}, extra: R
   annotations,
   _meta: { 'centralu/risk': risk, ...extra },
 })
-const own = { own: true, preset: 'normal' } as const
+const own = { own: true, preset: 'normal', args: {} } as const
 
 describe('what a tool may declare about the risk of a write', () => {
   it('local needs destructiveHint: false next to it — the MCP default is destructive, so silence asks', () => {
@@ -39,22 +39,22 @@ describe('what a tool may declare about the risk of a write', () => {
 describe('whether a declared write runs with no card', () => {
   it('local runs unasked under every preset and in any app: it touches only the app\'s own data', () => {
     const t = tool('local', { destructiveHint: false })
-    for (const preset of ['safe', 'normal', 'auto'] as const) expect(runsUnasked(t, { own: false, preset })).toBe(true)
+    for (const preset of ['safe', 'normal', 'auto'] as const) expect(runsUnasked(t, { own: false, preset, args: {} })).toBe(true)
   })
 
   it('routine runs unasked only for the session\'s own project\'s app, under normal', () => {
     const t = tool('routine', { destructiveHint: true })
     expect(runsUnasked(t, own)).toBe(true)
-    expect(runsUnasked(t, { own: false, preset: 'normal' })).toBe(false)
-    expect(runsUnasked(t, { own: true, preset: 'safe' })).toBe(false)
+    expect(runsUnasked(t, { own: false, preset: 'normal', args: {} })).toBe(false)
+    expect(runsUnasked(t, { own: true, preset: 'safe', args: {} })).toBe(false)
   })
 
-  it('a routine tool with askWhen asks when any named argument matches, and when the arguments are not known', () => {
+  it('a routine tool with askWhen asks when any named argument matches', () => {
     const t = tool('routine', {}, { 'centralu/askWhen': { push: true } })
     expect(runsUnasked(t, { ...own, args: { pr: 1 } })).toBe(true)
     expect(runsUnasked(t, { ...own, args: { push: false } })).toBe(true)
     expect(runsUnasked(t, { ...own, args: { push: true } })).toBe(false)
-    expect(runsUnasked(t, own)).toBe(false)
+    expect(runsUnasked(t, own)).toBe(true)
     // "*" is any value that is set: a path to another checkout; one entry matching is enough
     const two = tool('routine', {}, { 'centralu/askWhen': { push: true, path: '*' } })
     expect(runsUnasked(two, { ...own, args: { pr: 1 } })).toBe(true)
@@ -63,7 +63,7 @@ describe('whether a declared write runs with no card', () => {
     expect(runsUnasked(two, { ...own, args: { push: true } })).toBe(false)
   })
 
-  it('a routine tool with askUnless asks unless some named argument is set, and when the arguments are not known', () => {
+  it('a routine tool with askUnless asks unless some named argument is set', () => {
     // open_pr: card-free only when pre-pr does not run (skipPrePr) or nothing is opened (dryRun)
     const t = tool('routine', {}, { 'centralu/askUnless': { skipPrePr: '*', dryRun: true } })
     expect(runsUnasked(t, { ...own, args: { head: 'x' } })).toBe(false)

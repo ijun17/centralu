@@ -20,8 +20,7 @@ packages/agent-host/src/adapters/claude/surface.ts
 packages/agent-host/src/adapters/claude/tool-prefix.test.ts
 packages/agent-host/src/adapters/claude/usage-probe.test.ts
 packages/agent-host/src/adapters/claude/windows-start.test.ts
-packages/agent-host/src/adapters/codex/app-bridge.test.ts
-packages/agent-host/src/adapters/codex/apps.test.ts
+packages/agent-host/src/adapters/codex/bridge-apps.test.ts
 packages/agent-host/src/adapters/codex/bridge-reconnect.test.ts
 packages/agent-host/src/adapters/codex/bridge-utf8.test.ts
 packages/agent-host/src/adapters/codex/centralu-bridge.mjs

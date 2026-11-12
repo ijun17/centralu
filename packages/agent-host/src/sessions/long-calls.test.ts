@@ -1,14 +1,16 @@
 import { writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppToolResult } from '../adapters/contract.js'
+import { BRIDGE_ANSWER_MS, type AppToolResult } from '../adapters/contract.js'
 import * as kit from '../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
 import { attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
 
 /**
  * Long-running calls (M4 A-5, the plan's "long-running calls") — Codex cuts off an MCP tool call
- * at 300 seconds. Before that (at 240 seconds), the run id and "still running" are handed back
- * early, the call keeps going, and the agent follows up with each app server's `run_status`.
+ * at 300 seconds, and the stdio bridge at 280. Before that (at 240 seconds, `BRIDGE_ANSWER_MS`,
+ * which the bridge's `app` calls carry as `waitMs`), the run id and "still running" are handed back
+ * early, the call keeps going, and the agent follows up with the app's `run_status` through the
+ * `app` tool (#2231).
  *
  * The 240 seconds are advanced with a fake clock. The app is a real process, so it runs on its
  * own clock — the `hold` tool holds until a gate file appears (or it is cancelled).
@@ -18,7 +20,7 @@ let w: AttachWorld
 let hub: SessionAppsHub
 const WORKER: AppSessionKey = { id: 'long-s1', kind: 'worker', projectId: 'p1' }
 const NOTES = { projectId: 'p1', appId: 'notes' }
-const WAIT = 240_000
+const WAIT = BRIDGE_ANSWER_MS
 
 const text = (r: AppToolResult) => (r.content as { text?: string }[]).map((c) => c.text ?? '').join('\n')
 
@@ -68,7 +70,8 @@ describe('240 seconds — hand back an early result, and the call keeps going', 
     expect(r.isError).toBe(false)
     expect(runId).toMatch(/^run_/)
     expect(text(r)).toContain(runId)
-    expect(text(r)).toContain('run_status')
+    // The follow-up, written as the `app` call that makes it
+    expect(text(r)).toContain(`app(action="call", app="notes", tool="run_status", args={"run_id": "${runId}"})`)
     expect(r.structuredContent).toEqual({ runId, status: 'running' })
 
     // The call keeps going — the record still says running, and the app never received a cancellation
@@ -123,11 +126,26 @@ describe('240 seconds — hand back an early result, and the call keeps going', 
 
 describe('what run_status shows', () => {
   it('appears read-only in every app\'s list, and is called with no approval', async () => {
-    const a = hub.attach(WORKER)
-    const spec = (await a.tools('app-notes')).find((t) => t.name === 'run_status')
-    expect(spec?.annotations?.readOnlyHint).toBe(true)
-    expect(spec?.inputSchema).toMatchObject({ required: ['run_id'] })
-    expect(a.readOnly('app-notes', 'run_status')).toBe(true)
+    // A preset that asks about every write, and a person who denies each card
+    const asked: string[] = []
+    const gated = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      approval: { preset: () => 'safe', bypassed: () => false, ask: async (_id, detail) => (asked.push(detail.raw), 'deny') },
+    })
+    try {
+      const a = gated.attach(WORKER)
+      const spec = (await a.tools('app-notes')).find((t) => t.name === 'run_status')
+      expect(spec?.annotations?.readOnlyHint).toBe(true)
+      expect(spec?.inputSchema).toMatchObject({ required: ['run_id'] })
+      const r = await a.call('app-notes', 'run_status', { run_id: 'run_nope' })
+      expect(text(r)).toContain('Unknown run id')
+      expect(asked).toEqual([])
+      // A write of the same app is asked about there
+      expect(text(await a.call('app-notes', 'poke', { to: 1 }))).toContain('The person denied this call')
+      expect(asked).toHaveLength(1)
+    } finally {
+      gated.dispose()
+    }
   })
 
   it('another session\'s run stays invisible even to a caller that knows its id', async () => {

@@ -556,13 +556,13 @@ const HANDLERS: ToolHandlers = {
       return { text: `This session has no app named ${trustedJsonText(name)}. ${appListLine(apps)}${find ? ` ${find} finds apps it can attach.` : ''}`, isError: true }
     }
     if (args.action === 'list') {
-      if (!entry) return { text: appsText(apps, callForm(caller.profile, 'find_apps', {})) }
-      return { text: appToolsText(entry.name, await live!.tools(entry.server)) }
+      if (!entry || !live) return { text: appsText(apps, callForm(caller.profile, 'find_apps', {})) }
+      return { text: appToolsText(entry.name, await live.tools(entry.server)) }
     }
     const tool = trimmed(args.tool)
-    if (!entry || !tool) return { text: 'Give app and tool: app(action="list") names them.', isError: true }
+    if (!entry || !tool || !live) return { text: 'Give app and tool: app(action="list") names them.', isError: true }
     const callArgs = jsonObject(args.args)
-    return toolOutputOf(await live!.call(entry.server, tool, callArgs, { ...(signal ? { signal } : {}), ...(callId ? { callId } : {}), ...(waitMs ? { waitMs } : {}) }))
+    return toolOutputOf(await live.call(entry.server, tool, callArgs, { ...(signal ? { signal } : {}), ...(callId ? { callId } : {}), ...(waitMs ? { waitMs } : {}) }))
   },
 
   // Does not go through the manager — text baked into the build plus the tool registry is the whole guide (#30, M4 P-4)

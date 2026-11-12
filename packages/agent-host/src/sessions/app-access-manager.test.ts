@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -15,22 +15,14 @@ import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * Another project's app tools through the manager (#371 part A) — the sharing RPC, the three tools
- * as a session's agent calls them (`runCentraluTool`, the Codex bridge's door; Claude's in-process
- * server runs the same function), and what each kind of agent is given: Claude follows the attached
- * set live, a Codex thread is restarted through resume when the turn ends. A real store, real trust
- * and a real app; only the adapter is fake.
+ * as a session's agent calls them (`runCentraluTool`, the stdio bridge's door; Claude's in-process
+ * server runs the same function), and the app reached through Centralu's `app` tool, on every CLI at
+ * once with nothing restarted (#2231). A real store, real trust and a real app; only the adapter is fake.
  */
 
 class Handle implements SessionHandle {
   externalId = 'ext-1'
-  constructor(
-    readonly sessionId: string,
-    fixedServers: boolean,
-  ) {
-    // A Codex thread answers whether it has a server; a Claude session follows its set and leaves this out
-    if (fixedServers) this.appAttachment = () => 'attached'
-  }
-  appAttachment?: () => 'attached'
+  constructor(readonly sessionId: string) {}
   send() {}
   respondApproval() {
     return false
@@ -41,21 +33,19 @@ class Handle implements SessionHandle {
 
 class CapturingAdapter extends BaseAdapter {
   override descriptor = { name: 'x', label: 'X', mark: 'X', install: 'x', login: 'x' }
-  emits: EventSink[] = []
-  /** The server set each session was launched with, read inside the start as the real adapters read it (Claude's servers, a Codex thread's `mcp_servers`) */
+  /** The apps each session had when its tool started, read inside the start as a real adapter reads them (its instructions name an app's help, #957) */
   startServers = new Map<string, string[] | undefined>()
   /** The next start throws, after the manager has built the session's apps */
   failNext = false
   failedId = ''
-  protected override handle(opts: CreateSessionOpts, emit: EventSink) {
+  protected override handle(opts: CreateSessionOpts) {
     this.startServers.set(opts.sessionId, servers(opts))
     if (this.failNext) {
       this.failNext = false
       this.failedId = opts.sessionId
       throw new Error('the tool did not start')
     }
-    this.emits.push(emit)
-    return new Handle(opts.sessionId, this.tool === 'codex')
+    return new Handle(opts.sessionId)
   }
 }
 
@@ -80,6 +70,8 @@ function repo(name: string): string {
 
 const servers = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server)
 const tool = (sessionId: string, name: string, args: Record<string, unknown> = {}) => mgr.runCentraluTool(sessionId, name, args)
+/** One app tool called the way the session's agent calls it: through Centralu's `app` tool (#2231) */
+const call = (sessionId: string, app: string, name: string, args: Record<string, unknown> = {}) => tool(sessionId, 'app', { action: 'call', app, tool: name, args })
 
 beforeEach(async () => {
   root = tempRoot('cc-app-access-')
@@ -156,7 +148,7 @@ describe('sharing an app (apps.setShared)', () => {
     await mgr.updateSettings(s.id, { permissionPreset: 'auto' })
     mgr.consents.revokeProjectConsent(alpha, beta, 'apps')
     expect(servers(claude.last())).toContain('app-board')
-    expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)
+    expect((await call(s.id, 'board', 'peek')).isError).toBe(false)
     await mgr.updateSettings(s.id, { permissionPreset: 'normal' })
     expect(servers(claude.last())).not.toContain('app-board')
   })
@@ -184,51 +176,31 @@ describe('sharing an app (apps.setShared)', () => {
 })
 
 describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
-  it("Claude: the app's tools join the live session at once, and leave on detach_app", async () => {
+  it.each(['claude', 'codex'] as const)("%s: the app is the session's at once through the app tool, with nothing restarted, and leaves on detach_app", async (cli) => {
+    const adapter = cli === 'claude' ? claude : codex
     allowedBefore()
-    const s = await create(alpha, 'claude')
-    const o = claude.last()
+    const s = await create(alpha, cli)
+    const o = adapter.last()
     expect((await tool(s.id, 'find_apps')).text).toContain('No app can be attached')
 
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     expect((await tool(s.id, 'find_apps')).text).toContain('- beta/board · project "beta"')
 
-    // What Claude's adapter listens to (syncApps → setMcpServers), not only what a fresh count says. The app is
-    // started first, so its tool list arriving cannot be what the adapter hears
-    await rt.tools({ projectId: beta, appId: 'board' })
-    await waitFor(() => rt.list().find((x) => x.appId === 'board')?.status === 'running')
-    let heard = 0
-    o.apps!.onChange(() => heard++)
     const attached = await tool(s.id, 'attach_app', { app: 'beta/board' })
     expect(attached.isError).toBeFalsy()
-    expect(heard).toBe(1)
-    expect(attached.text).toContain('mcp__app-board__poke')
-    expect(attached.text).toContain('Its tools are available now.')
+    expect(attached.text).toContain('Attached: beta/board as "board".')
+    expect(attached.text).toContain('poke')
+    expect(attached.text).toContain('app(action="call", app="board", tool=…, args={…})')
     expect(servers(o)).toEqual(['app-board'])
+    expect((await tool(s.id, 'app', { action: 'list' })).text).toContain('- board: ')
+    expect((await call(s.id, 'board', 'peek')).isError).toBe(false)
     // Nothing was restarted for it
-    expect(claude.seen).toHaveLength(1)
+    expect(adapter.seen).toHaveLength(1)
 
-    expect((await tool(s.id, 'detach_app', { app: 'beta/board' })).text).toBe('Detached beta/board: the app-board tools are gone.')
+    expect((await tool(s.id, 'detach_app', { app: 'beta/board' })).text).toBe('Detached beta/board: calls to "board" are refused from now on.')
     expect(servers(o)).toEqual([])
-    expect(heard).toBe(2)
-  })
-
-  it('Codex: the thread is restarted through resume when the turn ends, and then has the app', async () => {
-    allowedBefore()
-    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
-    const s = await create(alpha, 'codex')
-    const emit = codex.emits.at(-1)!
-    emit({ type: 'state_change', sessionId: s.id, state: 'working' })
-
-    const attached = await tool(s.id, 'attach_app', { app: 'beta/board' })
-    expect(attached.text).toContain('the tools are there from the next turn')
-    // Not in the middle of the turn — the call that asked is still running
-    expect(codex.seen).toHaveLength(1)
-
-    emit({ type: 'state_change', sessionId: s.id, state: 'waiting_input' })
-    await waitFor(() => codex.seen.length === 2)
-    expect(codex.last().resumeExternalId).toBe('ext-1')
-    expect(servers(codex.last())).toEqual(['app-board'])
+    expect(await call(s.id, 'board', 'peek')).toMatchObject({ isError: true, text: expect.stringContaining('This session has no app named "board"') })
+    expect(adapter.seen).toHaveLength(1)
   })
 
   it("a session in a project that is not trusted cannot attach, and a call by an attached app's name is refused once sharing goes off", async () => {
@@ -236,12 +208,11 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     const s = await create(alpha, 'claude')
     await tool(s.id, 'attach_app', { app: 'beta/board' })
-    const apps = claude.last().apps!
-    expect((await apps.call('app-board', 'peek', {})).isError).toBe(false)
+    expect((await call(s.id, 'board', 'peek')).isError).toBe(false)
 
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: false })
     await waitFor(() => !servers(claude.last())!.includes('app-board'))
-    expect((await apps.call('app-board', 'peek', {})).isError).toBe(true)
+    expect((await call(s.id, 'board', 'peek')).isError).toBe(true)
 
     await rpc('projects.setTrusted', { projectId: alpha, trusted: false })
     expect((await tool(s.id, 'find_apps')).text).toContain('not trusted')
@@ -268,12 +239,9 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     const alwaysOpts = claude.last()
     expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
 
-    let heard = 0
-    onceOpts.apps!.onChange(() => heard++)
     await rpc('prefs.set', { patch: { sessionTools: false } })
     expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
-    expect(heard).toBe(0)
-    expect((await onceOpts.apps!.call('app-board', 'peek', {})).isError).toBeFalsy()
+    expect((await call(once.id, 'board', 'peek')).isError).toBeFalsy()
   })
 
   it('an attachment survives the session being restarted (resume)', async () => {
@@ -308,14 +276,10 @@ describe('consent per pair of projects, through the card', () => {
 
     // Revoked in Settings: both sessions lose the app — at once, not at the app's next change of state
     await waitFor(() => rt.list().find((x) => x.appId === 'board')?.status === 'running')
-    // What the adapter hears (Claude's syncApps listens here), not only what a fresh count says
-    let heard = 0
-    first.apps!.onChange(() => heard++)
     await rpc('projectConsents.revoke', { fromProjectId: alpha, toProjectId: beta, kind: 'apps' })
-    await new Promise((r) => setTimeout(r, 0))
-    expect(heard).toBe(1)
     expect(servers(first)).toEqual([])
     expect(servers(claude.last())).toEqual([])
+    expect((await call(s.id, 'board', 'peek')).isError).toBe(true)
   })
 
   it('a denial attaches nothing and is not remembered — the next attempt asks again', async () => {
@@ -367,7 +331,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
     // What the tool read while it started, not what a count says afterwards: the session is not known to the host yet then
     expect(adapter.startServers.get(heir.id)).toEqual(['app-board', 'app-ledger'])
     expect(servers(opened)).toEqual(['app-board', 'app-ledger'])
-    expect((await opened.apps!.call('app-ledger', 'peek', {})).isError).toBe(false)
+    expect((await call(heir.id, 'ledger', 'peek')).isError).toBe(false)
     // A copy: the original keeps its own, and detaching there leaves the successor's alone
     expect(servers(original)).toEqual(['app-board', 'app-ledger'])
     expect((await tool(s.id, 'detach_app', { app: 'beta/board' })).isError).toBeFalsy()
@@ -426,7 +390,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
     await mgr.trash.trashSession(s.id)
 
     expect(claude.startServers.get(heir.id)).toEqual(['app-board'])
-    expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)
+    expect((await call(heir.id, 'board', 'peek')).isError).toBe(false)
     expect(readFileSync(handoffNotePath(alpha, s.id), 'utf8')).toContain('- app "beta/board" — attached to you too — handle: app-board.')
   })
 

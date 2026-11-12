@@ -1,5 +1,3 @@
-import { rmSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
@@ -58,15 +56,12 @@ let handle: SessionHandle | null = null
 const WORKER: AppSessionKey = { id: 'claude-s1', kind: 'worker', projectId: 'p1' }
 const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { type?: string; name?: string; instance?: unknown }>
 
-/** Approval cards the last session raised for the person */
-let cards = 0
 /** Notices the last session raised */
 let notices: string[] = []
 /** The tool calls the last session put in its conversation, by id */
 let toolCalls: string[] = []
 
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
-  cards = 0
   notices = []
   toolCalls = []
   // The bundle's one member the `app` tool reads: the session's live attachment, as SessionTools hands it (#2231)
@@ -75,7 +70,6 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
     // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), centraluTools, toolProfile: 'reader', ...over },
     (e) => {
-      if (e.type === 'approval_request') cards++
       if (e.type === 'notice') notices.push(e.text)
       if (e.type === 'tool_call') toolCalls.push(e.callId)
     },

@@ -22,9 +22,9 @@ import { alive } from './process.test-helpers.js'
  * App views inside a conversation (M4 B-1) — end to end on the host's side.
  *
  * A real manager (records, broadcasts), a real runtime and app process (the fixture's `inline`
- * mode), a real ViewHost, a real RPC door. Only the adapter is fake: it holds onto the attachment
- * the manager handed it (`opts.apps`) and uses it to call app tools, the way the CLI's proxy server
- * does. Judgment is based on the broadcast events, the stored record, and whether ViewHost actually
+ * mode), a real ViewHost, a real RPC door. Only the adapter is fake: the test calls app tools
+ * through the session's live attachment (`liveFor`), the way Centralu's `app` tool does (#2231).
+ * Judgment is based on the broadcast events, the stored record, and whether ViewHost actually
  * opens that instance's view.
  */
 
@@ -108,9 +108,10 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt, views, inlineViews: inline })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
-  const session = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
-  const apps = adapter.seen.at(-1)!.apps!
-  // What the CLI does when starting a session — reads the list of attached apps (the app starts here)
+  // Under auto, where an app's write runs with no card (#2231): these tests are about the view, not the person's say
+  const session = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
+  const apps = mgr.apps.sessionAppsHub()!.liveFor(session.id)!
+  // What `app(action="list", app="viewer")` does — reads the app's tools (the app starts here)
   await apps.tools('app-viewer')
   return { sessionId: session.id, apps }
 }

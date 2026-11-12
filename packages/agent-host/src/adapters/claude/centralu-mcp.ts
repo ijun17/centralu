@@ -42,6 +42,11 @@ const CLAUDE_TOOL_USE_META = 'claudecode/toolUseId'
 
 /** What a tool of the SDK's in-process server answers */
 type ToolAnswer = Awaited<ReturnType<Parameters<typeof tool>[3]>>
+type ContentBlock = ToolAnswer['content'][number]
+
+/** The kinds of content a tool's result may hold (MCP's `ContentBlock`): an app's own result passes on as the app gave it (#2231) */
+const CONTENT_KINDS: ReadonlySet<unknown> = new Set(['text', 'image', 'audio', 'resource_link', 'resource'])
+const isContentBlock = (c: unknown): c is ContentBlock => typeof c === 'object' && c !== null && 'type' in c && CONTENT_KINDS.has(c.type)
 
 /** What Claude Code calls its own subagent tool: the name Centralu's instructions put `start_agent` before (#1587) */
 export const CLAUDE_SUBAGENT_TOOL = 'Agent'
@@ -87,10 +92,10 @@ export function centraluMcp(
             // The card's id, which Claude Code sends with the call: an app call's inline view settles under it (#2231, M4 B-1)
             const toolUseId = _meta?.[CLAUDE_TOOL_USE_META]
             const r = await runCentraluTool(tools, t.name, args, { sessionId: sessionId ?? null, profile }, signal, typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {})
-            // An app's own result goes on as the app gave it (#2231); the SDK's types know only its kinds, which the app's content is
-            return r.content
-              ? ({ content: r.content, isError: r.isError, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) } as ToolAnswer)
-              : { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
+            // An app's own result goes on as the app gave it (#2231): its blocks of MCP's kinds, which the app's server spoke
+            if (!r.content) return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
+            const answer: ToolAnswer = { content: r.content.filter(isContentBlock), isError: r.isError, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) }
+            return answer
           })
           .catch((e: unknown) => {
             if (e instanceof DrainCut) return drainToolResult(e)

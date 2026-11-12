@@ -292,7 +292,7 @@ function toolWithArgs(t: AppToolSpec): string {
 }
 
 /** The first line of an app author's text, JSON-quoted: their words, not ours (#121) */
-const authorLine = (text: string | undefined): string => trustedJsonText((text ?? '').split('\n')[0]!.trim())
+const authorLine = (text: string | undefined): string => trustedJsonText((text ?? '').split('\n')[0]?.trim() ?? '')
 
 /** The session's apps in one sentence, for an answer that names a wrong one */
 export function appListLine(apps: readonly SessionAppEntry[]): string {
@@ -324,7 +324,7 @@ export function appToolsText(app: string, tools: readonly AppToolSpec[]): string
 /** An app's own result as a tool's answer (#2231): its content and structured part as the app gave them, its text joined for a path that reads text only */
 export function toolOutputOf(r: AppToolResult): ToolOutput {
   const text = r.content
-    .map((c) => (c && typeof c === 'object' && (c as { type?: unknown }).type === 'text' ? String((c as { text?: unknown }).text ?? '') : ''))
+    .map((c) => (typeof c === 'object' && c !== null && 'type' in c && c.type === 'text' && 'text' in c && typeof c.text === 'string' ? c.text : ''))
     .filter(Boolean)
     .join('\n')
   return { text, content: r.content, isError: r.isError === true, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) }

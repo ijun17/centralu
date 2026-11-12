@@ -7,7 +7,6 @@ import { presetAsks, runsUnasked } from '../apps/contract.js'
 import { issuesText } from './tool-answers.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { durationText, raceTimeout, withTimeout } from '../timing.js'
-import { rpcError } from '../rpc-error.js'
 
 /**
  * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
@@ -919,7 +918,7 @@ function toSpec(t: RuntimeTool): AppToolSpec {
     name: t.name,
     ...(t.title !== undefined ? { title: t.title } : {}),
     ...(t.description !== undefined ? { description: t.description } : {}),
-    inputSchema: t.inputSchema as Record<string, unknown>,
+    inputSchema: t.inputSchema,
     ...(t.annotations ? { annotations: t.annotations } : {}),
     ...(t._meta ? { _meta: t._meta } : {}),
   }
@@ -945,7 +944,7 @@ export function toResult(o: AppCallOutcome): AppToolResult {
 function schemaIssues(schema: Record<string, unknown>, args: Record<string, unknown>): string | null {
   let checked
   try {
-    checked = z.fromJSONSchema(schema as Parameters<typeof z.fromJSONSchema>[0]).safeParse(args)
+    checked = z.fromJSONSchema(schema).safeParse(args)
   } catch {
     return null
   }

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { NormalizedEvent } from '@cc/protocol'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { CodexRequests } from './server-requests.js'
-import { permissionOptionsFor, appApprovalModeFor } from './launch-config.js'
+import { permissionOptionsFor } from './launch-config.js'
 
 /**
  * The `edits` preset on Codex (#1525): Codex has no approval mode that accepts patches and asks for commands, so the
@@ -54,7 +54,6 @@ async function run(editsFolder: string | null, changes: Change[], extra: Record<
     emit: (e) => events.push(e),
     respond: (_id, result) => answers.push(result),
     threadId: () => 't1',
-    appServers: () => new Set(),
     ownServer: () => false,
     editsFolder: () => editsFolder,
   })
@@ -103,7 +102,7 @@ describe('the edits preset, Codex (#1525)', () => {
   it('does not accept a command: only a file-change request is granted', async () => {
     const events: NormalizedEvent[] = []
     const answers: unknown[] = []
-    const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', appServers: () => new Set(), ownServer: () => false, editsFolder: () => folder })
+    const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', ownServer: () => false, editsFolder: () => folder })
     requests.onServerRequest({ id: 8, method: 'item/commandExecution/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: 'c1', command: 'rm -rf src', cwd: folder } })
     expect(answers).toEqual([])
     expect(events.filter((e) => e.type === 'approval_request')).toHaveLength(1)
@@ -112,7 +111,7 @@ describe('the edits preset, Codex (#1525)', () => {
   it('leaves a request alone that Codex ended while the folder was being checked: no answer, no card that never closes', async () => {
     const events: NormalizedEvent[] = []
     const answers: unknown[] = []
-    const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', appServers: () => new Set(), ownServer: () => false, editsFolder: () => folder })
+    const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', ownServer: () => false, editsFolder: () => folder })
     const changes = [{ ...update(join(base, 'outside', 'x.ts')), diff: '@@' }] // would be a card
     requests.noteFileChange({ method: 'item/started', params: { threadId: 't1', item: { type: 'fileChange', id: 'i1', changes } } })
     requests.onServerRequest({ id: 7, method: 'item/fileChange/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: 'i1' } })
@@ -126,7 +125,7 @@ describe('the edits preset, Codex (#1525)', () => {
     const ask = async (fileChanges: Record<string, unknown>) => {
       const events: NormalizedEvent[] = []
       const answers: unknown[] = []
-      const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', appServers: () => new Set(), ownServer: () => false, editsFolder: () => folder })
+      const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', ownServer: () => false, editsFolder: () => folder })
       requests.onServerRequest({ id: 9, method: 'applyPatchApproval', params: { conversationId: 't1', callId: 'c1', fileChanges } })
       for (let end = Date.now() + 20_000; answers.length === 0 && events.length === 0 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 2))
       return { answers, cards: events.filter((e) => e.type === 'approval_request').length }
@@ -157,11 +156,8 @@ describe('the edits preset, Codex (#1525)', () => {
     await handle.dispose()
   })
 
-  it('launches as normal does, and its app tools follow the person\'s policy as normal\'s', () => {
+  it('launches as normal does', () => {
     expect(permissionOptionsFor('edits')).toEqual(permissionOptionsFor('normal'))
     expect(permissionOptionsFor('edits')).toEqual({})
-    expect(appApprovalModeFor('edits', 'never')).toBe('approve')
-    expect(appApprovalModeFor('edits', 'on-request')).toBe('writes')
-    expect(appApprovalModeFor('normal', 'never')).toBe('approve')
   })
 })

@@ -4,7 +4,6 @@ import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type Per
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
-import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { AppAccess, writeShared } from './app-access.js'
 import type { WhenAsked } from './asked-gate.js'
