@@ -48,23 +48,25 @@ const FOLD_LOOK: Record<FoldSummaryState, SessionLook> = {
   background: 'idle',
 }
 
-/** A chip like ToolMark — a count instead of a letter. A count of 0 is no chip; the one that just dropped to 0 stays for its exit with its last count (usePresence, as the mark's dot does) */
+/**
+ * A chip like ToolMark — a count instead of a letter. A count of 0 is no chip; the one that just dropped to 0 stays for its exit with its last count (usePresence, as the mark's dot does).
+ *
+ * **A chip that leaves gives back its width as it fades** (`cc-chip-out`, #2202): the chips that stay slide over it, where they jumped by its width
+ * (and its gap) in one frame when it went (design-system §9). Its wrapper has no box at rest (`contents`), so the line's layout is the chips' own.
+ */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
   const presence = usePresence(count > 0)
   const [held, setHeld] = useState(count)
   if (count > 0 && held !== count) setHeld(count)
   if (!presence.shown) return null
   return (
-    <span
-      className={`cc-mark relative shrink-0 rounded-md ${presence.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'}`}
-      data-look={FOLD_LOOK[state]}
-      data-state={state}
-      data-leaving={presence.leaving || undefined}
-    >
-      <span className="readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong px-[3px] text-2xs font-semibold leading-none text-ink">
-        {held}
+    <span className={presence.leaving ? 'cc-chip-out pointer-events-none' : 'contents'}>
+      <span className={`cc-mark relative shrink-0 rounded-md ${presence.leaving ? '' : 'cc-fade'}`} data-look={FOLD_LOOK[state]} data-state={state} data-leaving={presence.leaving || undefined}>
+        <span className="readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong px-[3px] text-2xs font-semibold leading-none text-ink">
+          {held}
+        </span>
+        {state === 'background' && <BackgroundDot testId="fold-summary-background-dot" />}
       </span>
-      {state === 'background' && <BackgroundDot testId="fold-summary-background-dot" />}
     </span>
   )
 }
