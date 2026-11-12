@@ -403,9 +403,16 @@ describe("the person's say on an app call, at the call (#2231)", () => {
     expect(JSON.stringify(wrong.content)).toContain('Wrong arguments for poke: to: ')
     expect(JSON.stringify(wrong.content)).toContain('the new value')
     const missing = await a.call('app-notes', 'nope', {})
-    expect(JSON.stringify(missing.content)).toContain('notes has no tool \\"nope\\"')
+    expect(JSON.stringify(missing.content)).toContain('notes has no tool \\"nope\\". Nothing ran.')
     expect(asked).toEqual([])
-    expect(ran()).toEqual([])
+    // The unknown tool reached the runtime, which refused it and kept the row: the app's runs show what the agent tried
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => `${r.tool} ${r.status}`)).toEqual(['nope rejected'])
+  })
+
+  it("a tool the caller's list did not hold never runs, even one the runtime would run (a stale list): refused and recorded", async () => {
+    const out = await w.rt.call({ projectId: 'p1', appId: 'notes' }, 'poke', { to: 4 }, { kind: 'session', sessionId: 'claude-s1' }, { notListed: true })
+    expect(out).toMatchObject({ status: 'rejected', error: "poke was not in the caller's tool list when it called" })
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => `${r.tool} ${r.status}`)).toEqual(['poke rejected'])
   })
 
   it('a card the person has not answered within the bridge bound is withdrawn, and nothing runs', async () => {

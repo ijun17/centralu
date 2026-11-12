@@ -561,8 +561,18 @@ class Attachment implements SessionAppAttachment {
    */
   async call(server: string, tool: string, args: Record<string, unknown>, opts: AppCallOpts = {}): Promise<AppToolResult> {
     if (this.closed || !this.find(server)) return failure(`This session has no app named ${appNameOf(server)}.`)
-    const wrong = await this.argsProblem(server, tool, args)
-    if (wrong) return failure(wrong)
+    const tools = await this.tools(server)
+    const spec = tools.find((t) => t.name === tool)
+    /*
+     * A tool not in the session's list (an app-only tool, a guess) goes to the runtime all the same, unasked: it is refused
+     * there and recorded as every refused call is (`notListed`), so the app's runs show what an agent tried. Never run
+     */
+    if (!spec) {
+      await this.callNow(server, tool, args, { notListed: true, ...(opts.callId ? { callId: opts.callId } : {}) })
+      return failure(`${appNameOf(server)} has no tool ${JSON.stringify(tool)}. Nothing ran. Its tools: ${tools.map((t) => t.name).join(', ') || '(none listed yet)'}.`)
+    }
+    const issues = schemaIssues(spec.inputSchema, args)
+    if (issues) return failure(`Wrong arguments for ${tool}: ${issues}. Nothing ran. Its arguments: ${JSON.stringify(spec.inputSchema)}`)
     const abort = new AbortController()
     const onUp = () => abort.abort()
     if (opts.signal?.aborted) abort.abort()
@@ -584,15 +594,6 @@ class Attachment implements SessionAppAttachment {
       this.inflight.delete(abort)
       opts.signal?.removeEventListener('abort', onUp)
     }
-  }
-
-  /** What is wrong with a call before it runs: an unknown tool, or arguments its schema refuses (said with the schema) */
-  private async argsProblem(server: string, tool: string, args: Record<string, unknown>): Promise<string | null> {
-    const tools = await this.tools(server)
-    const spec = tools.find((t) => t.name === tool)
-    if (!spec) return `${appNameOf(server)} has no tool ${JSON.stringify(tool)}. Its tools: ${tools.map((t) => t.name).join(', ') || '(none listed yet)'}.`
-    const issues = schemaIssues(spec.inputSchema, args)
-    return issues ? `Wrong arguments for ${tool}: ${issues}. Nothing ran. Its arguments: ${JSON.stringify(spec.inputSchema)}` : null
   }
 
   /**
@@ -628,7 +629,7 @@ class Attachment implements SessionAppAttachment {
     server: string,
     tool: string,
     args: Record<string, unknown>,
-    opts: { signal?: AbortSignal; waitMs?: number; callId?: string },
+    opts: { signal?: AbortSignal; waitMs?: number; callId?: string; notListed?: true },
   ): Promise<AppToolResult> {
     const hit = this.find(server)
     // An unattached app never reaches the runtime — the only apps this session can call are the ones decision 4 gave it
@@ -656,7 +657,7 @@ class Attachment implements SessionAppAttachment {
         if (callId) this.hub.progress({ sessionId, callId, message })
       })
     const pending = this.hub.rt
-      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress })
+      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress, ...(opts.notListed ? { notListed: true as const } : {}) })
       // Vanished mid-call (the app's folder was deleted) — return it as a failed call instead of throwing
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
       .finally(() => {

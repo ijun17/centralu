@@ -163,10 +163,12 @@ describe("apps through Centralu's one server (#2231)", () => {
     expect(out).toMatchObject({ content: [{ type: 'text', text: 'poked 7' }], isError: false })
     const runs = w.rt.runs({ projectId: 'p1', appId: 'notes' })
     expect(runs.map((r) => [r.tool, r.callerKind, r.callerSessionId, r.status])).toEqual([['poke', 'session', 'claude-s1', 'ok']])
-    // A UI-only tool is not one of the session's: refused before it runs, naming the tools it has
+    // A UI-only tool is not one of the session's: refused, never run, naming the tools it has
     const refused = (await request('tools/call', appCall('notes', 'app_only'))) as { isError?: boolean; content: { text: string }[] }
     expect(refused.isError).toBe(true)
     expect(refused.content[0]!.text).toContain('notes has no tool "app_only"')
+    // Refused by the runtime and kept as its row, as every refused call is
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => `${r.tool} ${r.status}`)).toContain('app_only rejected')
     // The server name a session's earlier turns used reaches the same app
     expect(await request('tools/call', appCall('app-notes', 'poke', { to: 8 }))).toMatchObject({ content: [{ type: 'text', text: 'poked 8' }] })
   })

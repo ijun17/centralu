@@ -43,6 +43,12 @@ export type AppCallOptions = {
    * A wordless keepalive notification is never passed through.
    */
   onProgress?: (message: string) => void
+  /**
+   * The caller's list did not hold this tool when it called (#2231: the `app` tool checks a call against the session's
+   * list first). The call is refused and recorded as every refusal is, with this path's own reason where the tool is
+   * there and open to the caller after all (a list that was stale, or could not be read): it never runs unasked
+   */
+  notListed?: true
 }
 
 /**
@@ -221,6 +227,7 @@ export class AppCalls {
         if (!found.visibility.includes(need)) {
           return done('rejected', null, `${name} is not open to ${need === 'app' ? 'views' : 'agents'} (visibility: ${JSON.stringify(found.visibility)})`)
         }
+        if (opts.notListed) return done('rejected', null, `${name} was not in the caller's tool list when it called`)
 
         const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
         /*

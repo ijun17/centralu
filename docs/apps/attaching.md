@@ -74,7 +74,11 @@ of a tool name any more.
 `Attachment.call`), which counts decision 4 and the attachment again and goes through `ExternalApps.call` (caller
 `session`), as before ([trust-lifecycle-calls.md](trust-lifecycle-calls.md#one-call-path)). The host checks `args` against
 the tool's `inputSchema` first (zod's JSON Schema reader, as Centralu's own tools are checked; a schema it cannot read is
-not checked, as neither CLI checked one), so a wrong call costs no card and no run.
+not checked, as neither CLI checked one), so a wrong call costs no card and no run. A tool the session's list does not
+hold (an app-only tool, a guess) goes to `ExternalApps.call` all the same, unasked and marked `notListed`: the runtime
+refuses it and keeps the `rejected` row, as it did for an app server's refused call before, so the app's runs show what
+an agent tried; and where the runtime's own checks would let it run after all (a list that was stale or could not be
+read), `notListed` still refuses it, so it never runs without the person's say.
 
 **Approval is the host's, at the call, with the real arguments**, the same on every CLI (`Attachment.approve`). In order:
 
