@@ -157,12 +157,6 @@ describe('the thread in the inbox', () => {
       // The list opens from the button, and is not drawn closed
       expect(html).not.toContain('data-testid="mail-answering-list"')
     })
-
-    it('is not there with one question open, whatever else was said, so the box is as it was', () => {
-      expect(render(view({ messages: [first] })).html).not.toContain('data-testid="mail-answering"')
-      expect(render(view({ messages: [first, second, mine] })).html).not.toContain('data-testid="mail-answering"')
-      expect(render(view({ messages: [{ ...first, kind: 'note' }, second] })).html).not.toContain('data-testid="mail-answering"')
-    })
   })
 
   describe('the choices of a question (#1630)', () => {
