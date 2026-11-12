@@ -910,4 +910,19 @@ describe("a send's subject names its chain (#2229)", () => {
     w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which branch?\nmain or next' })
     expect(w.person.list().threads.map((t) => t.subject)).toContain('Which branch? main or next')
   })
+
+  it("the subject goes through the plain-line rule like a body's: marks dropped, and the ask card is titled by it, not by the question", () => {
+    const w = ready(hostWorld())
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', subject: '**Release** `2.4`', text: 'Ship it tonight?', choices: ['yes', 'no'] })
+    const row = w.person.list().threads.find((t) => t.ask !== null)!
+    expect(row.subject).toBe('Release 2.4')
+    expect(row.ask).toMatchObject({ text: 'Ship it tonight?', choices: ['yes', 'no'] })
+  })
+
+  it('a thread with no stored subject (a row from before the column, or a send without one) keeps the first message’s words, marks dropped', () => {
+    const w = ready(hostWorld())
+    w.mail.send(A, { to: [PERSON], text: '**Which** branch?', needsReply: true })
+    const row = w.person.list().threads.find((t) => t.ask !== null)!
+    expect(row.subject).toBe('Which branch?')
+  })
 })
