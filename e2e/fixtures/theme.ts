@@ -128,6 +128,19 @@ export function presetTests() {
     expect(await windowAppearance(page)).toMatchObject({ scheme: 'light' })
   })
 
+  test('Graphite is in the theme list as a dark theme, and picking it shows its floor and keeps Dark the default (#2208)', async ({ page }) => {
+    await openDemo(page)
+    expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
+    await openAppearance(page)
+    const pick = page.getByTestId('settings-theme-pick')
+    await expect(pick.locator('option[value="graphite"]')).toHaveText('Graphite')
+    await pickTheme(page, 'graphite')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
+    expect(await token(page, '--color-surface-side')).toBe('#28282a')
+    expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'graphite' })
+    expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('dark')
+  })
+
   for (const preset of THEME_PRESETS) {
     test(`${preset.name} keeps the urgency order on every reading surface`, async ({ page }) => {
       await openDemo(page)

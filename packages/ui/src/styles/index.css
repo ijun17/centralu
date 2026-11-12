@@ -1712,3 +1712,75 @@ html[data-accent] .cc-switch input:checked ~ .cc-switch-track {
     animation: cc-donut-out-still 100ms linear forwards;
   }
 }
+
+/*
+ * Graphite (#2208): a neutral grey dark preset in the style of macOS, the owner's "Dark Graphite" custom theme made a
+ * built-in. Cool greys with no warm tint, and Apple's system colours for the focus ring, the selection and the terminal.
+ * Every value is the owner's file as it was: none broke a rule of themes.md. It leaves what Dark already gives the
+ * same value (the scrim, the glow, the scrollbar track and every shadow) to the `@theme` block.
+ *
+ * Steps (ΔL*): the sidebar #28282a is 5.4 above the floor #1d1d1d and raised #2c2c2e 7.3 (Dark: 0 and 10.0).
+ * Contrast of each ink on the floor / the sidebar / raised, the urgency order holding on all three:
+ *   signal #ffffff 16.9 / 14.7 / 13.9    body #f5f5f7 15.5 / 13.5 / 12.8
+ *   muted  #b0b0b5  7.8 /  6.8 /  6.5    faint #8e8e93  5.2 /  4.5 /  4.3
+ * Lines: `line` #38383a is 1.44:1 on the floor, 1.26 on the sidebar and 1.19 on raised; the sidebar's `line-side`
+ * #48484b is 1.85, 1.61 and 1.53; `line-strong` #545456 is 2.23, 1.95 and 1.84. Dark's measure 1.59, 1.88 and 2.27 on the
+ * floor, so Graphite's lines are the gentler of the two, as its steps are.
+ */
+[data-theme='graphite'] {
+  --color-surface-floor: #1d1d1d;
+  --color-surface-side: #28282a;
+  --color-surface-raised: #2c2c2e;
+  --color-surface-selected: #3a3a3c;
+  --color-surface-hover: #48484a;
+  --color-surface-deck: #232325;
+  --color-surface-reading: #1d1d1d;
+  --color-surface-reading-raised: #2c2c2e;
+
+  --color-line: #38383a;
+  --color-line-strong: #545456;
+
+  --color-ink-signal: #ffffff;
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #b0b0b5;
+  --color-ink-faint: #8e8e93;
+  --color-mark-waiting: #a1a1a6;
+
+  --color-diff-add: #30d158;
+  --color-diff-add-bg: #163322;
+  --color-diff-del: #ff9f97;
+  --color-diff-del-bg: #3a1d1b;
+  --color-danger: #ff9f97;
+  --color-danger-bg: #3a1d1b;
+
+  --color-focus: #409cff;
+  --color-selection: #0a84ff4d;
+  --color-scrollbar-thumb: #48484a;
+  --color-scrollbar-thumb-hover: #636366;
+
+  --color-keycap-top: #3a3a3c;
+  --color-keycap-bottom: #2c2c2e;
+  --color-keycap-border: #0d0d0d;
+
+  --color-term-bg: #232325;
+  --color-term-log-bg: #2c2c2e;
+  --color-term-fg: #f5f5f7;
+  --color-term-cursor: #f5f5f7;
+  --color-term-selection: #48484a;
+  --color-term-black: #3a3a3c;
+  --color-term-red: #ff453a;
+  --color-term-green: #30d158;
+  --color-term-yellow: #ffd60a;
+  --color-term-blue: #0a84ff;
+  --color-term-magenta: #bf5af2;
+  --color-term-cyan: #64d2ff;
+  --color-term-white: #d1d1d6;
+  --color-term-bright-black: #636366;
+  --color-term-bright-red: #ff6961;
+  --color-term-bright-green: #4ae070;
+  --color-term-bright-yellow: #ffe36b;
+  --color-term-bright-blue: #409cff;
+  --color-term-bright-magenta: #da8fff;
+  --color-term-bright-cyan: #8de1ff;
+  --color-term-bright-white: #ffffff;
+}

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs, shared with the workflow's script (.github/scripts/bundle-base.mjs)
 import { jsBytesOf, judgeBundle, readBundleBase, readDeclarations, writeBundleRecord } from './bundle-budget.mjs'
+import { READING_SURFACES, THEME_PRESETS, contrast, urgencyBreaks, type Rgba } from '../packages/ui/src/app/theme.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -168,6 +169,17 @@ describe('the built CSS actually contains styles', () => {
        * ours, so it stays out of the brightness hierarchy; it is shown only while hovered.
        */
       'c42b1c',
+      /*
+       * Graphite (#2208, the owner's "Dark Graphite" file made a preset): macOS's greys, each a step or two bluer than
+       * neutral (a chroma of about 0.004), and Apple's system colours for the diff, danger, the focus ring, the selection
+       * and the terminal. The greys add no hue to the chrome, and the focus ring and selection are the interaction
+       * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
+       * brightness alone (`ink-signal` is pure white). Listed by value, as Dark's tints are.
+       */
+      '28282a', '2c2c2e', '3a3a3c', '48484a', '232325', '38383a', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
+      '30d158', '163322', 'ff9f97', '3a1d1b', // Graphite: diff, and danger
+      '409cff', '0a84ff', // Graphite: the focus ring, and the selection with the terminal's blue
+      'ff453a', 'ffd60a', 'bf5af2', '64d2ff', 'ff6961', '4ae070', 'ffe36b', 'da8fff', '8de1ff', // Graphite: the terminal
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
@@ -515,6 +527,36 @@ describe('icon script', () => {
       for (const icon of icons) {
         expect(deleted, `${conf} names ${icon}`).not.toContain(icon.replace(/^icons\//, ''))
       }
+    }
+  })
+})
+
+/*
+ * Graphite (#2208), read from the stylesheet's text: its `[data-theme='graphite']` block sets the colours the owner's file
+ * set, and its inks hold the floors Dark's do on every reading surface. The urgency order for every preset, and the
+ * high-contrast floors, are checked in the browser (e2e/fixtures/theme.ts), where a preset the list names is run.
+ */
+describe('Graphite', () => {
+  const css = readFileSync(join(ROOT, 'packages/ui/src/styles/index.css'), 'utf8')
+  const at = css.indexOf("[data-theme='graphite'] {")
+  const colors: Record<string, Rgba> = {}
+  for (const m of css.slice(at, css.indexOf('\n}\n', at)).matchAll(/(--color-[a-z-]+):\s*#([0-9a-f]{6})\b/gi)) {
+    const n = parseInt(m[2]!, 16)
+    colors[m[1]!] = [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1]
+  }
+
+  it("is a dark preset in the list, and Dark is still the dark side's first", () => {
+    expect(THEME_PRESETS.filter((p) => p.base === 'dark').map((p) => p.id)).toEqual(['dark', 'hc-dark', 'graphite'])
+    expect(THEME_PRESETS.find((p) => p.id === 'graphite')).toMatchObject({ name: 'Graphite', base: 'dark' })
+  })
+
+  it("keeps the urgency order, and its inks clear Dark's floors (body 7:1, secondary 4.5:1, background 3:1) on every reading surface", () => {
+    expect(colors['--color-surface-floor']).toEqual([0x1d, 0x1d, 0x1d, 1])
+    expect(urgencyBreaks(colors)).toEqual([])
+    for (const [surface] of READING_SURFACES) {
+      expect(contrast(colors['--color-ink']!, colors[surface]!), `ink on ${surface}`).toBeGreaterThanOrEqual(7)
+      expect(contrast(colors['--color-ink-muted']!, colors[surface]!), `muted on ${surface}`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(colors['--color-ink-faint']!, colors[surface]!), `faint on ${surface}`).toBeGreaterThanOrEqual(3)
     }
   })
 })

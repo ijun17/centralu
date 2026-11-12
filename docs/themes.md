@@ -35,6 +35,7 @@ side's preset.
 | Light | `light` | light (the default) |
 | High contrast dark | `hc-dark` | dark |
 | High contrast light | `hc-light` | light |
+| Graphite | `graphite` | dark |
 
 Every preset puts the conversation on the floor, with what rests on it (the composer, tool cards,
 approval and question cards) on the raised step and drawn with a hairline border, the way the
@@ -54,6 +55,7 @@ the two as "the same colour" at three steps apart with the line between them, an
 with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they still are). The inks are now body `#f0ecea`, secondary `#aca7a3`
 and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
 
+**Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own, since none broke a rule here; the comment above its block in `index.css` records the measurements (every ink on every reading surface, the lines). A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
 is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
