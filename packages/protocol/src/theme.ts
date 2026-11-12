@@ -180,6 +180,16 @@ export function themeSlug(name: string): string {
   )
 }
 
+/** Whether `id` is a preset's. A theme file under it would shadow the preset (#2214), so a new one is never filed there */
+export function isPresetThemeId(id: string): boolean {
+  return THEME_PRESETS.some((p) => p.id === id)
+}
+
+/** What refuses a theme file to be created under a preset's id (#2214); one already stored there (from before) is saved in place */
+export function presetIdRefusal(id: string): string {
+  return `${id} is a preset's id, and a theme file under it would hide the preset. Leave the id out and the file is filed under another one.`
+}
+
 /**
  * The id a new theme file named `name` gets: its slug, with a number added while `isTaken` says the id is. The one rule for the
  * host's `themes.save` and import, the Assistant's `set_preferences` (which names the id before the file exists) and the mock.
@@ -191,7 +201,7 @@ export function freeThemeId(name: string, isTaken: (id: string) => boolean): str
   const base = themeSlug(name)
   for (let n = 1; ; n++) {
     const id = n === 1 ? base : `${base}-${n}`
-    if (!isTaken(id) && !THEME_PRESETS.some((p) => p.id === id)) return id
+    if (!isTaken(id) && !isPresetThemeId(id)) return id
   }
 }
 

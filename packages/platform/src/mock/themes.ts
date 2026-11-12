@@ -1,5 +1,5 @@
 import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol/client'
-import { isRecord, parseThemeFile, formatThemeFile, freeThemeId } from '@cc/protocol/client'
+import { isRecord, parseThemeFile, formatThemeFile, freeThemeId, isPresetThemeId, presetIdRefusal } from '@cc/protocol/client'
 import type { ThemesPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 import { readStored, writeStored } from './stored.js'
@@ -50,6 +50,7 @@ export class ThemesMock {
     },
     save: async (id: string | null, content: ThemeFileContent) => {
       const target = id ?? freeThemeId(content.name, (id) => this.themeFiles.has(id))
+      if (id !== null && isPresetThemeId(id) && !this.themeFiles.has(id)) throw mockError(presetIdRefusal(id))
       this.writeThemeFile(target, formatThemeFile(content))
       return this.themeEntry(target)
     },

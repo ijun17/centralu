@@ -6,7 +6,9 @@ import {
   THEME_SCHEMA_FILE,
   formatThemeFile,
   freeThemeId,
+  isPresetThemeId,
   parseThemeFile,
+  presetIdRefusal,
   themeFileJsonSchema,
   type ThemeFileContent,
   type ThemeFileEntry,
@@ -121,6 +123,8 @@ export class ThemeFiles {
     // The reader refuses a bigger file (read), so writing one would list a theme that never applies
     if (Buffer.byteLength(text) > MAX_FILE_BYTES) throw rpcError('The theme is too large to be a theme file.')
     const target = id ?? (await this.freeId(content.name))
+    // An explicit id is an edit of that file: under a preset's id it is only one that is stored there already (#2214)
+    if (id !== null && isPresetThemeId(id) && !(await stat(this.pathOf(id)).then(() => true, () => false))) throw rpcError(presetIdRefusal(id))
     await mkdir(this.dir, { recursive: true })
     // On a filesystem that ignores case, `paper` would overwrite a hand-written Paper.json the list does not show
     const names = await readdir(this.dir).catch(() => [] as string[])

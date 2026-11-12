@@ -81,6 +81,11 @@ describe('the themes folder (#312)', () => {
     expect(readdirSync(dir).filter((n) => n.startsWith('light'))).toEqual(['light.json'])
   })
 
+  it('refuses an explicit id that is a preset id unless a file is stored under it already (#2214)', async () => {
+    await expect(files.save('graphite', { name: 'Mine', base: 'dark', tokens: {} })).rejects.toThrow("graphite is a preset's id")
+    expect(readdirSync(dir)).not.toContain('graphite.json')
+  })
+
   it('a file imported under a preset name gets its own id too', async () => {
     const source = join(root, 'Light.json')
     writeFileSync(source, JSON.stringify({ name: 'Light', base: 'light', tokens: { 'surface-floor': '#fafafa' } }))

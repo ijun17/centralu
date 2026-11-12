@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, freeThemeId, pickableThemes, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, freeThemeId, isPresetThemeId, presetIdRefusal, pickableThemes, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -143,6 +143,9 @@ export class PreferencesFlow {
     if (file !== undefined) {
       const bad = themeFileRefusal(file)
       if (bad) return { ok: false, error: bad }
+      // A preset's id is not taken by a new file (#2214); a file stored under it already is edited in place
+      const named = file.id?.trim()
+      if (named && isPresetThemeId(named) && !(await callWindow(rpc, 'themes.list', {})).some((f) => f.id === named)) return { ok: false, error: `themeFile.id: ${presetIdRefusal(named)}` }
     }
     if (changes.theme !== undefined) {
       const found = await this.theme(rpc, changes.theme)
@@ -180,9 +183,11 @@ export class PreferencesFlow {
       return { ok: false, error: `idleSleepMinutes is ${SLEEP_CHOICES}.` }
     }
 
+    let written: ThemeFileEntry | null = null
     if (file !== undefined) {
       try {
         const saved = await callWindow(rpc, 'themes.save', { id: file.id?.trim() || null, content: { name: file.name.trim(), base: file.base, tokens: file.tokens } })
+        written = saved
         done.push(themeFileWritten(saved))
       } catch (e) {
         return { ok: false, error: errorMessage(e) }
@@ -190,7 +195,8 @@ export class PreferencesFlow {
     }
     let toApply = parsed.data
     if (changes.theme !== undefined) {
-      const found = await this.theme(rpc, changes.theme)
+      // The name of the file made in this call is that file's, also when a preset has the same name (#2214): its id, not the name, is looked up
+      const found = await this.theme(rpc, written && changes.theme.trim().toLowerCase() === written.name.toLowerCase() ? written.id : changes.theme)
       if (typeof found === 'string') failed.push(`Theme: not picked. ${found}`)
       else {
         theme = found
