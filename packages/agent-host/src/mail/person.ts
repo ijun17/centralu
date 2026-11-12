@@ -135,10 +135,11 @@ export class MailPerson {
    */
   reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note', answers?: string): MailThreadView {
     const roots = this.rootsOf(threadId)
-    const found = answers === undefined ? this.replyTarget(roots) : this.pickTarget(roots, answers, text)
+    const found = answers === undefined ? this.replyTarget(roots) : this.pickTarget(roots, answers)
     if (!found) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
     const { target, to } = found
-    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers === undefined ? {} : { picked: true }) })
+    // A pick is one of the question's own choices; any other words to a question the window names are the person's own answer to it (#2191)
+    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers !== undefined && target.choices?.includes(text) ? { picked: true } : {}) })
     const at = this.shown(target.rootId).find((s) => s.m.id === sent.message.id)?.seq ?? 1
     return this.thread(target.rootId, { after: at - 1 })
   }
@@ -169,14 +170,13 @@ export class MailPerson {
   }
 
   /**
-   * The question a pick answers (#1630): the one the window names, which must be a question in these chains sent to the person by a session that is still
-   * here, whose choices include `text`, and not answered already (a question is answered once, whichever window gives the answer first)
+   * The question a pick or the person's own words answer (#1630, #2191): the one the window names, which must be a question in these chains sent to the person
+   * by a session that is still here, and not answered already (a question is answered once, whichever window gives the answer first)
    */
-  private pickTarget(roots: readonly string[], id: string, text: string): { target: MailRow; to: string[] } | undefined {
+  private pickTarget(roots: readonly string[], id: string): { target: MailRow; to: string[] } | undefined {
     const target = roots.flatMap((root) => this.shown(root).map((s) => s.m)).find((m) => m.id === id)
     const row = target && this.records.recipient(target.id, PERSON)
     if (!target || !row || hiddenFromPerson(row) || !this.here(target.sender)) return undefined
-    if (!target.choices?.includes(text)) throw refuse('bad_value', `${id} does not offer that choice.`)
     if (row.answerId !== null || (row.settled !== null && row.settled !== 'legacy')) throw refuse('answered', REFUSAL_TEXT.answered(id))
     return { target, to: [target.sender] }
   }

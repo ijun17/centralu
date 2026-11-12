@@ -10,7 +10,8 @@ import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
 import { Markdown } from '../session/Markdown.js'
-import { answerTo, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
+import { AnsweringPicker } from './AnsweringPicker.js'
+import { answerTo, choicesLabel, closeStopsWork, openQuestions, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, through the session view's `Markdown` (#2228: no raw HTML, links as that view treats them);
@@ -199,37 +200,45 @@ function Reply({ blocked }: { blocked: boolean }) {
   const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  // Which question the words answer, once the person has named one (#2191): else the newest, as it was before
+  const [chosen, setChosen] = useState<string | null>(null)
   if (!view) return null
+  // With more than one question waiting the box says which one its words answer; with one, nothing changes
+  const questions = openQuestions(view.messages)
+  const target = questions.length > 1 ? (questions.find((q) => q.id === chosen) ?? questions.at(-1)) : undefined
   const send = async () => {
     const words = text.trim()
     if (!words || sending || blocked) return
     setSending(true)
-    const ok = await reply(words, replyKind(view.messages))
+    const ok = await (target ? reply(words, 'answer', target.id) : reply(words, replyKind(view.messages)))
     setSending(false)
     // What was refused stays in the box, with the host's words in the toast
     if (ok) setText('')
   }
   return (
-    <div className="flex items-end gap-2 border-t border-line px-4 py-2">
-      <textarea
-        rows={2}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey(e.nativeEvent) }
-          if (isComposerSendKey(key, sendWithModifierEnter)) {
-            e.preventDefault()
-            void send()
-          }
-        }}
-        placeholder="Reply"
-        aria-label="Your reply"
-        className="max-h-40 min-w-0 flex-1 resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-        data-testid="mail-reply"
-      />
-      <Button size="md" variant="primary" disabled={!text.trim() || blocked} busy={sending} onClick={() => void send()} data-testid="mail-send">
-        Send
-      </Button>
+    <div className="border-t border-line">
+      {target && <AnsweringPicker questions={questions} target={target} onTarget={setChosen} />}
+      <div className="flex items-end gap-2 px-4 py-2">
+        <textarea
+          rows={2}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey(e.nativeEvent) }
+            if (isComposerSendKey(key, sendWithModifierEnter)) {
+              e.preventDefault()
+              void send()
+            }
+          }}
+          placeholder="Reply"
+          aria-label="Your reply"
+          className="max-h-40 min-w-0 flex-1 resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          data-testid="mail-reply"
+        />
+        <Button size="md" variant="primary" disabled={!text.trim() || blocked} busy={sending} onClick={() => void send()} data-testid="mail-send">
+          Send
+        </Button>
+      </div>
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { partyName } from '@cc/core'
 import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
@@ -78,4 +79,17 @@ export function choicesLabel(answered: boolean, picked: boolean, open: boolean):
   if (picked) return 'You chose'
   if (answered) return 'Answered'
   return open ? 'Choose one' : 'Not answered'
+}
+
+/**
+ * The questions to the person in a thread that wait for their answer (#2191): a session's question that none of their messages names (`answerTo`), oldest first.
+ * A reply box offers a choice of which one its words answer when there is more than one; with one, the words answer it as before
+ */
+export function openQuestions(messages: readonly MailMessage[]): MailMessage[] {
+  return messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && answerTo(messages, m) === null)
+}
+
+/** A question as one line, for the person to tell which is which: the session that asked it and its words */
+export function questionLine(m: Pick<MailMessage, 'sender' | 'body'>): string {
+  return `${partyName(m.sender)} · “${m.body.replace(/\s+/g, ' ').trim()}”`
 }

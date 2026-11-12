@@ -142,6 +142,29 @@ describe('the thread in the inbox', () => {
     expect(open.text).not.toMatch(/thread/i)
   })
 
+  describe('which question the reply box answers (#2191)', () => {
+    const q = (id: string, seq: number, who: MailParty, body: string) => ({ id, seq, sender: who, kind: 'question', urgent: false, body, facts: {}, createdAt: 1_800_000_000_000 })
+    const builder: MailParty = { address: 'session:h/s2', kind: 'session', sessionId: 's2', name: 'Builder', state: 'idle' }
+    const first = q('m1', 1, parser, 'Which branch should I build on?')
+    const second = q('m2', 2, builder, 'Keep the old settings format?')
+    const mine = { id: 'm3', seq: 3, sender: you, kind: 'answer', urgent: false, body: 'main', facts: { picked: true }, replyTo: 'm1', createdAt: 1_800_000_000_000 }
+
+    it('says which one the words answer, the newest by default, and how many others are open, once two are', () => {
+      const { html, text } = render(view({ messages: [first, second] }))
+      expect(text).toContain('Answering Builder · “Keep the old settings format?”')
+      expect(text).toContain('1 other open')
+      expect(html).toContain('data-testid="mail-answering"')
+      // The list opens from the button, and is not drawn closed
+      expect(html).not.toContain('data-testid="mail-answering-list"')
+    })
+
+    it('is not there with one question open, whatever else was said, so the box is as it was', () => {
+      expect(render(view({ messages: [first] })).html).not.toContain('data-testid="mail-answering"')
+      expect(render(view({ messages: [first, second, mine] })).html).not.toContain('data-testid="mail-answering"')
+      expect(render(view({ messages: [{ ...first, kind: 'note' }, second] })).html).not.toContain('data-testid="mail-answering"')
+    })
+  })
+
   describe('the choices of a question (#1630)', () => {
     const asked = { id: 'm1', seq: 1, sender: parser, kind: 'question', urgent: false, body: 'How should I handle that?', facts: {}, choices: ['Keep the old format', 'Switch now', 'Ask me again'], createdAt: 1_800_000_000_000 }
     const answer = (body: string, picked = false, to = 'm1') => ({ id: 'm2', seq: 2, sender: you, kind: 'answer', urgent: false, body, facts: picked ? { picked: true } : {}, replyTo: to, createdAt: 1_800_000_000_000 })

@@ -128,6 +128,70 @@ test('Mail: an answer in the reply box answers a question with choices too, and 
   await expect(page.getByTestId('mail-choices-1-1')).toHaveAttribute('aria-pressed', 'false')
 })
 
+test('Mail: with two questions open the reply box says which one its words answer, and switching changes it (#2191)', async ({ page }) => {
+  await setup(page)
+  const other = { ...PARSER, address: 'session:mock/s2', sessionId: 's2', name: 'Builder' }
+  const id = await seed(page, { subject: 'Two questions', from: PARSER, body: 'Which branch should I build on?', choices: ['main', 'release'] })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  // One question open: the box is as it always was
+  await expect(page.getByTestId('mail-answering')).toHaveCount(0)
+  await page.evaluate(([thread, from]) => (window as any).__mock.seedMailMessage(thread, { from, body: 'Keep the old settings format?', choices: ['Keep it', 'Switch now'] }), [id, other] as const)
+
+  // The newest is the default, and the rest are counted
+  await expect(page.getByTestId('mail-answering-target')).toHaveText('Builder · “Keep the old settings format?”')
+  await expect(page.getByTestId('mail-answering-others')).toHaveText('1 other open')
+  // Words with the default target answer the newest question and leave the other open
+  await page.getByTestId('mail-reply').fill('Yes, keep it for one release')
+  await page.getByTestId('mail-send').click()
+  await expect(page.getByTestId('mail-message-3')).toContainText('Yes, keep it for one release')
+  await expect(page.getByTestId('mail-choices-2-label')).toHaveText('Answered')
+  await expect(page.getByTestId('mail-choices-1-label')).toHaveText('Choose one')
+  // One left open: the box says nothing of a target again
+  await expect(page.getByTestId('mail-answering')).toHaveCount(0)
+})
+
+test('Mail: switching the question the reply box answers sends the words to that question (#2191)', async ({ page }) => {
+  await setup(page)
+  const other = { ...PARSER, address: 'session:mock/s2', sessionId: 's2', name: 'Builder' }
+  const id = await seed(page, { subject: 'Two questions', from: PARSER, body: 'Which branch should I build on?', choices: ['main', 'release'] })
+  await page.evaluate(([thread, from]) => (window as any).__mock.seedMailMessage(thread, { from, body: 'Keep the old settings format?', choices: ['Keep it', 'Switch now'] }), [id, other] as const)
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-answering-button').click()
+  await expect(page.getByTestId('mail-answering-list')).toBeVisible()
+  await page.getByTestId('mail-answering-1').click()
+  await expect(page.getByTestId('mail-answering-target')).toHaveText('Parser · “Which branch should I build on?”')
+  await page.getByTestId('mail-reply').fill('the release branch, please')
+  await page.getByTestId('mail-send').click()
+  await expect(page.getByTestId('mail-message-3')).toContainText('the release branch, please')
+  // The older question was answered, the newer one was not
+  await expect(page.getByTestId('mail-choices-1-label')).toHaveText('Answered')
+  await expect(page.getByTestId('mail-choices-2-label')).toHaveText('Choose one')
+})
+
+test('Inbox: Done on a mail row closes the thread from the list, and a failed close says why (#2226)', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId(`mail-thread-${id}`)).toBeVisible()
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.close.bind(mail)
+    w.__fail = true
+    mail.close = (...a: unknown[]) => (w.__fail ? Promise.reject(new Error('the link is down')) : real(...a))
+  })
+  await page.keyboard.press('d')
+  await expect(page.getByTestId('toast')).toContainText('Could not close this mail: the link is down')
+  await expect(page.getByTestId(`mail-thread-${id}`)).toBeVisible()
+  await page.evaluate(() => ((window as any).__fail = false))
+  await page.keyboard.press('d')
+  // Done leaves the list of what waits at once (a read, finished thread folds under Earlier), with nothing opened
+  await expect(page.getByTestId(`mail-thread-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+})
+
 test('Mail: closing a thread ends the reply box, and a thread left open is not there the next time', async ({ page }) => {
   await setup(page)
   const id = await seed(page, { subject: 'Land #12', from: PARSER, body: 'ready for review', kind: 'report' })

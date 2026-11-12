@@ -865,14 +865,17 @@ describe('a session asks the person by mail (#1630)', () => {
       expect(w.person.thread(root.id).messages.filter((m) => m.kind === 'answer').map((m) => m.body)).toEqual(['x', 'q'])
     })
 
-    it('a question is answered once: a second pick, from any window, is refused and writes nothing; so is a pick of words it did not offer', () => {
+    it('a question is answered once: a second pick, from any window, is refused and writes nothing', () => {
       const { w, thread, qa } = twoAsk()
       w.person.reply(thread, 'main', 'answer', qa.id)
       expect(refusedFor(() => w.person.reply(thread, 'dev', 'answer', qa.id))).toBe('answered')
       expect(refusedFor(() => w.person.reply(thread, 'main', 'answer', qa.id))).toBe('answered')
       expect(w.person.thread(thread).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === qa.id)).toHaveLength(1)
       const { w: w2, thread: t2, qa: other } = twoAsk()
-      expect(refusedFor(() => w2.person.reply(t2, 'neither', 'answer', other.id))).toBe('bad_value')
+      // Words that are none of its choices are the person's own answer to that question (#2191): it is answered once with them, and not as a pick
+      w2.person.reply(t2, 'neither', 'answer', other.id)
+      expect(w2.person.thread(t2).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === other.id).map((m) => [m.body, m.facts.picked])).toEqual([['neither', undefined]])
+      expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', other.id))).toBe('answered')
       expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', 'hub-aaaaaaaa.m_missing'))).toBe('unknown_message')
       // The free reply box stays free: it answers the newest open question, as before
       w2.person.reply(t2, 'my own words')
