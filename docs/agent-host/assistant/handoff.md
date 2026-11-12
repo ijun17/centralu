@@ -85,7 +85,7 @@ original's things is in this table; the bullets below say how.
   confirms it by its text).
 - **An original that stays** (a handoff that keeps it, #694) is told in its conversation what children, requests and
   mail went to whom (a `notice`; its apps stay with it and are not in it). A child with something going has its line
-  there; the finished ones are one count ("30 finished sessions also moved to …"). A call of its own still waiting on one of them (`agent_session` wait or send, `ask_project` with no task,
+  there; the finished ones are one count ("30 finished sessions also moved to …"). A call of its own still waiting on one of them (`agent_session` wait, `ask_project` with no task,
   a wait on a start request's handle, a `start_agent` call whose card is approved later) ends with where it went, so
   the answer is read once, by the new session; the child's open task is the new session's, so its last response answers
   the new session. Its later `agent_session` or `ask_project` about one of

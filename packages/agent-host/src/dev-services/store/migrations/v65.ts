@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v70. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v71. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -193,6 +193,21 @@ export class StepsV65 extends MigrationRange {
          */
         run: () => {
           this.addColumn('mail', 'choices', 'TEXT')
+        },
+      },
+      {
+        to: 71,
+        breaksOlderReaders: false,
+        /**
+         * The subject a session's `mail` send gives the chain it starts (#2229): `mail.subject`, one line of at most 80 characters, NULL on
+         * every other message. The sender's words, so a column of its own as v70's choices: `facts` is Centralu's record. The person's Inbox
+         * names the chain by it instead of its first message's words.
+         *
+         * **Expand only (#292's rule).** One nullable column. An older build names its columns in every read and insert of `mail`, so it
+         * never sees it: it opens the store and names the chain by its words, as before. Nothing is backfilled: no build kept a subject.
+         */
+        run: () => {
+          this.addColumn('mail', 'subject', 'TEXT')
         },
       },
     ]

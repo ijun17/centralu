@@ -3,7 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelOption, PermissionPreset } from '@cc/protocol'
-import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { wireHostMail } from './host-mail.test-helpers.js'
 import { ASK_THE_PERSON } from './start-agent-terms.js'
 
@@ -304,9 +304,8 @@ describe('auto Centralu boundaries (#603)', () => {
       ok: true,
       state: 'working',
     })
-    expect(
-      await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'send', text: 'note' }),
-    ).toMatchObject({ ok: true, state: 'mailed', messageId: expect.any(String) })
+    // Its mail to that child is mail: work by mail is only for a session the sender started (#1948)
+    expect(await sendWork(w.mgr, caller, child.sessionId, 'note')).toBeNull()
     const wait = w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'wait' })
     handle(child.sessionId).answer('done')
     expect(await wait).toMatchObject({ ok: true, state: 'done', answer: 'done' })
@@ -327,14 +326,31 @@ describe('auto Centralu boundaries (#603)', () => {
     )
   })
 
+  // #1948, #2133: under auto agent_session acts on any session of the project, but work by mail is only for one the sender started,
+  // so a child's question to its parent (or to any other session) is delivered as mail, never given to it as a task
+  it("keeps a child's mail to its parent mail under auto, not work for the parent", async () => {
+    const m = wireHostMail(w.mgr, w.store)
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const owner = await session()
+    const child = await start(owner)
+    if (!child.ok) throw new Error(child.error)
+    expect(await sendWork(w.mgr, child.sessionId, owner, 'which branch?')).toBeNull()
+    const sent = await m.hooks.tool!(child.sessionId, { action: 'send', to: 'parent', text: 'which branch?' })
+    expect(sent.isError).toBeFalsy()
+    expect(sent.text).not.toContain('You will be told when it ends')
+    expect(handle(owner).sent).toEqual([])
+  })
+
   it.each(['safe', 'normal'] as const)('%s refuses another owner and higher presets', async (preset) => {
     const caller = await session(preset)
     const other = await session()
-    for (const action of ['status', 'send', 'wait', 'stop', 'delete'] as const) {
+    for (const action of ['status', 'wait', 'stop', 'delete'] as const) {
       expect((await w.mgr.agentSession(caller, { sessionId: other, action, text: 'x' })).ok).toBe(false)
     }
+    // Its mail to that session is plain mail, not work
+    expect(await sendWork(w.mgr, caller, other, 'x')).toBeNull()
     const own = await session('auto', caller)
-    expect(await w.mgr.agentSession(caller, { sessionId: own, action: 'send', text: 'x' })).toMatchObject({
+    expect(await sendWork(w.mgr, caller, own, 'x')).toMatchObject({
       ok: false,
       error: expect.stringContaining('more permissions'),
     })

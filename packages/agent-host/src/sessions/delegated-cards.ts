@@ -6,7 +6,7 @@ import { tryParseJson } from '../json-value.js'
 
 /**
  * Cards in a session another session gave work (#676; docs/plans/mailbox.md §10.6.4): a session P has work open in session A (ask_project,
- * start_agent, agent_session send, send_to_session), and A raised a card. P is told, reads the card through a tool and may answer it as the gate
+ * start_agent, mail to a child, send_to_session), and A raised a card. P is told, reads the card through a tool and may answer it as the gate
  * allows; the person may answer too, and the first answer wins. The rules live in `RoutedCards` (routed-cards.ts) and a linked machine's
  * `RemoteAgents`; this module holds the pure parts: how P's answer is read, and the words P is told with.
  */

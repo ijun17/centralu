@@ -69,7 +69,7 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
     ...(folded > 0
       ? [
           `- ${folded} finished session${folded === 1 ? '' : 's'} — ${SETTLED_CHILD}. agent_session(action="list") lists ${folded === 1 ? 'it' : 'them'} with ${folded === 1 ? 'its' : 'their'} names, handles and states. ` +
-            `${folded === 1 ? 'It answers' : 'They answer'} to you as ${folded === 1 ? 'a session' : 'sessions'} you started: agent_session works on ${folded === 1 ? 'it' : 'each'} (status, wait, send, stop, delete), and a send gives more work, whose report comes to you.` +
+            `${folded === 1 ? 'It answers' : 'They answer'} to you as ${folded === 1 ? 'a session' : 'sessions'} you started: agent_session works on ${folded === 1 ? 'it' : 'each'} (status, wait, stop, delete), and mail to ${folded === 1 ? 'it' : 'one'} gives more work, whose report comes to you.` +
             (reports > 0 ? ` ${reports === 1 ? 'A report' : `${reports} reports`} the previous session had not read came with ${folded === 1 ? 'it' : 'them'} as mail: the mail tool's inbox lists ${reports === 1 ? 'it' : 'them'}.` : ''),
         ]
       : []),
@@ -212,7 +212,7 @@ export class HandoffChildren {
       const can = project !== undefined
         ? `Call ask_project with project "${project}" and no task to wait for its answer${told ? '; you are told of its cards and answer them with agent_session (answer) as far as you may' : ''}. It is that project's session: agent_session does nothing else with it.`
         : s.askedBy === from
-          ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work with agent_session (send) and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, send, stop, delete).`
+          ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work by mail and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, stop, delete).`
           : `${told ? 'Its report and its cards come to you' : 'Nothing about it comes to you unless you ask'}. You did not start it, so agent_session works on it only with the auto preset.`
       const folded = state === SETTLED_CHILD && project === undefined && s.askedBy === from
       moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}), ...(folded ? { folded: true } : {}) })

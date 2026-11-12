@@ -935,6 +935,28 @@ the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), s
 
 **#1630 (agents ask the person through mail).** The tool gets `choices`, a list of strings with no description (+53), and the description the line "Ask the person with kind "question"." (+33), which every seat served the mail tool and told its CLI's own choice tool is off carries (a test pins it). The definition measures 1,237 (main 1,231) and `MAIL_BUDGET_CHARS` stays 1,240. The room came from words that said nothing the rest does not: "Centralu's mailbox:" went from the description's start and "other" and "send to "assistant" to ask it," (which `to` says) with it, 44 characters, and `to` lost ", listing them" and "(a shared name is refused)" (the refusal says it, and lists them), 41. `to` keeps what the Assistant is for and what `find` matches. The reader seat on Codex, which loads the tool, measures 6,492 (main 6,486, ceiling 6,560); on Claude the tool is deferred, so its resident 3,428 is unchanged. The Assistant's seat has mail as a command and no definition, so it has no such line. A choice's description and a pick of several were left out: both cost words in every Codex request.
 
+**#1948 (more work is mail; the line on reports) and #2133 (the parent named before a child sends), owner 2026-11-12.** `agent_session`
+loses `send`, its `ifBusy` and "messages," (521 → 449; the agent set 1,372 → 1,300, `AGENT_BUDGET_CHARS` 1,400 → 1,330): more work for a
+session the caller started is `mail` send ([plans/mailbox.md](plans/mailbox.md) §10.6.6). The mail tool gains that `ifBusy` (+55) and the
+sentence "In a report, say what each claim was checked against, and what was not." (+72), since every report an agent writes is mail:
+and #2133 takes " or checkpoint" from `parent` in `to` (-14, below): 1,237 → 1,350, `MAIL_BUDGET_CHARS` 1,240 → 1,355. The reader's resident ceiling
+(the sum) rises by the net 45. Measured with `residentCost`
+(characters, not tokens):
+
+| Seat | Tool | Before | After |
+|---|---|---|---|
+| ordinary or child, Claude | resident (`start_agent` loaded; `mail`, `agent_session` deferred) | 3,428 | 3,428 |
+| ordinary or child, Claude | deferred | 3,006 | 3,047 |
+| ordinary or child, Codex | loaded (all) | 6,492 | 6,533 |
+| Assistant, Claude / Codex | resident (mail and agent_session are commands) | 10,711 / 10,769 | 10,711 / 10,769 |
+
+`start_agent` is 851 before and after. The Assistant reads the sentence through `centralu_help(command="mail")`, which costs nothing per
+request. #2133 went into `start_agent`'s child frame rather than the mail description: the frame line grows 65 → 128 characters, once in each
+task given to a child that can mail its parent, while a description naming the parent would cost about 108 characters in every Codex request
+of every seat with mail, and would need per-session tool definitions, which do not exist (the definitions are one list per profile). `to`
+no longer says `parent` is for "a question or checkpoint": a checkpoint is the progress report the frame says is not needed. Not
+measured live.
+
 Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds

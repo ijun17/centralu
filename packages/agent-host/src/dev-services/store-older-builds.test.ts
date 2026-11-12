@@ -116,12 +116,38 @@ describe('a store written before a question’s choices had a column (v69, #1630
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(1)
+    expect(second.migrationsRun).toBe(2) // v70, then v71 (#2229)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v69 writes: its own column list, none of ours
     db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES ('h1.m_2', 'session:h1/a', 'message', 1, 'h1.m_2', 'old', '{}', ?)`).run(at)
     expect(second.mailbox.message('h1.m_2')).toMatchObject({ body: 'old', choices: null })
+    db.close()
+  })
+})
+
+describe('a store written before a chain’s subject had a column (v70, #2229)', () => {
+  it('migrates with its mail intact, reads no subject, and an older build’s insert leaves the column empty', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-subject-'))
+    dirs.push(dir)
+    const file = join(dir, 'store.db')
+    const first = new Store(file)
+    const written = (first as unknown as { db: Database.Database }).db
+    const at = 1_800_000_000_000
+    written
+      .prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES ('h1.m_1', 'session:h1/a', 'message', 1, 'h1.m_1', 'Ship it?', '{}', ?)`)
+      .run(at)
+    written.exec(`ALTER TABLE mail DROP COLUMN subject`)
+    written.pragma('user_version = 70')
+    written.close()
+
+    const second = new Store(file)
+    expect(second.migrationsRun).toBe(1)
+    expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?', subject: null })
+    const db = (second as unknown as { db: Database.Database }).db
+    // What a build of v70 writes: its own column list, none of ours
+    db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, choices, created_at) VALUES ('h1.m_2', 'session:h1/a', 'message', 1, 'h1.m_2', 'old', '{}', NULL, ?)`).run(at)
+    expect(second.mailbox.message('h1.m_2')).toMatchObject({ body: 'old', subject: null })
     db.close()
   })
 })

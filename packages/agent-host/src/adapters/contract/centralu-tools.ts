@@ -1,4 +1,4 @@
-import type { MailToolArgs } from '../../mail/tool.js'
+import type { IfBusy, MailToolArgs } from '../../mail/tool.js'
 import type { SessionAppTools } from './session-apps.js'
 import type {
   UsageHistory,
@@ -378,13 +378,8 @@ export type RoutedCard = {
   answerable: boolean
 } & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail })
 
-/**
- * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): it goes as a mail task, which waits until the
- * session is free and reaches it as a turn of its own (a task joins no running turn until #1948 step 3). `fork` asks for something else instead: a sub-session started from a
- * copy of the session's conversation now, linked to the requester, in a worktree of its own (`fork_read`: read-only
- * work, in the session's folder, under at most `safe`)
- */
-export type IfBusy = 'fork' | 'fork_read'
+/** A busy session's fork instead of a mail task (`IfBusy`, mail/tool.ts) */
+export type { IfBusy }
 export type BusyAnswer =
   /** `lowMemory` (#686): mailed instead of the fork asked for, since memory was low; what was read */
   | { state: 'mailed'; sessionId: string; sessionName: string; messageId: string; lowMemory?: string }
@@ -533,10 +528,8 @@ export type AgentListRow = {
 /** agent_session's arguments (#561) */
 export type AgentSessionOpts = {
   sessionId: string
-  action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer'
+  action: 'status' | 'wait' | 'stop' | 'delete' | 'answer'
   text?: string
-  /** send to a busy session: a fork instead of mail (`IfBusy`) */
-  ifBusy?: IfBusy
   /** answer (#676): which card, when more than one stands */
   card?: string
 }
@@ -709,7 +702,7 @@ export type CentraluTools = {
    */
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The mailbox for the session that has these tools (#1347, mail): an ordinary session's alone; absent where there is none */
-  mail?(args: MailToolArgs): { text: string; isError?: boolean } | Promise<{ text: string; isError?: boolean }>
+  mail?(args: MailToolArgs, signal?: AbortSignal): { text: string; isError?: boolean } | Promise<{ text: string; isError?: boolean }>
   /**
    * Runs one tool or command of this seat, asking the person first when a session's request is what the Assistant's turn is (#1447, §9.7). The
    * runner calls it around every tool; absent, or in a turn that is not a session's request, it just runs
@@ -722,7 +715,7 @@ export type CentraluTools = {
   apps?(): SessionAppTools | null
   /** compact_self (#1451): asks Centralu to compact this session when its turn ends, with an optional focus line and (#2024) the step to continue with after it. The answer says what will happen */
   compactSelf?(focus?: string, then?: string): { text: string; isError?: boolean }
-  /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
+  /** Works with a session the caller started (#561, agent_session): status, wait, stop, delete, answer; more work is mail (#1948) */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */
   listAgents(): Promise<{ ok: true; agents: AgentListRow[] } | { ok: false; error: string }>

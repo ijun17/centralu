@@ -25,7 +25,7 @@ describe('which steps of the Assistant ask the person when a session asked for t
     for (const name of ['send_to_session', 'create_session', 'update_session_settings', 'create_project', 'add_project', 'add_machine', 'install_machine', 'remove_machine', 'set_preferences', 'set_project_trust', 'set_agent_limits', 'remove_approval_rule', 'delete_session', 'delete_archived', 'delete_all_archived', 'check_app', 'check', 'rename_session', 'restart_app', 'remove_app', 'create_app', 'handoff_session', 'start_agent', 'ask_project', 'answer_question', 'attach_app', 'update_centralu']) {
       expect(askedAct(name, name === 'update_centralu' ? { action: 'install' } : {}, THREAD), name).not.toBeNull()
     }
-    expect(askedAct('agent_session', { action: 'send', sessionId: 's' }, THREAD)).not.toBeNull()
+    expect(askedAct('agent_session', { action: 'stop', sessionId: 's' }, THREAD)).not.toBeNull()
     expect(askedAct('agent_session', { action: 'delete', sessionId: 's' }, THREAD)).not.toBeNull()
   })
 

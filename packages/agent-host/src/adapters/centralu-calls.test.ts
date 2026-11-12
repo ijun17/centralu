@@ -30,6 +30,25 @@ describe.each([
     expect(summary('centralu', 'agent_session', { sessionId: 'c1', action: 'send', text: 'also this' }).title).toBe('also this')
   })
 
+  // #1948: more work for a session is a mail send, so a send keeps the words and the chip an agent_session send had
+  it('mail send: "Sent mail", the subject or the first line, and the session it names by id apart', () => {
+    const child = '0f8fad5b-d9cb-469f-a165-70867728950e'
+    const s = summary('centralu', 'mail', { action: 'send', to: child, text: 'and the linter\nthen push' })
+    expect(s.centralu).toEqual({ tool: 'mail', label: 'Sent mail', sessionId: child })
+    expect(s.title).toBe('and the linter …')
+    expect(summary('centralu', 'mail', { action: 'send', to: `mac.${child}`, subject: 'Lint', text: 'x' })).toMatchObject({ title: 'Lint', centralu: { sessionId: `mac.${child}` } })
+    for (const to of ['person', 'parent', 'reviewer'])
+      expect(summary('centralu', 'mail', { action: 'send', to, text: 'done?' })).toMatchObject({ title: 'done?', centralu: { tool: 'mail', label: 'Sent mail' } })
+    expect(summary('centralu', 'mail', { action: 'send', to: 'parent', text: 'done?' }).centralu?.sessionId).toBeUndefined()
+  })
+
+  it('mail reply says "Replied" with no chip; the other mail actions keep the card they had, as an old agent_session send does', () => {
+    expect(summary('centralu', 'mail', { action: 'reply', thread: 't1', text: 'yes' })).toMatchObject({ title: 'yes', centralu: { tool: 'mail', label: 'Replied' } })
+    expect(summary('centralu', 'mail', { action: 'reply', thread: 't1', text: 'yes' }).centralu?.sessionId).toBeUndefined()
+    expect(summary('centralu', 'mail', { action: 'inbox' }).centralu).toEqual({ tool: 'mail' })
+    expect(summary('centralu', 'agent_session', { sessionId: 'c1', action: 'send', text: 'also this' }).centralu).toEqual({ tool: 'agent_session', label: 'Sent more to an agent', sessionId: 'c1' })
+  })
+
   it("an app's call through `app` names the app and its tool, titled by its arguments; an app- server's or another server's tool is not marked", () => {
     const call = summary('centralu', 'app', { action: 'call', app: 'board', tool: 'list_items', args: { status: 'open' } })
     expect(call.centralu).toEqual({ tool: 'list_items', app: 'board' })

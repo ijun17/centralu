@@ -39,7 +39,7 @@ describe('a turn with two askers fails closed (§4.2)', () => {
   it('a step that can be undone, and work handed on to a session no looser, ask: no asker can be checked against', async () => {
     const w = world()
     await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's', name: 'x' } }, undefined, run, refused)
-    await w.gate.when('orc', { name: 'agent_session', args: { action: 'send', sessionId: 's', text: 'go' } }, undefined, run, refused)
+    await w.gate.when('orc', { name: 'mail', args: { action: 'send', to: 's', text: 'go' } }, undefined, run, refused)
     expect(w.asked).toHaveLength(2)
   })
 

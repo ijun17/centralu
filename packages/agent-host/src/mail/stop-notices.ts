@@ -122,7 +122,7 @@ export class StopNotices {
    * Whether `session`'s turn `turnSeq` (its latest when absent) is `sender`'s alone: what a stop notice may quote to it (`quotes`), and whether it may
    * answer the session's cards as its work's giver (docs/plans/mailbox.md §10.6.4). All of it must hold:
    * - the turn is the session's latest (no turn since), and `sender`'s own message started it: a mail the mailbox delivered, or work `sender`
-   *   gave it (a start_agent task, an agent_session send: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the
+   *   gave it (a start_agent task, mail to its child: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the
    *   CLI started by itself (`cli`), or the person's, is never `sender`'s alone, even when it goes on with a task's work;
    * - every message the mailbox gave into it is from `sender`;
    * - everything else that may have entered it (`turnInputs`: each user row stored since the turn before began, and a question card answered

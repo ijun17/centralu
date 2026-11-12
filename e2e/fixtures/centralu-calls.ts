@@ -64,6 +64,25 @@ export function centraluCallTests(): void {
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(child)
     })
 
+    // #1948: more work for a session is a mail send; its card keeps the words and the chip an agent_session send had
+    test('a mail send to a child says "Sent mail" with its words, and opens the child', async ({ page }) => {
+      await setup(page, ['/tmp/consumer'])
+      const child = await newSession(page, 'consumer')
+      const parent = await newSession(page, 'consumer')
+      await emit(page, parent, { type: 'state_change', state: 'working' })
+      await emit(page, parent, {
+        type: 'tool_call',
+        callId: 'call-mail',
+        summary: { tool: 'mcp__centralu__mail', title: 'and the linter …', paths: [], centralu: { tool: 'mail', label: 'Sent mail', sessionId: child } },
+      })
+      await openFolds(page)
+      const card = page.getByTestId('tool-card').first()
+      await expect(card.getByTestId('centralu-call-label')).toHaveText('Sent mail')
+      await expect(card.getByTestId('tool-card-title')).toHaveText('and the linter …')
+      await card.getByTestId('centralu-call-open').click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(child)
+    })
+
     test('a failed agent step says why, and its mark never overlaps the session pill (#1544)', async ({ page }) => {
       await setup(page, ['/tmp/consumer'])
       const child = await newSession(page, 'consumer')

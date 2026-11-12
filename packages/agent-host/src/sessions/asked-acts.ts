@@ -197,9 +197,8 @@ export const CLASSIFIED = { reads: READS, undoable: UNDOABLE, handsOn: HANDS_ON,
 export function stepKind(name: string, args: Record<string, unknown>): 'undoable' | 'handsOn' | 'asks' {
   if (UNDOABLE.has(name)) return 'undoable'
   if (HANDS_ON.has(name)) return 'handsOn'
-  // Work given to a session's turn; stopping one, deleting one or answering its card is not undoable
-  if (name === 'agent_session') return args.action === 'send' ? 'handsOn' : 'asks'
-  // Mail that is neither an answer in the request's own thread nor to the person (`askedAct`): words to someone, who may act on them
+  // Mail that is neither an answer in the request's own thread nor to the person (`askedAct`): words to someone, who may act on them, or work for
+  // a child (#1948). agent_session's stop, delete and answer are not undoable
   if (name === 'mail') return args.action === 'send' ? 'handsOn' : 'asks'
   return 'asks'
 }

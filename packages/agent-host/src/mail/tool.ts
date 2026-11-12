@@ -1,10 +1,10 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
-import { isRoleVia, ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
+import { ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
-import { CITE_MS, type MessageService, type ReadItem, type SendResult } from './messages.js'
+import { CITE_MS, SUBJECT_CHARS, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
@@ -30,7 +30,16 @@ export type MailToolArgs = {
   cite?: boolean | undefined
   /** A question to the person: the answers it offers to pick from (#1630) */
   choices?: string[] | undefined
+  ifBusy?: IfBusy | undefined
 }
+
+/**
+ * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): it goes as a mail task, which waits until the
+ * session is free and reaches it as a turn of its own. `fork` asks for something else instead: a sub-session started from a
+ * copy of the session's conversation now, linked to the requester, in a worktree of its own (`fork_read`: read-only
+ * work, in the session's folder, under at most `safe`). Taken by mail's send to a session the caller gives work (#1948) and send_to_session
+ */
+export type IfBusy = 'fork' | 'fork_read'
 
 export type MailToolResult = { text: string; isError?: boolean }
 
@@ -58,6 +67,8 @@ export type MailToolHost = {
    * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
    */
   across?: Pick<MailAcross, 'send' | 'foreign' | 'find' | 'named'>
+  /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
+  work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   now?: () => number
 }
 
@@ -71,8 +82,6 @@ export type MailToolHost = {
  */
 export class MailTool {
   private readonly now: () => number
-  /** The sessions told once that `assistant` is not their parent (#1984) */
-  private readonly hinted = new Set<string>()
 
   constructor(
     private readonly service: MessageService,
@@ -98,7 +107,7 @@ export class MailTool {
    * session on another computer goes to that computer, which writes it or refuses it (#2067 items 2 and 3,
    * docs/plans/linked-mail.md §6 to §8). Nothing is written here unless it took the message
    */
-  async call(sessionId: string, args: MailToolArgs): Promise<MailToolResult> {
+  async call(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult> {
     const me = this.host.caller(sessionId)
     const across = this.host.across
     if (!me) return this.run(sessionId, args)
@@ -107,6 +116,9 @@ export class MailTool {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
+      // Work first: a start request's handle or a linked child's id is no name to look for on other computers, one of which may be away
+      const work = await this.work(sessionId, me, args, signal)
+      if (work) return work
       const far = across ? await this.acrossTarget(sessionId, me, args, across) : null
       if (!far || !across) return this.run(sessionId, args)
       // A citation is the person's message in this computer's record, checked here for the Assistant here: the other
@@ -174,6 +186,28 @@ export class MailTool {
     throw refuse('ambiguous', `${n} sessions are named ${JSON.stringify(t)}: ${shown.slice(0, 8).join(', ')}${n > 8 ? ', and more' : ''}. Send to one of them by its address.`)
   }
 
+  /**
+   * `MailToolHost.work` for the one session `to` names here, else for the word itself (a start request's handle, a linked child's id); a role is
+   * never work. The subject leads the words, so the child reads what the card shows, and the answer says it went as work
+   */
+  private async work(sessionId: string, me: { address: string }, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
+    const t = a.to?.trim() ?? ''
+    if (a.action !== 'send' || !this.host.work || !t || [PERSON, 'assistant', 'parent'].includes(t.toLowerCase()) || !a.text?.trim()) return null
+    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
+    const word = t.startsWith(own) ? t.slice(own.length) : t
+    const [only, other] = this.sessionsNamed(sessionId, word)
+    const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
+    const r = await this.host.work(sessionId, only && !other ? only.id : word, subject + a.text.trim(), a.ifBusy, signal)
+    return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
+  }
+
+  /** The sessions here a word names: the one with that id, else those of that name but the caller (after a handoff the heir has the name of the session it replaced, and writes to that one) */
+  private sessionsNamed(sessionId: string, word: string): ReturnType<MailToolHost['sessions']> {
+    const here = this.host.sessions()
+    const exact = here.find((s) => s.id === word)
+    return exact ? [exact] : here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
+  }
+
   private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
     switch (a.action) {
       case 'inbox':
@@ -184,8 +218,8 @@ export class MailTool {
         return this.handled(me.address, this.target(me.address, this.need(a.thread, 'thread')))
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
-        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}) })
-        return this.sent(sent) + this.parentHint(sessionId, me, to)
+        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(a.subject ? { subject: a.subject } : {}) })
+        return this.sent(sent)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
@@ -251,11 +285,7 @@ export class MailTool {
     if (absolute && !(absolute.kind === 'session' && t.startsWith(own))) return { address: t }
     const word = t.startsWith(own) ? t.slice(own.length) : t
     if (word === sessionId) throw refuse('bad_value', 'a message is for someone else')
-    const here = this.host.sessions()
-    const exact = here.find((s) => s.id === word)
-    if (exact) return { address: this.service.sessionAddress(exact.id) }
-    // (never the caller: after a handoff the heir has the name of the session it replaced, and writes to that one)
-    const named = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
+    const named = this.sessionsNamed(sessionId, word)
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
     // A child this host started on a linked machine (#2067): the service refuses it in its own words (elsewhere), not as a session it never had
@@ -269,16 +299,6 @@ export class MailTool {
       'unknown',
       `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").`,
     )
-  }
-
-  /**
-   * #1984: a session that has a parent and mails `assistant` may have meant the parent, which nothing it sees named. The answer says so once per session
-   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the Assistant itself.
-   */
-  private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
-    if (!isRoleVia(to.via) || !me.askedBy || me.askedBy === this.host.assistantId() || this.hinted.has(sessionId)) return ''
-    this.hinted.add(sessionId)
-    return ` It went to the Assistant, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */

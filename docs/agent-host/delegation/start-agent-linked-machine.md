@@ -113,7 +113,7 @@ see begin (before this build) reads as the last response, and so does an older m
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
 caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything
 of the child passes it: `status` (in a turn and at rest), `wait` (as it opens, on a card, at the turn's end, and before
-owing the turn again when the call is cut short), `answer`, `send` (a start's task, a send at rest, a note into a
+owing the turn again when the call is cut short), `answer`, a `mail` send that is work (a start's task, a send at rest, a note into a
 turn), a card's notice, and the linked report's text and preview (`LinkedReports` asks `reportGate`: deliver, withhold,
 or defer while it cannot tell). The gate reads whose the child's current or last turn is (`Whose`) from this hub's own
 evidence: `caller` once the machine recorded the instruction this hub last sent (its `user_message` from this

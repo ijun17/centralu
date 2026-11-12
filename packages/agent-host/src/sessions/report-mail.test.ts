@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { hostMail, mailSessionsOf, type HostMail } from '../mail/host-mail.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, MAIL_HOST, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -125,10 +125,11 @@ describe('a turn ends, the owner reads mail', () => {
     const [t1] = tasksOf(parent, child)
     const [first] = read.reportsOn(t1!.id)
     expect(read.row(first!.id, addr(parent))).toMatchObject({ deliveredAt: null, readAt: null })
-    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the linter' })
+    const again = sendWork(w.mgr, parent, child, 'and the linter')
     await w.until(() => (handleOf(child)?.sent.length ?? 0) === 2)
+    expect(await again).toMatchObject({ ok: true, state: 'working', reported: true })
     handleOf(child)!.answer('second')
-    expect(await again).toMatchObject({ ok: true, state: 'done', answer: 'second' })
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'second' })
     const [, t2] = tasksOf(parent, child)
     expect(t2).toMatchObject({ body: 'and the linter' })
     // The second was returned by the call that gave it, so it is recorded as told; the call read the reports on the caller's tasks, the first too
@@ -136,6 +137,25 @@ describe('a turn ends, the owner reads mail', () => {
     expect(read.row(second!.id, addr(parent))).toMatchObject({ readAt: expect.any(Number) })
     expect(read.row(first!.id, addr(parent))).toMatchObject({ readAt: expect.any(Number) })
     expect([read.taskRow(t1!.id, child)?.settled, read.taskRow(t2!.id, child)?.settled]).toEqual(['reported', 'reported'])
+  })
+
+  // #1948: more work is a mail send now; it returns at once, and the turn it gave is reported to the sender as start_agent's is
+  it('more work sent by mail is a task of its own, and the sender hears its end by mail', async () => {
+    const { parent, child } = await parentAndChild()
+    await turnEnds(child, 'first')
+    const sent = await m.hooks.tool!(parent, { action: 'send', to: child, text: 'and the linter' })
+    expect(sent).toMatchObject({ text: expect.stringContaining('You will be told when it ends.') })
+    expect(sent.isError).toBeFalsy()
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) === 2)
+    expect(handleOf(child)!.sent[1]).toContain('and the linter')
+    const [, t2] = tasksOf(parent, child)
+    expect(t2).toMatchObject({ body: 'and the linter', origin: 'agent_session' })
+    handleOf(child)!.answer('second')
+    await w.until(() => read.reportsOn(t2!.id).length > 0)
+    const [report] = read.reportsOn(t2!.id)
+    expect(report!.facts.answer).toBe('second')
+    expect(read.row(report!.id, addr(parent))).toBeTruthy()
+    expect(read.taskRow(t2!.id, child)?.settled).toBe('reported')
   })
 })
 
@@ -222,7 +242,7 @@ describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', 
     const { parent, child } = await parentAndChild()
     scoped(parent)
     handleOf(child)!.acceptsAtOnce = true
-    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'and the docs')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'code and docs done')
@@ -385,12 +405,12 @@ describe('work handed on', () => {
     await turnEnds(helper, 'a part done')
     // The owner gives the session more work; in it, the session sends the helper more. The helper's report waits for the session, so the work
     // goes as mail too, and the delivery gives it both in one turn
-    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'now this' })).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'now this')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 3)
     const now = tasksOf(parent, child)[1]!
     expect(now).toMatchObject({ body: 'now this' })
-    const sentMore = w.mgr.agentSession(child, { sessionId: helper, action: 'send', text: 'and a second part' })
+    const sentMore = sendWork(w.mgr, child, helper, 'and a second part')
     await w.until(() => (handleOf(helper)?.sent.length ?? 0) >= 2)
     expect(tasksOf(child, helper)[1]).toMatchObject({ body: 'and a second part', causeId: now.id })
     await turnEnds(child, 'handed the second part on')
@@ -433,10 +453,11 @@ describe('work handed on', () => {
   it('a call that returns the answer while the work handed on is open does not end the work either: still open, and no report', async () => {
     const { parent, child } = await handOn()
     await turnEnds(child, 'handed the tests on')
-    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'status?' })
+    const again = sendWork(w.mgr, parent, child, 'status?')
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    expect(await again).toMatchObject({ ok: true, state: 'working' })
     handleOf(child)!.answer('still waiting on the tests')
-    expect(await again).toMatchObject({ ok: true, answer: 'still waiting on the tests' })
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })).toMatchObject({ ok: true, answer: 'still waiting on the tests' })
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
     expect(asReports(parent, child)).toEqual([])
   })
@@ -449,7 +470,7 @@ describe('work handed on', () => {
     await turnEnds(grandchild, 'tests written')
     await w.until(() => read.taskRow(taskOf(child, grandchild).id, grandchild)?.settled === 'reported')
     // The grandchild's report waits for the session, so the owner's send goes as mail too, and the delivery gives it both in one turn
-    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })).toMatchObject({ ok: true, state: 'mailed' })
+    expect(await sendWork(w.mgr, parent, child, 'and then?')).toMatchObject({ ok: true, state: 'mailed' })
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'all done now')

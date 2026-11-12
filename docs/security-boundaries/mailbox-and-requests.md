@@ -10,7 +10,7 @@ from a session whose project is untrusted now (read live: no project is trusted,
 (another project's session, the Assistant) is held `policy` until the person trusts the project; mail into an untrusted project, within one
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
 leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
-S15): `start_agent`, `create_session` with a first message, `agent_session send`, `send_to_session` with `reportBack`, `ask_project` and the
+S15): `start_agent`, `create_session` with a first message, a `mail` send that is work, `send_to_session` with `reportBack`, `ask_project` and the
 linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (mailbox.md §7.5):
 identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the Assistant per asker group
 (`ask_rate`, no one-open rule any more). **Nothing holds, defers or refuses mail for how much of it there is** (#2014): past 20 mail-started
@@ -47,7 +47,7 @@ and in no other (an earlier request of the same session included): read in the p
 only who the request is from there, and `mail inbox` lists a request by that header and not by the subject the session wrote. (3) **The floor and the record.** A request's turn is never looser than the
 person's own. The steps that can be undone are listed (`UNDOABLE`, `sessions/asked-acts.ts`: a project added or made, a machine added or its link changed, a trust or a
 setting changed, a session renamed or restored, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken away), and so is work
-handed on to a session no looser than the asking one, wherever it is (`create_session`, `start_agent`, `send_to_session`, `agent_session send`, `ask_project`, a handoff,
+handed on to a session no looser than the asking one, wherever it is (`create_session`, `start_agent`, `send_to_session`, a `mail` send that is work, `ask_project`, a handoff,
 `mail send`; the new or target session's preset after any cap, `AskedGateHost.noLooser`): where the work goes is the Assistant's judgement, recorded like every step. These run without the request's card,
 and the cards they raise themselves ask as in the person's turn (the trust card, the project's card, the machine's card, the settings that ask, a start's consent): the
 turn never answers them. Every other step raises the person's card first, cited or not, naming the session and its project, under every preset (`alwaysAsk`, so `auto`

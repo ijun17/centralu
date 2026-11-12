@@ -528,7 +528,7 @@ export class RemoteAgents {
     if (!sent.ok) {
       if (waiting && this.waits.get(rec.sessionId) === waiting) this.dropWait(rec.sessionId)
       if (this.host.children.linkedReports.get(rec.sessionId)?.assistantId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-      return { ok: false, error: `The session "${rec.name}" [${rec.sessionId}] was made on ${machine.name} but did not take the task: ${bare(sent.error)}. Send it again with agent_session, or delete it.` }
+      return { ok: false, error: `The session "${rec.name}" [${rec.sessionId}] was made on ${machine.name} but did not take the task: ${bare(sent.error)}. Send it again by mail, or delete it with agent_session.` }
     }
     // The machine recorded the task before it answered: a task not taken as a turn of its own (the person's first message came first) is not followed
     const notTaken = this.unclaimed(rec, waiting)
@@ -561,7 +561,7 @@ export class RemoteAgents {
     return now?.ok ? now.text : listed
   }
 
-  /** agent_session on a child of a linked machine (#1038): status, wait, send, stop, delete, through the link */
+  /** agent_session on a child of a linked machine (#1038): status, wait, stop, delete, through the link */
   async agentSession(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (opts.action !== 'delete') return this.act(callerId, rec, opts, signal)
     this.deleting.add(rec.sessionId)
@@ -574,7 +574,12 @@ export class RemoteAgents {
     }
   }
 
-  private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+  /** New work for a child of a linked machine (`AgentSessionActions.sendWork`, the caller's `mail` to it), through the link */
+  send(callerId: string, rec: RemoteAgent, text: string): Promise<ChildRunResult> {
+    return this.act(callerId, rec, { sessionId: rec.sessionId, action: 'send', text })
+  }
+
+  private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts | { sessionId: string; action: 'send'; text: string }, signal?: AbortSignal): Promise<ChildRunResult> {
     if (rec.callerId !== callerId) return { ok: false, error: `${rec.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.` }
     const reader = this.host.linkedReader
     if (!reader) return { ok: false, error: `${rec.sessionId} is on ${rec.machine}, and no machine is linked to this computer now.` }
@@ -613,8 +618,7 @@ export class RemoteAgents {
         return now.running ? this.awaitTurn(rec, signal, ASK_WAIT_MS) : this.atRest(rec, now.state, reader)
       }
       case 'send': {
-        const text = opts.text?.trim()
-        if (!text) return { ok: false, error: 'Give the text to send.' }
+        const { text } = opts
         // Its deletion is under way: held, so the deletion decides (#2114). It goes if the child stays, and its sender is told if it goes
         if (this.deleting.has(rec.sessionId)) return this.hold(rec, text)
         // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)

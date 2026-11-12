@@ -12,7 +12,7 @@ import type {
   SessionInfo,
 } from '@cc/protocol'
 import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
-import type { DelegationHost } from './delegation-host.js'
+import type { DelegatedWork, DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
 import { newAssistantAgentFolder } from './assistant-home.js'
 import { AgentStartGates, agentStartGateError } from './agent-start-gates.js'
@@ -67,7 +67,8 @@ function startAgentLate(progress: StartProgress): ChildRunResult {
 
 /** What start_agent reaches of the rest of the delegation flow (`DelegationFlow`): the child's run, its wait, its answers */
 export type StartAgentDelegations = Pick<DelegationWaits, 'agentWorking'> & {
-  startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent?: boolean): Delegation
+  /** `DelegationFlow.delegate`: the one way a session is given work */
+  delegate(w: DelegatedWork): { d: Delegation; delivered: Promise<string | null> }
   awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing?: boolean, boundMs?: number): Promise<ChildRunResult>
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined
   /** start_agent on a linked machine (#1038) */
@@ -487,25 +488,19 @@ export class AgentStartFlow {
     // A worktree session is named by its branch, as every worktree session is, unless the caller named it (#861)
     if (name) this.host.rename(child.id, name)
     const key = `${callerId}>${child.id}`
-    const d = this.flow.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
-    // The delegation counts the child now
-    release()
-    progress.d = d
+    // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
+    const instructions = project.id === ASSISTANT_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
     /*
      * The mailbox writes the task down as a thread the caller owns (docs/plans/mailbox.md §8.1, §10.6.3): the caller's own words, not the frame. Before
      * they go in, which can outlast the call's bound: a host that goes meanwhile leaves the task to the next one, whose start answers it
      */
-    const withdraw = this.host.children.delegated(callerId, child.id, 'start_agent', choice.task)
-    try {
-      // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
-      const instructions = project.id === ASSISTANT_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
-      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions, canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
-    } catch (e) {
-      withdraw()
-      this.host.children.dropDelegation(key, d)
-      if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)
-      return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
-    }
+    const frame = agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions, canMailParent(child, callerId))
+    const { d, delivered } = this.flow.delegate({ key, callerId, sessionId: child.id, target: { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, agent: true, via: 'start_agent', task: choice.task, frame })
+    // The delegation counts the child now
+    release()
+    progress.d = d
+    const failed = await delivered
+    if (failed) return done({ ok: false, error: `Could not give the task to the new session: ${failed}` })
     const notice = this.host.handles.get(child.id)?.delegationNotice?.()
     return { key, d, notice: [unchecked, forkNote, notice].filter(Boolean).join('; ') || undefined }
   }

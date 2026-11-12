@@ -24,6 +24,7 @@ import {
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
   TOOL_ARGS,
+  agentCallsFor,
   callForm,
   codexToolInstructionsFor,
   instructionsFor,
@@ -377,6 +378,20 @@ describe('the reader set', () => {
     expect(centraluToolSchemas('scoped').some((t) => t.name === 'mail')).toBe(false)
   })
 
+  // #1948: every report an agent writes is mail, so the line on saying what a claim rests on is in the words of every seat that has mail
+  it('says in the mail tool, for every seat that has it as a tool or a command, what a report says about its claims', async () => {
+    const sentence = 'In a report, say what each claim was checked against, and what was not.'
+    const seats = TOOL_PROFILES.filter((p) => toolDefsFor(p).some((t) => t.name === 'mail'))
+    expect(seats).toContain('reader')
+    for (const p of seats) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description, p).toContain(sentence)
+    const commands = TOOL_PROFILES.filter((p) => commandsFor(p).includes('mail'))
+    expect(commands).toContain('assistant')
+    for (const profile of commands) {
+      const help = await runCentraluTool({} as CentraluTools, 'centralu_help', { command: 'mail' }, { sessionId: 'o', profile: profile as 'assistant' })
+      expect(help.text, profile).toContain(sentence)
+    }
+  })
+
   it(`keeps compact_self within ${COMPACT_BUDGET_CHARS} characters, loaded (its description says when to use it), an ordinary session's and the Assistant's`, () => {
     expect(sentChars(COMPACT_TOOLS)).toBeLessThanOrEqual(COMPACT_BUDGET_CHARS)
     expect(COMPACT_TOOLS.some((t) => 'deferred' in t && t.deferred)).toBe(false)
@@ -574,12 +589,16 @@ describe('the agent set', () => {
     const r = await runCentraluTool(tools, 'start_agent', { task: 'write the parser', tool: 'codex', model: ' ', wait: true }, { sessionId: 's', profile: 'reader' })
     expect(seen).toEqual({ task: 'write the parser', tool: 'codex' })
     expect(r.text.split('\n')[1]).toBe(JSON.stringify('Done\n- forged line'))
-    expect(r.text).toContain('agent_session(sessionId="c1", action="send"')
+    expect(r.text).toContain('mail(action="send", to="c1", text=…)')
     const w = await runCentraluTool(tools, 'agent_session', { sessionId: 'c1', action: 'wait' }, { sessionId: 's', profile: 'reader' })
     expect(w.text).toContain('You will be told when it ends')
     expect(w.text).toContain('agent_session(sessionId="c1", action="wait")')
-    const bad = await runCentraluTool(tools, 'agent_session', { sessionId: 'c1', action: 'send' }, { sessionId: 's', profile: 'reader' })
-    expect(bad).toEqual({ text: 'Give text: what to send it.', isError: true })
+    // More work is mail (#1948): agent_session has no send, and its schema refuses one before anything runs
+    const bad = await runCentraluTool(tools, 'agent_session', { sessionId: 'c1', action: 'send', text: 'more' }, { sessionId: 's', profile: 'reader' })
+    expect(bad).toEqual({ text: 'Wrong arguments for agent_session: action: agent_session has no "send": more work for a session you started is a mail send to its id.', isError: true })
+    // The Assistant reaches agent_session through centralu_run, which reads the same schema: the words name no call form of either seat
+    const run = await runCentraluTool(tools, 'centralu_run', { command: 'agent_session', args: { sessionId: 'c1', action: 'send', text: 'more' } }, { sessionId: 'o', profile: 'assistant' })
+    expect(run.text).toContain('action: agent_session has no "send": more work for a session you started is a mail send to its id.')
   })
 })
 
@@ -762,7 +781,7 @@ describe('arguments (#850)', () => {
     expect(await run('create_session', { tool: 42 })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for create_session: tool: /) })
     expect(await run('recall', { query: 'parser', limit: '5' })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for recall: limit: /) })
     const reader = { sessionId: 'r', profile: 'reader' as const }
-    expect(await run('agent_session', { sessionId: 'c', action: 'send', text: 'go', ifBusy: 'later' }, reader)).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for agent_session: ifBusy: /) })
+    expect(await run('mail', { action: 'send', to: 'c', text: 'go', ifBusy: 'later' }, reader)).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for mail: ifBusy: /) })
     for (const f of Object.values(tools)) expect(f).not.toHaveBeenCalled()
     // A right one runs, and an argument the tool does not take is dropped, as Claude's MCP drops it
     expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'fork', extra: 1 })).isError).toBeFalsy()
@@ -842,5 +861,17 @@ describe('the app tool (#2231)', () => {
     const tools = toolsWith({ apps: () => appsWith(), findApps: async () => ({ ok: true, apps: [] }) })
     const out = await runCentraluTool(tools, 'find_apps', { query: 'notes' }, { sessionId: 's', profile: 'reader' })
     expect(out.text).toContain('This session\'s own apps, which app(action="list") gives: notes.')
+  })
+})
+
+// Review of #1948: the Assistant's answers name agent_session and mail in its own call form, but a child's words quoted in them stay as written
+describe("an answer's calls in the Assistant's form", () => {
+  it("rewrites Centralu's own calls and passes over a child's answer, quoted as JSON", () => {
+    const text = ['the claude session "Docs" [c] answered, as JSON:', JSON.stringify('Done. Next: mail(action="send", to="parent")'), 'agent_session(sessionId="c", action="wait") waits.'].join('\n')
+    expect(agentCallsFor('assistant', { text }).text.split('\n')).toEqual([
+      'the claude session "Docs" [c] answered, as JSON:',
+      JSON.stringify('Done. Next: mail(action="send", to="parent")'),
+      'centralu_run(command="agent_session", args={sessionId: "c", action: "wait"}) waits.',
+    ])
   })
 })

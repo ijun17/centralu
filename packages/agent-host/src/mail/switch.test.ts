@@ -198,7 +198,7 @@ describe('the one hold and a refused delegation (§7.4, S15, S16)', () => {
       'Refused (untrusted_project): your project Pex is not trusted, so work you give outside it (to p1) waits for the person to trust Pex. Nothing was started. Centralu shows the person how, and tells you when Pex is trusted; give it again then.',
     )
     // Within its own project nothing is refused
-    expect(w.hooks.refusesDelegation!('x', { sessionId: 'x' }, { tool: 'agent_session', target: 'xi', text: 'hi' })).toBeNull()
+    expect(w.hooks.refusesDelegation!('x', { sessionId: 'x' }, { tool: 'mail', target: 'xi', text: 'hi' })).toBeNull()
     await w.advance(60_000)
     expect(w.to('a')).toEqual([])
     w.store.projects.setProjectTrusted('px', true)
