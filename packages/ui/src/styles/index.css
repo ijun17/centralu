@@ -1132,6 +1132,45 @@
 }
 
 /*
+ * A chip that leaves a row of chips (the status summary on a project's name line, #2202) fades and gives back its width in the same 150ms
+ * (usePresence's LEAVE_MS), so the chips that stay slide over it, not jump by its width when it goes. The width is a max-width that goes to 0 from
+ * more than any chip's own (a width cannot start from `auto`; ease-out, so the part above the chip's own is over in the first moments), and the gap
+ * the row keeps between chips (gap-1, 0.25rem) goes with it as a negative margin. Reduced motion: a short fade only, the chips stay where they
+ * are until it is gone.
+ */
+@keyframes cc-chip-out {
+  from {
+    max-width: 2.5rem;
+    margin-right: 0;
+    opacity: 1;
+  }
+  to {
+    max-width: 0;
+    margin-right: -0.25rem;
+    opacity: 0;
+  }
+}
+@keyframes cc-chip-out-still {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.cc-chip-out {
+  display: flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  animation: cc-chip-out 150ms ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-chip-out {
+    animation: cc-chip-out-still 100ms linear forwards;
+  }
+}
+
+/*
  * A linked machine's capsule that comes (a machine whose link came back, #1616) fades in. Opacity only, so reduced motion
  * keeps it: the change is still shown, without any travel. It never holds the press: the donuts in it are live from the
  * first frame. (A donut that comes after the bar was first drawn has main's own entrance, `.cc-donut-in`.)

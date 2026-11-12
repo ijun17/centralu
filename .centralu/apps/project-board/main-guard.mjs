@@ -11,10 +11,11 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, isOutage, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { createBranch, deleteBranch, GitHubError, FATAL, GUARD_NOTE, isOutage, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
 import { failingStepText, isTestFailure, testName } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
+import { cancelStray, dispatchOn, strayRuns } from './dispatch.mjs'
 import { short } from './util.mjs'
 import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
@@ -546,14 +547,24 @@ async function stepHunt(ctx) {
         // Left by an earlier try: it points at the same commit, so it is used as it is
       }
     }
-    await dispatchWorkflow(repo, WORKFLOW, branch, CI.fullTier ? { tier: 'full' } : undefined)
-    const tries = probe?.sha === step.probe.sha ? (probe.tries ?? 1) + 1 : 1
-    save({ hunt: { ...hunt, probe: { sha: step.probe.sha, head, without, index: step.index, end: step.end === true, branch, at: new Date(now).toISOString(), tries } } })
+    await dispatchOn(repo, [WORKFLOW], branch, head, CI.fullTier ? { tier: 'full' } : undefined)
+    // Two counters: the runs a probe lost (cancelled) and the dispatches that ran on the old commit (stray) are each started again once, and one does not use up the other
+    const same = probe?.sha === step.probe.sha
+    const tries = same ? (probe.tries ?? 1) + (probe.stray ? 0 : 1) : 1
+    const strays = same ? (probe.strays ?? 0) + (probe.stray ? 1 : 0) : 0
+    save({ hunt: { ...hunt, probe: { sha: step.probe.sha, head, without, index: step.index, end: step.end === true, branch, at: new Date(now).toISOString(), tries, strays } } })
     return { did: 'probing', sha: step.probe.sha }
   }
   const runs = (await workflowRuns(repo, WORKFLOW, { branch: probe.branch, event: 'workflow_dispatch' })).filter((r) => r.headSha === (probe.head ?? probe.sha))
   // Started after this probe was: a run of an earlier try on the same commit does not answer it
   const run = runs.find((r) => !r.createdAt || Date.parse(r.createdAt) >= Date.parse(probe.at) - 60_000)
+  // The dispatch ran on the branch as GitHub still had it (#2201), so no run of this commit will come: started again, as a cancelled one is
+  const onOldCommit = !run && (probe.strays ?? 0) < 1 ? await strayRuns(repo, [WORKFLOW], probe.branch, probe.head ?? probe.sha, probe.at) : []
+  if (onOldCommit.length) {
+    await cancelStray(repo, onOldCommit)
+    save({ hunt: { ...hunt, probe: { ...probe, again: true, stray: true } } })
+    return { did: 'retry', sha: probe.sha }
+  }
   if (!run || run.status !== 'completed') {
     // No runner, or a run that never ends: the hunt gives up rather than wait for good
     if (now - Date.parse(probe.at) > PROBE_MAX_MS) {

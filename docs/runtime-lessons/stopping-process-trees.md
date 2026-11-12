@@ -114,8 +114,10 @@ Platforms: Windows.
 Happened: Windows has no groups, so a helper outlived its app; libuv's job object hides this for plain Node children
 but not for detached or Python ones (285be4e9, #360).
 Rule: read the process table with its parent ids and creation times (the warm reader, `os/process-table.ts`, #2178); take the dead root's children created inside its lifetime (a clock tick of slack at the end: Node's clock runs
-behind the creation times, #1773), and deeper children no older than their parent; `taskkill` each, never ourselves, never throw.
-Guard: `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
+behind the creation times, #1773), and deeper children no older than their parent; `taskkill` each, never ourselves, never throw. One that is no longer
+there (a console child's conhost.exe ends with its parent) has no taskkill started for it, and one that ended while taskkill was at it is not reported (#2200: the
+answer is exit code 255 or 128 in the system's language, so the process being gone is what says it).
+Guard: `host/os/kill-tree.test.ts` "a leftover that ended before taskkill reached it"; `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
 the root's own, a later one a later holder's"; `host/apps/external/lifecycle.test.ts` "on Windows, a descendant started outside the app's job,
 left by an app that ended on its own, is ended — no orphan is left behind".
 Platforms: Windows.

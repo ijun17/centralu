@@ -11,7 +11,7 @@ import { g, githubStandIn } from './git-fixture.test-helpers.js'
 import { emptyQueue, pushEvent, quickLanded, normalize, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
-import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
+import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, ghCalls, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('the merge queue batches pull requests waiting for CI into one run (#962)', { timeout: 240_000 * SLOW }, () => {
   it('builds queue/batch-1 from main, runs CI on it once, cancels their own waiting runs, and lands each in order on the tested tree', async () => {
@@ -105,6 +105,38 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBeUndefined()
     expect(queueOnDisk().items.find((i: any) => i.pr === 78).alone).toBeUndefined()
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  it("reads the branch until it shows the batch's last commit before it starts CI on it (#2201)", async () => {
+    // GitHub shows queue/batch-1 as it was made, at main, for two reads after the merges moved it
+    runtime(batchState({ headStale: { n: 2 } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+    expect(gh().headReads).toBe(3)
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual(['queue/batch-1'])
+  })
+
+  it('starts CI once more when the run that came is on another commit, says so, and does so only once', async () => {
+    // The first dispatch ran on main's commit, as run 43113309704 did: the batch's own run never comes from it
+    runtime(batchState({ dispatchStale: 5 }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchEvents().some((t) => t.includes('it was started again')), 'the second dispatch')
+    await morePolls(6)
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual(['queue/batch-1', 'queue/batch-1'])
+    expect(batchEvents().filter((t) => t.includes('it was started again'))).toEqual([`Batch queue/batch-1: CI started on another commit than the batch's batch-b (GitHub did not show the branch there yet), so it was started again.`])
+    expect(batchesOnDisk()[0].redispatched).toBeTruthy()
+    // The run on the old commit holds a full run's runners: cancelled, once
+    expect(writes().filter((w) => w[0] === 'cancel' && w[1] === '960')).toHaveLength(1)
+  })
+
+  it('lands the batch from the run of the second dispatch', async () => {
+    runtime(batchState({ dispatchStale: 1 }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land')
+    expect(gh().dispatched).toHaveLength(2)
   })
 
   it('makes no batch for an hour when CI cannot be started on it, cancels none of their own runs, and lists the queue in the order it was made', async () => {
@@ -215,8 +247,8 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
       ])
       expect(batchEvents().filter((t) => t.includes('would not merge'))).toEqual([])
       expect(batchEvents().at(-1)).toBe('Batch queue/batch-1: landed #77, #78; main at main-78 is the tree CI tested.')
-      // The head of the branch was read once, for the one lost answer
-      expect(gh().headReads).toBe(1)
+      // The head of the branch was read once, for the one lost answer, and once more before CI was started on it
+      expect(gh().headReads).toBe(2)
     })
 
     it('drops the batch when the branch cannot be read afterwards, and goes on with none of it', async () => {
@@ -1401,6 +1433,11 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       await morePolls()
       expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'feat/unbatched']])
       expect(gh().dispatched).toEqual([{ ref: 'feat/unbatched', inputs: null }])
+      // Through the one way the queue starts CI (#2201): the branch is read before the run is started on it
+      const calls = ghCalls()
+      const read = calls.findIndex((a) => a.join(' ').includes('/commits/feat%2Funbatched'))
+      expect(read).toBeGreaterThanOrEqual(0)
+      expect(read).toBeLessThan(calls.findIndex((a) => a.join(' ').includes('/dispatches')))
       expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on feat/unbatched')
       expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
     })

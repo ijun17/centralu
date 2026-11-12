@@ -30,8 +30,9 @@ export function plantTreeScript(dir: string): string {
       'if (Number(depth) > 0) {',
       "  spawn(process.execPath, [__filename, pidFile, String(Number(depth) - 1)], { detached: true, stdio: 'ignore', windowsHide: true }).unref()",
       '}',
-      // After the spawn, so once the file holds every pid, every process in the tree has been started
-      "appendFileSync(pidFile, process.pid + '\\n')",
+      // After the spawn, so once the file holds every pid, every process in the tree has been started. With its depth: the
+      // lines come in the order the processes got to write them, which on a loaded machine is not the order of the tree (#2205)
+      "appendFileSync(pidFile, depth + ' ' + process.pid + '\\n')",
       'setInterval(() => {}, 1000)',
     ].join('\n'),
   )
@@ -58,10 +59,18 @@ export function processCounters(): { threads: number; handles: number; privateMb
   return { threads: threads!, handles: handles!, privateMb: Math.round(bytes! / 1048576) }
 }
 
-/** The pids the tree has written so far */
+/** The pids the tree has written so far, by place in the tree (the root first), not by the order they were written in (#2205) */
 export function treePids(pidFile: string): number[] {
   if (!existsSync(pidFile)) return []
-  return readFileSync(pidFile, 'utf8').split(/\r?\n/).filter(Boolean).map(Number)
+  return readFileSync(pidFile, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [depth, pid] = line.split(' ').map(Number)
+      return { depth: depth!, pid: pid! }
+    })
+    .sort((a, b) => b.depth - a.depth)
+    .map((row) => row.pid)
 }
 
 export { alive }

@@ -278,6 +278,17 @@ test('Sidebar: folding survives a restart (#205)', async ({ page }) => {
   await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
 })
 
+/**
+ * Hovers a project's status summary once it has its final width. A chip that was counted a moment ago (the session was working) fades out beside
+ * the new one and the summary narrows as it goes: hovered before that, the pointer is left outside the narrower summary and its tip closes
+ * (#2202: 1 run in 40 under load, with the chip still leaving at the hover). The chips slide over it now, but the summary still ends narrower.
+ */
+async function hoverSummary(page: Page, name: string) {
+  const line = page.getByTestId(`fold-summary-${name}`)
+  await expect(line.locator('[data-leaving]')).toHaveCount(0)
+  await line.hover()
+}
+
 test("Sidebar: a marker appears on the name row when a folded project's session is waiting for approval (#205)", async ({
   page,
 }) => {
@@ -296,7 +307,7 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   await expect(mark).toHaveAttribute('data-look', 'waiting')
   await expect(mark.locator('> span')).toHaveCSS('border-top-color', await tokenColor(page, '--color-ink-signal'))
   await expect(mark.locator('> span')).toHaveCSS('border-top-width', '2px')
-  await page.getByTestId('fold-summary-alpha').hover()
+  await hoverSummary(page, 'alpha')
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An open project keeps its count too (owner, 2026-11-05): beta's session is working
   await expect(page.getByTestId('fold-summary-beta').locator('[data-state="working"]')).toHaveText('1')
@@ -316,7 +327,7 @@ test('Sidebar: a session paused on its own background work has its own chip afte
   await expect(chip).toHaveAttribute('data-look', 'idle')
   await expect(chip.getByTestId('fold-summary-background-dot')).toBeVisible()
   await expect(line.locator('[data-state="working"]')).toHaveCount(0)
-  await line.hover()
+  await hoverSummary(page, 'alpha')
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 waiting on background work')
   const box = (await line.boundingBox())!
   await page.screenshot({ path: testInfo.outputPath('project-line-background.png'), clip: { x: 0, y: box.y - 10, width: box.x + box.width + 12, height: box.height + 20 } })
@@ -351,6 +362,66 @@ for (const motion of ['no-preference', 'reduce'] as const) {
     expect(await page.evaluate(() => (window as any).__leaving)).toBe('1')
     await expect(chip).toHaveCount(0)
     await expect(page.getByTestId('fold-summary-alpha')).toHaveCount(0)
+  })
+}
+
+/*
+ * A chip that leaves gives back its width as it fades (#2202): the chip that stays slides over to where it ends, where it jumped by 21px in one frame
+ * when the leaving one went (design-system §9, "never a jump"). The test holds the clock, so the chip is still leaving (the exit's timer is Playwright's),
+ * and takes hold of every animation on the line half way through, so it reads what the engine draws there, not how fast the page answers.
+ */
+for (const motion of ['no-preference', 'reduce'] as const) {
+  test(`Sidebar: the chips that stay on a project line slide over a chip that leaves, not jump (#2202, reduced motion: ${motion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: motion })
+    await page.clock.install()
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const working = await newSession(page, 'alpha', 'A task')
+    const failed = await newSession(page, 'alpha', 'B task')
+    const states = (a: string, b: string) =>
+      page.evaluate(
+        ({ a, b, working, failed }) =>
+          (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [working]: { ...s.sessions[working], state: a }, [failed]: { ...s.sessions[failed], state: b } } })),
+        { a, b, working, failed },
+      )
+    await states('working', 'error')
+    const line = page.getByTestId('fold-summary-alpha')
+    const stays = line.locator('[data-state="error"]')
+    await expect(line.locator('[data-state="working"]')).toHaveText('1')
+    await expect(stays).toHaveText('1')
+    await page.clock.pauseAt(new Date(Date.now() + 60_000))
+    const x = async () => (await stays.boundingBox())!.x
+    const before = await x()
+
+    await states('idle', 'error')
+    await expect(line.locator('[data-state="working"][data-leaving]')).toHaveCount(1)
+    // Half way through every animation that ends (a chip that stays has none; the ones that run for ever are left)
+    await line.evaluate((el) => {
+      for (const a of el.getAnimations({ subtree: true })) {
+        const end = Number(a.effect?.getComputedTiming().endTime)
+        if (!Number.isFinite(end)) continue
+        a.pause()
+        a.currentTime = end / 2
+      }
+    })
+    const half = await x()
+    await line.evaluate((el) => {
+      for (const a of el.getAnimations({ subtree: true })) if (Number.isFinite(Number(a.effect?.getComputedTiming().endTime))) a.finish()
+    })
+    const end = await x()
+    // The chip's own width and the gap beside it: where the one that stays ends up once it is gone
+    await page.clock.runFor(151)
+    await expect(line.locator('[data-state="working"]')).toHaveCount(0)
+    const after = await x()
+    expect(after).toBeGreaterThan(before + 15)
+    if (motion === 'reduce') {
+      // A short fade only: nothing moves until the chip is gone
+      expect(half).toBeCloseTo(before, 0)
+    } else {
+      expect(half).toBeGreaterThan(before + 2)
+      expect(half).toBeLessThan(after - 2)
+      // Not a jump at the end either: where it was drawn at the end of the exit is where it stays
+      expect(Math.abs(after - end)).toBeLessThan(1.5)
+    }
   })
 }
 

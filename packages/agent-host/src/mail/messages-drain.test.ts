@@ -3,6 +3,7 @@
  * what is inline, what is held, a party that goes, a handoff, the role that moves, and what a crash leaves.
  */
 import { describe, expect, it } from 'vitest'
+import { SLOW } from '../../../../tooling/test-timing.js'
 import { PERSON } from './address.js'
 import { A, B, C, ORC, W, X, addr, refusedFor, world } from './messages.test-helpers.js'
 import { refusalReason } from './rules.js'
@@ -386,6 +387,8 @@ describe('what a crash leaves (§7.6.5)', () => {
 })
 
 describe('holds and settling, by model', () => {
+  /* 25 seeds of 50-60 steps, each a world of its own: 0.7-0.9 s alone, 5 s on a CI runner twice as slow (#2203). The sweep is the test, so it keeps its size and its own limit */
+  const MODEL_LIMIT = 30_000 * SLOW
   /** A seeded generator: a failing seed can be run again */
   const rng = (seed: number) => {
     let s = seed
@@ -421,7 +424,7 @@ describe('holds and settling, by model', () => {
       }
       expect(sent, `seed ${seed}`).toBe(60)
     }
-  })
+  }, MODEL_LIMIT)
 
   it('in any run of sends, answers and dones, a watched row is settled exactly as its recipient or sender acted', () => {
     for (let seed = 1; seed <= 25; seed++) {
@@ -474,7 +477,7 @@ describe('holds and settling, by model', () => {
         }
       }
     }
-  })
+  }, MODEL_LIMIT)
 
   it('a refused send writes nothing', () => {
     const w = world()

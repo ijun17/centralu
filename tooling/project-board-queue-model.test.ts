@@ -40,6 +40,7 @@ const CI_CHANGES = readFileSync(join(REPO_ROOT, '.github/scripts/ci-changes.mjs'
 const hoisted = vi.hoisted(() => {
   // Every poll due at once: the model's clock is the ticks'
   process.env.PROJECT_BOARD_QUEUE_POLL_MS = '1'
+  process.env.PROJECT_BOARD_QUEUE_SEEN_MS = '1'
   const world: { current?: unknown } = {}
   return { world }
 })
@@ -56,6 +57,7 @@ vi.mock('../.centralu/apps/project-board/github.mjs', async (importOriginal) => 
     readRequired: async () => ({ names: w().required, unresolved: [], added: 0, source: 'the model' }),
     readWorkflowChecks: async (_repo: string, sha: string, o: { branch?: string }) => w().readWorkflowChecks(sha, o?.branch),
     readChecks: async (_repo: string, sha: string) => w().readWorkflowChecks(sha).reported,
+    workflowRuns: async (_repo: string, _file: string, o?: { branch?: string }) => w().dispatchRuns(o?.branch),
     runJobSteps: async (_repo: string, runId: number) => w().runJobSteps(runId),
     jobNotes: async () => [],
     readJobLog: async () => '',
@@ -465,6 +467,10 @@ class World {
         r.checks.map((c) => ({ kind: 'run', appSlug: 'github-actions', suiteId: r.suite, name: c.name, status: c.status, conclusion: c.conclusion, id: c.id, jobId: String(c.id), url: `https://github.com/${R}/actions/runs/${r.id}/job/${c.id}`, at: r.createdAt })),
       ),
     }
+  }
+  /** The dispatched runs on a branch, as GitHub lists a workflow's runs */
+  dispatchRuns(branch?: string) {
+    return this.runs.filter((r) => r.event === 'workflow_dispatch' && r.branch === branch).map((r) => ({ id: r.id, headSha: r.sha, createdAt: r.createdAt }))
   }
   runJobSteps(runId: number) {
     const r = this.runs.find((x) => x.id === runId)

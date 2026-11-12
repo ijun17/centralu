@@ -106,12 +106,15 @@ if (args[0] === 'issue' && args[1] === 'view') {
   if (st.headLost && st.headLost.n > 0) { st.headLost.n--; save(); fail('Get "https://api.github.com/' + path + '": EOF') }
   const head = (st.heads ?? {})[decodeURIComponent(path.slice((R + '/commits/').length))]
   if (!head) fail('Not Found (HTTP 404)')
-  out({ sha: head.sha, commit: { tree: { sha: head.tree } } })
+  // headStale: GitHub still shows the branch as it was made, for the first n reads after the merges moved it
+  const shown = st.headStale && st.headStale.n > 0 && st.headStale.n-- ? (st.main ?? { sha: 'main0', tree: 'tree-main0' }) : head
+  save()
+  out({ sha: shown.sha, commit: { tree: { sha: shown.tree } } })
 } else if (path === R + '/git/refs' && args.includes('POST')) {
   const body = JSON.parse(stdin)
   if ((st.refs ?? []).includes(body.ref)) fail('Reference already exists (HTTP 422)')
   write(['branch', body.ref.replace('refs/heads/', ''), body.sha])
-  st.heads = { ...st.heads, [body.ref.replace('refs/heads/', '')]: st.main ?? { sha: 'main0', tree: 'tree-main0' } }
+  st.heads = { ...st.heads, [body.ref.replace('refs/heads/', '')]: st.main && st.main.sha === body.sha ? st.main : { sha: body.sha, tree: 'tree-' + body.sha } }
   save()
   out({ ref: body.ref })
 } else if (path === R + '/merges') {
@@ -135,7 +138,13 @@ if (args[0] === 'issue' && args[1] === 'view') {
     const head = require('node:child_process').execFileSync('git', ['-C', st.origin, 'rev-parse', 'refs/heads/' + body.ref], { encoding: 'utf8' }).trim()
     st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 7000 + st.dispatched.length, run_attempt: 1, head_sha: head, head_branch: body.ref, event: 'workflow_dispatch', status: 'completed', conclusion: answer, created_at: '2099-01-01T00:00:00Z' }] }
   }
-  write(['dispatch', body.ref])
+  // dispatchStale: the first n dispatches ran on the commit the branch had before (main's), as run 43113309704 did, and the batch's own run never comes
+  if (st.dispatchStale > 0) {
+    st.dispatchStale--
+    st.branchRuns = { ...st.branchRuns, [body.ref]: [{ id: 960, run_attempt: 1, head_sha: (st.main ?? { sha: 'main0' }).sha, head_branch: body.ref, event: 'workflow_dispatch', status: 'in_progress', conclusion: null, created_at: new Date().toISOString() }] }
+    st.writes = [...(st.writes ?? []), ['dispatch', body.ref]]
+    save()
+  } else write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
@@ -334,7 +343,7 @@ afterAll(() => {
  * steps it with `until` and `polls` and waits for no clock. The fake
  * `gh` answers in the app's own process (`inProcess`), so a poll costs no process start (docs/plans/os-layer.md §2.4).
  */
-export const FAST = { PROJECT_BOARD_QUEUE_STEP: 'read', PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '1' }
+export const FAST = { PROJECT_BOARD_QUEUE_STEP: 'read', PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '1', PROJECT_BOARD_QUEUE_SEEN_MS: '1' }
 /**
  * Every git the tests and the app run here (#1346): no automatic maintenance. Since git 2.29 a commit, merge or fetch may
  * start a detached `git maintenance run --auto` that goes on working in the checkout after the command returns, which

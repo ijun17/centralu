@@ -310,6 +310,50 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     expect(issues()[0]!.title).toBe('Main is red since #83 feat(apps): change 83')
   })
 
+  it('starts a probe once its branch shows the commit, and once more when the run that came is on another commit (#2201)', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [, c2, c3, c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      // GitHub shows the first probe's branch as it was before for two reads, and its first run starts on that old commit
+      headStale: { n: 2 },
+      dispatchStale: 1,
+      on: {
+        [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'success')] } },
+        [`dispatch:${probe(c3)}`]: { branchRuns: { [probe(c3)]: [probeRun(992, c3, 'failure')] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect')
+    expect(guardOnDisk().hunt.culprit).toMatchObject({ sha: c3 })
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual([probe(c2), probe(c2), probe(c3)])
+    // Two stale reads, then the one that showed the commit, before the first dispatch
+    expect(gh().headReads).toBeGreaterThanOrEqual(3)
+    // The run on the old commit is cancelled, once
+    expect(writes().filter((w) => w[0] === 'cancel' && w[1] === '960')).toHaveLength(1)
+  })
+
+  it('starts a probe again for a run that came cancelled even after a stray run used up its restart (#2201)', async () => {
+    const repo = mainRepo(['81', '82', '83', '84'].map((n) => ({ subject: `feat(apps): change ${n} (#${n})`, files: [`packages/a${n}.ts`] })))
+    const [, c2, , c4] = repo.shas as [string, string, string, string]
+    const probe = (sha: string) => `queue/bisect-${sha.slice(0, 12)}`
+    landed(c4)
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c4, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      // The first dispatch ran on the old commit; the next two come cancelled, as a lost runner does
+      dispatchStale: 1,
+      on: { [`dispatch:${probe(c2)}`]: { branchRuns: { [probe(c2)]: [probeRun(991, c2, 'cancelled')] } } },
+    })
+    await call('merge_queue')
+    await until(() => !!guardOnDisk().hunt?.endedAt, 'the bisect to give up')
+    // The stray restart and the cancelled one are counted apart: three starts, where one shared count gave two
+    expect(gh().dispatched.map((d: { ref: string }) => d.ref)).toEqual([probe(c2), probe(c2), probe(c2)])
+  })
+
   it('does nothing while main is green, and keeps the app running while main has a run going', async () => {
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     const going = { ...mainRun(990, repo.shas[0]!, null), status: 'in_progress' }

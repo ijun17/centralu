@@ -2,8 +2,8 @@ import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, statSync } from 'node:fs'
 import { aliases } from './tooling/aliases.js'
-// Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
-import { SLOW } from './tooling/test-timing.js'
+// Windows gets three times the time limits (#368), and a CI runner the default test limit (#2203); a test that sets its own limit multiplies by SLOW
+import { defaultLimit, SLOW } from './tooling/test-timing.js'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -60,7 +60,7 @@ export default defineConfig({
      * `test-env/data-dir` fails a test file that writes it by hand.
      */
     unstubEnvs: true,
-    testTimeout: 5_000 * SLOW,
+    testTimeout: defaultLimit(5_000, process.platform, process.env.CI),
     hookTimeout: 10_000 * SLOW,
     exclude: EXCLUDE,
     /*
