@@ -100,13 +100,14 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       return sent
     },
 
-    async closeMail(outcome) {
+    async closeMail(outcome, threadId) {
       const platform = get().platform
-      const open = get().mailThread
-      if (!platform || !open) return false
+      const id = threadId ?? get().mailThread?.thread.id
+      if (!platform || !id) return false
+      // The host's own act on the person's mailbox: it needs no other machine to answer, so a thread whose other party is away closes as any (#2226)
       return act('close this mail', async () => {
-        await platform.mail.close(open.thread.id, outcome)
-        await refreshThread(get, set, open.thread.id)
+        await platform.mail.close(id, outcome)
+        await refreshThread(get, set, id)
         void get().loadMail()
       })
     },

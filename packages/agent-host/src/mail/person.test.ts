@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PERSON } from './address.js'
+import { PERSON, sessionAddress } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
 import { refusedFor } from './messages.test-helpers.js'
@@ -712,6 +712,37 @@ describe('work a script started (§8.1, #1468)', () => {
     const read = w.tool.run('a', { action: 'read', thread: task.id }).text
     expect(read).toContain('A script the person set up ("ci runner") wrote it, not the person')
     expect(read).not.toContain('The person wrote it.')
+  })
+})
+
+describe('the person finishes their own side of mail whose other party is on a linked machine that is away (#2226)', () => {
+  /** A session of a linked machine, as this host names it (`<machine>.<id>`): not one of this host's own sessions, so it is never told anything now */
+  const away = sessionAddress('hub-aaaaaaaa', 'm1.s9')
+  const withMachineAway = (w: ReturnType<typeof hostWorld>) => {
+    const r = ready(w)
+    return { ...r, person: new MailPerson(r.service, w.store.mailbox, w.delivery, { session: (id) => (id.startsWith('m1.') ? undefined : { name: id, state: 'idle' }), legacyChain: () => [], projectLabel: () => 'p', untrusted: () => false, turnOn: () => undefined, tellsNow: () => false, tell: async () => {} }) }
+  }
+
+  it('Mark done on a thread a linked machine’s session wrote leaves the Inbox at once, and the row it settled is the one the next connect tells that machine', () => {
+    const { person, store, service } = withMachineAway(hostWorld())
+    const q = service.send(away, { to: [PERSON], text: 'Which branch?', needsReply: true }).message
+    expect(person.list().threads.map((t) => [t.id, t.unread])).toEqual([[q.id, 1]])
+    // Opened as the person opens it, then Mark done
+    person.thread(q.id)
+    const closed = person.close(q.id, 'finished')
+    expect(closed).toMatchObject({ state: 'done', outcome: 'finished', unread: 0 })
+    expect(store.mailbox.recipient(q.id, PERSON)).toMatchObject({ settled: 'done' })
+    // Told to the machine from the stored row, when its link is back (`MailAcross.syncOnce`, linked-mail-across.test.ts)
+    expect(store.mailbox.acrossRows('hub-aaaaaaaa', 0).map((r) => [r.messageId, r.recipient, r.settled])).toContainEqual([q.id, PERSON, 'done'])
+  })
+
+  it('Dismiss on mail held for a message to such a session leaves the Inbox at once', () => {
+    const { person, store, service } = withMachineAway(hostWorld())
+    const m = service.sentAcross(A, { id: mid(50), to: away, text: 'do the thing', needsReply: true })
+    store.mailbox.hold(away, [m.id], 'uncertain')
+    expect(person.list().held).toHaveLength(1)
+    expect(person.held('dismiss', away, [m.id])).toEqual({ changed: 1 })
+    expect(person.list().held).toEqual([])
   })
 })
 

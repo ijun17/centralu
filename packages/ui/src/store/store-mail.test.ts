@@ -186,6 +186,21 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread?.messages.map((m) => m.body)).toEqual(['which?'])
   })
 
+  it('closes a thread the list names without opening it, and says why when the host refuses (#2226)', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })
+    await useStore.getState().loadMail()
+    expect(useStore.getState().mail?.threads.map((t) => [t.id, t.state])).toEqual([[id, 'open']])
+    expect(await useStore.getState().closeMail('finished', id)).toBe(true)
+    expect(useStore.getState().mailThread).toBeNull()
+    await vi.waitFor(() => expect(useStore.getState().mail?.threads.map((t) => [t.id, t.state])).toEqual([[id, 'done']]))
+    platform.mail.close = async () => {
+      throw new Error('the link is down')
+    }
+    expect(await useStore.getState().closeMail('finished', id)).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not close this mail: the link is down')
+  })
+
   it('says what failed when a close is refused, and the same for a thread that cannot be opened', async () => {
     const platform = attached()
     const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })

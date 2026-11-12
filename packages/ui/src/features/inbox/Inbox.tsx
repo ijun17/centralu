@@ -46,6 +46,7 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
   const openMailThread = useStore((s) => s.openMailThread)
+  const closeMail = useStore((s) => s.closeMail)
   const markDone = useStore((s) => s.markDone)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
@@ -122,6 +123,8 @@ export function Inbox() {
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
+        // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`)
+        else if (row?.kind === 'mail') void (row.thread.working === true ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
       } else if (action === 'allow' || action === 'deny') {
         /*
          * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
@@ -139,7 +142,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, mailThread, closeMailThread])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)

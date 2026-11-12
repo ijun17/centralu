@@ -24,8 +24,11 @@ export type MailSlice = {
    * first, or the link dropped after the host had taken it), so the choices show what became of the question
    */
   replyMail: (text: string, kind?: 'note' | 'answer' | 'question', answers?: string) => Promise<boolean>
-  /** Closes the open thread: Mark done (`finished`) or Drop (`dropped`). A session working on it is stopped and told (the host's close, 3.10) */
-  closeMail: (outcome?: 'finished' | 'failed' | 'stopped' | 'dropped') => Promise<boolean>
+  /**
+   * Closes the open thread, or the one `threadId` names (the list's Done, which opens nothing): Mark done (`finished`) or Drop (`dropped`). A session working on it
+   * is stopped and told (the host's close, 3.10). True when it closed; false, with the host's words in a toast, when it did not
+   */
+  closeMail: (outcome?: 'finished' | 'failed' | 'stopped' | 'dropped', threadId?: string) => Promise<boolean>
   /** Sends held mail now, or lets it go */
   heldMail: (action: 'release' | 'dismiss', row: Pick<MailHeldRow, 'recipient' | 'messageId'>) => Promise<boolean>
   /** Lifts a pause for a session's budget, or a thread's turns */
