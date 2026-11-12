@@ -25,6 +25,7 @@ import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dra
 import type { AppLinkDrop } from '../app-frame/dragRelay.js'
 import { droppedPiece, droppedText, insertAtCaret, isTextDrag, type DroppedText } from './dragLink.js'
 import { appReachNotice } from './appReachNotice.js'
+import { appTitleOf, projectLabelOf } from '../../store/names.js'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { ComposerFooter } from './ComposerFooter.jsx'
 import { EMPTY_CHAT, EMPTY_QUESTIONS } from './empty.js'
@@ -490,8 +491,8 @@ export const Composer = memo(function Composer({
         if (ask !== asked.current || r.reachable) return
         const s = useStore.getState()
         const app = s.externalApps.find((a) => a.appId === appId && a.projectId === appProject)
-        const project = appProject === null ? null : (s.projects[appProject]?.name ?? 'another project')
-        setAppNotice({ text: appReachNotice(r, app?.name ?? appId, project), reason: r.reason })
+        const project = appProject === null ? null : projectLabelOf(s.projects, appProject) || 'another project'
+        setAppNotice({ text: appReachNotice(r, appTitleOf({ name: app?.name, appId }), project), reason: r.reason })
       },
       () => {},
     )

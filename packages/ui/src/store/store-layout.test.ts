@@ -785,7 +785,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
  */
 describe('a workspace snapshot that could not be read', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
-  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true }
+  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true, sidebarWidth: 300 }
 
   it('is said, and a change made meanwhile is not saved over it', async () => {
     const mock = new MockPlatform()
@@ -889,6 +889,49 @@ describe('a workspace snapshot that could not be read', () => {
       vi.useRealTimers()
     }
   })
+
+  // The steps are the window's, not a reconnect's: a reconnect reads at once and the count goes on where it was
+  it('goes on up the same steps after a reconnect: four tries in all, then the give-up', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock, failures } = await failedFirstRead(Infinity)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(failures()).toBe(2)
+      mock.setConnectionState('disconnected')
+      mock.setConnectionState('connected')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(failures()).toBe(3)
+      useStore.setState({ toast: null })
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(failures()).toBe(4)
+      expect(useStore.getState().toast).toBe('Could not read the window layout after 4 tries; the one on screen is saved in its place')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A snapshot that reads but cannot be restored is a failed read too: the window must not stay unsaved for good
+  it('that reads but cannot be restored is tried again, and saved over after the last try', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock } = await failedFirstRead(1)
+      let restores = 0
+      useStore.setState({
+        setSidebarWidth: () => {
+          restores++
+          throw new Error('the restore threw partway')
+        },
+      })
+      await vi.advanceTimersByTimeAsync(1_000 + 5_000 + 30_000)
+      expect(restores).toBe(3)
+      expect(useStore.getState().toast).toBe('Could not read the window layout after 4 tries; the one on screen is saved in its place')
+      useStore.getState().toggleProjectFold('after-giving-up')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(folds(mock)).toEqual(['kept-fold', 'after-giving-up'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 /*
@@ -964,6 +1007,28 @@ describe('a workspace save that fails is sent again', () => {
       await vi.advanceTimersByTimeAsync(1_000 + 5_000)
       expect(useStore.getState().toast).toBeNull()
       await vi.advanceTimersByTimeAsync(30_000)
+      expect(useStore.getState().toast).toBe('Could not save the window layout; it is tried again on the next change or reconnect')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // The steps count on across a newer save: a person who keeps moving panes is told as soon as the retries are spent
+  it('says so after the same number of tries when a newer save arrives during a wait', async () => {
+    const mock = await attached()
+    const { calls } = failSaves(mock, 100)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.setState({ toast: null })
+      useStore.getState().toggleProjectFold('steps-a')
+      await vi.advanceTimersByTimeAsync(500)
+      useStore.getState().toggleProjectFold('steps-b') // goes at once, on the second step
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls()).toBe(2)
+      await vi.advanceTimersByTimeAsync(5_000 + 29_000)
+      expect(useStore.getState().toast).toBeNull()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(calls()).toBe(4)
       expect(useStore.getState().toast).toBe('Could not save the window layout; it is tried again on the next change or reconnect')
     } finally {
       vi.useRealTimers()

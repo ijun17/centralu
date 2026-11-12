@@ -3,6 +3,7 @@ import { appKeyOf } from '@cc/core'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { projectLabelOf } from '../../store/names.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { Button } from '../../components/Button.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
@@ -136,7 +137,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const release = useStore((s) => s.releasePinnedView)
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
-  const scope = useStore((s) => (pv.projectId ? (s.projects[pv.projectId]?.name ?? 'Project') : 'Other apps'))
+  const scope = useStore((s) => (pv.projectId ? projectLabelOf(s.projects, pv.projectId) : 'Other apps'))
   // The Runs panel (B-7) opens independently per view — a person watching one app's runs moving to another app sees that app's own panel state first
   const [runsOpen, setRunsOpen] = useState(false)
   // The Secrets panel (M4 E) — only exists for an app that declares secrets. If any are unset, the header's button states the count

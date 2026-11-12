@@ -66,7 +66,7 @@ export type Snapshot = {
 const STALE_TMP_MS = 60 * 60_000
 
 /** How deep a version captured before the depth was recorded walked (the fingerprint's old cap) */
-export const LEGACY_DEPTH = 8
+const LEGACY_DEPTH = 8
 
 export class AppVersions {
   /** `remove` is for tests; the default retries a busy file (Windows) */

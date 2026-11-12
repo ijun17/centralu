@@ -19,7 +19,7 @@ import { asObj, tryParseJson } from '../../json-value.js'
  * discovered here the same as any other, and shows up in the list with its reason.
  */
 
-export const PROJECT_APPS_REL = '.centralu/apps'
+const PROJECT_APPS_REL = '.centralu/apps'
 export const USER_APPS_REL = 'apps'
 /** The same location as path segments — the folder creator (`createApp`) passes the guard one segment at a time */
 export const PROJECT_APPS_PARTS = ['.centralu', 'apps'] as const
@@ -171,7 +171,7 @@ export const BROKEN_ROOT_APP_ID = 'centralu-root'
  * `taken` is the ids of the project's apps in `.centralu/apps/`: those are unchanged by #1141, so one with the same id
  * keeps it, and the root app is listed invalid with the reason.
  */
-export function scanRootApp(root: string, taken: readonly string[]): ScannedApp | null {
+function scanRootApp(root: string, taken: readonly string[]): ScannedApp | null {
   const read = readManifestText(root, MANIFEST_FILE)
   if ('missing' in read) return null
   const rootApp = (id: string, rest: Omit<ScannedApp, 'folder' | 'dir' | 'root'>): ScannedApp => ({

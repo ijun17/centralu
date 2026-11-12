@@ -33,7 +33,7 @@ export function nameTaken(path: string): boolean {
 }
 
 /** Where the folder of an app with this id goes, `<apps folder>/<id>`; nothing is created */
-export function appFolderPath(root: string, projectId: string | null, id: string): string {
+function appFolderPath(root: string, projectId: string | null, id: string): string {
   return join(root, ...(projectId === null ? USER_APPS_PARTS : PROJECT_APPS_PARTS), id)
 }
 

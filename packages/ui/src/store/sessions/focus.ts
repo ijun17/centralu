@@ -1,10 +1,11 @@
 import { isAssistantKind } from '@cc/protocol/client'
-import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId } from '@cc/core'
+import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId, nextWaitingSession } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
 import { trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { omitKey } from '../patch.js'
 import { assistantScreen } from '../assistant.js'
+import { computeInbox, currentWaitingId } from '../inbox.js'
 
 /**
  * Picking the session the person looks at: `focusSession`, the one door a dozen call sites go
@@ -20,6 +21,7 @@ type FocusActions = Pick<
   | 'openSearchHit'
   | 'clearSearchTarget'
   | 'openWaiting'
+  | 'openNextWaiting'
   | 'focusSession'
 >
 
@@ -47,6 +49,11 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       if (arrival) get().openApp(arrival.projectId, arrival.appId)
       get().dismissAppArrival(key)
     } else get().focusSession(id, opts)
+  },
+
+  openNextWaiting() {
+    const next = nextWaitingSession(computeInbox(get()), currentWaitingId(get()))
+    if (next) get().openWaiting(next)
   },
 
   focusSession(id, opts) {

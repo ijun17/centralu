@@ -1,5 +1,6 @@
 import type { ProjectInfo } from '@cc/protocol/client'
 import { isAway } from '@cc/core'
+import { useMachineName } from '../../../store/selectors.js'
 import { useStore } from '../../../store/store.js'
 import { formatChangedCount } from '../../../app/format.js'
 import { BranchIcon, ChangesIcon } from '../../../components/icons.jsx'
@@ -17,7 +18,7 @@ export function ProjectDetail({ project }: { project: ProjectInfo }) {
    * state lines dimmed, so a branch or a count from before the link dropped does not read as the folder's state now.
    */
   const away = useStore((s) => isAway(project, s.machines))
-  const machineName = useStore((s) => (project.machine ? (s.machines[project.machine]?.name ?? project.machine) : null))
+  const machineName = useMachineName(project.machine)
   return (
     <span className="flex min-w-48 flex-col gap-1.5" data-testid={`project-detail-${project.name}`}>
       {away && (

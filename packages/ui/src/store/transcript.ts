@@ -409,7 +409,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
  * how much it shrank tells someone roughly when the next compaction might come (only when the tool
  * reports it).
  */
-export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
+function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
   if (e.failed) return `Compaction failed — ${e.reason ?? 'unknown reason'}`
   if (e.before != null && e.after != null) {
     return `Context compacted here · ${formatCount(e.before)} → ${formatCount(e.after)}`
@@ -424,7 +424,7 @@ export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' 
  * message already carries a preview. What this states is the single fact that "this session
  * continues that one," and the full text is kept in the record alongside that fact.
  */
-export function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
+function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
   return `Handed off from "${e.from}" — the note is kept with this session`
 }
 
@@ -448,7 +448,7 @@ const KNOWN_MARKERS: ReadonlySet<string> = new Set([
 ])
 
 /** One stored or live marker's line — the live and restored paths must never word the same marker differently */
-export function markerText(
+function markerText(
   e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
 ): string {
   switch (e.type) {
@@ -495,7 +495,7 @@ export type NoticeLine = {
 }
 
 /** A notice's readable parts, or null for one the host did not place (stored before #342): it reads as its text alone */
-export function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
+function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
   if (!e.from) return null
   return {
     head: e.label ? `${e.from} · ${e.label}` : e.from,
@@ -527,14 +527,14 @@ function markerParts(
 }
 
 /** The model the provider refused, when this error is that failure (#1369) — the host marks it in `error.data`; other errors carry none */
-export function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | null {
+function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | null {
   const data: unknown = e.error.data
   if (typeof data !== 'object' || data === null || !('reason' in data) || data.reason !== 'model_rejected') return null
   return 'model' in data && typeof data.model === 'string' ? data.model : null
 }
 
 /** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
-export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
+function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   // No turn was running — the conversation could not be opened at all (#168, item 5)
   if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
   // Trying again cannot help; picking another model can, and the row offers it (#1369)

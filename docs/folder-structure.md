@@ -116,7 +116,9 @@ centralu/
 │  │     │     updates.ts (Centralu's update and the agent CLIs' versions)  machines.ts (linked machines)
 │  │     │     assistant.ts (the Assistant and its proposals)
 │  │     │     layout.ts (how the window is arranged)  navigation.ts (which screen, back and forward)
-│  │     │     selectors.ts (derived state)  transcript.ts (a conversation's rows)  layers.ts (open layers)
+│  │     │     selectors.ts (derived state)  inbox.ts (what waits on the person)  names.ts (names the screen shows)
+│  │     │     transcript.ts (a conversation's rows)  layers.ts (open layers)  single-flight.ts (one re-read at a time)
+│  │     │     retry.ts (the retry ladder)
 │  │     │     navHistory.ts  panelLayout.ts  foldGroups.ts  reloadBudget.ts  viewReconnect.ts  app-catalog.ts
 │  │     └─ styles/
 │  │

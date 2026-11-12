@@ -33,7 +33,7 @@ export async function carryAppFiles(dataRoot: string, fromKey: string, toKey: st
 }
 
 /** How long one step of a carry's copy may wait for the OS before the carry fails */
-export const CARRY_STEP_MS = 5000
+const CARRY_STEP_MS = 5000
 
 /**
  * The way back (#1204): what a deleted project's root app kept under its project's key goes back to the key it was

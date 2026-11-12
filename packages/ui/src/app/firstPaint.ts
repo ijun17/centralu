@@ -2,7 +2,7 @@ import { applyCachedTheme } from './theme.js'
 import { applyCachedTypography } from './typography.js'
 
 /** The longest the first frame waits for the bundled fonts: a font that cannot load must not keep the window blank */
-export const FONT_WAIT_MS = 3000
+const FONT_WAIT_MS = 3000
 
 /**
  * What an entry does before it draws the app, shared by the browser entry and the desktop entry (#850 item 16).

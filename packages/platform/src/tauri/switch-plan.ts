@@ -242,7 +242,7 @@ export function shellBarText(reason: string | undefined): string {
 }
 
 /** A build in a few words: its version and commit (`0.1.0-beta.10, 2ffcaec5`), or just the commit */
-export function shortBuild(b: Build | undefined): string {
+function shortBuild(b: Build | undefined): string {
   if (!b) return 'unknown'
   return b.version ? `${b.version}, ${b.commit}` : `build ${b.commit}`
 }

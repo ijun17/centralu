@@ -22,7 +22,7 @@ import type { MockPlatform } from './index.js'
  */
 
 /** The scenes that exist right now. `?demo=<name>` */
-export const DEMO_SCENES = ['focus', 'grid'] as const
+const DEMO_SCENES = ['focus', 'grid'] as const
 export type DemoScene = (typeof DEMO_SCENES)[number]
 
 export function isDemoScene(v: string): v is DemoScene {

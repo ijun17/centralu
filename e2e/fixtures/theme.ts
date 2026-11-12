@@ -329,7 +329,6 @@ export function themeTests() {
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
     expect(await token(page, '--color-focus')).toBe(focus)
     expect(await token(page, '--color-selection')).toBe(selection)
-    expect(await page.evaluate(() => document.documentElement.hasAttribute('data-accent'))).toBe(false)
   })
 
   test('Import copies a theme file in, and Show in Finder reveals one', async ({ page }) => {

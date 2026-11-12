@@ -11,7 +11,7 @@ import { sessionGridPanel } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { newSessionProjectOf, useStore } from './store.js'
-import { resetStore, sessionInfo } from './store.test-helpers.js'
+import { delta, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
 
@@ -790,5 +790,65 @@ describe('the Assistant session being deleted', () => {
     mock.emit({ type: 'session_deleted', sessionId: 'orc-1653' })
 
     expect(useStore.getState().assistantId).toBeNull()
+  })
+})
+
+/*
+ * #2171: a row built from the host's `SessionInfo` is built in one place. `createSession`'s own answer used to leave out
+ * half the fields, and replaced a row that `session_created` (broadcast before the response) had registered.
+ */
+describe('registering a session from the host\'s answer (#2171)', () => {
+  async function createdFrom(answer: (id: string) => SessionInfo, before?: (answer: SessionInfo) => void) {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/from-info-project')
+    await useStore.getState().attach(mock)
+    const real = mock.agents.createSession
+    vi.spyOn(mock.agents, 'createSession').mockImplementation(async (params) => {
+      const info = answer((await real(params)).id)
+      before?.(info)
+      return info
+    })
+    const created = await useStore.getState().createSession(p.id, { tool: 'claude' })
+    return useStore.getState().sessions[created.id]!
+  }
+
+  it('shows every fact the host answered with, not the defaults of a new row', async () => {
+    const row = await createdFrom((id) =>
+      sessionInfo(id, { projectId: 'p1', kind: 'coordinator', name: 'Named', autoNamed: false, goal: { objective: 'Ship it', status: 'active' }, state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' }),
+    )
+    expect(row).toMatchObject({ kind: 'coordinator', autoNamed: false, goal: { objective: 'Ship it', status: 'active' }, state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' })
+  })
+
+  it('keeps the row session_created registered first: the lastSeq and the preview events built since', async () => {
+    const row = await createdFrom(
+      (id) => sessionInfo(id, { lastSeq: 0 }),
+      (info) => {
+        useStore.getState().dispatchEvent({ ...delta(info.id, 'Hello'), seq: 7 } as NormalizedEvent)
+      },
+    )
+    expect(row.lastSeq).toBe(7)
+    expect(row.preview).toBe('Hello')
+  })
+})
+
+describe('the next waiting item (#2176)', () => {
+  it('opens the session that waits on the person, approvals before the rest', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('nw-idle', sessionInfo('nw-idle'))
+    mock.sessions.set('nw-wait', sessionInfo('nw-wait', { state: 'waiting_approval', waitingSince: 1 }))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().focusedSessionId).not.toBe('nw-wait')
+
+    useStore.getState().openNextWaiting()
+    expect(useStore.getState().focusedSessionId).toBe('nw-wait')
+  })
+
+  it('does nothing when nothing waits', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('nw-calm', sessionInfo('nw-calm'))
+    await useStore.getState().attach(mock)
+    const before = useStore.getState().focusedSessionId
+    useStore.getState().openNextWaiting()
+    expect(useStore.getState().focusedSessionId).toBe(before)
   })
 })

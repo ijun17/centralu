@@ -137,7 +137,7 @@ export function useUpdateCheckWhileOpen(): void {
 }
 
 /** Focus checks respect automatic-check consent, and failed requests are throttled too. */
-export function useUpdateCheckOnFocus(): void {
+function useUpdateCheckOnFocus(): void {
   const lastAttempt = useRef<number | null>(null)
   useEffect(() => {
     const read = () => {

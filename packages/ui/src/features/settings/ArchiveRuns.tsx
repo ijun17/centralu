@@ -12,7 +12,7 @@ import { SettingsCard } from './SettingsLayout.jsx'
 type RunGroup = { key: string; name: string; projectName: string | null; runs: TrashedRun[] }
 
 /** The records grouped by app (#378): an app that called run_agent a few dozen times reads as one heading, not a wall */
-export function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
+function groupRuns(runs: readonly TrashedRun[]): RunGroup[] {
   const groups = new Map<string, RunGroup>()
   for (const r of runs) {
     // A linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378 review)
