@@ -33,6 +33,7 @@ import { holdPinnedViews } from './apps.js'
 import { machinesHoldingMirror, reloadCommandRuns } from './machines.js'
 import { settleUnsureSends } from './sessions/send.js'
 import { rereadAll } from './events/rereads.js'
+import { RETRY_MS, retryLadder } from './retry.js'
 
 /**
  * The store's link to the host: attaching to a platform (its subscriptions, the first reads and the
@@ -63,39 +64,6 @@ export let restoringWorkspace = false
  */
 let workspaceUnread = false
 
-/**
- * The waits before reading again what a reconnect has to re-read (the session list, a conversation page) when the
- * read fails. Same steps as a failed workspace save: a host that fails every read is not helped by being asked
- * forever, and the next reconnect or opening the conversation reads again.
- */
-export const RECOVERY_RETRY_MS = [1_000, 5_000, 30_000] as const
-
-/**
- * Calls `read` until it succeeds, waiting the `RECOVERY_RETRY_MS` steps between tries. `failed` runs after every failure
- * and `gaveUp` once the steps run out; `keepGoing` is asked after each wait. Null when it stopped without a read.
- */
-export async function retryLadder<T>(
-  read: () => Promise<T>,
-  keepGoing: () => boolean,
-  failed?: () => void,
-  gaveUp?: () => void,
-): Promise<T | null> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await read()
-    } catch {
-      failed?.()
-    }
-    const wait = RECOVERY_RETRY_MS[attempt]
-    if (wait === undefined) {
-      gaveUp?.()
-      return null
-    }
-    await new Promise((r) => setTimeout(r, wait))
-    if (!keepGoing()) return null
-  }
-}
-
 /** Bumped by every reconnect recovery, so the retries of an older one stop once a newer one runs */
 let recoveryGeneration = 0
 
@@ -115,73 +83,59 @@ let recoveryGeneration = 0
  */
 const workspaceSave = {
   pending: null as WorkspaceSnapshot | null,
-  inFlight: false,
-  retryTimer: null as ReturnType<typeof setTimeout> | null,
-  /** Which step of `WORKSPACE_RETRY_MS` the next retry waits for. Reset by a stored save or a reconnect */
-  attempt: 0,
-  /** Bumped by a reset, so a save still settling from before it cannot touch the state after it */
-  epoch: 0,
-}
-
-/**
- * The waits before retrying a failed save while connected. Past the last step it stops, and the
- * pending snapshot waits for the next reconnect or the next save: a host that fails every save is
- * not helped by being asked every 30 s forever.
- */
-const WORKSPACE_RETRY_MS = [1_000, 5_000, 30_000] as const
-
-function clearWorkspaceRetry(): void {
-  if (workspaceSave.retryTimer) clearTimeout(workspaceSave.retryTimer)
-  workspaceSave.retryTimer = null
+  /** A save request is on its way: another is not started beside it */
+  sending: false,
+  /** Bumped by every flush and every reset: a sender that is not the latest stops once its wait is over */
+  run: 0,
 }
 
 /** Forgets any pending save. A new platform starts from its own stored snapshot, not the last one's leftovers */
 function resetWorkspaceSave(): void {
-  clearWorkspaceRetry()
   workspaceSave.pending = null
-  workspaceSave.inFlight = false
-  workspaceSave.attempt = 0
-  workspaceSave.epoch++
+  workspaceSave.sending = false
+  workspaceSave.run++
 }
 
-/** Sends the pending snapshot unless one is already on its way (that one sends the newer when it settles) */
-function flushWorkspace(get: () => AppState, set: StoreSet): void {
-  if (restoringWorkspace || workspaceSave.inFlight) return
+/**
+ * Sends the pending snapshot unless a request is already on its way (that sender sends the newer when it settles). A
+ * failed save waits the `RETRY_MS` steps and sends whatever is pending then; a new save or a reconnect during a wait
+ * sends at once, with a fresh set of steps. Past the last step it stops, and the pending snapshot waits for the next
+ * reconnect or the next save: a host that fails every save is not helped by being asked every 30 s forever.
+ */
+async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void> {
+  if (restoringWorkspace || workspaceSave.sending) return
   const platform = get().platform
-  const snap = workspaceSave.pending
-  if (!platform || !snap) return
-  clearWorkspaceRetry()
-  workspaceSave.inFlight = true
-  const epoch = workspaceSave.epoch
-  platform.workspace.save(snap).then(
-    () => {
-      if (workspaceSave.epoch !== epoch) return // attach started over; this save belongs to before it
-      workspaceSave.inFlight = false
-      if (workspaceSave.pending === snap) {
-        workspaceSave.pending = null
-        workspaceSave.attempt = 0
-      } else flushWorkspace(get, set) // A newer save came in meanwhile
-    },
-    () => {
-      if (workspaceSave.epoch !== epoch) return
-      workspaceSave.inFlight = false
-      // A newer save came in meanwhile: it supersedes this one and goes now
-      if (workspaceSave.pending !== snap) return flushWorkspace(get, set)
-      // Disconnected: the reconnect sends it. Out of steps: the next reconnect or save does
-      if (get().connection !== 'connected') return
-      const wait = WORKSPACE_RETRY_MS[workspaceSave.attempt]
-      if (wait === undefined) {
-        // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart
-        set({ toast: 'Could not save the window layout; it is tried again on the next change or reconnect' })
-        return
-      }
-      workspaceSave.attempt++
-      workspaceSave.retryTimer = setTimeout(() => {
-        workspaceSave.retryTimer = null
-        flushWorkspace(get, set)
-      }, wait)
-    },
-  )
+  if (!platform || !workspaceSave.pending) return
+  const run = ++workspaceSave.run
+  const mine = () => workspaceSave.run === run
+  const send = async () => {
+    const snap = workspaceSave.pending!
+    workspaceSave.sending = true
+    try {
+      await platform.workspace.save(snap)
+      return { snap, stored: true }
+    } catch (e) {
+      // A newer save supersedes this one and goes now; disconnected, the reconnect sends it
+      if (workspaceSave.pending !== snap || get().connection !== 'connected') return { snap, stored: false }
+      throw e
+    } finally {
+      if (mine()) workspaceSave.sending = false
+    }
+  }
+  while (mine() && workspaceSave.pending) {
+    const sent = await retryLadder(
+      send,
+      () => mine() && workspaceSave.pending !== null,
+      undefined,
+      // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart
+      () => {
+        if (mine()) set({ toast: 'Could not save the window layout; it is tried again on the next change or reconnect' })
+      },
+    )
+    if (!sent || !mine()) return
+    if (sent.stored && workspaceSave.pending === sent.snap) workspaceSave.pending = null
+    else if (!sent.stored && workspaceSave.pending === sent.snap) return
+  }
 }
 
 /**
@@ -339,70 +293,49 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    */
 }
 
+/** Bumped by every attach and every new read, so an older one stops once its wait is over */
+let workspaceReadRun = 0
+
 /**
  * Reading a snapshot again after a read that failed (#384). `attach` runs once per window, so without this one
  * timeout at startup held every save (`workspaceUnread`) until the window was opened again. It is read again on every
- * reconnect and on these waits while connected; read, it is brought back (`applyWorkspaceSnapshot`, without the screen)
- * and saving resumes. Past the last wait, the snapshot the window holds is saved in its place, said once: a row that
+ * reconnect and on the `RETRY_MS` waits while connected; read, it is brought back (`applyWorkspaceSnapshot`, without the
+ * screen) and saving resumes. Past the last wait, the snapshot the window holds is saved in its place, said once: a row that
  * never reads must not stop the window saving for good.
+ *
+ * @param afterFailure the read `attach` already tried and lost: it counts as the first try, so the first wait comes next
  */
-const WORKSPACE_READ_RETRY_MS = [1_000, 5_000, 30_000] as const
-const workspaceRead = {
-  timer: null as ReturnType<typeof setTimeout> | null,
-  /** Which step of `WORKSPACE_READ_RETRY_MS` the next wait is */
-  attempt: 0,
-  inFlight: false,
-  /** Bumped by every attach, so a read from before it does nothing after it */
-  epoch: 0,
-}
-
-function resetWorkspaceRead(): void {
-  if (workspaceRead.timer) clearTimeout(workspaceRead.timer)
-  workspaceRead.timer = null
-  workspaceRead.attempt = 0
-  workspaceRead.inFlight = false
-  workspaceRead.epoch++
-}
-
-function scheduleWorkspaceRead(get: () => AppState, set: StoreSet): void {
-  const wait = WORKSPACE_READ_RETRY_MS[workspaceRead.attempt]
-  if (wait === undefined) {
+async function readWorkspaceAgain(get: () => AppState, set: StoreSet, afterFailure = false): Promise<void> {
+  const platform = get().platform
+  if (!workspaceUnread || !platform) return
+  const run = ++workspaceReadRun
+  const current = () => run === workspaceReadRun && workspaceUnread
+  let first = afterFailure
+  let gaveUp = false
+  const snap = await retryLadder(
+    async () => {
+      if (!first) return platform.workspace.load()
+      first = false
+      throw new Error('the first read failed')
+    },
+    current,
+    undefined,
+    () => (gaveUp = true),
+  )
+  if (!current()) return
+  if (gaveUp) {
     workspaceUnread = false
-    set({ toast: `Could not read the window layout after ${WORKSPACE_READ_RETRY_MS.length + 1} tries; the one on screen is saved in its place` })
+    set({ toast: `Could not read the window layout after ${RETRY_MS.length + 1} tries; the one on screen is saved in its place` })
     get().saveWorkspace()
     return
   }
-  workspaceRead.attempt++
-  workspaceRead.timer = setTimeout(() => {
-    workspaceRead.timer = null
-    void readWorkspaceAgain(get, set)
-  }, wait)
-}
-
-async function readWorkspaceAgain(get: () => AppState, set: StoreSet): Promise<void> {
-  const platform = get().platform
-  if (!workspaceUnread || workspaceRead.inFlight || !platform) return
-  if (workspaceRead.timer) clearTimeout(workspaceRead.timer)
-  workspaceRead.timer = null
-  const epoch = workspaceRead.epoch
-  workspaceRead.inFlight = true
+  restoringWorkspace = true
   try {
-    const snap = await platform.workspace.load()
-    if (epoch !== workspaceRead.epoch || !workspaceUnread) return
-    restoringWorkspace = true
-    try {
-      if (snap) applyWorkspaceSnapshot(snap, get, set, false)
-    } finally {
-      restoringWorkspace = false
-    }
-    workspaceUnread = false
-    workspaceRead.attempt = 0
-  } catch {
-    if (epoch !== workspaceRead.epoch || !workspaceUnread) return
-    scheduleWorkspaceRead(get, set)
+    if (snap) applyWorkspaceSnapshot(snap, get, set, false)
   } finally {
-    if (epoch === workspaceRead.epoch) workspaceRead.inFlight = false
+    restoringWorkspace = false
   }
+  workspaceUnread = false
 }
 
 type ConnectionActions = Pick<AppState, 'attach' | 'saveWorkspace' | 'recoverAfterReconnect'>
@@ -424,7 +357,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      */
     detachAll()
     resetWorkspaceSave()
-    resetWorkspaceRead()
+    workspaceReadRun++
     set({ platform })
     subscriptions.push(
       platform.agents.subscribe((e, id) => get().dispatchEvent(e, id)),
@@ -455,8 +388,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
          */
         if ((connection === 'connected' || resync) && was !== 'connected') {
           // A save that failed while the host was away goes out now, with a fresh set of retries
-          workspaceSave.attempt = 0
-          flushWorkspace(get, set)
+          void flushWorkspace(get, set)
           // A new host (a restart, a switched build) read the installed CLIs before this window was back (#297)
           void get().checkAgentVersions(false)
           // Mail posted while the window was away sent its news to nobody
@@ -615,7 +547,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       // The app works normally even with no snapshot, but it is said, not saved over (`workspaceUnread`), and read again
       workspaceUnread = true
       set({ toast: `Could not read the window layout (${(e as Error).message}); it is shown as the defaults, and not saved over until it is read again` })
-      scheduleWorkspaceRead(get, set)
+      void readWorkspaceAgain(get, set, true)
     } finally {
       restoringWorkspace = false
     }
@@ -666,7 +598,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       showIgnored: s.showIgnored,
       introSeen: s.introSeen,
     } as never
-    flushWorkspace(get, set)
+    void flushWorkspace(get, set)
   },
 
   /**
@@ -703,7 +635,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     const generation = ++recoveryGeneration
 
     /*
-     * A failed read is tried again while this connection lasts (`RECOVERY_RETRY_MS`). Giving up at once left the
+     * A failed read is tried again while this connection lasts (`RETRY_MS`). Giving up at once left the
      * gap unrecovered until the next reconnect: no session created or deleted meanwhile, no conversation re-read.
      * A newer recovery, a drop (the reconnect recovers again) or a new platform ends the retries.
      */

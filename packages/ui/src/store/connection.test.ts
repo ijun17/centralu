@@ -4,7 +4,8 @@ import { DEFAULT_UI_PREFERENCES, sessionLiveDefaults } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { useStore, type ChatItem } from './store.js'
-import { goodThemes, RECOVERY_RETRY_MS } from './connection.js'
+import { goodThemes } from './connection.js'
+import { RETRY_MS } from './retry.js'
 
 /**
  * The store's link to the host (connection.ts): attaching to a platform, what a drop and a return
@@ -198,7 +199,7 @@ describe('the recovery\'s retries', () => {
     await useStore.getState().recoverAfterReconnect()
     expect(list).toHaveBeenCalledTimes(2)
 
-    await vi.advanceTimersByTimeAsync(RECOVERY_RETRY_MS[0])
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0])
     await older
     expect(list).toHaveBeenCalledTimes(2)
   })
@@ -213,7 +214,7 @@ describe('the recovery\'s retries', () => {
     const recovery = useStore.getState().recoverAfterReconnect()
     await vi.advanceTimersByTimeAsync(0)
     mock.setConnectionState('disconnected')
-    await vi.advanceTimersByTimeAsync(RECOVERY_RETRY_MS[0])
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0])
     await recovery
     expect(list).toHaveBeenCalledTimes(1)
   })
@@ -227,7 +228,7 @@ describe('the recovery\'s retries', () => {
     const recovery = useStore.getState().recoverAfterReconnect()
     await vi.advanceTimersByTimeAsync(10 * 60_000)
     await recovery
-    expect(list).toHaveBeenCalledTimes(RECOVERY_RETRY_MS.length + 1)
+    expect(list).toHaveBeenCalledTimes(RETRY_MS.length + 1)
   })
 })
 

@@ -3,6 +3,7 @@ import type { MailThreadView, NormalizedEvent } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
+import { coalescedRead } from './single-flight.js'
 
 /**
  * The person's mailbox (#1347, docs/plans/mailbox.md §10.1): its list, a thread, and the acts that are the person's. The host
@@ -17,10 +18,6 @@ type MailActions = Pick<
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
 const MAIL_PAGE = 100
-
-/** The list is being read; another `mail_changed` meanwhile asks for one more read after it, not one each, and waits for that one */
-let loading: Promise<void> | null = null
-let again = false
 
 /** The open thread, brought up to date with the messages after the last one it holds (and the host's task fields) */
 async function refreshThread(get: StoreGet, set: StoreSet, threadId: string): Promise<void> {
@@ -51,30 +48,9 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
   }
 
   return {
+    // Another `mail_changed` while the list is read asks for one more read after it, not one each, and waits for that one
     loadMail() {
-      const platform = get().platform
-      if (!platform) return Promise.resolve()
-      if (loading) {
-        again = true
-        return loading
-      }
-      loading = (async () => {
-        try {
-          do {
-            again = false
-            try {
-              const mail = await platform.mail.list()
-              if (get().platform !== platform) return
-              set({ mail })
-            } catch {
-              /* a host that is away: the last list stays */
-            }
-          } while (again)
-        } finally {
-          loading = null
-        }
-      })()
-      return loading
+      return coalescedRead('mail', get, (platform) => platform.mail.list(), (mail) => void set({ mail }))
     },
 
     async openMailThread(threadId) {

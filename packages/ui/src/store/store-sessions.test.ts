@@ -814,9 +814,9 @@ describe('registering a session from the host\'s answer (#2171)', () => {
 
   it('shows every fact the host answered with, not the defaults of a new row', async () => {
     const row = await createdFrom((id) =>
-      sessionInfo(id, { projectId: 'p1', kind: 'manager', name: 'Named', autoNamed: false, goal: 'Ship it', state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' }),
+      sessionInfo(id, { projectId: 'p1', kind: 'coordinator', name: 'Named', autoNamed: false, goal: { objective: 'Ship it', status: 'active' }, state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' }),
     )
-    expect(row).toMatchObject({ kind: 'manager', autoNamed: false, goal: 'Ship it', state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' })
+    expect(row).toMatchObject({ kind: 'coordinator', autoNamed: false, goal: { objective: 'Ship it', status: 'active' }, state: 'working', waitingSince: 5, askedBy: 'asker-1', forkedFrom: 'fork-1' })
   })
 
   it('keeps the row session_created registered first: the lastSeq and the preview events built since', async () => {

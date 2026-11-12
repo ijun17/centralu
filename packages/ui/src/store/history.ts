@@ -1,7 +1,7 @@
 import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergeBySeq, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
-import { retryLadder } from './connection.js'
+import { retryLadder } from './retry.js'
 import { inlineViewsFromHistory, mergeInlineHistory, syncInlineViews } from './apps.js'
 import { omitKey } from './patch.js'
 import { bumpChatKeysAbove, messagesToChat } from './transcript.js'
@@ -30,7 +30,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     const platform = get().platform
     if (!platform) return
     /*
-     * A page that fails to arrive is asked for again (`RECOVERY_RETRY_MS`), and meanwhile the cursor is dropped.
+     * A page that fails to arrive is asked for again (`RETRY_MS`), and meanwhile the cursor is dropped.
      * Swallowing the failure left a re-read's gap for good: a resync re-reads sessions that already hold a cursor,
      * and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing read it again
      * until the app was reopened. Without the cursor, opening the conversation reads it again too.
