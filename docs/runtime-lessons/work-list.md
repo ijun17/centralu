@@ -28,7 +28,6 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
 | 35 | SU8: the window reaps every child | `window/os_integration.rs` | all | 7 |
 | 36 | KL3: `stopGroup` never fires at our own group | `host/os/kill-tree.ts` | macOS, Linux | 8 |
-| 37 | KL6: strays measured again before the kill; the `systemd --user` subreaper | `host/dev-services/strays.ts` | macOS, Linux | 8 |
 | 38 | KL8: no HUP on Windows when closing a terminal | `host/dev-services/terminal.ts` | Windows | 8 |
 | 39 | KL9: the terminal's `disposeAll` kills every tree | `host/dev-services/terminal.ts` | macOS, Linux | 8 |
 | 40 | KL14: codex gets EOF before any signal | `host/adapters/codex/client.ts` | all | 8 |

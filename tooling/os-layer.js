@@ -66,6 +66,8 @@ export const OS_LAYER = [
   // Ending a process tree: groups and signals, or taskkill and parent links from the Windows process table (its warm reader)
   'packages/agent-host/src/os/kill-tree.ts',
   'packages/agent-host/src/os/process-table.ts',
+  // One variable of another process's environment, and only that one: the leftover finder's owner mark (#1898)
+  'packages/agent-host/src/os/process-env.ts',
   // The terminal's and the Run button's shell
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)

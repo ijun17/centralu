@@ -43,8 +43,10 @@ the host watch, its terminals and runs with it; a turn in flight shows stopped w
 and Linux. Only a stop for an update lists turns to continue.
 
 **Strays.** `strays.ts` rule 3 counts only the host's own descendants as ours. Processes a holding keeper of an earlier
-build left behind when it died hard (`kill -9`, a crash) are in sessions of their own under init; they are offered as
-leftovers like any orphan in the project's folders ([plans/keeper-removal.md](../../plans/keeper-removal.md) §5, risk 2).
+build left behind when it died hard (`kill -9`, a crash) are in sessions of their own under init. Ours is what the
+nearest owner mark up its parent chain says is ours ([KL6](../../runtime-lessons/stopping-process-trees.md), #1898): what an earlier host on the same data
+folder left (a crash, an update) is offered; what was started before the mark existed, those keepers' children included
+([plans/keeper-removal.md](../../plans/keeper-removal.md) §5, risk 2), is not, nor anything whose environment cannot be read.
 Stopping the ones a person chose (`stopStrays`) is the two shots every stop uses: SIGTERM to those still leftovers,
 then, after 3 s, SIGKILL to those that still are and still run the same command, measured again each time (#428).
 Both walk the table with `dev-services/proc-table.ts`, as `kill-tree.ts` does.

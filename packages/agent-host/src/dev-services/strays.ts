@@ -1,10 +1,12 @@
 import { isObj } from '../json-value.js'
+import { createHash, randomBytes } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { execText } from '../os/exec.js'
 import { KILL_GRACE_MS } from '../os/kill-tree.js'
+import { environmentValues } from '../os/process-env.js'
 import { ancestors, descendants } from './proc-table.js'
 
 /**
@@ -28,28 +30,49 @@ import { ancestors, descendants } from './proc-table.js'
  *     something the person launched in their own terminal (measured: launched from a terminal it
  *     is `ttys005`, launched by an agent over a pipe it is `??`). If a person's shell and whatever
  *     runs in it got mixed into the list, this feature would be unusable.
- *  3. **It is not our own descendant** — the shutdown procedure already cleans up the host's
+ *  3. **It is not our own descendant, nor what started us** — the shutdown procedure already cleans up the host's
  *     descendants as a whole tree. What this carries is only what that cleanup cannot reach.
- *  4. **It has no living owner** (a point raised by the user, 2026-09-10). Walking up the parent
- *     chain has to reach init (1). VS Code's Claude extension made this list without this rule —
- *     its workspace was our project folder, so cwd matched, and it was launched over a pipe, so it
- *     had no tty either. With only rules 1 through 3, **a process another app is actively using
- *     right now cannot be told apart from an ownerless orphan.** When this actually ran, that
- *     extension was hit with SIGTERM (143) and died.
+ *  4. **We started it** (#1898, the owner's decision of 2026-11-12): the nearest owner mark up its parent chain, its own
+ *     first, is this host's (`OWNER_MARK`, in the environment). The host puts the mark in its own environment, so every
+ *     agent, terminal and command it starts inherits it, and so does whatever those start, however it is re-parented
+ *     later. The parent chain's shape no longer decides: it could not tell a dev server an agent left behind from an
+ *     editor the person detached on purpose (`code .` from a terminal in the project: cwd in the project, no terminal,
+ *     adopted by `systemd --user` or init), nor see that VS Code's Claude extension, alive and launched over a pipe
+ *     in our folder, had an owner (it was SIGTERMed when an early version ran, 4a69b96f).
  *
- *     **WSL's `/init` counts as init** (#1882). There an orphan is adopted by a per-session `/init` helper, not by pid 1,
- *     so a leftover's parent is alive and the chain above would read it as an owner. `orphanAdopter` asks the machine where
- *     an orphan of ours lands (a short-lived one is made and its parent read); that process counts as init only when its
- *     command is exactly `/init`. Every other living parent is still an owner: an agent holding its own children, and `systemd --user`, which also adopts an editor that detached itself (`code .` from a terminal in the
- *     project: cwd in the project, no terminal, parent `systemd --user`), and would be offered as a leftover. A systemd
- *     desktop's own leftovers are therefore still missed, by choice. What started the host (the keeper, a launcher) is
- *     never a candidate.
+ *     A process whose environment cannot be read, or that has no mark, is never offered: one from before the mark,
+ *     one started outside Centralu, one whose starter cleared its environment, an app server (an app gets no `CENTRALU_`
+ *     variable but its own, `app-start-env.ts`), and on macOS a platform binary of the
+ *     system volume, whose environment `ps` does not show (`environmentValues`) unless a process it descends from
+ *     carries the mark.
  *
  *     If everything in between on the chain is also a candidate (same folder, no terminal), those
  *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
  *     `npm run dev` has to be selectable on the same screen too.
  */
 
+/**
+ * The variable that marks what a host started (#1898). Its value is one per data folder (`ownerMarkFor`): a second host
+ * on another folder (a dev build, an e2e host, `centralu serve` on its own folder) has another value and claims none of
+ * this host's processes, and the host after an update or a restart, on the same folder, has the same value and sees
+ * what the one before it left behind. Two hosts never share a folder at once (the instance lock).
+ */
+export const OWNER_MARK = 'CENTRALU_OWNER'
+
+/** The owner mark of a host whose store is `dbPath`: a digest of it, or a value of its own for a store in memory */
+export function ownerMarkFor(dbPath: string): string {
+  return dbPath === ':memory:' ? randomBytes(8).toString('hex') : createHash('sha256').update(dbPath).digest('hex').slice(0, 16)
+}
+
+/**
+ * Puts the owner mark in this host's environment, which every child inherits (`takeLaunchEnv`'s note), before anything
+ * is spawned for the person. A host started inside another host's agent replaces that host's mark with its own for its
+ * children; a read of the host process itself still shows the mark it started with (the environment it was given), so
+ * the outer host may offer that host as its agent's leftover, and never what runs under it (rule 4: the nearest mark).
+ */
+export function markOwnChildren(dbPath: string, env: Record<string, string | undefined> = process.env): void {
+  env[OWNER_MARK] = ownerMarkFor(dbPath)
+}
 export type StrayProcess = {
   pid: number
   /** The command it is running (for display, only the start of it) */
@@ -105,21 +128,12 @@ export function insideAny(cwd: string, roots: readonly string[]): string | null 
   return null
 }
 
-/** Builds the list by applying the four rules (pure — this is as far as a test needs to look) */
-export function pickStrays(
-  rows: readonly PsRow[],
-  cwdOf: ReadonlyMap<number, string>,
-  roots: readonly string[],
-  selfPid: number,
-  /** WSL's `/init` helper, where it adopts an orphan of ours (`orphanAdopter`), taken for init in rule 4 */
-  adopter: number | null = null,
-): StrayProcess[] {
+/** What passes rules 1 to 3, with its folder: the processes whose mark rule 4 asks about */
+function candidatesOf(rows: readonly PsRow[], cwdOf: ReadonlyMap<number, string>, roots: readonly string[], selfPid: number): Map<number, string> {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const ours = descendants(rows, [selfPid])
-  // Who started us (the keeper, a launcher) is not a leftover, whatever adopted it: it is no leftover of anyone's
+  // Who started us (the keeper, a launcher) is not a leftover: it is no leftover of anyone's
   const launchers = ancestors(rows, [selfPid])
-
-  // What passed rules 1 through 3. Rule 4 (no owner) can only be judged once this set is known
   const candidates = new Map<number, string>()
   for (const r of rows) {
     if (r.pid <= 1 || ours.has(r.pid) || launchers.has(r.pid)) continue
@@ -128,34 +142,47 @@ export function pickStrays(
     if (!cwd || !insideAny(cwd, roots)) continue
     candidates.set(r.pid, cwd)
   }
+  return candidates
+}
 
+/** The processes whose environment rule 4 reads: each candidate and every process of our account it descends from, init left out */
+export function markAsked(rows: readonly PsRow[], cwdOf: ReadonlyMap<number, string>, roots: readonly string[], selfPid: number): number[] {
+  const candidates = [...candidatesOf(rows, cwdOf, roots, selfPid).keys()]
+  const listed = new Set(rows.map((r) => r.pid))
+  return [...new Set([...candidates, ...ancestors(rows, candidates)])].filter((pid) => pid > 1 && listed.has(pid)).sort((a, b) => a - b)
+}
+
+/**
+ * Builds the list by applying the four rules (pure — this is as far as a test needs to look). `marks` holds the owner
+ * mark of each pid whose environment was read and carries one, whoever's it is; `mark` is this host's.
+ */
+export function pickStrays(
+  rows: readonly PsRow[],
+  cwdOf: ReadonlyMap<number, string>,
+  roots: readonly string[],
+  selfPid: number,
+  marks: ReadonlyMap<number, string>,
+  mark: string,
+): StrayProcess[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]))
-  /**
-   * Asks the parent chain **whether some app still holds this process.**
-   *
-   * If only candidates lie between this and init (1, or the adopter), there is no owner — an orphan we are free
-   * to clean up. If a living process that is not a candidate sits somewhere in between, it belongs
-   * to that app (VS Code's extension host sits in exactly that spot). If the chain leaves our own
-   * account and the parent cannot be found, this is also treated as belonging to someone else —
-   * when in doubt, not firing is this feature's rule.
+  /*
+   * Rule 4: the nearest mark up its parent chain, its own first, is ours. A host started inside another host's agent
+   * starts with that host's mark and gives its children its own: what runs under it is that host's, not ours (#2221
+   * review). A parent missing from our own account's table ends the walk
    */
-  const unowned = (pid: number): boolean => {
+  const ourStart = (pid: number): boolean => {
     const seen = new Set<number>()
-    let cur = byPid.get(pid)
-    while (cur && !seen.has(cur.pid)) {
-      seen.add(cur.pid)
-      if (cur.ppid <= 1 || cur.ppid === adopter) return true
-      if (!candidates.has(cur.ppid)) return false
-      cur = byPid.get(cur.ppid)
+    for (let row = byPid.get(pid); row && row.pid > 1 && !seen.has(row.pid); row = byPid.get(row.ppid)) {
+      const found = marks.get(row.pid)
+      if (found !== undefined) return found === mark
+      seen.add(row.pid)
     }
     return false
   }
-
   const out: StrayProcess[] = []
-  for (const [pid, cwd] of candidates) {
-    if (!unowned(pid)) continue
+  for (const [pid, cwd] of candidatesOf(rows, cwdOf, roots, selfPid)) {
     const row = byPid.get(pid)
-    if (row) out.push({ pid, command: row.command, cwd })
+    if (row && ourStart(pid)) out.push({ pid, command: row.command, cwd })
   }
   return out.sort((a, b) => a.pid - b.pid)
 }
@@ -163,7 +190,7 @@ export function pickStrays(
 /**
  * How long `ps` or `lsof` may take. On a saturated machine either can take far longer than a quiet one's tens of ms (#1793);
  * a listing that does not finish is not "no leftovers", it is said on stderr. Two listings run one after the other and the
- * screen gives a call 30 s, so each gets 12 s
+ * screen gives a call 30 s, so each gets 12 s; the owner marks are read after them in 5 s at most (`environmentValues`)
  */
 const LIST_TIMEOUT_MS = 12_000
 
@@ -211,39 +238,28 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
   return { rows, cwdOf }
 }
 
-/**
- * WSL's `/init` helper when it is where this machine re-parents an orphan, else null (#1882). A shell starts a background
- * process and exits, and the process's parent is read; it is returned only when its command is exactly `/init`. Another
- * adopter, `systemd --user` above all, is not taken for init: it also holds an editor that detached itself, which is no
- * leftover. A container's init is left out too, as no command line names one exactly. The probe is one `sleep` that
- * outlives the bounds below and is ended with the call (`end`).
- */
-export async function orphanAdopter(run: Run = exec, end: (pid: number) => void = (pid) => process.kill(pid)): Promise<number | null> {
-  let pid = 0
+/** The owner mark each of `pids` carries, whoever's it is; environments that could not be read are said on stderr */
+async function ownerMarks(pids: readonly number[]): Promise<Map<number, string>> {
   try {
-    const opts = { maxBuffer: 1024, timeoutMs: LIST_TIMEOUT_MS }
-    pid = Number((await run('/bin/sh', ['-c', 'sleep 60 </dev/null >/dev/null 2>&1 & echo $!'], opts)).stdout)
-    const ppid = Number((await run('ps', ['-o', 'ppid=', '-p', String(pid)], opts)).stdout)
-    if (!(ppid > 1)) return null
-    const command = (await run('ps', ['-o', 'command=', '-p', String(ppid)], opts)).stdout.trim()
-    return command === '/init' ? ppid : null
+    return await environmentValues(OWNER_MARK, pids)
   } catch (e) {
-    unread('where an orphan lands', e)
-    return null
-  } finally {
-    // The probe's own pid, started a moment ago by this call
-    if (pid > 1) try { end(pid) } catch { /* already gone */ }
+    unread('the processes\' owner marks', e)
+    return new Map()
   }
 }
 
-/** The leftover processes currently alive (`scanProcesses`, then the four rules) */
+/** The leftover processes currently alive (`scanProcesses`, the owner marks, then the four rules) */
 export async function findStrays(
   roots: readonly string[],
   selfPid = process.pid,
+  mark: string | undefined = process.env[OWNER_MARK],
 ): Promise<StrayProcess[]> {
-  if (!hasPs() || roots.length === 0) return []
-  const [{ rows, cwdOf }, adopter] = await Promise.all([scanProcesses(), orphanAdopter()])
-  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, adopter)
+  // A host that marks nothing has started nothing it could tell apart
+  if (!hasPs() || roots.length === 0 || !mark) return []
+  const { rows, cwdOf } = await scanProcesses()
+  const resolved = resolveRoots(roots)
+  const marks = await ownerMarks(markAsked(rows, cwdOf, resolved, selfPid))
+  return pickStrays(rows, cwdOf, resolved, selfPid, marks, mark)
 }
 
 /**
@@ -288,8 +304,8 @@ const REAL_STRAY_STOP: StrayStopDeps = { find: findStrays, kill: (pid, signal) =
  * running the same command: the same two shots as every other stop (`stopGroup`). A dev server that traps TERM used to
  * be left running after Stop.
  *
- * No host's children are held anywhere else any more (#1895 step 4): a process a holding keeper left behind when it
- * died is an orphan in our folder like any other, and is offered and stopped as one.
+ * No host's children are held anywhere else any more (#1895 step 4). What a holding keeper left behind when it died was
+ * started before the owner mark, so it is not offered (#1898).
  */
 export async function stopStrays(
   pids: readonly number[],

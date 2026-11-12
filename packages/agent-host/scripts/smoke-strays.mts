@@ -17,13 +17,15 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { findStrays, stopStrays } from '../src/dev-services/strays.js'
+import { findStrays, markOwnChildren, stopStrays } from '../src/dev-services/strays.js'
 const require = createRequire(import.meta.url)
 const pty = require('node-pty')
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 
 const root = mkdtempSync(join(tmpdir(), 'cc-stray-'))
+// What a host on this folder would start carries its mark (#1898): the orphan below inherits it, as an agent's command does
+markOwnChildren(join(root, 'store.db'))
 const pidfile = join(root, 'pid')
 // The intermediate shell exits immediately, so node gets adopted by init (the shape the agent's
 // bash tool produces)
