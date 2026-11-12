@@ -128,7 +128,7 @@ async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void>
     if (!start || !mine()) return
     const sent: Awaited<ReturnType<typeof send>> | null = await retryLadder(
       () => send(start),
-      () => mine() && workspaceSave.pending !== null,
+      () => mine() && workspaceSave.pending !== null && !restoringWorkspace,
       undefined,
       // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart
       () => {
@@ -136,8 +136,10 @@ async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void>
       },
     )
     if (!sent || !mine()) return
-    if (sent.stored && workspaceSave.pending === sent.snap) workspaceSave.pending = null
-    else if (!sent.stored && workspaceSave.pending === sent.snap) return
+    if (workspaceSave.pending === sent.snap) {
+      if (!sent.stored) return
+      workspaceSave.pending = null
+    }
   }
 }
 
@@ -298,6 +300,8 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
 
 /** Bumped by every attach and every new read, so an older one stops once its wait is over */
 let workspaceReadRun = 0
+/** A read is on its way: a reconnect does not start another beside it (it does cut a wait short) */
+let workspaceReading = false
 
 /**
  * Reading a snapshot again after a read that failed (#384). `attach` runs once per window, so without this one
@@ -310,35 +314,40 @@ let workspaceReadRun = 0
  */
 async function readWorkspaceAgain(get: () => AppState, set: StoreSet, afterFailure = false): Promise<void> {
   const platform = get().platform
-  if (!workspaceUnread || !platform) return
+  if (!workspaceUnread || !platform || workspaceReading) return
   const run = ++workspaceReadRun
   const current = () => run === workspaceReadRun && workspaceUnread
   let first = afterFailure
   let gaveUp = false
-  const snap = await retryLadder(
+  await retryLadder(
     async () => {
-      if (!first) return platform.workspace.load()
-      first = false
-      throw new Error('the first read failed')
+      if (first) {
+        first = false
+        throw new Error('the first read failed')
+      }
+      workspaceReading = true
+      try {
+        const snap = await platform.workspace.load()
+        if (!current()) return
+        restoringWorkspace = true
+        try {
+          if (snap) applyWorkspaceSnapshot(snap, get, set, false)
+        } finally {
+          restoringWorkspace = false
+        }
+        workspaceUnread = false
+      } finally {
+        workspaceReading = false
+      }
     },
     current,
     undefined,
     () => (gaveUp = true),
   )
-  if (!current()) return
-  if (gaveUp) {
-    workspaceUnread = false
-    set({ toast: `Could not read the window layout after ${RETRY_MS.length + 1} tries; the one on screen is saved in its place` })
-    get().saveWorkspace()
-    return
-  }
-  restoringWorkspace = true
-  try {
-    if (snap) applyWorkspaceSnapshot(snap, get, set, false)
-  } finally {
-    restoringWorkspace = false
-  }
+  if (!gaveUp || !current()) return
   workspaceUnread = false
+  set({ toast: `Could not read the window layout after ${RETRY_MS.length + 1} tries; the one on screen is saved in its place` })
+  get().saveWorkspace()
 }
 
 type ConnectionActions = Pick<AppState, 'attach' | 'saveWorkspace' | 'recoverAfterReconnect'>

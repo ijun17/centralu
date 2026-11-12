@@ -785,7 +785,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
  */
 describe('a workspace snapshot that could not be read', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
-  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true }
+  const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true, sidebarWidth: 300 }
 
   it('is said, and a change made meanwhile is not saved over it', async () => {
     const mock = new MockPlatform()
@@ -885,6 +885,29 @@ describe('a workspace snapshot that could not be read', () => {
       expect(folds(mock)).toEqual(['kept-meanwhile'])
       await vi.advanceTimersByTimeAsync(120_000)
       expect(failures()).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A snapshot that reads but cannot be restored is a failed read too: the window must not stay unsaved for good
+  it('that reads but cannot be restored is tried again, and saved over after the last try', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { mock } = await failedFirstRead(1)
+      let restores = 0
+      useStore.setState({
+        setSidebarWidth: () => {
+          restores++
+          throw new Error('the restore threw partway')
+        },
+      })
+      await vi.advanceTimersByTimeAsync(1_000 + 5_000 + 30_000)
+      expect(restores).toBe(3)
+      expect(useStore.getState().toast).toBe('Could not read the window layout after 4 tries; the one on screen is saved in its place')
+      useStore.getState().toggleProjectFold('after-giving-up')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(folds(mock)).toEqual(['kept-fold', 'after-giving-up'])
     } finally {
       vi.useRealTimers()
     }
