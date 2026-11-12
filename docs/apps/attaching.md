@@ -43,6 +43,94 @@ been read yet, the host starts the app and waits up to 15 s, then attaches it wi
 and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
 (`TOOL_LIST_WAIT_MS` in `sessions/session-apps.ts`, through `withTimeout`, #428).
 
+## Apps through two fixed Centralu tools (#2231)
+
+Owner decision (2026-11-12, option B; #512's apps row): a session reaches its apps through Centralu's own
+server, never through one MCP server per app. Before, every attached app was a server in the session (Claude: an
+in-process proxy per app, swapped in with `setMcpServers`; Codex: a stdio bridge per app, fixed at `thread/start`,
+`tools/list_changed` ignored), so a Codex thread never saw an app that arrived mid-thread, and a Codex request grew
+with every attached app. Now the session's tool list is the same whatever apps come and go, on every CLI that has
+Centralu's tools.
+
+**The tools** (every profile: the Assistant, a coordinator, a builder and an ordinary session; each has apps under
+decision 4):
+
+| Tool | Does | Answer |
+|---|---|---|
+| `app_tools({ app? })` | No `app`: this session's apps, decision 4's and what it attached, one per line with the first line of its description and its tool names (`(reads)` after a read-only one). With `app`: that app's tools, one line each with the read-only mark and the input schema | Names `app_call`; with no app, `find_apps` where the seat has it |
+| `app_call({ app, tool, args? })` | Calls one tool of one of this session's apps. `args` is an object (JSON text of one is read too) | The app's own result (`content` and `structuredContent` as the app gave them); a mismatch answers with the tool's schema and runs nothing |
+
+`find_apps`, `attach_app` and `detach_app` keep their roles (another project's or the user folder's apps, #371 part A);
+`find_apps` is the one listing of what a session *could* attach, `app_tools` of what it *has*: no app is in both. An
+app made or attached mid-session is callable on the next `app_call`, the same turn included, on both CLIs: the
+call checks the session's apps at call time, and nothing is restarted.
+
+**Names.** `app` is the app's name in this session: its server name of before without `app-` (`board`,
+`board-centralu`, `board-2`), from the same book (`session_app_names:<session>`, #1141), so a name a session has
+seen still never comes to mean another app. `app-board` is read as `board` (a session's earlier turns used the server
+names). The cut that kept `mcp__<server>__<tool>` within 64 characters (`SERVER_NAME_MAX`) goes: no app name is part
+of a tool name any more.
+
+**The one call path.** `app_call` reaches the hub's `SessionApps.call`, which re-checks decision 4 and the
+attachment at the call and goes through `ExternalApps.call` (caller `session`), as before. The host checks `args`
+against the tool's `inputSchema` first (zod's JSON Schema reader; a schema it cannot read is not checked, as the CLIs
+did not), so a wrong call costs no run and no card.
+
+**Approval moves to the host, at the call, with the real arguments**, the same on every CLI. In order:
+
+1. The Assistant in a turn a session's request started (#1447): the request gate (`whenAsked`), as before.
+2. A tool that runs unasked (`readOnlyHint`, or `centralu/risk` `local`, or `routine` in the session's own
+   project's app under `normal`, now with the real arguments on Codex too): no card.
+3. Otherwise the session's preset, read at the call:
+
+| Preset | Claude | Codex | Before (Claude / Codex) |
+|---|---|---|---|
+| `safe` | Card | Card | Card / card (`prompt`) |
+| `normal`, `edits` | Card, unless the person's own Claude mode is `bypassPermissions` | Card, unless the person's own `approval_policy` is `never` | The CLI's flow (a card, the person's rules, their mode) / card (`writes`), `approve` under `never` |
+| `auto` | No card | No card | No card / no card (`approve`) |
+
+The card is the host's (`HostCards.askHost`) in the session's approval slot, the same `other` card a Claude app
+tool raised (`mcp__app-<name>__<tool> {arguments}`); Allow runs the call, Deny answers "denied by the person",
+and Always allows this call only (an app tool's card has no rule key, as before). Codex never asks about Centralu's
+tools itself (`default_tools_approval_mode: approve`), so nothing of Codex's sits in front of the card. What changes:
+a Claude `normal` session's own permission rules that named `mcp__app-…` tools no longer apply (the CLI never sees an
+app tool), and a Claude mode other than `bypassPermissions` (`dontAsk`, `plan`, `auto`) gets the card;
+`askWhen`/`askUnless` are honoured on Codex as on Claude, since the host has the arguments.
+
+**Waiting.** A card stands until the person answers; on Codex the Centralu server's call ceiling
+(`tool_timeout_sec`) is raised from 300 s to 3,600 s so that a card is not cut by Codex (before, Codex asked
+before the call and its 300 s ran only once allowed). An app's run still answers "still running" with its run id
+after 240 s on Codex and is followed with `app_call(app, tool="run_status", args={run_id})`; Claude waits, as before.
+
+**Cards and history.** A call's card shows the app and its tool as an app tool's did: the adapters mark an
+`app_call` with `centralu: { app, tool }` (`centraluMark`) and title it with the arguments, so the screen draws it
+as it drew `mcp__app-<id>__<tool>`. An old record keeps its `mcp__app-<id>__<tool>` name and mark and renders as
+before. The inline view (B-1) joins the call to its card as before: Claude passes the card id
+(`claudecode/toolUseId`) on the Centralu call; Codex's `item/started` for `app_call` is noted with the app, tool
+and arguments inside it.
+
+**Instructions.** One line, where a session learns how to reach apps: the reader's first-tools line says
+`app_tools and app_call for this session's apps`, and #957's line on repository work names an app's help tool
+through `app_call`. The Assistant's, a builder's and a coordinator's instructions get one short sentence each.
+
+**Older window and host** (protocol.md §4, additions only). No shape changes. A record of an `app_call` carries
+the same `centralu` mark an app call had, so an older window draws it as before (`centraluCallOf` reads the mark
+first). An older window's `apps.reach` stops seeing `restart` and `bridge-failed`, which nothing produces now. The
+bridge methods `apps.sessionTools` and `apps.sessionCall` are removed (§3.2): only an app bridge of an older host's
+Codex thread called them, and such a thread is restarted with the host.
+
+**Recordings and replay.** The Claude recordings `mcp-app.jsonl` (2.1.296, 2.1.316) keep `mcp__app-…` calls: they
+are history, and their replay stays as it is (an old record renders). A recording of an `app_call` needs a live
+re-record on each CLI. Fixtures that carry a session's tool list (`surface-baseline`, the tool-prefix test) gain the
+two tools and lose the app servers.
+
+**What is deleted.** The Claude app proxy (`app-proxy.ts`) and the server sync for apps (`setMcpServers` on every
+attach, detach and app change); the Codex app bridge (`CC_APP_SERVER` in `centralu-bridge.mjs`), the app part of
+`thread-servers.ts` (per-tool `approval_mode`, `appApprovalModeFor`, `checkAppMode`, `appAttachment`), the elicitation
+path for app servers in `server-requests.ts`, the thread restart after an attach (`appsRestartAfterTurn`), the
+adapters' approval branches for app tools (`appToolUnasked`, the request hook's app branch), `SERVER_NAME_MAX`, and
+the bridge RPCs `apps.sessionTools`/`apps.sessionCall`. Apps' own MCP servers stay: they are the host's backend.
+
 ## Claude and Codex
 
 | | Claude | Codex |
