@@ -66,9 +66,12 @@ export function Inbox() {
   const [at, setAt] = useState<{ key: string | null; row: number }>({ key: null, row: 0 })
   const cursor = cursorIndex(list.waiting, at)
   useEffect(() => {
-    if (!open) setAt((a) => (a.key === null && a.row === 0 ? a : { key: null, row: 0 }))
-    else if (at.key === null && list.waiting[0]) setAt({ key: rowKeyOf(list.waiting[0]), row: 0 })
-  }, [open, at.key, list.waiting])
+    // Only a change is set: this runs after every commit (the list is a new array each time), and an update that
+    // changes nothing still counts as a nested one in a burst of store updates (#2059, e2e/event-burst.spec.ts)
+    if (!open) {
+      if (at.key !== null || at.row !== 0) setAt({ key: null, row: 0 })
+    } else if (at.key === null && list.waiting[0]) setAt({ key: rowKeyOf(list.waiting[0]), row: 0 })
+  }, [open, at.key, at.row, list.waiting])
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
