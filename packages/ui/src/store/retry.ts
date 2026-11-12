@@ -5,27 +5,37 @@
  */
 export const RETRY_MS = [1_000, 5_000, 30_000] as const
 
+/** How far up the ladder a read is: `at` is the wait its next failure takes. Handed to several ladders, it keeps the count across them */
+export type RetrySteps = { at: number }
+
 /**
  * Calls `read` until it succeeds, waiting the `RETRY_MS` steps between tries. `failed` runs after every failure
  * and `gaveUp` once the steps run out; `keepGoing` is asked after each wait. Null when it stopped without a read.
+ *
+ * `steps` is the count of waits already taken (a caller that resets it on success starts over from the first wait).
+ * `afterFailure` says the read already failed once, outside the ladder, so it starts with the wait instead of a try.
  */
 export async function retryLadder<T>(
   read: () => Promise<T>,
   keepGoing: () => boolean,
   failed?: () => void,
   gaveUp?: () => void,
+  { steps = { at: 0 }, afterFailure = false }: { steps?: RetrySteps; afterFailure?: boolean } = {},
 ): Promise<T | null> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await read()
-    } catch {
-      failed?.()
+  for (let skip = afterFailure; ; skip = false) {
+    if (!skip) {
+      try {
+        return await read()
+      } catch {
+        failed?.()
+      }
     }
-    const wait = RETRY_MS[attempt]
+    const wait = RETRY_MS[steps.at]
     if (wait === undefined) {
       gaveUp?.()
       return null
     }
+    steps.at++
     await new Promise((r) => setTimeout(r, wait))
     if (!keepGoing()) return null
   }
