@@ -158,7 +158,7 @@ describe('the built CSS actually contains styles', () => {
        * about 0.003 to 0.006, and the system blue for the focus ring and the terminal's selection. As Graphite's, none of it
        * reaches a state or urgency, which the inks rank by brightness alone (`ink-signal` is pure black).
        */
-      'f7f7f8', 'e0e0e5', 'e7e7ea', 'f2f2f4', 'e3e3e6', 'ceced1', 'c6c6cb', '1d1d1f', '636368', '7c7c81', '5b5b60', 'c9c9ce', 'aeaeb2',
+      'f7f7f8', 'e0e0e5', 'e7e7ea', 'f2f2f4', 'e3e3e6', 'd4d4d8', 'c6c6cb', '1d1d1f', '636368', '7c7c81', '5b5b60', 'c9c9ce', 'aeaeb2',
       '0066d6', 'cfe3ff', // Light: the focus ring, and the terminal's selection
       // light: diff and danger, terminal
       '1a7f37', 'dafbe1', 'cf222e', 'ffebe9',

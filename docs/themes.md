@@ -64,7 +64,7 @@ bluer than neutral, a white floor (`#ffffff`), raised `#f7f7f8` and the sidebar 
 `#cfe3ff`). It replaced the earlier Light (floor `#f0f0f0`, raised `#f9f9f9`, sidebar `#e0e0e0`, signal `#111111`, ink
 `#2a2a2a`). Every token the file sets is the preset's value now; the ones it does not set kept the earlier Light's (the diff and danger colours, the keycap, the
 terminal's ANSI colours, the scrim, the glow, and the notice, sticky, dock, key and chip shadows), and its window line
-(`line-chrome`) is what its `line` and `ink-faint` mixed to, `#ceced1`. Three frame edges are colours of their own (owner, 2026-10-19), and
+(`line-chrome`) is `#d4d4d8`, between its `line` and `line-strong` (1.48 / 1.29 / 1.38:1 on the floor, the sidebar and a raised surface; the mix it drew before the file was `#ceced1`). Three frame edges are colours of their own (owner, 2026-10-19), and
 did not move: a resting panel's border (`#d4d4d4`, lighter than Light New's `line-chrome` and `line-strong`), an answering one (`#9e9e9e`) and the person's
 bubble (`#cdcdcd`). The agent's bubble and a tool call card, which had edges of their own (`#e6e6e6`, `#e2e2e2`), draw the plain `line` (`#e3e3e6`) now, three and four levels darker. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
 more against every reading surface. A test checks the urgency order (below) for every preset, and
@@ -172,17 +172,14 @@ The agent's bubble, a relayed message's and a tool call's card (a failed one kee
 
 Light used to draw these in colours of its own that every light theme inherited (a resting panel `#d4d4d4`, answering `#9e9e9e`, the person's bubble `#cdcdcd`, and the agent's bubble `#e6e6e6` and a tool card `#e2e2e2`, which are the plain `line` now; owner 2026-10-19), so a custom light theme such as Pink had grey frames. Those values are the Light preset's tokens now; the dark presets set the colours these were drawn with (`line-strong`, `ink-muted`, and the person's bubble as `ink-faint` at 40% over `surface-hover`, written out as a solid colour). In the high-contrast presets the person's bubble is `line-strong`: it was `#616161` in high contrast dark, weaker than its own `line`, and `#a2a2a2` in high contrast light, 2.5:1 on white. A theme file that leaves one out follows the token in the table (`follows` in `THEME_TOKENS`; `resolveSide` writes the `var()`), so Pink's frames are its own `line` and `line-strong`.
 
-**No border is a part of a colour.** `border-line/60` and its kind (43 uses, and `border-danger/40`, `/70` and `ring-ink-muted/70` in eight more) drew `line` at 60 or 70% over the ground, so the line was a blend with whatever lay under it: 1.06 to 1.27:1 in Dark, Light and Graphite (under the rule below) and 2.1 to 2.6:1 in the high-contrast presets (under their 3:1). They are the solid `line` now (or `line-strong` for the selected chip's and the attachment's edge, which were `ink-faint` or `ink-muted` at 40 to 50%), and `tooling/styles.test.ts` fails on a border, divider, ring or outline class with an opacity on any colour token. A danger notice's edge is the solid `danger` (it was `danger` at 40%, 1.7 to 2.3:1 on its fill); a danger button's is `line-strong`, and `danger` under the pointer. Where one wanted to be lighter than `line`, it is not: `line` already is the quiet hairline, and the rule puts the floor at 1.2:1.
+**No border is a part of a colour.** `border-line/60` and its kind (43 uses, and `border-danger/40`, `/70` and `ring-ink-muted/70` in eight more) drew `line` at 60 or 70% over the ground, so the line was a blend with whatever lay under it: 1.06 to 1.27:1 in Dark, Light and Graphite (the floor below is 1.1:1) and 2.1 to 2.6:1 in the high-contrast presets (under their 3:1). They are the solid `line` now (or `line-strong` for the selected chip's and the attachment's edge, which were `ink-faint` or `ink-muted` at 40 to 50%), and `tooling/styles.test.ts` fails on a border, divider, ring or outline class with an opacity on any colour token. A danger notice's edge is the solid `danger` (it was `danger` at 40%, 1.7 to 2.3:1 on its fill); a danger button's is `line-strong`, and `danger` under the pointer. Where one wanted to be lighter than `line`, it is not: `line` already is the quiet hairline, and the rule puts the floor at 1.2:1.
 
-**The rule**, measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), the lowest of the three counting:
+**The rule** (owner, 2026-11-12), measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), on each of them:
 
-| Token | At least | Why this number |
-|---|---|---|
-| `line` | 1.2:1 | Below it a line is lost: the top bar's `line` was 1.10:1 on Light's sidebar and read as no line at all (a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone). Dark's lowest is 1.28:1 (on raised); Light's and Graphite's are 1.23:1 now, so 1.2 is a floor close to what the presets already draw, not a new look |
-| `line-chrome` | 1.4:1 | A step over `line` on the grounds it sits on, so the sidebar's lines and its edge stand apart from the conversation beside them. Dark's lowest is 1.52:1, Light's 1.47:1 |
-| `line-strong` | 1.7:1, and 0.25 over `line-chrome` | "Clearly stronger" in numbers: Dark's lowest is 1.83:1, 0.31 over its `line-chrome`. Light's was 1.42:1, and would have fallen under its own `line-chrome` once `line` rose |
+- `line` is at least **1.1:1**. A floor, not a target: below it a line is lost. The top bar's `line` was 1.10:1 on Light's sidebar and was changed for that (#2207), and a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone, so 1.1 sits just over what was found to vanish. The presets draw more: Dark's lowest is 1.28:1 (on raised), Graphite's 1.23:1, Light's 1.11:1 (the owner's `#e3e3e6` on the sidebar).
+- `line-strong` is stronger than `line-chrome`, which is stronger than `line`, strictly, by contrast. There is no number for the step: the order is the rule. (An earlier draft asked 1.2, 1.4 and 1.7:1 and a step of 0.25; the owner's Light New file did not meet it and he kept the file.)
 
-The high-contrast presets keep the hairline at 3:1 or more on every reading surface, for `line` and `line-chrome` both; their `line-strong` is far above the rule, and each frame edge (`line-panel`, `line-answering`, `line-bubble-mine`) must clear 3:1 too. `e2e/fixtures/theme.ts` checks all of this for every preset, in a test apart from the urgency order, so a preset cannot drift back and the line decision does not turn the urgency test red.
+The high-contrast presets keep every line at 3:1 or more on every reading surface (`line`, `line-chrome`, `line-strong`), and each frame edge (`line-panel`, `line-answering`, `line-bubble-mine`) must clear 3:1 too. `e2e/fixtures/theme.ts` checks all of this for every preset, in a test apart from the urgency order, so a preset cannot drift back and the line decision does not turn the urgency test red. The presets other than Light already met the earlier, stricter numbers, and none of their values was loosened for the new floor.
 
 What changed, per preset (contrast on the floor / the sidebar / a raised surface; before, then after):
 
@@ -190,24 +187,24 @@ What changed, per preset (contrast on the floor / the sidebar / a raised surface
 |---|---|---|---|
 | Dark (unchanged) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
 | Light, before (the earlier Light) | `#cbcbcb` 1.42 / 1.23 / 1.54 | `#bababa` 1.70 / 1.47 / 1.84 | `#aaaaaa` 2.04 / 1.76 / 2.21 |
-| Light, now (Light New, the owner's values) | `#e3e3e6` 1.28 / 1.11 / 1.20 | `#ceced1` 1.57 / 1.37 / 1.47 | `#c6c6cb` 1.70 / 1.48 / 1.59 |
+| Light, now (Light New, the owner's `line` and `line-strong`; `line-chrome` chosen) | `#e3e3e6` 1.28 / 1.11 / 1.20 | `#d4d4d8` 1.48 / 1.29 / 1.38 | `#c6c6cb` 1.70 / 1.48 / 1.59 |
 | High contrast dark (unchanged) | `#707070` 4.24 / 4.24 / 3.87 | `#797979` 4.82 / 4.82 / 4.40 | `#a8a8a8` 8.83 / 8.83 / 8.06 |
 | High contrast light (unchanged) | `#767676` 4.54 on all | `#707070` 4.95 on all | `#4a4a4a` 8.86 on all |
 | Graphite, before | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
 | Graphite, after | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 (unchanged) |
 
-- **Light** is the owner's "Light New" with its values kept as they are, and they miss the rule in the cells below (the same measure: the floor / the sidebar / a raised surface). The test fails for it on exactly these. The smallest value that passes is next to each; the owner decides between keeping his values and these.
+- **Light** is the owner's "Light New" and keeps his values as they are (owner, 2026-11-12): `line` `#e3e3e6` and `line-strong` `#c6c6cb`, and the rest of the file. His file sets no `line-chrome`, so the preset's is chosen: `#d4d4d8`, the middle of the two (it was `#ceced1`, a mix of `line` and `ink-faint`, before). Against the floor / the sidebar / a raised surface, with the old value beside it:
 
-  | Token | The owner's value | Fails on | Smallest passing | Its contrast |
-  |---|---|---|---|---|
-  | `line` (1.2:1) | `#e3e3e6` 1.28 / 1.11 / 1.20 | the sidebar (1.11), a raised surface by a hair (1.196) | `#dbdbde` | 1.38 / 1.20 / 1.29 |
-  | `line-chrome` (1.4:1) | `#ceced1` 1.57 / 1.37 / 1.47 | the sidebar (1.37) | `#cbcbce` | 1.62 / 1.41 / 1.51 |
-  | `line-strong` (1.7:1, and 0.25 over `line-chrome`) | `#c6c6cb` 1.70 / 1.48 / 1.59 | the sidebar (1.48) and a raised surface (1.59); the step over `line-chrome` is 0.13 / 0.11 / 0.12 | `#b8b8bd` (with `line-chrome` `#cbcbce`) | 1.98 / 1.72 / 1.85 |
+  | Token | Value | Contrast | Before (the mix) |
+  |---|---|---|---|
+  | `line` | `#e3e3e6` | 1.28 / 1.11 / 1.20 | the same |
+  | `line-chrome` | `#d4d4d8` | 1.48 / 1.29 / 1.38 | `#ceced1` 1.57 / 1.37 / 1.47 |
+  | `line-strong` | `#c6c6cb` | 1.70 / 1.48 / 1.59 | the same |
 
-  Every ink keeps the urgency order and clears 7 / 4.5 / 3:1 on every reading surface (body 14.6 on the sidebar, secondary 5.2, background 3.6). A person who already has the "Light New" file keeps it as it is, as with Graphite.
-- **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the rule, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. Nothing else in it broke the rule.
-- **Dark and the high-contrast presets** already kept the rule, so the three lines did not change. The top bar's and the shell banner's line in Dark is `line-chrome`, as the sidebar's always was.
-- The evidence panel's edge and header and the overlay header draw `line-chrome` too, so they meet the sidebar's lines (they drew `line` before; in Light that lifts them from 1.10:1 to 1.37:1 on the sidebar's ground). The other panels on that ground keep `line`.
+  The order holds on all three grounds and `line` clears 1.1:1 on all of them, so Light meets the rule. Every ink keeps the urgency order and clears 7 / 4.5 / 3:1 on every reading surface (body 14.6 on the sidebar, secondary 5.2, background 3.6). The sidebar's lines and the top bar's are a little lighter than the first Light New draft drew them. A person who already has the "Light New" file keeps it as it is, as with Graphite; with no `line-chrome` in it, its window line is its `line`.
+- **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the 1.2:1 the rule asked at the time, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. It stays, although `#38383a` would pass the 1.1:1 floor.
+- **Dark and the high-contrast presets** already kept the rule (and the stricter one before it), so the three lines did not change. The top bar's and the shell banner's line in Dark is `line-chrome`, as the sidebar's always was.
+- The evidence panel's edge and header and the overlay header draw `line-chrome` too, so they meet the sidebar's lines (they drew `line` before; in Light that lifts them from 1.11:1 to 1.29:1 on the sidebar's ground). The other panels on that ground keep `line`.
 
 ## How it is applied
 

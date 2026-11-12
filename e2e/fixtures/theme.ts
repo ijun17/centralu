@@ -21,15 +21,11 @@ type Mock = {
 
 const DARK_FLOOR = '#120e0a'
 /**
- * The rule for the three lines (docs/themes.md "The lines"): each is checked on the floor, the sidebar and a raised
- * surface, the three grounds a line is drawn on. `line` stays visible but quiet, `line-chrome` is a step stronger, and
- * `line-strong` is clearly stronger again.
+ * The rule for the three lines (docs/themes.md "The lines"), checked on the floor, the sidebar and a raised surface, the three
+ * grounds a line is drawn on: `line` is at least this much against each, and `line-strong` is stronger than `line-chrome`, which
+ * is stronger than `line`, strictly, on each of them (owner, 2026-11-12). 1.1 is a floor under the 1.03 that #2207 found gone.
  */
-const LINE_FLOOR = 1.2
-const LINE_CHROME_FLOOR = 1.4
-const LINE_STRONG_FLOOR = 1.7
-/** How much more contrast each line has than the one below it */
-const LINE_STEP = 0.25
+const LINE_FLOOR = 1.1
 /** The least contrast of each ink on a reading surface in every preset; the high-contrast presets hold every ink to 4.5:1 besides */
 const INK_FLOORS = [['--color-ink', 7], ['--color-ink-muted', 4.5], ['--color-ink-faint', 3]] as const
 const LINE_GROUNDS = ['--color-surface-floor', '--color-surface-side', '--color-surface-raised'] as const
@@ -266,10 +262,8 @@ export function presetTests() {
       for (const surface of LINE_GROUNDS) {
         const [line, side, strong] = edges.map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
         expect.soft(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
-        expect.soft(side, `line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_CHROME_FLOOR)
-        expect.soft(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
-        expect.soft(side - line, `line-chrome over line on ${surface}`).toBeGreaterThanOrEqual(0)
-        expect.soft(strong - side, `line-strong over line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
+        expect.soft(side, `line-chrome over line on ${surface}`).toBeGreaterThan(line)
+        expect.soft(strong, `line-strong over line-chrome on ${surface}`).toBeGreaterThan(side)
         // High contrast keeps every edge at 3:1: the three lines and each frame's edge (a bubble of yours at 2.5:1 was missed when only two were checked)
         if (preset.id.startsWith('hc-')) for (const n of [...edges, ...frames]) expect.soft(contrast(colors[n]!, colors[surface]!), `${n} on ${surface}`).toBeGreaterThanOrEqual(3)
       }
