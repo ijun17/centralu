@@ -83,7 +83,7 @@ export class DelegationFlow {
         return null
       } catch (e) {
         withdraw()
-        d.wait.fail(e as Error)
+        d.wait.fail(e instanceof Error ? e : new Error(errorMessage(e)))
         this.host.children.dropDelegation(w.key, d)
         if (this.host.agentRuns.get(w.sessionId) === d.wait) this.host.agentRuns.delete(w.sessionId)
         return errorMessage(e)
