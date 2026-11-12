@@ -511,7 +511,8 @@ answer, and a test on memory says what the host does:
 - `processes.stop`'s sweep on Windows ends what the child started between its spawn and its exit as recorded
   (`GroupedChild.exitedAt`, shared with `app-process.ts` and `local-process.ts`) plus one clock tick (`CLOCK_TICK_MS`: Node's
   clock runs up to a tick behind the creation times Windows stamps), never up to the time of the sweep, when its pid may
-  already be another program's.
+  already be another program's; and before it ends one, it reads the table again and ends it only if its pid still has the creation time the sweep
+  saw (#2206), as a number is reused.
 
 `memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
 checks the in-memory OS against both on any OS (and a few cases more: a program's file while it runs, `EXDEV`, symlink

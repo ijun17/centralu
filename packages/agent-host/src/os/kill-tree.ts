@@ -272,7 +272,8 @@ const TASKKILL_MS = 5000
  * How long the host's shutdown waits for the stops it started (`stopsSettled`), under the host's own bound (`SHUTDOWN_BOUND_MS`).
  * A stop that could not read the table is a table read (`STOP_LIST_MS`) and one `taskkill` for every root side by side (`TASKKILL_MS` at
  * most), and a second to spare. One that read it is the read, one `taskkill` for the roots, and one for each process of the longest
- * tree after the one before it, which a tree of a few processes fits (0.2–0.5 s each, measured), and which a starved machine
+ * tree after the one before it, and a read of the table before each (the warm reader's 2–4 ms; a read of its own, before it is warm, 0.4–1 s,
+ * and bounded by `TASKKILL_MS`, #2206), which a tree of a few processes fits (0.2–0.5 s each, measured), and which a starved machine
  * does not: the table then is what fails first. Past the bound the shutdown goes on, and a tree the stop did not reach is the
  * one thing the host can no longer do anything about.
  */
@@ -482,8 +483,12 @@ export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProc
 export type LeftoverOs = {
   /** The process table; given up on after `timeoutMs` (by default the long bound below, for a sweep) */
   listProcesses: (timeoutMs?: number) => Promise<WinProcRow[]>
-  /** Ends a process and every process under it, forcibly; with `alone`, that process only. Rejects (or throws) with taskkill's exit status */
-  taskkill: (pid: number, alone?: boolean) => void | Promise<void>
+  /**
+   * Ends a process and every process under it, forcibly; with `alone`, that process only. Rejects (or throws) with taskkill's exit status.
+   * `created` is the creation time the table showed for `pid` (a sweep's): a process that has another now is not the one the table
+   * showed, and is not ended (`ProcessGone`)
+   */
+  taskkill: (pid: number, alone?: boolean, created?: number) => void | Promise<void>
 }
 
 /*
@@ -501,8 +506,8 @@ const runFile = promisify(execFile)
  * `run` is `execFile` as a promise and `table` gives the warm reader once there is one, parameters so a test can answer in
  * their place; while it gives none every read is one of its own
  */
-export const leftoverOs = (run: typeof runFile, table: () => TableReader | undefined = () => undefined, alive: (pid: number) => boolean = pidAlive): LeftoverOs => ({
-  listProcesses: async (timeoutMs = 60_000) => {
+export const leftoverOs = (run: typeof runFile, table: () => TableReader | undefined = () => undefined, alive: (pid: number) => boolean = pidAlive): LeftoverOs => {
+  const listProcesses = async (timeoutMs = 60_000): Promise<WinProcRow[]> => {
     const warm = table()
     if (warm) {
       try {
@@ -513,22 +518,29 @@ export const leftoverOs = (run: typeof runFile, table: () => TableReader | undef
     }
     const { stdout } = await run(powershell(), [...POWERSHELL_ARGS, READ_ONCE], { timeout: timeoutMs, windowsHide: true })
     return parseWinProcs(stdout)
-  },
-  // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
-  taskkill: async (pid, alone = false) => {
-    // Already gone, as a console child's conhost.exe is with its parent: no process to start for it (under load a taskkill took 2-4 s, #2200)
-    if (!alive(pid)) throw gone(pid)
-    try {
-      await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
-    } catch (e) {
-      // It ended while taskkill was at it: that answer is "not found" in the system's language, with 128 or 255 as its exit code (measured, a
-      // console child's conhost.exe ended at that moment: 255, "could not be terminated. Reason: There is no running instance of the task"), so
-      // neither says it. That the process is no longer there does
+  }
+  return {
+    listProcesses,
+    // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
+    taskkill: async (pid, alone = false, created) => {
+      // Already gone, as a console child's conhost.exe is with its parent: no process to start for it (under load a taskkill took 2-4 s, #2200)
       if (!alive(pid)) throw gone(pid)
-      throw e
-    }
-  },
-})
+      // A number is reused: a process that ended after the table was read may have given its number to another one, which is not ours to
+      // end and whose tree `/T` would take with it (#2206). Only the creation time tells them apart; the table is read again for it,
+      // and one that cannot be read, in the time a taskkill itself is given, leaves the process alone (the read's own error is reported)
+      if (created !== undefined && !(await listProcesses(TASKKILL_MS)).some((r) => r.pid === pid && r.created === created)) throw gone(pid)
+      try {
+        await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
+      } catch (e) {
+        // It ended while taskkill was at it: that answer is "not found" in the system's language, with 128 or 255 as its exit code (measured, a
+        // console child's conhost.exe ended at that moment: 255, "could not be terminated. Reason: There is no running instance of the task"), so
+        // neither says it. That the process is no longer there does
+        if (!alive(pid)) throw gone(pid)
+        throw e
+      }
+    },
+  }
+}
 
 /** Whether a process of this number still runs: signal 0 sends nothing (`EPERM`: it does, as another user's). The one answer to it (`processes.alive` is this) */
 export function pidAlive(pid: number): boolean {
@@ -540,7 +552,7 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** What `leftoverOs`'s taskkill rejects with for a process that is no longer there, whatever taskkill said of it: nothing to end, and nothing to report */
+/** What `leftoverOs`'s taskkill rejects with for a process that is no longer there (or whose number another process has now), whatever taskkill said of it: nothing to end, and nothing to report */
 export class ProcessGone extends Error {
   constructor(pid: number) {
     super(`process ${pid} is already gone`)
@@ -692,10 +704,10 @@ async function endInOrder(found: readonly WinProcRow[], by: number, os: Leftover
   for (const r of found) {
     if (r.pid === process.pid) continue // never ourselves
     try {
-      await os.taskkill(r.pid, parents.has(r.pid))
+      await os.taskkill(r.pid, parents.has(r.pid), r.created)
       ended.push(r.pid)
     } catch (e) {
-      // Already gone (the process was not there, or ended while taskkill was at it), or ended by the /T of one before it: taskkill's 128. Anything else left it running
+      // Already gone (the process was not there, or ended while taskkill was at it, or its number is another process's now), or ended by the /T of one before it: taskkill's 128. Anything else left it running
       if (e instanceof ProcessGone) continue
       const status = typeof e === 'object' && e !== null ? ('status' in e ? e.status : 'code' in e ? e.code : undefined) : undefined
       if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${by}, could not be ended (status ${String(status)}: ${e instanceof Error ? e.message.replace(/\s+/g, ' ').trim() : 'unknown error'})`)

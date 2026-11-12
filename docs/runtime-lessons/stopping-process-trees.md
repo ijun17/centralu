@@ -32,6 +32,7 @@ Happened: the second shot assumed a pid missing from `ps` led its own group, whi
 recycled number (e7ea439a).
 Rule: `ps` read and the root absent means no targets; fall back to `-root` only when `ps` itself failed; the same pid
 in another group is someone else.
+POSIX has the same window, much smaller, and no creation time is added (#2206): the second shot takes pid **and** group as the identity and reads `ps` again right before it fires, and a group is not reused while it has members. What is left is the milliseconds between a `ps` read and its signal, against a wrap of the number space: 32,768 by the kernel's default (about 22 s of forking at the 1,500 a second measured on Linux), 4,194,304 where systemd sets it (WSL, about 47 minutes), 99,999 on macOS (not measured, about 67 s at that rate). A creation time would be `ps lstart` (a locale-dependent text), `/proc/<pid>/stat` (Linux only) and nothing on macOS: three sources, not the one reader of Windows.
 Guard: `host/os/kill-tree.test.ts` "fires at nothing when ps was read but root is missing — this is where a
 recycled pid could be hit"; `host/os/kill-tree.test.ts` "the same pid in a different group is someone else
 — a spot where the number was recycled in the meantime".
@@ -116,8 +117,8 @@ but not for detached or Python ones (285be4e9, #360).
 Rule: read the process table with its parent ids and creation times (the warm reader, `os/process-table.ts`, #2178); take the dead root's children created inside its lifetime (a clock tick of slack at the end: Node's clock runs
 behind the creation times, #1773), and deeper children no older than their parent; `taskkill` each, never ourselves, never throw. One that is no longer
 there (a console child's conhost.exe ends with its parent) has no taskkill started for it, and one that ended while taskkill was at it is not reported (#2200: the
-answer is exit code 255 or 128 in the system's language, so the process being gone is what says it).
-Guard: `host/os/kill-tree.test.ts` "a leftover that ended before taskkill reached it"; `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
+answer is exit code 255 or 128 in the system's language, so the process being gone is what says it). **A number is reused**: before it ends a process of the sweep, the stop reads the table again (the same reader, in the time a taskkill is given) and ends it only if that pid still has the creation time the sweep saw it with (what remains is the milliseconds from that read to the taskkill); another creation time means the number is another process's, which `taskkill /T` would take with its tree, so it is skipped as gone (`ProcessGone`, #2206). A table that cannot be read leaves the process alone and says so.
+Guard: `host/os/kill-tree.test.ts` "ends no process that has another creation time than the table showed it with, whose number it has now"; `host/os/kill-tree.test.ts` "a leftover that ended before taskkill reached it"; `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
 the root's own, a later one a later holder's"; `host/apps/external/lifecycle.test.ts` "on Windows, a descendant started outside the app's job,
 left by an app that ended on its own, is ended — no orphan is left behind".
 Platforms: Windows.
