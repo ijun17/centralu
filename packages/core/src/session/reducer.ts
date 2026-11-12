@@ -69,7 +69,7 @@ export type SessionSummary = {
   context: { used: number; window: number; exactness: 'exact' | 'estimate' } | null
   limit: { resumeAt?: string; usedPercent?: number; windowMins?: number } | null
   lastError: { code: string; message: string } | null
-  /** For detecting file conflicts between concurrent sessions (FR-2) */
+  /** The files this session changed, as its events reported them (FR-2): the git changes and the file tree mark them */
   touchedPaths: string[]
   /** Changed from the session header (FR-7) */
   model: string | null
@@ -315,15 +315,4 @@ export function markRead(s: SessionSummary, seq: number): SessionSummary {
 
 export function rename(s: SessionSummary, name: string): SessionSummary {
   return { ...s, name, autoNamed: false }
-}
-
-/** Concurrent sessions in the same directory that touched the same file (FR-2 data-loss warning) */
-export function detectFileConflicts(sessions: readonly SessionSummary[]): { path: string; sessionIds: string[] }[] {
-  const byPath = new Map<string, string[]>()
-  for (const s of sessions) {
-    for (const p of s.touchedPaths) byPath.set(p, [...(byPath.get(p) ?? []), s.id])
-  }
-  return [...byPath.entries()]
-    .filter(([, ids]) => ids.length > 1)
-    .map(([path, sessionIds]) => ({ path, sessionIds }))
 }

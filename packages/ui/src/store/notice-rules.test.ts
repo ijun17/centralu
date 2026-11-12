@@ -4,7 +4,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { useStore } from './store.js'
-import { computeInbox } from './selectors.js'
+import { computeInbox } from './inbox.js'
 
 /*
  * Notices with the top-right cards gone (owner, 2026-10-18): a notice is a line the inbox's capsule writes out for a

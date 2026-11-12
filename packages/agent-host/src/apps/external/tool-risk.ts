@@ -65,7 +65,7 @@ export const askWhen = (tool: RiskTool): Record<string, unknown> | null => named
 export const askUnless = (tool: RiskTool): Record<string, unknown> | null => namedArguments(tool, ASK_UNLESS_META_KEY)
 
 /** What an `askWhen` entry of this value means: the argument is set at all (a path to another checkout, say), whatever it holds */
-export const ANY_VALUE = '*'
+const ANY_VALUE = '*'
 
 /** Whether one argument of a call is what an `askWhen` entry names: the same value, or any value that is set for `ANY_VALUE` */
 const matches = (given: unknown, named: unknown): boolean => (named === ANY_VALUE ? given !== undefined && given !== null && given !== '' : given === named)

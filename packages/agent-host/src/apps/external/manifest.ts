@@ -114,7 +114,7 @@ const cspField = z.object(Object.fromEntries(CSP_KEYS.map((k) => [k, z.array(z.s
  * browser storage or blob workers (5 of 86 public apps tested, including map-server, which could not
  * load its map tiles). The values match ViewHost's `OriginMode`, the same two words.
  */
-export const VIEW_ORIGINS = ['opaque', 'app'] as const
+const VIEW_ORIGINS = ['opaque', 'app'] as const
 const VIEW_KEYS = ['origin', 'span'] as const
 const SPAN_KEYS = ['cols', 'rows'] as const
 
@@ -126,7 +126,7 @@ const SPAN_KEYS = ['cols', 'rows'] as const
  * stands at 1 × 1 as before. A whole number outside 1..`GRID_SPAN_MAX` is clamped into it, as the grid clamps a span
  * that does not fit; anything that is not two whole numbers is ignored. Both say so in a warning (`check` reports it).
  */
-export function readViewSpan(raw: unknown): { span?: GridSpan; warning?: string } {
+function readViewSpan(raw: unknown): { span?: GridSpan; warning?: string } {
   if (raw === undefined) return {}
   const v = raw as { cols?: unknown; rows?: unknown }
   const whole = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)

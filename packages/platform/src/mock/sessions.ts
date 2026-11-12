@@ -20,7 +20,7 @@ const MOCK_LOSS = 'A session it started owes it a report; it will not be told, a
  * Whether git would take `name` as a branch (`git check-ref-format --branch`), which the host asks git itself
  * (`gitValidBranchName`). The rules git applies to a branch name, written out for the mock that has no git.
  */
-export function validBranchName(name: string): boolean {
+function validBranchName(name: string): boolean {
   if (!name || name === '@' || name.startsWith('-')) return false
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x20\x7f~^:?*[\\]/.test(name) || name.includes('..') || name.includes('@{') || name.includes('//')) return false

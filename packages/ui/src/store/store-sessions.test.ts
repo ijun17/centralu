@@ -830,3 +830,25 @@ describe('registering a session from the host\'s answer (#2171)', () => {
     expect(row.preview).toBe('Hello')
   })
 })
+
+describe('the next waiting item (#2176)', () => {
+  it('opens the session that waits on the person, approvals before the rest', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('nw-idle', sessionInfo('nw-idle'))
+    mock.sessions.set('nw-wait', sessionInfo('nw-wait', { state: 'waiting_approval', waitingSince: 1 }))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().focusedSessionId).not.toBe('nw-wait')
+
+    useStore.getState().openNextWaiting()
+    expect(useStore.getState().focusedSessionId).toBe('nw-wait')
+  })
+
+  it('does nothing when nothing waits', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('nw-calm', sessionInfo('nw-calm'))
+    await useStore.getState().attach(mock)
+    const before = useStore.getState().focusedSessionId
+    useStore.getState().openNextWaiting()
+    expect(useStore.getState().focusedSessionId).toBe(before)
+  })
+})

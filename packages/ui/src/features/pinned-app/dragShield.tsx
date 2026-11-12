@@ -106,7 +106,7 @@ function subscribeDrag(listener: () => void): () => void {
 const draggingNow = () => dragging
 
 /** Whether anything is being dragged over this window */
-export function useAnyDrag(): boolean {
+function useAnyDrag(): boolean {
   return useSyncExternalStore(subscribeDrag, draggingNow, draggingNow)
 }
 

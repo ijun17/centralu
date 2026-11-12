@@ -39,7 +39,7 @@ export const DRAG_START_TTL_MS = 120_000
  * in layout pixels, and scaled by how the frame's box is drawn (`rect.width / offsetWidth`), so a
  * page zoom (the text size setting zooms the root) does not move the box.
  */
-export function contentBox(frame: HTMLIFrameElement): Box {
+function contentBox(frame: HTMLIFrameElement): Box {
   const rect = frame.getBoundingClientRect()
   const cs = getComputedStyle(frame)
   const k = frame.offsetWidth > 0 ? rect.width / frame.offsetWidth : 1

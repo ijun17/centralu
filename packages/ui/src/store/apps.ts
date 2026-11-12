@@ -90,8 +90,8 @@ export function registerPinnedFrame(key: string, frame: InlineFrame): () => void
  * — this many within this window. Past the cap it stops reopening automatically and just marks it
  * "changed" for the person to press. See the comment on `followAppCode` for why.
  */
-export const AUTO_RELOADS = 3
-export const AUTO_RELOAD_WINDOW_MS = 60_000
+const AUTO_RELOADS = 3
+const AUTO_RELOAD_WINDOW_MS = 60_000
 const autoReloads = reloadBudget(AUTO_RELOADS, AUTO_RELOAD_WINDOW_MS)
 
 /** The app's current code as reported by the list — `null` if unknown (never came up, or an old host) */
@@ -704,7 +704,7 @@ export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string
  * inbox notice once. Run after the app list is read; a project whose trust changed is looked at afresh then
  * (`forgetArrivalsOf`). Saved with the workspace, so a reload does not say it again.
  */
-export function noteArrivals(get: StoreGet, set: StoreSet): void {
+function noteArrivals(get: StoreGet, set: StoreSet): void {
   const s = get()
   const trusted = new Set(Object.values(s.projects).filter((p) => p.trusted).map((p) => p.id))
   // Keyed as the catalog keys an app with a project (`appKeyOf`), titled as it titles one

@@ -19,7 +19,7 @@ const reading = new Map<string, Reading>()
 export function coalescedRead<T>(
   key: string,
   get: StoreGet,
-  fetch: (platform: Platform) => Promise<T>,
+  read: (platform: Platform) => Promise<T>,
   apply: (value: T) => boolean | void,
 ): Promise<void> {
   const platform = get().platform
@@ -36,7 +36,7 @@ export function coalescedRead<T>(
       do {
         mine.again = false
         try {
-          const value = await fetch(platform)
+          const value = await read(platform)
           if (get().platform !== platform) return
           if (apply(value)) mine.again = true
         } catch {

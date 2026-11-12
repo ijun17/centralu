@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
 import { usableThemeFiles } from '../store/store.js'
-import { accentTokens, activeSide, cachedThemeFiles, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
+import { activeSide, cachedThemeFiles, contrast, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -24,18 +24,18 @@ describe('which side shows', () => {
 
 describe('resolving a side', () => {
   it('applies a theme file’s tokens as CSS variables over the preset for its base', () => {
-    const t = resolveSide('light', 'mine', [file({ tokens: { 'surface-floor': '#fafafa', 'shadow-modal': 'none' } })], null)
+    const t = resolveSide('light', 'mine', [file({ tokens: { 'surface-floor': '#fafafa', 'shadow-modal': 'none' } })])
     expect(t).toMatchObject({ id: 'mine', base: 'light', tokens: { '--color-surface-floor': '#fafafa', '--shadow-modal': 'none' } })
   })
 
   it('falls back to the side’s preset when the id names nothing', () => {
-    expect(resolveSide('dark', 'gone', [], null)).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
-    expect(resolveSide('light', 'gone', [], null)).toMatchObject({ id: 'light', preset: 'light', base: 'light' })
-    expect(resolveSide('dark', 'hc-dark', [], null)).toMatchObject({ preset: 'hc-dark', base: 'dark' })
+    expect(resolveSide('dark', 'gone', [])).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
+    expect(resolveSide('light', 'gone', [])).toMatchObject({ id: 'light', preset: 'light', base: 'light' })
+    expect(resolveSide('dark', 'hc-dark', [])).toMatchObject({ preset: 'hc-dark', base: 'dark' })
   })
 
   it('does not apply a broken file (the store hands over its last clean version instead)', () => {
-    expect(resolveSide('light', 'mine', [file({ broken: true, tokens: { ink: '#000' } })], null).tokens).toEqual({})
+    expect(resolveSide('light', 'mine', [file({ broken: true, tokens: { ink: '#000' } })]).tokens).toEqual({})
   })
 })
 
@@ -58,18 +58,9 @@ describe('a value a theme file holds that this window cannot use', () => {
 
   it('is applied for none of the tokens it names, and the rest still are', () => {
     vi.stubGlobal('CSS', { supports: (_property: string, value: string) => !value.startsWith('not-') })
-    const r = resolveSide('light', 'mine', [file({ tokens: { 'surface-floor': '#101010', 'surface-side': 'not-a-colour' } })], null)
+    const r = resolveSide('light', 'mine', [file({ tokens: { 'surface-floor': '#101010', 'surface-side': 'not-a-colour' } })])
     expect(r.tokens['--color-surface-floor']).toBe('#101010')
     expect(r.tokens).not.toHaveProperty('--color-surface-side')
-  })
-})
-
-describe('the accent', () => {
-  it('colours focus and selection, and never the signal', () => {
-    const tokens = accentTokens('#6ea8fe')
-    expect(Object.keys(tokens).sort()).toEqual(['--color-focus', '--color-selection'])
-    expect(tokens).not.toHaveProperty('--color-ink-signal')
-    expect(tokens['--color-focus']).toBe('#6ea8fe')
   })
 })
 
@@ -111,8 +102,8 @@ describe('the urgency order (contrast is urgency)', () => {
 describe('a custom theme whose file is broken at start', () => {
   const cache = {
     mode: 'dark',
-    dark: { id: 'mine', name: 'Mine', base: 'dark', preset: 'dark', tokens: { '--color-surface-floor': '#101820', sparkle: '#fff' }, accent: null },
-    light: { id: 'light', name: 'Light', base: 'light', preset: 'light', tokens: {}, accent: null },
+    dark: { id: 'mine', name: 'Mine', base: 'dark', preset: 'dark', tokens: { '--color-surface-floor': '#101820', sparkle: '#fff' } },
+    light: { id: 'light', name: 'Light', base: 'light', preset: 'light', tokens: {} },
   }
 
   afterEach(() => vi.unstubAllGlobals())
@@ -126,7 +117,7 @@ describe('a custom theme whose file is broken at start', () => {
     vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(cache) })
     const broken = file({ id: 'mine', base: 'dark', broken: true })
     const lastGoodThemes = cachedThemeFiles()
-    expect(resolveSide('dark', 'mine', usableThemeFiles({ themeFiles: [broken], lastGoodThemes }), null)).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
+    expect(resolveSide('dark', 'mine', usableThemeFiles({ themeFiles: [broken], lastGoodThemes }))).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
     vi.stubGlobal('localStorage', { getItem: () => null })
     expect(cachedThemeFiles()).toEqual({})
   })

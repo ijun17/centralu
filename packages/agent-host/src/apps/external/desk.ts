@@ -208,9 +208,9 @@ export type BrokerHost = {
  * and data belongs in a file instead. 200,000 characters is roughly 50,000 tokens, comfortably inside
  * both tools' context windows.
  */
-export const AGENT_PROMPT_MAX_CHARS = 200_000
+const AGENT_PROMPT_MAX_CHARS = 200_000
 /** The schema cap — 64KiB is plenty to describe one answer shape. Anything larger is data, not a schema */
-export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
+const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
 
 /**
  * Runaway prevention (M4 D-5) — an app is code, and a loop in code runs hundreds of times before a
@@ -236,7 +236,7 @@ export const AGENT_SCHEMA_MAX_BYTES = 64 * 1024
  * be held silently for minutes, and a loop would only pile the queue higher. A refusal reaches the
  * app immediately, with a reason — the app can wait for the first one to finish and ask again.
  */
-export const CHAIN_DEPTH_MAX = 3
+const CHAIN_DEPTH_MAX = 3
 export const AGENT_RUNS_PER_WINDOW = 5
 
 const CallAppArgs = z.object({
@@ -351,7 +351,7 @@ function brokerRow(ledger: RunLedger | null, app: AppRef, tool: BrokerToolName |
  * default tool — if the default is not in the list, it resolves to the list's first tool instead (it
  * never resolves outside the declaration).
  */
-export function pickAgentTool(declared: boolean | string[] | undefined, requested: string | undefined, fallback: string | null): { tool: string } | { error: string } {
+function pickAgentTool(declared: boolean | string[] | undefined, requested: string | undefined, fallback: string | null): { tool: string } | { error: string } {
   if (declared === true) {
     if (!fallback) return { error: 'No agent adapter is available. Install and configure an agent CLI before running an agent.' }
     if (requested !== undefined && requested !== fallback) {

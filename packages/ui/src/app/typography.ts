@@ -31,7 +31,7 @@ export const LEADING_CODE = 1.5
  * 12% either way: at 13px that is about 2.5px a line, the smallest step that reads as a different
  * density in a long reply without turning Compact into overlapping descenders.
  */
-export const LINE_HEIGHT_FACTORS: Record<LineHeight, number> = { compact: 0.88, normal: 1, relaxed: 1.12 }
+const LINE_HEIGHT_FACTORS: Record<LineHeight, number> = { compact: 0.88, normal: 1, relaxed: 1.12 }
 
 /** A short list to pick from. Empty is the app's own stack; anything else can be typed */
 export const BODY_FONTS: readonly { value: string; label: string }[] = [

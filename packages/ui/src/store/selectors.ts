@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
-import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, listedState, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
+import { buildInbox, countWaiting, isAway, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
+import { candidates } from './inbox.js'
 import { machineNameOf, projectMachineOf } from './names.js'
 
 /**
@@ -11,18 +12,6 @@ import { machineNameOf, projectMachineOf } from './names.js'
  * re-render loop. So only a stable reference (the sessions map) is pulled out of the store, and
  * the computation itself is wrapped in useMemo.
  */
-
-/*
- * A question the agent asked and the person has not answered is listed as an approval is (owner, 2026-10-18): it stays
- * in the inbox until it is answered, read or not. An error keeps its own place: it outranks the question.
- */
-const toCandidate = (x: SessionSummary) => ({
-  id: x.id, projectId: x.projectId, name: x.name,
-  state: listedState(x),
-  asking: x.pendingQuestions.length > 0,
-  waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
-  preview: x.preview, interruption: x.interruption ?? null,
-})
 
 /**
  * The agent tools this machine has, as the host reported them when the app connected.
@@ -60,12 +49,6 @@ export function useToolMeta(tool: ToolName): ToolDescriptor {
   )
 }
 
-/** Everything that waits on the person (#703): sessions in a waiting state, and the Assistant's proposals nobody answered */
-function candidates(state: Pick<AppState, 'sessions' | 'mcpProposals' | 'skillProposals' | 'appArrivals'>): InboxCandidate[] {
-  // And the apps trusted projects gained (#1141)
-  return [...Object.values(state.sessions).map(toCandidate), ...proposalCandidates(pendingProposals(state)), ...appArrivalCandidates(state.appArrivals)]
-}
-
 export function useInbox(now: number): InboxItem[] {
   const sessions = useStore((s) => s.sessions)
   const mcpProposals = useStore((s) => s.mcpProposals)
@@ -88,24 +71,12 @@ export function useCounts() {
   )
 }
 
-/** Is a proposal waiting for the person's answer? The Assistant's row asks this (#703) */
-export function useHasPendingProposal(): boolean {
-  return useStore((s) => s.mcpProposals.length + s.skillProposals.length > 0)
-}
-
 export function useSessionsOf(projectId: string): SessionSummary[] {
   const sessions = useStore((s) => s.sessions)
   return useMemo(
     () => Object.values(sessions).filter((x) => x.projectId === projectId),
     [sessions, projectId],
   )
-}
-
-export function useUnread(sessionId: string): boolean {
-  return useStore((s) => {
-    const x = s.sessions[sessionId]
-    return x ? isUnread(x) : false
-  })
 }
 
 export function useFocusedSession(): SessionSummary | undefined {
@@ -134,28 +105,6 @@ export function useIsProjectSelected(projectId: string): boolean {
 /** Is this project's screen, or one of its sessions, what the focus lane shows (the sidebar tints its group)? */
 export function useIsProjectOpen(projectId: string): boolean {
   return useStore((s) => openProjectOf(s) === projectId)
-}
-
-export function useConflicts() {
-  const sessions = useStore((s) => s.sessions)
-  return useMemo(() => detectFileConflicts(Object.values(sessions)), [sessions])
-}
-
-/** A pure computation for use outside a hook (e.g. a global shortcut handler) */
-export function computeInbox(state: AppState, now = Date.now()): InboxItem[] {
-  return buildInbox(candidates(state), now)
-}
-
-/**
- * Where "next waiting" starts from (#703): the session on screen, or on the Assistant's screen with a proposal
- * waiting, the last proposal (its cards stand there), so the jump moves on instead of landing on the same screen.
- */
-export function currentWaitingId(state: AppState): string | null {
-  if (state.view === 'assistant') {
-    const last = computeInbox(state).findLast((i) => i.proposal)
-    if (last) return last.id
-  }
-  return state.focusedSessionId
 }
 
 /**

@@ -12,7 +12,7 @@ import type { Tool } from '@modelcontextprotocol/client'
  */
 export type Audience = 'model' | 'app'
 
-export const DEFAULT_VISIBILITY: readonly Audience[] = ['model', 'app']
+const DEFAULT_VISIBILITY: readonly Audience[] = ['model', 'app']
 
 /**
  * A single tool's audience. **When the field is present but malformed, this rejects it** — reading

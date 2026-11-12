@@ -38,7 +38,7 @@ export const SIDEBAR_DEFAULT = 240
  * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
  * creating feedback where dragging it makes it grow larger still.
  */
-export const CENTER_MIN = 360
+const CENTER_MIN = 360
 
 /**
  * The width the conversation lane keeps when the window is narrower than the two side lanes' widths allow (#1561): the

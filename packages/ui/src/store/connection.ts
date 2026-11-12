@@ -108,8 +108,9 @@ async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void>
   if (!platform || !workspaceSave.pending) return
   const run = ++workspaceSave.run
   const mine = () => workspaceSave.run === run
-  const send = async () => {
-    const snap = workspaceSave.pending!
+  const send = async (first: WorkspaceSnapshot): Promise<{ snap: WorkspaceSnapshot; stored: boolean }> => {
+    // The latest pending: a retry never sends the older snapshot over a newer one
+    const snap = workspaceSave.pending ?? first
     workspaceSave.sending = true
     try {
       await platform.workspace.save(snap)
@@ -122,9 +123,11 @@ async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void>
       if (mine()) workspaceSave.sending = false
     }
   }
-  while (mine() && workspaceSave.pending) {
-    const sent = await retryLadder(
-      send,
+  for (;;) {
+    const start: WorkspaceSnapshot | null = workspaceSave.pending
+    if (!start || !mine()) return
+    const sent: Awaited<ReturnType<typeof send>> | null = await retryLadder(
+      () => send(start),
       () => mine() && workspaceSave.pending !== null,
       undefined,
       // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart

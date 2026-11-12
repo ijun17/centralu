@@ -683,12 +683,6 @@
     --cc-check-bg: var(--color-danger);
     --cc-check-mark: var(--color-danger-bg);
   }
-  /* The accent, when the person turns it on, also colours checked controls (#312) — never the
-     danger check, which keeps its red */
-  html[data-accent] input[type='checkbox']:not(.accent-danger) {
-    --cc-check-bg: var(--color-accent);
-    --cc-check-mark: var(--color-surface-floor);
-  }
   input[type='checkbox']:checked {
     background: var(--cc-check-bg);
     border-color: var(--cc-check-bg);
@@ -1490,11 +1484,6 @@
    line-strong, and a Centralu call its stronger edge, since those say something */
 [data-theme='light'] [data-testid='tool-card']:not([data-centralu-call], .border-dashed) {
   border-color: #e2e2e2;
-}
-/* The accent, when the person turns it on, colours a switch that is on, as it does a checked box (components/Switch) */
-html[data-accent] .cc-switch input:checked ~ .cc-switch-track {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
 }
 
 /*

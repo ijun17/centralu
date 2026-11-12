@@ -47,7 +47,7 @@ export function ThemeSection() {
   const sideKey = (side: ThemeBase) => (side === 'dark' ? 'themeDark' : 'themeLight')
 
   const duplicate = async () => {
-    const current = resolveSide(showing, prefs[sideKey(showing)], usable, null)
+    const current = resolveSide(showing, prefs[sideKey(showing)], usable)
     const file = usable.find((f) => f.id === current.id)
     // A theme file is copied as written; a preset is read off the stylesheet, every token spelled out
     const tokens = file ? { ...file.tokens } : readPresetTokens(current.preset)
@@ -88,7 +88,7 @@ export function ThemeSection() {
         label="Theme"
         control={
           <ThemePicker
-            value={resolveSide(showing, prefs[sideKey(showing)], usable, null).id}
+            value={resolveSide(showing, prefs[sideKey(showing)], usable).id}
             files={usable}
             onPick={(id, base) => void setPrefs({ themeMode: base, [sideKey(base)]: id })}
           />
