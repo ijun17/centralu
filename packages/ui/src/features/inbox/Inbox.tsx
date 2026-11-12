@@ -63,7 +63,7 @@ export function Inbox() {
     that row from then on; ↑ and ↓ walk the one list, mail rows included. The row number only stands in for a row that
     has left (Done): the cursor then stays at that place, kept on the last row when it was the last.
   */
-  const [at, setAt] = useState({ key: null as string | null, row: 0 })
+  const [at, setAt] = useState<{ key: string | null; row: number }>({ key: null, row: 0 })
   const cursor = cursorIndex(list.waiting, at)
   useEffect(() => {
     if (!open) setAt({ key: null, row: 0 })

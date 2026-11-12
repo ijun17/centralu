@@ -173,7 +173,7 @@ export class ThemeFiles {
   /** The id a new file named `name` goes under (`freeThemeId`): not one of the files here, not a preset's */
   private async freeId(name: string): Promise<string> {
     // Lowercased: on a filesystem that ignores case `Paper.json` takes `paper` too (see `save`)
-    const names = new Set((await readdir(this.dir).catch(() => [] as string[])).map((n) => n.toLowerCase()))
+    const names = new Set((await readdir(this.dir).catch((): string[] => [])).map((n) => n.toLowerCase()))
     return freeThemeId(name, (id) => names.has(`${id}.json`))
   }
 }
