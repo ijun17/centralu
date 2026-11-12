@@ -473,7 +473,7 @@ export const REPLAYS: Replay[] = [
     scenario: 'centralu-session',
     // A recording made through a host: its tools were served by one, and the replay host stands in with tools that answer a success
     async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent', 'Sent more to an agent'])
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent', 'Sent mail', 'Waited for an agent', 'Waited for an agent'])
     },
   },
   { tool: 'claude', scenario: 'mcp-call' },
