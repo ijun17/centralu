@@ -58,10 +58,14 @@ and background `#756f6b`. A custom theme whose `base` is `dark` inherits these w
 **Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own but its `line`, one step lighter (`#3a3a3c`, from `#38383a`) to meet the hairline rule in [The lines](#the-lines); the comment above its block in `index.css` records the inks' measurements on every reading surface, and [The lines](#the-lines) the lines'. A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
 
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
-is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
-is `#f0f0f0`, raised `#f9f9f9`, the sidebar a recess at `#e0e0e0` (ΔL* 5.6 below the conversation),
-and no surface is pure white. The signal is `#111111` and the body ink `#2a2a2a`. Three edges are softer than the
-hairline there (owner, 2026-10-19): a resting panel's border (`#d4d4d4`) and an answering one (`#9e9e9e`), a message
+is waiting for you, and raised surfaces step toward the floor's own white. Since 2026-11-12 (the owner's decision) it is the owner's "Light New" custom theme, the way Graphite is "Dark Graphite": macOS-style greys a step or two
+bluer than neutral, a white floor (`#ffffff`), raised `#f7f7f8` and the sidebar a recess at `#efefef`. The signal is
+`#000000` and the body ink `#1d1d1f`; the focus ring and the terminal's selection are the system blue (`#0066d6`,
+`#cfe3ff`). It replaced the earlier Light (floor `#f0f0f0`, raised `#f9f9f9`, sidebar `#e0e0e0`, signal `#111111`, ink
+`#2a2a2a`). Every token the file sets is the preset's value now; the ones it does not set kept the earlier Light's (the diff and danger colours, the keycap, the
+terminal's ANSI colours, the scrim, the glow, and the notice, sticky, dock, key and chip shadows), and its window line
+(`line-chrome`) is what its `line` and `ink-faint` mixed to, `#ceced1`. Three edges are written as colours of their own, softer than the
+hairline there (owner, 2026-10-19), and did not move: a resting panel's border (`#d4d4d4`) and an answering one (`#9e9e9e`), a message
 bubble's and a tool card's. The comments in `styles/index.css` record the measurements. The high-contrast presets put every ink at 4.5:1 or more and the hairline at 3:1 or
 more against every reading surface. A test checks the urgency order (below) for every preset, and
 those two thresholds for the high-contrast ones.
@@ -169,14 +173,22 @@ What changed, per preset (contrast on the floor / the sidebar / a raised surface
 | Preset | `line` | `line-chrome` | `line-strong` |
 |---|---|---|---|
 | Dark (unchanged) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
-| Light, before | `#d6d6d6` 1.28 / 1.10 / 1.38 | `#c3c3c3` 1.55 / 1.34 / 1.67 | `#bdbdbd` 1.65 / 1.42 / 1.78 |
-| Light, after | `#cbcbcb` 1.42 / 1.23 / 1.54 | `#bababa` 1.70 / 1.47 / 1.84 | `#aaaaaa` 2.04 / 1.76 / 2.21 |
+| Light, before (the earlier Light) | `#cbcbcb` 1.42 / 1.23 / 1.54 | `#bababa` 1.70 / 1.47 / 1.84 | `#aaaaaa` 2.04 / 1.76 / 2.21 |
+| Light, now (Light New, the owner's values) | `#e3e3e6` 1.28 / 1.11 / 1.20 | `#ceced1` 1.57 / 1.37 / 1.47 | `#c6c6cb` 1.70 / 1.48 / 1.59 |
 | High contrast dark (unchanged) | `#707070` 4.24 / 4.24 / 3.87 | `#797979` 4.82 / 4.82 / 4.40 | `#a8a8a8` 8.83 / 8.83 / 8.06 |
 | High contrast light (unchanged) | `#767676` 4.54 on all | `#707070` 4.95 on all | `#4a4a4a` 8.86 on all |
 | Graphite, before | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
 | Graphite, after | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 (unchanged) |
 
-- **Light** needed its `line` raised: on the sidebar's `#e0e0e0` it was under the 1.2:1 floor. `#cbcbcb` clears 1.2:1 there, and the cards and panels that share `line` stay quiet (checked in the grid scene and a Settings page). Its `line-strong` moved with it, since the derived `line-chrome` would otherwise have passed it. The three edges that are softer than the hairline in Light (a resting panel's border, a message bubble's and a tool card's, owner 2026-10-19) are written as their own colours and did not move.
+- **Light** is the owner's "Light New" with its values kept as they are, and they miss the rule in the cells below (the same measure: the floor / the sidebar / a raised surface). The test fails for it on exactly these. The smallest value that passes is next to each; the owner decides between keeping his values and these.
+
+  | Token | The owner's value | Fails on | Smallest passing | Its contrast |
+  |---|---|---|---|---|
+  | `line` (1.2:1) | `#e3e3e6` 1.28 / 1.11 / 1.20 | the sidebar (1.11), a raised surface by a hair (1.196) | `#dbdbde` | 1.38 / 1.20 / 1.29 |
+  | `line-chrome` (1.4:1) | `#ceced1` 1.57 / 1.37 / 1.47 | the sidebar (1.37) | `#cbcbce` | 1.62 / 1.41 / 1.51 |
+  | `line-strong` (1.7:1, and 0.25 over `line-chrome`) | `#c6c6cb` 1.70 / 1.48 / 1.59 | the sidebar (1.48) and a raised surface (1.59); the step over `line-chrome` is 0.13 / 0.11 / 0.12 | `#b8b8bd` (with `line-chrome` `#cbcbce`) | 1.98 / 1.72 / 1.85 |
+
+  Every ink keeps the urgency order and clears 7 / 4.5 / 3:1 on every reading surface (body 14.6 on the sidebar, secondary 5.2, background 3.6). A person who already has the "Light New" file keeps it as it is, as with Graphite.
 - **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the rule, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. Nothing else in it broke the rule.
 - **Dark and the high-contrast presets** already kept the rule, so none of their lines changed. The top bar's and the shell banner's line in Dark is now `line-chrome`, as the sidebar's always was.
 - The evidence panel and the other panels drawn on the sidebar's ground keep the plain `line`: raising Light's `line` lifts them, and they sit at 1.23:1 on that ground now, not 1.10:1.

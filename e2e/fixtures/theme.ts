@@ -130,13 +130,13 @@ export function presetTests() {
     await openDemo(page)
     await openAppearance(page)
     await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
-    expect(await token(page, '--color-ink-signal')).toBe('#111111')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
+    expect(await token(page, '--color-ink-signal')).toBe('#000000')
     expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('light')
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(240, 240, 240)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'light', background: 'rgb(255, 255, 255)' })
     // The conversation is on the floor, as in Dark (#362)
-    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#f0f0f0')
+    expect(await page.getByTestId('session-view').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-surface-floor').trim())).toBe('#ffffff')
     // The pick is the mode and that side's theme, so the stored preferences keep their shape
     expect(await prefsOf(page)).toMatchObject({ themeMode: 'light', themeLight: 'light' })
   })
@@ -229,11 +229,11 @@ export function presetTests() {
       }
       for (const surface of LINE_GROUNDS) {
         const [line, side, strong] = ['--color-line', '--color-line-chrome', '--color-line-strong'].map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
-        expect(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
-        expect(side, `line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_CHROME_FLOOR)
-        expect(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
-        expect(side - line, `line-chrome over line on ${surface}`).toBeGreaterThanOrEqual(0)
-        expect(strong - side, `line-strong over line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
+        expect.soft(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
+        expect.soft(side, `line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_CHROME_FLOOR)
+        expect.soft(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
+        expect.soft(side - line, `line-chrome over line on ${surface}`).toBeGreaterThanOrEqual(0)
+        expect.soft(strong - side, `line-strong over line-chrome on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
       }
       if (preset.id.startsWith('hc-')) {
         // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
@@ -384,7 +384,7 @@ export function themeTests() {
     await page.evaluate(() => (window as any).__store.getState().setPrefs({ accent: '#6ea8fe' }))
     // Theme changes go through the same path an accent would; let one land each way, then read
     await pickTheme(page, 'light')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#f0f0f0')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#ffffff')
     await pickTheme(page, 'dark')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
     expect(await token(page, '--color-focus')).toBe(focus)

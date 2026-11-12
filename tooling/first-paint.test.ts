@@ -77,14 +77,14 @@ describe('the first paint (#340)', () => {
   })
 
   it('paints the light floor for a cached light theme', () => {
-    expect(firstPaint(choice('light'))).toEqual({ backgroundColor: '#f0f0f0', colorScheme: 'light' })
+    expect(firstPaint(choice('light'))).toEqual({ backgroundColor: '#ffffff', colorScheme: 'light' })
   })
 
   it('does not follow the OS: a System mode an older build cached is the dark side, on a light OS or a dark one', () => {
     expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
     expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
     // And a held Light stays Light under a dark OS
-    expect(firstPaint(choice('light'), true)).toEqual({ backgroundColor: '#f0f0f0', colorScheme: 'light' })
+    expect(firstPaint(choice('light'), true)).toEqual({ backgroundColor: '#ffffff', colorScheme: 'light' })
   })
 
   it("paints a high-contrast or Graphite preset's floor and a custom theme's own floor", () => {
@@ -94,6 +94,6 @@ describe('the first paint (#340)', () => {
     expect(firstPaint(choice('light', undefined, custom))).toEqual({ backgroundColor: '#fdf6e3', colorScheme: 'light' })
     // A value the browser cannot use falls back to the preset's floor
     const broken = { ...side('mine', 'light', { '--color-surface-floor': 'url(x)' }), preset: 'light' }
-    expect(firstPaint(choice('light', undefined, broken))).toEqual({ backgroundColor: '#f0f0f0', colorScheme: 'light' })
+    expect(firstPaint(choice('light', undefined, broken))).toEqual({ backgroundColor: '#ffffff', colorScheme: 'light' })
   })
 })

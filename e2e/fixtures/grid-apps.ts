@@ -515,7 +515,7 @@ export function gridAppTests(): void {
       // Every preset the app lists. Dark and Light are also checked by value; the others only have to agree with themselves
       const byValue: Record<string, { floor: string; raised: string }> = {
         dark: { floor: '#120e0a', raised: '#282320' },
-        light: { floor: '#f0f0f0', raised: '#f9f9f9' },
+        light: { floor: '#ffffff', raised: '#f7f7f8' },
       }
       for (const preset of THEME_PRESETS) {
         await page.evaluate(

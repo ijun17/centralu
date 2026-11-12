@@ -326,7 +326,7 @@
  *   Dark   sidebar #120e0a, conversation #120e0a: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
  *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#45403c, `line-chrome`
  *          since #2207: the sidebar's own edge always was, and the top bar's now is) alone parts them now.
- *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
+ *   Light  sidebar #efefef, conversation #ffffff (the owner's "Light New" since 2026-11-12; it was #e0e0e0 and #f0f0f0): ΔL* 5.0, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
@@ -364,8 +364,8 @@
  * Light sits a step down from white (#362): the owner found the near-white version (floor
  * #f2f2f2, conversation #f8f8f8, cards #ffffff) too bright. The floor is #e8e8e8 and raised
  * #f4f4f4, never pure white, and every other surface, line and ink moved by the same lightness
- * it had from the floor before (line ΔL* 7, line-strong 16.5, hover 8.5; the lines were raised again in #2207 to meet the rule in
- * themes.md "The lines": line #cbcbcb, line-strong #aaaaaa), so the steps read as
+ * it had from the floor before (line ΔL* 7, line-strong 16.5, hover 8.5). All of Light's values were replaced by the owner's "Light New" on
+ * 2026-11-12 (themes.md); where they miss the rule in themes.md "The lines" is recorded there, so the steps read as
  * they did. The two quieter inks are a little darker to keep their contrast on the dimmer floor:
  * muted 6.1:1 (was 6.0), faint 3.3:1 (was 3.1).
  *
@@ -373,26 +373,26 @@
  * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
  */
 [data-theme='light'] {
-  --color-surface-floor: #f0f0f0;
-  --color-surface-side: #e0e0e0;
-  --color-surface-raised: #f9f9f9;
-  --color-surface-selected: #d4d4d4;
-  --color-surface-hover: #d9d9d9;
+  --color-surface-floor: #ffffff;
+  --color-surface-side: #efefef;
+  --color-surface-raised: #f7f7f8;
+  --color-surface-selected: #e0e0e5;
+  --color-surface-hover: #e7e7ea;
   /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
      deeper one in light, so the panels still read as cut out of it */
-  --color-surface-deck: #e4e4e4;
-  --color-surface-reading: #f0f0f0;
-  --color-surface-reading-raised: #f9f9f9;
+  --color-surface-deck: #f2f2f4;
+  --color-surface-reading: #ffffff;
+  --color-surface-reading-raised: #f7f7f8;
 
-  --color-line: #cbcbcb;
-  --color-line-chrome: #bababa;
-  --color-line-strong: #aaaaaa;
+  --color-line: #e3e3e6;
+  --color-line-chrome: #ceced1;
+  --color-line-strong: #c6c6cb;
 
-  --color-ink-signal: #111111;
-  --color-ink: #2a2a2a;
-  --color-ink-muted: #5a5a5a;
-  --color-ink-faint: #7a7a7a;
-  --color-mark-waiting: #5b5b5b;
+  --color-ink-signal: #000000;
+  --color-ink: #1d1d1f;
+  --color-ink-muted: #636368;
+  --color-ink-faint: #7c7c81;
+  --color-mark-waiting: #5b5b60;
 
   --color-diff-add: #1a7f37;
   --color-diff-add-bg: #dafbe1;
@@ -401,11 +401,11 @@
   --color-danger: #cf222e;
   --color-danger-bg: #ffebe9;
 
-  --color-focus: #555555;
+  --color-focus: #0066d6;
   /* Translucent black: it darkens whatever is under it by the same amount, as the white does in dark */
-  --color-selection: rgb(0 0 0 / 0.14);
-  --color-scrollbar-thumb: #c5c5c5;
-  --color-scrollbar-thumb-hover: #acacac;
+  --color-selection: rgb(0 122 255 / 0.18);
+  --color-scrollbar-thumb: #c9c9ce;
+  --color-scrollbar-thumb-hover: #aeaeb2;
   --color-scrim-thin: color-mix(in oklab, #000 25%, transparent);
 
   --color-keycap-top: #f4f4f4;
@@ -416,11 +416,11 @@
 
 
   /* The terminal: GitHub's light palette, on the light grey the rest of the preset uses */
-  --color-term-bg: #f0f0f0;
-  --color-term-log-bg: #f4f4f4;
-  --color-term-fg: #1f1f1f;
-  --color-term-cursor: #1f1f1f;
-  --color-term-selection: #cccccc;
+  --color-term-bg: #f7f7f8;
+  --color-term-log-bg: #f2f2f4;
+  --color-term-fg: #1d1d1f;
+  --color-term-cursor: #1d1d1f;
+  --color-term-selection: #cfe3ff;
   --color-term-black: #24292f;
   --color-term-red: #cf222e;
   --color-term-green: #116329;
@@ -439,11 +439,11 @@
   --color-term-bright-white: #8c959f;
 
   /* Shadows carry far less black: on a light floor the dark values read as smudges */
-  --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.18);
-  --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.18);
-  --shadow-dropdown: 0 16px 48px -8px rgb(0 0 0 / 0.2);
+  --shadow-popover: 0 10px 30px -8px rgb(0 0 0 / 0.14), 0 0 0 0.5px rgb(0 0 0 / 0.08);
+  --shadow-popover-up: 0 -10px 30px -8px rgb(0 0 0 / 0.14), 0 0 0 0.5px rgb(0 0 0 / 0.08);
+  --shadow-dropdown: 0 14px 40px -8px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.08);
   --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.2);
-  --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.25);
+  --shadow-modal: 0 22px 56px -12px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.08);
   --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.16);
   --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.12);
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.12);

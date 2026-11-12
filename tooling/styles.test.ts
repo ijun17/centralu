@@ -153,6 +153,13 @@ describe('the built CSS actually contains styles', () => {
        * terminal's ANSI palette. They are
        * listed by preset so a value that is no longer used can be found and removed.
        */
+      /*
+       * Light (the owner's "Light New" file made the preset): macOS-style greys a step or two bluer than neutral, a chroma of
+       * about 0.003 to 0.006, and the system blue for the focus ring and the terminal's selection. As Graphite's, none of it
+       * reaches a state or urgency, which the inks rank by brightness alone (`ink-signal` is pure black).
+       */
+      'f7f7f8', 'e0e0e5', 'e7e7ea', 'f2f2f4', 'e3e3e6', 'ceced1', 'c6c6cb', '1d1d1f', '636368', '7c7c81', '5b5b60', 'c9c9ce', 'aeaeb2',
+      '0066d6', 'cfe3ff', // Light: the focus ring, and the terminal's selection
       // light: diff and danger, terminal
       '1a7f37', 'dafbe1', 'cf222e', 'ffebe9',
       '24292f', '116329', '4d2d00', '0969da', '8250df', '1b7c83', '6e7781',

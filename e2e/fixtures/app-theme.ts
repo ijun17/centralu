@@ -19,7 +19,7 @@ const BOARD = new URL('../../.centralu/apps/project-board/', import.meta.url)
 
 /** Dark and Light values from styles/index.css, as the browser computes them */
 const DARK = { floor: '#120e0a', ink: 'rgb(240, 236, 234)', signal: 'rgb(255, 255, 255)', danger: 'rgb(251, 158, 134)', thumb: 'rgb(64, 59, 55)' }
-const LIGHT = { floor: '#f0f0f0', ink: 'rgb(42, 42, 42)', signal: 'rgb(17, 17, 17)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(197, 197, 197)' }
+const LIGHT = { floor: '#ffffff', ink: 'rgb(29, 29, 31)', signal: 'rgb(0, 0, 0)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(201, 201, 206)' }
 
 /** A board with more cards than its column can show, so the column scrolls */
 const BOARD_STATE = {
@@ -197,8 +197,8 @@ export function appThemeTests() {
     await expect.poll(async () => (await entries(v, 'host-context-changed')).length).toBe(1)
     const [changed] = await entries(v, 'host-context-changed')
     expect(changed.theme).toBe('light')
-    expect(changed.styles.variables).toMatchObject({ '--color-background-primary': LIGHT.floor, '--color-text-primary': '#2a2a2a', '--color-text-warning': '#111111' })
-    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#111111', '--centralu-scrollbar-thumb': '#c5c5c5' })
+    expect(changed.styles.variables).toMatchObject({ '--color-background-primary': LIGHT.floor, '--color-text-primary': '#1d1d1f', '--color-text-warning': '#000000' })
+    expect(changed.centralu.variables).toMatchObject({ '--centralu-signal': '#000000', '--centralu-scrollbar-thumb': '#c9c9ce' })
     // Nothing that did not change goes out again
     expect(changed).not.toHaveProperty('locale')
 
@@ -435,7 +435,7 @@ export function appThemeTests() {
     await expect.poll(() => schemeOf(v)).toBe('light')
     await expect(v.locator('#count')).toBeVisible()
     const { inside, outside } = await insideAndOutside(page)
-    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([240, 240, 240])
+    expect(outside, `page rgb(${outside.join(', ')})`).toEqual([255, 255, 255])
     // Neither a dark canvas from a proxy stuck on dark nor a white one: exactly the page under it
     expect(inside, `frame rgb(${inside.join(', ')})`).toEqual(outside)
   })
