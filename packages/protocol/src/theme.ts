@@ -165,6 +165,7 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
   { id: 'light', name: 'Light', base: 'light' },
   { id: 'hc-dark', name: 'High contrast dark', base: 'dark' },
   { id: 'hc-light', name: 'High contrast light', base: 'light' },
+  { id: 'graphite', name: 'Graphite', base: 'dark' },
 ]
 
 /** What the screen writes into a theme file (the host adds `$schema`) */

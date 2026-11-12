@@ -168,6 +168,17 @@ describe('the built CSS actually contains styles', () => {
        * ours, so it stays out of the brightness hierarchy; it is shown only while hovered.
        */
       'c42b1c',
+      /*
+       * Graphite (#2208, the owner's "Dark Graphite" file made a preset): macOS's greys, each a step or two bluer than
+       * neutral (a chroma of 0.003 to 0.007), and Apple's system colours for the diff, danger, the focus ring, the selection
+       * and the terminal. The greys add no hue to the chrome, and the focus ring and selection are the interaction
+       * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
+       * brightness alone (`ink-signal` is pure white). Listed by value, as Dark's tints are.
+       */
+      '28282a', '2c2c2e', '3a3a3c', '48484a', '232325', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
+      '30d158', '163322', 'ff9f97', '3a1d1b', // Graphite: diff, and danger
+      '409cff', '0a84ff', // Graphite: the focus ring, and the selection with the terminal's blue
+      'ff453a', 'ffd60a', 'bf5af2', '64d2ff', 'ff6961', '4ae070', 'ffe36b', 'da8fff', '8de1ff', // Graphite: the terminal
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
@@ -388,7 +399,7 @@ describe('Tauri permissions', () => {
    */
   it('the top bar height agrees across the config, Rust and the screen', () => {
     const header = readFileSync(join(ROOT, 'packages/ui/src/app/App.tsx'), 'utf8')
-    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b border-line bg-surface-side/.exec(header)
+    const m = /className="flex h-(\d+) shrink-0 items-center gap-4 border-b /.exec(header)
     expect(m, 'could not find the top bar\'s h-* class').toBeTruthy()
     const barPx = Number(m![1]) * 4 // tailwind h-9 = 36px
     const BUTTON = 12 // the diameter of a macOS traffic light

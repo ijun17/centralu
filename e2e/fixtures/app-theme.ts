@@ -1,5 +1,6 @@
 import { inflateSync } from 'node:zlib'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
+import { THEME_PRESETS } from '../../packages/ui/src/app/theme.js'
 import { appScreenHtml, fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
 
 /**
@@ -291,7 +292,7 @@ export function appThemeTests() {
     expect(await styleOf(v, 'button', 'borderTopLeftRadius')).toBe('6px')
   })
 
-  for (const [preset, side] of [['dark', 'dark'], ['light', 'light'], ['hc-dark', 'dark'], ['hc-light', 'light']] as const) {
+  for (const { id: preset, base: side } of THEME_PRESETS) {
     test(`the project board takes its colours, type and shape from the theme: ${preset}`, async ({ page }) => {
       await showBoard(page)
       const v = view(page)

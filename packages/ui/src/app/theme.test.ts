@@ -32,6 +32,8 @@ describe('resolving a side', () => {
     expect(resolveSide('dark', 'gone', [])).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
     expect(resolveSide('light', 'gone', [])).toMatchObject({ id: 'light', preset: 'light', base: 'light' })
     expect(resolveSide('dark', 'hc-dark', [])).toMatchObject({ preset: 'hc-dark', base: 'dark' })
+    // Graphite is a dark preset of its own, and Dark stays what the dark side falls back to (#2208)
+    expect(resolveSide('dark', 'graphite', [])).toMatchObject({ id: 'graphite', preset: 'graphite', base: 'dark', tokens: {} })
   })
 
   it('does not apply a broken file (the store hands over its last clean version instead)', () => {

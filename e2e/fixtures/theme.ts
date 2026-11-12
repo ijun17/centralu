@@ -19,6 +19,19 @@ type Mock = {
 }
 
 const DARK_FLOOR = '#120e0a'
+/**
+ * The rule for the three lines (docs/themes.md "The lines"): each is checked on the floor, the sidebar and a raised
+ * surface, the three grounds a line is drawn on. `line` stays visible but quiet, `line-side` is a step stronger, and
+ * `line-strong` is clearly stronger again.
+ */
+const LINE_FLOOR = 1.2
+const LINE_SIDE_FLOOR = 1.4
+const LINE_STRONG_FLOOR = 1.7
+/** How much more contrast each line has than the one below it */
+const LINE_STEP = 0.25
+/** The least contrast of each ink on a reading surface in every preset; the high-contrast presets hold every ink to 4.5:1 besides */
+const INK_FLOORS = [['--color-ink', 7], ['--color-ink-muted', 4.5], ['--color-ink-faint', 3]] as const
+const LINE_GROUNDS = ['--color-surface-floor', '--color-surface-side', '--color-surface-raised'] as const
 
 export async function token(page: Page, name: string): Promise<string> {
   return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
@@ -126,6 +139,19 @@ export function presetTests() {
     expect(await windowAppearance(page)).toMatchObject({ scheme: 'light' })
   })
 
+  test('Graphite is in the theme list as a dark theme, and picking it shows its floor and keeps Dark the default (#2208)', async ({ page }) => {
+    await openDemo(page)
+    expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
+    await openAppearance(page)
+    const pick = page.getByTestId('settings-theme-pick')
+    await expect(pick.locator('option[value="graphite"]')).toHaveText('Graphite')
+    await pickTheme(page, 'graphite')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
+    expect(await token(page, '--color-surface-side')).toBe('#28282a')
+    expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'graphite' })
+    expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('dark')
+  })
+
   for (const preset of THEME_PRESETS) {
     test(`${preset.name} keeps the urgency order on every reading surface`, async ({ page }) => {
       await openDemo(page)
@@ -134,14 +160,27 @@ export function presetTests() {
         [preset.id, preset.base],
       )
       await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(preset.id)
-      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line']
+      const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n), '--color-line', '--color-line-side', '--color-line-strong']
       const colors = await presetColors(page, names)
       expect(urgencyBreaks(colors)).toEqual([])
+      // Every ink keeps a floor of its own on every reading surface, the ones Dark's inks keep, so no preset's quieter inks sink (#2208)
+      for (const [surface] of READING_SURFACES) {
+        for (const [ink, floor] of INK_FLOORS) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(floor)
+      }
+      for (const surface of LINE_GROUNDS) {
+        const [line, side, strong] = ['--color-line', '--color-line-side', '--color-line-strong'].map((n) => contrast(colors[n]!, colors[surface]!)) as [number, number, number]
+        expect(line, `line on ${surface}`).toBeGreaterThanOrEqual(LINE_FLOOR)
+        expect(side, `line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_SIDE_FLOOR)
+        expect(strong, `line-strong on ${surface}`).toBeGreaterThanOrEqual(LINE_STRONG_FLOOR)
+        expect(side - line, `line-side over line on ${surface}`).toBeGreaterThanOrEqual(0)
+        expect(strong - side, `line-strong over line-side on ${surface}`).toBeGreaterThanOrEqual(LINE_STEP)
+      }
       if (preset.id.startsWith('hc-')) {
         // High contrast: every ink clears 4.5:1 and the hairline 3:1, on every reading surface
         for (const [surface] of READING_SURFACES) {
           for (const [ink] of INK_ORDER) expect(contrast(colors[ink]!, colors[surface]!), `${ink} on ${surface}`).toBeGreaterThanOrEqual(4.5)
           expect(contrast(colors['--color-line']!, colors[surface]!), `line on ${surface}`).toBeGreaterThanOrEqual(3)
+          expect(contrast(colors['--color-line-side']!, colors[surface]!), `line-side on ${surface}`).toBeGreaterThanOrEqual(3)
         }
       }
     })
