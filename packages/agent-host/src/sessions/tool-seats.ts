@@ -5,6 +5,7 @@ import { trustedJsonText } from './tool-answers.js'
 import {
   AGENT_TOOLS,
   APP_ACCESS_TOOLS,
+  APP_TOOLS,
   BUILDER_INSTRUCTIONS,
   BUILDER_TOOL_NAMES,
   COMMAND_TOOLS,
@@ -238,6 +239,8 @@ export function seatHas(profile: ToolProfile | null, capability: keyof typeof SE
 
 /** The profile rule itself, whatever the tier: who may use which of Centralu's commands */
 function baseAllows(profile: ToolProfile, name: string): boolean {
+  // A session's own apps (#2231): every profile has apps under decision 4, and reaches them through this one tool
+  if (APP_TOOLS.some((t) => t.name === name)) return true
   if (MAIL_TOOLS.some((t) => t.name === name)) return seatHas(profile, 'mail')
   if (APP_ACCESS_TOOLS.some((t) => t.name === name)) return seatHas(profile, 'apps')
   if (profile === 'reader') {
@@ -269,9 +272,9 @@ export function toolDefsFor(
   profile: ToolProfile,
   tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS]
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...APP_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS]
   return [
-    ...[...CENTRALU_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)),
+    ...[...CENTRALU_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...APP_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }

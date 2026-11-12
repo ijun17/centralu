@@ -19,14 +19,13 @@ import { bridgeToken } from '../../transport/bridge-token.js'
 import { bridgePath } from '../bridge-path.js'
 
 /**
- * Tests Codex's app bridge **as a whole bridge** (M4 A-5) — a real bridge process, a real host WS
- * server, a real manager, runtime and app. In Codex's spot, the test itself stands in and speaks
- * MCP over stdio.
+ * Tests the stdio bridge Codex and ACP agents reach Centralu through, **as a whole bridge**, for apps (#2231) — a real bridge
+ * process, a real host WS server, a real manager, runtime and app. In Codex's spot, the test itself stands in and speaks MCP
+ * over stdio.
  *
- * Why Codex itself is not used: it cannot be run while logged out (plan S-3). So it is assumed
- * that "Codex starts this bridge and sends tools/list/tools/call," and what is checked here is
- * what happens after that — whether the bridge passes through the host's session gate and reaches
- * the one path into the runtime.
+ * Why Codex itself is not used: what is checked is what happens once Codex starts this bridge and sends tools/list and
+ * tools/call — whether an `app` call passes through the host's session gate, its card, and reaches the one path into the
+ * runtime.
  */
 
 class Handle implements SessionHandle {
@@ -76,10 +75,10 @@ let gate = ''
  * Starts one bridge and speaks to it as if it were Codex. It holds the credential the adapter was
  * handed for that session (one made the same way for a session that never started).
  */
-function bridge(sessionId: string, appServer: string, env: Record<string, string> = {}) {
+function bridge(sessionId: string, env: Record<string, string> = {}) {
   const credential = handedBridge.get(sessionId)?.token ?? bridgeToken(TOKEN, sessionId)
   const child = spawn(process.execPath, [bridgePath()], {
-    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_BRIDGE_TOKEN: credential, CC_SESSION_ID: sessionId, CC_APP_SERVER: appServer, ...env },
+    env: { ...process.env, CC_HOST_URL: `ws://127.0.0.1:${port}`, CC_BRIDGE_TOKEN: credential, CC_SESSION_ID: sessionId, ...env },
   })
   bridges.push(child)
   const got: { id?: number; result?: Record<string, unknown>; error?: { message: string } }[] = []
@@ -136,49 +135,65 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const worker = async () =>
-  (await mgr.createSession({ projectId, cwd: root, tool: 'codex', permissionPreset: 'normal' })) as SessionInfo
+const worker = async (permissionPreset: 'normal' | 'auto' = 'normal') =>
+  (await mgr.createSession({ projectId, cwd: root, tool: 'codex', permissionPreset })) as SessionInfo
 
-describe('app bridge — end to end, seen from Codex\'s own spot', () => {
-  it("the bridge's tools/list surfaces the agent tools the host gave, annotations and all, unchanged", async () => {
+/** An `app` call as Codex sends it through the bridge */
+const appCall = (app: string, tool: string, args: Record<string, unknown> = {}) => ({ name: 'app', arguments: { action: 'call', app, tool, args } })
+
+describe("the bridge — apps through Centralu's app tool, end to end, seen from Codex's own spot (#2231)", () => {
+  it("the bridge's tool list has the app tool, and listing one app gives its agent tools with the read-only mark", async () => {
     const s = await worker()
-    const { request } = bridge(s.id, 'app-notes')
+    const { request } = bridge(s.id)
     const init = await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'codex', version: '0' } })
-    expect(init.result).toMatchObject({ serverInfo: { name: 'app-notes' }, capabilities: { tools: {} } })
-
+    expect(init.result).toMatchObject({ serverInfo: { name: 'centralu' }, capabilities: { tools: {} } })
     const list = await request('tools/list')
-    const tools = (list.result as { tools: { name: string; annotations?: unknown }[] }).tools
-    expect(tools.map((t) => t.name)).not.toContain('app_only')
-    expect(tools.find((t) => t.name === 'peek')?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false })
+    expect((list.result as { tools: { name: string }[] }).tools.map((t) => t.name)).toContain('app')
+    const notes = await request('tools/call', { name: 'app', arguments: { action: 'list', app: 'notes' } })
+    const text = JSON.stringify(notes.result)
+    expect(text).toContain('peek (reads)')
+    expect(text).not.toContain('app_only')
   })
 
-  it("the bridge's tools/call reaches the runtime with that session as the caller, and is logged", async () => {
-    const s = await worker()
-    const { request } = bridge(s.id, 'app-notes')
+  it("an app call reaches the runtime with that session as the caller, is logged, and comes back as the app's own result", async () => {
+    const s = await worker('auto')
+    const { request } = bridge(s.id)
     await request('initialize', {})
-    const out = await request('tools/call', { name: 'poke', arguments: { to: 5 } })
+    const out = await request('tools/call', appCall('notes', 'poke', { to: 5 }))
     expect(out.result).toMatchObject({ content: [{ type: 'text', text: 'poked 5' }], isError: false })
     expect(rt.runs({ projectId, appId: 'notes' }).map((r) => [r.tool, r.callerKind, r.callerSessionId])).toEqual([['poke', 'session', s.id]])
   })
 
-  it('the bridge of an app not attached to that session cannot call anything — the host decides this, not the bridge', async () => {
-    const s = await worker()
-    // A user-folder app is only attached to the Assistant
-    const { request } = bridge(s.id, 'app-helper')
+  it("an app the session does not have cannot be called — the host decides this, not the bridge", async () => {
+    const s = await worker('auto')
+    const { request } = bridge(s.id)
     await request('initialize', {})
-    const list = await request('tools/list')
-    expect(list.error?.message).toContain('This app is not attached to this session')
-    const out = await request('tools/call', { name: 'peek', arguments: {} })
+    // A user-folder app is only the Assistant's
+    const out = await request('tools/call', appCall('helper', 'peek'))
     expect(out.result).toMatchObject({ isError: true })
+    expect(JSON.stringify(out.result)).toContain('This session has no app named \\"helper\\"')
     expect(rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
   })
 
-  it('cannot call under the name of a session with no live handle', async () => {
-    const { request } = bridge('00000000-0000-4000-8000-000000000000', 'app-notes')
+  it('cannot call under the name of a session the host does not have', async () => {
+    const { request } = bridge('00000000-0000-4000-8000-000000000000')
     await request('initialize', {})
-    const out = await request('tools/call', { name: 'peek', arguments: {} })
+    const out = await request('tools/call', appCall('notes', 'peek'))
     expect(out.result).toMatchObject({ isError: true })
-    expect(JSON.stringify(out.result)).toContain('it is not running')
+    expect(rt.runs({ projectId, appId: 'notes' })).toEqual([])
+  })
+
+  it("under normal, a write asks the person with the host's card in the session; their Allow runs it, and a read never asks", async () => {
+    const s = await worker()
+    const { request } = bridge(s.id)
+    await request('initialize', {})
+    expect((await request('tools/call', appCall('notes', 'peek'))).result).toMatchObject({ isError: false })
+    const pending = request('tools/call', appCall('notes', 'poke', { to: 4 }))
+    const card = await until(() => mgr.meta.get(s.id)?.pendingApproval, (c) => c !== undefined && c !== null, 10_000)
+    expect(card!.detail).toMatchObject({ kind: 'other', raw: expect.stringContaining('notes: poke {"to":4}') })
+    expect(rt.runs({ projectId, appId: 'notes' }).map((r) => r.tool)).toEqual(['peek'])
+    await call('agents.respondApproval', { sessionId: s.id, requestId: card!.requestId, decision: 'allow' })
+    expect((await pending).result).toMatchObject({ content: [{ type: 'text', text: 'poked 4' }], isError: false })
   })
 })
 
@@ -205,66 +220,42 @@ async function rawClient(token: string) {
  * process of the same user (`ps eww`, measured on macOS 27.0.1), so this is what such a process
  * would get by reading it.
  */
-describe('app bridge — its credential opens only its own session\'s bridge calls (#382)', () => {
+describe("the bridge — its credential opens only its own session's bridge calls (#382)", () => {
   it("the adapter is handed a credential that is not the host's token, and a bridge holding it reaches the app", async () => {
-    const s = await worker()
+    const s = await worker('auto')
     const handed = handedBridge.get(s.id)!
     expect(handed.token).not.toContain(TOKEN)
-    const { request } = bridge(s.id, 'app-notes')
+    const { request } = bridge(s.id)
     await request('initialize', {})
-    const out = await request('tools/call', { name: 'poke', arguments: { to: 3 } })
+    const out = await request('tools/call', appCall('notes', 'poke', { to: 3 }))
     expect(out.result).toMatchObject({ content: [{ type: 'text', text: 'poked 3' }], isError: false })
   })
 
   it("a bridge holding one session's credential cannot call as another session", async () => {
-    const a = await worker()
-    const b = await worker()
-    const { request } = bridge(b.id, 'app-notes', { CC_BRIDGE_TOKEN: handedBridge.get(a.id)!.token })
+    const a = await worker('auto')
+    const b = await worker('auto')
+    const { request } = bridge(b.id, { CC_BRIDGE_TOKEN: handedBridge.get(a.id)!.token })
     await request('initialize', {})
-    const out = await request('tools/call', { name: 'poke', arguments: { to: 1 } })
+    const out = await request('tools/call', appCall('notes', 'poke', { to: 1 }))
     expect(out.result).toMatchObject({ isError: true })
     expect(JSON.stringify(out.result)).toContain('for another session')
     expect(rt.runs({ projectId, appId: 'notes' })).toEqual([])
   })
 
-  it("cannot set its session's preset to auto or change a project's trust", async () => {
+  it("cannot set its session's preset to auto or change a project's trust, nor call the removed app bridge methods", async () => {
     const s = await worker()
     const stolen = await rawClient(handedBridge.get(s.id)!.token)
     const preset = await stolen.rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
     const trust = await stolen.rpc('projects.setTrusted', { projectId, trusted: false })
+    const old = await stolen.rpc('apps.sessionCall', { sessionId: s.id, server: 'app-notes', name: 'poke', args: { to: 1 } })
     stolen.close()
     expect(preset).toMatchObject({ ok: false, error: { message: expect.stringContaining('cannot call agents.updateSettings') } })
     expect(trust).toMatchObject({ ok: false, error: { message: expect.stringContaining('cannot call projects.setTrusted') } })
+    expect(old).toMatchObject({ ok: false })
     const sessions = (await call('sessions.list', {})) as SessionInfo[]
     expect(sessions.find((x) => x.id === s.id)?.permissionPreset).toBe('normal')
     const projects = (await call('projects.list', {})) as { id: string; trusted: boolean }[]
     expect(projects.find((p) => p.id === projectId)?.trusted).toBe(true)
-  })
-})
-
-/**
- * Tests a long-running call across the whole bridge. The product's own value (240 seconds) is
- * checked on the host side with a fake clock (long-calls.test.ts). Here, the value the bridge
- * carries is shrunk to 1 second and run end to end **with a real clock**: Codex's spot -> the
- * bridge -> the host's session gate -> returning early -> run_status.
- */
-describe('app bridge — a long-running call', () => {
-  it('once the wait time the bridge carries is exceeded, a run id comes back first, and the result is followed up through run_status', async () => {
-    const s = await worker()
-    const { request } = bridge(s.id, 'app-notes', { CC_APP_WAIT_MS: '1000' })
-    await request('initialize', {})
-    const first = await request('tools/call', { name: 'hold', arguments: {} })
-    const runId = (first.result as { structuredContent: { runId: string; status: string } }).structuredContent.runId
-    expect(first.result).toMatchObject({ isError: false, structuredContent: { status: 'running' } })
-    expect(runId).toMatch(/^run_/)
-
-    const running = await request('tools/call', { name: 'run_status', arguments: { run_id: runId } })
-    expect(running.result).toMatchObject({ structuredContent: { runId, status: 'running' } })
-
-    writeFileSync(gate, '')
-    await until(() => rt.runs({ projectId, appId: 'notes' }).find((r) => r.id === runId)?.status, (st) => st === 'ok', 10_000)
-    const done = await request('tools/call', { name: 'run_status', arguments: { run_id: runId } })
-    expect(done.result).toMatchObject({ isError: false, structuredContent: { runId, status: 'ok' } })
-    expect(JSON.stringify(done.result)).toContain('released')
+    expect(rt.runs({ projectId, appId: 'notes' })).toEqual([])
   })
 })

@@ -5,27 +5,21 @@ import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
 import type { CreateSessionOpts, CentraluTools, SessionHandle } from '../contract.js'
-import { answerOrCard } from '../approval-outcome.test-helpers.js'
 import { REPO_WORK_FIRST } from '../../sessions/centralu-tools.js'
 
 /**
- * An external app attached to a Claude session (M4 A-5) — one in-process proxy server per app.
+ * A Claude session's apps (#2231): reached through Centralu's in-process server and its `app` tool, never a server per app.
  *
- * The only fake here is `query`: it never starts the CLI, and just records the options passed to
- * the SDK and any `setMcpServers` calls. The proxy server is built with the **real**
- * `createSdkMcpServer`, and the test stands in for the CLI, sending JSON-RPC directly — on the
- * app side, everything is a real runtime and a real app process (a fixture). So this checks, end
- * to end, that "a tool the CLI calls travels the runtime's one path, tagged as a session caller,
- * and gets recorded."
+ * The only fake here is `query`: it never starts the CLI, and just records the options passed to the SDK. Centralu's server is
+ * built with the **real** `createSdkMcpServer`, and the test stands in for the CLI, sending JSON-RPC directly — on the app
+ * side, everything is a real runtime and a real app process (a fixture). So this checks, end to end, that "an `app` call
+ * the CLI makes travels the runtime's one path, tagged as a session caller, and gets recorded."
  */
 
 type Sent = { jsonrpc: '2.0'; id?: number; method?: string; result?: Record<string, unknown>; error?: unknown }
 
 const captured = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
-  setCalls: [] as Record<string, unknown>[],
-  /** What the next setMcpServers answers as failed, or throws when it is an Error */
-  setFails: null as Record<string, string> | Error | null,
   /** Messages the CLI would emit — the stream yields them once the test pushes them in (conversation-view matching, B-1). */
   feed: [] as unknown[],
   wake: null as (() => void) | null,
@@ -51,12 +45,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
       close: () => {},
       supportedCommands: async () => [],
       getContextUsage: async () => undefined,
-      setMcpServers: async (servers: Record<string, unknown>) => {
-        captured.setCalls.push(servers)
-        const fails = captured.setFails
-        if (fails instanceof Error) throw fails
-        return { added: [], removed: [], errors: fails ?? {} }
-      },
     }
   },
 }))
@@ -81,9 +69,11 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
   cards = 0
   notices = []
   toolCalls = []
+  // The bundle's one member the `app` tool reads: the session's live attachment, as SessionTools hands it (#2231)
+  const centraluTools = { apps: () => hub.liveFor(key.id) } as unknown as CentraluTools
   handle = await new ClaudeAdapter().createSession(
     // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
-    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
+    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), centraluTools, toolProfile: 'reader', ...over },
     (e) => {
       if (e.type === 'approval_request') cards++
       if (e.type === 'notice') notices.push(e.text)
@@ -93,8 +83,8 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
   return handle
 }
 
-/** Attaches to the proxy server the way the CLI would — exactly the transport shape the SDK's v1 server receives. */
-async function connect(server: string) {
+/** Attaches to Centralu's server the way the CLI would — exactly the transport shape the SDK's v1 server receives. */
+async function connect(server = 'centralu') {
   const sent: Sent[] = []
   const pipe = {
     onmessage: undefined as ((m: unknown) => void) | undefined,
@@ -123,8 +113,6 @@ async function connect(server: string) {
 
 beforeEach(() => {
   captured.options = null
-  captured.setCalls = []
-  captured.setFails = null
   captured.feed = []
   captured.wake = null
   w = attachWorld(kit)
@@ -143,47 +131,50 @@ afterEach(async () => {
   await w.dispose()
 })
 
-describe('one in-process proxy server per app', () => {
-  it('an app-<id> server is loaded per attached app, and an ordinary worker still reads the user\'s own settings', async () => {
+/** An `app` call as the CLI sends it to Centralu's server */
+const appCall = (app: string, tool: string, args: Record<string, unknown> = {}, meta?: Record<string, unknown>) => ({
+  name: 'app',
+  arguments: { action: 'call', app, tool, args },
+  ...(meta ? { _meta: meta } : {}),
+})
+
+describe("apps through Centralu's one server (#2231)", () => {
+  it("loads Centralu's server alone, whatever apps the session has, and an ordinary worker still reads the user's own settings", async () => {
     await start(WORKER)
-    expect(Object.keys(servers()).sort()).toEqual(['app-notes', 'app-tasks'])
-    expect(servers()['app-notes']).toMatchObject({ type: 'sdk', name: 'app-notes' })
+    expect(Object.keys(servers())).toEqual(['centralu'])
+    const { request } = await connect()
+    const { tools } = (await request('tools/list')) as { tools: { name: string }[] }
+    expect(tools.map((t) => t.name)).toContain('app')
     // Only the Assistant turns off reading settings files — an app being attached (in a trusted project) never changes a worker's own settings load.
     expect(captured.options).not.toHaveProperty('settingSources')
   })
 
-  it('the CLI\'s tools/list receives only the agent-facing tools — with description, annotations and schema exactly as the app declared them', async () => {
+  it("lists the session's apps, and one app's tools with the read-only mark and the schema the app declared", async () => {
     await start(WORKER)
-    const { request } = await connect('app-notes')
-    const { tools } = (await request('tools/list')) as { tools: Record<string, unknown>[] }
-    const names = tools.map((t) => t.name)
-    expect(names).not.toContain('app_only')
-    expect(names).toEqual(expect.arrayContaining(['echo', 'peek', 'poke']))
-    expect(tools.find((t) => t.name === 'peek')).toMatchObject({
-      title: 'Peek',
-      description: 'Reads the value without changing anything',
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    })
-    expect(tools.find((t) => t.name === 'poke')?.inputSchema).toMatchObject({
-      type: 'object',
-      properties: { to: { type: 'number', description: 'the new value' } },
-      required: ['to'],
-    })
+    const { request } = await connect()
+    const apps = (await request('tools/call', { name: 'app', arguments: { action: 'list' } })) as { content: { text: string }[] }
+    expect(apps.content[0]!.text).toMatch(/^- notes: /m)
+    expect(apps.content[0]!.text).toMatch(/^- tasks: /m)
+    const notes = (await request('tools/call', { name: 'app', arguments: { action: 'list', app: 'notes' } })) as { content: { text: string }[] }
+    const text = notes.content[0]!.text
+    expect(text).toContain('- peek (reads): "Reads the value without changing anything"')
+    expect(text).toContain('"to":{"type":"number","description":"the new value"}')
+    expect(text).not.toContain('app_only')
   })
 
-  it('the CLI\'s tools/call travels the runtime\'s one path, tagged as a session caller, and gets recorded', async () => {
+  it("an app call travels the runtime's one path as a session caller and is recorded; the app's result comes back as the app gave it", async () => {
     await start(WORKER)
-    const { request } = await connect('app-notes')
-    const out = await request('tools/call', { name: 'poke', arguments: { to: 7 } })
+    const { request } = await connect()
+    const out = await request('tools/call', appCall('notes', 'poke', { to: 7 }))
     expect(out).toMatchObject({ content: [{ type: 'text', text: 'poked 7' }], isError: false })
-
     const runs = w.rt.runs({ projectId: 'p1', appId: 'notes' })
     expect(runs.map((r) => [r.tool, r.callerKind, r.callerSessionId, r.status])).toEqual([['poke', 'session', 'claude-s1', 'ok']])
-
-    // A UI-only tool is rejected even if its name is known — the rejection is still recorded as one line.
-    const refused = await request('tools/call', { name: 'app_only', arguments: {} })
-    expect(refused).toMatchObject({ isError: true })
-    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' })[0]).toMatchObject({ tool: 'app_only', status: 'rejected', callerKind: 'session' })
+    // A UI-only tool is not one of the session's: refused before it runs, naming the tools it has
+    const refused = (await request('tools/call', appCall('notes', 'app_only'))) as { isError?: boolean; content: { text: string }[] }
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]!.text).toContain('notes has no tool "app_only"')
+    // The server name a session's earlier turns used reaches the same app
+    expect(await request('tools/call', appCall('app-notes', 'poke', { to: 8 }))).toMatchObject({ content: [{ type: 'text', text: 'poked 8' }] })
   })
 })
 
@@ -199,11 +190,11 @@ describe('the conversation-view card id — Claude', () => {
     return ids
   }
 
-  it('the tool use id the CLI carries on tools/call becomes that call\'s card id', async () => {
+  it("the tool use id the CLI carries on the app call becomes that call's card id", async () => {
     const ids = heard()
     await start(WORKER)
-    const { request } = await connect('app-notes')
-    await request('tools/call', { name: 'poke', arguments: { to: 1 }, _meta: { 'claudecode/toolUseId': 'toolu_01ABC', progressToken: 3 } })
+    const { request } = await connect()
+    await request('tools/call', appCall('notes', 'poke', { to: 1 }, { 'claudecode/toolUseId': 'toolu_01ABC', progressToken: 3 }))
     expect(ids).toHaveLength(1)
     expect(await ids[0]).toBe('toolu_01ABC')
   })
@@ -211,25 +202,21 @@ describe('the conversation-view card id — Claude', () => {
   it('matches against a tool_use from the stream when no id is carried along — a card that already has a result is not matched', async () => {
     const ids = heard()
     await start(WORKER)
-    const { request } = await connect('app-notes')
+    const { request } = await connect()
     const toolUse = (id: string, to: number) => ({
       type: 'assistant',
-      message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__app-notes__poke', input: { to } }] },
+      message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__centralu__app', input: { action: 'call', app: 'notes', tool: 'poke', args: { to } } }] },
     })
-    // A call denied at approval: its result (the denial) arrives right after the tool_use.
+    // A call refused before it ran: its result arrives right after the tool_use.
     captured.feed.push(toolUse('toolu_denied', 2), {
       type: 'user',
       message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_denied', is_error: true, content: 'denied' }] },
     })
     captured.feed.push(toolUse('toolu_ok', 2))
     captured.wake?.()
-    /*
-     * Waits until the session has shown the last tool use (#845): it notes a tool use for matching before it shows it,
-     * so by then both are noted. A 20 ms sleep used to stand in for this, and on a loaded machine the call could come
-     * first and rest on the short join wait instead.
-     */
+    // Waits until the session has shown the last tool use (#845): it notes a tool use for matching before it shows it
     await kit.until(() => toolCalls, (ids) => ids.includes('toolu_ok'))
-    await request('tools/call', { name: 'poke', arguments: { to: 2 } })
+    await request('tools/call', appCall('notes', 'poke', { to: 2 }))
     expect(await ids[0]).toBe('toolu_ok')
   })
 })
@@ -238,312 +225,39 @@ describe('the conversation-view card id — Claude', () => {
 describe("Centralu's instructions name an app's help only with an app attached", () => {
   const instructions = () => (servers()['centralu'] as unknown as { instance: { server: { _instructions?: string } } }).instance.server._instructions ?? ''
   it('an ordinary session that starts with apps gets the line; one that starts with none does not', async () => {
-    const reader = { centraluTools: {} as CentraluTools, toolProfile: 'reader' as const }
-    await start(WORKER, reader)
+    await start(WORKER)
     expect(instructions()).toContain(REPO_WORK_FIRST)
     await handle?.dispose()
     // An untrusted project's apps do not attach (decision 4): this session starts with none
     w.trust.p1 = false
     w.rt.refresh()
-    await start(WORKER, reader)
+    await start(WORKER)
     expect(Object.keys(servers())).toEqual(['centralu'])
     expect(instructions()).not.toContain(REPO_WORK_FIRST)
   })
 })
 
-describe('an attached app changing is followed without a restart', () => {
-  const last = () => captured.setCalls.at(-1) ?? null
+/** The CLI's own call to Centralu's server, sent on the transport so the test can watch for its answer */
+function sendRaw(id: number, params: Record<string, unknown>) {
+  const pipe = (servers()['centralu'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
+  pipe.onmessage({ jsonrpc: '2.0', id, method: 'tools/call', params })
+}
 
-  it('calls setMcpServers with the new set when an app appears — an already-attached server keeps the same object', async () => {
-    await start(WORKER)
-    const notes = servers()['app-notes']
-    // Calls the rescan that folder watching would trigger, directly (does not wait for fs-event lag — see session-apps.test.ts).
-    w.plant('p1', 'fresh')
-    w.rt.refresh()
-    await kit.until(() => last(), (s) => s !== null && 'app-fresh' in s)
-    expect(Object.keys(last()!).sort()).toEqual(['app-fresh', 'app-notes', 'app-tasks'])
-    // The object has to stay the same for the SDK to keep the connection as-is — a new object either gets ignored (same name) or drops and reattaches.
-    expect(last()!['app-notes']).toBe(notes)
-  })
-
-  // #841 item 8: logged only, an app that never attached looked like an app with no tools
-  it('says in the session when Claude Code could not attach an app, or could not change the set', async () => {
-    await start(WORKER)
-    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      captured.setFails = { 'app-fresh': 'connection refused\nat …' }
-      w.plant('p1', 'fresh')
-      w.rt.refresh()
-      await kit.until(() => notices.length, (n) => n === 1)
-      expect(notices[0]).toContain('could not attach app-fresh (connection refused)')
-
-      captured.setFails = new Error('query closed')
-      rmSync(join(w.roots.p1, '.centralu', 'apps', 'fresh'), { recursive: true, force: true })
-      w.rt.refresh()
-      await kit.until(() => notices.length, (n) => n === 2)
-      expect(notices[1]).toContain("could not update this session's apps (query closed)")
-    } finally {
-      quiet.mockRestore()
-    }
-  })
-
-  it('calls with the server excluded from the set when an app disappears', async () => {
-    await start(WORKER)
-    rmSync(join(w.roots.p1, '.centralu', 'apps', 'tasks'), { recursive: true, force: true })
-    w.rt.refresh()
-    await kit.until(() => last(), (s) => s !== null)
-    expect(Object.keys(last()!)).toEqual(['app-notes'])
-  })
-
-  it('when trust flips, every app drops, and reverting it reattaches with a fresh proxy server', async () => {
-    await start(WORKER)
-    const before = servers()['app-notes']
-    w.trust.p1 = false
-    w.rt.refresh()
-    await kit.until(() => captured.setCalls.length, (n) => n === 1)
-    expect(last()).toEqual({})
-
-    w.trust.p1 = true
-    w.rt.refresh()
-    await kit.until(() => captured.setCalls.length, (n) => n === 2)
-    expect(Object.keys(last()!).sort()).toEqual(['app-notes', 'app-tasks'])
-    // A server the SDK has detached cannot be reconnected — an app that reattaches is a new object.
-    expect(last()!['app-notes']).not.toBe(before)
-  })
-
-  /*
-   * A server the person approved is also an app in the user's own folder (A-7) — `second` here is
-   * exactly that app, right after approval. No server is ever loaded raw; the set contains only
-   * centralu and app proxy servers.
-   */
-  it('when the Assistant\'s set changes, centralu stays the original object, alongside the user-folder apps', async () => {
-    const tools = {} as CentraluTools
-    await start({ id: 'orch-1', kind: 'orchestrator', projectId: null }, {
-      centraluTools: tools,
-      toolProfile: 'assistant',
-    })
-    const centralu = servers()['centralu']
-    expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu'])
-
-    w.plant('user', 'second')
-    w.rt.refresh()
-    await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
-    expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu'])
-    // Omitting it would make the SDK drop the Assistant server — the same object has to be included every time.
-    expect(last()!['centralu']).toBe(centralu)
-  })
-
-  it('sends tools/list_changed instead of swapping the server when only an attached app\'s tools change', async () => {
-    const extra = join(w.root, 'extra.json')
-    w.plant('p1', 'grows', ['--mode', 'attach', '--extra-from', extra])
-    w.rt.refresh()
-    await start(WORKER)
-    const { request, sent } = await connect('app-grows')
-    await request('tools/list')
-
-    const { writeFileSync } = await import('node:fs')
-    writeFileSync(extra, JSON.stringify(['added_later']))
-    await w.rt.restart({ projectId: 'p1', appId: 'grows' })
-    await w.rt.tools({ projectId: 'p1', appId: 'grows' }, 'model')
-
-    await kit.until(() => sent.filter((m) => m.method === 'notifications/tools/list_changed').length, (n) => n > 0)
-    expect(captured.setCalls).toEqual([])
-    const { tools } = (await request('tools/list')) as { tools: { name: string }[] }
-    expect(tools.map((t) => t.name)).toContain('added_later')
-  })
-})
-
-/**
- * Approval for app tools (decision 5): a tool with a read-only annotation is never asked about,
- * and everything else follows the session preset. The judgment is made using the annotation the
- * attached app **actually declared** — a name simply starting with `app-` is never trusted on its
- * own.
- */
-describe('approval of app tools — read-only x preset', () => {
-  /** The real approval callback: its answer, or 'asked-the-human' once it raised an approval card */
-  async function decide(toolName: string): Promise<unknown> {
-    const canUseTool = captured.options?.canUseTool as ((n: string, i: Record<string, unknown>) => Promise<unknown>) | undefined
-    expect(typeof canUseTool).toBe('function')
-    const r = await answerOrCard(() => canUseTool!(toolName, { to: 1 }), () => cards)
-    return r === 'still asking' ? 'asked-the-human' : r
-  }
-  const ALLOW = { behavior: 'allow', updatedInput: { to: 1 } }
-
-  for (const preset of ['safe', 'normal'] as const) {
-    it(`${preset}: a read-only tool is never asked about, and every other app tool asks the person`, async () => {
-      const h = await start(WORKER, { permissionPreset: preset })
-      // The situation once the model has received the list — the same as the CLI having called tools/list.
-      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-notes')
-
-      expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
-      expect(await decide('mcp__app-notes__poke')).toBe('asked-the-human')
-      // A tool with no annotation at all is also not read-only.
-      expect(await decide('mcp__app-notes__echo')).toBe('asked-the-human')
-    })
-  }
-
-  /*
-   * Auto is bypassPermissions, so app tools never reach the callback. The callback is still
-   * passed for choice questions (AskUserQuestion) (#171), and a request that reaches the callback
-   * because it hit an `ask` rule in the settings file is denied the way it was before there was a
-   * callback at all — never asking the person, and never approving it on their behalf either.
-   */
-  it('auto: asks about nothing, including app tools (bypassPermissions — a request reaching the callback is denied with no card)', async () => {
-    await start(WORKER, { permissionPreset: 'auto' })
-    expect(captured.options?.permissionMode).toBe('bypassPermissions')
-    expect(await decide('mcp__app-notes__echo')).toMatchObject({ behavior: 'deny' })
-  })
-
-  it('a tool that only imitates an app\'s name does not pass — an unattached app, an unknown list, or a name with an extra segment', async () => {
-    await start(WORKER, { permissionPreset: 'normal' })
-    // The list is not known yet — this is not a tool the model picked from our own list.
-    expect(await decide('mcp__app-notes__peek')).toBe('asked-the-human')
-    await w.rt.tools({ projectId: 'p1', appId: 'notes' })
-    // An app from a different project is not attached to this session (even with a read-only tool).
-    await w.rt.tools({ projectId: 'p2', appId: 'other' }).catch(() => {})
-    expect(await decide('mcp__app-other__peek')).toBe('asked-the-human')
-    // A tool hiding behind someone else's server name with one extra segment appended.
-    expect(await decide('mcp__app-notes__peek__x')).toBe('asked-the-human')
-    // Now the list is known — the same name passes.
-    expect(await decide('mcp__app-notes__peek')).toEqual(ALLOW)
-  })
-})
-
-/**
- * A write an app declares `local` or `routine` (`tool-risk.ts`) runs with no card where the person's trust covers it,
- * and asks everywhere else. The tools: `note` (local), `post` and `merge` (routine), `restack` (routine, asks when
- * `push` is true), `liar` (says local, but not that it is undoable), `release` (declares nothing).
- */
-describe('approval of app tools — declared risk x preset x whose app it is', () => {
-  async function decide(toolName: string, input: Record<string, unknown> = {}): Promise<unknown> {
-    const canUseTool = captured.options?.canUseTool as (n: string, i: Record<string, unknown>) => Promise<unknown>
-    const r = await answerOrCard(() => canUseTool(toolName, input), () => cards)
-    return r === 'still asking' ? 'asked-the-human' : r
-  }
-  const allowed = (input: Record<string, unknown> = {}) => ({ behavior: 'allow', updatedInput: input })
-
-  beforeEach(() => {
-    w.plant('p1', 'board', ['--mode', 'attach', '--risks'])
-    w.plant('user', 'userboard', ['--mode', 'attach', '--risks'])
-    w.rt.refresh()
-  })
-
-  it("normal, the session's own project's app: bookkeeping and routine writes run unasked; undeclared, contradicted and push ask", async () => {
-    const h = await start(WORKER, { permissionPreset: 'normal' })
-    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
-    expect(await decide('mcp__app-board__note')).toEqual(allowed())
-    expect(await decide('mcp__app-board__post')).toEqual(allowed())
-    expect(await decide('mcp__app-board__merge')).toEqual(allowed())
-    expect(await decide('mcp__app-board__restack', { pr: 3 })).toEqual(allowed({ pr: 3 }))
-    expect(await decide('mcp__app-board__restack', { pr: 3, push: true })).toBe('asked-the-human')
-    // `open` is routine only when it runs no code of the head (skipPrePr) or opens nothing (dryRun): the board's open_pr
-    expect(await decide('mcp__app-board__open', { head: 'b' })).toBe('asked-the-human')
-    expect(await decide('mcp__app-board__open', { head: 'b', skipPrePr: 'a fork' })).toEqual(allowed({ head: 'b', skipPrePr: 'a fork' }))
-    expect(await decide('mcp__app-board__open', { head: 'b', dryRun: true })).toEqual(allowed({ head: 'b', dryRun: true }))
-    expect(await decide('mcp__app-board__open', { head: 'b', skipPrePr: 'a fork', path: 'C:/other' })).toBe('asked-the-human')
-    expect(await decide('mcp__app-board__liar')).toBe('asked-the-human')
-    expect(await decide('mcp__app-board__release')).toBe('asked-the-human')
-  })
-
-  it('safe asks for a routine write but not for a local one', async () => {
-    const h = await start(WORKER, { permissionPreset: 'safe' })
-    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
-    expect(await decide('mcp__app-board__note')).toEqual(allowed())
-    expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
-  })
-
-  it("a user-folder app's routine write asks: no project's trust stands behind it, while its local write still runs", async () => {
-    const h = await start({ id: 'claude-orch', kind: 'orchestrator', projectId: null }, { permissionPreset: 'normal' })
-    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-userboard')
-    expect(await decide('mcp__app-userboard__post')).toBe('asked-the-human')
-    expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
-  })
-
-  it("an app another project shares, which the session attached itself (attach_app), asks for its routine writes though its project is trusted", async () => {
-    w.trust.p2 = true
-    w.plant('p2', 'shared', ['--mode', 'attach', '--risks'])
-    w.rt.refresh()
-    hub.dispose()
-    hub = new SessionAppsHub(w.rt, {
-      toolListWaitMs: 10_000,
-      callJoinWaitMs: 300,
-      onDemand: { attached: () => [{ ref: { projectId: 'p2', appId: 'shared' }, server: 'app-shared' }], allowed: () => true },
-    })
-    const h = await start(WORKER, { permissionPreset: 'normal' })
-    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-shared')
-    // Its own project's app, in the same session, is still covered
-    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
-    expect(await decide('mcp__app-board__post')).toEqual(allowed())
-    expect(await decide('mcp__app-shared__post')).toBe('asked-the-human')
-    expect(await decide('mcp__app-shared__merge')).toBe('asked-the-human')
-    // Bookkeeping in its own data is not about whose project it is
-    expect(await decide('mcp__app-shared__note')).toEqual(allowed())
-  })
-
-  /**
-   * "Own" needs the session to be a project's and the app to be that project's (`unasked` in session-apps.ts). Each of
-   * its two guards is the only thing between the call and a card in one case the attach rules do not reach on their own:
-   * an app the session attached itself can be any project's, or the user's.
-   */
-  describe('whose app it is, one guard at a time', () => {
-    const attachOnDemand = (ref: { projectId: string | null; appId: string }, server: string) => {
-      hub.dispose()
-      hub = new SessionAppsHub(w.rt, {
-        toolListWaitMs: 10_000,
-        callJoinWaitMs: 300,
-        onDemand: { attached: () => [{ ref, server }], allowed: () => true },
-      })
-    }
-
-    it('a session that belongs to no project is not the owner of a user-folder app, though both project ids are null', async () => {
-      attachOnDemand({ projectId: null, appId: 'userboard' }, 'app-userboard')
-      const h = await start({ id: 'claude-loose', kind: 'worker', projectId: null }, { permissionPreset: 'normal' })
-      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-userboard')
-      expect(await decide('mcp__app-userboard__post')).toBe('asked-the-human')
-      expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
-    })
-
-    it('the Assistant is not the owner of an app, even one of the project it is recorded under', async () => {
-      attachOnDemand({ projectId: 'p1', appId: 'board' }, 'app-board')
-      const h = await start({ id: 'claude-orch', kind: 'orchestrator', projectId: 'p1' }, { permissionPreset: 'normal' })
-      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
-      expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
-      expect(await decide('mcp__app-board__note')).toEqual(allowed())
-    })
-  })
-})
-
-/**
- * A slow call — Claude's in-process server effectively has no call timeout (the SDK's default is
- * about 28 hours, sdk.d.ts `createSdkMcpServer`). So it waits, rather than returning early.
- * `run_status` still shows up in the list — both tools see the same list.
- */
 describe('a slow call — Claude waits', () => {
-  it('run_status is listed as read-only and gets called without approval', async () => {
-    await start(WORKER, { permissionPreset: 'safe' })
-    const { request } = await connect('app-notes')
-    const { tools } = (await request('tools/list')) as { tools: { name: string; annotations?: Record<string, unknown> }[] }
-    expect(tools.find((t) => t.name === 'run_status')?.annotations).toMatchObject({ readOnlyHint: true })
-    const canUseTool = captured.options?.canUseTool as (n: string, i: Record<string, unknown>) => Promise<unknown>
-    expect(await canUseTool('mcp__app-notes__run_status', { run_id: 'run_x' })).toEqual({ behavior: 'allow', updatedInput: { run_id: 'run_x' } })
-  })
-
   it('still does not return early with "still running" even after 240 seconds — the result arrives when it finishes', async () => {
     await start(WORKER)
-    const { request, sent } = await connect('app-notes')
+    const { request, sent } = await connect()
     await request('tools/list')
     const realSetTimeout = globalThis.setTimeout
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      // Sends the call the way the CLI would — the answer arrives in sent.
-      const pipe = (servers()['app-notes'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
-      pipe.onmessage({ jsonrpc: '2.0', id: 900, method: 'tools/call', params: { name: 'hold', arguments: {} } })
+      sendRaw(900, appCall('notes', 'hold'))
       const deadline = performance.now() + 15_000
       while (!w.records('notes').some((r) => r.t === 'holding')) {
         if (performance.now() > deadline) throw new Error('the app never started holding')
         await new Promise((r) => realSetTimeout(r, 10))
       }
-      // This outlasts both Claude's 240 seconds and Codex's 300 seconds. At 10 minutes, the runtime's own host-to-app boundary (callTimeoutMs) kicks in.
+      // This outlasts the bridge's 240 seconds and Codex's 300 seconds. At 10 minutes, the runtime's own host-to-app boundary (callTimeoutMs) kicks in.
       await vi.advanceTimersByTimeAsync(6 * 60_000)
       expect(sent.find((m) => m.id === 900)).toBeUndefined()
     } finally {
@@ -564,10 +278,9 @@ describe('a slow call — Claude waits', () => {
  */
 describe('stopping stops app calls too — Claude', () => {
   async function holdViaCli() {
-    const { request, sent } = await connect('app-notes')
+    const { request, sent } = await connect()
     await request('tools/list')
-    const pipe = (servers()['app-notes'] as unknown as { instance: { server: { transport: { onmessage(m: unknown): void } } } }).instance.server.transport
-    pipe.onmessage({ jsonrpc: '2.0', id: 700, method: 'tools/call', params: { name: 'hold', arguments: {} } })
+    sendRaw(700, appCall('notes', 'hold'))
     await kit.until(() => w.records('notes').some((r) => r.t === 'holding'), Boolean)
     return sent
   }

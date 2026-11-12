@@ -388,9 +388,8 @@ export class SessionProcesses {
       this.host.restartPolicy.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
     }
-    // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
+    // Applying a deferred settings change (#164) is also done by this same restart
     this.host.restartPolicy.restartAfterTurn.delete(sessionId)
-    this.host.restartPolicy.appsRestartAfterTurn.delete(sessionId)
     this.host.restartPolicy.definitionsRestartAfterTurn.delete(sessionId)
     this.host.restartPolicy.launchSettingsRestartAfterTurn.delete(sessionId)
     this.noticeTrustRestart(sessionId)

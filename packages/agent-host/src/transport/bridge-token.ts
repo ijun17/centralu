@@ -48,7 +48,7 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 
 /**
  * Every RPC the bridge sends (centralu-bridge.mjs), and nothing more. Each one names its session
- * in `sessionId`, and the host already judges what that session may do from it: these four only carry
+ * in `sessionId`, and the host already judges what that session may do from it: these only carry
  * a session's own tool calls.
  */
 export const BRIDGE_METHODS: ReadonlySet<string> = new Set([
@@ -57,8 +57,6 @@ export const BRIDGE_METHODS: ReadonlySet<string> = new Set([
   // #2133 step 3: the same two under the role's new name, which a bridge of a later release calls
   'assistant.tools',
   'assistant.tool',
-  'apps.sessionTools',
-  'apps.sessionCall',
 ])
 
 /**

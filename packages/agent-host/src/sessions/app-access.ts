@@ -78,12 +78,6 @@ export type AppAccessDeps = {
     what: { text: string; app: { appId: string; name: string } },
     signal?: AbortSignal,
   ): Promise<{ ok: true } | { ok: false; error: string }>
-  /**
-   * The session's set changed — the manager recounts its live handle and says when the agent has the
-   * tools: `now` (Claude follows the set live) or `next_turn` (a Codex thread keeps the servers it
-   * started with, so the manager restarts it through resume once the turn ends).
-   */
-  attachedChanged(sessionId: string): 'now' | 'next_turn'
   /** How long to wait for an app's tool list when it is attached (the hub's own cap by default) */
   toolListWaitMs?: number
 }
@@ -101,10 +95,10 @@ export type FoundApp = {
 }
 
 export type AttachOutcome =
-  | { ok: true; server: string; tools: string[]; when: 'now' | 'next_turn'; already?: boolean }
+  | { ok: true; server: string; tools: string[]; already?: boolean }
   | { ok: false; error: string }
 
-export type DetachOutcome = { ok: true; server: string; when: 'now' | 'next_turn' } | { ok: false; error: string }
+export type DetachOutcome = { ok: true; server: string } | { ok: false; error: string }
 
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
 const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref)}`
@@ -178,7 +172,7 @@ export class AppAccess implements OnDemandApps {
     const app = named.app
     const target: AppRef = { projectId: app.projectId, appId: app.appId }
     const has = already.find((h) => sameApp(h.ref, target))
-    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), when: 'now', already: true }
+    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), already: true }
     if (!this.candidates(session).some((a) => sameApp(a, app))) {
       return { ok: false, error: this.whyNot(session, app) }
     }
@@ -208,8 +202,7 @@ export class AppAccess implements OnDemandApps {
     const inUse = [...this.deps.hub.refsFor(session).map((h) => h.server), ...kept.map((r) => r.server)]
     const server = this.deps.hub.claimAttachName(sessionId, target, inUse)
     this.save(sessionId, [...kept, { projectId: app.projectId, appId: app.appId, server, consent, at: Date.now() }])
-    const when = this.deps.attachedChanged(sessionId)
-    return { ok: true, server, tools: await this.toolNames(target), when }
+    return { ok: true, server, tools: await this.toolNames(target) }
   }
 
   detach(sessionId: string, ref: string): DetachOutcome {
@@ -229,7 +222,7 @@ export class AppAccess implements OnDemandApps {
       sessionId,
       mine.filter((x) => x !== r),
     )
-    return { ok: true, server: r.server, when: this.deps.attachedChanged(sessionId) }
+    return { ok: true, server: r.server }
   }
 
   /**

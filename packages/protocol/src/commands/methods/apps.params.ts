@@ -424,26 +424,4 @@ export const appsParams = {
     ...machineParam,
     id: z.string(),
   }),
-  /**
-   * The agent tools of one external app attached to a session (M4 A-5) — called by the bridge
-   * of an adapter that cannot attach in-process. The shape is exactly MCP's `Tool` (the bridge
-   * hands back what it received, unchanged). Rejected if the app is not attached to that session.
-   */
-  'apps.sessionTools': z.object({ sessionId: SessionId, server: z.string() }),
-  /**
-   * A session's agent calls a tool of an attached app (M4 A-5) — called by the bridge. The
-   * caller is that session, and it goes through the runtime's single path (visibility scope, run
-   * id, history). The result has the shape of MCP's `CallToolResult`.
-   *
-   * `waitMs`: if a call takes longer than this, the run id and "still running" are returned
-   * first (the call itself keeps going). The bridge of a tool with an outside time limit (Codex's
-   * 300 seconds) sets this shorter than that limit.
-   */
-  'apps.sessionCall': z.object({
-    sessionId: SessionId,
-    server: z.string(),
-    name: z.string(),
-    args: z.record(z.string(), z.unknown()),
-    waitMs: z.number().int().min(1_000).max(3_600_000).optional(),
-  }),
 } as const

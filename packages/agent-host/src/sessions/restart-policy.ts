@@ -99,13 +99,6 @@ export class RestartPolicy {
    */
   private readonly backgroundHolds = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
 
-  /**
-   * Codex sessions whose attached apps changed mid-turn (#371 part A) — restarted through resume when
-   * the turn ends, beside `restartAfterTurn`'s settings drift: a Codex thread keeps the MCP servers it
-   * started with, so the restart is what gives it (or takes away) an app it attached or detached.
-   */
-  readonly appsRestartAfterTurn = new Set<string>()
-
   /** Background work the session's process holds that ending it would end (#648): what its tool listed as running */
   private backgroundRunning(sessionId: string): boolean {
     const m = this.host.meta.get(sessionId)
@@ -148,7 +141,6 @@ export class RestartPolicy {
     const why =
       cause === 'launch_settings' ? 'changed launch settings'
       : cause === 'instructions' ? "changed Centralu tool definitions"
-      : cause === 'thread_restart' ? 'a change of attached apps'
       : cause === 'model_change' ? 'a model change'
       : this.host.running.get(sessionId)?.permissionPreset !== m.permissionPreset ? 'a permission change'
       : 'changed settings'
@@ -213,12 +205,10 @@ export class RestartPolicy {
     }
     this.restartAfterTurn.delete(sessionId)
     this.clearBackgroundHold(sessionId)
-    // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not.
-    const apps = this.appsRestartAfterTurn.delete(sessionId)
     const definitions = this.definitionsRestartAfterTurn.delete(sessionId)
     const launchSettings = this.launchSettingsRestartAfterTurn.delete(sessionId)
-    if (!(apps || definitions || launchSettings || this.settingsDrifted(sessionId)) || !this.host.handles.has(sessionId)) return
-    const cause = launchSettings ? 'launch_settings' : apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(sessionId)
+    if (!(definitions || launchSettings || this.settingsDrifted(sessionId)) || !this.host.handles.has(sessionId)) return
+    const cause = launchSettings ? 'launch_settings' : definitions ? 'instructions' : this.restartCause(sessionId)
     // Publish the barrier before dispose can emit events or the completed wait can hand the parent its answer.
     const restarting = Promise.resolve().then(() => this.host.restartSession(sessionId, cause)).then(() => {}).finally(() => {
       if (this.deferredRestarts.get(sessionId) === restarting) this.deferredRestarts.delete(sessionId)

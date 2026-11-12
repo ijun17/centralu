@@ -32,6 +32,17 @@ import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
  */
 export { CENTRALU_MCP_NAME }
 
+/**
+ * Where Claude Code carries the card id on an MCP tool call (M4 B-1). The CLI's MCP tool wrapper calls
+ * `callTool({ name, arguments, _meta: { "claudecode/toolUseId": <tool_use id> } })` (measured from the binary's own strings,
+ * SDK 0.3.263, on the app proxy this replaced in #2231). That id equals the adapter's `tool_call` callId, so an `app` call's
+ * inline view knows its card without matching; absent, the host matches what the adapter noted (`SessionApps.noteCall`).
+ */
+const CLAUDE_TOOL_USE_META = 'claudecode/toolUseId'
+
+/** What a tool of the SDK's in-process server answers */
+type ToolAnswer = Awaited<ReturnType<Parameters<typeof tool>[3]>>
+
 /** What Claude Code calls its own subagent tool: the name Centralu's instructions put `start_agent` before (#1587) */
 export const CLAUDE_SUBAGENT_TOOL = 'Agent'
 
@@ -72,9 +83,14 @@ export function centraluMcp(
         hostDrain
           .track(`tool ${CENTRALU_MCP_NAME}/${t.name}`, async () => {
             // The call's own signal (MCP's request extra): the CLI cancelling the call stops what it started (ask_project, #371)
-            const signal = (extra as { signal?: AbortSignal } | undefined)?.signal
-            const r = await runCentraluTool(tools, t.name, args, { sessionId: sessionId ?? null, profile }, signal)
-            return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
+            const { signal, _meta } = (extra ?? {}) as { signal?: AbortSignal; _meta?: Record<string, unknown> }
+            // The card's id, which Claude Code sends with the call: an app call's inline view settles under it (#2231, M4 B-1)
+            const toolUseId = _meta?.[CLAUDE_TOOL_USE_META]
+            const r = await runCentraluTool(tools, t.name, args, { sessionId: sessionId ?? null, profile }, signal, typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {})
+            // An app's own result goes on as the app gave it (#2231); the SDK's types know only its kinds, which the app's content is
+            return r.content
+              ? ({ content: r.content, isError: r.isError, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) } as ToolAnswer)
+              : { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
           })
           .catch((e: unknown) => {
             if (e instanceof DrainCut) return drainToolResult(e)

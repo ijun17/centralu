@@ -22,7 +22,11 @@ export type ToolProfile = 'assistant' | 'scoped' | 'builder' | 'reader'
 /** Whoever called a tool — sessionId=null means a person (the UI) */
 export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
 
-export type ToolOutput = { text: string; isError?: boolean }
+/**
+ * What a Centralu tool answers. `content` and `structuredContent` carry an app's own result through the `app` tool (#2231),
+ * as the app gave it, so the agent reads it as it read an app tool's result before; `text` is its text blocks joined
+ */
+export type ToolOutput = { text: string; isError?: boolean; content?: unknown[]; structuredContent?: Record<string, unknown> }
 
 /**
  * The name of the Assistant MCP server.
@@ -100,4 +104,4 @@ export function proposedMcpServerNameError(name: string): string | null {
 }
 
 // What the host does with how risky an app says a write is (an app tool's approval, `tool-risk.ts`)
-export { runsUnasked } from './external/tool-risk.js'
+export { presetAsks, runsUnasked } from './external/tool-risk.js'

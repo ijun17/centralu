@@ -24,7 +24,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   startAgent: AgentStartFlow['startAgent']
   agentSession: DelegationFlow['agentSession']
   readonly delegationFlow: Pick<DelegationFlow, 'listAgents'>
-  readonly apps: Pick<SessionAppWiring, 'requireAppAccess'>
+  readonly apps: Pick<SessionAppWiring, 'requireAppAccess' | 'appsHub'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => Promise<{ text: string; isError?: boolean }>
   /** The `compact_self` tool of a session (#1451) */
@@ -76,13 +76,20 @@ export class SessionTools {
     return { profile, tools: () => this.toolBundleOf(m.id, profile, m) }
   }
 
-  /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
+  /**
+   * The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project; with
+   * the session's own apps in every one (#2231: every profile has apps under decision 4, and reaches them through `app`)
+   */
   private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): CentraluTools | undefined {
-    return toolBundleFor(profile, m.scopeSessionIds, {
+    const bundle = toolBundleFor(profile, m.scopeSessionIds, {
       assistant: () => this.centraluToolsFor(sessionId),
       scoped: (ids) => this.host.centraluToolsFor(sessionId, ids),
       reader: () => this.readerToolsFor(sessionId),
     })
+    if (!bundle) return undefined
+    // The live handle's attachment, read at each call: a session with no live agent makes no call
+    const hub = () => this.host.apps.appsHub
+    return { ...bundle, apps: () => hub()?.liveFor(sessionId) ?? null }
   }
 
   /**
