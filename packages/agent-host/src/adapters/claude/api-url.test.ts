@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pathsOf } from '../../os.js'
-import { claudeApiUrl, type ReadText } from './api-url.js'
+import type { ReadText } from '../settings-text.js'
+import { claudeApiUrl } from './api-url.js'
 
 describe("the API host Claude Code's turns reach (#1415)", () => {
   const dir = pathsOf().join('cfg', '.claude')

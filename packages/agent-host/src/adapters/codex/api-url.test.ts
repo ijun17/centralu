@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pathsOf } from '../../os.js'
-import type { ReadText } from '../claude/api-url.js'
+import type { ReadText } from '../settings-text.js'
 import { chatgptBaseUrl, codexApiUrl } from './api-url.js'
 
 describe("the API host Codex's turns reach (#1415)", () => {

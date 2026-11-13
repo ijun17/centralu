@@ -27,15 +27,16 @@ const PLAN_LIMIT = /hit your (?:\w+ ){0,2}limit\b|Claude AI usage limit reached/
  * When a limit's own words say it resets (#1415), for a stop that came with no reset in the tool's data: Codex's 429 ends a turn with "You've hit your
  * usage limit. … try again at 6:17 PM." (or "… try again at Oct 27th, 2026 6:17 PM." for a later day; measured on Codex 0.160.0, which sent no
  * `account/rateLimits/updated` before it), Claude Code's with "You've hit your session limit · resets 7:50pm". The time is the computer's own clock's,
- * as the CLI printed it on the same computer; one without a day is the next such time from `now`. Undefined when the words name none
+ * as the CLI printed it on the same computer; one without a day is the next such time from `now`, the current minute included. Undefined when the words name none
  */
 export function planLimitResetAt(message: string, now: number): number | undefined {
   const m = RESET_WORDS.exec(message)
   if (!m) return undefined
   const [, month, day, year, hour, minute, half] = m
+  // A 12-hour clock's: "13pm" or "6:75 PM" is no time, and the stop waits the slow retry instead
+  if (Number(hour) < 1 || Number(hour) > 12 || Number(minute ?? 0) > 59) return undefined
   const h = (Number(hour) % 12) + (half?.toLowerCase() === 'p' ? 12 : 0)
   const min = Number(minute ?? 0)
-  if (h > 23 || min > 59) return undefined
   if (month && day && year) {
     const mi = MONTHS.indexOf(month.slice(0, 3).toLowerCase())
     if (mi < 0) return undefined
@@ -43,7 +44,8 @@ export function planLimitResetAt(message: string, now: number): number | undefin
   }
   const at = new Date(now)
   at.setHours(h, min, 0, 0)
-  if (at.getTime() <= now) at.setDate(at.getDate() + 1)
+  // The stated minute itself is now, not tomorrow: a stop at 6:17:20 that says "6:17 PM" resets at once (resetAt keeps a past time at now)
+  if (at.getTime() <= now - 60_000) at.setDate(at.getDate() + 1)
   return at.getTime()
 }
 

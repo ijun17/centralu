@@ -343,14 +343,16 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
 /** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders a waiting call told of this stop */
 export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; starter?: string | null; held?: boolean }
 
-/** Who else hears of a stop (`MailHooks.stopped`, session ids): `told` by a call still waiting on it, and the session that started the stopped one */
 /**
  * How a stop's wait ended (#1415): `continued` by Centralu's note (`centralu`), by another turn that started (`other`: the person's Continue, mail
  * the mailbox delivered), or not at all (false: Stop, a message, Don't continue, the setting off, the tries spent). `first`: the first continue of a run of stops
  */
 export type WaitEnd = { continued: false | 'centralu' | 'other'; first: boolean }
 
-/** `held`: Centralu waits to continue the stop (#1415): what it released is told when the wait ends (`stopWaitEnded`), not now */
+/**
+ * Who else hears of a stop (`MailHooks.stopped`, session ids): `told` by a call still waiting on it, and the session that started the stopped one.
+ * `held`: Centralu waits to continue the stop (#1415): what it released is told when the wait ends (`stopWaitEnded`), not now
+ */
 export type StopTold = { told?: readonly string[]; starter?: string | null; held?: boolean }
 
 /** Why a session stopped, the words of `sessionStopped` */

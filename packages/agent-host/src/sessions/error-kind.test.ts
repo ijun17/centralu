@@ -40,5 +40,14 @@ describe('when a limit’s own words say it resets (#1415)', () => {
     expect(planLimitResetAt('Claude AI usage limit reached', now)).toBeUndefined()
     expect(planLimitResetAt('try again later', now)).toBeUndefined()
     expect(planLimitResetAt('resets 13:70pm', now)).toBeUndefined()
+    // A 12-hour clock's hour only: "13pm" is no time, not 1 am
+    expect(planLimitResetAt('try again at 13 PM.', now)).toBeUndefined()
+    expect(planLimitResetAt('try again at 0:30 AM.', now)).toBeUndefined()
+  })
+
+  it('a stop inside the stated minute resets now, not tomorrow; a time an hour gone is the next day', () => {
+    const later = new Date(2026, 10, 13, 18, 17, 20).getTime()
+    expect(planLimitResetAt('… try again at 6:17 PM.', later)).toBe(at(2026, 10, 13, 18, 17))
+    expect(planLimitResetAt('… try again at 5:17 PM.', later)).toBe(at(2026, 10, 14, 17, 17))
   })
 })

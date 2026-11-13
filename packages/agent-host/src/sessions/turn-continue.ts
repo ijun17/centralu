@@ -275,10 +275,16 @@ export class TurnContinue {
     const i = this.host.meta.get(sessionId)?.interruption
     if (!this.stops.has(sessionId) || !i?.autoContinue || (i.reason !== 'network' && i.reason !== 'limit')) return null
     const cause = i.reason
-    const first = (this.stopTries.get(sessionId)?.n ?? 0) === 0
-    this.stopTries.delete(sessionId)
+    const first = this.endRun(sessionId)
     this.dropStop(sessionId, false)
     return (ok) => this.host.waitEnded(sessionId, cause, ok ? { continued: 'other', first } : { continued: false, first: false })
+  }
+
+  /** The work went on in a turn of its own: the run of continues ends; whether this engine had continued none of it (the starter hears of the first) */
+  private endRun(sessionId: string): boolean {
+    const first = (this.stopTries.get(sessionId)?.n ?? 0) === 0
+    this.stopTries.delete(sessionId)
+    return first
   }
 
   /**
@@ -326,8 +332,7 @@ export class TurnContinue {
    * or nobody is owed
    */
   private dropStop(sessionId: string, tell: false | 'stopped' | 'went on'): boolean {
-    const first = (this.stopTries.get(sessionId)?.n ?? 0) === 0
-    if (tell === 'went on') this.stopTries.delete(sessionId)
+    const first = tell === 'went on' && this.endRun(sessionId)
     const had = this.stops.delete(sessionId)
     const m = this.host.meta.get(sessionId)
     const i = m?.interruption

@@ -1,10 +1,7 @@
 import { z } from 'zod'
 import { pathsOf } from '../../os.js'
-import { realOs } from '../../os/real.js'
-import type { ReadText } from '../claude/api-url.js'
+import { readSettingsText, type ReadText } from '../settings-text.js'
 import { codexHome } from './home.js'
-
-const readText: ReadText = (path) => realOs().files.promises.readFile(path, 'utf8')
 
 /** A base URL as config.toml may give it: an http(s) address, nothing else (a probe goes there) */
 const BaseUrl = z.string().url().refine((u) => /^https?:\/\//i.test(u))
@@ -21,7 +18,7 @@ const BaseUrl = z.string().url().refine((u) => /^https?:\/\//i.test(u))
 export async function codexApiUrl(
   env: Record<string, string | undefined> = process.env,
   home: string = codexHome(env),
-  read: ReadText = readText,
+  read: ReadText = readSettingsText,
 ): Promise<string> {
   const text = await read(pathsOf().join(home, 'config.toml')).catch(() => '')
   return chatgptBaseUrl(text) ?? (env.OPENAI_BASE_URL || 'https://chatgpt.com')

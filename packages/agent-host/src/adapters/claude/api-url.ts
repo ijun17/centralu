@@ -1,12 +1,8 @@
 import { pathsOf } from '../../os.js'
-import { realOs } from '../../os/real.js'
 import { isObj } from '../../json-value.js'
+import { readSettingsText, type ReadText } from '../settings-text.js'
 import { claudeConfigDir } from './lsp-plugins.js'
 
-/** Reads a file's text; rejects when there is none */
-export type ReadText = (path: string) => Promise<string>
-
-const readText: ReadText = (path) => realOs().files.promises.readFile(path, 'utf8')
 
 /**
  * The API host Claude Code's turns reach (`AgentAdapter.apiUrl`, #1415): `ANTHROPIC_BASE_URL` from the user settings' `env`
@@ -17,7 +13,7 @@ const readText: ReadText = (path) => realOs().files.promises.readFile(path, 'utf
 export async function claudeApiUrl(
   env: Record<string, string | undefined> = process.env,
   configDir: string = claudeConfigDir(env),
-  read: ReadText = readText,
+  read: ReadText = readSettingsText,
 ): Promise<string> {
   const fromSettings = await read(pathsOf().join(configDir, 'settings.json'))
     .then((text) => {
