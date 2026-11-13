@@ -78,8 +78,9 @@ export const prNumberOf = (to: string): number | null => {
   return m ? Number(m[1]) : null
 }
 
-/** "The checks on #123 finished: 2 failed" */
-const checksEnded = (number: number, r: PrChecks): string => `The checks on #${number} finished: ${r.failed === 0 ? 'none' : r.failed} failed`
+/** "The checks on #123 finished: 2 failed, 1 cancelled", or "No checks ran on #123" when its head has none */
+const checksEnded = (number: number, r: PrChecks): string =>
+  r.total === 0 ? `No checks ran on #${number}` : `The checks on #${number} finished: ${r.failed === 0 ? 'none' : r.failed} failed${r.cancelled ? `, ${r.cancelled} cancelled` : ''}`
 
 /** The time spec `to` names, from `now`, or a refusal that says why not */
 function timeSpec(to: string, now: number): Extract<WatchSpec, { source: 'time' }> {
@@ -167,6 +168,8 @@ export class Watches {
   /** When the pull requests were last asked of gh, and whether an asking runs: one at a time, at most once a `WATCH.prPollMs` */
   private polledAt = -Infinity
   private polling = false
+  /** For each pull request polled, its head and number of checks when the last poll found none running: a finish is believed when two polls agree */
+  private settledAt = new Map<string, string>()
 
   constructor(private readonly host: WatchesHost) {
     this.now = host.now ?? Date.now
@@ -446,9 +449,9 @@ export class Watches {
   }
 
   /**
-   * Asks gh once for each pull request an active watch names, however many name it (§18.3), and fires what ended: the checks on its head finished, or
-   * the pull request was merged or closed. A new head starts the wait again. gh gone or signed out ends each watch with one quiet notice saying so; a
-   * gh that cannot answer now is asked again at the next poll
+   * Asks gh once for each pull request an active watch names, however many name it (§18.3), and fires what ended: the checks on its head finished,
+   * or none ran, as two polls in a row agree; or the pull request was merged or closed. A new head starts the wait again. gh gone or signed out ends
+   * each watch with one quiet notice saying so; a gh that cannot answer now is asked again at the next poll
    */
   private async pollPrs(now: number): Promise<void> {
     this.polling = true
@@ -459,13 +462,19 @@ export class Watches {
         const w = readWatch(row)
         if (w?.spec.source === 'pr') byPr.set(w.target, [...(byPr.get(w.target) ?? []), w])
       }
-      for (const watches of byPr.values()) {
+      const settled = new Map<string, string>()
+      for (const [target, watches] of byPr) {
         const first = watches[0]?.spec
         if (first?.source !== 'pr') continue
         const r = await this.host.prChecks(first.project, first.number).catch(() => null)
         if (!this.schedule || r === null) continue
-        for (const w of watches) this.prChanged(w, r)
+        // A check can appear after the others ended, or a push's checks a moment after it: one more poll that sees the same is the finish
+        const seen = typeof r === 'object' && r.pending === 0 ? `${r.headOid}:${r.total}` : null
+        const agreed = seen !== null && this.settledAt.get(target) === seen
+        if (seen !== null) settled.set(target, seen)
+        for (const w of watches) this.prChanged(w, r, agreed)
       }
+      this.settledAt = settled
     } catch (e) {
       console.error(`[mail] asking gh for the watched pull requests failed: ${errorMessage(e)}`)
     } finally {
@@ -473,7 +482,7 @@ export class Watches {
     }
   }
 
-  private prChanged(w: Watch, r: PrChecks | 'unavailable' | 'signed_out'): void {
+  private prChanged(w: Watch, r: PrChecks | 'unavailable' | 'signed_out', agreed: boolean): void {
     if (w.spec.source !== 'pr') return
     const { number } = w.spec
     if (r === 'unavailable' || r === 'signed_out') {
@@ -484,13 +493,21 @@ export class Watches {
       this.fire(w.id, r.state, (at) => ({ body: `Pull request #${number} was ${r.state}.`, facts: { watch: { id: w.id, source: 'pr', change: r.state } }, next: { state: 'fired', endedAt: at, endedBy: 'host', nextAt: null } }))
       return
     }
-    if (r.headOid !== w.spec.headOid) this.host.records.saveWatch(writeWatch({ ...w, spec: { ...w.spec, headOid: r.headOid } }))
-    if (r.total === 0 || r.pending > 0) return
+    if (r.headOid !== w.spec.headOid) this.moveHead(w.id, r.headOid)
+    if (!agreed) return
     this.fire(w.id, `checks:${r.headOid}`, (at) => ({
       body: `${checksEnded(number, r)}.`,
       facts: { watch: { id: w.id, source: 'pr', change: 'checks' } },
       next: { state: 'fired', endedAt: at, endedBy: 'host', nextAt: null },
     }))
+  }
+
+  /** A push moved the pull request's head: the row, re-read in a transaction, waits for the new one if it is still active (gh was asked meanwhile) */
+  private moveHead(id: string, headOid: string): void {
+    this.host.records.transaction(() => {
+      const fresh = this.read(id)
+      if (fresh?.state === 'active' && fresh.spec.source === 'pr') this.host.records.saveWatch(writeWatch({ ...fresh, spec: { ...fresh.spec, headOid } }))
+    })
   }
 
   /**

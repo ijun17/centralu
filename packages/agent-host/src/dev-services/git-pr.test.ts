@@ -299,18 +299,19 @@ setTimeout(() => { process.stderr.write(Buffer.from([0xac, 0x0a])); process.exit
     expect(log.mock.calls.filter((c) => String(c[0]).includes('gh could not'))).toEqual([])
   })
 
-  it('reads a pull request’s checks for a watch (#1324): check runs and commit statuses, running, failed and passed', { timeout: 30_000 * SLOW }, async () => {
+  it('reads a pull request’s checks for a watch (#1324): check runs and commit statuses, running, failed, cancelled and passed', { timeout: 30_000 * SLOW }, async () => {
     const project = ghSaying('')
     const rollup = [
       { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
       { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' },
       { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'CANCELLED' },
       { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
       { __typename: 'StatusContext', state: 'ERROR' },
       { __typename: 'StatusContext', state: 'PENDING' },
     ]
     writeFileSync(join(project, 'pr'), `process.stdout.write(${JSON.stringify(JSON.stringify({ state: 'OPEN', headRefOid: 'abc', statusCheckRollup: rollup }))})\n`)
-    expect(await prChecks(project, 123)).toEqual({ state: 'open', headOid: 'abc', total: 6, pending: 2, failed: 2 })
+    expect(await prChecks(project, 123)).toEqual({ state: 'open', headOid: 'abc', total: 7, pending: 2, failed: 2, cancelled: 1 })
   })
 
   it('tells a gh with no sign-in from one that cannot answer now, for a watch; the branch lookup reads both as unknown', { timeout: 30_000 * SLOW }, async () => {

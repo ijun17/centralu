@@ -14,10 +14,10 @@ const gh = vi.hoisted(() => ({ answer: new Map<number, unknown>(), asked: [] as 
 vi.mock('../dev-services/git-pr.js', () => ({
   prChecks: async (_cwd: string, n: number) => {
     gh.asked.push(n)
-    return gh.answer.get(n) ?? null
+    return (await gh.answer.get(n)) ?? null
   },
 }))
-const checks = (o: Partial<PrChecks>): PrChecks => ({ state: 'open', headOid: 'h1', total: 3, pending: 0, failed: 0, ...o })
+const checks = (o: Partial<PrChecks>): PrChecks => ({ state: 'open', headOid: 'h1', total: 3, pending: 0, failed: 0, cancelled: 0, ...o })
 
 const A = at('a')
 const B = at('b')
@@ -388,11 +388,14 @@ describe('a pull request watch (§18.3, PR 2)', () => {
     await w.advance(60_000)
     expect(gh.asked).toEqual([7])
     expect(notices(w, A)).toEqual([])
-    gh.answer.set(7, checks({ failed: 1 }))
+    gh.answer.set(7, checks({ failed: 1, cancelled: 1 }))
+    await w.advance(60_000)
+    // One poll that sees none running is not the finish yet: a check can still appear (§18.3)
+    expect(notices(w, A)).toEqual([])
     await w.advance(60_000)
     const [fired, ...more] = notices(w, A)
     expect(more).toEqual([])
-    expect(fired?.body).toBe('The checks on #7 finished: 1 failed.\n\nYour note:\n> merge it then')
+    expect(fired?.body).toBe('The checks on #7 finished: 1 failed, 1 cancelled.\n\nYour note:\n> merge it then')
     expect(fired?.facts.watch).toMatchObject({ source: 'pr', change: 'checks' })
     expect(notices(w, B)).toHaveLength(1)
     gh.asked.length = 0
@@ -413,7 +416,41 @@ describe('a pull request watch (§18.3, PR 2)', () => {
     expect(notices(w, A)).toEqual([])
     gh.answer.set(7, checks({ headOid: 'h2', total: 4 }))
     await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    await w.advance(60_000)
     expect(notices(w, A).map((m) => m.body)).toEqual(['The checks on #7 finished: none failed.'])
+  })
+
+  it('believes a finish only when two polls in a row agree: a check that appears after the others ended waits, and a head with no checks fires once that none ran', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7')
+    gh.answer.set(7, checks({ total: 3 }))
+    await w.advance(60_000)
+    gh.answer.set(7, checks({ total: 4 }))
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    gh.answer.set(7, checks({ headOid: 'h2', total: 0 }))
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    await w.advance(60_000)
+    await w.advance(60_000)
+    expect(notices(w, A).map((m) => m.body)).toEqual(['No checks ran on #7.'])
+  })
+
+  it('a watch closed while gh is asked stays closed when gh answers with a new head', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    const id = idOf(await watchPr(w, 'a', '#7'))
+    let answer: (r: PrChecks) => void = () => {}
+    gh.answer.set(7, new Promise<PrChecks>((resolve) => (answer = resolve)))
+    gh.asked.length = 0
+    await w.advance(60_000)
+    expect(gh.asked).toEqual([7])
+    expect(w.tool.run('a', { action: 'close', thread: id }).text).toBe(`Cancelled watch ${id}.`)
+    answer(checks({ headOid: 'h2', pending: 1 }))
+    await w.advance(60_000)
+    expect(w.watches.list(A)).toEqual([])
   })
 
   it('fires when the pull request is merged or closed, and has nothing to wait for when it is so already', async () => {

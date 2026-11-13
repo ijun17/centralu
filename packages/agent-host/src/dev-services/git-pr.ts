@@ -71,11 +71,11 @@ export async function gitBranchPr(
 
 const prState = (state: unknown): BranchPr['state'] => (state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : 'open')
 
-/** A pull request's checks on its head (docs/plans/mailbox.md §18.3): how many there are, how many still run, how many failed */
-export type PrChecks = { state: BranchPr['state']; headOid: string; total: number; pending: number; failed: number }
+/** A pull request's checks on its head (docs/plans/mailbox.md §18.3): how many there are, how many still run, failed and were cancelled */
+export type PrChecks = { state: BranchPr['state']; headOid: string; total: number; pending: number; failed: number; cancelled: number }
 
-/** A check run's ends that are not a pass: what the notice counts as failed */
-const FAILED = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
+/** A check run's ends that are not a pass: what the notice counts as failed. `CANCELLED` is counted apart: a newer run cancels an older one */
+const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
 
 /**
  * The checks of pull request `number`, asked of gh as `gitBranchPr` asks it (a watch on `#123`, #1324). `'unavailable'`: gh is not installed;
@@ -88,14 +88,16 @@ export async function prChecks(projectCwd: string, number: number, signal?: Abor
   if (typeof j.state !== 'string' || typeof j.headRefOid !== 'string' || !Array.isArray(j.statusCheckRollup)) return null
   let pending = 0
   let failed = 0
+  let cancelled = 0
   for (const c of j.statusCheckRollup) {
     if (!isObj(c)) continue
     const end = typeof c.conclusion === 'string' && c.conclusion ? c.conclusion : typeof c.state === 'string' ? c.state : ''
     const running = 'status' in c ? c.status !== 'COMPLETED' : end === 'PENDING' || end === 'EXPECTED'
     if (running) pending++
     else if (FAILED.has(end)) failed++
+    else if (end === 'CANCELLED') cancelled++
   }
-  return { state: prState(j.state), headOid: j.headRefOid, total: j.statusCheckRollup.length, pending, failed }
+  return { state: prState(j.state), headOid: j.headRefOid, total: j.statusCheckRollup.length, pending, failed, cancelled }
 }
 
 /**
