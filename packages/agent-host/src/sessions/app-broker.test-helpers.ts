@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { isAppCall } from '@cc/protocol'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AppCallOpts, AppToolResult, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { storePermissionBook } from '../app-permission-book.js'
@@ -202,7 +203,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   const openCalls = new Map<string, string[]>()
   const onEvent = (e: NormalizedEvent) => {
     events.push(e)
-    if (e.type === 'approval_request' && e.detail.kind === 'other' && e.detail.about === undefined && w?.answerAppCalls) {
+    if (e.type === 'approval_request' && e.detail.kind === 'other' && isAppCall(e.detail) && w?.answerAppCalls) {
       const raw = e.detail.raw
       if ((openCalls.get(e.sessionId) ?? []).some((start) => raw.startsWith(start))) {
         const answer = w.answerAppCalls
