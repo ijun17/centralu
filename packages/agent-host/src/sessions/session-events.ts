@@ -1,6 +1,6 @@
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
-import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
+import { CONTINUE_WORDS, applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
 import type { SessionHandle } from '../adapters/contract.js'
 import { centraluInputId } from '../adapters/input-receipts.js'
@@ -511,8 +511,9 @@ export class SessionEvents {
    * If the message is then refused, the turn it was meant to carry on is over, and the error the retry stood in for ends it.
    */
   async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
-    const sessionId = args[0]
-    const held = this.host.turnContinue.supersede(sessionId)
+    const [sessionId, text, , from, relayed, fromApp] = args
+    // The person's own Continue (the inbox's, the header's Continue now): the work goes on, which is what a held stop notice waits to say
+    const held = this.host.turnContinue.supersede(sessionId, text === CONTINUE_WORDS && !from && !relayed && !fromApp)
     try {
       await this.deliverNow(...args)
     } catch (e) {

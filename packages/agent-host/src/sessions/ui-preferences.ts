@@ -5,6 +5,7 @@ import { isObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
+import type { TurnContinue } from './turn-continue.js'
 
 /**
  * The single app_setting key where the whole set of screen preferences lives.
@@ -30,7 +31,8 @@ const COMPACT_BESIDE_FIELDS = ['idleShare', 'nudge', 'nudgeFirst', 'nudgeSecond'
  * What the screen preferences reach of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'store'> & Pick<SessionTrashHost, 'appsHub'>
+export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'store'> &
+  Pick<SessionTrashHost, 'appsHub'> & { readonly turnContinue: Pick<TurnContinue, 'settingsChanged'> }
 
 /**
  * The screen's preferences (UiPreferences) and its workspace layout, kept in the store for every window: read as one
@@ -149,6 +151,8 @@ export class UiPreferenceStore {
     // Every window hears it (`prefs_changed`): one that did not make the change reads the record again
     // A patch that only carried the session tools switch (always on, not stored) changed nothing
     if (Object.keys(written).length) this.host.emit({ type: 'prefs_changed' })
+    // A continue setting turned off ends the waits it stood for now, not when each comes due (#1415)
+    if ('continueAfterLimit' in written || 'continueOnNetwork' in written) this.host.turnContinue.settingsChanged()
     const { autoCompact: _two, ...shown } = written
     for (const key of Object.values(COMPACT_BESIDE)) delete (shown as Record<string, unknown>)[key]
     return { ...current, ...shown, ...(merged ? { autoCompact: merged } : {}) }

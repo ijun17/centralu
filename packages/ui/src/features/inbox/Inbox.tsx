@@ -16,6 +16,7 @@ import {
   Kbd,
   StateDot,
   canContinue,
+  waitStands,
   formatWaiting,
   waitingTone,
 } from '../../components/primitives.jsx'
@@ -334,7 +335,7 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
             title={`Sends "${CONTINUE_WORDS}"`}
             data-testid={`inbox-continue-${it.id}`}
           >
-            {it.interruption.autoContinue ? 'Continue now' : 'Continue'}
+            {waitStands(it.interruption) ? 'Continue now' : 'Continue'}
           </button>
         )}
         {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}

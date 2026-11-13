@@ -1210,10 +1210,11 @@
 .cc-fade-out {
   animation: cc-fade-out 150ms ease-in forwards;
 }
+/* Reduced motion keeps a short fade (design-system.md §9): it is opacity only, no travel, and a layer that left at once read as cut off */
 @media (prefers-reduced-motion: reduce) {
   .cc-fade,
   .cc-fade-out {
-    animation: none;
+    animation-duration: 100ms;
   }
 }
 

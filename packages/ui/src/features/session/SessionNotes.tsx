@@ -2,7 +2,8 @@ import { CONTINUE_WORDS, SHUTDOWN_WORDS, type Interruption, type SessionState } 
 import { isInTurn } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { canContinue, interruptionLabel } from '../../components/primitives.jsx'
+import { canContinue, interruptionLabel, waitStands } from '../../components/primitives.jsx'
+import { usePresence } from '../../components/presence.js'
 import { Button } from '../../components/Button.jsx'
 
 /*
@@ -33,7 +34,7 @@ export function useSessionNotes(session: NotedSession | undefined, away: boolean
      * A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking).
      * A stop Centralu continues by itself has its buttons in the header (#1415), so its note has none
      */
-    hasButton: error || (interrupted && !session.interruption?.autoContinue) || (dormant && !!wakeError && !waking),
+    hasButton: error || (interrupted && !waitStands(session.interruption)) || (dormant && !!wakeError && !waking),
   }
 }
 
@@ -84,7 +85,8 @@ export function InterruptedNote({
 }) {
   const send = useStore((s) => s.send)
   // Centralu continues it by itself (#1415): the header says when, with Continue now; this line says only the stop
-  const waits = !!interruption.autoContinue
+  // It fades out as a wait comes and in as one goes (design-system.md §9), taking no press while it leaves
+  const button = usePresence(!waitStands(interruption))
   const why =
     interruption.reason === 'network'
       ? 'A network error ended the last turn before it finished.'
@@ -105,11 +107,12 @@ export function InterruptedNote({
       <span className="min-w-0 flex-1 break-words">
         <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
       </span>
-      {!waits && (
+      {button.shown && (
         <Button
           variant="secondary"
           size="sm"
-          className="cc-fade shrink-0"
+          className={`${button.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} shrink-0`}
+          aria-hidden={button.leaving || undefined}
           onClick={() => void send(sessionId, CONTINUE_WORDS)}
           title={`Sends "${CONTINUE_WORDS}"`}
           data-testid="interrupted-continue"

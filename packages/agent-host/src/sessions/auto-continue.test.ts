@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import { CONTINUE_WORDS, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { LIMIT_NOTE, NETWORK_NOTE } from '../adapters/input-receipts.js'
 import { Store } from '../dev-services/store.js'
@@ -268,5 +268,69 @@ describe('a turn a usage limit stopped (#1415)', () => {
     handle.emit({ type: 'limit_reached', sessionId: id, resumeAt: new Date(Date.now() + 1000).toISOString() })
     expect(a.session(id).interruption).toMatchObject({ reason: 'limit' })
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+  })
+})
+
+describe("who the stop's notice was held from hears it once, however the wait ends (#2239 re-check)", () => {
+  /** What the host tells the stop notice path when a wait ends (`MailSessionsView.mailWaitEnded`) */
+  const told = (a: ReturnType<typeof host>) => {
+    const view = (a.mgr as unknown as { mail: { mailWaitEnded: (...x: unknown[]) => void } }).mail
+    return vi.spyOn(view, 'mailWaitEnded')
+  }
+
+  it('a turn the mailbox starts during the wait ends it, told as the stop; nothing is probed after, and no "could not reach" comes mid-work', async () => {
+    const a = host()
+    const ended = told(a)
+    const { id, handle } = await cutByNetwork(a)
+    // As delivered mail does: the tool takes an input outside this engine, and its turn starts
+    handle.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[4] * MAX_FAILED_PROBES)
+    expect(probes).toBe(0)
+    expect(handle.sent).toEqual([])
+    expect(lines(id, 'continue')).toEqual([])
+    expect(ended).toHaveBeenCalledTimes(1)
+  })
+
+  it('a continue the tool refuses after it was handed is said in the conversation and told once, as the stop', async () => {
+    const a = host()
+    const ended = told(a)
+    const { id, handle } = await cutByNetwork(a)
+    handle.refuseSend = true
+    online = true
+    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[0] + TICK_MS)
+    expect(handle.sent).toEqual([])
+    expect(lines(id, 'continue').at(-1)?.text).toMatch(/^Centralu could not continue this turn: /)
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+  })
+
+  it("the person's Continue now is told as the work continuing; another message of theirs as the stop", async () => {
+    const a = host()
+    const ended = told(a)
+    const first = await cutByNetwork(a)
+    await a.rpc('agents.send', { sessionId: first.id, text: CONTINUE_WORDS })
+    expect(ended).toHaveBeenCalledWith(first.id, 'network', null, { continued: true, first: true })
+    const second = await cutByNetwork(a)
+    await a.rpc('agents.send', { sessionId: second.id, text: 'use the other branch' })
+    expect(ended).toHaveBeenCalledWith(second.id, 'network', null, { continued: false, first: false })
+    expect(ended).toHaveBeenCalledTimes(2)
+  })
+
+  it('turning the setting off ends its waits at once, told once, and leaves the other cause waiting', async () => {
+    const a = host()
+    const ended = told(a)
+    const { id } = await cutByNetwork(a)
+    const limited = await started(a)
+    limited.handle.emit({ type: 'limit_reached', sessionId: limited.id, resumeAt: new Date(Date.now() + 60 * 60_000).toISOString() })
+    a.mgr.prefs.setUiPreferences({ continueOnNetwork: false })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'network' })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    expect(events.filter((e) => e.type === 'interruption' && e.sessionId === id).at(-1)).toMatchObject({ interruption: { reason: 'network' } })
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+    expect(a.session(limited.id).interruption?.autoContinue).toBeDefined()
   })
 })
