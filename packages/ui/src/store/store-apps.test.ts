@@ -559,3 +559,16 @@ describe('an orphaned in-conversation view is remembered only while its close is
     })
   })
 })
+
+describe('turning an app off on this computer, or on (#1938)', () => {
+  it('names the app in the toast when the host refuses, either way', async () => {
+    const mock = new MockPlatform()
+    mock.externalAppList = [appInfo('board', { name: 'Project board' })]
+    await useStore.getState().attach(mock)
+    vi.spyOn(mock.apps, 'setOff').mockRejectedValue(new Error('the machine is not reachable right now'))
+    await useStore.getState().setAppOff('p1', 'board', true)
+    expect(useStore.getState().toast).toBe('Could not turn Project board off: the machine is not reachable right now')
+    await useStore.getState().setAppOff('p1', 'board', false)
+    expect(useStore.getState().toast).toBe('Could not turn Project board on: the machine is not reachable right now')
+  })
+})

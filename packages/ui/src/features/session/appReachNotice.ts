@@ -67,6 +67,7 @@ export function appReachNotice(r: Unreachable, app: string, project: string | nu
       return `${cannot}: ${project ?? 'its project'} is not trusted. Trust the project to attach its apps.`
     case 'app-unusable':
       if (r.status === 'failed') return `${cannot}: the app stopped after repeated failures. Restart it from its view.`
+      if (r.status === 'off') return `${cannot}: the app is turned off on its computer. Turn it on in Settings → Apps.`
       if (r.status === 'unconfirmed') return `${cannot}: the app is not turned on yet. Review it and turn it on first.`
       return `${cannot}: the app's manifest is not valid. Once it is fixed, the app attaches again.`
     case 'restart':

@@ -1,5 +1,5 @@
 import { appKeyOf, sameApp, type ExternalAppInfo, type LinkedApp, type LinkedAppCallParams, type LinkedAppCallResult } from '@cc/protocol'
-import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { unusableAs, type AppCallOutcome, type AppRef, type ExternalApps } from '../apps/external/runtime.js'
 import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/app-call-bounds.js'
 import { isObj } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
@@ -35,8 +35,6 @@ export type LinkedAppCallsDeps = {
   projectName(projectId: string): string
 }
 
-/** An app that cannot run now is not offered, as for a session here (session-apps.ts `UNUSABLE`) */
-const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 const RUN_STATUSES = ['ok', 'error', 'cancelled', 'rejected', 'running'] as const
 /** The calls kept after they ended, per link, for `run_status` and a resend */
 const KEPT_PER_LINK = 200
@@ -120,7 +118,7 @@ export class LinkedAppCalls {
   private reachable(from: LinkedCaller, session: string): ExternalAppInfo[] {
     return this.deps.rt
       .list()
-      .filter((a) => a.projectId !== null && !UNUSABLE.has(a.status) && this.deps.reach(from, session, a))
+      .filter((a) => a.projectId !== null && unusableAs(a) === null && this.deps.reach(from, session, a))
       .sort((x, y) => appKeyOf(x).localeCompare(appKeyOf(y)))
   }
 

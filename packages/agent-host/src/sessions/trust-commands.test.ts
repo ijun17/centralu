@@ -9,7 +9,7 @@ import { ExternalApps, MANIFEST_FILE } from '../apps/external/runtime.js'
 import { storePermissionBook } from '../app-permission-book.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
-import { readShared } from './app-access.js'
+import { readAppFlag } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { commandRig, expectOnlyAssistantRuns } from './assistant-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
@@ -33,7 +33,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-trust-')))
   mkdirSync(join(root, 'data'))
   store = new Store()
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: ['control'], permissions: storePermissionBook(store), shared: (ref) => readShared(store.settings, ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: ['control'], permissions: storePermissionBook(store), shared: (ref) => readAppFlag(store.settings, 'shared', ref) })
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, () => {})
   mgr.apps.useExternalApps(rt)

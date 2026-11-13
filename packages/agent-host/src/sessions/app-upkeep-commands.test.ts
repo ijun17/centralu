@@ -10,7 +10,7 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { storePermissionBook } from '../app-permission-book.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
-import { readShared } from './app-access.js'
+import { readAppFlag } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { commandRig, expectOnlyAssistantRuns } from './assistant-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
@@ -41,7 +41,7 @@ beforeEach(() => {
     dataRoot: data,
     reservedIds: ['control'],
     permissions: storePermissionBook(store),
-    shared: (ref) => readShared(store.settings, ref),
+    shared: (ref) => readAppFlag(store.settings, 'shared', ref),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>

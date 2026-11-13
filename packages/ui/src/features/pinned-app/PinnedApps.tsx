@@ -3,7 +3,7 @@ import { appKeyOf } from '@cc/core'
 import { sameApp } from '@cc/protocol/client'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
-import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { type ExternalCatalogApp, useExternalApp, viewMustClose } from '../../store/app-catalog.js'
 import { projectLabelOf } from '../../store/names.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -248,12 +248,11 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   }, [canOpen, pv.phase, pv.key, start])
 
   /*
-   * Trust was lost, or the manifest broke — the app can no longer run. The view (the app's own HTML)
-   * is also that project's code, so it comes down along with it. The slot is kept and returned to
-   * idle: trusting it again reopens it in this same slot.
+   * The app can no longer run (`viewMustClose`: trust lost, a broken manifest, an import waiting on review, turned off).
+   * The view (the app's own HTML) is also that project's code, so it comes down along with it. The slot is kept and
+   * returned to idle: once the app can run again, it reopens in this same slot.
    */
-  // The same applies when an imported app is waiting to be reconfirmed (M4 E-3) — if what runs after enabling it changed, the view's HTML is also code the person has not yet reviewed
-  const blocked = app?.info.status === 'untrusted' || app?.info.status === 'invalid' || app?.info.status === 'unconfirmed'
+  const blocked = !!app && viewMustClose(app.info)
   useEffect(() => {
     if (!blocked || pv.phase !== 'open') return
     let alive = true

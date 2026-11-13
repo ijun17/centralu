@@ -2,7 +2,7 @@ import { storePermissionBook } from '../app-permission-book.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import type { Store } from '../dev-services/store.js'
-import { readShared, writeShared } from '../sessions/app-access.js'
+import { readAppFlag, writeAppFlag } from '../sessions/app-access.js'
 import type { SessionManager } from '../sessions/manager.js'
 import { plantAttachApp, type PlantKit } from '../sessions/session-apps.test-helpers.js'
 import { LinkedApps } from './linked-apps.js'
@@ -22,7 +22,8 @@ export function hostApps(store: Store, mgr: SessionManager) {
     reservedIds: ['control'],
     runs: storeRunLedger(store),
     permissions: storePermissionBook(store),
-    shared: (ref) => readShared(store.settings, ref),
+    shared: (ref) => readAppFlag(store.settings, 'shared', ref),
+    off: (ref) => readAppFlag(store.settings, 'off', ref),
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -42,7 +43,7 @@ export function hostApps(store: Store, mgr: SessionManager) {
     plant(kit: PlantKit, projectId: string, id: string, o: { shared?: boolean } = {}) {
       const path = store.projects.listProjects().find((p) => p.id === projectId)!.path
       gates.set(id, plantAttachApp(kit, path, id, logs))
-      if (o.shared) writeShared(store.settings, { projectId, appId: id }, true)
+      if (o.shared) writeAppFlag(store.settings, 'shared', { projectId, appId: id }, true)
       rt.refresh()
     },
     /** Lets the app's `hold` calls end */

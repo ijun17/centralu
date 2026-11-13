@@ -500,6 +500,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       forgetPermission: (appId, projectId, capability, machine) => done(rpc.call('apps.forgetPermission', { appId, projectId, capability, ...on(machine) })),
       usage: (appId, projectId, machine) => rpc.call('apps.usage', { appId, projectId, ...on(machine) }),
       setShared: (appId, projectId, shared) => done(rpc.call('apps.setShared', { appId, projectId, shared })),
+      setOff: (appId, projectId, off) => done(rpc.call('apps.setOff', { appId, projectId, off })),
       setSecret: (appId, projectId, name, value, machine) => done(rpc.call('apps.setSecret', { appId, projectId, name, value, ...on(machine) })),
       importPrepare: (source) => rpc.call('apps.importPrepare', { source }),
       importCommit: (token, { enable, reviewKey, parent }) =>

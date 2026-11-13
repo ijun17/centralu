@@ -213,6 +213,8 @@ export class AppBuilderMock {
       if (app.status === 'invalid' || app.status === 'unconfirmed' || app.status === 'failed') {
         return { reachable: false, reason: 'app-unusable', status: app.status }
       }
+      // Turned off on this computer (#1938), as the host's `unusableAs` reads it
+      if (app.off === true) return { reachable: false, reason: 'app-unusable', status: 'off' }
       const live = this.appAttachments.get(`${sessionId} ${key}`)
       if (live === 'restart') return { reachable: false, reason: 'restart' }
       if (live === 'failed') return { reachable: false, reason: 'bridge-failed' }

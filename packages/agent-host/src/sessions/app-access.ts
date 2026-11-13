@@ -1,5 +1,5 @@
 import { APP_SERVER_PREFIX, appKeyOf, type ExternalAppInfo, isAssistantKind, sameApp } from '@cc/protocol'
-import type { AppRef } from '../apps/external/runtime.js'
+import { offRefusal, unusableAs, type AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
 import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps.js'
 import { withTimeout } from '../timing.js'
@@ -106,17 +106,24 @@ export type AttachOutcome =
 export type DetachOutcome = { ok: true; server: string } | { ok: false; error: string }
 
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
-const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref)}`
-const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
+/**
+ * A switch the person sets on one project app, stored as `app_<flag>:<project>/<app>` = `1` and absent when not set:
+ *   shared  shared with their other projects (#371 part A), the runtime's `shared` dep
+ *   off     turned off on this computer (#1938, docs/plans/remote-hub.md §13.7): the copy its project's checkout here
+ *           carries of an app another computer runs, the runtime's `off` dep
+ * A user-folder app has neither.
+ */
+export type AppFlag = 'shared' | 'off'
 
-/** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
-export function readShared(store: Pick<AppAccessStore['settings'], 'appSetting'>, ref: AppRef): boolean {
-  return ref.projectId !== null && store.appSetting(SHARED_KEY({ projectId: ref.projectId, appId: ref.appId })) === '1'
+const FLAG_KEY = (flag: AppFlag, ref: { projectId: string; appId: string }) => `app_${flag}:${appKeyOf(ref)}`
+
+export function readAppFlag(store: Pick<AppAccessStore['settings'], 'appSetting'>, flag: AppFlag, ref: AppRef): boolean {
+  return ref.projectId !== null && store.appSetting(FLAG_KEY(flag, { projectId: ref.projectId, appId: ref.appId })) === '1'
 }
 
-export function writeShared(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, ref: { projectId: string; appId: string }, shared: boolean): void {
-  if (shared) store.setAppSetting(SHARED_KEY(ref), '1')
-  else store.deleteAppSetting(SHARED_KEY(ref))
+export function writeAppFlag(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, flag: AppFlag, ref: { projectId: string; appId: string }, on: boolean): void {
+  if (on) store.setAppSetting(FLAG_KEY(flag, ref), '1')
+  else store.deleteAppSetting(FLAG_KEY(flag, ref))
 }
 
 export class AppAccess implements OnDemandApps {
@@ -326,16 +333,17 @@ export class AppAccess implements OnDemandApps {
     return this.deps.hub
       .appsOf(session.id)
       // An untrusted project's apps attach nowhere, auto included (owner, #1141)
-      .filter((a) => !UNUSABLE.has(a.status))
+      .filter((a) => unusableAs(a) === null)
       .filter((a) => a.projectId === null || (assistant ? a.root === true : a.projectId !== session.projectId && (a.shared === true || a.root === true)))
       .filter((a) => !have.some((h) => sameApp(h.ref, a)))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
   }
 
   private whyNot(session: AppSessionKey, app: ExternalAppInfo): string {
+    if (app.off === true) return offRefusal(this.refOf(app))
     if (app.projectId !== null && app.projectId === session.projectId) return `${this.refOf(app)} is this project's own app; it is attached already when the project is trusted.`
     if (app.status === 'untrusted') return `${this.refOf(app)} is in a project the person has not trusted, so it does not run.`
-    if (UNUSABLE.has(app.status)) return `${this.refOf(app)} cannot run now (${app.status}${app.error ? `: ${app.error.split('\n')[0]}` : ''}).`
+    if (unusableAs(app) !== null) return `${this.refOf(app)} cannot run now (${app.status}${app.error ? `: ${app.error.split('\n')[0]}` : ''}).`
     if (isAssistantKind(session.kind) && app.projectId !== null && app.root !== true) return `${this.refOf(app)} is an app inside its project, which only that project's sessions use: hand the work to one of them with send_to_session.`
     if (app.projectId !== null && app.shared !== true && app.root !== true) return `${this.refOf(app)} is not shared with other projects. Only the person can share it (Settings → Apps).`
     return `${this.refOf(app)} cannot be attached to this session.`

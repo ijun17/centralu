@@ -201,6 +201,11 @@ export type ExternalAppsDeps = {
    */
   shared?: (ref: AppRef) => boolean
   /**
+   * Whether the person turned this project app off on this computer (#1938, docs/plans/remote-hub.md §13.7: the copy of
+   * an app another computer runs) — read from the store whenever `blocker` asks, like trust. Absent means none is off.
+   */
+  off?: (ref: AppRef) => boolean
+  /**
    * Whether a folder in the user folder was registered as a project in place (#1141, `user-app-adoption.ts`): it is
    * that project's root app now, so the user folder no longer lists it. Asked on every scan of the user folder, with
    * the folder's path, which the record is bound to. Absent: nothing was.

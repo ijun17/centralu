@@ -461,6 +461,22 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect.poll(() => closed(page)).toEqual([instanceId])
   })
 
+  test('turning the app off on this computer also takes down its open view (#1938): nothing of the view starts it again', async ({ page }) => {
+    const pid = await trustedProject(page, '/tmp/alpha')
+    await setApps(page, [app('slider', pid)])
+    await page.getByTestId(`app-row-${pid}/slider`).click()
+    const pinned = page.getByTestId(`pinned-app-${pid}/slider`)
+    await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+    const instanceId = await page.evaluate(() => (window as any).__store.getState().pinnedViews[0].instanceId as string)
+
+    // As "Runs on this computer" turned off in Settings → Apps does
+    await page.evaluate((p) => (window as any).__store.getState().setAppOff(p, 'slider', true), pid)
+    await expect(pinned.getByTestId('pinned-status')).toHaveText('Off')
+    await expect(pinned.getByTestId('app-frame')).toHaveCount(0)
+    await expect.poll(() => teardowns(page)).toBe(1)
+    await expect.poll(() => closed(page)).toEqual([instanceId])
+  })
+
   test('when an app disappears, its open view goes down and the instance is released', async ({ page }) => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('slider', pid)])

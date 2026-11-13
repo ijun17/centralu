@@ -29,7 +29,7 @@ export function standIns(linked: LinkedApps | undefined, session: { id: string; 
   for (const a of given) {
     if (copy(a)) {
       const app = there(a.appId)
-      out.push(app ? { app, nameAs: a } : { app: a, nameAs: a, withheld: linked.withheldWhy(hub, a.appId) })
+      out.push(app ? { app, nameAs: a } : { app: a, nameAs: a, withheld: linked.withheldWhy(hub, a.appId, session.id) })
     } else if (!LinkedApps.owns(a) || !given.some((c) => copy(c) && c.appId === a.appId)) out.push({ app: a, nameAs: a })
   }
   return out

@@ -8,7 +8,7 @@ import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
-import { readShared } from './app-access.js'
+import { readAppFlag } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -92,7 +92,7 @@ beforeEach(async () => {
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readShared(store.settings, ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readAppFlag(store.settings, 'shared', ref), off: (ref) => readAppFlag(store.settings, 'off', ref) })
   mgr.apps.useExternalApps(rt, { toolListWaitMs: 10_000 })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   alpha = ((await rpc('projects.add', { path: a })) as { id: string }).id
@@ -172,6 +172,40 @@ describe('sharing an app (apps.setShared)', () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: false })
     expect(board().shared).toBeUndefined()
     await expect(rpc('apps.setShared', { appId: 'nope', projectId: beta, shared: true })).rejects.toThrow(/No such app/)
+  })
+})
+
+describe('an app off on this computer (apps.setOff, #1938, docs/plans/remote-hub.md §13.7)', () => {
+  it("is taken from its own project's sessions and from one that attached it, refused by name, and given back when on", async () => {
+    allowedBefore()
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    const own = await create(beta, 'claude')
+    const ownOpts = claude.last()
+    const other = await create(alpha, 'codex')
+    await tool(other.id, 'attach_app', { app: 'beta/board' })
+    const otherOpts = codex.last()
+    expect([servers(ownOpts), servers(otherOpts)]).toEqual([['app-board'], ['app-board']])
+    expect((await call(own.id, 'board', 'peek')).isError).toBe(false)
+
+    await rpc('apps.setOff', { appId: 'board', projectId: beta, off: true })
+    expect(store.settings.appSetting(`app_off:${beta}/board`)).toBe('1')
+    await waitFor(() => servers(ownOpts)!.length === 0 && servers(otherOpts)!.length === 0)
+    expect(rt.list().find((a) => a.appId === 'board')).toMatchObject({ status: 'stopped', off: true })
+    expect((await call(own.id, 'board', 'peek')).isError).toBe(true)
+    expect(await rpc('apps.reach', { sessionId: own.id, appId: 'board', projectId: beta })).toEqual({ reachable: false, reason: 'app-unusable', status: 'off' })
+    // Not offered to attach either, and asked for by name, the agent is told who can turn it on
+    expect((await tool(other.id, 'find_apps')).text).not.toContain('beta/board')
+    expect((await tool(other.id, 'attach_app', { app: 'beta/board' })).text).toContain("beta/board is turned off on this computer, so nothing ran. Only the person can turn it on (its project's Settings → Apps).")
+    // Its own project's session is told the same, not that the app is attached already
+    expect((await tool(own.id, 'attach_app', { app: 'beta/board' })).text).toContain("beta/board is turned off on this computer, so nothing ran. Only the person can turn it on (its project's Settings → Apps).")
+    // Nothing above started it again
+    expect(rt.list().find((a) => a.appId === 'board')?.status).toBe('stopped')
+
+    await rpc('apps.setOff', { appId: 'board', projectId: beta, off: false })
+    expect(store.settings.appSetting(`app_off:${beta}/board`)).toBeNull()
+    await waitFor(() => servers(ownOpts)!.length === 1 && servers(otherOpts)!.length === 1)
+    expect((await call(own.id, 'board', 'peek')).isError).toBe(false)
+    await expect(rpc('apps.setOff', { appId: 'nope', projectId: beta, off: true })).rejects.toThrow(/No such app/)
   })
 })
 

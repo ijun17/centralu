@@ -306,6 +306,7 @@ type AppActions = Pick<
   | 'refreshExternalApps'
   | 'dismissAppArrival'
   | 'setAppShared'
+  | 'setAppOff'
   | 'removeUserApp'
   | 'refreshAppQuestions'
   | 'answerAppQuestion'
@@ -352,6 +353,17 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       await platform.apps.setShared(appId, projectId, shared)
     } catch (e) {
       set({ toast: `Could not change sharing: ${errorMessage(e)}` })
+    }
+  },
+
+  async setAppOff(projectId, appId, off) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.apps.setOff(appId, projectId, off)
+    } catch (e) {
+      const info = get().externalApps.find((a) => isApp(a, projectId, appId))
+      set({ toast: `Could not turn ${info ? appTitleOf(info) : appId} ${off ? 'off' : 'on'}: ${errorMessage(e)}` })
     }
   },
 

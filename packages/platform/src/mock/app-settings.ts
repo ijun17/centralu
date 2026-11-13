@@ -72,6 +72,14 @@ export class AppSettingsMock {
       this.sharedWrites.push({ appId, projectId, shared })
       this.emit({ type: 'external_apps_changed' })
     },
+    /** Off on this computer (#1938) — like the host: a project app only, the mark in the list with `stopped`, then the broadcast */
+    setOff: async (appId: string, projectId: string, off: boolean): Promise<void> => {
+      const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId }))
+      if (!a) throw new Error(`No such app: ${appId}`)
+      if (off) Object.assign(a, { off: true, status: 'stopped' })
+      else delete a.off
+      this.emit({ type: 'external_apps_changed' })
+    },
     setSecret: async (appId: string, projectId: string | null, name: string, value: string | null, machine?: string): Promise<void> => {
       const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId, machine }))
       if (!a) throw new Error(noSuchAppText({ projectId, appId }))

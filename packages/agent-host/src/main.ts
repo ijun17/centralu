@@ -24,7 +24,7 @@ import { mailPeers } from './links/mail-peers.js'
 import { recordStartingHub } from './sessions/hub-preset.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/centralu-tools.js'
-import { readShared } from './sessions/app-access.js'
+import { readAppFlag } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
@@ -410,7 +410,9 @@ const externalApps = new ExternalApps({
   // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
   builderBusy: (ref) => mgr.appSessions.builderBusy(ref),
   // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
-  shared: (ref) => readShared(store.settings, ref),
+  shared: (ref) => readAppFlag(store.settings, 'shared', ref),
+  // A project app the person turned off on this computer (#1938) — read fresh, like trust
+  off: (ref) => readAppFlag(store.settings, 'off', ref),
   // A user-folder app registered as a project in place is that project's root app now (#1141)
   adoptedUserApp: (appId, dir) => adoptedUserApp(store, appId, dir),
   adoptedProjectOf: (appId) => adoptedProjectOf(store, appId),

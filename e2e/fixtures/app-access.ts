@@ -82,6 +82,34 @@ export function appAccessTests(): void {
     expect((await sharedWrites(page)).at(-1)).toEqual({ appId: 'counter', projectId: pid, shared: false })
   })
 
+  test('a project app runs on this computer until its switch in Settings → Apps is turned off (#1938): then it reads Off with why', async ({ page }) => {
+    await page.goto('/?mock=1')
+    const pid = await addProject(page, '/tmp/ops')
+    await page.evaluate((l) => (window as any).__mock.setExternalApps(l), [app('counter', pid, { name: 'Counter', status: 'running' }), app('helper', null)])
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-apps').click()
+
+    const row = page.getByTestId(`external-app-${pid}/counter`)
+    const line = row.getByTestId('external-app-runs-here')
+    const box = line.getByRole('checkbox')
+    await expect(line).toHaveText('Runs on this computer')
+    // On while it runs here: the switch never reads on for an app that is off
+    await expect(box).toBeChecked()
+    await expect(row.getByTestId('external-app-status')).toHaveText('Running')
+    // A user-folder app is a copy of nothing, so it has no switch
+    await expect(page.getByTestId('external-app-_user/helper').getByTestId('external-app-runs-here')).toHaveCount(0)
+
+    await box.uncheck()
+    await expect(box).not.toBeChecked()
+    await expect(row.getByTestId('external-app-status')).toHaveText('Off')
+    await expect(row.getByTestId('external-app-reason')).toHaveText('It is turned off on this computer, so it does not start here. Turn it on in Settings → Apps.')
+    await box.check()
+    await expect(box).toBeChecked()
+    await expect(row.getByTestId('external-app-status')).toHaveText('Stopped')
+    // The reason folds away (design-system.md §9) rather than staying
+    await expect(row.getByTestId('external-app-reason')).toBeHidden()
+  })
+
   test("the app's own header shares it too, and says when it is shared", async ({ page }) => {
     await page.goto('/?mock=1')
     const pid = await addProject(page, '/tmp/ops')

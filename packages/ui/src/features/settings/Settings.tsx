@@ -23,7 +23,8 @@ import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
 import { ASSISTANT_DEMANDS, useRefusals } from '../project/useToolChoice.js'
-import { Switch } from '../../components/Switch.jsx'
+import { RunsHereLine, ShareLine } from './AppSwitchLines.jsx'
+import { Fold } from '../../components/Fold.jsx'
 import {
   AppIcon,
   BackgroundIcon,
@@ -454,13 +455,17 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const [removing, setRemoving] = useState(false)
   // A linked machine's user-folder app (#82): removed there, so the question names the machine
   const machineName = useMachineName(app.projectId === null ? app.info.machine : null)
+  // The reason folds in and out (design-system.md §9): kept through the fold's exit, so the line does not blank first
+  const [reason, setReason] = useState(status.reason)
+  if (status.reason !== null && status.reason !== reason) setReason(status.reason)
   return (
     <li className="px-4 py-3" data-testid={`external-app-${app.key}`} data-status={app.info.status}>
       <div className="flex items-center gap-2 text-sm text-ink">
         <span className="truncate">{app.title}</span>
         <span className="readout text-2xs text-ink-faint">{app.appId}</span>
         <span
-          className={`readout ml-auto shrink-0 text-2xs ${status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
+          key={status.label}
+          className={`readout cc-setup-swap ml-auto shrink-0 text-2xs ${status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}
           data-testid="external-app-status"
         >
           {status.label}
@@ -480,11 +485,11 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
           </Button>
         </div>
       )}
-      {status.reason && (
+      <Fold open={status.reason !== null}>
         <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-body text-ink-muted" data-testid="external-app-reason">
-          {status.reason}
+          {status.reason ?? reason}
         </p>
-      )}
+      </Fold>
       {app.info.status === 'untrusted' && app.projectId && (
         // The same card as the project's row, with its apps listed (#1141)
         <TrustProjectButton projectId={app.projectId} testId="external-app-trust" className="mt-1.5" />
@@ -514,6 +519,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       {/* What can be set on the app, on one line under what it says about itself */}
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 empty:hidden">
         <ShareLine app={app} />
+        <RunsHereLine app={app} />
         <GridSpanLine app={app} />
         {app.projectId === null && !confirming && (
           <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setConfirming(true)} data-testid="external-app-remove">
@@ -581,29 +587,6 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
         title="Panel size in grid cells"
       />
     </div>
-  )
-}
-
-/**
- * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
- * project app is that project's own. When on, a session in another project can find it and attach it
- * to itself for as long as it needs the tools, after the person allows that pair of projects once.
- * A user-folder app has no switch: it is the person's own and available to every project already. Nor has a root app
- * (#1141): it follows its project's trust, which already lets it reach the person's other projects (owner, 2026-10-18).
- */
-function ShareLine({ app }: { app: ExternalCatalogApp }) {
-  const setShared = useStore((s) => s.setAppShared)
-  if (app.projectId === null || app.info.root) return null
-  const shared = app.info.shared === true
-  return (
-    <label
-      className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted"
-      title="Sessions in your other projects can attach this app while they need it. Each project asks you once."
-      data-testid="external-app-share"
-    >
-      <Switch checked={shared} onChange={(e) => void setShared(app.projectId!, app.appId, e.target.checked)} />
-      <span>Share with other projects</span>
-    </label>
   )
 }
 

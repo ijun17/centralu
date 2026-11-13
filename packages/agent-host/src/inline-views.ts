@@ -444,7 +444,7 @@ export class InlineViews {
 
   /**
    * The reason this app's view cannot be rendered — the app disappeared, its project is no longer
-   * trusted, or its manifest is broken. Since a view's HTML is also that app's code, all three cases
+   * trusted, its manifest is broken, or it was turned off here. Since a view's HTML is also that app's code, all three cases
    * close the view and never reopen it (the same rule as the fixed view, B-2). A crashed or stopped
    * app is not one of these — the view's next call restarts the app. The reason is written in plain
    * language, since it stands as is in the view.
@@ -456,6 +456,8 @@ export class InlineViews {
     // An imported app waiting for review (E-3) — if what runs after enabling it changed, the view's HTML is also code from before the person reviewed it again
     if (info.status === 'unconfirmed') return info.error ?? 'This imported app is not enabled'
     if (info.status === 'invalid') return `This app's manifest is invalid: ${info.error ?? 'unknown error'}`
+    // Turned off on this computer (#1938): it reads stopped, but no call restarts it, so its view has nothing to call
+    if (info.off === true) return 'This app was turned off on this computer'
     return null
   }
 

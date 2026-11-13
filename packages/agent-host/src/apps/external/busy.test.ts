@@ -24,6 +24,7 @@ let projRoot = ''
 let rt: ExternalApps | null = null
 
 beforeEach(() => {
+  off = new Set()
   root = tempRoot('cc-app-busy-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
@@ -64,17 +65,23 @@ serveStdio(() => {
   centralu.tool(server, 'hold', { description: 'Hold', inputSchema: z.object({ reason: z.string() }) }, async ({ reason }) => say(await centralu.busy(reason)))
   centralu.tool(server, 'release', { description: 'Release' }, async () => say(await centralu.busy(false)))
   centralu.tool(server, 'pid', { description: 'Pid' }, async () => say(process.pid))
+  // Says it is busy, so a test knows the call arrived, then never answers
+  centralu.tool(server, 'stall', { description: 'Stall' }, async () => (await centralu.busy('stalling'), new Promise(() => {})))
   return server
 })
 `,
   )
 }
 
+/** The apps the person turned off on this computer (#1938), as the store's `app_off:` settings read */
+let off = new Set<string>()
+
 function runtime(): ExternalApps {
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: projRoot, trusted: true }],
     dataRoot,
     reservedIds: [],
+    off: (r) => off.has(r.appId),
     timing: { idleMs: IDLE_MS, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, resumeBusyMs: RESUME_MS },
   })
   rt.refresh()
@@ -176,6 +183,21 @@ describe('a host that starts again resumes the apps that were busy (#1236)', () 
     expect([info(r, 'released')?.status, info(r, 'stopped')?.status]).toEqual(['stopped', 'stopped'])
   })
 
+  it('does not start one the person turned off on this computer meanwhile, and spends its record (#1938)', async () => {
+    plant('queue')
+    const first = runtime()
+    await call(first, 'queue', 'hold', { reason: 'work' })
+    await first.dispose()
+    expect(recorded()).toEqual(['queue'])
+    // Turned off while the host was down: the copy of an app another computer runs (docs/plans/remote-hub.md §13.7)
+    off.add('queue')
+
+    const r = runtime()
+    await pastResume()
+    expect(info(r, 'queue')).toMatchObject({ status: 'stopped', off: true })
+    expect(recorded()).toEqual([])
+  })
+
   it('does not start one that no longer declares uses.background, and spends its record', async () => {
     plant('queue')
     const first = runtime()
@@ -190,6 +212,48 @@ describe('a host that starts again resumes the apps that were busy (#1236)', () 
     await pastResume()
     expect(info(r, 'queue')?.status).toBe('stopped')
     expect(recorded()).toEqual([])
+  })
+})
+
+describe('an app turned off on this computer (#1938, docs/plans/remote-hub.md §13.7)', () => {
+  it('stops at once though busy, is refused every call and never starts; turned on, it starts when next needed', async () => {
+    plant('queue')
+    const r = runtime()
+    const pid = Number(await call(r, 'queue', 'pid'))
+    await call(r, 'queue', 'hold', { reason: 'work' })
+    expect(info(r, 'queue')).toMatchObject({ status: 'running', busy: 'work' })
+    expect(info(r, 'queue')?.off).toBeUndefined()
+
+    off.add('queue')
+    r.appSettingsChanged(ref('queue'))
+    // As losing trust does: the process goes now, busy or not, and the list says why it is down
+    await until(() => alive(pid), (a) => !a)
+    expect(info(r, 'queue')).toMatchObject({ status: 'stopped', off: true })
+    expect(info(r, 'queue')?.busy).toBeUndefined()
+    const refused = await r.call(ref('queue'), 'pid', {}, caller)
+    expect(refused).toMatchObject({ status: 'rejected', error: "queue is turned off on this computer, so nothing ran. Only the person can turn it on (its project's Settings → Apps)." })
+    await pastIdle()
+    expect(info(r, 'queue')?.status).toBe('stopped')
+
+    off.delete('queue')
+    r.appSettingsChanged(ref('queue'))
+    // Nothing starts it by itself: the next call does
+    expect(info(r, 'queue')?.status).toBe('stopped')
+    expect(info(r, 'queue')?.off).toBeUndefined()
+    expect(Number(await call(r, 'queue', 'pid'))).not.toBe(pid)
+  })
+
+  it('a call running when it is turned off is told so, and that it may have done part of it', async () => {
+    plant('queue')
+    const r = runtime()
+    const running = r.call(ref('queue'), 'stall', {}, caller)
+    await until(() => info(r, 'queue')?.busy, (b) => b === 'stalling')
+    off.add('queue')
+    r.appSettingsChanged(ref('queue'))
+    expect(await running).toMatchObject({
+      status: 'error',
+      error: 'queue was stopped while this call ran (turned off on this computer), so it may have done part of it.',
+    })
   })
 })
 

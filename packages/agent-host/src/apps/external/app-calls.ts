@@ -271,6 +271,8 @@ export class AppCalls {
           return result.isError ? done('error', result, resultText(result) || 'The tool returned an error with no text') : done('ok', result, null)
         } catch (err) {
           if (abort.signal.aborted) return done('cancelled', null, 'The caller cancelled this call')
+          // This host stopped the app under the call (turned off, trust lost, a restart): that, not the pipe's end, is why
+          if (proc.stoppedFor) return done('error', null, `${e.ref.appId} was stopped while this call ran (${proc.stoppedFor}), so it may have done part of it.`)
           return done('error', null, (err as Error).message)
         } finally {
           this.openRuns.delete(runId)

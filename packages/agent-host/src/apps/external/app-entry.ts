@@ -88,7 +88,7 @@ export type AppTool = { tool: Tool; visibility: Audience[] }
  * Why an app may not run right now (`ExternalApps.blocker`) — the one answer every door asks: a call, a start, a
  * check, a reload, and the list's status. `reason` is worded for the person or agent who reads it verbatim.
  */
-export type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'removing' | 'failed'; reason: string }
+export type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'off' | 'removing' | 'failed'; reason: string }
 
 /**
  * Clears what a run of failures left behind — the count, the backoff, the reason, the stop — and the remembered spec

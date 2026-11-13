@@ -285,6 +285,7 @@ export class AppLifecycle {
     // A running app is stopping — it is not running in the list from this moment (A-8)
     this.host.appsChanged()
     proc.log.note(`stopping: ${why}`)
+    proc.stoppedFor = why
     await Promise.all([proc.stop(graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree }), stopping])
   }
 

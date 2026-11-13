@@ -267,6 +267,11 @@ export interface AppsPort {
    */
   setShared(appId: AppId, projectId: string, shared: boolean): Promise<void>
   /**
+   * Turns a project app off on this computer, or back on (#1938): for the copy of an app another computer runs for the
+   * same repository. Off, it never starts here and no session here is given it; a running copy stops.
+   */
+  setOff(appId: AppId, projectId: string, off: boolean): Promise<void>
+  /**
    * Prepares to import an app (M4 E-3) — the host copies the source (a folder on this
    * machine, a local .zip, or a .zip over https) into a staging area and returns what the
    * person should review. **It has not been admitted yet.** Rejections (a link pointing

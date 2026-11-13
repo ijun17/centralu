@@ -622,7 +622,12 @@ export function createRpcHandler(
     'apps.setShared': async (p) => {
       // Sharing a project app with the person's other projects (#371 part A) — the manager stores it and recounts sessions
       const { appId, projectId, shared } = p
-      mgr.apps.setAppShared({ projectId, appId }, shared)
+      mgr.apps.setAppFlag('shared', { projectId, appId }, shared)
+      return { ok: true as const }
+    },
+    'apps.setOff': async ({ appId, projectId, off }) => {
+      // The copy of an app another computer runs, off on this one (#1938) — the manager stores it and the runtime stops it
+      mgr.apps.setAppFlag('off', { projectId, appId }, off)
       return { ok: true as const }
     },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,

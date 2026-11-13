@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { appKeyOf } from '@cc/core'
 import type { ExternalAppInfo } from '@cc/protocol/client'
 import { isApp, useStore } from './store.js'
-import { appTitleOf } from './names.js'
+import { appTitleOf, machineNameOf } from './names.js'
 
 /**
  * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
@@ -69,8 +69,23 @@ export function userAppMachine(info: ExternalAppInfo): string | undefined {
   return isRemoteUserApp(info) ? (info.machine ?? undefined) : undefined
 }
 
-/** An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11) */
-export function appStatus(info: ExternalAppInfo): AppStatusView {
+/** The linked machines by id, for their names (`machineNameOf`) */
+type MachineNames = Readonly<Record<string, { name: string }>>
+
+/**
+ * An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11). `machines`
+ * names the machine an app turned off there is off on (ux-writing.md §1)
+ */
+export function appStatus(info: ExternalAppInfo, machines: MachineNames = {}): AppStatusView {
+  /*
+   * Turned off on its computer (#1938): the copy of an app another computer runs for the same repository. Its status
+   * reads `stopped` (an older window's word for it) only when off is what stops it; an app also invalid, untrusted or
+   * not enabled reads that first, as the host's `blocker` orders them, so the row names what turning it on would not fix
+   */
+  if (info.off === true && info.status === 'stopped') {
+    const where = info.machine ? `${machineNameOf(machines, info.machine)}, so it does not start there` : 'this computer, so it does not start here'
+    return { label: 'Off', reason: `It is turned off on ${where}. Turn it on in Settings → Apps.`, runnable: false, tone: 'quiet' }
+  }
   switch (info.status) {
     case 'running':
       return { label: 'Running', reason: null, runnable: true, tone: 'quiet' }
@@ -114,7 +129,7 @@ const byTitle = (a: ExternalCatalogApp, b: ExternalCatalogApp) => a.title.locale
  * the way there is for sessions, and discovery order (the order folders were read in) differs by
  * filesystem, which could shuffle the sidebar's rows on every startup.
  */
-export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
+export function buildCatalog(external: readonly ExternalAppInfo[], machines: MachineNames = {}): AppCatalog {
   const ext: ExternalCatalogApp[] = external.map((info) => ({
     kind: 'external',
     /*
@@ -127,7 +142,7 @@ export function buildCatalog(external: readonly ExternalAppInfo[]): AppCatalog {
     projectId: info.projectId,
     title: appTitleOf(info),
     info,
-    status: appStatus(info),
+    status: appStatus(info, machines),
   }))
   ext.sort(byTitle)
   const byProject: Record<string, ExternalCatalogApp[]> = {}
@@ -156,7 +171,8 @@ export function catalogByKey(external: readonly ExternalAppInfo[]): Map<string, 
 
 export function useAppCatalog(): AppCatalog {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(external), [external])
+  const machines = useStore((s) => s.machines)
+  return useMemo(() => buildCatalog(external, machines), [external, machines])
 }
 
 const NONE: ExternalCatalogApp[] = []
@@ -164,7 +180,8 @@ const NONE: ExternalCatalogApp[] = []
 /** A single project's apps — used by the project's block in the sidebar */
 export function useProjectApps(projectId: string): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(external).byProject[projectId] ?? NONE, [external, projectId])
+  const machines = useStore((s) => s.machines)
+  return useMemo(() => buildCatalog(external, machines).byProject[projectId] ?? NONE, [external, machines, projectId])
 }
 
 /**
@@ -174,7 +191,8 @@ export function useProjectApps(projectId: string): ExternalCatalogApp[] {
  */
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(external).external.filter((a) => a.projectId === null), [external])
+  const machines = useStore((s) => s.machines)
+  return useMemo(() => buildCatalog(external, machines).external.filter((a) => a.projectId === null), [external, machines])
 }
 
 /**
@@ -183,10 +201,21 @@ export function useUserApps(): ExternalCatalogApp[] {
  */
 export function useExternalApp(projectId: string | null, appId: string, machine?: string | null): ExternalCatalogApp | undefined {
   const external = useStore((s) => s.externalApps)
+  const machines = useStore((s) => s.machines)
   return useMemo(() => {
     const info = external.find((a) => isApp(a, projectId, appId, machine))
-    return info ? buildCatalog([info]).external[0] : undefined
-  }, [external, projectId, appId, machine])
+    return info ? buildCatalog([info], machines).external[0] : undefined
+  }, [external, machines, projectId, appId, machine])
+}
+
+/**
+ * Whether an open view of the app has to come down (B-2): its HTML is also the app's code, so it does not stay rendered
+ * once its project is no longer trusted, its manifest broke, an imported app waits on review again (M4 E-3), or it is
+ * turned off on its computer (#1938), which nothing of the view's starts again. One that failed or crashed stays: its
+ * Restart is on the view. The host closes a view in a conversation by the same list (inline-views.ts `unavailable`).
+ */
+export function viewMustClose(info: ExternalAppInfo): boolean {
+  return info.status === 'untrusted' || info.status === 'invalid' || info.status === 'unconfirmed' || info.off === true
 }
 
 /** `uses` in plain words (`uses-lines.ts`, which imports nothing of the store) */

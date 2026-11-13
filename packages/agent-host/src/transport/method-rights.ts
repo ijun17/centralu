@@ -290,6 +290,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'apps.askBuilder': 'everyday',
   'apps.check': 'everyday',
   'apps.setShared': { asks: switchedOn('shared'), when: 'it shares the app' },
+  // Off only narrows (the copy stops, and this computer's sessions lose it); on gives it back to them unasked (#1938)
+  'apps.setOff': { asks: (params) => fields(params).off !== true, when: 'it turns the app back on' },
   'apps.setSecret': 'window',
   'apps.importPrepare': 'window',
   'apps.importCommit': 'asks',

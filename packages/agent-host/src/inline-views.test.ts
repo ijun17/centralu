@@ -10,6 +10,7 @@ import { PROJECT_APPS, plantApp, until } from './apps/external/test-helpers.js'
 import { Store } from './dev-services/store.js'
 import { attachInlineViews, type InlineLimits, type InlineViews } from './inline-views.js'
 import { createRpcHandler } from './rpc.js'
+import { readAppFlag } from './sessions/app-access.js'
 import { SessionManager } from './sessions/manager.js'
 import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from './temp-dir.test-helpers.js'
@@ -90,6 +91,8 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
     // The run record (A-6) — checks "reopening does not call the tool again" by the number of
     // entries for calls that reached the app
     runs: storeRunLedger(store),
+    // Off on this computer (#1938), read from the store as main.ts wires it
+    off: (ref) => readAppFlag(store.settings, 'off', ref),
     watchFlushMs: 40,
     timing: { idleMs, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, maxFailures },
   })
@@ -311,6 +314,17 @@ describe('paths that close a view', () => {
     await rpc('projects.setTrusted', { projectId, trusted: false })
     await until(appViews, (v) => v.some((e) => e.phase === 'closed'))
     expect(appViews().at(-1)).toMatchObject({ callId: 'toolu_T', phase: 'closed', reason: "This app's project is no longer trusted" })
+    await expect(frame(id)).rejects.toThrow(/not open/)
+  })
+
+  it('also closes the view of an app turned off on this computer (#1938): no call of it would start the app', async () => {
+    const { apps } = await start()
+    await apps.call('app-viewer', 'show', { q: 'x' }, { callId: 'toolu_O' })
+    await until(appViews, (v) => v.some((e) => e.phase === 'result'))
+    const id = appViews()[0]!.instanceId!
+    await rpc('apps.setOff', { projectId, appId: 'viewer', off: true })
+    await until(appViews, (v) => v.some((e) => e.phase === 'closed'))
+    expect(appViews().at(-1)).toMatchObject({ callId: 'toolu_O', phase: 'closed', reason: 'This app was turned off on this computer' })
     await expect(frame(id)).rejects.toThrow(/not open/)
   })
 })
