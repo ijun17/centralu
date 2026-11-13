@@ -322,7 +322,7 @@ export class TurnContinue {
     if (this.probes.get(tool) !== p) return
     if (up) return this.release(tool, 'network')
     p.step = Math.min(p.step + 1, PROBE_STEPS_MS.length - 1)
-    p.next = Date.now() + (PROBE_STEPS_MS[p.step] ?? PROBE_STEPS_MS[PROBE_STEPS_MS.length - 1])
+    p.next = Date.now() + (PROBE_STEPS_MS[p.step] ?? PROBE_STEPS_MS[0])
   }
 
   /** The cause cleared for every session of a tool waiting on it */

@@ -180,7 +180,7 @@ Implementation rules:
   swap could not continue (Codex's `adoptedIdle()`, #2020). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
-- **`apiUrl()` names the API host the tool's turns reach** (optional; #1415): Claude `ANTHROPIC_BASE_URL` or `https://api.anthropic.com`, Codex `OPENAI_BASE_URL` or `https://chatgpt.com`. The host probes it to know the network is back ([../lifecycle/auto-continue.md](../lifecycle/auto-continue.md)); a tool without one has no network wait. Codex marks a credits or spend limit `limit_reached.credits`, which is never continued by itself.
+- **`apiUrl()` names the API host the tool's turns reach** (optional; #1415): Claude `ANTHROPIC_BASE_URL` or `https://api.anthropic.com`, Codex `OPENAI_BASE_URL` or `https://chatgpt.com`. The host probes it to know the network is back ([../lifecycle/auto-continue.md](../lifecycle/auto-continue.md)); a tool without one is taken as reachable at the first probe, 15 s after the stop. Codex marks a credits or spend limit `limit_reached.credits`, which is never continued by itself.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - **What both adapters do the same way is written once, in `adapters/session-kit.ts`** (#428), since copies of it
   drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an
