@@ -126,6 +126,108 @@ and from the last turn recalled; an edit made earlier is not redone); the load o
 background: ask for a long shell "in the background" and end the turn, then check whether a child is left under the
 agent pid and whether it survives the agent's exit; for Cursor, a subagent still running past the turn.
 
+## 3a. Measured (2026-11-13, Mac, codex-cli 0.160.0)
+
+Run by a session on the owner's Mac, `gpt-5.6-luna` at low effort, each Codex run in a `CODEX_HOME` of its own (a copy of
+`auth.json` and of the rollout, deleted after; the real `~/.codex` and `~/.centralu` untouched). Scripts:
+`packages/agent-host/scripts/probe-codex-resume.mts` (M1), `probe-codex-shared.mts` (M2), `probe-resume-cache.mts`
+with `--tool` (M1b, M3). **[checked: the runs; raw lines were in the session's temp folders and are summarised here]**
+
+**Rollouts on this Mac** (814 files in `~/.codex/sessions`): median 112 KB, p90 3.1 MB, 201 are ≥ 1 MB (25%), 25 ≥ 10 MB,
+11 ≥ 50 MB (1.4%), 3 ≥ 500 MB. So 50 MB+ is **not** common here.
+
+**M1, direct, 3 runs per cell, real rollouts copied in.** The 1 MB thread (0.9 MB file) is a 67k-token context, the 47 MB
+and 513 MB threads resume to 25-35k tokens (compacted), so TTFT differs by thread, not by file size. Cache read = the
+last `tokenUsage.last` reading of the woken turn (the first can repeat the previous turn's). Times in ms.
+
+| Rollout | Idle | Arm | TTFT (3 runs, sorted) | Cache read (3 runs) | spawn → `initialize` | `thread/resume` (excludeTurns) |
+|---|---|---|---|---|---|---|
+| 0.9 MB | 2 min | live | 1033, 1059, 1291 | .966 ×3 | | |
+| 0.9 MB | 2 min | woken | 5435, 6754, 7453 | .998 ×3 | 70, 62, 32 | 39, 39, 40 |
+| 0.9 MB | 16 min | live | 1214, 1323, 2693 | .966 ×3 | | |
+| 0.9 MB | 16 min | woken | 4179, 4233, 4704 | **.238**, .997, .998 | 71, 36, 52 | 43, 40, 39 |
+| 47 MB | 2 min | live | 1168, 1595, 1643 | .908, .911, .912 | | |
+| 47 MB | 2 min | woken | 4974, 5464, 5869 | .991, .992, .993 | 65, 59, 31 | 34, 35, 33 |
+| 47 MB | 16 min | live | 1061, 1167, 1566 | .909, .909, .910 | | |
+| 47 MB | 16 min | woken | 4324, 4651, 4814 | .990, .992, .993 | 64, 66, 64 | 34, 36, 35 |
+| 513 MB | 2 min | live | 1072, 1333, 1513 | .932, .936, .938 | | |
+| 513 MB | 2 min | woken | 4568, 4766, 5457 | .992, .995, .995 | 34, 67, 65 | 63, 64, 73 |
+| 513 MB | 16 min | live | 1085, 1260, 3484 | **.194**, .938, .938 | | |
+| 513 MB | 16 min | woken | 4221, 5273, 5386 | .995, .995, .996 | 68, 66, 72 | 63, 63, 67 |
+
+Re-run of the 47 MB / 2 min cell with only 6 processes at once (the table above ran 36 at once, several logged
+"failed to refresh available models: request timed out"): live TTFT 983, 1072, 1138, woken 4264, 4385, 4539, cache read
+.919-.921 live and .990-.993 woken, spawn 32-64, resume 33-35. So the contention did not inflate the woken TTFT.
+
+Readings: **(1)** the live control still reads the cache at 16 min (.91-.97), so OpenAI's lifetime is longer than the idle
+times here; the woken turn reads as much as the live one (it is higher, .99 against .91-.97, in all 35 other cells). The
+two misses (.194 live, .238 woken) are one per arm: a cache miss that happens now and then, not caused by the resume.
+**(2)** The wait is TTFT, not the resume: a new app-server is ready in 30-70 ms and `thread/resume` with `excludeTurns`
+(what the adapter sends, `thread-open.ts:80`) takes 33-73 ms even for the 513 MB rollout; the first model request of a
+new process takes 4.2-5.9 s to the first token against 1.0-1.6 s live. Added wait = woken TTFT + spawn + resume − live
+TTFT, by medians: 1 MB 5.7 s (2 min) / 3.0 s (16 min), **47 MB 3.9 s (2 min) / 3.6 s (16 min)**, 513 MB 3.5 s / 4.0 s;
+worst run against best live: 47 MB 4.8 s. **(3)** The first `thread/resume` of the 513 MB rollout without
+`excludeTurns` (my probe's first call, not the adapter's) took 28-36 s and 33-35 s of the whole warm turn; the adapter
+does not send it that way, and the page cache was warm for every wake here (cold disk: unchecked).
+
+**Inventory at rest** (§3, M1): not run in this pass (see §11).
+
+**M1b, Codex through a host** (`agents.restartSession` as the sleep/wake; `restartMs` = the RPC; 3 runs per arm, 2 min
+idle, a small project, 8k-token unique block; the code word from turn 1 recalled in the woken turn):
+
+| Arm | `restartMs` | TTFT (ms) | Cache read |
+|---|---|---|---|
+| live | | 2582, 3836, 2329 | .990, .991, .992 |
+| restarted | 307, 309, 290 | 5651, 6329, 5602 | .950, .979, .951 |
+
+Restarted − live: +3.1 s median TTFT plus 0.3 s restart = **~3.4 s**; cache within 4.2 points of the live one (the
+widest, .950 against .992). The code word was recalled in a restarted run (checked in one run's answer text; the 3-run
+comparison's detection was wrong and is fixed in the script, so only that run is counted). A first attempt with six
+hosts at once on one `CODEX_HOME` failed to start three of them ("codex app-server exited"), the rest were run staggered.
+
+### Rule of §2 applied
+
+- Cache: the woken turn reads within 5 points of the live control at every cell (it reads more), 2 min and 16 min,
+  direct (M1) and through a host (M1b, worst 4.2 points).
+- Added wait at 50 MB: 3.9 s median, 4.8 s worst run, ≤ 5 s. At 1 MB with a 67k-token context the 2 min cell is 5.7 s
+  (above 5 s), which §2 does not make a condition (the rule is at 50 MB).
+- 50 MB+ rollouts: 11 of 814 (1.4%): not common.
+
+**Outcome A (Codex sleeps).** B's gates were measured anyway (M2) so the owner can see what B would cost; B is not chosen.
+The case is close on the wait (3.4-4.8 s against the 5 s line, and 5.7 s on a large-context thread), and the middle row
+(Q1) is the owner's if the line is judged on the 67k-token thread rather than the 50 MB one: the wait is the new process's
+first model request, not the resume, so it does not grow with the rollout size.
+
+**M2, one shared app-server** (`probe-codex-shared.mts`, one server, 10 threads, each its own cwd and per-thread `config`):
+
+| Gate | Result |
+|---|---|
+| (a) two turns at once | pass: both streamed 299 deltas each, overlapping 5.3 s of 5.4 s, both answers right |
+| (b) server requests carry `threadId` | pass: `item/commandExecution/requestApproval` had the thread's id |
+| (c) own credential and pwd per thread | pass for 5 of 5: `shell_environment_policy: { set: { CC_PROBE_CRED } }` in the thread's `config` printed `cred-i` and the thread's cwd |
+| (d) RSS | process tree (wrapper + app-server) 59 MB at 0 threads, 95 / 107 / 127 / 139 MB at 1 / 2 / 5 / 10 threads started and idle, 299 MB at 10 after one turn each (~24 MB per thread, E3 said ~24). With two stdio MCP servers per thread (stand-ins for the bridge and one of the person's, ~45 MB each): 290 → 389 / 482 / 754 / 1212 MB at +1 / +2 / +5 / +10 threads, ~92 MB per added thread: **MCP servers are started per thread, even in one server**, and the ≤ 50 MB gate fails with two of them (not one of the B-out gates) |
+| (e) kill mid-turn | one process dies, the exit is reported 37 ms after the kill, no turn completed afterwards: every thread ends with it |
+| (f) resume of the 513 MB thread while another streams | pass: the streaming thread kept sending deltas during the resume (184 with `excludeTurns`, 275 without; resume 3.3 s / 5.5 s). Its longest gap (57 s) is the same without any resume (control run), so it is the model's pause, not the resume |
+| (g) `thread/unsubscribe` | exists on 0.160.0, answers `unsubscribed`, but **no `thread/closed` notification arrived and memory/processes did not go back** (1212 → 1215 MB, 20 MCP processes still there in 3 s); `thread/resume` of an unsubscribed thread worked |
+| (h) cwd | pass: each thread's `AGENTS.md` from its own cwd was answered (5 of 5), the server's own cwd was a neutral folder |
+
+B's gates (a), (b), (c), (f) all pass, so B was possible; under §2 it only applies if the cache is lost, which it is not.
+(g) matters for B: an unsubscribe did not give the memory back here, so B's "release" would not free an idle thread's MCP
+servers either (3 s of waiting; later not checked).
+
+**M3, ACP tools on this Mac** (via the host, `agents.restartSession` then a code-word question; 2 min and 16 min idle):
+
+| Tool | Installed | Result |
+|---|---|---|
+| opencode 1.19.4 | yes, logged in | live cache .996 (2 min), .997 (16 min); after the restart **.080 at both times** (input 20,5xx of which 1,792 read: the cache is lost on `session/load`); code word recalled 3 of 3; restart RPC 2.25 s ×2; TTFT live 4140 / 2756 ms, restarted 5515 / 7357 ms (one run each) |
+| cursor-agent 2026.10.22 | yes, logged in | **not measured**: with `auto` preset the first warm turns ran 240 s without the host's turn end arriving (Cursor sends no usage; why no `turn_complete` was seen is not investigated), so no wake number. Background check: no child seen either side, but the turn did not finish, so inconclusive |
+| agy 1.4.8 (`~/.local/bin/agy`) | the CLI yes; **Centralu's Antigravity adapter says "not installed"** on a temp data dir (it installs its own managed release under the data dir and signs in itself) | not measured |
+
+OpenCode background check (`nohup sleep … &` in the turn): no `sleep` child found before or after the restart; whether the
+model ran it at all under the `normal` preset (approvals are denied by the driver) is not known: **inconclusive**.
+OpenCode's finding for §6: its load recalled the conversation every time but loses the prompt cache (about 20k input
+tokens re-read at full price at each wake), which the plan's §6 assumed was fine.
+
 ## 4. Outcome A: Codex sleeps
 
 - `adapters/codex/index.ts:82-87`: `sleep: true`, the comment replaced by the measured numbers and their date.
@@ -274,11 +376,14 @@ and Windows.
 
 ## 11. Not checked
 
-- Codex: cache read after a resume; resume time by size on the current CLI; spawn time; background shells and goals at
-  rest; per-thread `shell_environment_policy`; `thread/unsubscribe` on the installed CLI; whether MCP servers are per
-  thread in one server. All are M1/M2.
-- ACP: `session/load` on the installed versions; cache after a load; background shells past a turn for all three;
-  Cursor subagents past a turn. All are M3.
-- OpenAI's prompt-cache lifetime (from memory, not fetched: minutes of inactivity, longer off-peak) [guess]; the 16 min
-  live control in M1 measures it instead.
-- That every scheduled delivery and watch reaches a session through `deliverMail`.
+After the 2026-11-13 Mac run (§3a):
+
+- Not run: the **inventory at rest** of M1 (a background shell and an active goal past a turn on Codex; A's preconditions
+  in §4 stay unknown); the rest of M2 (g): whether memory returns later than 3 s after `thread/unsubscribe`; a **cold
+  page cache** for a 500 MB rollout wake (every wake here had the file in memory); the 1 MB (not 0.9 MB) and 500 MB (513 MB)
+  sizes are the nearest real rollouts, no padded ones; M1b ran 2 min only, 3 runs, one account.
+- M3: Cursor and Antigravity not measured (above); OpenCode's background check inconclusive; no ACP tool measured at
+  runs of 3 (OpenCode one run per cell); Windows not run (this pass was the Mac only).
+- The numbers use `gpt-5.6-luna` at low effort and the 15-minute-like idle times 2 and 16 min; other models, and the
+  heavier load of the owner's real `config.toml` (its own MCP servers), were not used (the temp `CODEX_HOME` had a minimal config).
+- Still unchecked from before: that every scheduled delivery and watch reaches a session through `deliverMail`.
