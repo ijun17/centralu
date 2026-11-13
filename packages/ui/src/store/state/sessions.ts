@@ -213,6 +213,8 @@ export type SessionsSlice = {
    * The error line stays in the conversation and nothing is retried or continued.
    */
   markDone: (sessionId: string) => Promise<void>
+  /** Don't continue (#1415): the stopped turn Centralu would continue by itself waits for the person instead */
+  stopContinue: (sessionId: string) => Promise<void>
   /**
    * The person has an app's agent session on screen (#378): the host keeps it as theirs instead of deleting it when its
    * run ends. Said at once, with nothing unread too, which `markRead` skips

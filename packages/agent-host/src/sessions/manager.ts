@@ -11,7 +11,8 @@ import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
-import { OverloadRetry } from './overload-retry.js'
+import { CONTINUE_NOTES, TurnContinue } from './turn-continue.js'
+import { apiAnswers } from './api-answers.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { MachineFlow, type MachineOps } from './machine-flow.js'
@@ -64,6 +65,7 @@ import type {
 } from '@cc/protocol'
 import {
   autoCompactOf,
+  autoContinueOf,
   DATA_DIR,
   withoutToolRecord,
   errorMessage,
@@ -156,8 +158,8 @@ export class SessionManager {
   private readonly reports: ChildReports
   /** A session's `interruption` kept with its events, the reconnect clocks, and a quit's stop (interruption-watch.ts) */
   private readonly interruptions: InterruptionWatch
-  /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts, #1693) */
-  private readonly overloadRetry: OverloadRetry
+  /** A stopped turn waiting for its cause to clear to be continued: an overloaded provider, the network, a usage limit (turn-continue.ts, #1693, #1415) */
+  private readonly turnContinue: TurnContinue
   /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
   readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
@@ -374,20 +376,32 @@ export class SessionManager {
     this.mail = new MailSessionsView(this.parts())
     this.inputs = new TurnInputs(this.parts())
     this.processes = new SessionProcesses(this.parts())
-    this.overloadRetry = new OverloadRetry({
+    this.turnContinue = new TurnContinue({
       meta: this.meta,
       leaving: () => this.tenure.disposing,
       compactTurn: (id) => this.selfCompaction.compactTurn(id),
       running: (id) => this.handles.has(id),
+      settings: () => autoContinueOf(this.prefs.uiPreferences()),
+      reachable: async (tool) => {
+        const url = this.adapters.get(tool)?.apiUrl?.()
+        return url ? apiAnswers(url) : true
+      },
       note: (e) => this.events.onEvent(e),
-      // Through Centralu's channel, as an update's continue: sent only while the retry still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
-      send: (id, text, gate) =>
-        this.events
-          .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, {
+      changed: (m) => {
+        this.store.sessions.upsertSession(m)
+        this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption ?? null })
+      },
+      continued: (id, cause) => this.mail.mailContinued(id, cause, this.meta.get(id)?.askedBy ?? null),
+      // Through Centralu's channel, as an update's continue: sent only while the wait still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
+      send: (id, cause, gate) => {
+        const note = CONTINUE_NOTES[cause]
+        return this.events
+          .deliverMail(id, { text: note.text, quiet: false, line: note.line, label: note.label, skipLine: () => !note.line }, {
             leaving: () => this.tenure.disposing,
             // The last check before the tool is given the note (deliverMail asks it once, right before): passed, the turn is the tool's
             atRest: () => {
-              const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle')
+              // A held retry continues a turn that is still running; a stop's continue starts one at rest
+              const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle') === (cause === 'overloaded')
               if (stands) gate.handed()
               return stands
             },
@@ -395,7 +409,8 @@ export class SessionManager {
           // Stopped or taken over while it waited: nothing was sent, and nothing failed
           .catch((err: unknown) => {
             if (!(err instanceof MailNotAtRest)) throw err
-          }),
+          })
+      },
     })
     const compactSetting = () => autoCompactOf(this.prefs.uiPreferences())
     const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
@@ -1069,8 +1084,8 @@ export class SessionManager {
       get interruptions() {
         return self.interruptions
       },
-      get overloadRetry() {
-        return self.overloadRetry
+      get turnContinue() {
+        return self.turnContinue
       },
       get keeperOpts() {
         return self.keeperOpts
@@ -1364,6 +1379,12 @@ export class SessionManager {
     return { cleared, newer }
   }
 
+
+  /** Don't continue (#1415): the stop the session waits to be continued from is left for the person. Whether a wait stood */
+  stopContinue(sessionId: string): boolean {
+    this.sessionOf(sessionId)
+    return this.turnContinue.stopContinue(sessionId)
+  }
 
   /** A session's row, or `session_not_found` */
   private sessionOf(sessionId: string): SessionInfo {

@@ -16,7 +16,7 @@ import type { SessionEventsHost } from './session-events.js'
  * getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type TurnInputsHost = Pick<DelegationHost, 'children' | 'closing' | 'emit' | 'handles' | 'meta' | 'trashing'> &
-  Pick<SessionEventsHost, 'overloadRetry' | 'requireHandle'> &
+  Pick<SessionEventsHost, 'turnContinue' | 'requireHandle'> &
   Pick<MailSessionsHost, 'events'> & {
     /** The sessions an external app owns: a message of the person's makes an app's agent session theirs */
     readonly appSessions: AppSessions
@@ -188,9 +188,11 @@ export class TurnInputs {
   }
 
   interrupt(sessionId: string): void {
+    // A stop waiting to be continued (#1415) is at rest: the Stop ends the wait, and there is no turn to stop
+    if (this.host.turnContinue.stopContinue(sessionId) && !inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) return
     // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop.
     // Once the retry's note is with the tool it runs a turn, which the Stop stops like any
-    const took = this.host.overloadRetry.cancel(sessionId)
+    const took = this.host.turnContinue.cancel(sessionId)
     const waiting = took === 'waiting' || took === 'sending'
     const handle = waiting ? this.host.handles.get(sessionId) : this.host.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.

@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, freeThemeId, isPresetThemeId, presetIdRefusal, pickableThemes, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { ASSISTANT_CHANGE, autoContinueOf, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, freeThemeId, isPresetThemeId, presetIdRefusal, pickableThemes, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -118,6 +118,7 @@ export class PreferencesFlow {
       versions.status === 'fulfilled'
         ? `- Move idle sessions to a newly installed agent CLI: ${onOff(versions.value.autoApply)} (moveIdleSessionsToNewAgentCli)`
         : '- Agent CLI versions: not available on this host',
+      `- Continue a turn by itself after a usage limit resets: ${onOff(autoContinueOf(p).limit)} (continueAfterLimit); when the network is back: ${onOff(autoContinueOf(p).network)} (continueOnNetwork)`,
       'Interface',
       `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)} (set_preferences sendWithModifierEnter)`,
       `- Sidebar groups folded: ${p.foldedGroups.length} (set_preferences foldedGroups folds or unfolds a session's children)`,
@@ -171,6 +172,8 @@ export class PreferencesFlow {
     }
     if (changes.lineHeight !== undefined) patch.lineHeight = changes.lineHeight
     if (changes.sendWithModifierEnter !== undefined) patch.sendWithModifierEnter = changes.sendWithModifierEnter
+    if (changes.continueAfterLimit !== undefined) patch.continueAfterLimit = changes.continueAfterLimit
+    if (changes.continueOnNetwork !== undefined) patch.continueOnNetwork = changes.continueOnNetwork
     if (changes.foldedGroups !== undefined) {
       const keys = await this.foldedKeys(rpc, changes.foldedGroups)
       if (typeof keys === 'string') return { ok: false, error: keys }

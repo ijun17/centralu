@@ -31,7 +31,7 @@ import type { UsageRecorder } from './usage-recorder.js'
  * getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emit' | 'handles' | 'memoryGate' | 'meta' | 'store'> &
-  Pick<SessionEventsHost, 'interruptions' | 'overloadRetry' | 'reports'> &
+  Pick<SessionEventsHost, 'interruptions' | 'turnContinue' | 'reports'> &
   Pick<MailSessionsHost, 'events'> & {
     /** What the stops before this start left (the manager's constructor options) */
     readonly keeperOpts: { updateResume?: UpdateResumeFolder; systemEnd?: SystemEnd | null }
@@ -237,8 +237,8 @@ export class HostTenure {
 
   private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
-    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's
-    this.host.overloadRetry.stopAll()
+    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's. A stop's wait is stored, for the next host (#1415)
+    this.host.turnContinue.stopAll()
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
     // An earlier build that takes over after this one (a rollback) reads what the sessions in a turn owe from report marks (mailbox.md §10.6.3)
@@ -398,6 +398,8 @@ export class HostTenure {
     // An earlier build's delegated turns (#676) are no one's now: cards go to the givers of open work (docs/plans/mailbox.md §10.6.4)
     store.children.dropDelegatedTurns()
     this.keptAtStart = goingOn
+    // The stops the last host left waiting for the network or a usage limit's reset (stored with each session, #1415) are waited for again
+    this.host.turnContinue.restore(this.host.meta.values())
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }
 }

@@ -45,6 +45,10 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+  /** The API a ChatGPT sign-in talks to, or the one a key's base URL names (`AgentAdapter.apiUrl`) */
+  apiUrl(): string {
+    return process.env.OPENAI_BASE_URL || 'https://chatgpt.com'
+  }
   readonly cacheBilling = 'openai' as const
   readonly contextAtRequest = true
   /** What Codex offers against what this adapter limits (#270) */

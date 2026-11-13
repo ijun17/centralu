@@ -8,7 +8,7 @@ import type { DelegationHost } from './delegation-flow.js'
 import type { HandoffFlowHost } from './handoff-flow.js'
 import { HUB_SENDER } from './hub-sender.js'
 import type { LinkedEvent, LinkedReports } from './linked-reports.js'
-import type { OverloadRetry } from './overload-retry.js'
+import type { TurnContinue } from './turn-continue.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { SessionToolsHost } from './session-tools.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
@@ -36,7 +36,7 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     /** The Assistant's reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts) */
-    readonly overloadRetry: Pick<OverloadRetry, 'stands'>
+    readonly turnContinue: Pick<TurnContinue, 'stands'>
   }
 
 /**
@@ -101,7 +101,7 @@ export class LinkedHost {
      * turn that happens to end first; without tracking (or after a host swap) the next turn end takes it.
      *
      * A failure of the input is not always the task's end (#2015): Codex fails it as its turn ends with an error, before the
-     * host sees that error, and the host holds a capacity error and continues the turn after a wait (`OverloadRetry`). So the
+     * host sees that error, and the host holds a capacity error and continues the turn after a wait (`TurnContinue`). So the
      * failure takes the mark down only when no retry stands once the error has been seen (a step later); with one, the turn
      * that is continued still runs the task, and the mark goes with the end it reaches (cancelled, retried, or spent).
      */
@@ -115,7 +115,7 @@ export class LinkedHost {
     const failed = () => {
       this.hubAskTurns.delete(sessionId)
       queueMicrotask(() => {
-        if (!this.host.overloadRetry.stands(sessionId)) this.host.store.settings.deleteAppSetting(key)
+        if (!this.host.turnContinue.stands(sessionId)) this.host.store.settings.deleteAppSetting(key)
       })
     }
     try {

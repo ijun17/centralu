@@ -33,6 +33,8 @@ export const PREFERENCE_COVERAGE: Record<keyof UiPreferences, PreferenceReach> =
   hubAuto: {
     excluded: 'No set_preferences field yet: the call the window makes (prefs.set, and machines.hubAuto for a linked machine) turns it on or off with no card, with the limited credential too (owner decision 2026-11-05, method-rights.ts).',
   },
+  continueAfterLimit: { tool: 'set_preferences', field: 'continueAfterLimit' },
+  continueOnNetwork: { tool: 'set_preferences', field: 'continueOnNetwork' },
   foldedGroups: { tool: 'set_preferences', field: 'foldedGroups' },
   notifyPolicy: { tool: 'set_preferences', field: 'notifications' },
   autoCompact: { tool: 'set_preferences', field: 'autoCompact' },

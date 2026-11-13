@@ -1,8 +1,9 @@
-import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
+import { CONTINUE_WORDS, SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
 import { isInTurn } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { CONTINUE_TEXT, canContinue, interruptionLabel } from '../../components/primitives.jsx'
+import { autoContinueLabel, canContinue, interruptionLabel } from '../../components/primitives.jsx'
+import { formatClock } from '../../app/format.js'
 import { Button } from '../../components/Button.jsx'
 
 /*
@@ -80,10 +81,15 @@ export function InterruptedNote({
   interruption: Interruption
 }) {
   const send = useStore((s) => s.send)
+  const stopContinue = useStore((s) => s.stopContinue)
+  // Centralu continues it by itself (#1415): the wait as the host said it, with going on now or leaving it for the person
+  const wait = autoContinueLabel(interruption, formatClock)
   const why =
     interruption.reason === 'network'
       ? 'A network error ended the last turn before it finished.'
-      : interruption.reason === 'quit'
+      : interruption.reason === 'limit'
+        ? 'The usage limit ended the last turn before it finished.'
+        : interruption.reason === 'quit'
         ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
         : interruption.reason === 'shutdown'
           ? `The last turn did not finish: ${SHUTDOWN_WORDS} while it was running.`
@@ -95,19 +101,31 @@ export function InterruptedNote({
       data-reason={interruption.reason}
       title={interruption.detail}
     >
-      <span className="min-w-0 flex-1 break-words">
-        <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
+      <span key={wait ?? 'stopped'} className="cc-fade min-w-0 flex-1 break-words" data-testid={wait ? 'auto-continue-wait' : undefined}>
+        {wait ? <span className="text-ink">{wait}</span> : <><span className="text-ink">{interruptionLabel(interruption)}</span> — {why}</>}
       </span>
       <Button
         variant="secondary"
         size="sm"
         className="shrink-0"
-        onClick={() => void send(sessionId, CONTINUE_TEXT)}
-        title={`Sends "${CONTINUE_TEXT}"`}
+        onClick={() => void send(sessionId, CONTINUE_WORDS)}
+        title={`Sends "${CONTINUE_WORDS}"`}
         data-testid="interrupted-continue"
       >
-        Continue
+        {wait ? 'Continue now' : 'Continue'}
       </Button>
+      {wait && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="cc-fade shrink-0"
+          onClick={() => void stopContinue(sessionId)}
+          title="Centralu leaves this turn stopped; Continue stays here"
+          data-testid="auto-continue-stop"
+        >
+          Don&apos;t continue
+        </Button>
+      )}
     </p>
   )
 }

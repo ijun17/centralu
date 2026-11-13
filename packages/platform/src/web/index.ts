@@ -213,6 +213,9 @@ class WebAgentPort implements AgentPort {
   clearError(sessionId: string, seq: number) {
     return this.rpc.call('sessions.clearError', { sessionId, seq })
   }
+  stopContinue(sessionId: string) {
+    return this.rpc.call('sessions.stopContinue', { sessionId })
+  }
   listSessions() {
     return this.rpc.call('sessions.list', {})
   }

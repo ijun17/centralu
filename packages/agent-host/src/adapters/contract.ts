@@ -495,6 +495,12 @@ export interface AgentAdapter {
    */
   compactCommand?(focus: string | null): string
   /**
+   * Where the tool's model API is (#1415, #2238): the host asks it for any answer to tell that the network is back before it continues
+   * a turn the network stopped (`TurnContinue`). A request with no credentials, so no quota is spent; any HTTP answer counts. Absent:
+   * nothing to ask, and the continue goes on the probe steps alone
+   */
+  apiUrl?(): string
+  /**
    * Who this tool is, for the screens that draw a row per tool.
    *
    * It lives on the adapter because the adapter is the only thing that knows the tool

@@ -174,6 +174,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'sessions.markRead': 'everyday',
   // Hiding a failure is the person's (an agent's script may not clear what went wrong with it)
   'sessions.clearError': 'window',
+  'sessions.stopContinue': 'window',
 
   // The trash: reading and restoring run; deleting for good asks
   'trash.list': 'everyday',

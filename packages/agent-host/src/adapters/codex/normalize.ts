@@ -285,8 +285,11 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      */
     case 'account/rateLimits/updated': {
       const snapshot = asObj(paramsOf(n, 'account/rateLimits/updated').rateLimits)
-      const reached = str(snapshot.rateLimitReachedType) !== '' || snapshot.spendControlReached === true
+      const reachedType = str(snapshot.rateLimitReachedType)
+      const reached = reachedType !== '' || snapshot.spendControlReached === true
       if (!reached) return []
+      // Credits and spend do not reset with time (#1415): such a limit waits for the person
+      const credits = reachedType.includes('credits') || snapshot.spendControlReached === true
 
       /*
        * `rateLimitReachedType` does not name a window (generated/v2/RateLimitReachedType.ts), so the window that is
@@ -304,6 +307,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
           usedPercent: finite(window.usedPercent),
           windowMins: finite(window.windowDurationMins),
           resumeAt: resetsAt ? new Date(resetsAt * 1000).toISOString() : undefined,
+          ...(credits ? { credits: true } : {}),
         },
       ]
     }

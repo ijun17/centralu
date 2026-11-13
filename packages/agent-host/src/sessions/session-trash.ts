@@ -40,6 +40,7 @@ import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { CardRests } from './card-rest.js'
 import { realOs } from '../os/real.js'
+import type { TurnContinue } from './turn-continue.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -83,6 +84,7 @@ export type SessionTrashHost = {
   readonly resuming: ReadonlyMap<string, unknown>
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   stopWatchingReconnect: (sessionId: string) => void
+  readonly turnContinue: Pick<TurnContinue, 'forget'>
   readonly store: Store
   sweepOrphanHandoffNotes: (projectId?: string) => Promise<void>
   /** The purged session's usage counts not yet written are dropped (the store deleted the written ones, §6.2) */
@@ -423,6 +425,8 @@ export class SessionTrash {
     this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
+    // A wait to continue it goes with it: restored from the trash, it continues nothing by itself (#1415)
+    this.host.turnContinue.forget(sessionId)
     this.host.meta.delete(sessionId)
     await this.host.store.trash.trashSession(sessionId, {
       projectId: m.projectId,
