@@ -56,11 +56,13 @@ else if (a[1].includes('/commits/')) {
 
 describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
   // A pull request's checks are the host's watch (#1324): its form is refused before asking GitHub anything
-  it('refuses a pull request with the usage', () => {
+  it('takes --ref only, with its deadline before or after it, and answers a pull request with the usage', () => {
     const r = run(['77'])
     expect(r.status).toBe(2)
     expect(r.stderr).toContain('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs --ref <branch|sha>')
     expect(r.calls()).toEqual([])
+    expect(run(['--ref', 'main', '--timeout-minutes', '1']).status).toBe(0)
+    expect(run(['--timeout-minutes', '1', '--ref', 'main']).status).toBe(0)
   })
 
   // Windows starts no program through a `#!` line, so there is no direct run to check there
@@ -115,13 +117,6 @@ describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
     const r = run(['--ref', 'main'], 'success', false, false, 'missing')
     expect(r.status).toBe(0)
     expect(r.calls().filter((a) => a[1]?.includes('/actions/runs?'))).toHaveLength(2)
-  })
-
-  it.each([
-    ['--ref', 'main', '--timeout-minutes', '1'],
-    ['--timeout-minutes', '1', '--ref', 'main'],
-  ])('accepts a deadline before or after the ref: %j', (...args) => {
-    expect(run(args).status).toBe(0)
   })
 
   it('enforces the CLI deadline even when a gh subprocess never exits', () => {
