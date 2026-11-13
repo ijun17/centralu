@@ -963,7 +963,7 @@ read (`state`, `outcome`, `next`, `blocker`, `unblock`, `follows`) and the actio
 and the reader's resident ceiling (the sum) falls by 180. A session learns of watches from this definition only: nothing resident names
 them, so on Claude, where `mail` is deferred, a session finds `watch` once it loads the tool. PR 2 (the `#123` source) fits under the same
 ceiling by cutting words, not raising it (owner, 2026-11-13): `"at 16:30" or "every 30m"` → `"at 16:30", "every 30m" or PR "#123"`, and
-`"assistant": the Centralu Assistant, for` → `"assistant": the Assistant, for`; 1,171 → 1,175. Measured with `residentCost`:
+`"assistant": the Centralu Assistant, for` → `"assistant": the Assistant, for`; 1,170 → 1,174. Measured with `residentCost`:
 
 | Seat | Tool | Before | After |
 |---|---|---|---|
