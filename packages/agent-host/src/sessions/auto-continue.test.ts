@@ -221,20 +221,6 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(probes).toBe(0)
   })
 
-  it('a session put to sleep while it waits is woken by the continue, and the note goes to the new process (#2027)', async () => {
-    const hour = 60 * 60_000
-    const { a, id, handle } = await limited(hour)
-    // A stopped turn is at rest: nothing keeps it awake through a wait of hours
-    expect(a.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
-    expect(await a.mgr.processes.sleepSession(id)).toBe(true)
-    expect(a.session(id).live).toBe(false)
-    await vi.advanceTimersByTimeAsync(hour + RESET_MARGIN_MS)
-    expect(a.adapter.created).toHaveLength(2)
-    expect(handle.sent).toEqual([])
-    expect(a.adapter.last.sent).toEqual([LIMIT_NOTE])
-    expect(a.session(id).live).toBe(true)
-  })
-
   it("a Codex 429 with no reset in its data continues at the time its words say, not 30 minutes on", async () => {
     vi.setSystemTime(new Date(2026, 10, 13, 17, 30))
     const a = host()

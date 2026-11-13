@@ -286,8 +286,9 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
 - Tests: `sessions/sleep.test.ts` "a Codex session, on the recording of a real app-server": the real adapter on
   `resume.jsonl` through `SessionManager`; the sleeper puts it to sleep (`session_live asleep`), and the next message
   resumes the thread in a new process and the turn answers with the code word; every recorded line used, none
-  unexpected. Fails with `sleep: false`. `sessions/auto-continue.test.ts`: a session asleep through a usage limit's
-  wait is woken by the continue, and the note goes to the new process. The guards' tests are above.
+  unexpected. Fails with `sleep: false`. The guards' tests are above. A session asleep through a usage limit's wait is
+  woken by the continue, a `deliverMail` like any (§7); a test of it passed on main already (pre-pr's revert check), so
+  it is not part of this change: that path was there for Claude's sleeping sessions.
 - No protocol, store or UI change. The UI comments §4 named describe the old grid wake as history and stay.
 
 ## 5. Outcome B: one shared app-server per account
