@@ -95,7 +95,7 @@ of a tool's:
 | Rule | Why |
 |---|---|
 | A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
-| Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
+| Only a tool whose adapter says so (`capabilities.sleep`): Claude and Codex yes, the ACP tools not yet | Each one's resume was measured to keep the cache. Codex (#2027, [../../plans/sleep-every-tool.md](../../plans/sleep-every-tool.md) §3a): the woken turn read the cache as the live one did at 2 and 16 minutes, for 1, 47 and 513 MB rollouts, and the wake added 3.4-4.8 s, nearly all of it the new process's first model request, so one shared app-server per account was not chosen. An ACP tool sleeps once it is measured to keep nothing unreported past a turn (OpenCode also lost the cache on `session/load`) |
 | Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work (the CLI's own timers included, below), or a tool that cannot report its background work | The same rule as moving a session to a new CLI ([Moving sessions to a newly installed agent CLI](#moving-sessions-to-a-newly-installed-agent-cli-297)): ending the process would end what it holds |
 | Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`), except one whose report is paused over its own background work while it rests (#721, [../delegation/start-agent-steps.md](../delegation/start-agent-steps.md) step 7) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
@@ -122,6 +122,12 @@ asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {sto
 long, conservatively). The adapter looks again a second after the next one is due. A process adopted from a previous
 host reads them back from its conversation's last 400 messages (the transcript has no structured results, so a
 wake-up counts its asked delay from the adoption). The tool mark's tooltip on the sidebar row lists them (its dot says that some run) and says the session stays
-awake until they end. A Codex session is never put to sleep, so its own scheduling needs nothing here.
+awake until they end.
+
+**What a Codex thread keeps past a turn counts too (#2027).** A Codex command's item stays `inProgress` until its process
+exits, and the app-server takes a running command with it when it ends. So a command item a turn's `turn/completed`
+leaves open is listed as background work (kind `shell`) until its `item/completed` arrives, and a goal whose status is
+`active` (Codex starts the goal's turns itself) is listed (kind `other`) until it is cleared, completed or paused; both in
+`CodexChildTracker` (`adapters/codex/child-tracker.ts`).
 
 Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.

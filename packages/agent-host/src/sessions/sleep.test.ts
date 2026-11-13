@@ -1,5 +1,7 @@
+import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -19,6 +21,9 @@ import {
   type SleepSessions,
 } from './sleep.js'
 import { sdk } from '../adapters/claude/sdk-message.test-helpers.js'
+import { PROBLEM, REPLAYED, replayAdapters } from '../adapters/frames/replay-agent.test-helpers.js'
+import { temporaryFolder } from '../adapters/frames/replay.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Putting idle sessions to sleep (#568): a session quiet for the set time, holding nothing a person would lose, has
@@ -400,5 +405,49 @@ describe('a parent and the agents it started (start_agent, #561)', () => {
     w.adapters.get('claude')!.handles.get(parent)!.event({ type: 'turn_complete', sessionId: parent })
     expect(await w.mgr.processes.sleepSession(child)).toBe(true)
     expect(await w.mgr.processes.sleepSession(parent)).toBe(true)
+  })
+})
+
+describe('a Codex session, on the recording of a real app-server (#2027)', () => {
+  it('sleeps once quiet, its app-server ended, and the next message resumes the thread and runs its turn', async () => {
+    const problems: string[] = []
+    const log = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      if (String(a[0]).startsWith(PROBLEM)) problems.push(String(a[0]))
+    })
+    // The session's folder is named after the recording it replays: a turn, the thread resumed in a new process, a turn
+    const root = temporaryFolder('sleep-codex-')
+    const cwd = join(root.path, 'resume')
+    mkdirSync(cwd)
+    const store = new Store()
+    const events: NormalizedEvent[] = []
+    const adapters = replayAdapters(REPLAYED.filter((r) => r.tool === 'codex'))
+    const mgr = new SessionManager(store, adapters, (e) => events.push(e))
+    const rpc = createRpcHandler(mgr, adapters)
+    try {
+      const p = (await rpc('projects.add', { path: cwd })) as { id: string }
+      const { id } = (await rpc('agents.createSession', { projectId: p.id, cwd, tool: 'codex', permissionPreset: 'normal' })) as { id: string }
+      const ends = () => events.filter((e) => e.sessionId === id && e.type === 'turn_complete').length
+      await mgr.inputs.send(id, 'Remember the code word: pelican. Reply with exactly: noted')
+      await vi.waitFor(() => expect(ends()).toBe(1), { timeout: 10_000 * SLOW })
+
+      let now = 0
+      const sleeper = new SessionSleeper({ sessions: mgr, processes: mgr.processes, canSleep: (tool) => !!adapters.get(tool)?.capabilities.sleep, now: () => now })
+      now += DEFAULT_SLEEP_AFTER_MINUTES * MIN
+      expect(await sleeper.sweep()).toEqual([id])
+      expect(events).toContainEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+      expect(mgr.listSessions().find((s) => s.id === id)!.live).toBe(false)
+
+      const before = events.length
+      await mgr.inputs.send(id, 'What was the code word? Answer with the word only.')
+      await vi.waitFor(() => expect(ends()).toBe(2), { timeout: 10_000 * SLOW })
+      const answer = events.slice(before).flatMap((e) => (e.type === 'message_delta' && e.sessionId === id && e.role === 'assistant' ? [e.text] : [])).join('')
+      expect(answer.toLowerCase()).toContain('pelican')
+      expect(problems).toEqual([])
+    } finally {
+      await mgr.tenure.disposeAll()
+      store.close()
+      root.remove()
+      log.mockRestore()
+    }
   })
 })

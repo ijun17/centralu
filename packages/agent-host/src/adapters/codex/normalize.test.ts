@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { approvalDetailFrom, toCodexDecision } from './approvals.js'
+import { asObj } from '../../json-value.js'
 import { CodexChildTracker } from './child-tracker.js'
 import { fileChangesOf } from './items.js'
 import { CompactionMarks, normalizeNotification } from './normalize.js'
@@ -933,5 +934,56 @@ describe('a spawnAgent card held open while its child runs (#843)', () => {
     const out = tracker.release('Ended with the session process')
     expect(out.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'spawn', ok: false }])
     expect(out.flatMap((e) => (e.type === 'notice' ? [e.text] : []))).toEqual(['Background agent "run the tests" stopped: Ended with the session process'])
+  })
+})
+
+describe('what a Codex thread keeps past a turn, when the process ends (#2027)', () => {
+  it('a kept command ends stopped with the process; an active goal leaves the list with no ending, as the thread keeps it', () => {
+    const tracker = new CodexChildTracker(S)
+    // The real frames: the kept command's start and the turn that ended with it running, then the goal set
+    const kept = recordedNotifications('background-kept')
+    const firstEnd = kept.findIndex((n) => n.method === 'turn/completed')
+    for (const n of kept.slice(0, firstEnd + 1)) tracker.own(n)
+    for (const n of recordedNotifications('goal-set', 'thread/goal/updated')) tracker.own(n)
+    const out = tracker.release('Ended with the session process')
+    const lists = out.flatMap((e) => (e.type === 'background_tasks' ? [e] : []))
+    expect(lists).toHaveLength(1)
+    expect(lists[0]!.live).toEqual([])
+    expect(lists[0]!.ended?.map((t) => `${t.kind} ${t.status}`)).toEqual(['shell stopped'])
+    expect(out.flatMap((e) => (e.type === 'notice' ? [e.text] : []))).toEqual([`Background shell "/bin/zsh -lc 'sleep 25; echo kept-done'" stopped: Ended with the session process`])
+  })
+
+  it('a goal alone leaves the list when the process ends', () => {
+    const tracker = new CodexChildTracker(S)
+    for (const n of recordedNotifications('goal-set', 'thread/goal/updated')) tracker.own(n)
+    expect(tracker.release('Ended with the session process')).toEqual([{ type: 'background_tasks', sessionId: S, live: [] }])
+    // Nothing listed, nothing said
+    expect(tracker.release('Ended with the session process')).toEqual([])
+  })
+})
+
+describe('an active goal whose turn was stopped (#2027, #2248 review)', () => {
+  // Real frames, in the order they came: the goal set, then from `interrupt` the turn the person stopped and the turn that started after it
+  const goal = recordedNotifications('goal-set', 'thread/goal/updated')
+  const frames = recordedNotifications('interrupt')
+  const stop = frames.findIndex((n) => n.method === 'turn/completed' && asObj(asObj(n.params).turn).status === 'interrupted')
+  const stopped = frames[stop]
+  const next = frames.slice(stop + 1).find((n) => n.method === 'turn/started')
+  const listed = (out: ReturnType<CodexChildTracker['own']>) => out.flatMap((e) => (e.type === 'background_tasks' ? [e.live.map((t) => t.kind)] : []))
+
+  it('is not listed once the turn ends stopped, so the session can sleep; the next turn that starts lists it again', () => {
+    expect(stopped).toBeDefined()
+    expect(next).toBeDefined()
+    const tracker = new CodexChildTracker(S)
+    expect(listed(goal.flatMap((n) => tracker.own(n)))).toEqual([['other']])
+    expect(listed(tracker.own(stopped!))).toEqual([[]])
+    expect(listed(tracker.own(next!))).toEqual([['other']])
+  })
+
+  it('is listed again when Codex says more of it', () => {
+    const tracker = new CodexChildTracker(S)
+    goal.forEach((n) => tracker.own(n))
+    tracker.own(stopped!)
+    expect(listed(goal.flatMap((n) => tracker.own(n)))).toEqual([['other']])
   })
 })

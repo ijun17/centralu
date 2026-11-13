@@ -26,6 +26,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
+import { asObj, isObj, str } from '../src/json-value.js'
 import { MeasuredHost, type Json } from './measure-tools/host.mjs'
 
 const { values: opt } = parseArgs({
@@ -33,16 +34,26 @@ const { values: opt } = parseArgs({
     'sleep-sec': { type: 'string', default: '20' },
     'gap-sec': { type: 'string', default: '0' },
     'min-read': { type: 'string', default: '0.9' },
-    model: { type: 'string', default: 'haiku' },
+    model: { type: 'string', default: '' },
+    // Another tool that sleeps (Codex, #2027): `--tool codex --model gpt-5.6-luna`. With `--idle-sec 120 --arm resumed|live`, a restart in place of the sleep, for a tool that does not sleep (docs/plans/sleep-every-tool.md M1b, M3)
+    tool: { type: 'string', default: 'claude' },
+    'idle-sec': { type: 'string', default: '0' },
+    arm: { type: 'string', default: 'resumed' },
+    // Instead of the idle time: a background shell started in the turn, and whether it survives the restart (M3)
+    background: { type: 'boolean', default: false },
   },
 })
 
+if (!opt.model && (opt.tool ?? 'claude') === 'claude') opt.model = 'haiku'
 const root = mkdtempSync(join(tmpdir(), 'cc-probe-resume-cache-'))
 const sleepMs = Number(opt['sleep-sec']) * 1000
-const ENV = {
+/** A restart in place of the sleep (M1b, M3): the host must not put the session to sleep on its own meanwhile, so its quiet period is a day */
+const restartArm = opt.background || Number(opt['idle-sec']) > 0
+const ENV: Record<string, string> = {
+  ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
   ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-  CC_SLEEP_AFTER_MS: String(sleepMs),
+  CC_SLEEP_AFTER_MS: String(restartArm ? 24 * 3600_000 : sleepMs),
 }
 
 function project(): string {
@@ -62,17 +73,23 @@ function uniqueBlock(lines = 700): string {
   return Array.from({ length: lines }, (_, i) => `Line ${i}: ${words[i % 10]} ${randomBytes(3).toString('hex')} ${words[(i * 7) % 10]}`).join('\n')
 }
 
-type Request = { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cacheTtl?: string }
-const requestsOf = (events: Json[]): Request[] => events.filter((e) => e.type === 'usage_update' && e.request).map((e) => e.request as Request)
+type Request = { inputTokens: number; cacheReadTokens: number; cacheCreationTokens?: number; cacheTtl?: string }
+const isRequest = (v: unknown): v is Request => isObj(v) && typeof v.inputTokens === 'number' && typeof v.cacheReadTokens === 'number'
+const requestsOf = (events: Json[]): Request[] =>
+  events.flatMap((e): Request[] => {
+    const r: unknown = e.request
+    return e.type === 'usage_update' && isRequest(r) ? [r] : []
+  })
 const total = (r: Request) => r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens ?? 0)
 const show = (label: string, r: Request | undefined) =>
   console.log(
     r
-      ? `  ${label}: input ${r.inputTokens}, read ${r.cacheReadTokens}, wrote ${r.cacheCreationTokens} of ${total(r)} (read ${(r.cacheReadTokens / total(r)).toFixed(3)}), ttl ${r.cacheTtl ?? '-'}`
+      ? `  ${label}: input ${r.inputTokens}, read ${r.cacheReadTokens}, wrote ${String(r.cacheCreationTokens)} of ${total(r)} (read ${(r.cacheReadTokens / total(r)).toFixed(3)}), ttl ${r.cacheTtl ?? '-'}`
       : `  ${label}: no request seen`,
   )
 
 const say = 'Reply with the single word: ok'
+const code = `KUMQUAT-${randomBytes(3).toString('hex')}`
 let failed = false
 const host = new MeasuredHost(join(root, 'data'), ENV)
 try {
@@ -80,24 +97,66 @@ try {
   await host.start()
   const dir = project()
   const p = await host.rpc('projects.add', { path: dir })
-  await host.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
-  const s = await host.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude', model: opt.model, permissionPreset: 'normal' })
-  if (s.model !== opt.model) await host.rpc('agents.updateSettings', { sessionId: s.id, model: opt.model })
+  const projectId = str(p.id)
+  await host.rpc('projects.setTrusted', { projectId, trusted: true })
+  const s = await host.rpc('agents.createSession', { projectId, cwd: dir, tool: opt.tool, ...(opt.model ? { model: opt.model } : {}), permissionPreset: opt.tool === 'cursor-agent' ? 'auto' : 'normal' })
+  const sessionId = str(s.id)
+  if (opt.model && s.model !== opt.model) await host.rpc('agents.updateSettings', { sessionId, model: opt.model })
 
   console.log(`# warm (${opt.model})`)
-  await host.turn(s.id, `Reference text follows; do not repeat it.\n\n${uniqueBlock()}\n\n${say}`)
+  await host.turn(sessionId, `Remember this code word: ${code}. Reference text follows; do not repeat it.\n\n${uniqueBlock()}\n\n${say}`)
   const tWarm = Date.now()
-  const warm = requestsOf(await host.turn(s.id, say)).at(-1)
+  const warm = requestsOf(await host.turn(sessionId, say)).at(-1)
   const warmMs = Date.now() - tWarm
   show('warm turn', warm)
   console.log(`  the turn took ${warmMs} ms (send to its end)`)
 
+  if (restartArm) {
+    // The idle time passes, then (arm `resumed`) `agents.restartSession` swaps the process as a sleep and a wake would; `live` leaves it
+    if (opt.background) {
+      const mark = '30' + Math.floor(Math.random() * 90 + 10)
+      await host.turn(sessionId, `Start this exact shell command in the background and reply "started" as soon as it is started: nohup sleep ${mark} >/dev/null 2>&1 &`)
+      await new Promise((r) => setTimeout(r, 2000))
+      const find = () => execFileSync('ps', ['-axo', 'pid,ppid,command']).toString().split('\n').filter((l) => new RegExp(`sleep ${mark}\\b`).test(l) && !l.includes('grep')).map((l) => l.trim())
+      const before = find()
+      await host.rpc('agents.restartSession', { sessionId })
+      await new Promise((r) => setTimeout(r, 1500))
+      const after = find()
+      console.log('RESULT ' + JSON.stringify({ tool: opt.tool, background: true, childBeforeRestart: before, childAfterRestart: after }))
+      for (const l of after) process.kill(Number(l.split(/\s+/)[0]), 'SIGTERM')
+      await host.stop()
+      rmSync(root, { recursive: true, force: true })
+      process.exit(0)
+    }
+    await new Promise((r) => setTimeout(r, Number(opt['idle-sec']) * 1000))
+    let restartMs: number | null = null
+    if (opt.arm === 'resumed') {
+      const t = Date.now()
+      await host.rpc('agents.restartSession', { sessionId })
+      restartMs = Date.now() - t
+    }
+    const mark = host.events.length
+    const sent = Date.now()
+    const turn = await host.turn(sessionId, 'What was the code word I told you to remember? Reply with only the word. Do not use any tool.')
+    const recalled = turn.filter((e) => e.type === 'message_delta').map((e) => str(e.text)).join('').includes(code)
+    const first = turn.findIndex((e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
+    const firstAt = first < 0 ? undefined : host.eventAt[mark + host.events.slice(mark).findIndex((e) => e === turn[first])]
+    const firstMs = firstAt === undefined ? null : firstAt - sent
+    const woken = requestsOf(turn).at(-1)
+    show('woken turn', woken)
+    const r = woken ? woken.cacheReadTokens / total(woken) : null
+    console.log('RESULT ' + JSON.stringify({ tool: opt.tool, arm: opt.arm, idleSec: Number(opt['idle-sec']), restartMs, ttftMs: firstMs, turnMs: Date.now() - sent, warmTurnMs: warmMs, warm, woken, cacheRead: r, recalledCode: recalled, answer: JSON.stringify(turn.filter((e) => e.type === 'message_delta' || e.type === 'message').map((e): unknown => e.text)).slice(0, 120), code }))
+    await host.stop()
+    rmSync(root, { recursive: true, force: true })
+    process.exit(0)
+  }
+
   console.log(`\n# waiting for the host to put it to sleep (CC_SLEEP_AFTER_MS=${sleepMs})`)
   const t0 = Date.now()
-  const slept = () => host.events.some((e) => e.type === 'session_live' && e.sessionId === s.id && e.live === false)
+  const slept = () => host.events.some((e) => e.type === 'session_live' && e.sessionId === sessionId && e.live === false)
   while (!slept() && Date.now() - t0 < sleepMs + 120_000) await new Promise((r) => setTimeout(r, 250))
-  const listed = (await host.rpc('sessions.list', {})) as Json[]
-  const asleep = slept() && listed.find((x) => x.id === s.id)?.live === false
+  const listed: unknown = await host.rpc('sessions.list', {})
+  const asleep = slept() && (Array.isArray(listed) ? listed : []).map(asObj).find((x) => x.id === sessionId)?.live === false
   console.log(`  ${asleep ? `asleep after ${Math.round((Date.now() - t0) / 1000)} s of quiet` : 'never slept'}`)
   if (!asleep) failed = true
 
@@ -109,7 +168,7 @@ try {
 
   console.log('\n# a message wakes it')
   const sent = Date.now()
-  const turn = await host.turn(s.id, say)
+  const turn = await host.turn(sessionId, say)
   const wokenMs = Date.now() - sent
   const woke = turn.find((e) => e.type === 'session_live' && e.live === true)
   const woken = requestsOf(turn)[0]

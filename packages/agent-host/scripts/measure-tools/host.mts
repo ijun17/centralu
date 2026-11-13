@@ -17,6 +17,8 @@ export type ApprovalPolicy = (event: Json) => 'allow' | 'deny' | 'always'
 
 export class MeasuredHost {
   readonly events: Json[] = []
+  /** When each of `events` arrived (ms since the epoch), index for index */
+  readonly eventAt: number[] = []
   private proc: ChildProcess | null = null
   private ws: WebSocket | null = null
   private n = 1
@@ -111,6 +113,7 @@ export class MeasuredHost {
     }
     if (f.kind !== 'event') return
     this.events.push(f.event)
+    this.eventAt.push(Date.now())
     if (f.event.type === 'approval_request') {
       const decision = this.approvals(f.event)
       this.answered.push({ kind: String(f.event.detail?.kind ?? ''), tool: f.event.detail?.tool, decision })
