@@ -106,6 +106,21 @@ describe('the thread in the inbox', () => {
     expect(mineHtml).toContain('whitespace-pre-wrap')
   })
 
+  it('draws others’ messages on the session panel’s surface, so they read as cards on the Inbox panel, and the person’s own on none (#2242)', () => {
+    const at = 1_800_000_000_000
+    const { html } = render(
+      view({
+        messages: [
+          { id: 'm1', seq: 1, sender: parser, kind: 'note', urgent: false, body: 'hello', facts: {}, createdAt: at },
+          { id: 'm2', seq: 2, sender: you, kind: 'answer', urgent: false, body: 'hi', facts: {}, createdAt: at },
+        ],
+      }),
+    )
+    const theirs = html.slice(html.indexOf('data-testid="mail-message-1"'), html.indexOf('data-testid="mail-message-2"'))
+    expect(theirs).toContain('bg-surface-floor')
+    expect(html.slice(html.indexOf('data-testid="mail-message-2"'))).not.toContain('bg-surface-floor')
+  })
+
   it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {
     const { html, text } = render(
       view({

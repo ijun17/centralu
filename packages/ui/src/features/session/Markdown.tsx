@@ -1,3 +1,4 @@
+import { startNumberedLists } from '@cc/core'
 import { errorMessage } from '@cc/protocol/client'
 import { Fragment, memo, useRef, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Options, type UrlTransform } from 'react-markdown'
@@ -28,7 +29,7 @@ import { ReplyImage } from './ReplyImage.jsx'
  * which reads only a path one of the session's replies wrote (`ReplyImage`). Elsewhere a local image is not loaded.
  */
 export const Markdown = memo(function Markdown({
-  text,
+  text: written,
   projectRoot,
   projectId = null,
   sessionId = null,
@@ -56,6 +57,8 @@ export const Markdown = memo(function Markdown({
    * line break react-markdown itself puts between top-level blocks, so the page is the same as one parse of the whole.
    */
   const split = useRef<MarkdownSplit | null>(null)
+  // A numbered list that starts at 2 or more right under a line of prose is a list here as it is to the writer (#2242)
+  const text = startNumberedLists(written)
   if (split.current?.text !== text) split.current = advanceSplit(split.current, text)
   return (
     <div className={`cc-md max-w-[80ch] ${TONE_CLASS[tone]}`} data-testid="markdown">
