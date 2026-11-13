@@ -46,6 +46,16 @@ class Versioned extends Store {
     newest = 65
     this.migrate()
   }
+
+  /** Runs every step up to `version` (this build's newest, for a store opened as the next host opens it) */
+  upgradeTo(version: number): void {
+    newest = version
+    try {
+      this.migrate()
+    } finally {
+      newest = 65
+    }
+  }
 }
 
 function v64Store(): Versioned {
@@ -479,12 +489,7 @@ describe('holds an earlier build left, on a store opened from v64 (#2243)', () =
     heldV64(store, S3, [budget], 'budget')
 
     // This build opens the store: steps 65 to 72 run (72 finds nothing yet), and then the host's start moves what the v64 build left pending
-    newest = 72
-    try {
-      store.migrate()
-    } finally {
-      newest = 65
-    }
+    store.upgradeTo(72)
     expect(store.mailbox.heldRows()).toEqual([])
     expect(movePendingThreadMail(store.raw, NOW, () => null).recipients).toBe(3)
     expect(store.mailbox.heldRows().map((h) => [h.messageId, h.held])).toEqual([[request, 'policy']])
