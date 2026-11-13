@@ -53,7 +53,7 @@ describe('the method classification (#1405)', () => {
       expect(limitedRight(m, {}), m).toBe('window')
     // #1970: a program of this user must not be able to plant a system end
     expect(limitedRight('host.systemEnding', {})).toBe('window')
-    for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession']) expect(limitedRight(m, {}), m).toBe('link')
+    for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession', 'host.apps', 'host.appCall', 'host.appCancel', 'host.appNotice']) expect(limitedRight(m, {}), m).toBe('link')
     for (const m of ['orchestrator.tool', 'orchestrator.tools']) expect(limitedRight(m, {}), m).toBe('bridge')
   })
 

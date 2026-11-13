@@ -1,5 +1,6 @@
-import { HubMethods, type HubAskParams, type HubAskResult, type HubProject } from '@cc/protocol'
+import { HubMethods, type HubAskParams, type HubAskResult, type HubProject, type LinkedAppNoticeParams } from '@cc/protocol'
 import type { MailAcross } from '../mail/across.js'
+import type { LinkedAppCalls } from './linked-app-calls.js'
 import { rpcError } from '../rpc-error.js'
 import type { ReverseCalls } from './link-deps.js'
 
@@ -24,8 +25,27 @@ export function reverseCalls(o: {
   selfName: () => string
   /** Mail across linked machines (mail/across.ts): a machine's session's message, what became of mail, and a search */
   across?: Pick<MailAcross, 'fromMachine' | 'rows' | 'answerFind'>
+  /**
+   * This computer's apps used from the machine (#1938, docs/plans/remote-hub.md §13.5): answered whatever the switch says,
+   * as `LinkedAppCalls` decides who may reach what; and a machine's app's notice to a session here that called it
+   */
+  apps?: { calls: Pick<LinkedAppCalls, 'list' | 'call' | 'cancel'>; notice(machine: { id: string; name: string }, p: LinkedAppNoticeParams): Promise<void> }
 }): ReverseCalls {
   return async (machine, method, params, signal) => {
+    const apps = o.apps
+    if (apps && method === 'hub.apps') {
+      const p = read(HubMethods['hub.apps'].params.safeParse(params))
+      return { apps: await apps.calls.list(machine, p.session, p.start) }
+    }
+    if (apps && method === 'hub.appCall') return apps.calls.call(machine, read(HubMethods['hub.appCall'].params.safeParse(params)))
+    if (apps && method === 'hub.appCancel') {
+      apps.calls.cancel(machine, read(HubMethods['hub.appCancel'].params.safeParse(params)).call)
+      return { ok: true }
+    }
+    if (apps && method === 'hub.appNotice') {
+      await apps.notice(machine, read(HubMethods['hub.appNotice'].params.safeParse(params)))
+      return { ok: true }
+    }
     const across = o.across
     if (across && method === 'hub.mail') return across.fromMachine(machine, read(HubMethods['hub.mail'].params.safeParse(params)))
     if (across && method === 'hub.find') return across.answerFind(machine, read(HubMethods['hub.find'].params.safeParse(params)))
@@ -34,7 +54,7 @@ export function reverseCalls(o: {
       return { ok: true }
     }
     if (method !== 'hub.projects' && method !== 'hub.askProject') {
-      throw rpcError(`Unknown method: ${method}. A linked machine may ask this computer only hub.projects and hub.askProject${across ? ', and mail with hub.mail, hub.mailRows and hub.find' : ''}.`)
+      throw rpcError(`Unknown method: ${method}. A linked machine may ask this computer only hub.projects and hub.askProject${across ? ', and mail with hub.mail, hub.mailRows and hub.find' : ''}${apps ? ', and its apps with hub.apps, hub.appCall, hub.appCancel and hub.appNotice' : ''}.`)
     }
     if (!o.allowed(machine.id)) {
       throw rpcError(`${o.selfName()} does not let sessions on ${machine.name} ask its projects. The person can turn that on in Settings → Machines on ${o.selfName()}.`)

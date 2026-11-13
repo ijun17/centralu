@@ -1461,8 +1461,9 @@ words). No live model, no real ssh link.
 
 ## 13. A project's app used from another machine: Design (#1938)
 
-Design, 2026-11-13, for the build that follows; no code yet. File and line citations are of PR #2235's tree (one `app`
-tool and `SessionAppsHub`, branch `lane-apps-tool`), on which this builds, unless marked "main".
+Design, 2026-11-13. File and line citations are of PR #2235's tree (one `app` tool and `SessionAppsHub`), on which this
+builds, unless marked "main". PR 1 (a hub's sessions and the agents they start on machines) is built; where it differs
+from the design below, §13.15 says so and why.
 
 ### 13.1 Decided (owner, 2026-11-12, on #1938)
 
@@ -1556,11 +1557,14 @@ Each host decides only what it owns.
   session and names the machine, as `ask_project` across does (ask-project-flow.ts l.342). "Always" is read as once:
   `project_consents` has foreign keys to local projects (§12.6). The attachment then lasts for that session
   (`session_apps:<session>`, consent `once`), and a handoff copies it like any other (#1638, `carry`).
-- **An app's capability question** (`uses`, desk.ts l.185) during a call from elsewhere is asked on the app's host.
-  Its origin session is not on that host, so `askCapability` already falls back to the question on the app's own row
-  (sessions/host-cards.ts l.187-215: `meta.has(sessionId)` is false for a qualified id). For an app on the hub that is
-  the hub's window. For an app on a machine, PR 1 makes sure the hub's window shows that machine's app questions
-  [unchecked whether it does today].
+- **An app's capability request** (`uses`) during a call from elsewhere is decided on the app's host, by the one rule
+  for app calls since #2245, `BrokerDesk.permit` (security-boundaries/app-servers.md): a remembered deny refuses, an
+  allow at the stamp allows, and a trusted project's declared request runs without a card unless the lowest preset among
+  the calls open into the app is `safe`. A call from elsewhere has no preset on the app's host, so it counts as `safe`
+  there (`appAgentPreset`'s default): its declared requests are asked, never run unasked. Its origin session is not on
+  that host, so `askCapability` puts the question on the app's own row (sessions/host-cards.ts: `meta.has(sessionId)` is
+  false for a qualified id). The rule is the design's, unchanged; only its owner moved from the desk's old gate to
+  `permit`. Whether the hub's window shows the question of a machine's app is unchecked in PR 1 (§13.15).
 - **The limited credential** (#1405): the new `host.*` methods are `'link'` in `METHOD_RIGHTS`
   (transport/method-rights.ts), and `hub.*` calls are answered only on the link's own connection. A script reaches an
   app on another machine only through its session's `app` tool on its session's host, after the same gates, so never
@@ -1664,13 +1668,16 @@ finds no such local app, grants nothing and keeps the element, stored-shapes.md 
 a dot, links/machine-ids.ts on main l.7-10), and the copy's switch is an app setting. §13.13 question 1 option (a)
 needs one step (a kind on `machine_ask_consents`); its number comes from the orchestrator.
 
-**Pull requests** (each self-contained; after PR #2235 lands):
+**Pull requests** (each self-contained, landing in this order):
 
-1. Both directions' list and call for the hub's sessions and the hub's started agents on machines (§13.2-§13.6),
-   notices both ways, `apps: true` on the offer, the hub's window showing a machine's app questions.
-2. The copy's switch (after question 2), the one-time merge of §13.8 done on the real pair and recorded, and a
-   machine's other sessions reaching the hub's apps (after question 1).
-3. Machine to machine through the hub (#2067).
+1. A hub's sessions using a machine's apps, and the agents they start on a machine using the parent project's apps on
+   the hub (§13.2-§13.6): both directions' list and call, cancel and `run_status`, notices both ways, `apps: true` on
+   the offer.
+2. The copy's switch, "Off on this computer" (`app_off:<project>/<app>`, §13.7), and the steps and a dry-run readout of
+   the one-time merge of §13.8; the merge itself is done on the owner's machines after it lands.
+3. Machine to machine through the hub (#2067), and a machine's other sessions reaching the hub's apps behind the owner's
+   card (§13.13 question 1), remembered per machine in a table of its own (store step 74; why a table and not a column is
+   said there).
 
 ### 13.10 Risks and failure cases
 
@@ -1697,9 +1704,10 @@ Each fails with its part disabled.
   machine; the machine away refused naming it, nothing ran; the link dropped mid-call; `run_status` after reconnect; a
   cancel aborting the run there; a machine from before it.
 - links/reverse-app-calls.test.ts, real hosts as links/reverse-asks.test.ts: a started agent calls its parent
-  project's hub app with no card; under `normal` a write tool asks in its own card; its checkout's copy is not given;
-  another machine session refused; a hub that did not offer apps is not called; a notice from the hub's app arrives,
-  and one with another machine's address does not verify.
+  project's hub app with no card, recorded on the hub under its qualified id; its checkout's copy is not given; a
+  session the hub has no record of starting is listed nothing, whatever the machine says; a hub that did not offer apps
+  is not called and the copy stays; a notice from the hub's app arrives, and one to a session without the app is
+  refused.
 - apps/external: `off` never starts, `resumeBusy` skips it, a call is refused with the reason.
 - protocol.test.ts golden fixtures for every added method and field; e2e/older-host.spec.ts for `off`'s default.
 
@@ -1717,23 +1725,13 @@ called from the Mac shown in the Mac's window.
 - A generic import of an app's data: once, for one app (§13.8).
 - Forwarding progress lines: later, if a long call needs them.
 
-### 13.13 Open questions for the owner
+### 13.13 The owner's answers (2026-11-13, on #1938)
 
-1. **A machine's session that is not a started agent, using the hub's apps** (the reverse direction, off by default,
-   §3 rule 2). (a) Behind the machine's existing switch (§12.7), the app shared, and a card on the hub as §12.7's pair
-   card is, shown on the app's row in the hub's window since no hub session gets a task, remembered per pair. It keeps
-   "the reached side's person consents", so a compromised machine reaches nothing by default; it costs a store step (a
-   kind on `machine_ask_consents`, which today cannot tell asking from using apps). (b) The switch plus a card the
-   machine's host raises in its own session: no store step and no new card, but with the switch on the hub trusts the
-   machine's host to have asked. (c) Started agents only; other machine sessions are refused. **Recommended: (a)**,
-   the rule the owner added in §12.7; (c) is what PR 1 builds until then.
-2. **How the copy in the other checkout is kept off.** (a) "Off on this computer" on the app's row in that project's
-   Settings → Apps: the copy never starts; that checkout's own sessions use the other project's app by attaching it
-   by name, and started agents get it anyway. (b) (a) plus "use <project> on <machine> instead": that checkout's
-   sessions get the named app under the same name without attaching; less friction, more code (a target to pick, and
-   to keep when that machine or project goes). (c) No switch: the board's own `queue-driver.json` keeps the copy from
-   guarding main: a per-app fix, which the issue ruled out, and the copy still keeps a queue of its own.
-   **Recommended: (a)**: least code, nothing inferred, and naming the project stays the one way in, as decided.
+1. **A machine's session that is not a started agent, using the hub's apps: (a).** The hub shows one approval card on
+   that app's row and remembers the answer per machine. The owner added that the card shows in the Inbox like other
+   approval cards. Until it lands (PR 3), only the agents the hub's sessions started reach the hub's apps.
+2. **The copy in the other checkout: (a).** "Off on this computer" on the app's row in that project's Settings → Apps
+   (PR 2); with the Inbox card above, the only layout addition.
 
 ### 13.14 What this rests on
 
@@ -1742,3 +1740,32 @@ issue and its decision comment, and §12.6 and §12.7. Not checked: whether the 
 questions today (PR 1); how opened.mjs treats an entry without `notice` (PR 2); whether `queue_merge` on a machine
 whose `queue-driver.json` says `drive: false` still starts a queue there (moot once the copy is off); the id under which
 a machine names a hub's project beyond `hubs.projects()`. No measurement and no run over a real link.
+
+### 13.15 As built: PR 1
+
+Where the code differs from the design above, and why:
+
+- **No user-folder apps across the link.** An app ref names a project, and a user-folder app's is null, so a machine's
+  user-folder app could not be told from the hub's own. A hub session reaches a machine's shared and root apps only.
+- **Machine to hub is withdrawn with `hub.appCancel`, not `call.cancel`.** The machine's call to the hub is cut by its
+  own timeout, which would cancel the run there through `call.cancel`; a run that outlives the caller's wait or a dropped
+  link must carry on, so only an explicit cancel (the caller's abort) withdraws it. Both directions now cancel the same way.
+- **No `AppCaller.elsewhere`.** Nothing reads it: the run row keeps the qualified session id, which already names the
+  machine. One field fewer to keep in step.
+- **A call from elsewhere counts as `safe`** on the app's host, for the app's own agent and its capability requests
+  (§13.4). The caller's preset is on another host, and an unknown preset must never widen what runs unasked.
+- **The list starts an app on demand.** `host.apps` / `hub.apps` take an optional `start {projectId, appId}`: an app that
+  never listed its tools since its host started is started there first, as attaching or listing an app here starts it,
+  so a remote app's tools are known before its first call.
+- **The name is `<machine>/<project>/<app>`** in `find_apps`, and `attach_app` reads it back; `<project>/<app>` works when
+  the project name is unique across this host and its linked hosts.
+- **Notices** go through the host's `appNotice` port (`linkedNotices`, links/apps-across.ts): a notice to a qualified
+  session id is passed to that host, which delivers it only to a session whose apps include the sender now. desk.ts and
+  notices.ts are unchanged.
+- **What a hub gave a started agent is remembered with the session** (`hub_apps:<session>`, an app setting that goes with
+  the session; stored-shapes.md). After the machine's host restarts, and before that hub offers again, its apps keep their
+  names and answer that the hub is away, and the checkout's copy stays withheld (§13.5, §13.6). Only the copy in the
+  session's own project is withheld, never a user-folder app of the same id.
+- **A cancel that overtakes its call** is kept on the app's host, and the call never starts. A link lost during a call is
+  never sent again by itself: it ends as "may or may not have done this", with the run id when it is known.
+- **Not in PR 1:** the hub's window showing a machine's app capability question (unchecked whether it does).

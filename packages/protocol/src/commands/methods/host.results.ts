@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { HostRequest, UpdateStatus } from '../../entities.js'
+import { LinkedAppCallResult, LinkedAppsResult } from '../../linked-apps.js'
 import {
   HostActivity,
   HostLastAnswerResult,
@@ -84,11 +85,16 @@ export const hostResults = {
   'host.handover': z.object({ ok: z.literal(true) }),
   'host.systemEnding': z.object({ ok: z.literal(true) }),
   // `mail`: this host takes mail from the hub's side (`host.mail`, #2067 item 2), so the hub's task for a child here says to mail
-  'host.hubOffer': z.object({ ok: z.literal(true), mail: z.boolean().optional() }),
+  // `apps`: this host answers `host.apps` and `host.appCall` from the hub (#1938)
+  'host.hubOffer': z.object({ ok: z.literal(true), mail: z.boolean().optional(), apps: z.boolean().optional() }),
   // As `hub.mail` answers (machines-hub.ts `HubMailResult`, which the window's bundle leaves out, #1648)
   'host.mail': z.union([
     z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional() }),
     z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) }),
   ]),
   'host.mailRows': z.object({ ok: z.literal(true) }),
+  'host.apps': LinkedAppsResult,
+  'host.appCall': LinkedAppCallResult,
+  'host.appCancel': z.object({ ok: z.literal(true) }),
+  'host.appNotice': z.object({ ok: z.literal(true) }),
 } as const

@@ -33,7 +33,7 @@ export class ProjectConsents {
     callerSessionId: string,
     toProjectId: string,
     access: ProjectConsentKind,
-    what: { text: string; app?: { appId: string; name: string }; session?: { id: string; name: string } },
+    what: { text: string; app?: { appId: string; name: string }; session?: { id: string; name: string }; machine?: { name: string; project: string } },
     signal?: AbortSignal,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const caller = this.host.meta.get(callerSessionId)
@@ -43,6 +43,7 @@ export class ProjectConsents {
     if (fromId === toProjectId) return { ok: true }
     const projects = this.host.store.projects.listProjects()
     const from = projects.find((p) => p.id === fromId)
+    if (from && what.machine) return this.ensureLinkedAccess(callerSessionId, from, toProjectId, access, { ...what, machine: what.machine }, signal)
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
     if (this.host.store.permissions.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
@@ -75,6 +76,37 @@ export class ProjectConsents {
       return { ok: false, error: `The person did not allow ${from.name} to reach ${to.name} this way. Do not ask again unless they tell you to.` }
     }
     return { ok: false, error: `The question to the person was withdrawn before they answered, so ${to.name} was not reached.` }
+  }
+
+  /**
+   * The same card for a project on a linked machine (#1938, as ask_project's across, docs/plans/remote-hub.md §13.4): it
+   * names the machine, and "always" is read as allow once, since a remembered consent is a row tied to two projects of
+   * this computer
+   */
+  private async ensureLinkedAccess(
+    callerSessionId: string,
+    from: { id: string; name: string },
+    toProjectId: string,
+    access: ProjectConsentKind,
+    what: { text: string; app?: { appId: string; name: string }; machine: { name: string; project: string } },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const label = `${what.machine.project} on ${what.machine.name}`
+    const decision = await this.host.hostCards.askHost(
+      callerSessionId,
+      {
+        kind: 'project_access',
+        access,
+        from: { id: from.id, name: from.name },
+        to: { id: toProjectId, name: what.machine.project, machine: what.machine.name },
+        text: what.text,
+        ...(what.app ? { app: what.app } : {}),
+      },
+      signal,
+    )
+    if (decision === 'allow' || decision === 'always') return { ok: true }
+    if (decision === 'deny') return { ok: false, error: `The person did not allow ${from.name} to reach ${label} this way. Do not ask again unless they tell you to.` }
+    return { ok: false, error: `The question to the person was withdrawn before they answered, so ${label} was not reached.` }
   }
 
   /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */

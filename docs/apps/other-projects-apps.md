@@ -94,3 +94,10 @@ name, and approval follows the calling session's preset (decision 5).
 the store's settings table (`session_apps:<session>`), so it survives the host restarting and the
 session resuming. It is checked again on every count: sharing turned off, the "always" revoked,
 either project untrusted, or the app becoming unusable takes it away at once, on every CLI.
+
+**On another machine** (#1938, [plans/remote-hub.md](../plans/remote-hub.md) §13). On a hub, `find_apps` also lists
+what each connected machine lets this session attach, as `<machine>/<project>/<app>`, and names a machine it could not
+ask. `attach_app` takes that name (or `<project>/<app>` when the project name is unique), with the project's card naming
+the machine; "always" is read as once, as for `ask_project` across machines. The record keeps the app under the
+machine's qualified project id. Calls are forwarded to the app's machine and recorded there under the hub's session; a
+machine that is away is answered as away, never by a copy here.

@@ -383,6 +383,11 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   // From a hub that offered on the same connection only (rpc.ts), as `host.hubOffer` (#2067 item 2)
   'host.mail': 'link',
   'host.mailRows': 'link',
+  // From a hub that offered apps on the same connection only (rpc.ts), as `host.mail` (#1938)
+  'host.apps': 'link',
+  'host.appCall': 'link',
+  'host.appCancel': 'link',
+  'host.appNotice': 'link',
 
   // The window's own state, preferences, themes and approval rules
   'workspace.save': 'window',

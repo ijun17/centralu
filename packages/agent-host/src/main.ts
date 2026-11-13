@@ -73,6 +73,8 @@ import { Router } from './links/router.js'
 import { hubSelfId, linkDepsFor, storeProjectOrder } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
+import { LinkedApps } from './links/linked-apps.js'
+import { appsPeers, hubAppCalls, hubAppsMemory, linkedNotices, machineAppCalls } from './links/apps-across.js'
 import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
@@ -416,8 +418,15 @@ const externalApps = new ExternalApps({
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
 onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_changed' }))
+/*
+ * A project's app used from another machine (#1938, docs/plans/remote-hub.md §13): the apps of the hosts this one links,
+ * and of the hub that started a session here, reached by the session's own app path. Their hosts are wired below
+ */
+const linkedApps = new LinkedApps({ remember: hubAppsMemory(store.settings) })
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
-mgr.apps.useExternalApps(externalApps)
+mgr.apps.useExternalApps(externalApps, { linked: linkedApps })
+/** A project's name here, as a linked host's session reads it beside its app (#1938) */
+const projectNameHere = (id: string): string => store.projects.listProjects().find((p) => p.id === id)?.name ?? id
 /*
  * User-folder apps become projects in place (#1141): each one, once, with what was kept under its old key carried to its
  * new one, and the sessions this manager already loaded moved with it. It runs once this host is ready (below).
@@ -679,6 +688,8 @@ const links = new Links(linkDepsFor(store, {
    */
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
   hubMail: true,
+  // This hub's apps used by the agents its sessions started on a machine (#1938, §13.5)
+  hubApps: true,
   // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review)
   mailReady: () => hostMailbox.across.changed(),
   // When agents compact: this hub's setting governs the machines it links (#1376)
@@ -692,6 +703,18 @@ const links = new Links(linkDepsFor(store, {
     selfName: hubName,
     // Every session on a machine mails every session this hub reaches, and finds them (#2067, docs/plans/linked-mail.md §5 to §8)
     across: hostMailbox.across,
+    apps: {
+      calls: hubAppCalls(externalApps, {
+        selfName: hubName,
+        // The project a started agent works for: its parent's, from this hub's own record of it
+        parentProject: (id) => {
+          const parent = mgr.linkedHost.remoteAgentParent(id)
+          return parent ? mgr.sessionProject(parent) : null
+        },
+        projectName: projectNameHere,
+      }),
+      notice: (machine, p) => mgr.apps.linkedNoticeIn(machine.id, p),
+    },
   }),
 }))
 /*
@@ -710,6 +733,9 @@ hostMailbox.across.usePeers(
 // A machine that takes mail from this hub is told so in its children's task (#2067 item 2)
 mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
 mgr.useLinkedHubs(hubs)
+// The hosts whose apps a session here uses (#1938): this hub's machines, and the hub that started a session here
+linkedApps.usePeers(appsPeers({ machines: links, hubs, settings: store.settings }))
+mgr.apps.useLinkedNotices(linkedNotices({ machines: links, hubs }))
 mgr.useHubName(hubName)
 mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
@@ -797,6 +823,8 @@ const router: Router = new Router({
     updateApply,
     hubs,
     mailAcross: hostMailbox.across,
+    // This machine's project apps used by its hub's sessions (#1938)
+    appsAcross: { calls: machineAppCalls(externalApps, { projectName: projectNameHere }), notice: (hub, p) => mgr.apps.linkedNoticeIn(hub.id, p) },
     mail: mailPerson,
     watches: hostMailbox.watches,
     requests,

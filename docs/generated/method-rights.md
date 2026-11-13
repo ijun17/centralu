@@ -241,6 +241,10 @@ With the limited credential: refused, never a card: the person's own answers and
 
 With the limited credential: refused: a hub linked to this host calls it, with the token.
 
+- `host.appCall`
+- `host.appCancel`
+- `host.appNotice`
+- `host.apps`
 - `host.credentials`
 - `host.hubAuto`
 - `host.hubOffer`

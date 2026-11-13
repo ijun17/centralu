@@ -91,6 +91,11 @@ export type LinkDeps = {
    */
   hubMail?: boolean
   /**
+   * Whether `reverse` answers `hub.apps` and `hub.appCall` (#1938, docs/plans/remote-hub.md §13.6): said to every machine
+   * in the offer (`apps: true`), so a machine never calls an older hub, which would leave the call unanswered
+   */
+  hubApps?: boolean
+  /**
    * A machine took this hub's offer of mail at a connect (#2067 review): what became of mail that crossed while the link was
    * down is told now (`MailAcross.changed`)
    */

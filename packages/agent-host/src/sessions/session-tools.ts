@@ -170,7 +170,13 @@ export class SessionTools {
    */
   private appAndMailTools(sessionId: string): Pick<CentraluTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
     return {
-      findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
+      findApps: async (query) => {
+        const access = this.host.apps.requireAppAccess()
+        // A linked machine's apps are asked for first (#1938): the list names them, and one that could not be asked is said
+        const away = await access.refreshLinked(sessionId)
+        const r = access.find(sessionId, query)
+        return r.ok && away.length ? { ...r, away } : r
+      },
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       mail: (args, signal) => this.host.mailTool(sessionId, args, signal),

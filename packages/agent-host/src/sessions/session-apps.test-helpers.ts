@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +33,18 @@ export type PlantKit = {
 }
 
 export const FIXTURE_APP = fileURLToPath(new URL('../apps/external/test-fixtures/app.mjs', import.meta.url))
+
+/**
+ * The fixture app (`--mode attach`: echo, peek, poke, hold) planted in a project folder, logging into `logs` (#1938's
+ * linked hosts). `open()` lets its `hold` calls end
+ */
+export function plantAttachApp(kit: PlantKit, projectPath: string, id: string, logs: string): { open(): void } {
+  const gate = join(logs, `${id}.gate`)
+  kit.plantApp(join(projectPath, ...kit.PROJECT_APPS), id, {
+    server: { command: process.execPath, args: [FIXTURE_APP, '--log', join(logs, `${id}.jsonl`), '--gate', gate, '--mode', 'attach'] },
+  })
+  return { open: () => writeFileSync(gate, '') }
+}
 
 export type Rec = { t: string; pid: number; runId?: string | null; method?: string }
 
