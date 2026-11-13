@@ -91,7 +91,8 @@ describe('no caller under safe — the declaration is the consent (#2237)', () =
   })
 })
 
-describe('a chain started from a session under safe — that session\'s approval card', () => {
+// The calling session is under safe in these: otherwise no card stands (above)
+describe('a chain started from a session — that session\'s approval card', () => {
   it('a card stands up and the session becomes waiting-for-approval. Allowing it lets the request proceed, and the answer is remembered so it is not asked again', async () => {
     w.plant('project', 'notes', { agent: true })
     w.rt.refresh()
@@ -124,7 +125,7 @@ describe('a chain started from a session under safe — that session\'s approval
     expect(capabilityCards(caller.id)).toHaveLength(1)
   })
 
-  it('denying it ends the request in a refusal, and that refusal is also remembered, for every preset. A card\'s "always allow" is an allow', async () => {
+  it('denying it ends the request in a refusal, and that refusal is also remembered. A card\'s "always allow" is an allow', async () => {
     w.plant('project', 'notes', { agent: true, host: ['sessions.list'] })
     w.rt.refresh()
     answerAgent()
@@ -143,15 +144,17 @@ describe('a chain started from a session under safe — that session\'s approval
     expect(brokerSaid(await always).isError).toBe(false)
   })
 
-  it('a call_app chain a safe session started asks in that session for the called app\'s request', async () => {
+  it('a call_app chain asks in the session that started it for the called app\'s request when that session is under safe, and runs unasked otherwise', async () => {
     w.plant('project', 'notes', { apps: ['other'] })
     w.plant('project', 'other', { agent: true })
     w.rt.refresh()
     answerAgent()
     w.answerCapabilities = 'allow'
+    const chain = { tool: 'call_app', args: { app: 'other', tool: 'ask_broker', args: { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } } } }
+    expect(brokerSaid(await w.callFromSession(await session(), 'app-notes', chain)).isError).toBe(false)
+    expect(allCapabilityCards()).toEqual([])
     const caller = await session('safe')
-    const out = await w.callFromSession(caller, 'app-notes', { tool: 'call_app', args: { app: 'other', tool: 'ask_broker', args: { mode: 'run', tool: 'run_agent', args: { prompt: 'x' } } } })
-    expect(brokerSaid(out).isError).toBe(false)
+    expect(brokerSaid(await w.callFromSession(caller, 'app-notes', chain)).isError).toBe(false)
     expect(capabilityCards(caller.id).map((c) => c.detail.kind === 'capability' && [c.detail.app.appId, c.detail.capability])).toEqual([
       ['notes', `app:${w.projectId}/other`],
       ['other', 'agent:claude'],
@@ -231,6 +234,9 @@ describe('a chain started from a session under safe — that session\'s approval
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), uses: { agent: true, host: ['git.status'] } }))
     w.rt.refresh()
     await until(() => w.rt.permissions(APP()), (l) => l[0]?.current === false)
+    // A session not under safe is not asked about the stale allow
+    expect(brokerSaid(await w.callFromSession(await session(), 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)
+    expect(allCapabilityCards()).toHaveLength(1)
     await ask()
     expect(capabilityCards(caller.id)).toHaveLength(2)
     await w.rpc('apps.forgetPermission', { appId: 'notes', projectId: w.projectId, capability: 'agent:claude' })
@@ -240,7 +246,8 @@ describe('a chain started from a session under safe — that session\'s approval
   })
 })
 
-describe('a chain started from the UI while a safe session calls in — that app\'s question', () => {
+// A session under safe holds a call open into the app in these: otherwise no question stands (above)
+describe('a chain started from the UI — that app\'s question', () => {
   it('the question stands in the list and is broadcast. Answering it lets the stalled UI call proceed, and the question disappears', async () => {
     w.plant('project', 'notes', { agent: true })
     w.rt.refresh()

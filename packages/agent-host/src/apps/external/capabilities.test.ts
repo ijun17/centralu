@@ -100,7 +100,7 @@ const usesBecome = async (appId: string, uses: Record<string, unknown>) => {
 }
 
 describe('no caller under safe — what is declared runs with no card (#2237)', () => {
-  it('run_agent, call_app and host_data each run unasked and nothing is remembered; the host is handed the calls open into the app', async () => {
+  it('run_agent, call_app and host_data each run unasked and nothing is remembered; the host is handed the calls open into the app, and what is not declared is refused before they are read', async () => {
     plant('notes', { agent: true, apps: ['other'], host: ['sessions.list'] })
     plant('other', {})
     underSafe = false
@@ -111,14 +111,8 @@ describe('no caller under safe — what is declared runs with no card (#2237)', 
     expect(asked).toEqual([])
     expect(rt.permissions(ref('notes'))).toEqual([])
     expect(askedAbout).toEqual([[SESSION], [SESSION], [SESSION]])
-  })
-
-  it('what is not declared is still refused, before the callers are read', async () => {
-    plant('notes', {})
-    underSafe = false
-    make()
-    expect(await ask('notes', 'run_agent', { prompt: 'x' })).toMatchObject({ isError: true, text: expect.stringContaining('did not declare') })
-    expect(askedAbout).toEqual([])
+    expect((await ask('notes', 'host_data', { name: 'git.status' })).isError).toBe(true)
+    expect(askedAbout).toHaveLength(3)
   })
 
   it('an allow given against older uses lets the request through unasked; a caller under safe is asked again', async () => {
@@ -127,6 +121,7 @@ describe('no caller under safe — what is declared runs with no card (#2237)', 
     await ask('notes', 'run_agent', { prompt: 'x' })
     expect(asked).toHaveLength(1)
     await usesBecome('notes', { agent: true, host: ['git.status'] })
+    expect(rt.permissions(ref('notes'))).toMatchObject([{ decision: 'allow', current: false }])
     underSafe = false
     expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(false)
     expect(asked).toHaveLength(1)
@@ -152,7 +147,8 @@ describe('no caller under safe — what is declared runs with no card (#2237)', 
   })
 })
 
-describe('a caller under safe — asks once on first use, and remembers the answer', () => {
+// From here on the caller is under safe (underSafe's default): the person is asked
+describe('asks once on first use, and remembers the answer', () => {
   it('an allow lets the request through, and the next request for the same capability is not asked about', async () => {
     plant('notes', { agent: true })
     make()
@@ -194,17 +190,6 @@ describe('a caller under safe — asks once on first use, and remembers the answ
     ])
   })
 
-  it('when the manifest\'s uses changes, a remembered allow is not used and it asks again', async () => {
-    plant('notes', { agent: true })
-    make()
-    await ask('notes', 'run_agent', { prompt: 'x' })
-    expect(asked).toHaveLength(1)
-    // The declaration changes — the app's builder has restated what the app uses
-    await usesBecome('notes', { agent: true, host: ['git.status'] })
-    expect(rt.permissions(ref('notes'))).toMatchObject([{ decision: 'allow', current: false }])
-    await ask('notes', 'run_agent', { prompt: 'x' })
-    expect(asked).toHaveLength(2)
-  })
 })
 
 describe('waiting', () => {
