@@ -429,6 +429,31 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // A command Codex keeps running after the turn that started it (#2027): ending the app-server for a sleep would end it
+    name: 'background-kept',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(
+        d,
+        'Start the shell command `sleep 25; echo kept-done` so that it keeps running after your turn ends: run it with your command tool and the shortest wait for output it allows, and do not wait for it, poll it or stop it. Do not use `&`, `nohup` or `disown`. Then reply with the word started and end your turn.',
+      )
+      await turn(d, 'Now wait until that command has finished, and tell me what it printed.')
+    },
+  },
+  {
+    // A goal set on an idle thread, then cleared (#2027): whatever an active goal starts by itself, a sleep must not end it
+    name: 'goal-set',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send('/goal Create a file named goal.txt in the current folder that holds the word ok. The goal is complete once that file exists.')
+      await d.waitFor('the goal set', (e) => e.type === 'goal' && e.goal !== null)
+      d.session().send('/goal clear')
+      await d.waitFor('the goal cleared', (e) => e.type === 'goal' && e.goal === null)
+    },
+  },
+  {
     // A call to a tool of an MCP server the person set up: its arguments and its answer
     name: 'mcp-call',
     tools: ['codex', 'claude'],
