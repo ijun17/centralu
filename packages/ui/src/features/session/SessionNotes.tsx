@@ -2,8 +2,7 @@ import { CONTINUE_WORDS, SHUTDOWN_WORDS, type Interruption, type SessionState } 
 import { isInTurn } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { autoContinueLabel, canContinue, interruptionLabel } from '../../components/primitives.jsx'
-import { formatClock } from '../../app/format.js'
+import { canContinue, interruptionLabel } from '../../components/primitives.jsx'
 import { Button } from '../../components/Button.jsx'
 
 /*
@@ -30,8 +29,11 @@ export function useSessionNotes(session: NotedSession | undefined, away: boolean
     error,
     interrupted,
     dormant,
-    /** A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking) */
-    hasButton: error || interrupted || (dormant && !!wakeError && !waking),
+    /**
+     * A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking).
+     * A stop Centralu continues by itself has its buttons in the header (#1415), so its note has none
+     */
+    hasButton: error || (interrupted && !session.interruption?.autoContinue) || (dormant && !!wakeError && !waking),
   }
 }
 
@@ -81,9 +83,8 @@ export function InterruptedNote({
   interruption: Interruption
 }) {
   const send = useStore((s) => s.send)
-  const stopContinue = useStore((s) => s.stopContinue)
-  // Centralu continues it by itself (#1415): the wait as the host said it, with going on now or leaving it for the person
-  const wait = autoContinueLabel(interruption, formatClock)
+  // Centralu continues it by itself (#1415): the header says when, with Continue now; this line says only the stop
+  const waits = !!interruption.autoContinue
   const why =
     interruption.reason === 'network'
       ? 'A network error ended the last turn before it finished.'
@@ -101,29 +102,19 @@ export function InterruptedNote({
       data-reason={interruption.reason}
       title={interruption.detail}
     >
-      <span key={wait ?? 'stopped'} className="cc-fade min-w-0 flex-1 break-words" data-testid={wait ? 'auto-continue-wait' : undefined}>
-        {wait ? <span className="text-ink">{wait}</span> : <><span className="text-ink">{interruptionLabel(interruption)}</span> — {why}</>}
+      <span className="min-w-0 flex-1 break-words">
+        <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
       </span>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="shrink-0"
-        onClick={() => void send(sessionId, CONTINUE_WORDS)}
-        title={`Sends "${CONTINUE_WORDS}"`}
-        data-testid="interrupted-continue"
-      >
-        {wait ? 'Continue now' : 'Continue'}
-      </Button>
-      {wait && (
+      {!waits && (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           className="cc-fade shrink-0"
-          onClick={() => void stopContinue(sessionId)}
-          title="Centralu leaves this turn stopped; Continue stays here"
-          data-testid="auto-continue-stop"
+          onClick={() => void send(sessionId, CONTINUE_WORDS)}
+          title={`Sends "${CONTINUE_WORDS}"`}
+          data-testid="interrupted-continue"
         >
-          Don&apos;t continue
+          Continue
         </Button>
       )}
     </p>

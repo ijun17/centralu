@@ -16,7 +16,7 @@ by itself" for these two causes only); #1693 (2026-10-28) the overload retry sta
 |---|---|---|---|
 | `overloaded` (#1693) | Codex's `serverOverloaded` error is held: the turn stays `working`, a `retry` notice says when | after `DELAYS_MS` (30 s, 2, 5, 10 min), unchanged | 4 (the delays) |
 | `network` | a turn ends in an error the network caused (`interruption.reason: 'network'`, [turn-endings-and-mail.md](turn-endings-and-mail.md)) | the tool's API host answers a probe | 5 |
-| `limit` | a turn ends on a usage limit: the tool's `limit_reached`, or an error its words call one (`interruption.reason: 'limit'`) | the reset the tool said, plus `RESET_MARGIN_MS` (60 s); no reset said: 30 minutes after the stop | 3 |
+| `limit` | a turn ends on the account's usage limit: the tool's `limit_reached`, or an error in the tools' own limit words ("You've hit your … limit", "Claude AI usage limit reached", `isPlanLimit`; `interruption.reason: 'limit'`). A 429, a gateway's quota or a plan upgrade notice is not one: nothing says it resets for the account | the reset the tool said, plus `RESET_MARGIN_MS` (60 s); no reset said: 30 minutes after the stop | 3 |
 
 **Why those N.** Overloaded keeps its four delays (#1693). Network: an outage can flap, and each continue is made only after
 the API answered, so a sixth failure in a row says the turn itself fails there, not the network. Limit: one reset can be
@@ -26,32 +26,37 @@ tries are spent the stop is left as it is, with a `continue` notice saying how o
 
 **Never continued**: a turn the person or an Assistant stopped (no interruption is set); `refused`, `other`, auth and model
 errors (they set no `network` or `limit` reason); a Codex credits or spend limit (`limit_reached.credits`: they do not reset
-with time); a compaction turn; a stop whose setting is off; a stop while the host is leaving.
+with time; kept on the session's `limit.credits`, so it holds whether Codex says it before or after the turn's error, and a
+credits notice after the wait is set takes the wait away); a compaction turn; a stop whose setting is off; a stop while the host is leaving.
 
 ## Decisions
 
 | Decision | Why |
 |---|---|
-| **The network is back** is a probe: an HTTP `HEAD` of the tool's API base (`AgentAdapter.apiUrl`: Claude `ANTHROPIC_BASE_URL` or `https://api.anthropic.com`, Codex `OPENAI_BASE_URL` or `https://chatgpt.com`), 10 s timeout, redirects not followed. **Any** HTTP answer counts, a 401 or 404 included (`sessions/api-answers.ts`) | Reachability is the question, not the account: the probe carries no credential and costs no quota. The tool's own base URL is what its turns use, so a proxy or a gateway is probed as the turn would reach it |
-| Probes run per tool, not per session, at 15 s, 30 s, 1, 2 min and then every 5 min (`PROBE_STEPS_MS`), while any network wait of that tool stands | Several stopped sessions of a tool share one probe. The steps back off so a long outage costs a request every 5 minutes |
+| **The network is back** is a probe: an HTTP `HEAD` of the tool's API base (`AgentAdapter.apiUrl`: Claude `env.ANTHROPIC_BASE_URL` of its user `settings.json`, then the environment's, then `https://api.anthropic.com` (`adapters/claude/api-url.ts`), Codex `OPENAI_BASE_URL` or `https://chatgpt.com`), 10 s timeout, redirects not followed. **Any** HTTP answer counts, a 401 or 404 included (`sessions/api-answers.ts`) | Reachability is the question, not the account: the probe carries no credential and costs no quota. The tool's own base URL is what its turns use, so a proxy or a gateway is probed as the turn would reach it |
+| Probes run per tool, not per session, at 15 s, 30 s, 1, 2 min and then every 5 min (`PROBE_STEPS_MS`), while any network wait of that tool stands. A wait starts the probe at the step of its tries (the first stop at 15 s, a second in a row at 30 s, …): five tries take about 9 minutes, not 75 s | Several stopped sessions of a tool share one probe. The steps back off so a long outage costs a request every 5 minutes. A proxy that answers the probe while the API calls fail would otherwise spend the tries in a minute and a quarter (the #2239 review) |
+| **A probe that never answers** ends at `MAX_FAILED_PROBES` (80 failures in a row, about 6 hours awake): the tool's network waits end, as **Don't continue** ends them, with a `continue` notice "Centralu could not reach this tool's API for hours, …" | A base URL the probe does not know (a project's own settings, a tool with no `apiUrl`) must not leave a wait standing forever |
+| **Every continue counts**, a failed one too: the note it hands the tool stays in the tool's history | The cap and the per-try backoff bound those notes: at most five in a row, minutes apart (the #2239 review's "notes pile up") |
 | **A sleeping computer** is a wake: a tick of the 5 s timer that comes 30 s or more late probes every tool at once | No OS signal is needed (none reaches the host on every platform); timers do not run during sleep, so a late tick is the wake |
 | Another turn of the same tool finishing releases that tool's network waits at once | That turn reached the API just now; no probe can say more |
 | **Staggering**: continues of one tool go at least `STAGGER_MS` (5 s) apart, in the order their causes cleared | A reset or a network return clears many sessions at once (#1913 saw many wakes at once). The tool stands for the account: the host does not know which account a session runs under, and one tool's sessions on one computer share one in practice |
 | **Survives a host restart without a store step**: the wait is a field of the session's stored interruption (`Interruption.autoContinue: {at?, tries}`, the `sessions.interruption` JSON column). A host that starts takes every stored wait up again (`restore`, the end of `HostTenure.restoreAtStart`); a limit whose reset passed while no host ran continues within seconds | The stop and its reset are already stored with the session; an older build reads the field as an extra and drops it (stored-shapes.md), so a rollback leaves a plain stop |
 | The overloaded case stores nothing, as built | Its turn is held `working`: a host that leaves ends it with its error (`stopAll`), as #1693 decided |
 | **What cancels a wait**: the person's Stop (`agents.interrupt`), any message into the session (it carries the work on itself), **Don't continue** (`sessions.stopContinue`), the trash or a delete. Each is honoured until the note is handed to the tool: the send is gated on the wait still standing | The same rules as the overload retry's (`cancel`, `supersede`); after the hand-off the tool runs an ordinary turn, which Stop stops like any |
-| **Continue now** sends the person's Continue ("Continue where you stopped. …", `CONTINUE_WORDS`), which takes the wait away as any message does | One Continue, the same sentence everywhere: the inbox, the line above the composer, the note |
+| **Continue now** sends the person's Continue ("Continue where you stopped. …", `CONTINUE_WORDS`), which takes the wait away as any message does | One Continue, the same sentence everywhere: the inbox, the header, the line above the composer |
 | **Linked hosts**: a session continues on the host that runs it. A hub never sees a linked machine's session events in its own `SessionEvents` (they pass to its windows), so its engine has no wait for it; **Don't continue** and Stop on a linked session are routed to the machine that owns it (`links/routes.ts`) | No double continue: one engine per session, the owner's |
-| **Who is told**: when the first continue of a stop goes in, the senders of what that stop released and nobody answered yet, and the session that started it, are told once through the stop notice path (`StopNotices.sessionContinued`, #1948), woken only from a turn | The owner's "told once, when the work continues". The released questions stay open, so the continued turn's answer still answers them |
+| **Who is told**: a stop with a wait releases what it held but tells nobody yet (`StopTold.held`). When the wait ends (`StopNotices.stopWaitEnded`) the senders of what that stop released and nobody answered yet are told once: that the work continued, with the session that started it on the first continue; or, when it ends without one (Stop, a message, **Don't continue**, the trash, the setting off, the tries or the probe spent), the ordinary stop notice they would have had at the stop (#1948). Woken only from a turn | The owner's "told once, when the work continues". A notice at the stop and another at the continue told twice, and the first said the work had stopped while it was about to go on (the #2239 review). The released questions stay open, so the continued turn's answer still answers them |
 | **The settings** are two booleans of the person's preferences (`continueAfterLimit`, `continueOnNetwork`; absent reads as on), rows under Settings › Background & updates › Agents, and `set_preferences` takes them | Per computer: a linked machine keeps its own (follow-up if one switch should reach both) |
 | **The update-cut continue** (#1618, [continue-after-update.md](continue-after-update.md)) keeps its own delivery and shares the words (`CONTINUE_WORDS`) and the note's recognition (`isCentraluNote`) | Its trigger is a list the leaving host writes and its delivery waits for the session's resume at start; moving it into this engine would change #1618's rules for no gain. One sentence, one recognition |
 
 ## Where it shows
 
-The interruption the host sends says the wait (`autoContinue`); the screen draws it and works nothing out. The line above the
-composer reads "Usage limit · continues at 01:20" or "Network lost · continues when the network is back", with **Continue
-now** and **Don't continue** (`Button`, the line fades in, `cc-fade`). Without a wait the line is the stop as before, with
-**Continue**. When the continue goes in, the conversation shows "The network is back, so Centralu continued this turn." or
+The interruption the host sends says the wait (`autoContinue`); the screen draws it and works nothing out. The session's
+**header** (owner, 2026-10-26) reads "Usage limit · continues at 01:20" or "Network lost · continues when the network is
+back", with **Continue now** and **Don't continue** (`Button`, `features/session/AutoContinueWait.tsx`); it fades in and
+out (`usePresence`, `cc-fade` / `cc-fade-out`, design-system.md §9). The line above the composer says the stop as before
+this change, and shows its **Continue** only when no wait stands, so no button shows twice. The inbox row says the wait in the
+header's words, and its Continue reads **Continue now** then. When the continue goes in, the conversation shows "The network is back, so Centralu continued this turn." or
 "The usage limit reset, so Centralu continued this turn.".
 
 ## Tests
@@ -59,4 +64,4 @@ now** and **Don't continue** (`Button`, the line fades in, `cc-fade`). Without a
 `sessions/auto-continue.test.ts` (fake timers and a stubbed `fetch`: the probe, a wake, another turn releasing the wait, the
 cap, every cancel, the settings, a restart, a limit's reset, credits, staggering), `sessions/turn-continue.test.ts` (the
 overload cases, unchanged), `mail/stop-notices.test.ts` (who is told), `sessions/interruptions.test.ts` (which ends are limit
-stops), `e2e/fixtures/interrupted-sessions.ts` (the wait on screen and its buttons).
+stops), `features/inbox/inboxLabel.test.ts` (the row's words), `e2e/fixtures/interrupted-sessions.ts` (the header's wait, its buttons, the line and the inbox row).

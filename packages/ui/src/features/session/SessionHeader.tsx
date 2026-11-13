@@ -13,6 +13,7 @@ import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { PresetTag } from './PresetTag.jsx'
 import { SubagentSteps } from './chat-rows/ChatRow.jsx'
 import { SessionHeaderMenu } from './SessionHeaderMenu.jsx'
+import { AutoContinueWait } from './AutoContinueWait.jsx'
 
 /**
  * A session pane's header (#428): the name, the machine, the badges, Run and Restart.
@@ -84,6 +85,9 @@ export function SessionHeader({
             : ''}
         </span>
       )}
+
+      {/* A stop Centralu continues by itself (#1415): when, with Continue now and Don't continue */}
+      <AutoContinueWait sessionId={session.id} interruption={session.interruption} />
 
       {/*
         A goal that is set (2026-09-07 — Claude's /goal, Codex's thread/goal/*). What a session

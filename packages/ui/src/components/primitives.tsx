@@ -49,12 +49,13 @@ export const canContinue = (i: Interruption | null | undefined): i is Interrupti
 
 /**
  * The wait of a stop Centralu continues by itself (#1415), as the host said it (`Interruption.autoContinue`): what stopped it and
- * when it goes on. Null when nothing continues it by itself
+ * when it goes on. Null when nothing continues it by itself. One wording for the header and the inbox row
  */
 export function autoContinueLabel(i: Interruption, clock: (d: Date) => string): string | null {
   const wait = i.autoContinue
   if (!wait) return null
-  if (i.reason === 'limit') return `Usage limit · continues ${wait.at === undefined ? 'later' : `at ${clock(new Date(wait.at))}`}`
+  // The host gives every limit wait its time (the reset said, or 30 minutes after the stop)
+  if (i.reason === 'limit') return wait.at === undefined ? null : `Usage limit · continues at ${clock(new Date(wait.at))}`
   return 'Network lost · continues when the network is back'
 }
 
