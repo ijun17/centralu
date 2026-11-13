@@ -1,4 +1,4 @@
-import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol/client'
+import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView, type WatchView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -32,6 +32,10 @@ export class MailMock {
   waiting = 0
   /** What the person pressed, for a test to read */
   readonly calls: string[] = []
+  /** The watches each session keeps (#1324), by session id */
+  private readonly watchRows = new Map<string, WatchView[]>()
+  /** False stands in for an older host: both watch methods are unknown to it */
+  knowsWatches = true
 
   constructor(
     private readonly clock: MockClock,
@@ -94,6 +98,18 @@ export class MailMock {
     t.row.unread += 1
     t.row.last = { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: message.createdAt }
     this.touch(t)
+  }
+
+  /** Puts a watch on a session, as its `mail` tool would: the header lists it */
+  seedWatch(sessionId: string, spec: Omit<WatchView, 'id' | 'createdAt'>): string {
+    const id = `mock.w_${this.clock.next()}`
+    this.watchRows.set(sessionId, [...(this.watchRows.get(sessionId) ?? []), { ...spec, id, createdAt: this.clock.now() }])
+    this.emit({ type: 'watches_changed', sessionId })
+    return id
+  }
+
+  private olderHost(method: string): void {
+    if (!this.knowsWatches) throw mockError(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
   }
 
   private must(threadId: string): Thread {
@@ -218,6 +234,21 @@ export class MailMock {
     wake: async (wake) => {
       this.calls.push(`wake:${wake}`)
       this.waiting = 0
+    },
+    watches: async (sessionId) => {
+      this.olderHost('watches.list')
+      return (this.watchRows.get(sessionId) ?? []).map((w) => ({ ...w }))
+    },
+    cancelWatch: async (id) => {
+      this.olderHost('watches.cancel')
+      this.calls.push(`cancelWatch:${id}`)
+      for (const [sessionId, rows] of this.watchRows) {
+        if (!rows.some((w) => w.id === id)) continue
+        this.watchRows.set(sessionId, rows.filter((w) => w.id !== id))
+        this.emit({ type: 'watches_changed', sessionId })
+        return true
+      }
+      return false
     },
   }
 }

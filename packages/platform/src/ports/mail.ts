@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import type { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '@cc/protocol/client'
 
 /**
  * The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1): what the Inbox lists and shows, the person's words in a
@@ -26,4 +26,11 @@ export interface MailPort {
   resume(target: { sessionId: string } | { threadId: string }): Promise<void>
   /** Answers "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn (§7.9) */
   wake(wake: boolean): Promise<void>
+  /**
+   * The watches a session keeps (#1324, docs/plans/mailbox.md §18.8), for its header. A change is announced as `watches_changed`
+   * naming the session. An older host has no such method and the call rejects
+   */
+  watches(sessionId: string): Promise<WatchView[]>
+  /** The person cancels a watch; false when it had ended already */
+  cancelWatch(id: string): Promise<boolean>
 }
