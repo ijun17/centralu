@@ -113,7 +113,7 @@ describe('a turn the network stopped (#2238)', () => {
     // The probe answers, but the turn fails again (#1415 review: a gateway that answers HEAD and drops the API's requests spent the tries in 75 s)
     online = true
     for (let i = 1; i <= MAX_TRIES.network; i++) {
-      const step = PROBE_STEPS_MS[Math.min(i - 1, PROBE_STEPS_MS.length - 1)]
+      const step = PROBE_STEPS_MS[Math.min(i - 1, PROBE_STEPS_MS.length - 1)] ?? PROBE_STEPS_MS[0]
       await vi.advanceTimersByTimeAsync(step - TICK_MS)
       expect(handle.sent).toHaveLength(i - 1)
       await vi.advanceTimersByTimeAsync(2 * TICK_MS)
@@ -129,7 +129,7 @@ describe('a turn the network stopped (#2238)', () => {
 
   it(`a probe that never answers leaves the stop for the person after ${MAX_FAILED_PROBES} tries, saying so`, async () => {
     const { a, id, handle } = await cutByNetwork()
-    const last = PROBE_STEPS_MS[PROBE_STEPS_MS.length - 1]
+    const last = PROBE_STEPS_MS[4]
     await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS.reduce((x, y) => x + y, 0) + (MAX_FAILED_PROBES - PROBE_STEPS_MS.length) * last - last)
     expect(a.session(id).interruption?.autoContinue).toBeDefined()
     await vi.advanceTimersByTimeAsync(last + TICK_MS)
