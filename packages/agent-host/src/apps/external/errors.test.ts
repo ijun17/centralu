@@ -233,7 +233,7 @@ describe('a call stopped by a denied capability is not an app bug', () => {
     const r = make()
     const asked: string[] = []
     // The person denies the agent, and allows board to call notes
-    r.attachBrokerHost(fakeBrokerHost({ askCapability: async (q) => (asked.push(q.capability), q.capability.startsWith('agent:') ? 'deny' : 'allow') }))
+    r.attachBrokerHost(fakeBrokerHost({ asksPerson: () => true, askCapability: async (q) => (asked.push(q.capability), q.capability.startsWith('agent:') ? 'deny' : 'allow') }))
     const denied = { appId: 'notes', projectId: 'p1', name: 'App notes', capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session' }
 
     const first = await r.call(ref('notes'), 'summarize', {}, SESSION)
