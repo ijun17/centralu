@@ -1,6 +1,6 @@
 import { appKeyOf, sameApp, type ExternalAppInfo, type LinkedApp, type LinkedAppCallParams, type LinkedAppCallResult } from '@cc/protocol'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
-import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/session-apps.js'
+import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/app-call-bounds.js'
 import { isObj } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
 import { qualify } from './machine-ids.js'

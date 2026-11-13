@@ -1581,7 +1581,10 @@ attach step: it works for that project.
   apps `givesApp` (session-apps.ts l.155-160) gives a session of that project. The asking machine is the link's, never
   a parameter, so a machine can only ask for its own sessions.
 - For such a session the parent project's app takes the name, and the app of the same id in its own checkout is not
-  given to it: no started agent ever writes into the copy's data, whatever §13.7 decides.
+  given to it: no started agent ever writes into the copy's data, whatever §13.7 decides. The rule is the hub, not its
+  list (`LinkedApps.givingHub`): once a hub that offers apps started the session, none of its own project's apps runs
+  for it here, and one that hub does not list now (it is away, its project there is not trusted, the app cannot run
+  there, or the parent session is gone) answers why, under the copy's name.
 - Its calls are approved under its own preset (the one the hub gave it, `callerPreset`), in its own card.
 - Queue news and other notices reach it through `host.appNotice` (§13.3).
 
@@ -1762,10 +1765,16 @@ Where the code differs from the design above, and why:
 - **Notices** go through the host's `appNotice` port (`linkedNotices`, links/apps-across.ts): a notice to a qualified
   session id is passed to that host, which delivers it only to a session whose apps include the sender now. desk.ts and
   notices.ts are unchanged.
-- **What a hub gave a started agent is remembered with the session** (`hub_apps:<session>`, an app setting that goes with
-  the session; stored-shapes.md). After the machine's host restarts, and before that hub offers again, its apps keep their
-  names and answer that the hub is away, and the checkout's copy stays withheld (§13.5, §13.6). Only the copy in the
-  session's own project is withheld, never a user-folder app of the same id.
+- **The copy is withheld because of who started the session, never because of what the hub lists** (review of PR 1).
+  `LinkedApps.givingHub` is the one rule: a session whose starting hub offers apps, or is away, or was recorded as
+  offering them when it started the session (`apps` on `started_from_hub_by:<session>`, so a restart before that hub
+  is back keeps it), runs none of its own project's apps here. Each is given under the name it had in the session, and
+  stands for the hub's app of the same id once the hub lists it (`standIns`, sessions/linked-session-apps.ts), so the
+  agent's first `board` is the hub's board; one the hub does not list answers why and runs nothing. Only a hub that
+  offers no apps gives nothing, and its agents keep their project's apps here. A user-folder app is never withheld.
+  This replaced a remembered copy of the hub's last list (`hub_apps:<session>`, never released), whose emptying let the
+  copy run.
 - **A cancel that overtakes its call** is kept on the app's host, and the call never starts. A link lost during a call is
-  never sent again by itself: it ends as "may or may not have done this", with the run id when it is known.
+  never sent again by itself: it ends as "may or may not have done this", said once, with the whole `run_status` call
+  when the run id is known. A session's long calls are kept by session and run id: a linked host chooses its run ids.
 - **Not in PR 1:** the hub's window showing a machine's app capability question (unchecked whether it does).

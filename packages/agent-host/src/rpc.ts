@@ -933,10 +933,17 @@ export function createRpcHandler(
       await mailAcross.rows(p.rows, { hub: hub.id })
       return { ok: true as const }
     },
-    'host.apps': async (p, ctx) => ({ apps: await appsHub(ctx).calls.list(appsHub(ctx).hub, p.session, p.start) }),
-    'host.appCall': async (p, ctx) => appsHub(ctx).calls.call(appsHub(ctx).hub, p),
+    'host.apps': async (p, ctx) => {
+      const { hub, calls } = appsHub(ctx)
+      return { apps: await calls.list(hub, p.session, p.start) }
+    },
+    'host.appCall': async (p, ctx) => {
+      const { hub, calls } = appsHub(ctx)
+      return calls.call(hub, p)
+    },
     'host.appCancel': async (p, ctx) => {
-      appsHub(ctx).calls.cancel(appsHub(ctx).hub, p.call)
+      const { hub, calls } = appsHub(ctx)
+      calls.cancel(hub, p.call)
       return { ok: true as const }
     },
     'host.appNotice': async (p, ctx) => {

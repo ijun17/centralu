@@ -128,7 +128,7 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     const sent = (JSON.parse(hub.store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]') as { sent?: string }[]).map((a) => a.sent ?? '')
     expect(sent).toEqual([expect.stringContaining('call mail with `to: "parent"`')])
     // The machine recorded the hub from the connection the start came in on, and the hub recorded its parent
-    expect(startingHub(machine.store.settings, childId)).toEqual({ id: hub.id, name: 'Hub mac' })
+    expect(startingHub(machine.store.settings, childId)).toEqual({ id: hub.id, name: 'Hub mac', apps: false })
     expect(await send(machine, 'done: hello said', { from: childId })).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac\. /) })
     expect(received(hub, childId).map((m) => m.body)).toEqual(['done: hello said'])
     // Git checkouts and a card: room for a loaded machine, as links.test.ts gives its start_agent rig

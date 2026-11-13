@@ -47,7 +47,8 @@ machine to a hub is such a call (`hub.mail`); mail from a hub to a machine is a 
    "the hub session that started it". The machine does not know which session that is, and is never asked to name
    it. It knows which hub: when `agents.createSession` comes with `fromHub`, the machine records the hub that offered on
    the connection the call came in on (`LinkedHubs.on`, never anything the call says), by its id and name, under
-   `started_from_hub_by:<session id>` beside the `started_from_hub:` mark. An app setting, as the mark is: no store step,
+   `started_from_hub_by:<session id>` beside the `started_from_hub:` mark. Since #1938 the record also says whether that
+   hub offered its apps then (`apps`, absent in a record from before it; docs/plans/remote-hub.md §13.5). An app setting, as the mark is: no store step,
    an older build reads only the mark, and the purge deletes both with the session.
 2. **The call.** The machine calls `hub.mail` with its own session's id, the text and the send's fields (`needsReply`,
    `urgent`) on that hub's connection, and on no other: a hub that did not start the session never reads the text.

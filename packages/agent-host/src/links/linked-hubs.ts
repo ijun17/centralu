@@ -2,6 +2,7 @@ import { HubAskResult, HubMethods, errorMessage, oneLineText, type HubAskParams,
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { LOOKUP_MS } from './machine-reach.js'
 import type { AppsPeer } from './linked-apps.js'
+import type { StartingHub } from '../sessions/hub-preset.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -38,7 +39,7 @@ export type LinkedHubsDeps = {
   /** How long one message may wait for the hub's answer (30 s when absent). For tests */
   mailTimeoutMs?: number
   /** Records the hub that started a session here (`recordStartingHub`), for one created before that hub offered (`awaitOffer`) */
-  record?: (sessionId: string, hub: { id: string; name: string }) => void
+  record?: (sessionId: string, hub: StartingHub) => void
 }
 
 /** The words a call that failed for an older hub says (it has no such method) */
@@ -73,7 +74,7 @@ export class LinkedHubs {
     this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null })
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
-    for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name })
+    for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name, apps })
     if (mail) for (const fn of this.mailOffered) fn(o.hub.id)
   }
 
@@ -173,8 +174,8 @@ export class LinkedHubs {
   }
 
   /** The hub that offered on this connection, if one did (`startedByHub`: the hub a session it creates here records) */
-  on(client: number): { id: string; name: string } | undefined {
-    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name }
+  on(client: number): StartingHub | undefined {
+    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name, apps: h.apps }
     return undefined
   }
 

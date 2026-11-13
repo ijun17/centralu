@@ -1,6 +1,7 @@
 import { APP_SERVER_PREFIX, appKeyOf, type ExternalAppInfo, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
+import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps.js'
 import { withTimeout } from '../timing.js'
 import { listSetting } from '../dev-services/store/settings.js'
 import { LinkedApps } from '../links/linked-apps.js'

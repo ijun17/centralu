@@ -100,4 +100,6 @@ what each connected machine lets this session attach, as `<machine>/<project>/<a
 ask. `attach_app` takes that name (or `<project>/<app>` when the project name is unique), with the project's card naming
 the machine; "always" is read as once, as for `ask_project` across machines. The record keeps the app under the
 machine's qualified project id. Calls are forwarded to the app's machine and recorded there under the hub's session; a
-machine that is away is answered as away, never by a copy here.
+machine that is away is answered as away, never by a copy here. An agent a hub session started on a machine is given its
+parent project's apps on the hub, each under the name its checkout's copy has there, and none of those copies runs for it:
+an app the hub does not offer it now answers why ([plans/remote-hub.md](../plans/remote-hub.md) §13.5).

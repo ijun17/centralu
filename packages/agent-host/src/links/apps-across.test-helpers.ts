@@ -6,7 +6,6 @@ import { readShared, writeShared } from '../sessions/app-access.js'
 import type { SessionManager } from '../sessions/manager.js'
 import { plantAttachApp, type PlantKit } from '../sessions/session-apps.test-helpers.js'
 import { LinkedApps } from './linked-apps.js'
-import { hubAppsMemory } from './apps-across.js'
 import { cleanups, folder } from './links-world.test-helpers.js'
 
 /**
@@ -27,7 +26,7 @@ export function hostApps(store: Store, mgr: SessionManager) {
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
-  const linked = new LinkedApps({ lookupMs: 2_000, chunkMs: 1_000, remember: hubAppsMemory(store.settings) })
+  const linked = new LinkedApps({ lookupMs: 2_000, chunkMs: 1_000 })
   mgr.apps.useExternalApps(rt, { linked })
   cleanups.push(() => rt.dispose())
   const projectName = (id: string) => store.projects.listProjects().find((p) => p.id === id)?.name ?? id

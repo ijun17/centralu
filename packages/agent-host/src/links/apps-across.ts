@@ -1,9 +1,8 @@
-import { LinkedApp, oneLineText, type LinkedAppNoticeParams } from '@cc/protocol'
-import { z } from 'zod'
+import type { LinkedAppNoticeParams } from '@cc/protocol'
 import type { ExternalApps } from '../apps/external/runtime.js'
 import { startingHub } from '../sessions/hub-preset.js'
 import { LinkedAppCalls } from './linked-app-calls.js'
-import type { AppsPeer, HubGave, LinkedAppsDeps } from './linked-apps.js'
+import type { AppsPeers } from './linked-apps.js'
 import type { LinkedHubs } from './linked-hubs.js'
 import { qualify, splitQualified } from './machine-ids.js'
 
@@ -44,21 +43,24 @@ export function machineAppCalls(rt: Runtime, o: { projectName: (id: string) => s
 
 /**
  * The linked hosts a session here uses apps of (`LinkedApps`): on a hub every machine it links; on a machine the hub that
- * started the session (`startingHub`), and only that one, so a started agent never reaches another hub's apps
+ * started the session (`startingHub`), and only that one, so a started agent never reaches another hub's apps. Whether
+ * that hub gives it apps is `LinkedApps.givingHub`'s to say
  */
-export function appsPeers(o: { machines?: Machines; hubs?: Pick<LinkedHubs, 'appsPeer'>; settings?: { appSetting(key: string): string | null } }): (sessionId: string) => AppsPeer[] {
-  return (sessionId) => {
-    const peers: AppsPeer[] = (o.machines?.all() ?? []).map((m) => ({
-      id: m.id,
-      name: m.name,
-      reachable: m.reachable,
-      answers: m.answersApps,
-      gives: false,
-      call: (method, params, timeoutMs) => m.call(`host.${method}`, params, timeoutMs),
-    }))
-    const hub = o.settings ? startingHub(o.settings, sessionId) : null
-    const peer = hub ? o.hubs?.appsPeer(hub.id) : undefined
-    return peer ? [...peers, peer] : peers
+export function appsPeers(o: { machines?: Machines; hubs?: Pick<LinkedHubs, 'appsPeer'>; settings?: { appSetting(key: string): string | null } }): AppsPeers {
+  return {
+    machines: () =>
+      (o.machines?.all() ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        reachable: m.reachable,
+        answers: m.answersApps,
+        gives: false,
+        call: (method, params, timeoutMs) => m.call(`host.${method}`, params, timeoutMs),
+      })),
+    startedBy: (sessionId) => {
+      const hub = o.settings ? startingHub(o.settings, sessionId) : null
+      return hub ? { hub, link: o.hubs?.appsPeer(hub.id) } : null
+    },
   }
 }
 
@@ -77,34 +79,5 @@ export function linkedNotices(o: { machines?: Machines; hubs?: Pick<LinkedHubs, 
     const hub = o.hubs?.appsPeer(split.machine)
     if (hub) return hub.call('appNotice', params, 30_000).then(() => undefined)
     return null
-  }
-}
-
-/** The app setting a session's remembered hub apps are kept in (`<name>:<sessionId>`, so they go with the session) */
-export const hubAppsKey = (sessionId: string) => `hub_apps:${sessionId}`
-
-const Gave = z.object({ hub: z.object({ id: z.string().min(1).max(200), name: z.string().max(500) }), apps: z.array(LinkedApp).max(500) })
-
-/**
- * What the hub that started a session here gave it, kept with the session (§13.5): read when that hub has not offered since
- * this host started, so its apps answer that it is away and the checkout's copy stays withheld. Written when the list
- * changes. A record that cannot be read counts as none
- */
-export function hubAppsMemory(settings: { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }): NonNullable<LinkedAppsDeps['remember']> {
-  return {
-    read(sessionId) {
-      const raw = settings.appSetting(hubAppsKey(sessionId))
-      if (!raw) return null
-      try {
-        const r = Gave.safeParse(JSON.parse(raw))
-        return r.success ? { hub: { id: r.data.hub.id, name: oneLineText(r.data.hub.name, 120) || r.data.hub.id }, apps: r.data.apps } : null
-      } catch {
-        return null
-      }
-    },
-    write(sessionId, gave: HubGave) {
-      const value = JSON.stringify(gave)
-      if (settings.appSetting(hubAppsKey(sessionId)) !== value) settings.setAppSetting(hubAppsKey(sessionId), value)
-    },
   }
 }

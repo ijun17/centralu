@@ -88,8 +88,9 @@ describe("a hub's session uses a machine's project app (#1938)", () => {
     await machine.close()
     const lost = await holding
     expect(lost.isError).toBe(true)
-    expect(text(lost)).toContain(runId)
-    expect(text(lost)).toContain('may or may not')
+    // Said once, with the whole call that asks about it, under the name the agent calls the app by
+    expect(text(lost).match(/may or may not/g)).toHaveLength(1)
+    expect(text(lost)).toContain(`app(action="call", app="board", tool="run_status", args={"run_id": "${runId}"})`)
 
     await eventually(() => hub.machine().status !== 'connected')
     const r = await live.call('app-board', 'peek', {})

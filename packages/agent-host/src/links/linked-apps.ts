@@ -5,6 +5,7 @@ import { NOT_REACHABLE } from '../adapters/contract.js'
 import type { AppCallOutcome, AppRef } from '../apps/external/runtime.js'
 import { LOOKUP_MS, awayRefusal } from './machine-reach.js'
 import { qualify, splitQualified } from './machine-ids.js'
+import { RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/app-call-bounds.js'
 
 /**
  * The calling session's side of a project's app on another machine (#1938, docs/plans/remote-hub.md §13.3): what the
@@ -20,9 +21,8 @@ import { qualify, splitQualified } from './machine-ids.js'
  *   - **A call outlives the link's wait.** It is asked in waits of its own (`CHUNK_MS`), the same call id each time, so
  *     the link's timeout never cuts a long call, asking again within it is never a second run, and the run id is known
  *     early. A link lost during a call ends it as maybe done; it is never sent again by itself.
- *   - **Never a local copy.** A host that cannot be reached answers that it cannot, naming it, and nothing ran. What the
- *     hub that started a session gave it is remembered with the session (`remember`), so after a restart, before that hub
- *     is back, its apps keep their names and answer that the hub is away, and the checkout's copy stays withheld (§13.5).
+ *   - **Never a local copy.** A host that cannot be reached answers that it cannot, naming it, and nothing ran. For a
+ *     session a hub started here, `givingHub` is the one rule for the copy its checkout carries (§13.5).
  */
 
 /** A linked host whose apps a session here may use */
@@ -43,15 +43,18 @@ export type LinkedAppsDeps = {
   lookupMs?: number
   /** How long one wait of a call lasts (`CHUNK_MS`). For tests */
   chunkMs?: number
-  /** What a hub that started a session here last gave it, kept with the session (`hubAppsMemory`, links/apps-across.ts) */
-  remember?: {
-    read(sessionId: string): HubGave | null
-    write(sessionId: string, gave: HubGave): void
-  }
 }
 
-/** The apps a hub gave a session it started here, as remembered: the hub, and the apps without their tools */
-export type HubGave = { hub: { id: string; name: string }; apps: LinkedApp[] }
+/** The linked hosts whose apps a session here uses (`appsPeers`, links/apps-across.ts) */
+export type AppsPeers = {
+  /** The machines this host links (on a hub): their shared and root apps, behind the attach card */
+  machines(): AppsPeer[]
+  /**
+   * The hub that started a session here, as recorded with the session (`startingHub`), and its link when it offered since
+   * this host started (`LinkedHubs.appsPeer`); null for a session no hub started
+   */
+  startedBy(sessionId: string): { hub: { id: string; name: string; apps?: boolean }; link: AppsPeer | undefined } | null
+}
 
 /** A tool as the runtime lists one (MCP `Tool`): what `Attachment` reads of a remote app's list too */
 export type LinkedTool = LinkedApp['tools'] extends (infer T)[] | null ? T : never
@@ -63,11 +66,8 @@ const FIRST_MS = 5_000
 const CHUNK_MS = 60_000
 /** What the link's timeout adds to a wait: the app's host answers by the wait, so only a lost link outlasts it */
 const SLACK_MS = 30_000
-/**
- * How long a list that starts an app there is waited for: past the answering host's own bound on starting it (15 s,
- * sessions/session-apps.ts `TOOL_LIST_WAIT_MS`, not imported: session-apps.ts imports this module), with `SLACK_MS`
- */
-const START_LIST_MS = 15_000 + SLACK_MS
+/** How long a list that starts an app there is waited for: past the answering host's own bound on starting it, with `SLACK_MS` */
+const START_LIST_MS = TOOL_LIST_WAIT_MS + SLACK_MS
 
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 const LOST_KEPT = 500
@@ -81,12 +81,12 @@ export class LinkedApps {
   private lost = new Set<string>()
 
   /** The linked hosts a session here may use apps of (`appsPeers`): none until the links are wired (`usePeers`) */
-  private peers: (sessionId: string) => AppsPeer[] = () => []
+  private peers: AppsPeers = { machines: () => [], startedBy: () => null }
 
   constructor(private readonly deps: LinkedAppsDeps = {}) {}
 
   /** The hosts this one links and is linked by, once they exist: main.ts makes this before them */
-  usePeers(peers: (sessionId: string) => AppsPeer[]): void {
+  usePeers(peers: AppsPeers): void {
     this.peers = peers
   }
 
@@ -106,24 +106,42 @@ export class LinkedApps {
   }
 
   /**
-   * The session's linked hosts, and the hub that started it as remembered when that hub has not offered since this host
-   * started (or withdrew): away, so its apps keep their names and answer that it is away, never the checkout's copy
+   * **The one rule for a session a hub started here** (§13.5): the hub that gives it its project's apps, or null when none
+   * does. A hub that started it and offers apps gives them, and so does one that is away (not offered since this host
+   * started, or its link is down), whatever it last listed: the session's own project's apps here are its checkout's
+   * copies of that hub's, so none of them runs for it, and one the hub does not list now is answered with why
+   * (`withheldWhy`). Only a hub that offers no apps (a Centralu from before apps across machines), linked now or recorded
+   * so when it started the session, gives nothing, and its agents keep their project's apps here, as before.
    */
-  private peersOf(sessionId: string): AppsPeer[] {
-    const peers = this.peers(sessionId)
-    const gave = this.deps.remember?.read(sessionId)
-    if (!gave || peers.some((p) => p.id === gave.hub.id)) return peers
-    const away: AppsPeer = { id: gave.hub.id, name: gave.hub.name, reachable: false, answers: true, gives: true, call: () => Promise.reject(new Error(`${gave.hub.name} is ${NOT_REACHABLE}`)) }
-    return [...peers, away]
+  givingHub(sessionId: string): AppsPeer | null {
+    const started = this.peers.startedBy(sessionId)
+    if (!started) return null
+    if (started.link) return started.link.answers ? started.link : null
+    if (started.hub.apps === false) return null
+    const { id, name } = started.hub
+    return { id, name, reachable: false, answers: true, gives: true, call: () => Promise.reject(new Error(`${name} is ${NOT_REACHABLE}`)) }
   }
 
-  /** What a host last listed for the session; for the hub that started it, what it gave, remembered across restarts */
+  /**
+   * Why an app of the session's own project is not run for a session its hub gives apps to (`givingHub`), when that hub
+   * does not list it now: the hub is away, or it withholds the app (its project there is not trusted, the app cannot run
+   * there, or it has no record of starting this session)
+   */
+  withheldWhy(hub: AppsPeer, appId: string): string {
+    const copy = `This computer's copy of ${appId} is not used in its place.`
+    if (!hub.reachable) return `${awayRefusal(hub.name, NOT_REACHABLE, `${appId} there was not called; nothing ran`)} ${copy}`
+    return `${hub.name} does not offer ${appId} to this session now: there its project may not be trusted, the app may not be able to run, or the session that started this one may be gone. ${copy} Nothing ran.`
+  }
+
+  /** The session's linked hosts: the machines this host links, and the hub that gives it apps */
+  private peersOf(sessionId: string): AppsPeer[] {
+    const hub = this.givingHub(sessionId)
+    return hub ? [...this.peers.machines(), hub] : this.peers.machines()
+  }
+
+  /** What a host last listed for the session */
   private listed(peer: AppsPeer, sessionId: string): LinkedApp[] {
-    const kept = this.lists.get(key(peer.id, sessionId))
-    if (kept) return kept.apps
-    if (!peer.gives) return []
-    const gave = this.deps.remember?.read(sessionId)
-    return gave && gave.hub.id === peer.id ? gave.apps : []
+    return this.lists.get(key(peer.id, sessionId))?.apps ?? []
   }
 
   /**
@@ -186,7 +204,6 @@ export class LinkedApps {
           if (r.success) {
             this.lists.set(k, { apps: r.data.apps, at: Date.now() })
             for (const a of r.data.apps) this.labels.set(qualify(peer.id, a.projectId), `${peer.name}/${oneLineText(a.project, 120) || a.projectId}`)
-            if (peer.gives) this.deps.remember?.write(sessionId, { hub: { id: peer.id, name: peer.name }, apps: r.data.apps.map((a) => ({ ...a, tools: null })) })
             return
           }
           away.push({ name: peer.name, why: 'its answer could not be read' })
@@ -204,7 +221,13 @@ export class LinkedApps {
    * One call of the session's on an app there, through `appCall` until it ends. `signal` withdraws it there (`appCancel`).
    * A link lost on the way ends it here as maybe done, with its run id, and `run_status` asks the app's host again
    */
-  async call(sessionId: string, ref: AppRef, tool: string, args: Record<string, unknown>, opts: { signal?: AbortSignal; onRun?: (runId: string) => void; notListed?: true } = {}): Promise<AppCallOutcome> {
+  async call(
+    sessionId: string,
+    ref: AppRef,
+    tool: string,
+    args: Record<string, unknown>,
+    opts: { signal?: AbortSignal; onRun?: (runId: string) => void; notListed?: true; name?: string } = {},
+  ): Promise<AppCallOutcome> {
     const hit = this.where(sessionId, ref)
     if (!hit) return failed('', 'That app is not offered to this session from its computer now. Nothing ran.')
     const { peer, app } = hit
@@ -227,10 +250,11 @@ export class LinkedApps {
           if (older(err)) return failed(runId, `Update Centralu on ${peer.name} to use its apps from here. Nothing ran.`)
           // Sent, and no answer: it may have run there. Never sent again by itself
           if (runId) this.keepLost(runId)
-          const again = runId
-            ? ` Its run id there is ${runId}: run_status asks about it once the link is back.`
-            : ' Its run id there is not known; check what it does before calling it again.'
-          return failed(runId, `${peer.name}: ${oneLineText(errorMessage(err), 500)}. ${what} may or may not have done this.${again}`)
+          // The link's own words are left out: they may say "may or may not" already, and the agent needs it once
+          const lost = `The link to ${peer.name} was lost during the call, so ${what} may or may not have done this.`
+          if (!runId) return failed(runId, `${lost} Its run id there is not known: check what it did before calling it again.`)
+          const status = `app(action="call", app=${JSON.stringify(opts.name ?? ref.appId)}, tool="${RUN_STATUS_TOOL}", args={"run_id": ${JSON.stringify(runId)}})`
+          return failed(runId, `${lost} Do not call it again: once the link is back, ${status} gives its result.`)
         }
         const r = LinkedAppCallResult.safeParse(raw)
         if (!r.success) return failed(runId, `${peer.name} answered in a form this computer does not read; it may or may not have done this.`)

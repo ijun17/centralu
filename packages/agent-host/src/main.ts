@@ -74,7 +74,7 @@ import { hubSelfId, linkDepsFor, storeProjectOrder } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
 import { LinkedApps } from './links/linked-apps.js'
-import { appsPeers, hubAppCalls, hubAppsMemory, linkedNotices, machineAppCalls } from './links/apps-across.js'
+import { appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './links/apps-across.js'
 import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
@@ -422,7 +422,7 @@ onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_
  * A project's app used from another machine (#1938, docs/plans/remote-hub.md §13): the apps of the hosts this one links,
  * and of the hub that started a session here, reached by the session's own app path. Their hosts are wired below
  */
-const linkedApps = new LinkedApps({ remember: hubAppsMemory(store.settings) })
+const linkedApps = new LinkedApps()
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
 mgr.apps.useExternalApps(externalApps, { linked: linkedApps })
 /** A project's name here, as a linked host's session reads it beside its app (#1938) */
