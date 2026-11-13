@@ -273,13 +273,23 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
   (`adapters/codex/child-tracker.ts`); the inventory at rest (§3a) showed both kinds of work exist and a sleep would end them:
   - a command item a turn's `turn/completed` leaves `inProgress` is listed (kind `shell`, not stoppable) until its
     `item/completed`, which comes between turns or in a later one. A command's item stays `inProgress` until its process
-    exits (`long-command`, `background-kept`), and no other recorded turn, an interrupted one included, ended with one
-    open [checked: every 0.160.0 recording scanned]. When the app-server ends, a listed command is ended `stopped`: it
-    went with the app-server (§3a);
+    exits (`long-command`, `background-kept`), and no other recorded turn ended with one open [checked: every 0.160.0
+    recording scanned; none stops a running command]. A Stop does not end a running command (measured for a child's,
+    `probe-codex-background.mts`), so one a stopped turn leaves open is running and is listed; whether Codex sends its
+    `item/completed` once it exits after a Stop: unchecked (if not, the session stays awake until its app-server ends:
+    memory, never lost work). When the app-server ends, a listed command is ended `stopped`: it went with the
+    app-server (§3a);
   - a goal whose status is `active` (from `thread/goal/updated`, and `thread/goal/get` on resume) is listed (kind
-    `other`) until it is cleared, completed or paused. The process ending does not end it as a task: it is the thread's.
+    `other`) until it is cleared, completed or paused. When the process ends it leaves the list with no ending: the goal
+    is the thread's, and a resume reads it back (`thread/goal/get`).
 
   Both make `sessionIdle` say `background`, so they also hold off a move to a new CLI, which ends the app-server too.
+  Being background work, they count wherever it does (`liveBackgroundTasks`): the session shows paused on background
+  work, and a delete, a handoff or an update waits or asks as for a running shell. For a command that is the point; for
+  a goal it is mostly brief (measured: a set goal's turn starts within milliseconds and runs it to its end), but a goal
+  left `active` with no turn running would hold all of it until cleared [how often Codex leaves one so: unchecked].
+  A process adopted from a previous host does not exist any more (#1895 C: no agent process outlives its host), so a
+  new host never meets a command it did not see start.
   Their tests replay `background-kept` and `goal-set` (`adapters/codex/replay.test.ts`): the shell is listed before
   turn 1's end goes out and ended `completed` later; the goal listed while active and gone once cleared. Both fail with
   the tracker's hook taken out.
