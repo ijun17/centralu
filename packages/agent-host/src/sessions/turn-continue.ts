@@ -3,6 +3,7 @@ import { errorMessage, type NormalizedEvent, type SessionInfo, type ToolName } f
 import { LIMIT_NOTE, NETWORK_NOTE, RETRY_NOTE } from '../adapters/input-receipts.js'
 import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { inTurn } from '../idle.js'
+import type { WaitEnd } from '../mail/stop-notices.js'
 
 /**
  * The one owner of "continue a stopped turn once its cause clears" (#1693, #1415, #2238; docs/agent-host/lifecycle/auto-continue.md).
@@ -27,7 +28,9 @@ import { inTurn } from '../idle.js'
  * stop the setting is off for.
  *
  * **What cancels it.** The person's Stop (`cancel`), a message into the session (`deliver` calls `supersede`: it carries the work on
- * itself), Don't continue (`stopContinue`), the session going to the trash (`forget`) or being deleted. A held turn also goes with
+ * itself; the person's Continue is told as the work going on, once it went in: `personContinues`), a turn that starts any other way (mail the
+ * mailbox delivers: `observe` sees `working`), Don't continue (`stopContinue`), the cause's setting going off (`settingsChanged`, and the
+ * send's gate reads it), the session going to the trash (`forget`) or being deleted. A held turn also goes with
  * any other end of the turn (`observe`). Each is honoured until the note is handed to the tool: the send is gated on the wait
  * still standing (`live`). Once handed, the tool runs a turn of its own and the session is in an ordinary turn.
  */
@@ -101,7 +104,7 @@ export type TurnContinueHost = {
    * A stop's wait ended: `continued` when its continue went in (`first` of a run of stops), else it was dropped (Stop, a message, Don't continue,
    * the trash, the setting, the tries spent). Who the stop's notice was held from hears it now, once (the stop notice path, #1948)
    */
-  waitEnded(sessionId: string, cause: StopCause, end: { continued: boolean; first: boolean }): void
+  waitEnded(sessionId: string, cause: StopCause, end: WaitEnd): void
 }
 
 /** What a send is given: whether the wait still stands, and the word that the tool is being handed the note (from then on the turn is the tool's) */
@@ -208,7 +211,7 @@ export class TurnContinue {
     // A turn starts that is not this engine's continue (that one's wait went when it was handed): mail the mailbox gave, a wake. It carries
     // the work on, so the wait goes, and who the stop's notice was held from hears it now (#2239 re-check). Before the interruption is
     // cleared (`trackInterruption` runs after this), so the stored wait is still there to say it
-    if (e.type === 'state_change' && e.state === 'working' && this.stops.has(id)) this.dropStop(id, 'stopped')
+    if (e.type === 'state_change' && e.state === 'working' && this.stops.has(id)) this.dropStop(id, 'went on')
     // Codex says a credits limit when it likes, also after the turn it ended (#1415 review): a wait armed on the error's words goes
     if (e.type === 'limit_reached' && e.credits && this.stops.get(id)?.cause === 'limit') this.stopContinue(id)
     if (e.type !== 'turn_complete') return
@@ -236,11 +239,8 @@ export class TurnContinue {
    * stood. The error is handed back for the case that the message does not go in (`lost`). Not a retry handed to the tool: its turn is
    * running and the message joins it like any message into a running turn, with nothing owed; only the record of the note goes
    */
-  supersede(sessionId: string, continues = false): string | null {
-    // The person's Continue (Continue now) is the continue the stop's notice was held for: told as one (#2239 re-check); any other message is
-    // the person taking the work over, told as the stop
-    if (continues) this.personContinues(sessionId)
-    else this.stopContinue(sessionId)
+  supersede(sessionId: string): string | null {
+    this.stopContinue(sessionId)
     const w = this.held.get(sessionId)
     if (w?.phase === 'handed') {
       this.heldTries.delete(sessionId)
@@ -264,11 +264,19 @@ export class TurnContinue {
     return this.dropStop(sessionId, 'stopped')
   }
 
-  /** The person's Continue went in while a wait stood: the work goes on, as a continue of this engine's would */
-  private personContinues(sessionId: string): void {
-    const run = this.stopTries.get(sessionId)
+  /**
+   * The person's Continue (Continue now, the inbox's Continue) while a wait stands: the wait goes now, and who the stop's notice was held from is told
+   * once the message went in (`ok`: the work went on) or did not (the stop). Null when no wait stood. Any other message of the person's is them
+   * taking the work over: told as the stop (`supersede`)
+   */
+  personContinues(sessionId: string): ((ok: boolean) => void) | null {
+    const i = this.host.meta.get(sessionId)?.interruption
+    if (!this.stops.has(sessionId) || !i?.autoContinue || (i.reason !== 'network' && i.reason !== 'limit')) return null
+    const cause = i.reason
+    const first = (this.stopTries.get(sessionId)?.n ?? 0) === 0
     this.stopTries.delete(sessionId)
-    this.dropStop(sessionId, (run?.n ?? 0) === 0 ? 'continued first' : 'continued')
+    this.dropStop(sessionId, false)
+    return (ok) => this.host.waitEnded(sessionId, cause, ok ? { continued: 'other', first } : { continued: false, first: false })
   }
 
   /**
@@ -277,7 +285,8 @@ export class TurnContinue {
    */
   settingsChanged(): void {
     const on = this.host.settings()
-    for (const [id, w] of [...this.stops]) if (!on[w.cause] && w.phase === 'waiting') this.stopContinue(id)
+    // One being sent is the send's gate's (`live` reads the setting right before the hand-off)
+    for (const [id, w] of [...this.stops]) if (!on[w.cause] && w.phase !== 'sending') this.stopContinue(id)
   }
 
   /** The session goes to the trash: a restore from there continues nothing by itself, so the stored wait goes with the row */
@@ -311,9 +320,12 @@ export class TurnContinue {
 
   /**
    * Takes a stop's wait away, stored too: whether one stood. `tell`: who its stop's notice was held from hears it now, that it ended without a
-   * continue (`stopped`) or that the person continued it (`continued`, with the starter on the first of a run); false: the caller tells, or nobody is owed
+   * continue (`stopped`) or that the work went on in a turn of its own (`went on`, with the starter on the first of a run); false: the caller tells,
+   * or nobody is owed
    */
-  private dropStop(sessionId: string, tell: false | 'stopped' | 'continued' | 'continued first'): boolean {
+  private dropStop(sessionId: string, tell: false | 'stopped' | 'went on'): boolean {
+    const first = (this.stopTries.get(sessionId)?.n ?? 0) === 0
+    if (tell === 'went on') this.stopTries.delete(sessionId)
     const had = this.stops.delete(sessionId)
     const m = this.host.meta.get(sessionId)
     const i = m?.interruption
@@ -321,7 +333,7 @@ export class TurnContinue {
       const { autoContinue: _, ...stop } = i
       m.interruption = stop
       this.host.changed(m)
-      if (tell && (i.reason === 'network' || i.reason === 'limit')) this.host.waitEnded(sessionId, i.reason, { continued: tell !== 'stopped', first: tell === 'continued first' })
+      if (tell && (i.reason === 'network' || i.reason === 'limit')) this.host.waitEnded(sessionId, i.reason, tell === 'went on' ? { continued: 'other', first } : { continued: false, first: false })
     }
     if (!this.stops.size) this.idle()
     return had
@@ -400,22 +412,16 @@ export class TurnContinue {
   }
 
   private async fireStop(id: string, w: StopWait): Promise<void> {
-    if (this.stops.get(id) !== w) return
-    const m = this.host.meta.get(id)
-    // Its stored wait is the truth: gone (a new turn cleared the interruption, the person acted), or the setting turned off meanwhile
-    // Leaving: the stored wait is the next host's
-    if (this.host.leaving()) return
-    // A new turn cleared it (its end answers what the stop held), or the setting went off meanwhile (the stop is the person's now)
-    if (!m?.interruption?.autoContinue || inTurn(m.state) || !this.host.settings()[w.cause]) {
-      this.dropStop(id, !!m?.interruption?.autoContinue && !inTurn(m.state) && 'stopped')
-      return
-    }
+    // Taken away meanwhile (every end of a wait drops it first: a turn that started, the person, the setting). Leaving: the stored wait is the next host's
+    if (this.stops.get(id) !== w || this.host.leaving()) return
     w.phase = 'sending'
     const run = this.stopTries.get(id)
     const n = (run?.cause === w.cause ? run.n : 0) + 1
     this.stopTries.set(id, { cause: w.cause, n })
     let handed = false
-    const live = () => this.stops.get(id) === w
+    const standing = () => this.stops.get(id) === w
+    // The one gate, read right before the note is handed: the wait still stands and its setting is still on (it can go off while a dormant session wakes)
+    const live = () => standing() && this.host.settings()[w.cause]
     try {
       await this.host.send(id, w.cause, {
         live,
@@ -434,14 +440,14 @@ export class TurnContinue {
         this.host.waitEnded(id, w.cause, { continued: false, first: false })
         return
       }
-      if (!live()) return
+      if (!standing()) return
       this.stopContinue(id)
       this.host.note({ type: 'notice', sessionId: id, level: 'warning', from: 'Centralu', label: 'continue', text: words })
       return
     }
-    // Not handed and still standing: the session was taken over at the last check (deliverMail's `atRest`), so the wait ends without a continue
-    if (live()) this.dropStop(id, 'stopped')
-    if (handed) this.host.waitEnded(id, w.cause, { continued: true, first: n === 1 })
+    // Not handed and still standing: the gate said no at the last check (the setting went off, the session was taken over), so the wait ends without a continue
+    if (standing()) this.stopContinue(id)
+    if (handed) this.host.waitEnded(id, w.cause, { continued: 'centralu', first: n === 1 })
   }
 
   private async fireHeld(id: string, w: Held): Promise<void> {

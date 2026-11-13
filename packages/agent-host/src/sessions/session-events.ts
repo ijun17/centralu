@@ -512,14 +512,17 @@ export class SessionEvents {
    */
   async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
     const [sessionId, text, , from, relayed, fromApp] = args
-    // The person's own Continue (the inbox's, the header's Continue now): the work goes on, which is what a held stop notice waits to say
-    const held = this.host.turnContinue.supersede(sessionId, text === CONTINUE_WORDS && !from && !relayed && !fromApp)
+    // The person's own Continue (the inbox's, the header's Continue now): told as the work going on once it went in, as the stop if it did not
+    const continued = text === CONTINUE_WORDS && !from && !relayed && !fromApp ? this.host.turnContinue.personContinues(sessionId) : null
+    const held = this.host.turnContinue.supersede(sessionId)
     try {
       await this.deliverNow(...args)
     } catch (e) {
+      continued?.(false)
       if (held !== null) this.host.turnContinue.lost(sessionId, held)
       throw e
     }
+    continued?.(true)
   }
 
   /**

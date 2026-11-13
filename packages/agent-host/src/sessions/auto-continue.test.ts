@@ -278,14 +278,14 @@ describe("who the stop's notice was held from hears it once, however the wait en
     return vi.spyOn(view, 'mailWaitEnded')
   }
 
-  it('a turn the mailbox starts during the wait ends it, told as the stop; nothing is probed after, and no "could not reach" comes mid-work', async () => {
+  it('a turn the mailbox starts during the wait ends it, told as the work going on; nothing is probed after, and no "could not reach" comes mid-work', async () => {
     const a = host()
     const ended = told(a)
     const { id, handle } = await cutByNetwork(a)
     // As delivered mail does: the tool takes an input outside this engine, and its turn starts
     handle.emit({ type: 'state_change', sessionId: id, state: 'working' })
     expect(ended).toHaveBeenCalledTimes(1)
-    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: 'other', first: true })
     await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[4] * MAX_FAILED_PROBES)
     expect(probes).toBe(0)
     expect(handle.sent).toEqual([])
@@ -307,12 +307,12 @@ describe("who the stop's notice was held from hears it once, however the wait en
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
   })
 
-  it("the person's Continue now is told as the work continuing; another message of theirs as the stop", async () => {
+  it("the person's Continue now is told as the work going on once it went in; another message of theirs as the stop", async () => {
     const a = host()
     const ended = told(a)
     const first = await cutByNetwork(a)
     await a.rpc('agents.send', { sessionId: first.id, text: CONTINUE_WORDS })
-    expect(ended).toHaveBeenCalledWith(first.id, 'network', null, { continued: true, first: true })
+    expect(ended).toHaveBeenCalledWith(first.id, 'network', null, { continued: 'other', first: true })
     const second = await cutByNetwork(a)
     await a.rpc('agents.send', { sessionId: second.id, text: 'use the other branch' })
     expect(ended).toHaveBeenCalledWith(second.id, 'network', null, { continued: false, first: false })
@@ -332,5 +332,34 @@ describe("who the stop's notice was held from hears it once, however the wait en
     expect(ended).toHaveBeenCalledTimes(1)
     expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
     expect(a.session(limited.id).interruption?.autoContinue).toBeDefined()
+  })
+
+  it("a Continue now that does not go in is told as the stop, never as the work going on", async () => {
+    const a = host()
+    const ended = told(a)
+    const { id, handle } = await cutByNetwork(a)
+    handle.refuseSend = true
+    await expect(a.rpc('agents.send', { sessionId: id, text: CONTINUE_WORDS })).rejects.toThrow()
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+  })
+
+  it('the setting turned off while the continue is on its way (a restart or a wake waited out) sends nothing, told once as the stop', async () => {
+    const a = host()
+    const ended = told(a)
+    const { id, handle } = await cutByNetwork(a)
+    // Every input waits for a restart under way: the continue is being sent, not yet handed to the tool
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    ;(a.mgr as unknown as { restartPolicy: { deferredRestarts: Map<string, Promise<void>> } }).restartPolicy.deferredRestarts.set(id, gate)
+    online = true
+    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[0] + TICK_MS)
+    a.mgr.prefs.setUiPreferences({ continueOnNetwork: false })
+    release()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(handle.sent).toEqual([])
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
   })
 })

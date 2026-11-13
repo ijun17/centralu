@@ -105,7 +105,7 @@ export class StopNotices {
    * still answers them. Not continued (a Stop, a message, Don't continue, the trash, the setting, the tries spent): they are told the stop as it would
    * have been told then
    */
-  stopWaitEnded(address: string, why: 'limit' | 'network', starter: string | null, end: { continued: boolean; first: boolean }): void {
+  stopWaitEnded(address: string, why: 'limit' | 'network', starter: string | null, end: WaitEnd): void {
     this.d.run(() => {
       const held = (r: RecipientRow) => r.releasedWhy === why && r.settled === null && r.toldAt === null
       const rows = [...this.d.records.unansweredTo(address), ...this.d.records.watchedTo(address)].filter(held)
@@ -128,7 +128,11 @@ export class StopNotices {
         if (parseAddress(to)?.kind !== 'session') continue
         this.d.notice(to, {
           kind: 'notice',
-          body: `${name} ${CONTINUED_WORDS[why]}, so Centralu continued it. What it owes you comes when it answers or ends.`,
+          // One wording per way it went on (ux-writing.md §3): Centralu's note, or a turn of its own (the person's Continue, mail it was given)
+          body:
+            end.continued === 'centralu'
+              ? `${name} ${CONTINUED_WORDS[why]}, so Centralu continued it. What it owes you comes when it answers or ends.`
+              : `${name} ${WENT_ON_WORDS[why]}, and its work has gone on. What it owes you comes when it answers or ends.`,
           facts: { about: { session: address }, reason: 'continued', ...(this.wakes(to, false) ? {} : { quiet: true }) },
           dedupeKey: `continued:${to}:${address}:${seq}`,
         })
@@ -340,6 +344,12 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
 export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; starter?: string | null; held?: boolean }
 
 /** Who else hears of a stop (`MailHooks.stopped`, session ids): `told` by a call still waiting on it, and the session that started the stopped one */
+/**
+ * How a stop's wait ended (#1415): `continued` by Centralu's note (`centralu`), by another turn that started (`other`: the person's Continue, mail
+ * the mailbox delivered), or not at all (false: Stop, a message, Don't continue, the setting off, the tries spent). `first`: the first continue of a run of stops
+ */
+export type WaitEnd = { continued: false | 'centralu' | 'other'; first: boolean }
+
 /** `held`: Centralu waits to continue the stop (#1415): what it released is told when the wait ends (`stopWaitEnded`), not now */
 export type StopTold = { told?: readonly string[]; starter?: string | null; held?: boolean }
 
@@ -428,4 +438,9 @@ ${quoted(clipped)}`
 const CONTINUED_WORDS: Record<'limit' | 'network', string> = {
   limit: 'was stopped by its usage limit, which has reset',
   network: 'lost the network, which is back',
+}
+/** What a session's notice says stopped it, when its work went on in a turn of its own rather than by Centralu's note */
+const WENT_ON_WORDS: Record<'limit' | 'network', string> = {
+  limit: 'was stopped by its usage limit',
+  network: 'lost the network',
 }

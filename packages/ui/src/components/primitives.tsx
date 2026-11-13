@@ -59,10 +59,10 @@ export const waitStands = (i: Interruption | null | undefined): i is Interruptio
  * when it goes on. Null when nothing continues it by itself. One wording for the header and the inbox row
  */
 export function autoContinueLabel(i: Interruption, clock: (d: Date) => string): string | null {
-  if (!waitStands(i)) return null
   const at = i.autoContinue?.at
-  if (i.reason === 'limit' && at !== undefined) return `Usage limit · continues at ${clock(new Date(at))}`
-  return 'Network lost · continues when the network is back'
+  if (!waitStands(i)) return null
+  // A standing wait with a time is a limit's (`waitStands`); a network wait has none
+  return at === undefined ? 'Network lost · continues when the network is back' : `Usage limit · continues at ${clock(new Date(at))}`
 }
 
 export function StateDot({ state }: { state: SessionState }) {
