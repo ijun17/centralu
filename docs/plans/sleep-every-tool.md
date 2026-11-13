@@ -275,24 +275,33 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
     `item/completed`, which comes between turns or in a later one. A command's item stays `inProgress` until its process
     exits (`long-command`, `background-kept`), and no other recorded turn ended with one open [checked: every 0.160.0
     recording scanned; none stops a running command]. A Stop does not end a running command (measured for a child's,
-    `probe-codex-background.mts`), so one a stopped turn leaves open is running and is listed; whether Codex sends its
-    `item/completed` once it exits after a Stop: unchecked (if not, the session stays awake until its app-server ends:
-    memory, never lost work). When the app-server ends, a listed command is ended `stopped`: it went with the
+    `probe-codex-background.mts`), so one a stopped turn leaves open is running and is listed; Codex sends its
+    `item/completed` once it exits (#2248 deep review, live: the command ran on about 80 s after the Stop, stayed
+    listed, completed ok, and the session slept after). When the app-server ends, a listed command is ended `stopped`: it went with the
     app-server (§3a);
   - a goal whose status is `active` (from `thread/goal/updated`, and `thread/goal/get` on resume) is listed (kind
     `other`) until it is cleared, completed or paused. When the process ends it leaves the list with no ending: the goal
-    is the thread's, and a resume reads it back (`thread/goal/get`).
+    is the thread's, and a resume reads it back (`thread/goal/get`). **A turn that ends stopped unlists it** until
+    Codex says more of it (`thread/goal/updated`) or a turn starts: in the review a Stop of a goal's turn left the goal
+    `active` (tokensUsed 0) and Codex started no turn in 90 s, so a listed goal held the session busy until cleared.
+    Nothing runs then, and a wake reads the goal back, so a sleep loses nothing.
 
   Both make `sessionIdle` say `background`, so they also hold off a move to a new CLI, which ends the app-server too.
   Being background work, they count wherever it does (`liveBackgroundTasks`): the session shows paused on background
   work, and a delete, a handoff or an update waits or asks as for a running shell. For a command that is the point; for
-  a goal it is mostly brief (measured: a set goal's turn starts within milliseconds and runs it to its end), but a goal
-  left `active` with no turn running would hold all of it until cleared [how often Codex leaves one so: unchecked].
+  a goal it is brief (measured: a set goal's turn starts within milliseconds, and in the review Codex started three
+  turns by itself before completing it); the one case found where Codex leaves a goal `active` with no turn, a stopped
+  turn, unlists it (above).
   A process adopted from a previous host does not exist any more (#1895 C: no agent process outlives its host), so a
   new host never meets a command it did not see start.
   Their tests replay `background-kept` and `goal-set` (`adapters/codex/replay.test.ts`): the shell is listed before
   turn 1's end goes out and ended `completed` later; the goal listed while active and gone once cleared. Both fail with
-  the tracker's hook taken out.
+  the tracker's hook taken out. The stopped-goal rule is tested on real frames (`normalize.test.ts`: the goal of
+  `goal-set`, the stopped turn and the next turn's start of `interrupt`) and fails without it.
+- **Deep review** (#2248, Opus on the Mac with a live codex-cli 0.160.0): an idle sleep and wake (live again in 0.15 s,
+  first text +3.0 s, the turn-1 word recalled); a command kept past its turn (listed, slept only after it ended); an
+  active goal (listed across three turns Codex started, slept after it completed); a Stop during a running command
+  (listed until its `item/completed`, then slept); a stopped goal turn (the finding fixed above).
 - Tests: `sessions/sleep.test.ts` "a Codex session, on the recording of a real app-server": the real adapter on
   `resume.jsonl` through `SessionManager`; the sleeper puts it to sleep (`session_live asleep`), and the next message
   resumes the thread in a new process and the turn answers with the code word; every recorded line used, none

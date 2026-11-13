@@ -63,7 +63,10 @@ const GOAL_ID = 'goal'
  * **An active goal.** Codex works toward a goal (`thread/goal/set`) in turns it starts itself, which a sleep would end.
  * So a goal whose status is `active` is listed (kind `other`) until it is cleared, completed or paused. The goal itself
  * lives in the thread and outlives the process (the adapter reads it back on resume), so the process ending does not end
- * it as a task.
+ * it as a task. **A stopped turn leaves it idle**: measured live (#2248 review, codex-cli 0.160.0), a Stop of a goal's
+ * turn left the goal `active` and Codex started no turn for it in 90 s, so a goal still listed then held the session
+ * busy until the person cleared it. After a turn that ends interrupted the goal is not listed, until Codex says more
+ * of it (`thread/goal/updated`) or a turn starts; a sleep then loses nothing, as a wake reads the goal back.
  *
  * A child runs on its own thread, and its notifications arrive on the parent's connection (#222). It is live while
  * its thread is active. Measured (scripts/probe-codex-background.mts, codex-cli 0.160.0, gpt-5.6-luna, 2026-10-04):
@@ -101,6 +104,8 @@ export class CodexChildTracker {
   private readonly commands = new Map<string, { command: string; kept: boolean }>()
   /** The objective of the thread's goal while it is active (#2027) */
   private goal: string | null = null
+  /** Whether the active goal is left idle by a stopped turn: not listed until Codex says more of it or a turn starts */
+  private goalStopped = false
 
   constructor(private readonly sessionId: string) {
     this.events = new BackgroundEvents(sessionId)
@@ -180,10 +185,16 @@ export class CodexChildTracker {
       this.commands.delete(id)
       return c?.kept ? this.changed([{ ...this.keptTask(id, c.command), status: codexItemOk(item) ? 'completed' : 'failed' }]) : []
     }
+    if (n.method === 'turn/started' && this.goalStopped) {
+      this.goalStopped = false
+      return this.changed()
+    }
     if (n.method === 'turn/completed') {
       const open = [...this.commands.values()].filter((c) => !c.kept)
       for (const c of open) c.kept = true
-      return open.length > 0 ? this.changed() : []
+      const stopped = this.goal !== null && !this.goalStopped && str(asObj(p.turn).status) === 'interrupted'
+      if (stopped) this.goalStopped = true
+      return open.length > 0 || stopped ? this.changed() : []
     }
     if (n.method === 'thread/goal/updated') return this.goalIs(goalFromCodex(asObj(p.goal)))
     if (n.method === 'thread/goal/cleared') return this.goalIs(null)
@@ -193,8 +204,9 @@ export class CodexChildTracker {
   /** The thread's goal as read: a notification, or `thread/goal/get` on resume */
   goalIs(g: SessionGoal | null): NormalizedEvent[] {
     const objective = g?.status === 'active' ? g.objective : null
-    if (objective === this.goal) return []
+    if (objective === this.goal && !this.goalStopped) return []
     this.goal = objective
+    this.goalStopped = false
     return this.changed()
   }
 
@@ -209,6 +221,7 @@ export class CodexChildTracker {
     const live = this.live().filter((t) => t.id !== GOAL_ID)
     this.commands.clear()
     this.goal = null
+    this.goalStopped = false
     for (const t of this.threads.values()) {
       t.active = false
       t.turnId = null
@@ -253,7 +266,7 @@ export class CodexChildTracker {
       if (task) out.push(task)
     }
     for (const [id, c] of this.commands) if (c.kept) out.push(this.keptTask(id, c.command))
-    if (this.goal !== null) out.push({ id: GOAL_ID, kind: 'other', description: `Goal: ${firstLine(this.goal.trim())}`, stopsWithTurn: false, stoppable: false, status: 'running' })
+    if (this.goal !== null && !this.goalStopped) out.push({ id: GOAL_ID, kind: 'other', description: `Goal: ${firstLine(this.goal.trim())}`, stopsWithTurn: false, stoppable: false, status: 'running' })
     return out
   }
 
