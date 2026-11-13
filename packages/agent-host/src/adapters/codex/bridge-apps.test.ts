@@ -192,7 +192,7 @@ describe("the bridge — apps through Centralu's app tool, end to end, seen from
     expect((await request('tools/call', appCall('notes', 'peek'))).result).toMatchObject({ isError: false })
     const pending = request('tools/call', appCall('notes', 'poke', { to: 4 }))
     const card = await until(() => mgr.listSessions().find((x) => x.id === s.id)?.pendingApproval, (c) => c !== undefined && c !== null, 10_000)
-    expect(card!.detail).toMatchObject({ kind: 'other', raw: expect.stringContaining('notes: poke {"to":4}') })
+    expect(card!.detail).toMatchObject({ kind: 'other', raw: expect.stringContaining('notes: poke {"to":4}'), about: 'app_call' })
     expect(rt.runs({ projectId, appId: 'notes' }).map((r) => r.tool)).toEqual(['peek'])
     await call('agents.respondApproval', { sessionId: s.id, requestId: card!.requestId, decision: 'allow' })
     expect((await pending).result).toMatchObject({ content: [{ type: 'text', text: 'poked 4' }], isError: false })

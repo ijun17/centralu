@@ -153,8 +153,8 @@ table in [the section above](#apps-through-one-centralu-tool-2231) says, decided
 The decision is made from the session's app's tool list, not from a name.
 
 **A write can declare how risky it is** (`apps/external/tool-risk.ts`). Everything that is not read-only used to
-ask, from a note in the app's own data folder to a merge, and "always" does not help on Claude: an app tool's card
-has no rule key, so nothing it remembers reaches the next call. A tool may say, in its `_meta`:
+ask, from a note in the app's own data folder to a merge, and the app call card asks every time and offers no
+"always", so a session that works through an app is asked again for each call that is not declared below. A tool may say, in its `_meta`:
 
 | `_meta["centralu/risk"]` | Means | No card when |
 |---|---|---|

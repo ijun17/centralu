@@ -5,8 +5,8 @@ import type { PermissionPreset } from '@cc/protocol'
  *
  * `annotations.readOnlyHint: true` already lets a tool run with no card (decision 5). That left every other write,
  * from a note in the app's own data folder to a merge on GitHub, behind a card under `safe` and `normal`, and
- * "always" is not remembered for an app tool on Claude (`alwaysAllowKey` has no key for an `other` card), so a
- * session that worked through an app was asked again for each call. This adds two levels an app can declare in
+ * the app call card asks every time and offers no "always", so a session that worked through an app was asked again
+ * for each call. This adds two levels an app can declare in
  * the tool's `_meta`, and the host decides what each is worth. A declaration is a claim, like `readOnlyHint`:
  * it is read from the tool list of an app the person turned on (or trusted with its project), never from a
  * name, and an undeclared tool keeps asking.

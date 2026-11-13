@@ -126,11 +126,17 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     // Assistant's preset asks about a write: the host's card, which the person allows
     const call = live(orc.id).call('app-echoer', 'poke', { to: 3 })
     const card = await until(() => mgr.sessionInfo(orc.id)?.pendingApproval, (p) => p !== undefined && p !== null)
-    expect(card!.detail).toMatchObject({ kind: 'other', raw: 'echoer: poke {"to":3}' })
-    mgr.inputs.respondApproval(orc.id, card!.requestId, 'allow')
+    expect(card!.detail).toMatchObject({ kind: 'other', raw: 'echoer: poke {"to":3}', about: 'app_call' })
+    // The card offers no "always": one sent anyway is read as allow, once, and nothing is remembered for the next call
+    mgr.inputs.respondApproval(orc.id, card!.requestId, 'always')
     const out = await call
     expect(out.isError).toBeFalsy()
     expect(out.content).toEqual([{ type: 'text', text: 'poked 3' }])
+    const again = live(orc.id).call('app-echoer', 'poke', { to: 4 })
+    const second = await until(() => mgr.sessionInfo(orc.id)?.pendingApproval, (p) => p !== undefined && p !== null && p.requestId !== card!.requestId)
+    expect(second!.detail).toMatchObject({ kind: 'other', raw: 'echoer: poke {"to":4}', about: 'app_call' })
+    mgr.inputs.respondApproval(orc.id, second!.requestId, 'deny')
+    await again
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([
       expect.objectContaining({ tool: 'poke', status: 'ok', callerKind: 'session', callerSessionId: orc.id }),
     ])

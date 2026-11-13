@@ -497,7 +497,7 @@ export type SessionAppAttachment = SessionApps & SessionAppTools
 export type AppApproval = {
   preset(sessionId: string): PermissionPreset
   bypassed(sessionId: string): boolean
-  ask(sessionId: string, detail: { kind: 'other'; raw: string; about?: string }, signal: AbortSignal): Promise<'allow' | 'always' | 'always_project' | 'deny' | null>
+  ask(sessionId: string, detail: { kind: 'other'; raw: string; about: typeof APP_CALL }, signal: AbortSignal): Promise<'allow' | 'always' | 'always_project' | 'deny' | null>
 }
 
 /** The attachment for one handle — what the adapter and the `app` tool see of a session's apps */
