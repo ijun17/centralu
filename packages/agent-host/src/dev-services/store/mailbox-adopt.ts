@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3'
 import { parseAddress } from '../../mail/address.js'
 import { wakes } from '../../mail/rules.js'
-import { endEarlierBuildHolds } from './earlier-holds.js'
 import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail-types.js'
 import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKind } from './mailbox.js'
 
@@ -13,7 +12,7 @@ import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKin
 /** v61 mail older than this is not moved: retention would not have kept it waiting (§6.4) */
 const MOVE_WITHIN_MS = 180 * 24 * 60 * 60 * 1000
 
-/** v61 holds carried by a move: every recipient hold, and the person's `released` (sent as it is, never held again). What an earlier build held that nothing holds now is ended after the copy (`endEarlierBuildHolds`, #2243) */
+/** v61 holds carried by a move: every recipient hold, and the person's `released` (sent as it is, never held again). What an earlier build held that today's gate would not hold is written `dismissed` as the row is moved (#2243) */
 const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS, 'released'])
 
 type PendingSql = MessageSql & {
@@ -49,7 +48,13 @@ function kindOf(m: MessageRow, threadOrigin: string): { kind: MailKind; needsRep
  * released is never held again (`releasedTo`). A session's message carries its sender's project (`projectOf`; the old tool left its threads' project empty), so the one hold judges it
  * at drain. Returns how many messages and rows were written
  */
-export function movePendingThreadMail(db: Database.Database, now: number, projectOf: (address: string) => string | null): { messages: number; recipients: number } {
+export function movePendingThreadMail(
+  db: Database.Database,
+  now: number,
+  projectOf: (address: string) => string | null,
+  /** Whether today's gate (`reach.holdFor`, the one the delivery uses) holds a message of this kind from this project for this recipient */
+  holdsNow: (m: { kind: MailKind; senderProject: string | null }, recipient: string) => boolean,
+): { messages: number; recipients: number } {
   return db
     .transaction(() => {
       const pending = db
@@ -94,6 +99,7 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
       for (const p of pending) {
         const m = toMessage(p)
         const sender = parseAddress(m.sender)
+        const senderProject = sender?.kind === 'session' ? (projectOf(m.sender) ?? (m.sender === p.t_owner ? p.t_project_id : null)) : null
         const target = m.replyTo === null ? undefined : rootOf.get(m.replyTo)
         const { kind, needsReply } = kindOf(m, p.t_origin)
         const facts: MailFacts = {
@@ -107,7 +113,7 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         messages += insertMail.run({
           id: m.id,
           sender: m.sender,
-          senderProject: sender?.kind === 'session' ? (projectOf(m.sender) ?? (m.sender === p.t_owner ? p.t_project_id : null)) : null,
+          senderProject,
           kind,
           needsReply: needsReply ? 1 : 0,
           replyTo: target ? m.replyTo : null,
@@ -119,24 +125,31 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
           legacyThread: m.threadId,
           createdAt: m.createdAt,
         }).changes
+        const via = p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? ROLE_VIA : null
+        const carried = p.r_held !== null && CARRIED_HOLDS.has(p.r_held) ? p.r_held : null
+        /*
+         * A hold an earlier build set stays only if today's gate would hold the mail now (#2243): the token guard (`budget`) is never set by today's code, and
+         * a `policy` hold is asked of `holdsNow`, the gate the delivery uses, so an untrusted asker's request is held while its project is untrusted and the
+         * first-contact hold of an earlier build is not. What does not stay is written `dismissed`, as the person's Dismiss writes it (not held, never delivered).
+         * Only rows inserted here are judged: a row moved at an earlier start may be held `policy` by the delivery's own judgement, which is not this move's to undo
+         */
+        const ended = carried === 'budget' || (carried === 'policy' && !holdsNow({ kind, senderProject }, p.r_recipient))
         recipients += insertRow.run({
           messageId: m.id,
           recipient: p.r_recipient,
-          via: p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? ROLE_VIA : null,
+          via,
           settled: kind === 'task' && to?.trashed === 1 ? 'gone' : 'legacy',
           dueAt: p.r_due_at,
-          attemptAt: p.r_attempt_at,
+          attemptAt: ended ? null : p.r_attempt_at,
           deliveredAt: p.r_delivered_at,
           readAt: p.r_read_at,
-          held: p.r_held !== null && CARRIED_HOLDS.has(p.r_held) ? p.r_held : null,
-          attempts: p.r_attempts,
-          lastError: p.r_last_error,
+          held: ended ? 'dismissed' : carried,
+          attempts: ended ? 0 : p.r_attempts,
+          lastError: ended ? null : p.r_last_error,
           now,
         }).changes
         handled.run({ now, id: m.id, recipient: p.r_recipient })
       }
-      // What an earlier build held and nothing holds now is not carried as held (#2243): the same ending store step 72 gives the rows moved before it
-      endEarlierBuildHolds(db)
       return { messages, recipients }
     })
     .immediate()

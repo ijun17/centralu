@@ -1,7 +1,6 @@
-import { endEarlierBuildHolds } from '../earlier-holds.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v71. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v72. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -218,15 +217,39 @@ export class StepsV65 extends MigrationRange {
          * The holds of an earlier build, ended (#2243). The mail token guard (`budget`) went with D32 (#2014, beta.49) and the `auto` receiver's
          * first-contact hold (`holdsInbound`) with D10, but the rows an earlier build held kept their hold when the v65 move carried them (settled
          * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
-         * without asking" weeks after nothing could write such a hold. `endEarlierBuildHolds` (store/earlier-holds.ts, which says what it ends and
-         * why `dismissed`) is the one predicate, used by this step for the rows moved already and by the move for those it moves from now on: a
-         * store of v64 or before opened by this build runs steps 65 to 72 and then the move, which would bring the holds back.
+         * without asking" weeks after nothing could write such a hold.
+         *
+         * **One meaning: a hold from an earlier build stays only if today's gate would hold the mail now.** `budget` is never set by today's code, so every
+         * such row goes. A `policy` row settled `legacy` stays while `reach.holdFor` (mail/reach.ts) would hold it: a `message` from an untrusted project (a
+         * missing project row is untrusted) to a session of another project, which is how a genuine untrusted asker's request is still held. The
+         * delivery also holds moved rows that way (it judges a `legacy` row like any other, and `records.hold` writes `held` alone), so the same row looks
+         * the same whoever held it, and this step cannot tell them apart; it asks the gate, as the move asks it for the rows it moves from now on. What the
+         * gate would not hold goes, and what goes is `dismissed`, the hold word the person's Dismiss sets (not held for the person, never delivered):
+         * `gone` says a sender or recipient is gone and `withdrawn` that the sender said it no longer waits, and neither is so. `settled` stays `legacy`.
+         *
+         * **This is a frozen copy of `holdFor`'s conditions, on purpose.** A step runs once on every store and must not call code that may change later;
+         * if `holdFor` changes, this step does not. It mirrors: `m.kind === 'message'`; `leaves(senderProject, recipientProject)` = the sender's project is
+         * not null and untrusted (`projects.trusted = 0`, or no such project) and is not the recipient session's project; the recipient is a session (a
+         * `sessions` row). The recipient's project is read from `sessions.project_id` and the sender's from `mail.sender_project`, as the move wrote it.
          *
          * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
          * and does not bring the holds back. Nothing is deleted: the message and its row stay. The sender is not told: the person did not dismiss it.
          */
         run: () => {
-          endEarlierBuildHolds(this.db)
+          // A store with no such row (every one but an old owner's, and a test's partial schema) has nothing to judge, and needs no table the judgement reads
+          if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
+          if (this.db.prepare(`SELECT 1 FROM mail_recipients WHERE held IN ('budget', 'policy') LIMIT 1`).get() === undefined) return
+          this.db.exec(
+            `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
+              WHERE held = 'budget'
+                 OR (held = 'policy' AND settled = 'legacy' AND NOT EXISTS (
+                      SELECT 1 FROM mail m, sessions s
+                       WHERE m.id = mail_recipients.message_id AND m.kind = 'message'
+                         AND m.sender_project IS NOT NULL
+                         AND COALESCE((SELECT p.trusted FROM projects p WHERE p.id = m.sender_project), 0) = 0
+                         AND mail_recipients.recipient LIKE 'session:%' AND substr(mail_recipients.recipient, instr(mail_recipients.recipient, '/') + 1) = s.id
+                         AND s.project_id IS NOT m.sender_project))`,
+          )
         },
       },
     ]
