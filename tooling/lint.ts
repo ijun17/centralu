@@ -35,7 +35,7 @@ import {
   countFindings,
   disabledFindings,
   eslintOptions,
-  guardOptions,
+  guardRun,
   LISTABLE_RULES,
   lintHeapMb,
   lintFailed,
@@ -72,8 +72,7 @@ const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
 // The guard pass: its own configuration, and no comment configures it. A file none of its rules reads is not a result.
 // It reads the whole repository even for some paths: the ceilings below count every file of a package, and it is a run of seconds
-const guardAll = await new ESLint(guardOptions(ROOT)).lintFiles(['.'])
-for (const r of guardAll) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
+const guardAll = await guardRun(ROOT)
 const disabled = disabledFindings(ROOT, results)
 // Counted over the whole repository, and not shown: they are not findings (#1607)
 const assertions = assertionTotals(ROOT, guardAll)

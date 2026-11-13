@@ -50,6 +50,14 @@ export const ASSERTION_RULE = 'guard/type-assertions'
  */
 export const guardOptions = (cwd: string): ESLint.Options => ({ cwd, concurrency: Math.max(2, Math.min(4, availableParallelism())), overrideConfigFile: join(cwd, 'tooling', 'eslint-guard-pass.js') })
 
+/** The guard pass over every file under `root`, without the notices about comments and ignored files that are not findings. tooling/lint.ts and the test of the ceilings both run it (the test on a temp folder, with `configRoot` the repository). */
+export async function guardRun(root: string, configRoot = root): Promise<ESLint.LintResult[]> {
+  const { ESLint: Linter } = await import('eslint')
+  const results = await new Linter({ ...guardOptions(root), overrideConfigFile: join(configRoot, 'tooling', 'eslint-guard-pass.js') }).lintFiles(['.'])
+  for (const r of results) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
+  return results
+}
+
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
 

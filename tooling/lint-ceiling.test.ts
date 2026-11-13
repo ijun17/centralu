@@ -1,29 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { execFile } from 'node:child_process'
-import { rmSync, writeFileSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
+import { ASSERTIONS, assertionTotals, guardRun, overAndUnder } from './lint-allowlist.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
-describe('pnpm lint <paths>', () => {
-  // Async: the run reads the whole repository (tens of seconds on a loaded runner), and a sync spawn holds the worker's loop that long
-  it('holds a package to its type-assertion ceiling, as the whole run does (pre-pr lints only the changed files)', async () => {
-    const file = join(ROOT, 'packages', 'protocol', 'src', `zz-ceiling-probe-${process.pid}.ts`)
-    writeFileSync(file, 'export const probe = 1 as number\n')
+describe('the type-assertion ceilings', () => {
+  // The same functions tooling/lint.ts runs (guardRun, assertionTotals, overAndUnder), on a copy of a package in a temp folder:
+  // nothing is written into the repository, so a killed run leaves nothing for another run to count
+  it('hold a package to its ceiling over every file of it, as the whole run does', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-ceiling-'))
     try {
-      // A timeout under the test's own, so the child is gone and the probe removed before vitest gives up on the test
-      const args = ['--import', 'tsx', 'tooling/lint.ts', relative(ROOT, file).split(sep).join('/')]
-      const r = await promisify(execFile)(process.execPath, args, { cwd: ROOT, timeout: 100_000 * SLOW }).then(
-        (o) => ({ code: 0, out: `${o.stdout}${o.stderr}` }),
-        (e: { code?: number | string | null; stdout?: string; stderr?: string }) => ({ code: e.code, out: `${e.stdout ?? ''}${e.stderr ?? ''}` }),
-      )
-      expect(r.out).toContain('packages/protocol: 1, ceiling 0 type assertions')
-      expect(r.code).toBe(1)
+      mkdirSync(join(dir, 'packages', 'protocol', 'src'), { recursive: true })
+      writeFileSync(join(dir, 'packages', 'protocol', 'src', 'probe.ts'), 'export const probe = 1 as number\n')
+      const totals = assertionTotals(dir, await guardRun(dir, ROOT))
+      expect(totals).toEqual({ 'packages/protocol': 1 })
+      expect(overAndUnder(totals, ASSERTIONS).over).toEqual(['packages/protocol: 1, ceiling 0'])
     } finally {
-      rmSync(file, { force: true })
+      rmSync(dir, { recursive: true, force: true })
     }
-  }, 120_000 * SLOW)
+  }, 60_000 * SLOW)
 })
