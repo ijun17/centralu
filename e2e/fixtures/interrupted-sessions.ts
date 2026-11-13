@@ -152,7 +152,8 @@ export function interruptedSessionTests() {
     await expect(page.getByTestId('interrupted-continue')).toHaveText('Continue')
 
     // The inbox row says the wait in the header's words; a network wait says what it waits for
-    await emit(page, [{ type: 'interruption', sessionId: other, interruption: { reason: 'network', at: Date.now(), autoContinue: { tries: 1 } } }])
+    const failure = networkFailure(other)
+    await emit(page, [...failure.slice(0, -1), { type: 'interruption', sessionId: other, interruption: { reason: 'network', at: Date.now(), autoContinue: { tries: 1 } } }])
     await openInbox(page)
     await expect(item(page, other)).toContainText('Network lost · continues when the network is back')
     await expect(page.getByTestId(`inbox-continue-${other}`)).toHaveText('Continue now')
