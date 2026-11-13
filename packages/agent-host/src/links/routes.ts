@@ -329,6 +329,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'mail.held': HUB,
   'mail.resume': HUB,
   'mail.wake': HUB,
+  // A watch lives on its owner's host (docs/plans/mailbox.md §18.6): the window lists the watches of the host it talks to
+  'watches.list': HUB,
+  'watches.cancel': HUB,
   'grid.get': HUB,
   'grid.set': HUB,
   'prefs.get': HUB,

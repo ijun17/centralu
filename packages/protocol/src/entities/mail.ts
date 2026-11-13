@@ -143,3 +143,23 @@ export const MailThreadView = z.object({
   canReply: z.boolean().optional(),
 })
 export type MailThreadView = z.infer<typeof MailThreadView>
+
+/**
+ * One watch a session keeps (#1324, docs/plans/mailbox.md §18.8), as its header lists it. The window words the row from these fields:
+ * the host sends no sentence. `source` is what it waits for: `session` a session's turn end, question or stop (`what` its name);
+ * `time` a time (`at` the next firing, `everyMinutes` when it repeats); `pr` a pull request's checks (`what` `#123`). An unknown
+ * source from a newer host reads as `other`, shown by its `what`.
+ */
+export const WatchView = z.object({
+  id: z.string(),
+  source: z.enum(['session', 'time', 'pr', 'other']).catch('other'),
+  what: z.string().default(''),
+  at: z.number().nullable().default(null),
+  everyMinutes: z.number().nullable().default(null),
+  /** When it ends if nothing fires it */
+  until: z.number(),
+  /** The session's own note, at most 300 characters; empty for none */
+  note: z.string().default(''),
+  createdAt: z.number(),
+})
+export type WatchView = z.infer<typeof WatchView>
