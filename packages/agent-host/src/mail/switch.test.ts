@@ -123,14 +123,18 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.tool.run('b', { action: 'read' }).text).toContain('CI is green on #12')
   })
 
-  it('mail an older build held for the person after telling its recipient of it is moved still held: the move releases nothing', () => {
+  it('mail an older build held for the person after telling its recipient of it is moved, the holds nothing holds now ended (#2243), the others kept, and nothing released', () => {
     const w = hostWorld()
     const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, held: 'budget' })
     const note = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F05' }
     oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F05', owner: X, subject: 'fyi', at: w.clock.t }, [{ id: note.id, sender: X, kind: 'note', body: 'A note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'policy' }] }])
+    const kept = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F06' }
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F06', owner: X, subject: 'later', at: w.clock.t }, [{ id: kept.id, sender: X, kind: 'note', body: 'A later note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'uncertain' }] }])
     started(w)
-    expect(w.row(q.id, B)).toMatchObject({ held: 'budget' })
-    expect(w.row(note.id, B)).toMatchObject({ held: 'policy' })
+    // The token guard and the first-contact hold are gone: dismissed, not delivered, not listed. A hold that still exists is carried as it was
+    expect(w.row(q.id, B)).toMatchObject({ held: 'dismissed' })
+    expect(w.row(note.id, B)).toMatchObject({ held: 'dismissed' })
+    expect(w.row(kept.id, B)).toMatchObject({ held: 'uncertain' })
   })
 })
 
