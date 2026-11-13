@@ -15,6 +15,7 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { CLIENT_INFO } from '@cc/protocol'
 import { CodexClient, type ServerNotification, type ServerRequest } from '../src/adapters/codex/client.js'
+import { asObj, str } from '../src/json-value.js'
 
 const { values: o } = parseArgs({ options: { rollout: { type: 'string' }, model: { type: 'string', default: 'gpt-5.6-luna' }, 'only-f': { type: 'boolean', default: false } } })
 const root = mkdtempSync(join(tmpdir(), 'cc-probe-codex-shared-'))
@@ -65,7 +66,7 @@ const client: CodexClient = new CodexClient(
 await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
 client.notify('initialized')
 
-const tp = (e: Ev) => (e.n.params ?? {}) as Record<string, any>
+const tp = (e: Ev) => asObj(e.n.params)
 const serverPid = () => {
   const ps = execFileSync('ps', ['-axo', 'pid,ppid,rss,command']).toString().split('\n')
   const mine = ps.map((l) => l.trim().split(/\s+/)).filter((p) => p.length > 3)
@@ -73,7 +74,7 @@ const serverPid = () => {
 }
 /** RSS in MB of the app-server's whole process tree (the npm node wrapper included) */
 function treeRss(): { mb: number; procs: number; mcp: number } {
-  const rows = serverPid().mine.map((p) => ({ pid: +p[0]!, ppid: +p[1]!, rss: +p[2]!, cmd: p.slice(3).join(' ') }))
+  const rows = serverPid().mine.map((p) => ({ pid: Number(p[0]), ppid: Number(p[1]), rss: Number(p[2]), cmd: p.slice(3).join(' ') }))
   const roots = rows.filter((r) => r.ppid === process.pid && /codex/.test(r.cmd))
   const seen = new Set<number>()
   const walk = (pid: number) => {
@@ -84,7 +85,7 @@ function treeRss(): { mb: number; procs: number; mcp: number } {
   const inTree = rows.filter((r) => seen.has(r.pid))
   return { mb: Math.round(inTree.reduce((s, r) => s + r.rss, 0) / 1024), procs: inTree.length, mcp: inTree.filter((r) => r.cmd.includes(mcpPath)).length }
 }
-const rootPids = () => serverPid().mine.filter((p) => +p[1]! === process.pid && /codex/.test(p.slice(3).join(' '))).map((p) => +p[0]!)
+const rootPids = () => serverPid().mine.filter((p) => Number(p[1]) === process.pid && /codex/.test(p.slice(3).join(' '))).map((p) => Number(p[0]))
 
 const cwds: string[] = []
 const threads: string[] = []
@@ -116,8 +117,8 @@ const turnDone = (threadId: string, ms = 240_000) =>
     }
     waiters.push(check)
   })
-const textOf = (threadId: string) => evs.filter((e) => tp(e).threadId === threadId && e.n.method === 'item/completed' && tp(e).item?.type === 'agentMessage').map((e) => tp(e).item.text).join('\n')
-const outputOf = (threadId: string) => evs.filter((e) => tp(e).threadId === threadId && e.n.method === 'item/completed' && tp(e).item?.type === 'commandExecution').map((e) => String(tp(e).item.aggregatedOutput ?? ''))
+const textOf = (threadId: string) => evs.filter((e) => tp(e).threadId === threadId && e.n.method === 'item/completed' && asObj(tp(e).item).type === 'agentMessage').map((e) => str(asObj(tp(e).item).text)).join('\n')
+const outputOf = (threadId: string) => evs.filter((e) => tp(e).threadId === threadId && e.n.method === 'item/completed' && asObj(tp(e).item).type === 'commandExecution').map((e) => str(asObj(tp(e).item).aggregatedOutput))
 const gate: Record<string, unknown> = {}
 const log = (g: string, v: unknown) => {
   gate[g] = v
@@ -138,7 +139,7 @@ try {
   log('d_rss_without_mcp', rss)
   // (c) credential and pwd per thread; (h) cwd from the thread, not the process; (b) server requests carry threadId (see below)
   await Promise.all(
-    threads.slice(0, 5).map(async (t, i) => {
+    threads.slice(0, 5).map(async (t) => {
       const d = turnDone(t)
       await startTurn(t, `Run the shell command: echo "CRED=$CC_PROBE_CRED PWD=$(pwd)"   Then reply with one word.`)
       await d
@@ -146,21 +147,24 @@ try {
   )
   log('c_shell_env_and_cwd', threads.slice(0, 5).map((t, i) => ({ i, out: outputOf(t).map((s) => s.trim()), expectCred: `cred-${i}`, expectCwd: cwds[i] })))
   const turnDones = threads.slice(5, 10).map((t) => turnDone(t))
-  await Promise.all(threads.slice(5, 10).map((t, k) => startTurn(t, `Without using any tool: which project code word do your project instructions (AGENTS.md) give? Answer with only the word.`)))
+  await Promise.all(threads.slice(5, 10).map((t) => startTurn(t, `Without using any tool: which project code word do your project instructions (AGENTS.md) give? Answer with only the word.`)))
   await Promise.all(turnDones)
   log('h_agents_md_from_thread_cwd', threads.slice(5, 10).map((t, k) => ({ i: k + 5, answer: textOf(t).trim(), expect: `PROJ${k + 5}-WORD` })))
   log('d_rss_after_turns_no_mcp', treeRss())
 
   // (a) two turns at once stream independently: delta windows overlap
   const mark = evs.length
-  const [a, b] = [threads[0]!, threads[1]!]
+  const [a, b] = threads
+  if (!a || !b) throw new Error('(a) needs two threads')
   const da = turnDone(a)
   const db = turnDone(b)
   await Promise.all([startTurn(a, 'Write the numbers 1 to 150, one per line, nothing else.'), startTurn(b, 'Write the numbers 151 to 300, one per line, nothing else.')])
   await Promise.all([da, db])
   const span = (t: string) => {
     const d = evs.slice(mark).filter((e) => tp(e).threadId === t && e.n.method === 'item/agentMessage/delta')
-    return { first: d[0]!.at - t0, last: d.at(-1)!.at - t0, deltas: d.length }
+    const [first, last] = [d[0], d.at(-1)]
+    if (!first || !last) throw new Error(`(a) no agent message delta on thread ${t}`)
+    return { first: first.at - t0, last: last.at - t0, deltas: d.length }
   }
   const sa = span(a)
   const sb = span(b)
@@ -168,11 +172,12 @@ try {
 
   // (b) a server request: a thread that needs approval (on-request, read-only sandbox) asks to write a file
   const rq0 = requests.length
-  const tb = threads[2]!
+  const tb = threads[2]
+  if (!tb) throw new Error('(b) needs a third thread')
   const dbq = turnDone(tb)
   await client.request('turn/start', { threadId: tb, effort: 'low', approvalPolicy: 'on-request', sandboxPolicy: { type: 'readOnly' }, input: [{ type: 'text', text: 'Create the file approved.txt in the current directory with the text hi, using a shell command. Then reply with one word.' }] })
   await dbq
-  log('b_server_requests', requests.slice(rq0).map((r) => ({ method: r.method, threadId: (r.params as any)?.threadId ?? null, expect: tb })))
+  log('b_server_requests', requests.slice(rq0).map((r) => ({ method: r.method, threadId: asObj(r.params).threadId ?? null, expect: tb })))
 
   // (d) with two MCP servers per thread, 1, 2, 5, 10 more threads
   const before = treeRss()
@@ -198,7 +203,9 @@ try {
   await new Promise((r) => setTimeout(r, 3000))
   const closed = evs.filter((e) => e.n.method === 'thread/closed').length
   log('g_unsubscribe', { before: preG, after: treeRss(), responses: unsub.slice(0, 2), threadClosedNotifications: closed })
-  const re = await client.request('thread/resume', { threadId: mcpThreads[0]!, cwd: cwds.at(-1)!, model: o.model }).then(() => 'resumed', (e: Error) => e.message)
+  const [resumeId, resumeCwd] = [mcpThreads[0], cwds.at(-1)]
+  if (!resumeId || !resumeCwd) throw new Error('(g) needs a thread with MCP servers and a cwd')
+  const re = await client.request('thread/resume', { threadId: resumeId, cwd: resumeCwd, model: o.model }).then(() => 'resumed', (e: Error) => e.message)
   log('g_resume_after_unsubscribe', re)
 
   }
@@ -206,10 +213,12 @@ try {
   // (f) resume of the big thread while another thread streams
   if (o.rollout) {
     copyFileSync(o.rollout, join(home, 'sessions', '2026', '01', '01', basename(o.rollout)))
-    const bigId = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(o.rollout)![1]!
+    const bigId = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(o.rollout)?.[1]
+    if (!bigId) throw new Error(`--rollout must be a rollout file named after its thread id (<uuid>.jsonl): ${o.rollout}`)
     for (const variant of ['control', 'resume-excludeTurns', 'resume-full']) {
     const mk = evs.length
-    const streamer = threads[0]!
+    const streamer = threads[0]
+    if (!streamer) throw new Error('(f) needs a thread to stream')
     const ds = turnDone(streamer)
     await startTurn(streamer, 'Write the numbers 1 to 1500, one per line, nothing else.')
     await new Promise((r) => setTimeout(r, 2500))
@@ -221,12 +230,18 @@ try {
     const d = evs.slice(mk).filter((e) => tp(e).threadId === streamer && e.n.method === 'item/agentMessage/delta').map((e) => e.at)
     let maxGap = 0
     let gapAt = 0
-    for (let i = 1; i < d.length; i++) if (d[i]! - d[i - 1]! > maxGap) ((maxGap = d[i]! - d[i - 1]!), (gapAt = d[i - 1]! - rs))
+    for (let i = 1; i < d.length; i++) {
+      const [prev, cur] = [d[i - 1] ?? 0, d[i] ?? 0]
+      if (cur - prev > maxGap) {
+        maxGap = cur - prev
+        gapAt = prev - rs
+      }
+    }
     const gapsWithin = d.filter((x) => x >= rs && x <= re2)
     const gapBaseline = (() => {
       const pre = d.filter((x) => x < rs)
       let m = 0
-      for (let i = 1; i < pre.length; i++) m = Math.max(m, pre[i]! - pre[i - 1]!)
+      for (let i = 1; i < pre.length; i++) m = Math.max(m, (pre[i] ?? 0) - (pre[i - 1] ?? 0))
       return m
     })()
     log('f_' + variant, { resumeMs: re2 - rs, streamerDeltasDuringResume: gapsWithin.length, maxGapMs: maxGap, maxGapStartedMsAfterResumeSent: gapAt, maxGapBeforeResumeMs: gapBaseline })
@@ -237,7 +252,6 @@ try {
   // (e) kill mid-turn: what the other threads lose
   const running = threads.slice(0, 3)
   const mk2 = evs.length
-  const doneBefore = new Set<string>()
   await Promise.all(running.map((t) => startTurn(t, 'Run the shell command `sleep 25` and then reply with one word.')))
   await new Promise((r) => setTimeout(r, 6000))
   const pids = rootPids()

@@ -21,6 +21,7 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { CLIENT_INFO } from '@cc/protocol'
 import { CodexClient, type ServerNotification } from '../src/adapters/codex/client.js'
+import { asObj, finite } from '../src/json-value.js'
 
 const { values: o } = parseArgs({
   options: { rollout: { type: 'string' }, 'idle-sec': { type: 'string', default: '120' }, arm: { type: 'string', default: 'resumed' }, model: { type: 'string', default: 'gpt-5.6-luna' }, label: { type: 'string', default: '' } },
@@ -35,7 +36,8 @@ copyFileSync(join(homedir(), '.codex', 'auth.json'), join(home, 'auth.json'))
 writeFileSync(join(home, 'config.toml'), `model = "${o.model}"\nmodel_reasoning_effort = "low"\napproval_policy = "never"\nsandbox_mode = "read-only"\n`)
 const file = join(home, 'sessions', '2026', '01', '01', basename(o.rollout))
 copyFileSync(o.rollout, file)
-const threadId = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(file)![1]!
+const threadId = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(file)?.[1]
+if (!threadId) throw new Error(`--rollout must be a rollout file named after its thread id (<uuid>.jsonl): ${o.rollout}`)
 const mb = statSync(file).size / 1e6
 process.env.CODEX_HOME = home
 
@@ -44,15 +46,15 @@ let mark: Mark | null = null
 let turnDone: (() => void) | null = null
 const onNotification = (n: ServerNotification) => {
   if (!mark) return
-  const p = (n.params ?? {}) as Record<string, any>
   const m = n.method
   if (mark.first === null && (m === 'item/agentMessage/delta' || m.includes('reasoning') && m.endsWith('Delta'))) mark.first = Date.now() - mark.at
   if (m === 'thread/tokenUsage/updated') {
-    const last = p.tokenUsage?.last
-    if (last && last.inputTokens > 0) {
+    const last = asObj(asObj(asObj(n.params).tokenUsage).last)
+    const input = finite(last.inputTokens)
+    if (input !== undefined && input > 0) {
       // The last reading of the turn: the first one can repeat the previous turn's. A one-word turn with no tool is one request
-      mark.input = last.inputTokens
-      mark.cached = last.cachedInputTokens
+      mark.input = input
+      mark.cached = finite(last.cachedInputTokens) ?? null
       mark.updates++
     }
   }
@@ -101,7 +103,7 @@ try {
     out.resumeMs = await resume(c, true)
   }
   const woken = await turn(c, say)
-  out.woken = { ...woken, cacheRead: woken.input ? woken.cached! / woken.input : null }
+  out.woken = { ...woken, cacheRead: woken.input ? (woken.cached ?? 0) / woken.input : null }
   await c.dispose()
 } catch (e) {
   out.error = String(e)
