@@ -272,7 +272,7 @@ export function createRpcHandler(
     },
     // A host without watches (a test's) lists none and cancels nothing
     'watches.list': async (p: unknown) => ({ watches: watches?.views(RpcMethods['watches.list'].params.parse(p).sessionId) ?? [] }),
-    'watches.cancel': async (p: unknown) => ({ cancelled: watches?.cancel(RpcMethods['watches.cancel'].params.parse(p).id, 'person') ?? false }),
+    'watches.cancel': async (p: unknown) => ({ cancelled: (watches?.cancel(RpcMethods['watches.cancel'].params.parse(p).id, 'person') ?? 'ended') !== 'ended' }),
     'apps.inlineViews': async (p: unknown) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
     'apps.importPrepare': async (p: unknown) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
     'apps.importCancel': async (p: unknown) => {

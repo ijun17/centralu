@@ -75,6 +75,14 @@ describe('the badge', () => {
     expect(renderToStaticMarkup(<WatchesCapsule sessionId="s1" rows={useStore.getState().watches.s1} />)).toContain('data-count="1"')
   })
 
+  it('a deleted session’s rows go with it, so a reconnect does not ask for them again', async () => {
+    const platform = attached()
+    await useStore.getState().loadWatches('s1')
+    expect(useStore.getState().watches.s1).toEqual([])
+    platform.emit({ type: 'session_deleted', sessionId: 's1' })
+    expect(useStore.getState().watches.s1).toBeUndefined()
+  })
+
   it('shows nothing, and says nothing, against an older host that has no watches', async () => {
     const platform = attached()
     platform.mockMail.knowsWatches = false

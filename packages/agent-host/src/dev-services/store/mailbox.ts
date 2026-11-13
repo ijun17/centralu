@@ -956,11 +956,13 @@ export class MailboxRecords {
       .run({ messageId, from, to })
   }
 
-  /** The trash was emptied of `address`: its rows go, and each message left with no row but the person's own. Returns the rows deleted */
+  /** The trash was emptied of `address`: its rows and watches go, and each message left with no row but the person's own. Returns the rows deleted */
   purgeParty(address: string): number {
     return this.transaction(() => {
       const ids = this.db.prepare<[string], { id: string }>(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ?`).all(address).map((r) => r.id)
       const n = this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ?`).run(address).changes
+      // Its watches go with its mail (docs/plans/mailbox.md §18.4)
+      this.deleteWatchesOf(address)
       // The person's own words stay in their window, sent to nobody kept (§12)
       this.dropOrphans(ids, { keepPerson: true })
       return n

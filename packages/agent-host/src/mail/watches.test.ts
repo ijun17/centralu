@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
 import { NOW, at, hostWorld } from './host-mail.test-helpers.js'
 import { HOUR_MS, MINUTE_MS } from './rules.js'
@@ -79,6 +79,27 @@ describe('a time watch (§18.3)', () => {
     expect(w.watches.read(id)?.state).toBe('active')
   })
 
+  it('an `every` whose end passed while the host was away fires its last slot before the end, late, and no slot after it', async () => {
+    const w = started()
+    const id = idOf(watch(w, 'a', 'every 30m'))
+    w.clock.t += 48 * HOUR_MS
+    await w.delivery.sweep()
+    const [fired, ...more] = notices(w, A)
+    expect(more).toEqual([])
+    expect(fired?.facts.watch).toEqual({ id, source: 'time', change: 'due', late: true })
+    expect(fired?.dedupeKey).toBe(`watch:${A}:${id}:${slotKey(NOW + 24 * HOUR_MS)}`)
+    expect(w.watches.read(id)?.state).toBe('expired')
+  })
+
+  it('missed slots are late though the host is back right at a slot', async () => {
+    const w = started()
+    const id = idOf(watch(w, 'a', 'every 10m'))
+    w.clock.t += 20 * MINUTE_MS
+    await w.delivery.sweep()
+    expect(notices(w, A).map((m) => m.facts.watch)).toEqual([{ id, source: 'time', change: 'due', late: true }])
+    expect(notices(w, A)[0]?.body).toContain(`It fires late: Centralu was not running at ${hhmm(NOW + 10 * MINUTE_MS)}, or the computer slept.`)
+  })
+
   it('`at` is the next such minute of this computer’s time, resolved once', () => {
     const w = started()
     const id = idOf(watch(w, 'a', 'at 06:15'))
@@ -105,17 +126,6 @@ describe('a session watch (§18.3)', () => {
     expect(notices(w, A)).toHaveLength(1)
   })
 
-  it('a turn that ends while the target’s own background work runs does not fire: only its last response at rest does', () => {
-    const w = started()
-    watch(w, 'a', 'beta')
-    // The turn ended, and no last response came (ChildReports waits for the session's own work to end)
-    w.turns.beginOther('b', 'person', null)
-    w.endTurn('b')
-    expect(notices(w, A)).toEqual([])
-    w.hooks.lastResponse?.('b', { body: () => 'done', relay: () => {}, released: false })
-    expect(notices(w, A).map((m) => m.facts.reason)).toEqual(['turn_ended'])
-  })
-
   it('fires `asked` for a new card, not one it was set with; `stopped`; and `gone`, each ending the watch', () => {
     const w = started()
     w.cards.set('b', ['q-old'])
@@ -137,13 +147,38 @@ describe('a session watch (§18.3)', () => {
     expect(w.watches.read(id)?.state).toBe('gone')
   })
 
-  it('a deleted owner’s watches go with it', () => {
+  it('an owner in the session archive keeps its watches, which may come back with it; deleted for good, they go with its mail', () => {
     const w = started()
-    const id = idOf(watch(w, 'a', 'beta'))
+    const id = idOf(watch(w, 'a', 'in 1h'))
     w.hooks.sessionGone('a')
+    expect(w.watches.read(id)?.state).toBe('active')
+    w.store.mailbox.purgeParty(A)
     expect(w.watches.read(id)).toBeUndefined()
-    turnEnded(w, 'b')
+  })
+
+  it('a stop Centralu holds to continue fires `stopped` only when its wait ends without going on', () => {
+    const w = started()
+    watch(w, 'a', 'gamma')
+    w.hooks.stopped?.('c', 'limit', { held: true })
+    w.hooks.waitEnded?.('c', 'limit', null, { continued: 'centralu', first: true })
     expect(notices(w, A)).toEqual([])
+    w.hooks.stopped?.('c', 'limit', { held: true })
+    w.hooks.waitEnded?.('c', 'limit', null, { continued: false, first: false })
+    expect(notices(w, A).map((m) => m.facts.reason)).toEqual(['stopped'])
+  })
+
+  it('one watch that fails to fire leaves the others on the same session, and the turn’s end goes on', () => {
+    const w = started()
+    watch(w, 'a', 'beta')
+    watch(w, 'c', 'beta')
+    const notice = w.mail.notice.bind(w.mail)
+    vi.spyOn(w.mail, 'notice').mockImplementationOnce(() => {
+      throw new Error('disk full')
+    }).mockImplementation(notice)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => turnEnded(w, 'b')).not.toThrow()
+    expect([...notices(w, A), ...notices(w, at('c'))].map((m) => m.facts.reason)).toEqual(['turn_ended'])
+    vi.restoreAllMocks()
   })
 
   it('set again keeps one row, with the later end and the new note', () => {
@@ -192,10 +227,24 @@ describe('the end of a watch (§18.4, §18.8)', () => {
     expect(w.tool.run('a', { action: 'close', thread: id })).toEqual({ text: `Watch ${id} had ended already.` })
 
     const other = idOf(watch(w, 'a', 'beta'))
-    expect(w.watches.cancel(other, 'person')).toBe(true)
-    expect(w.watches.cancel(other, 'person')).toBe(false)
+    expect(w.watches.cancel(other, 'person')).toBe('cancelled')
+    expect(w.watches.cancel(other, 'person')).toBe('ended')
     expect(notices(w, A)).toMatchObject([{ body: `The person cancelled your watch on beta (${B}).`, facts: { quiet: true, watch: { id: other, change: 'cancelled' } } }])
     expect(w.watches.read(other)).toMatchObject({ state: 'cancelled', endedBy: 'person' })
+  })
+
+  it('closed after it fired but before its notice reached the owner, it says the notice is taken back, and tells the window', async () => {
+    const w = started()
+    const id = idOf(watch(w, 'a', 'in 10m'))
+    w.states.set('a', { kind: 'busy', why: 'turn' })
+    await w.advance(10 * MINUTE_MS + 5_000)
+    expect(w.watches.read(id)?.state).toBe('fired')
+    expect(notices(w, A)).toHaveLength(1)
+    const changed: string[] = []
+    w.watches.onChange((sessionId) => changed.push(sessionId))
+    expect(w.tool.run('a', { action: 'close', thread: id })).toEqual({ text: `Watch ${id} had fired, and its notice had not reached you yet: it will not come.` })
+    expect(notices(w, A)).toEqual([])
+    expect(changed).toEqual(['a'])
   })
 
   it('tells the window each time a session’s watch set changes', () => {
@@ -205,8 +254,9 @@ describe('the end of a watch (§18.4, §18.8)', () => {
     const id = idOf(watch(w, 'a', 'beta'))
     turnEnded(w, 'b')
     idOf(watch(w, 'b', 'in 1h'))
-    w.watches.cancel(id, 'person')
-    expect(changed).toEqual(['a', 'a', 'b'])
+    // It had fired, and its notice not delivered yet is taken back: that changes the owner's mail too
+    expect(w.watches.cancel(id, 'person')).toBe('withdrawn')
+    expect(changed).toEqual(['a', 'a', 'b', 'a'])
   })
 })
 
@@ -259,6 +309,21 @@ describe('evaluation (§18.5)', () => {
     expect(notices(w, at('h')).map((m) => m.facts.watch)).toEqual([{ id: mine, source: 'session', change: 'turn_ended' }])
     turnEnded(w, 'h')
     expect(notices(w, at('c')).map((m) => m.facts.watch)).toEqual([{ id: onA, source: 'session', change: 'turn_ended' }])
+  })
+
+  it('a handoff ends a watch that would have the heir watch itself, and moves nothing when the mail’s move fails', () => {
+    const w = started({ extra: { h: { name: 'heir', projectId: 'p1' } } })
+    const onHeir = idOf(watch(w, 'a', 'heir'))
+    const kept = idOf(watch(w, 'a', 'in 1h'))
+    expect(() => w.watches.handOver(A, at('h'), () => {
+      throw new Error('the mail could not move')
+    })).toThrow('the mail could not move')
+    expect(w.watches.read(kept)?.owner).toBe(A)
+    w.hooks.handOver?.('a', 'h', 'all', [])
+    expect(w.watches.read(onHeir)).toMatchObject({ owner: at('h'), state: 'cancelled', endedBy: 'host' })
+    expect(w.watches.read(kept)).toMatchObject({ owner: at('h'), state: 'active' })
+    turnEnded(w, 'h')
+    expect(notices(w, at('h'))).toEqual([])
   })
 
   it('warns the person once when a session’s watches woke it a 7th time in an hour, not at the 6th', async () => {

@@ -10,6 +10,13 @@ import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
 import { isTimeWatch, type Watches } from './watches.js'
 
+/** What `close` on a watch of the caller's did (`Watches.cancel`) */
+const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => string> = {
+  cancelled: (id) => `Cancelled watch ${id}.`,
+  withdrawn: (id) => `Watch ${id} had fired, and its notice had not reached you yet: it will not come.`,
+  ended: (id) => `Watch ${id} had ended already.`,
+}
+
 /**
  * The arguments of the `mail` tool a session calls, as the version-1 schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts, unchanged in
  * M3a: docs/plans/mailbox.md §11.3). This is what the tool reads once they are checked.
@@ -230,7 +237,7 @@ export class MailTool {
       case 'close': {
         const id = a.thread?.trim() ?? ''
         const w = parseMailId(id)?.kind === 'watch' ? this.host.watches?.read(id) : undefined
-        if (w?.owner === me.address) return this.host.watches?.cancel(id, 'owner') ? `Cancelled watch ${id}.` : `Watch ${id} had ended already.`
+        if (w?.owner === me.address) return CANCEL_ANSWER[this.host.watches?.cancel(id, 'owner') ?? 'ended'](id)
         throw refuse(
           'removed',
           `Centralu's mail has no threads any more, so "close" closes only a watch of yours. Answer a message with ${calls.answer('<message id>')}, and mark one that needs nothing with ${calls.done('<message id>')}.`,

@@ -3590,17 +3590,18 @@ Q1 = b): a session finds the `watch` action in the `mail` definition itself, and
 
 **Time.** `in` and `at` fire once at their minute, at most 7 days ahead. `every` fires at each slot for 24 hours. The
 change key is the slot (`2026-11-13T16:30`). A slot the host missed (the computer slept, or the host was down) fires
-once, late, with `facts.watch.late = true`. Several missed `every` slots collapse into one firing.
+once, late, with `facts.watch.late = true`. Several missed `every` slots collapse into one firing, the latest slot
+before the watch's end; `late` says the first one was missed, and no slot after the end fires.
 
 **Session.** One-shot. It fires on the first of these changes of the target. Each change is read where the host
 already learns it, through the mail hooks built in `mail/host-mail.ts:261`, so there is no new feed:
 
 | Change (`reason` in the frame) | Hook | When |
 |---|---|---|
-| `turn_ended` | `lastResponse` (`host-mail.ts:286`) | the moment a last response answers tasks. A turn that ended while the session's own background work runs is still working (owner 2026-11-04, `mail/rest.ts`) |
+| `turn_ended` | `lastResponse` (`host-mail.ts`) | the moment a last response answers tasks. A turn that ended while the session's own background work runs is still working (owner 2026-11-04, `mail/rest.ts`): that work's end with no turn after it settles the session (`ChildReports.settleAtRest`), which a watch on it asks for as an open task does (`MailHooks.watchedAtRest`) |
 | `asked` | the session's `question_request` or `approval_request` event (`sessionEvent` in `host-mail.ts`) | it raised a question or approval card. Not `cards.tell`: that runs only for givers of open work there, and a watcher has none (it is refused one) |
-| `stopped` | `stopped` | interrupted, error, usage limit, quit |
-| `gone` | `sessionGone` (`host-mail.ts:263`) | deleted |
+| `stopped` | `stopped`, or `waitEnded` for a stop Centralu holds to continue (#1415) | interrupted, error, usage limit, quit. A held stop is a stop only when its wait ends without going on, as its senders are told |
+| `gone` | `sessionGone` (`host-mail.ts`) | in the session archive or deleted |
 
 It never fires for the state it was set in. The row keeps the target's last ended turn and pending cards at
 registration as its baseline, and the answer says what the target is doing now. A session may watch a session it may
@@ -3638,10 +3639,12 @@ and fire nothing; an update back picks them up, and the late ones fire once.
 
 Indexes: `(owner, state)` and `(state, next_at)`. A row ends at `expires_at` (24 hours for session and `every`
 watches, the time itself for `in` and `at`, never more than 7 days), when a one-shot fires, when it is cancelled, or
-when its owner is deleted. The owner's rows are deleted with its mail on the party-gone path (`host-mail.ts:263`). A
+when its owner is deleted. An owner in the session archive keeps its rows, as it keeps its mail, since the archive may
+give it back; they are deleted with its mail when it is deleted for good (`MailboxRecords.purgeParty`). A
 handoff that moves a session's mailbox to its heir (`MessageService.handOver`, scope `all`: the original goes) moves its
-active watches with it, the same rows with `owner` rewritten to the heir, and the watches others keep on the original wait
-for the heir, from the heir's state then. A row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):
+active watches with it in the same transaction, the same rows with `owner` rewritten to the heir, and the watches others
+keep on the original wait for the heir, from the heir's state then. One that would have the heir watch itself (the
+original's on the heir, or the heir's on the original) ends, `ended_by` `host`, and nobody is told. A row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):
 `Your watch on <what> ended after 24 hours without a change.` Ended rows are kept 14 days, like a read notice (§6.4),
 and the same retention sweeps them.
 
@@ -3717,7 +3720,8 @@ with a `Cancel` `Button`:
 - the note, one line, muted.
 
 When the person cancels, the owner gets one quiet notice, `The person cancelled your watch on <what>.`, so it does not
-go on waiting. Copy follows ux-writing §1: the session's name, not its address, and no "watch id" on screen. The
+go on waiting. A cancel also takes back a firing not delivered yet; `close` on a watch that had fired says so: `Watch <id>
+had fired, and its notice had not reached you yet: it will not come.` Copy follows ux-writing §1: the session's name, not its address, and no "watch id" on screen. The
 placement is the owner's (2026-11-13, §18.14 Q3 = a).
 
 **Protocol (additions only, protocol.md §4):** methods `watches.list { sessionId }` → `{ watches: WatchView[] }` and
@@ -3745,7 +3749,7 @@ badge (`e2e/older-host.spec.ts`). The badge's count is a selector over the liste
 |---|---|
 | `agent-host/src/mail/watches.ts` (new) | `Watches`: register, cancel, list, changed, due, the firing transaction, catch-up |
 | `dev-services/store/migrations/v<n>.ts`, `store/mailbox.ts` | the `mail_watches` step; row methods; the undelivered-notice query by fact name |
-| `mail/host-mail.ts` | builds `Watches`; one call each in `lastResponse`, `sessionEvent` (a card), `stopped`, `sessionGone`, `handOver` |
+| `mail/host-mail.ts` | builds `Watches`; one call each in `lastResponse`, `sessionEvent` (a card), `stopped`, `waitEnded`, `sessionGone`, `handOver`, `watchedAtRest` |
 | `mail/delivery.ts` | starts and stops `Watches`; `due(now)` in `sweep`; the timer through `schedule` |
 | `mail/tool.ts` | `watch`, `close` with a `w_` id, the `inbox` lines; `MailToolArgs` loses the dead fields |
 | `mail/ids.ts` | the `w_` kind |

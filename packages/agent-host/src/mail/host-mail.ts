@@ -232,6 +232,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const party = parseAddress(address)
       return party?.kind !== 'session' || party.host !== hostId || reach.elsewhere(address)
     },
+    archived: (address) => {
+      const party = parseAddress(address)
+      return party?.kind === 'session' && party.host === hostId && store.trash.isTrashed(party.sessionId)
+    },
   })
   const delivery = new MailDelivery(service, records, sessions.mailSessions(), {
     watches,
@@ -293,13 +297,17 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) => {
       void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
-      watches.changed(addressOf(id), 'stopped')
+      // A stop Centralu holds to continue (#1415) is a stop only if its wait ends without going on, as its senders are told (`waitEnded`)
+      if (!o?.held) watches.changed(addressOf(id), 'stopped')
     },
-    waitEnded: (id, why, starter, end) => service.stops.stopWaitEnded(addressOf(id), why, starter ? addressOf(starter) : null, end),
+    waitEnded: (id, why, starter, end) => {
+      service.stops.stopWaitEnded(addressOf(id), why, starter ? addressOf(starter) : null, end)
+      if (!end.continued) watches.changed(addressOf(id), 'stopped')
+    },
     leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
     handOver: (from, to, which, children) => {
-      if (which === 'all') watches.handOver(addressOf(from), addressOf(to))
-      return aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf)))
+      const moveMail = () => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
+      return aboutSessions(which === 'all' ? watches.handOver(addressOf(from), addressOf(to), moveMail) : moveMail())
     },
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -330,7 +338,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         answers: (sender) => sender === PERSON || parseAddress(sender)?.kind === 'session',
         queued: delivery.queuedFor(addressOf(id)),
       })
-      watches.changed(addressOf(id), 'turn_ended')
       // A sender whose seat cannot read mail (an older build's coordinator, a builder) is refused it (`no_mailbox`): it is told in its conversation, as
       // it was before step 3, and the report is marked delivered and read once that went in, so the Inbox reads it as told
       for (const taskId of answered) {
@@ -344,9 +351,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
           records.markRead(owner, [report.id], at)
         })
       }
+      watches.changed(addressOf(id), 'turn_ended')
     },
     requestTurnEnded: requestTurnRecorder(service, mailTurns, addressOf),
     openTasks: (id, side) => openTaskParties(store.mailbox, addressOf(id), side),
+    watchedAtRest: (id) => watches.waitsForRest(addressOf(id)),
     // A card a session raised is told to the givers of its open work, and answered by one of them only as the gate allows (§10.6.4)
     cards: {
       // Only a turn the giver's own work started, as the turn owner was: one the mailbox started for its task (the session was busy) is told only

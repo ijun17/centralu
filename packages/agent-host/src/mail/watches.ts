@@ -119,6 +119,8 @@ export type WatchesHost = {
   mayRead(reader: string, target: string): boolean
   /** Whether the address is a session on another computer */
   elsewhere(address: string): boolean
+  /** Whether the address is a session of this host in the session archive, which may give it back */
+  archived(address: string): boolean
 }
 
 /**
@@ -192,24 +194,28 @@ export class Watches {
     return `Watching ${this.what(w)} until ${this.clock(expiresAt)}; ${doing}. ${id}`
   }
 
-  /** Ends a watch (`by` its owner or the person); its firing not given yet is taken back. False when it had ended already */
-  cancel(id: string, by: 'owner' | 'person'): boolean {
+  /**
+   * Ends a watch (`by` its owner or the person), and takes back its firing not given yet: `cancelled` when it was active, `withdrawn` when it had ended
+   * but its notice had not reached its owner, `ended` when there was nothing left to do (or no such watch)
+   */
+  cancel(id: string, by: 'owner' | 'person'): 'cancelled' | 'withdrawn' | 'ended' {
     const now = this.now()
-    const w = this.host.records.transaction(() => {
+    const done = this.host.records.transaction(() => {
       const w = this.read(id)
       if (!w) return undefined
       // Its firings: the quiet notice of its end (a cancel told before) stays
       const undelivered = this.host.records.undeliveredNotices('$.watch.id', id).filter(({ message }) => message.facts.quiet !== true)
       if (undelivered.length) this.host.records.deleteRows(undelivered.map(({ row }) => ({ messageId: row.messageId, recipient: row.recipient })))
-      if (w.state !== 'active') return undefined
+      if (w.state !== 'active') return undelivered.length ? { w, how: 'withdrawn' as const } : undefined
       this.host.records.saveWatch(writeWatch({ ...w, state: 'cancelled', endedAt: now, endedBy: by, nextAt: null }))
       if (by === 'person') {
         this.host.service.notice(w.owner, { body: `The person cancelled your watch on ${this.what(w)}.`, facts: { quiet: true, watch: { id, source: w.spec.source, change: 'cancelled' } }, dedupeKey: this.key(w, 'cancelled') })
       }
-      return w
+      return { w, how: 'cancelled' as const }
     })
-    if (w) this.emit(w.owner)
-    return w !== undefined
+    if (!done) return 'ended'
+    this.emit(done.w.owner)
+    return done.how
   }
 
   /** A watch by id, active or ended, as this build reads it */
@@ -249,30 +255,56 @@ export class Watches {
     for (const row of this.host.records.activeWatches({ target })) {
       const w = readWatch(row)
       if (w?.spec.source !== 'session' || (card !== undefined && w.spec.baselineCards.includes(card))) continue
-      this.fireSession(w, change)
+      // One watch that fails leaves the others, and the hook's own work after it, as they were
+      try {
+        this.fireSession(w, change)
+      } catch (e) {
+        console.error(`[mail] watch ${row.id}: ${errorMessage(e)}`)
+      }
     }
   }
 
-  /** A session is gone: its own watches go with it, and the watches on it fire `gone` */
+  /** Whether a session watch on `target` waits for its rest: a turn of it ended since the watch was set, and its own background work held the end (§18.3) */
+  waitsForRest(target: string): boolean {
+    const party = parseAddress(target)
+    const ended = party?.kind === 'session' ? this.host.records.lastEndedTurn(party.sessionId) : 0
+    return this.host.records.activeWatches({ target }).some((r) => {
+      const w = readWatch(r)
+      return w?.spec.source === 'session' && ended > w.spec.baselineTurn
+    })
+  }
+
+  /**
+   * A session left (the session archive or deleted): the watches on it fire `gone`. Its own stay, as its mail does, while the archive may give it back;
+   * they are deleted with its mail when it is deleted for good (`MailboxRecords.purgeParty`, §18.4)
+   */
   gone(address: string): void {
-    if (this.host.records.deleteWatchesOf(address) > 0) this.emit(address)
     this.changed(address, 'gone')
   }
 
   /**
-   * A handoff moved `from`'s mailbox to `to` (`MessageService.handOver`, scope `all`): its active watches are `to`'s, the same rows, and the watches
-   * others keep on `from` wait for `to`, from `to`'s state now
+   * A handoff moves `from`'s mailbox to `to` (`moveMail`: `MessageService.handOver`, scope `all`), in one transaction with this: its active watches
+   * are `to`'s, the same rows, and the watches others keep on `from` wait for `to`, from `to`'s state now. One that would have `to` watch itself (the
+   * original's on its heir, or the heir's on the original) ends, and nobody is told: no one set a watch on itself
    */
-  handOver(from: string, to: string): void {
+  handOver<T>(from: string, to: string, moveMail: () => T): T {
+    const now = this.now()
     const owners = new Set([from, to])
-    for (const row of this.host.records.activeWatches({ owner: from })) this.host.records.saveWatch({ ...row, owner: to })
-    for (const row of this.host.records.activeWatches({ target: from })) {
-      const w = readWatch(row)
-      if (w?.spec.source !== 'session') continue
-      this.host.records.saveWatch(writeWatch({ ...w, spec: { ...w.spec, ...this.baseline(to), target: to } }))
-      owners.add(w.owner)
-    }
+    const moved = this.host.records.transaction(() => {
+      for (const row of this.host.records.activeWatches({ owner: from })) this.host.records.saveWatch({ ...row, owner: to })
+      for (const row of this.host.records.activeWatches({ target: from })) {
+        const w = readWatch(row)
+        if (w?.spec.source !== 'session') continue
+        this.host.records.saveWatch(writeWatch({ ...w, spec: { ...w.spec, ...this.baseline(to), target: to } }))
+        owners.add(w.owner)
+      }
+      for (const row of this.host.records.activeWatches({ owner: to })) {
+        if (row.target === to) this.host.records.saveWatch({ ...row, state: 'cancelled', endedAt: now, endedBy: 'host', nextAt: null })
+      }
+      return moveMail()
+    })
     for (const owner of owners) this.emit(owner)
+    return moved
   }
 
   /** What is due by now fires (a time's slot) or ends (its 24 hours), then the timer is set to the next one. Also the delivery's sweep's safety net */
@@ -292,9 +324,9 @@ export class Watches {
 
   /** Every active session watch against its target's stored state (§18.5 catch-up): a change while no delivery ran fires once */
   private catchUp(): void {
-    // An owner deleted while no host ran (its `sessionGone` never came) takes its watches with it, as that hook would have
+    // An owner deleted for good by a build that does not know watches takes them with it, as `purgeParty` does
     for (const owner of new Set(this.host.records.activeWatches().map((r) => r.owner))) {
-      if (!this.host.session(owner)) this.host.records.deleteWatchesOf(owner)
+      if (!this.host.session(owner) && !this.host.archived(owner)) this.host.records.deleteWatchesOf(owner)
     }
     for (const row of this.host.records.activeWatches()) {
       const w = readWatch(row)
@@ -318,17 +350,21 @@ export class Watches {
     }))
   }
 
-  /** A time's slot is due: the latest slot passed fires once (missed `every` slots are one firing), `late` when the host was not there for it */
+  /**
+   * A time's slot is due: the latest slot passed by now and not after the watch's end fires once (missed `every` slots are one firing), `late` when the
+   * host was not there for the first slot missed
+   */
   private fireTime(w: Watch, spec: Extract<WatchSpec, { source: 'time' }>, now: number): void {
     const period = (spec.periodMin ?? 0) * MINUTE_MS
-    const slot = period > 0 ? spec.slotMs + Math.floor((now - spec.slotMs) / period) * period : spec.slotMs
-    const late = now - slot > MINUTE_MS
+    const last = Math.min(now, w.expiresAt)
+    const slot = period > 0 ? spec.slotMs + Math.floor((last - spec.slotMs) / period) * period : spec.slotMs
+    const late = now - spec.slotMs > MINUTE_MS
     const next = period > 0 ? slot + period : null
     const every = spec.kind === 'every' ? `, every ${spec.periodMin} minutes,` : ''
     this.fire(w.id, slotKey(slot), (at) => ({
-      body: `Your timer set at ${this.clock(w.createdAt)}${every} for ${this.clock(slot)} is due.${late ? ` It fires late: Centralu was not running at ${this.clock(slot)}, or the computer slept.` : ''}`,
+      body: `Your timer set at ${this.clock(w.createdAt)}${every} for ${this.clock(slot)} is due.${late ? ` It fires late: Centralu was not running at ${this.clock(spec.slotMs)}, or the computer slept.` : ''}`,
       facts: { watch: { id: w.id, source: 'time', change: 'due', ...(late ? { late: true } : {}) } },
-      next: next !== null && next <= w.expiresAt ? { spec: { ...spec, slotMs: next }, nextAt: next } : { state: next === null ? 'fired' : 'expired', endedAt: at, endedBy: 'host', nextAt: null },
+      next: next !== null && next <= w.expiresAt && next > now ? { spec: { ...spec, slotMs: next }, nextAt: next } : { state: next === null ? 'fired' : 'expired', endedAt: at, endedBy: 'host', nextAt: null },
     }))
   }
 
