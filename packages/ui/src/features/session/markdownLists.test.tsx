@@ -26,11 +26,13 @@ describe('Markdown: a numbered list that starts above 1', () => {
 
   it('is a list after a paragraph line, and after a nested list', () => {
     expect(html('Plain line\n5. five')).toContain('<ol start="5">')
-    const out = html('1. one\n   - nested\n**More**\n2. two')
-    // `2. two` joins the first list as its second item (numbered by position), not as words in the bold line's paragraph
-    expect(out).toContain('<strong>More</strong>')
-    expect(out).not.toMatch(/<strong>More<\/strong>\s*2\. two/)
-    expect(out.match(/<ol/g)).toHaveLength(1)
+    const out = html('- a\n  - nested\n\n**More**\n2. two')
+    expect(out).toContain('<p><strong>More</strong></p>')
+    expect(out).toContain('<ol start="2">')
+  })
+
+  it('leaves the lazy line of a tight list tight', () => {
+    expect(html('1. one\nlazy\n2. two')).not.toContain('<p>')
   })
 })
 
