@@ -143,7 +143,8 @@ const UNDOABLE: ReadonlySet<string> = new Set([
   'check_app', // the same, for an app
   'propose_mcp_server', // the person decides on the proposal
   'propose_skill', // the same
-  // Three that take a remembered answer away, so that step asks again: the person answers it again
+  // Three that take a remembered answer away, so that step asks again: the person answers it again. Forgetting an app's deny
+  // widens instead (#2237): what the app declares then runs unasked, so that command raises its own card (TrustFlow.forgetAnswer)
   'remove_approval_rule',
   'revoke_project_consent',
   'forget_app_answer',

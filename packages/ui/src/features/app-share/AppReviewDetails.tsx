@@ -1,11 +1,11 @@
 import type { AppReview } from '@cc/protocol/client'
 import { formatBytes } from '../../app/format.js'
-import { usesLines } from '../../store/app-catalog.js'
+import { appCanLines, usesLines } from '../../store/app-catalog.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
  * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
- * already-imported app that needs re-confirmation) **runs**, **what it will use**, what secrets
+ * already-imported app that needs re-confirmation) **runs**, **what it can do**, what secrets
  * it wants, and which files are coming in. The import dialog and the pinned-view confirmation
  * share this one component.
  *
@@ -15,7 +15,7 @@ import { Badge } from '../../components/Badge.jsx'
  * stands even before that — that is the whole reason it is asking again.
  */
 export function AppReviewDetails({ review }: { review: AppReview }) {
-  const uses = usesLines(review.uses)
+  const can = appCanLines(usesLines(review.uses))
   return (
     <div className="space-y-3 text-sm" data-testid="app-review">
       <div>
@@ -38,8 +38,7 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
           )}
           {review.changed.uses && (
             <p className="text-ink-muted">
-              It used to ask for:{' '}
-              {usesLines(review.changed.was.uses).join('; ') || 'nothing beyond its own tools'}
+              Before: {appCanLines(usesLines(review.changed.was.uses)).join('. ')}
             </p>
           )}
         </Section>
@@ -52,17 +51,13 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
         </p>
       </Section>
 
-      <Section title="What it asks Centralu for" testId="review-uses">
-        {uses.length === 0 ? (
-          <p className="text-ink-muted">Nothing beyond its own tools.</p>
-        ) : (
-          <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
-            {uses.map((u) => (
-              <li key={u}>{u}</li>
-            ))}
-          </ul>
-        )}
-        {uses.length > 0 && <p className="mt-1 text-xs text-ink-faint">Each is asked about once, the first time the app uses it.</p>}
+      <Section title="What it can do" testId="review-uses">
+        <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
+          {can.map((u) => (
+            <li key={u}>{u}</li>
+          ))}
+        </ul>
+        <p className="mt-1 text-xs text-ink-faint">Once enabled, it does these without asking, unless a session set to Safe calls it.</p>
       </Section>
 
       <Section title="Secrets it wants" testId="review-secrets">

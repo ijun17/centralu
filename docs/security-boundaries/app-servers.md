@@ -341,6 +341,14 @@ One pull request, deep tier (trust and permissions). No store step, no protocol 
   line ("Can run your default agent in a new session"), "Uses nothing beyond its own tools" for none. The three
   places call it; the inbox notice joins its lines with ". ". "What it may ask for is not known" became "What it
   can do is not known", and the share card's "What … may ask for changed" "What … can do changed".
+  - `AppReviewDetails.tsx` (the import review, which is an imported app's consent): "What it asks Centralu for"
+    became "What it can do", in `appCanLines`, with "Once enabled, it does these without asking, unless a session
+    set to Safe calls it." in place of "Each is asked about once, the first time the app uses it."; a changed
+    app's "It used to ask for:" became "Before:".
+  - `ErrorTail.tsx` (a call stopped by a deny): after "choose Forget", "Centralu asks again the next time." became
+    "The app can then do it without asking, unless a session set to Safe calls it."
+  - `forget_app_answer`'s definition: "an allow at once, a deny once the person agrees" (+6 characters; no budget
+    raised).
   - `ApprovalCard.tsx`: "Centralu remembers your answer for this app. You can change it later under Runs →
     Permissions." (the "manifest" in the old text was an internal word, ux-writing.md §3).
   - `trust-flow.ts` `listAppGrants` and `forgetAnswer`: say what forgetting does now (a forgotten deny lets the app

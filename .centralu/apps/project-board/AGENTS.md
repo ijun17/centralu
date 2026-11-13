@@ -1265,11 +1265,12 @@ push run of CI is fully green, the full tier included (or `commit`).
    `process.stdout` yourself. stderr is shown to the person when the app fails.
 10. **Asking the agent**: inside a tool handler, `await centralu.agent('prompt', { schema, tool })`
     asks the agent of the person using Centralu. Each call runs in a new session under this app
-    (the person can read it), with the `safe` approval setting, and returns the agent's final
-    answer: text, or with `schema` (a JSON Schema whose top level is an object) JSON of that shape,
-    checked by Centralu. Under `safe` the agent reads without asking, but every file write and
-    command waits for the person to approve it in that session, so ask the agent for an answer and
-    do the writing in your own tool code. Declare `"uses": { "agent": true }` in the manifest for the person's
+    (the person can read it) and returns the agent's final answer: text, or with `schema` (a JSON
+    Schema whose top level is an object) JSON of that shape, checked by Centralu. That session runs
+    under `auto`, but never above the lowest approval setting among the sessions calling into the
+    app, and under `safe` when no one is behind the call. Under `safe` the agent reads without
+    asking, but every file write and command waits for the person to approve it in that session, so
+    ask the agent for an answer and do the writing in your own tool code. Declare `"uses": { "agent": true }` in the manifest for the person's
     default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
     agent marked as written by this app, not by the person, so say plainly what you need. A run
     takes seconds to minutes; the helper keeps the call alive while it waits. An app runs one agent

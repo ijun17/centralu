@@ -223,8 +223,8 @@ test.describe('import (E-3)', () => {
 
     const details = dialog.getByTestId('app-review')
     await expect(details.getByTestId('review-command')).toHaveText('node server.mjs --port 3')
-    await expect(details.getByTestId('review-uses')).toContainText('Run your default agent in a new session')
-    await expect(details.getByTestId('review-uses')).toContainText('Call other apps: other')
+    await expect(details.getByTestId('review-uses')).toContainText('Can run your default agent in a new session')
+    await expect(details.getByTestId('review-uses')).toContainText('Can call other apps: other')
     await expect(details.getByTestId('review-secrets')).toContainText('API_KEY')
     await expect(details.getByTestId('review-file-list')).toContainText('server.mjs')
     await expect(details.getByTestId('review-file-list')).toContainText('ui/index.html')

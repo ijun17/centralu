@@ -554,7 +554,7 @@ test.describe('C-6: errors reach the builder', () => {
     await expect(tail.getByTestId('error-tail-title')).toHaveText('summarize stopped: you did not allow it')
     await expect(tail.getByTestId('error-tail-denied')).toHaveText(
       'You did not allow Team notes to run an agent (Claude Code) in a new session. This is your decision, not a bug in the app. ' +
-        'To change it, open Runs, find it under Permissions and choose Forget. Centralu asks again the next time.',
+        'To change it, open Runs, find it under Permissions and choose Forget. The app can then do it without asking, unless a session set to Safe calls it.',
     )
     // Not a bug in the app — no stack, and no sending to the builder session
     await expect(tail.getByTestId('error-tail-stderr')).toHaveCount(0)
