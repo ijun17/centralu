@@ -3,7 +3,7 @@
  * model is at capacity. Please try a different model.", codex_error_info: "server_overloaded" }` on `task_complete`
  * (measured in three rollouts, 2026-10-28), and sends it as `TurnError.codexErrorInfo: "serverOverloaded"` over the
  * app-server. It is no usage limit and no refusal of the model: the same request is served a moment later, which is why the
- * host retries this one error and no other (`OverloadRetry`).
+ * host retries this one error and no other (`TurnContinue`).
  *
  * The marker `ProtocolError.data.reason` carries (`data` is free-form, so an older screen shows the error as any other).
  */

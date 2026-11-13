@@ -35,7 +35,7 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     readonly askProjectFlow: AskProjectFlow
     /** The Assistant's reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: LinkedReports
-    /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts) */
+    /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
     readonly turnContinue: Pick<TurnContinue, 'stands'>
   }
 

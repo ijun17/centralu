@@ -322,7 +322,7 @@ export class TurnContinue {
     if (this.probes.get(tool) !== p) return
     if (up) return this.release(tool, 'network')
     p.step = Math.min(p.step + 1, PROBE_STEPS_MS.length - 1)
-    p.next = Date.now() + PROBE_STEPS_MS[p.step]!
+    p.next = Date.now() + (PROBE_STEPS_MS[p.step] ?? PROBE_STEPS_MS[PROBE_STEPS_MS.length - 1])
   }
 
   /** The cause cleared for every session of a tool waiting on it */
@@ -351,7 +351,8 @@ export class TurnContinue {
       return
     }
     w.phase = 'sending'
-    const n = (this.stopTries.get(id)?.cause === w.cause ? this.stopTries.get(id)!.n : 0) + 1
+    const run = this.stopTries.get(id)
+    const n = (run?.cause === w.cause ? run.n : 0) + 1
     this.stopTries.set(id, { cause: w.cause, n })
     let handed = false
     const live = () => this.stops.get(id) === w

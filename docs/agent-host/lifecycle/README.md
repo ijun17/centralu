@@ -33,3 +33,4 @@ Thanks to this design, half of FR-10 (restore on restart) is the same code path 
 | [agent-cli-updates.md](agent-cli-updates.md) | Moving sessions to a newly installed agent CLI; putting idle sessions to sleep |
 | [turn-endings-and-mail.md](turn-endings-and-mail.md) | Turns that stopped without anyone asking; the mailbox's delivery in the host |
 | [continue-after-update.md](continue-after-update.md) | Continuing the turns an update cut |
+| [auto-continue.md](auto-continue.md) | Continuing a turn the provider's capacity, the network or a usage limit stopped, once the cause clears |

@@ -130,7 +130,8 @@ export function interruptedSessionTests() {
     await emit(page, [{ type: 'interruption', sessionId: s, interruption: null }])
     await expect(item(page, s)).toHaveCount(0)
   })
-  test('a stop Centralu continues by itself shows the wait, with Continue now and Don't continue (#1415)', async ({ page }) => {
+
+  test("a stop Centralu continues by itself shows the wait, with Continue now and Don't continue (#1415)", async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     const s = await newSession(page, 'alpha')
     const at = new Date(2030, 0, 1, 1, 20).getTime()

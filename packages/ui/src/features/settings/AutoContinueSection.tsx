@@ -8,19 +8,21 @@ import { SettingToggle } from './SettingToggle.jsx'
  * there. Each computer's host continues its own sessions by its own switches
  */
 export function AutoContinueSection() {
-  const on = useStore((s) => autoContinueOf(s.prefs))
-  const setPrefs = useStore((s) => s.setPrefs)
+  // Each switch by itself: a selector that builds an object would read as a change on every store update
+  const limit = useStore((s) => autoContinueOf(s.prefs).limit)
+  const network = useStore((s) => autoContinueOf(s.prefs).network)
+  const setPrefs = (patch: { continueAfterLimit?: boolean; continueOnNetwork?: boolean }) => void useStore.getState().setPrefs(patch)
   return (
     <>
       <SettingToggle
-        checked={on.limit}
+        checked={limit}
         onChange={(next) => setPrefs({ continueAfterLimit: next })}
         label="Continue after a usage limit resets"
         testId="settings-continue-limit"
         hint="A turn your usage limit stopped goes on by itself when the limit resets. Off, it waits for you."
       />
       <SettingToggle
-        checked={on.network}
+        checked={network}
         onChange={(next) => setPrefs({ continueOnNetwork: next })}
         label="Continue when the network is back"
         testId="settings-continue-network"

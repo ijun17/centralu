@@ -70,7 +70,7 @@ const NETWORK_WORDS = [
  * `withStderrTail`'s): that tail is whatever the process printed last, and a word in it says nothing of this turn.
  */
 export function failureSentence(message: string): string {
-  return message.split(/(?:^|[.\s])stderr:/)[0]!.trim()
+  return (message.split(/(?:^|[.\s])stderr:/)[0] ?? '').trim()
 }
 
 export function isNetworkFailure(message: string): boolean {
