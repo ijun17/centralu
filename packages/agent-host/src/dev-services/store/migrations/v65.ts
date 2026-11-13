@@ -229,14 +229,20 @@ export class StepsV65 extends MigrationRange {
          *
          * **This is a frozen copy of `holdFor`'s conditions, on purpose.** A step runs once on every store and must not call code that may change later;
          * if `holdFor` changes, this step does not. It mirrors: `m.kind === 'message'`; `leaves(senderProject, recipientProject)` = the sender's project is
-         * not null and untrusted (`projects.trusted = 0`, or no such project) and is not the recipient session's project; the recipient is a session (a
-         * `sessions` row). The recipient's project is read from `sessions.project_id` and the sender's from `mail.sender_project`, as the move wrote it.
+         * not null and untrusted (`projects.trusted = 0`, or no such project) and is not the recipient session's project; the recipient is a session of this
+         * host that is kept (a `sessions` row with `deleted_at` NULL: the live session lookup skips a trashed one, so the gate holds nothing for it). The
+         * recipient's project is read from `sessions.project_id` and the sender's from `mail.sender_project`, as the move wrote it.
+         *
+         * **Not mirrored: a recipient on another machine** (a linked hub's session, a linked-machine child), which the live gate holds and this step
+         * dismisses, since it compares the session id with this host's `sessions` rows only. That is acceptable: no such row is on the owner's store (read
+         * only, 2026-11-13: all six held rows leave), and an old hold on another machine's session could not be released from this one in any case (Release
+         * sends through this host's delivery to a session it keeps). There is no cheap exact way: the far session's project is not stored here.
          *
          * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
          * and does not bring the holds back. Nothing is deleted: the message and its row stay. The sender is not told: the person did not dismiss it.
          */
         run: () => {
-          // A store with no such row (every one but an old owner's, and a test's partial schema) has nothing to judge, and needs no table the judgement reads
+          // A store with no table, or no row held `budget` or `policy`, has nothing to judge (and a test's partial schema lacks the tables the judgement reads)
           if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
           if (this.db.prepare(`SELECT 1 FROM mail_recipients WHERE held IN ('budget', 'policy') LIMIT 1`).get() === undefined) return
           this.db.exec(
@@ -244,7 +250,7 @@ export class StepsV65 extends MigrationRange {
               WHERE held = 'budget'
                  OR (held = 'policy' AND settled = 'legacy' AND NOT EXISTS (
                       SELECT 1 FROM mail m, sessions s
-                       WHERE m.id = mail_recipients.message_id AND m.kind = 'message'
+                       WHERE m.id = mail_recipients.message_id AND m.kind = 'message' AND s.deleted_at IS NULL
                          AND m.sender_project IS NOT NULL
                          AND COALESCE((SELECT p.trusted FROM projects p WHERE p.id = m.sender_project), 0) = 0
                          AND mail_recipients.recipient LIKE 'session:%' AND substr(mail_recipients.recipient, instr(mail_recipients.recipient, '/') + 1) = s.id
