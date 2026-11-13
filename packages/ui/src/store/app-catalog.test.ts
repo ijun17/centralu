@@ -95,4 +95,19 @@ describe('the rule for reading status', () => {
       reason: 'server.command is missing',
     })
   })
+
+  it('an app turned off on its computer (#1938) reads Off whatever its status, and cannot be opened', () => {
+    expect(appStatus(info('a', { status: 'stopped', off: true }))).toEqual({
+      label: 'Off',
+      reason: 'It is turned off on this computer, so it does not start here. Turn it on in Settings → Apps.',
+      runnable: false,
+      tone: 'quiet',
+    })
+    expect(appStatus(info('board', { projectId: 'm1.p1', machine: 'm1', status: 'stopped', off: true }))).toMatchObject({
+      label: 'Off',
+      reason: 'It is turned off on that computer, so it does not start there. Turn it on in Settings → Apps.',
+      runnable: false,
+    })
+    expect(appStatus(info('a', { status: 'stopped', off: false }))).toMatchObject({ label: 'Stopped', runnable: true })
+  })
 })

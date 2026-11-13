@@ -85,6 +85,9 @@ describe('the line under a link from an app the session cannot reach', () => {
     expect(say({ reachable: false, reason: 'untrusted' })).toMatch(/alpha is not trusted\. Trust the project/)
     expect(say({ reachable: false, reason: 'app-unusable', status: 'failed' })).toMatch(/Restart it from its view/)
     expect(say({ reachable: false, reason: 'app-unusable', status: 'unconfirmed' })).toMatch(/not turned on yet/)
+    expect(say({ reachable: false, reason: 'app-unusable', status: 'off' })).toBe(
+      "This session can't use Project board's tools: the app is turned off on its computer. Turn it on in Settings → Apps.",
+    )
     expect(say({ reachable: false, reason: 'app-unusable', status: 'invalid' })).toMatch(/manifest is not valid/)
     expect(say({ reachable: false, reason: 'restart' })).toMatch(/Codex thread started before the app was attached\. Restart the session/)
     expect(say({ reachable: false, reason: 'bridge-failed' })).toMatch(/bridge did not start in this session\. Restart the session/)
