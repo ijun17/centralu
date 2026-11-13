@@ -357,7 +357,7 @@ export class TrustFlow {
     if (answer.decision !== 'allow') {
       const question = [
         `Forget that you denied ${label} to ${plainQuoted(answer.text, 300)} (${shown(answer.capability)})?`,
-        'The app declares it, so it can then do it without asking, unless a session under safe calls it.',
+        'The app declares it, so it can then do it without asking, unless a session set to Safe calls it.',
       ].join('\n')
       const refused = await this.ask(caller, question, signal, 'forgotten')
       if (refused) return { ok: false, error: refused }

@@ -225,6 +225,7 @@ test.describe('import (E-3)', () => {
     await expect(details.getByTestId('review-command')).toHaveText('node server.mjs --port 3')
     await expect(details.getByTestId('review-uses')).toContainText('Can run your default agent in a new session')
     await expect(details.getByTestId('review-uses')).toContainText('Can call other apps: other')
+    await expect(details.getByTestId('review-uses-note')).toHaveText('Once enabled, it does these without asking, unless a session set to Safe calls it.')
     await expect(details.getByTestId('review-secrets')).toContainText('API_KEY')
     await expect(details.getByTestId('review-file-list')).toContainText('server.mjs')
     await expect(details.getByTestId('review-file-list')).toContainText('ui/index.html')
@@ -295,11 +296,12 @@ test.describe('import (E-3)', () => {
     expect(await mockList<unknown[]>(page, 'importCommits')).toEqual([])
   })
 
-  test('an app that changed after being enabled is reviewed again, showing what it used to run', async ({ page }) => {
+  test('an app that changed after being enabled is reviewed again, showing what it used to run and could do', async ({ page }) => {
     await page.goto('/?mock=1')
     const changed = review({
       server: { command: 'node', args: ['server.mjs', '--port', '4'] },
-      changed: { server: true, uses: false, was: { server: { command: 'node', args: ['server.mjs', '--port', '3'] }, uses: { agent: true, apps: ['other'] } } },
+      uses: {},
+      changed: { server: true, uses: true, was: { server: { command: 'node', args: ['server.mjs', '--port', '3'] }, uses: { agent: true, apps: ['other'] } } },
     })
     await page.evaluate((r) => (window as any).__mock.appReviews.set('_user/notes', r), changed)
     await setApps(page, [
@@ -315,6 +317,10 @@ test.describe('import (E-3)', () => {
     await expect(gate.getByTestId('pinned-review-title')).toHaveText('This app changed. Review it before it runs again.')
     await expect(gate.getByTestId('review-changed')).toContainText('It used to run node server.mjs --port 3')
     await expect(gate.getByTestId('review-command')).toHaveText('node server.mjs --port 4')
+    await expect(gate.getByTestId('review-uses-was')).toHaveText('What it could do before:Can run your default agent in a new sessionCan call other apps: other')
+    // It uses nothing now: no note that it does these without asking
+    await expect(gate.getByTestId('review-uses')).toContainText('Uses nothing beyond its own tools')
+    await expect(gate.getByTestId('review-uses-note')).toHaveCount(0)
     // The settings row gives both where it came from and a path to review
     await page.getByTestId('open-settings').click()
     await page.getByTestId('settings-tab-apps').click()

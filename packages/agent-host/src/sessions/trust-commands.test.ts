@@ -495,7 +495,7 @@ describe('app grants', () => {
     const orc = await mgr.assistant()
     const kept = await answered(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' }, 'deny')
     expect(kept.question).toContain('Forget that you denied "App helper" (id "helper") of the project "Alpha" to "may agent:claude" ("agent:claude")?')
-    expect(kept.question).toContain('it can then do it without asking, unless a session under safe calls it')
+    expect(kept.question).toContain('it can then do it without asking, unless a session set to Safe calls it')
     expect(kept.r.isError).toBe(true)
     expect(store.permissions.listAppPermissions(`${a.id}/helper`)).toMatchObject([{ capability: 'agent:claude', decision: 'deny' }])
 

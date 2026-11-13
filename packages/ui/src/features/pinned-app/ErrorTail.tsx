@@ -133,9 +133,7 @@ export function ErrorTail({
         </header>
         <p className="mt-1 whitespace-pre-wrap break-words text-ink-muted" data-testid="error-tail-denied">
           {`You did not allow ${denied.name} to ${denied.text}. This is your decision, not a bug in the app. `}
-          {here
-            ? 'To change it, open Runs, find it under Permissions and choose Forget. The app can then do it without asking, unless a session set to Safe calls it.'
-            : `To change it, open ${denied.name}'s Runs, find it under Permissions and choose Forget. The app can then do it without asking, unless a session set to Safe calls it.`}
+          {`To change it, open ${here ? 'Runs' : `${denied.name}'s Runs`}, find it under Permissions and choose Forget. The app can then do it without asking, unless a session set to Safe calls it.`}
         </p>
       </section>
     )

@@ -15,7 +15,7 @@ import { Badge } from '../../components/Badge.jsx'
  * stands even before that — that is the whole reason it is asking again.
  */
 export function AppReviewDetails({ review }: { review: AppReview }) {
-  const can = appCanLines(usesLines(review.uses))
+  const uses = usesLines(review.uses)
   return (
     <div className="space-y-3 text-sm" data-testid="app-review">
       <div>
@@ -37,9 +37,10 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
             </p>
           )}
           {review.changed.uses && (
-            <p className="text-ink-muted">
-              Before: {appCanLines(usesLines(review.changed.was.uses)).join('. ')}
-            </p>
+            <div className="text-ink-muted" data-testid="review-uses-was">
+              <p>What it could do before:</p>
+              <CanList uses={usesLines(review.changed.was.uses)} />
+            </div>
           )}
         </Section>
       )}
@@ -52,12 +53,12 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
       </Section>
 
       <Section title="What it can do" testId="review-uses">
-        <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
-          {can.map((u) => (
-            <li key={u}>{u}</li>
-          ))}
-        </ul>
-        <p className="mt-1 text-xs text-ink-faint">Once enabled, it does these without asking, unless a session set to Safe calls it.</p>
+        <CanList uses={uses} />
+        {uses.length > 0 && (
+          <p className="mt-1 text-xs text-ink-faint" data-testid="review-uses-note">
+            Once enabled, it does these without asking, unless a session set to Safe calls it.
+          </p>
+        )}
       </Section>
 
       <Section title="Secrets it wants" testId="review-secrets">
@@ -114,6 +115,17 @@ const SKIP_WHY: Record<string, string> = {
   link: 'a link, not followed',
   'link to nothing': 'a broken link',
   'not a regular file': 'not a regular file',
+}
+
+/** What an app's `uses` lets it do, one "Can …" line each (`appCanLines`, the trust card's wording) */
+function CanList({ uses }: { uses: string[] }) {
+  return (
+    <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
+      {appCanLines(uses).map((u) => (
+        <li key={u}>{u}</li>
+      ))}
+    </ul>
+  )
 }
 
 function Section({ title, testId, tone, children }: { title: string; testId: string; tone?: 'alert'; children: React.ReactNode }) {

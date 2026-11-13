@@ -54,7 +54,8 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     (the person can read it) and returns the agent's final answer: text, or with `schema` (a JSON
     Schema whose top level is an object) JSON of that shape, checked by Centralu. That session runs
     under `auto`, but never above the lowest approval setting among the sessions calling into the
-    app, and under `safe` when no one is behind the call. Under `safe` the agent reads without
+    app. It runs under `safe` when nothing says who asked: no call is open, the calling session is
+    gone, or the chain of calls can no longer be followed. Under `safe` the agent reads without
     asking, but every file write and command waits for the person to approve it in that session, so
     ask the agent for an answer and do the writing in your own tool code. Declare `"uses": { "agent": true }` in the manifest for the person's
     default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
