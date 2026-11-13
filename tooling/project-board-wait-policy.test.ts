@@ -24,7 +24,6 @@ async function run(reply: Reply = () => undefined, options: Record<string, unkno
       calls.push(call)
       const answer = reply(call, calls)
       if (answer !== undefined) return JSON.stringify(answer)
-      if (args[0] === 'pr') return JSON.stringify({ headRefOid: SHA })
       if (args[1]?.includes('/actions/runs?')) return JSON.stringify([{ workflow_runs: [DONE] }])
       if (args[1]?.includes('/check-runs?')) return JSON.stringify({ check_runs: [DONE] })
       if (args[1]?.endsWith('/status')) return JSON.stringify({ statuses: [] })
@@ -70,15 +69,6 @@ describe('wait-checks terminal states and deadline', () => {
       ? workflows(args) ? [{ workflow_runs: [] }] : checks(args) ? { check_runs: [] } : undefined
       : undefined)
     expect(r.code).toBe(visibleAt <= 120_000 ? 0 : 4)
-  })
-
-  it('gives a new pull request head its own registration grace without resetting the deadline', async () => {
-    const r = await run(({ args, at }) => args[0] === 'pr' ? { headRefOid: at < 120_000 ? SHA : 'new-head' }
-      : workflows(args) ? [{ workflow_runs: at < 120_000 ? [{ status: 'in_progress' }] : [] }]
-        : checks(args) ? { check_runs: [] } : undefined, { ref: null, number: 77, timeoutMs: 300_000 })
-    expect(r.code).toBe(4)
-    expect(r.elapsed).toBe(240_000)
-    expect(r.calls.at(-1)?.timeoutMs).toBe(60_000)
   })
 
   it('can finish external checks after the grace even without Actions workflows', async () => {

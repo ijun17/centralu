@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
-import { gitBranchPr } from './git-pr.js'
+import { gitBranchPr, prChecks } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 import { useWarmProcessTable } from '../os/process-table.test-helpers.js'
@@ -297,5 +297,28 @@ setTimeout(() => { process.stderr.write(Buffer.from([0xac, 0x0a])); process.exit
     const project = ghSaying('no pull requests found for branch "feat/y"\n')
     expect(await gitBranchPr(project, 'feat/y')).toBeNull()
     expect(log.mock.calls.filter((c) => String(c[0]).includes('gh could not'))).toEqual([])
+  })
+
+  it('reads a pull request’s checks for a watch (#1324): check runs and commit statuses, running, failed and passed', { timeout: 30_000 * SLOW }, async () => {
+    const project = ghSaying('')
+    const rollup = [
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
+      { __typename: 'StatusContext', state: 'ERROR' },
+      { __typename: 'StatusContext', state: 'PENDING' },
+    ]
+    writeFileSync(join(project, 'pr'), `process.stdout.write(${JSON.stringify(JSON.stringify({ state: 'OPEN', headRefOid: 'abc', statusCheckRollup: rollup }))})\n`)
+    expect(await prChecks(project, 123)).toEqual({ state: 'open', headOid: 'abc', total: 6, pending: 2, failed: 2 })
+  })
+
+  it('tells a gh with no sign-in from one that cannot answer now, for a watch; the branch lookup reads both as unknown', { timeout: 30_000 * SLOW }, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const project = ghSaying('To get started with GitHub CLI, please run:  gh auth login\n')
+    expect(await prChecks(project, 7)).toBe('signed_out')
+    expect(await gitBranchPr(project, 'feat/w')).toBeNull()
+    writeFileSync(join(project, 'pr'), `process.stderr.write('error connecting to api.github.com'); process.exitCode = 1\n`)
+    expect(await prChecks(project, 7)).toBeNull()
   })
 })

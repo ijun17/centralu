@@ -21,8 +21,7 @@ const calls = fs.readFileSync(process.env.FAKE_GH_LOG, 'utf8').trim().split('\n'
 const scenario = process.env.FAKE_SCENARIO
 if (scenario === 'hung') setInterval(() => {}, 1_000)
 const workflowPolls = calls.filter(c => c[1].includes('/actions/runs?')).length
-if (a[0] === 'pr') process.stdout.write(JSON.stringify({ headRefOid: process.env.FAKE_SHA }))
-else if (a[1].includes('/actions/runs?')) {
+if (a[1].includes('/actions/runs?')) {
   const done = { status: 'completed' }
   let pages = [{ workflow_runs: [done] }]
   if (scenario === 'missing' && workflowPolls === 0) pages = [{ workflow_runs: [] }]
@@ -56,26 +55,17 @@ else if (a[1].includes('/commits/')) {
 }
 
 describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
-  it.each(['77', '#77', 'ijun17/centralu#77'])('keeps the pull request form %s', (pr) => {
-    const r = run([pr])
-    expect(r.status).toBe(0)
-    expect(r.stdout.trim()).toBe('ijun17/centralu#77: 2/2 checks passed.')
-  })
-
-  // The tools' own reading of a pull request (parseItemRef): a missing # used to be read as part of
-  // the name, so owner/name77 waited on owner/name7#7
-  it('reads a pull request as the board tools do, and refuses a reference without its #', () => {
-    expect(run(['https://github.com/ijun17/centralu/pull/77']).stdout.trim()).toBe('ijun17/centralu#77: 2/2 checks passed.')
-    const r = run(['ijun17/centralu77'])
+  // A pull request's checks are the host's watch (#1324): its form is refused before asking GitHub anything
+  it('refuses a pull request with the usage', () => {
+    const r = run(['77'])
     expect(r.status).toBe(2)
-    expect(r.stderr).toContain('Usage:')
-    // Refused before asking GitHub anything
+    expect(r.stderr).toContain('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs --ref <branch|sha>')
     expect(r.calls()).toEqual([])
   })
 
   // Windows starts no program through a `#!` line, so there is no direct run to check there
   it.skipIf(process.platform === 'win32')('runs directly through its executable shebang', () => {
-    const r = run(['77'], 'success', true)
+    const r = run(['--ref', 'main'], 'success', true)
     expect(r.error).toBeUndefined()
     expect(r.status).toBe(0)
     expect(r.stdout).toContain('2/2 checks passed.')
@@ -87,7 +77,6 @@ describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
     expect(r.stdout.trim()).toBe(`ijun17/centralu@${ref} (abc1234): 2/2 checks passed.`)
     expect(r.calls()).toContainEqual(['api', `repos/ijun17/centralu/commits/${encodeURIComponent(ref)}`])
     expect(r.calls()).toContainEqual(['api', `repos/ijun17/centralu/commits/${SHA}/check-runs?per_page=100`])
-    expect(r.calls().some((a) => a[0] === 'pr')).toBe(false)
   })
 
   it('waits for absent and pending branch checks before reporting green', () => {
@@ -130,8 +119,8 @@ describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
 
   it.each([
     ['--ref', 'main', '--timeout-minutes', '1'],
-    ['--timeout-minutes', '1', '77'],
-  ])('accepts a deadline with ref and pull request arguments: %j', (...args) => {
+    ['--timeout-minutes', '1', '--ref', 'main'],
+  ])('accepts a deadline before or after the ref: %j', (...args) => {
     expect(run(args).status).toBe(0)
   })
 

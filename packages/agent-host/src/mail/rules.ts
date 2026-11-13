@@ -50,6 +50,8 @@ const REFUSALS = [
   'removed',
   'untrusted_project',
   'answered',
+  // a pull request watch where gh is not installed or not signed in (§18.3)
+  'unavailable',
 ] as const
 export type MailRefusal = (typeof REFUSALS)[number]
 
@@ -166,6 +168,8 @@ export const WATCH = {
   /** How long a session or `every` watch lasts; setting it again extends it */
   lastsMs: 24 * HOUR_MS,
   noteChars: 300,
+  /** How often the host asks gh for the pull requests watched (§18.3, owner 2026-11-13): once a minute, one call per pull request */
+  prPollMs: MINUTE_MS,
   /** Firings to one session in an hour past which the person is warned once per clock hour */
   warnWakesPerHour: 6,
 } as const

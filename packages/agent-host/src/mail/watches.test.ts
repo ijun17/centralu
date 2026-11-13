@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { PrChecks } from '../dev-services/git-pr.js'
 import { PERSON } from './address.js'
 import { NOW, at, hostWorld } from './host-mail.test-helpers.js'
 import { HOUR_MS, MINUTE_MS } from './rules.js'
@@ -7,6 +8,16 @@ import { HOUR_MS, MINUTE_MS } from './rules.js'
  * Watches the host keeps (#1324, docs/plans/mailbox.md §18): a session asks Centralu to wake it at a time or when another session ends its turn, asks
  * or stops, and the change comes as one notice through the mailbox. Time is a fake clock and the delivery's injected `schedule`; nothing sleeps.
  */
+
+/** What gh answers for a pull request, by number; each asking counted */
+const gh = vi.hoisted(() => ({ answer: new Map<number, unknown>(), asked: [] as number[] }))
+vi.mock('../dev-services/git-pr.js', () => ({
+  prChecks: async (_cwd: string, n: number) => {
+    gh.asked.push(n)
+    return gh.answer.get(n) ?? null
+  },
+}))
+const checks = (o: Partial<PrChecks>): PrChecks => ({ state: 'open', headOid: 'h1', total: 3, pending: 0, failed: 0, ...o })
 
 const A = at('a')
 const B = at('b')
@@ -350,3 +361,93 @@ function tomorrow(ms: number): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hhmm(ms)}`
 }
+
+describe('a pull request watch (§18.3, PR 2)', () => {
+  afterEach(() => {
+    gh.answer.clear()
+    gh.asked.length = 0
+  })
+  const watchPr = (w: ReturnType<typeof hostWorld>, id: string, to: string, text?: string) => w.tool.call(id, { action: 'watch', to, ...(text ? { text } : {}) })
+
+  it('gh not installed or not signed in is refused and writes no row', async () => {
+    const w = started()
+    gh.answer.set(7, 'unavailable')
+    expect((await watchPr(w, 'a', '#7')).text).toBe('Refused (unavailable): gh is not installed on this computer, so Centralu cannot watch #7 here.')
+    gh.answer.set(7, 'signed_out')
+    expect((await watchPr(w, 'a', '#7')).text).toBe('Refused (unavailable): gh is not signed in on this computer (gh auth login), so Centralu cannot watch #7 here.')
+    expect(w.watches.list(A)).toEqual([])
+  })
+
+  it('fires once when the checks on its head finish, saying how many failed, and asks gh once a minute for each pull request however many watch it', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 2 }))
+    const answer = await watchPr(w, 'a', '#7', 'merge it then')
+    expect(answer.text).toMatch(/^Watching the checks on #7 until .*; 2 of 3 still run\. id /)
+    await watchPr(w, 'b', '#7')
+    gh.asked.length = 0
+    await w.advance(60_000)
+    expect(gh.asked).toEqual([7])
+    expect(notices(w, A)).toEqual([])
+    gh.answer.set(7, checks({ failed: 1 }))
+    await w.advance(60_000)
+    const [fired, ...more] = notices(w, A)
+    expect(more).toEqual([])
+    expect(fired?.body).toBe('The checks on #7 finished: 1 failed.\n\nYour note:\n> merge it then')
+    expect(fired?.facts.watch).toMatchObject({ source: 'pr', change: 'checks' })
+    expect(notices(w, B)).toHaveLength(1)
+    gh.asked.length = 0
+    await w.advance(5 * 60_000)
+    expect(gh.asked).toEqual([])
+    expect(notices(w, A)).toHaveLength(1)
+  })
+
+  it('a push starts the wait again: the new head’s checks are what it waits for', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7')
+    gh.answer.set(7, checks({ headOid: 'h2', total: 0 }))
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    gh.answer.set(7, checks({ headOid: 'h2', total: 4, pending: 1 }))
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    gh.answer.set(7, checks({ headOid: 'h2', total: 4 }))
+    await w.advance(60_000)
+    expect(notices(w, A).map((m) => m.body)).toEqual(['The checks on #7 finished: none failed.'])
+  })
+
+  it('fires when the pull request is merged or closed, and has nothing to wait for when it is so already', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7')
+    gh.answer.set(7, checks({ state: 'merged' }))
+    await w.advance(60_000)
+    expect(notices(w, A).map((m) => m.body)).toEqual(['Pull request #7 was merged.'])
+    expect((await watchPr(w, 'a', '#7')).text).toBe('#7 is merged already: nothing to watch.')
+    gh.answer.set(8, checks({}))
+    expect((await watchPr(w, 'a', '#8')).text).toBe('The checks on #8 finished: none failed already: nothing to watch. A push starts new checks; watch again after it.')
+    expect(w.watches.list(A)).toEqual([])
+  })
+
+  it('gh signed out after it was set ends it with one quiet notice, and gh is not asked again', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7')
+    gh.answer.set(7, 'signed_out')
+    await w.advance(60_000)
+    const [ended, ...more] = notices(w, A)
+    expect(more).toEqual([])
+    expect(ended?.body).toBe('Your watch on the checks on #7 ended: gh is not signed in on this computer (gh auth login).')
+    expect(ended?.facts.quiet).toBe(true)
+    gh.asked.length = 0
+    await w.advance(10 * 60_000)
+    expect(gh.asked).toEqual([])
+  })
+
+  it('the window lists it by its number', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7', 'n')
+    expect(w.watches.views('a')).toMatchObject([{ source: 'pr', what: '#7', note: 'n' }])
+  })
+})

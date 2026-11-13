@@ -58,6 +58,56 @@ export async function gitBranchPr(
   signal?: AbortSignal,
   timeoutMs = OK.timeout,
 ): Promise<BranchPr | 'unavailable' | null> {
+  const j = await ghPrView(projectCwd, branch, ['number', 'state', 'url', 'headRefOid'], signal, timeoutMs)
+  if (j === 'unavailable') return 'unavailable'
+  if (!j || j === 'signed_out' || typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
+  return {
+    number: j.number,
+    state: prState(j.state),
+    url: j.url,
+    ...(typeof j.headRefOid === 'string' && j.headRefOid ? { headOid: j.headRefOid } : {}),
+  }
+}
+
+const prState = (state: unknown): BranchPr['state'] => (state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : 'open')
+
+/** A pull request's checks on its head (docs/plans/mailbox.md §18.3): how many there are, how many still run, how many failed */
+export type PrChecks = { state: BranchPr['state']; headOid: string; total: number; pending: number; failed: number }
+
+/** A check run's ends that are not a pass: what the notice counts as failed */
+const FAILED = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
+
+/**
+ * The checks of pull request `number`, asked of gh as `gitBranchPr` asks it (a watch on `#123`, #1324). `'unavailable'`: gh is not installed;
+ * `'signed_out'`: gh says it is not signed in; `null`: unknown for now (offline, no such pull request, GitHub refusing).
+ * `statusCheckRollup` mixes check runs (`status`, `conclusion`) and commit statuses (`state`): both are read
+ */
+export async function prChecks(projectCwd: string, number: number, signal?: AbortSignal): Promise<PrChecks | 'unavailable' | 'signed_out' | null> {
+  const j = await ghPrView(projectCwd, String(number), ['state', 'headRefOid', 'statusCheckRollup'], signal)
+  if (j === null || j === 'unavailable' || j === 'signed_out') return j
+  if (typeof j.state !== 'string' || typeof j.headRefOid !== 'string' || !Array.isArray(j.statusCheckRollup)) return null
+  let pending = 0
+  let failed = 0
+  for (const c of j.statusCheckRollup) {
+    if (!isObj(c)) continue
+    const end = typeof c.conclusion === 'string' && c.conclusion ? c.conclusion : typeof c.state === 'string' ? c.state : ''
+    const running = 'status' in c ? c.status !== 'COMPLETED' : end === 'PENDING' || end === 'EXPECTED'
+    if (running) pending++
+    else if (FAILED.has(end)) failed++
+  }
+  return { state: prState(j.state), headOid: j.headRefOid, total: j.statusCheckRollup.length, pending, failed }
+}
+
+/**
+ * `gh pr view <ref> --json <fields>` in the project's folder: the object it printed, or why there is none
+ */
+async function ghPrView(
+  projectCwd: string,
+  ref: string,
+  fields: string[],
+  signal?: AbortSignal,
+  timeoutMs = OK.timeout,
+): Promise<Record<string, unknown> | 'unavailable' | 'signed_out' | null> {
   /*
    * **An abort, or running past `timeoutMs`, ends gh with the processes it started, and returns once gh is gone** (the
    * host stopping, #368; a gh that does not answer, #982). `os.processes.run` starts gh as the root of a tree this host
@@ -71,7 +121,7 @@ export async function gitBranchPr(
    * those systems remove a folder a process works in).
    */
   try {
-    const run = await realOs().processes.run(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], {
+    const run = await realOs().processes.run(programPath('gh'), ['pr', 'view', ref, '--json', fields.join(',')], {
       cwd: projectCwd,
       timeoutMs,
       maxBuffer: OK.maxBuffer,
@@ -82,23 +132,20 @@ export async function gitBranchPr(
     })
     if (run.ended) return null
     if (run.code !== 0) {
-      noteGhFailure(branch, { stderr: run.stderr.toString('utf8').slice(-GH_STDERR_KEEP) })
-      return null
+      const stderr = run.stderr.toString('utf8').slice(-GH_STDERR_KEEP)
+      noteGhFailure(ref, { stderr })
+      return SIGNED_OUT.test(stderr) ? 'signed_out' : null
     }
     const j: unknown = JSON.parse(run.stdout.toString('utf8'))
-    if (!isObj(j)) return null
-    if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
-    return {
-      number: j.number,
-      state: j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : 'open',
-      url: j.url,
-      ...(typeof j.headRefOid === 'string' && j.headRefOid ? { headOid: j.headRefOid } : {}),
-    }
+    return isObj(j) ? j : null
   } catch (e) {
     // Not started at all (ENOENT) has nothing to wait for
     const failure = execFailure(e)
     if (failure.code === 'ENOENT') return 'unavailable'
-    noteGhFailure(branch, failure)
+    noteGhFailure(ref, failure)
     return null
   }
 }
+
+/** gh's words when it has no sign-in for the host (gh 2.83.0: "To get started with GitHub CLI, please run:  gh auth login") */
+const SIGNED_OUT = /gh auth login|not logged in/i

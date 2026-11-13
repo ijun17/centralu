@@ -8,7 +8,7 @@ import { CITE_MS, SUBJECT_CHARS, type MessageService, type ReadItem, type SendRe
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
-import { isTimeWatch, type Watches } from './watches.js'
+import { isTimeWatch, prNumberOf, type Watches } from './watches.js'
 
 /** What `close` on a watch of the caller's did (`Watches.cancel`) */
 const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => string> = {
@@ -72,7 +72,7 @@ export type MailToolHost = {
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */
-  watches?: Pick<Watches, 'register' | 'cancel' | 'read' | 'list' | 'what' | 'clock'>
+  watches?: Pick<Watches, 'register' | 'registerPr' | 'cancel' | 'read' | 'list' | 'what' | 'clock'>
   now?: () => number
 }
 
@@ -116,6 +116,12 @@ export class MailTool {
     const across = this.host.across
     if (!me) return this.run(sessionId, args)
     try {
+      // A pull request's checks are asked of gh before the watch is written (§18.3)
+      const pr = args.action === 'watch' ? prNumberOf(args.to ?? '') : null
+      if (pr !== null) {
+        const watches = this.watchArgs(args)
+        return { text: await watches.registerPr(me.address, pr, args.text?.trim() ?? '', (id) => mailCalls(1, this.host.form(sessionId)).close(id), signal) }
+      }
       if (args.action === 'find') {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
@@ -248,15 +254,21 @@ export class MailTool {
 
   /** `watch` (§18.2): `to` a session, resolved as `send` resolves it, or a time; `text` the session's note. No other field */
   private watch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
+    const watches = this.watchArgs(a)
+    const to = a.to?.trim() ?? ''
+    if (!to) return `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time), "every 30m" (at least 10 minutes) or "#123" (a pull request's checks); text is your note, at most 300 characters.`
+    // Itself is the watch's to refuse, in its words (`party` refuses it as a message's recipient)
+    const target = isTimeWatch(to) ? to : to === sessionId || to === me.address ? me.address : this.party(sessionId, me, to).address
+    return watches.register(me.address, target, a.text?.trim() ?? '', (id) => calls.close(id))
+  }
+
+  /** The watches, for a `watch` that names only `to` and `text` */
+  private watchArgs(a: MailToolArgs): NonNullable<MailToolHost['watches']> {
     const watches = this.host.watches
     if (!watches) throw refuse('no_mailbox', 'watches are not available here')
     const other = (['thread', 'kind', 'subject', 'urgent', 'cite', 'choices', 'ifBusy'] as const).find((k) => a[k] !== undefined)
     if (other) throw refuse('field_not_allowed', `a watch takes to and text only, not ${other}.`)
-    const to = a.to?.trim() ?? ''
-    if (!to) return `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time) or "every 30m" (at least 10 minutes); text is your note, at most 300 characters.`
-    // Itself is the watch's to refuse, in its words (`party` refuses it as a message's recipient)
-    const target = isTimeWatch(to) ? to : to === sessionId || to === me.address ? me.address : this.party(sessionId, me, to).address
-    return watches.register(me.address, target, a.text?.trim() ?? '', (id) => calls.close(id))
+    return watches
   }
 
   private need(value: string | undefined, name: string): string {
