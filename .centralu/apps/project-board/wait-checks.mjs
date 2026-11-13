@@ -8,13 +8,13 @@ const cancelled = (r) => (r.conclusion ?? r.state) === 'cancelled'
 class WaitTimeout extends Error {}
 
 /** Exit codes: 0 passed, 1 failed, 2 error, 3 approval, 4 empty, 5 cancelled, 6 timeout. */
-export async function waitForChecks({ repo, ref, number, timeoutMs = DEFAULT_TIMEOUT_MS, pollMs = 30_000 }, {
+export async function waitForChecks({ repo, ref, timeoutMs = DEFAULT_TIMEOUT_MS, pollMs = 30_000 }, {
   gh,
   now = () => performance.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   onRetry = () => {},
 }) {
-  let label = ref ? `${repo}@${ref}` : `${repo}#${number}`
+  let label = `${repo}@${ref}`
   const started = now()
   const deadline = started + timeoutMs
   const finish = (code, message) => ({ code, message: `${label}: ${message}` })
@@ -63,17 +63,11 @@ export async function waitForChecks({ repo, ref, number, timeoutMs = DEFAULT_TIM
   }
 
   try {
-    const pinnedSha = ref ? (await request(['api', `repos/${repo}/commits/${encodeURIComponent(ref)}`])).sha : null
-    if (ref) label = `${label} (${pinnedSha.slice(0, 7)})`
-    let registrationSha
-    let registrationStarted
+    const sha = (await request(['api', `repos/${repo}/commits/${encodeURIComponent(ref)}`])).sha
+    label = `${label} (${sha.slice(0, 7)})`
+    const registrationStarted = now()
     for (;;) {
       remaining()
-      const sha = pinnedSha ?? (await request(['pr', 'view', String(number), '-R', repo, '--json', 'headRefOid'])).headRefOid
-      if (sha !== registrationSha) {
-        registrationSha = sha
-        registrationStarted = now()
-      }
       const workflows = await runsForHead(sha)
       const blocked = workflows.find(needsAction)
       if (blocked) return finish(3, `approval/action required: ${blocked.name ?? 'workflow'} (${blocked.status === 'completed' ? blocked.conclusion : blocked.status})${blocked.html_url ? ` — ${blocked.html_url}` : ''}.`)

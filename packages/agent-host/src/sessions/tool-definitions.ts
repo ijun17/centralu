@@ -814,7 +814,7 @@ export const MAIL_TOOLS = [
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'close', 'find', 'watch']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer. For watch: a session, "in 30m", "at 16:30" or "every 30m"'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question; "assistant": the Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer. For watch: a session, "in 30m", "at 16:30", "every 30m" or PR "#123"'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),

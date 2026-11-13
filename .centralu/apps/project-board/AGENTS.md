@@ -138,9 +138,10 @@ intermittent failures (#368).
 
 ### Waiting without blocking
 
-Start `node .centralu/apps/project-board/bin/wait-checks.mjs <pr>` in the background instead of
-holding an MCP call open (or give `owner/repo#pr` or its URL: the forms the tools take, `parseItemRef`). Use `--ref <branch|sha>` instead to wait for
-a branch or commit in the configured repository; the ref is resolved once and its pinned SHA is printed with the label.
+For a pull request's checks, set a watch: `mail(action="watch", to="#123")` (docs/plans/mailbox.md §18.3). Centralu wakes
+you with one notice when they finish, or when the pull request is merged or closed. To wait for a branch or commit in the
+configured repository, start `node .centralu/apps/project-board/bin/wait-checks.mjs --ref <branch|sha>` in the background
+instead of holding an MCP call open; the ref is resolved once and its pinned SHA is printed with the label.
 It allows two minutes for workflow registration and waits for active workflows before deciding
 on checks. `--timeout-minutes <minutes>` sets the overall deadline (default 90 minutes), including
 polling, retries, and hung `gh` subprocesses. Failed `gh` calls retry three times, after 1/2/4 seconds.

@@ -1,6 +1,7 @@
 import { createListeners } from '@cc/common'
 import { errorMessage, type WatchView } from '@cc/protocol'
 import { z } from 'zod'
+import type { PrChecks } from '../dev-services/git-pr.js'
 import { parseJson } from '../dev-services/store/json.js'
 import type { MailboxRecords, WatchRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
@@ -15,10 +16,14 @@ import { HOUR_MS, MINUTE_MS, WARNING_TEXT, WATCH, hourlyKey, refuse } from './ru
  * notice through `MessageService.notice`, which MailDelivery brings like any other mail. The shape first, then the one owner of the rows.
  */
 
-/** What a watch waits for: a time (`in` and `at` once at `slotMs`, `every` at each slot), or a change of a session since its baseline */
+/**
+ * What a watch waits for: a time (`in` and `at` once at `slotMs`, `every` at each slot), a change of a session since its baseline, or the end of a
+ * pull request's checks on its head (`headOid`, the head the wait is for: a push starts it again)
+ */
 export type WatchSpec =
   | { source: 'time'; kind: 'in' | 'at' | 'every'; slotMs: number; periodMin?: number }
   | { source: 'session'; target: string; baselineTurn: number; baselineCards: string[] }
+  | { source: 'pr'; project: string; number: number; headOid: string }
 
 /** `active` until it ends; every other state is an end and never goes back */
 export const WATCH_STATES = ['active', 'fired', 'expired', 'cancelled', 'gone'] as const
@@ -35,6 +40,7 @@ export type Watch = Omit<WatchRow, 'source' | 'spec' | 'state' | 'endedBy'> & { 
 const StoredSpec = {
   time: z.object({ kind: z.enum(['in', 'at', 'every']), slotMs: z.number(), periodMin: z.number().optional() }),
   session: z.object({ baselineTurn: z.number(), baselineCards: z.array(z.string()) }),
+  pr: z.object({ project: z.string(), number: z.number(), headOid: z.string() }),
 }
 
 function readWatch(row: WatchRow): Watch | undefined {
@@ -49,21 +55,32 @@ function readWatch(row: WatchRow): Watch | undefined {
   } else if (row.source === 'session') {
     const s = StoredSpec.session.safeParse(raw)
     spec = s.success ? { source: 'session', target: row.target, ...s.data } : undefined
+  } else if (row.source === 'pr') {
+    const pr = StoredSpec.pr.safeParse(raw)
+    spec = pr.success ? { source: 'pr', ...pr.data } : undefined
   }
   return spec && { ...row, spec, state, endedBy }
 }
 
 function writeWatch(w: Watch): WatchRow {
   const { spec } = w
-  const stored =
-    spec.source === 'session'
-      ? { baselineTurn: spec.baselineTurn, baselineCards: spec.baselineCards }
-      : { kind: spec.kind, slotMs: spec.slotMs, ...(spec.periodMin !== undefined ? { periodMin: spec.periodMin } : {}) }
-  return { ...w, source: spec.source, target: spec.source === 'session' ? spec.target : w.target, spec: JSON.stringify(stored) }
+  if (spec.source === 'session') return { ...w, source: spec.source, target: spec.target, spec: JSON.stringify({ baselineTurn: spec.baselineTurn, baselineCards: spec.baselineCards }) }
+  const { source, ...stored } = spec
+  return { ...w, source, spec: JSON.stringify(stored) }
 }
 
 /** Whether `to` names a time rather than a session (§18.2) */
 export const isTimeWatch = (to: string): boolean => /^(in|at|every)\s/i.test(to.trim())
+
+/** The pull request `to` names (`#123`), or null (§18.3) */
+export const prNumberOf = (to: string): number | null => {
+  const m = /^#(\d{1,9})$/.exec(to.trim())
+  return m ? Number(m[1]) : null
+}
+
+/** "The checks on #123 finished: 2 failed, 1 cancelled", or "No checks ran on #123" when its head has none */
+const checksEnded = (number: number, r: PrChecks): string =>
+  r.total === 0 ? `No checks ran on #${number}` : `The checks on #${number} finished: ${r.failed === 0 ? 'none' : r.failed} failed${r.cancelled ? `, ${r.cancelled} cancelled` : ''}`
 
 /** The time spec `to` names, from `now`, or a refusal that says why not */
 function timeSpec(to: string, now: number): Extract<WatchSpec, { source: 'time' }> {
@@ -91,7 +108,11 @@ function timeSpec(to: string, now: number): Extract<WatchSpec, { source: 'time' 
 }
 
 const USAGE =
-  'a watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer\'s time, the next such minute) or "every 30m" (at least 10 minutes), and may take text, your note of at most 300 characters.'
+  'a watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer\'s time, the next such minute), "every 30m" (at least 10 minutes) or "#123" (a pull request\'s checks), and may take text, your note of at most 300 characters.'
+
+function checkNote(note: string): void {
+  if (note.length > WATCH.noteChars) throw refuse('too_long', `a watch's note is at most ${WATCH.noteChars} characters.`)
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const day = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -121,7 +142,17 @@ export type WatchesHost = {
   elsewhere(address: string): boolean
   /** Whether the address is a session of this host in the session archive, which may give it back */
   archived(address: string): boolean
+  /** The project of a session of this host, by address */
+  projectOf(address: string): string | null
+  /** A pull request's checks in a project, asked of gh (`prChecks`, dev-services/git-pr.ts) */
+  prChecks(project: string, number: number, signal?: AbortSignal): Promise<PrChecks | 'unavailable' | 'signed_out' | null>
 }
+
+/** Why gh cannot answer for a pull request watch, as a refusal and a watch's end say it */
+const GH_MISSING = {
+  unavailable: 'gh is not installed on this computer',
+  signed_out: 'gh is not signed in on this computer (gh auth login)',
+} as const
 
 /**
  * The watches of this host (docs/plans/mailbox.md §18.5): `register`, `cancel`, `list`, `changed` from the mail hooks, and `due` from the one timer
@@ -134,6 +165,11 @@ export class Watches {
   private readonly listeners = createListeners<string>((e) => console.error(`[mail] a watches listener failed: ${errorMessage(e)}`))
   private schedule: ((ms: number, fn: () => void) => () => void) | null = null
   private cancelTimer: (() => void) | null = null
+  /** When the pull requests were last asked of gh, and whether an asking runs: one at a time, at most once a `WATCH.prPollMs` */
+  private polledAt = -Infinity
+  private polling = false
+  /** For each pull request polled, its head and number of checks when the last poll found none running: a finish is believed when two polls agree */
+  private settledAt = new Map<string, string>()
 
   constructor(private readonly host: WatchesHost) {
     this.now = host.now ?? Date.now
@@ -159,14 +195,45 @@ export class Watches {
     this.cancelTimer?.()
     this.cancelTimer = null
     this.schedule = null
+    // A start after it asks gh afresh: one poll before a stop and one after are not two in a row
+    this.settledAt = new Map()
   }
 
   /** Sets a watch, or extends the same one (same owner, source and target) with this note; returns the answer the tool gives (§18.2) */
   register(owner: string, to: string, note: string, close: (id: string) => string): string {
     const now = this.now()
-    if (note.length > WATCH.noteChars) throw refuse('too_long', `a watch's note is at most ${WATCH.noteChars} characters.`)
     const spec = isTimeWatch(to) ? timeSpec(to, now) : this.sessionSpec(owner, to)
-    const target = spec.source === 'session' ? spec.target : to.trim()
+    const { w, id } = this.put(owner, spec, spec.source === 'session' ? spec.target : to.trim(), note, close, now)
+    if (spec.source === 'time') {
+      return spec.kind === 'every'
+        ? `Watching every ${spec.periodMin} minutes until ${this.clock(w.expiresAt)}, first at ${this.clock(spec.slotMs)}. ${id}`
+        : `Watching for ${this.clock(spec.slotMs)}: Centralu wakes you then. ${id}`
+    }
+    const s = this.host.session(w.target)
+    const doing = s?.cards.length ? 'it is waiting on a question or an approval now' : s?.working ? 'it is working now' : 'it is at rest now'
+    return `Watching ${this.what(w)} until ${this.clock(w.expiresAt)}; ${doing}. ${id}`
+  }
+
+  /**
+   * A watch on a pull request's checks (`#123`, §18.3), asked of gh first: gh missing or signed out, or a pull request it cannot read, is refused
+   * and writes no row; one that has ended, or whose checks on its head have finished, has nothing to wait for
+   */
+  async registerPr(owner: string, number: number, note: string, close: (id: string) => string, signal?: AbortSignal): Promise<string> {
+    checkNote(note)
+    const project = this.host.projectOf(owner)
+    if (!project) throw refuse('bad_value', 'a pull request is watched from a session in its project, and this session has none.')
+    const r = await this.host.prChecks(project, number, signal)
+    if (r === 'unavailable' || r === 'signed_out') throw refuse('unavailable', `${GH_MISSING[r]}, so Centralu cannot watch #${number} here.`)
+    if (r === null) throw refuse('bad_value', `gh cannot read pull request #${number} in this session's project now.`)
+    if (r.state !== 'open') return `#${number} is ${r.state} already: nothing to watch.`
+    if (r.total > 0 && r.pending === 0) return `${checksEnded(number, r)} already: nothing to watch. A push starts new checks; watch again after it.`
+    const { w, id } = this.put(owner, { source: 'pr', project, number, headOid: r.headOid }, `${project}#${number}`, note, close, this.now())
+    return `Watching ${this.what(w)} until ${this.clock(w.expiresAt)}; ${r.pending} of ${r.total} still run. ${id}`
+  }
+
+  /** The row of a new watch, or the same one (owner, source, target) extended with this note (§18.2); refused past `WATCH.perSession` */
+  private put(owner: string, spec: WatchSpec, target: string, note: string, close: (id: string) => string, now: number): { w: Watch; id: string } {
+    checkNote(note)
     const active = this.list(owner)
     const same = active.find((w) => w.spec.source === spec.source && w.target === target)
     if (!same && active.length >= WATCH.perSession) {
@@ -183,15 +250,7 @@ export class Watches {
     }
     this.host.records.saveWatch(writeWatch(w))
     this.emit(owner)
-    const id = `id ${w.id}. Cancel with ${close(w.id)}.`
-    if (spec.source === 'time') {
-      return spec.kind === 'every'
-        ? `Watching every ${spec.periodMin} minutes until ${this.clock(expiresAt)}, first at ${this.clock(spec.slotMs)}. ${id}`
-        : `Watching for ${this.clock(spec.slotMs)}: Centralu wakes you then. ${id}`
-    }
-    const s = this.host.session(target)
-    const doing = s?.cards.length ? 'it is waiting on a question or an approval now' : s?.working ? 'it is working now' : 'it is at rest now'
-    return `Watching ${this.what(w)} until ${this.clock(expiresAt)}; ${doing}. ${id}`
+    return { w, id: `id ${w.id}. Cancel with ${close(w.id)}.` }
   }
 
   /**
@@ -234,7 +293,7 @@ export class Watches {
     return this.list(sessionAddress(this.host.hostId, sessionId)).map((w) => ({
       id: w.id,
       source: w.spec.source,
-      what: w.spec.source === 'session' ? this.host.service.labelOf(w.spec.target) : '',
+      what: w.spec.source === 'session' ? this.host.service.labelOf(w.spec.target) : w.spec.source === 'pr' ? `#${w.spec.number}` : '',
       at: w.spec.source === 'time' ? w.spec.slotMs : null,
       everyMinutes: w.spec.source === 'time' ? (w.spec.periodMin ?? null) : null,
       until: w.expiresAt,
@@ -246,6 +305,7 @@ export class Watches {
   /** What a watch waits for, in Centralu's words: `<name> (<address>)`, `a timer for 16:30`, `a timer every 30 minutes` */
   what(w: Watch): string {
     if (w.spec.source === 'session') return `${this.host.service.labelOf(w.spec.target)} (${w.spec.target})`
+    if (w.spec.source === 'pr') return `the checks on #${w.spec.number}`
     return w.spec.kind === 'every' ? `a timer every ${w.spec.periodMin} minutes` : `a timer for ${this.clock(w.spec.slotMs)}`
   }
 
@@ -310,6 +370,7 @@ export class Watches {
   /** What is due by now fires (a time's slot) or ends (its 24 hours), then the timer is set to the next one. Also the delivery's sweep's safety net */
   due(now = this.now()): void {
     if (!this.schedule) return
+    if (!this.polling && now - this.polledAt >= WATCH.prPollMs) void this.pollPrs(now)
     for (const row of this.host.records.activeWatches({ dueBy: now })) {
       const w = readWatch(row)
       try {
@@ -371,20 +432,85 @@ export class Watches {
 
   /** It reached its end without a change: one quiet notice when it never fired (§18.4) */
   private expire(w: Watch, now: number): void {
+    this.endQuietly(w.id, now, 'expired', (fresh) => (fresh.firedCount === 0 ? `Your watch on ${this.what(fresh)} ended after 24 hours without a change.` : null))
+  }
+
+  /** Ends an active watch by the host, with one quiet notice to its owner when `body` gives one */
+  private endQuietly(id: string, now: number, change: string, body: (w: Watch) => string | null): void {
     const ended = this.host.records.transaction(() => {
-      const fresh = this.read(w.id)
-      if (fresh?.state !== 'active') return false
+      const fresh = this.read(id)
+      if (fresh?.state !== 'active') return undefined
       this.host.records.saveWatch(writeWatch({ ...fresh, state: 'expired', endedAt: now, endedBy: 'host', nextAt: null }))
-      if (fresh.firedCount === 0) {
-        this.host.service.notice(fresh.owner, {
-          body: `Your watch on ${this.what(fresh)} ended after 24 hours without a change.`,
-          facts: { quiet: true, watch: { id: fresh.id, source: fresh.spec.source, change: 'expired' } },
-          dedupeKey: this.key(fresh, 'expired'),
-        })
+      const text = body(fresh)
+      if (text !== null) {
+        this.host.service.notice(fresh.owner, { body: text, facts: { quiet: true, watch: { id, source: fresh.spec.source, change } }, dedupeKey: this.key(fresh, change) })
       }
-      return true
+      return fresh
     })
-    if (ended) this.emit(w.owner)
+    if (ended) this.emit(ended.owner)
+  }
+
+  /**
+   * Asks gh once for each pull request an active watch names, however many name it (§18.3), and fires what ended: the checks on its head finished,
+   * or none ran, as two polls in a row agree; or the pull request was merged or closed. A new head starts the wait again. gh gone or signed out ends
+   * each watch with one quiet notice saying so; a gh that cannot answer now is asked again at the next poll
+   */
+  private async pollPrs(now: number): Promise<void> {
+    this.polling = true
+    this.polledAt = now
+    try {
+      const byPr = new Map<string, Watch[]>()
+      for (const row of this.host.records.activeWatches()) {
+        const w = readWatch(row)
+        if (w?.spec.source === 'pr') byPr.set(w.target, [...(byPr.get(w.target) ?? []), w])
+      }
+      const settled = new Map<string, string>()
+      for (const [target, watches] of byPr) {
+        const first = watches[0]?.spec
+        if (first?.source !== 'pr') continue
+        const r = await this.host.prChecks(first.project, first.number).catch(() => null)
+        // A gh that cannot answer now keeps nothing of the poll before it: the finish waits for two fresh polls that agree
+        if (!this.schedule || r === null) continue
+        // A check can appear after the others ended, or a push's checks a moment after it: one more poll that sees the same is the finish
+        const seen = typeof r === 'object' && r.pending === 0 ? `${r.headOid}:${r.total}` : null
+        const agreed = seen !== null && this.settledAt.get(target) === seen
+        if (seen !== null) settled.set(target, seen)
+        for (const w of watches) this.prChanged(w, r, agreed)
+      }
+      if (this.schedule) this.settledAt = settled
+    } catch (e) {
+      console.error(`[mail] asking gh for the watched pull requests failed: ${errorMessage(e)}`)
+    } finally {
+      this.polling = false
+    }
+  }
+
+  private prChanged(w: Watch, r: PrChecks | 'unavailable' | 'signed_out', agreed: boolean): void {
+    if (w.spec.source !== 'pr') return
+    const { number } = w.spec
+    if (r === 'unavailable' || r === 'signed_out') {
+      this.endQuietly(w.id, this.now(), 'gh', () => `Your watch on ${this.what(w)} ended: ${GH_MISSING[r]}.`)
+      return
+    }
+    if (r.state !== 'open') {
+      this.fire(w.id, r.state, (at) => ({ body: `Pull request #${number} was ${r.state}.`, facts: { watch: { id: w.id, source: 'pr', change: r.state } }, next: { state: 'fired', endedAt: at, endedBy: 'host', nextAt: null } }))
+      return
+    }
+    if (r.headOid !== w.spec.headOid) this.moveHead(w.id, r.headOid)
+    if (!agreed) return
+    this.fire(w.id, `checks:${r.headOid}`, (at) => ({
+      body: `${checksEnded(number, r)}.`,
+      facts: { watch: { id: w.id, source: 'pr', change: 'checks' } },
+      next: { state: 'fired', endedAt: at, endedBy: 'host', nextAt: null },
+    }))
+  }
+
+  /** A push moved the pull request's head: the row, re-read in a transaction, waits for the new one if it is still active (gh was asked meanwhile) */
+  private moveHead(id: string, headOid: string): void {
+    this.host.records.transaction(() => {
+      const fresh = this.read(id)
+      if (fresh?.state === 'active' && fresh.spec.source === 'pr') this.host.records.saveWatch(writeWatch({ ...fresh, spec: { ...fresh.spec, headOid } }))
+    })
   }
 
   /**

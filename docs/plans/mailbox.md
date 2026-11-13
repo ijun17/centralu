@@ -3557,7 +3557,7 @@ These are not watches, because they already arrive as mail without one:
 | a session by name or id (resolved like `send`, `MailTool.party`, `mail/tool.ts:259`) | session | no |
 | `in 30m`, `in 2h`, `at 16:30` (the host's local time, the next such minute) | time | no |
 | `every 30m` (at least 10 minutes) | time | yes |
-| `#123` (only if §18.14 Q2 picks the host) | pull request | no |
+| `#123` (PR 2) | pull request | no |
 
 `text` is the session's own note, up to 300 characters, quoted back in the notice. Any other field is refused with one
 sentence that names it. A call with no `to` answers the usage line. The answer names the watch, its end, the target's
@@ -3613,9 +3613,21 @@ session watch ends after 24 hours; setting it again extends it.
 **A pull request's checks** (`#123`, PR 2): the host keeps them (owner, 2026-11-13, §18.14 Q2 = a). The watch is a
 one-shot. It polls `gh pr view <n> --json state,headRefOid,statusCheckRollup` (these fields checked against gh
 2.83.0's `--help`) every 60 seconds through the same runner as `gitBranchPr` (`dev-services/git-pr.ts:55`: 10 s
-timeout, `unavailable` without gh). It runs one call per project per tick, however many watches name it. It fires when
-every check on the current head has concluded (the notice names how many failed) or when the PR is merged or closed. A
-push that changes the head starts the wait again.
+timeout, `unavailable` without gh). It runs one call per pull request per tick, however many watches name it, from the
+delivery's 60-second sweep. It fires when every check on the current head has concluded (the notice names how many
+failed and how many were cancelled; a newer run cancels an older one, so a cancel is not counted as failed) or when the
+PR is merged or closed. A finish is believed when two polls in a row agree: none running, the same head and the same
+number of checks, since a check can appear after the others ended and a push's checks a moment after it. A poll runs at
+the first sweep at least 60 seconds after the one before, so two polls are 60 to about 120 seconds apart, and the
+notice comes within about four minutes of the last check's end (two minutes when the sweep keeps time). A head with no
+checks on two polls in a row fires once, "No checks ran on #123", as long after the push (a repository whose checks
+take longer than a poll's gap to appear gets it early). A gh that cannot answer between the two, or a host stopped
+between them, starts the count again. A push that changes the head starts the wait again; the new head is written to the
+row re-read in a transaction, so a watch closed or moved while gh was asked stays so. At registration gh is asked
+first: gh not installed, or signed out (its "gh auth login"), is refused `unavailable` and writes no row; a PR
+already merged, closed or with its checks done answers so and writes none. gh gone or signed out later ends each watch
+on it with one quiet notice saying so, and gh is not asked again for it; a gh that cannot answer now (offline) is asked
+at the next tick.
 
 **Not sources.** A session quiet for a long time (a time watch and `read_session` cover it); the merge queue (the
 board app's own notices); an app's event (§18.1).
@@ -3799,7 +3811,7 @@ a due time (Windows and macOS); the person cancels from the badge and the sessio
 | Rollback to a build without the table | the rows sleep; nothing fires until an update back |
 | The owner or the target deleted | the owner's rows are deleted with its mail; the target's watchers fire `gone` |
 | A compact or a model switch | the row is the host's, not the conversation's; the firing names the watch and the note |
-| gh missing or signed out (PR 2) | the registration answers `unavailable` and creates no row |
+| gh missing or signed out (PR 2) | the registration answers `unavailable` and creates no row; later, one quiet notice and the watch ends |
 
 ### 18.13 PR order
 

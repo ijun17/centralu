@@ -3,7 +3,6 @@
 import { readFile } from 'node:fs/promises'
 import { runProgram } from '../system.mjs'
 import { DEFAULT_TIMEOUT_MS, waitForChecks } from '../wait-checks.mjs'
-import { parseItemRef } from '../github.mjs'
 
 const args = process.argv.slice(2)
 const timeoutAt = args.indexOf('--timeout-minutes')
@@ -17,15 +16,9 @@ if (timeoutAt >= 0) {
 }
 const ref = args[0] === '--ref' && args.length === 2 && args[1] && !args[1].startsWith('-') ? args[1] : null
 const config = JSON.parse(await readFile(new URL('../project.json', import.meta.url), 'utf8'))
-// A pull request in the forms the board's tools take (parseItemRef): 8, #8, owner/repo#8 or its URL
-let pr = null
-try {
-  if (args.length === 1 && !ref) pr = parseItemRef(args[0], config.repository)
-} catch {
-  // refused below with the usage
-}
-if (!validTimeout || (!ref && !pr)) {
-  console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs <pr|owner/repo#pr|PR URL> | --ref <branch|sha> [--timeout-minutes <minutes>]')
+// A pull request's checks are a watch the host keeps: mail(action="watch", to="#123")
+if (!validTimeout || !ref) {
+  console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs --ref <branch|sha> [--timeout-minutes <minutes>]')
   process.exit(2)
 }
 const gh = (args, { timeoutMs }) =>
@@ -41,9 +34,8 @@ const gh = (args, { timeoutMs }) =>
     },
   )
 const result = await waitForChecks({
-  repo: pr?.repo ?? config.repository,
+  repo: config.repository,
   ref,
-  number: pr?.number ?? null,
   timeoutMs,
   pollMs: Math.max(1_000, Number(process.env.PROJECT_BOARD_WAIT_POLL_MS) || 30_000),
 }, { gh, onRetry: (message) => console.error(message) })

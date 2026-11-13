@@ -298,7 +298,7 @@ describe('watch, and close with its id (docs/plans/mailbox.md §18.2)', () => {
     stops.push(() => w.stop())
     expect(w.run('a', { action: 'watch', to: 'beta', kind: 'note' })).toEqual({ text: 'Refused (field_not_allowed): a watch takes to and text only, not kind.', isError: true })
     expect(w.run('a', { action: 'watch' }).text).toBe(
-      `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time) or "every 30m" (at least 10 minutes); text is your note, at most 300 characters.`,
+      `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time), "every 30m" (at least 10 minutes) or "#123" (a pull request's checks); text is your note, at most 300 characters.`,
     )
     const id = /id (\S+)\./.exec(w.run('a', { action: 'watch', to: 'beta', text: 'its review' }).text)?.[1] ?? ''
     expect(w.run('a', { action: 'inbox' }).text.split('\n')).toEqual(['Your mailbox is empty.', `Watching: ${id} beta (${B}) until ${w.watches.clock(w.clock.t + 24 * 3_600_000)}: its review`])

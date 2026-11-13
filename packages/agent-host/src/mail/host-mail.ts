@@ -1,3 +1,4 @@
+import { prChecks } from '../dev-services/git-pr.js'
 import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
@@ -235,6 +236,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     archived: (address) => {
       const party = parseAddress(address)
       return party?.kind === 'session' && party.host === hostId && store.trash.isTrashed(party.sessionId)
+    },
+    projectOf: (address) => reach.projectOf(address),
+    prChecks: async (project, number, signal) => {
+      const path = projects().find((p) => p.id === project)?.path
+      return path ? prChecks(path, number, signal) : null
     },
   })
   const delivery = new MailDelivery(service, records, sessions.mailSessions(), {

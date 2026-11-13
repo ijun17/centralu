@@ -295,9 +295,8 @@ Before rehearsing, wait for main's checks with
 The ref is resolved once; output includes its pinned SHA, such as `repo@main (abc1234)`.
 It allows workflow runs to register and waits for active runs to complete before deciding
 on checks, including jobs that register late.
-The existing `<pr|owner/repo#pr>` form waits for a pull request.
-The default deadline is 90 minutes; use `--timeout-minutes <minutes>` with either form to
-change it. Waiting for approval (`waiting` or `action_required`) ends immediately with an
+A pull request's checks are a watch instead (`mail(action="watch", to="#123")`).
+The default deadline is 90 minutes; use `--timeout-minutes <minutes>` to change it. Waiting for approval (`waiting` or `action_required`) ends immediately with an
 action-needed message. No workflow runs and no checks for two minutes means "nothing to wait
 for". Cancelled runs have their own outcome; "superseded by a newer push (cancelled)" is shown
 only when a newer run on the same workflow, branch, event, and repository has a different SHA.
