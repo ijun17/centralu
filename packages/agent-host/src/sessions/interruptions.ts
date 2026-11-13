@@ -88,6 +88,9 @@ export function interruptionWords(i: Interruption): string {
 /** A turn that went with its process: Centralu quit, or the system ended under the host (#1397). Both wait for the person's Continue, and neither is a failure of the work */
 export const wentWithItsProcess = (i: Interruption | null | undefined): boolean => i?.reason === 'quit' || i?.reason === 'shutdown'
 
+/** A stop Centralu holds to continue by itself once its cause clears (#1415): told as a stop only when that wait ends without going on */
+export const heldToContinue = (i: Interruption | null | undefined): boolean => !!i?.autoContinue
+
 /** The line the conversation shows where that note went in */
 export const UPDATE_CONTINUE_LINE = 'Centralu was updated during this turn, which stopped it; Centralu continued it on the new version.'
 

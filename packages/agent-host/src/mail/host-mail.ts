@@ -1,6 +1,6 @@
 import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import { wentWithItsProcess } from '../sessions/interruptions.js'
+import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
 import { labelOf } from '../sessions/transcript-view.js'
 import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
@@ -222,7 +222,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const party = parseAddress(address)
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
       const cards = s ? [...s.pendingQuestions.map((q) => q.requestId), ...(s.pendingApproval ? [s.pendingApproval.requestId] : [])] : []
-      return s && { working: inTurn(s.state), cards, interrupted: (s.interruption ?? null) !== null }
+      return s && { working: inTurn(s.state), cards, interrupted: (s.interruption ?? null) !== null, held: heldToContinue(s.interruption) }
     },
     mayRead: (reader, target) => {
       const [from, to] = [parseAddress(reader), parseAddress(target)]
@@ -340,18 +340,22 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       })
       // A sender whose seat cannot read mail (an older build's coordinator, a builder) is refused it (`no_mailbox`): it is told in its conversation, as
       // it was before step 3, and the report is marked delivered and read once that went in, so the Inbox reads it as told
-      for (const taskId of answered) {
-        const owner = records.message(taskId)?.sender ?? ''
-        const party = parseAddress(owner)
-        const report = records.reportsOn(taskId).at(-1)
-        if (party?.kind !== 'session' || sessions.canReadMail(party.sessionId) || !report) continue
-        relay(party.sessionId, () => {
-          const at = now()
-          records.markDelivered(owner, [report.id], at, null)
-          records.markRead(owner, [report.id], at)
-        })
+      try {
+        for (const taskId of answered) {
+          const owner = records.message(taskId)?.sender ?? ''
+          const party = parseAddress(owner)
+          const report = records.reportsOn(taskId).at(-1)
+          if (party?.kind !== 'session' || sessions.canReadMail(party.sessionId) || !report) continue
+          relay(party.sessionId, () => {
+            const at = now()
+            records.markDelivered(owner, [report.id], at, null)
+            records.markRead(owner, [report.id], at)
+          })
+        }
+      } finally {
+        // The watches on it hear the end whatever became of the relay, and theirs never stops it (`Watches.changed` keeps each apart)
+        watches.changed(addressOf(id), 'turn_ended')
       }
-      watches.changed(addressOf(id), 'turn_ended')
     },
     requestTurnEnded: requestTurnRecorder(service, mailTurns, addressOf),
     openTasks: (id, side) => openTaskParties(store.mailbox, addressOf(id), side),

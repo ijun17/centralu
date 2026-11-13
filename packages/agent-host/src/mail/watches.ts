@@ -114,7 +114,7 @@ export type WatchesHost = {
   records: MailboxRecords
   now?: () => number
   /** A session of this host as a watch reads it, by address; undefined when it is not here (in the archive, deleted, never) */
-  session(address: string): { working: boolean; cards: string[]; interrupted: boolean } | undefined
+  session(address: string): { working: boolean; cards: string[]; interrupted: boolean; held: boolean } | undefined
   /** Whether `reader` may read `target` with read_session: the one read rule (§18.3) */
   mayRead(reader: string, target: string): boolean
   /** Whether the address is a session on another computer */
@@ -335,7 +335,8 @@ export class Watches {
       const party = parseAddress(w.spec.target)
       const baseline = w.spec.baselineCards
       const ended = party?.kind === 'session' && this.host.records.lastEndedTurn(party.sessionId) > w.spec.baselineTurn
-      const change: SessionChange | null = !s ? 'gone' : s.cards.some((c) => !baseline.includes(c)) ? 'asked' : ended && !s.working ? (s.interrupted ? 'stopped' : 'turn_ended') : null
+      // A stop Centralu holds to continue is no change yet: its wait's end tells (`waitEnded`)
+      const change: SessionChange | null = !s ? 'gone' : s.cards.some((c) => !baseline.includes(c)) ? 'asked' : ended && !s.working && !s.held ? (s.interrupted ? 'stopped' : 'turn_ended') : null
       if (change) this.fireSession(w, change)
     }
   }
@@ -364,7 +365,7 @@ export class Watches {
     this.fire(w.id, slotKey(slot), (at) => ({
       body: `Your timer set at ${this.clock(w.createdAt)}${every} for ${this.clock(slot)} is due.${late ? ` It fires late: Centralu was not running at ${this.clock(spec.slotMs)}, or the computer slept.` : ''}`,
       facts: { watch: { id: w.id, source: 'time', change: 'due', ...(late ? { late: true } : {}) } },
-      next: next !== null && next <= w.expiresAt && next > now ? { spec: { ...spec, slotMs: next }, nextAt: next } : { state: next === null ? 'fired' : 'expired', endedAt: at, endedBy: 'host', nextAt: null },
+      next: next !== null && next <= w.expiresAt ? { spec: { ...spec, slotMs: next }, nextAt: next } : { state: next === null ? 'fired' : 'expired', endedAt: at, endedBy: 'host', nextAt: null },
     }))
   }
 

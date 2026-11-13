@@ -7,13 +7,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // eslint-disable-next-line no-restricted-imports -- tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import type { WatchView } from '@cc/protocol/client'
+import { sessionFromInfo } from '../../store/sessionList.js'
 import { useStore } from '../../store/store.js'
-import { resetStore } from '../../store/store.test-helpers.js'
+import { resetStore, sessionInfo } from '../../store/store.test-helpers.js'
 import { watchLine, WatchesCapsule, WatchRow } from './Watches.jsx'
 
 beforeEach(() => {
   resetStore()
-  useStore.setState({ watches: {} })
+  useStore.setState({ watches: {}, sessions: { s1: sessionFromInfo(sessionInfo('s1')) } })
 })
 
 // Local times, as the rows write them
@@ -75,12 +76,35 @@ describe('the badge', () => {
     expect(renderToStaticMarkup(<WatchesCapsule sessionId="s1" rows={useStore.getState().watches.s1} />)).toContain('data-count="1"')
   })
 
-  it('a deleted session’s rows go with it, so a reconnect does not ask for them again', async () => {
+  it('a deleted session’s rows go with it, and an answer that comes after its deletion keeps nothing', async () => {
     const platform = attached()
     await useStore.getState().loadWatches('s1')
     expect(useStore.getState().watches.s1).toEqual([])
     platform.emit({ type: 'session_deleted', sessionId: 's1' })
     expect(useStore.getState().watches.s1).toBeUndefined()
+
+    useStore.setState({ sessions: { s2: sessionFromInfo(sessionInfo('s2')) } })
+    let answer = (_: WatchView[]) => {}
+    vi.spyOn(platform.mail, 'watches').mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    const asked = useStore.getState().loadWatches('s2')
+    platform.emit({ type: 'session_deleted', sessionId: 's2' })
+    answer([watch({})])
+    await asked
+    expect(useStore.getState().watches.s2).toBeUndefined()
+  })
+
+  it('a reconnect asks again for the listed sessions only, and the news of one the window does not list asks nothing', async () => {
+    const platform = new MockPlatform()
+    platform.sessions.set('s1', sessionInfo('s1'))
+    await useStore.getState().attach(platform)
+    useStore.setState({ watches: { s1: [], gone: [watch({})] } })
+    const asked = vi.spyOn(platform.mail, 'watches')
+    platform.emit({ type: 'watches_changed', sessionId: 'never-listed' })
+    platform.setConnectionState('disconnected')
+    platform.setConnectionState('connected')
+    await vi.waitFor(() => expect(asked).toHaveBeenCalledWith('s1'))
+    expect(asked.mock.calls).toEqual([['s1']])
+    expect(useStore.getState().watches['never-listed']).toBeUndefined()
   })
 
   it('shows nothing, and says nothing, against an older host that has no watches', async () => {

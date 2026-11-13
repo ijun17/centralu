@@ -3600,7 +3600,7 @@ already learns it, through the mail hooks built in `mail/host-mail.ts:261`, so t
 |---|---|---|
 | `turn_ended` | `lastResponse` (`host-mail.ts`) | the moment a last response answers tasks. A turn that ended while the session's own background work runs is still working (owner 2026-11-04, `mail/rest.ts`): that work's end with no turn after it settles the session (`ChildReports.settleAtRest`), which a watch on it asks for as an open task does (`MailHooks.watchedAtRest`) |
 | `asked` | the session's `question_request` or `approval_request` event (`sessionEvent` in `host-mail.ts`) | it raised a question or approval card. Not `cards.tell`: that runs only for givers of open work there, and a watcher has none (it is refused one) |
-| `stopped` | `stopped`, or `waitEnded` for a stop Centralu holds to continue (#1415) | interrupted, error, usage limit, quit. A held stop is a stop only when its wait ends without going on, as its senders are told |
+| `stopped` | `stopped`, or `waitEnded` for a stop Centralu holds to continue (#1415) | interrupted, error, usage limit, quit. A held stop (`heldToContinue`) is a stop only when its wait ends without going on, as its senders are told; the catch-up at start reads it the same way |
 | `gone` | `sessionGone` (`host-mail.ts`) | in the session archive or deleted |
 
 It never fires for the state it was set in. The row keeps the target's last ended turn and pending cards at

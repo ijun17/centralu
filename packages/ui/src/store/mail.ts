@@ -142,9 +142,14 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       })
     },
 
+    /*
+     * Only a session the window lists: the news of one it does not list, a reconnect's reload of one that left, and an answer that comes after
+     * its session was deleted keep nothing (`forgetSessions` takes its rows away)
+     */
     loadWatches(sessionId) {
+      if (!get().sessions[sessionId]) return Promise.resolve()
       return coalescedRead(`watches:${sessionId}`, get, (platform) => platform.mail.watches(sessionId), (rows) => {
-        set((s) => ({ watches: { ...s.watches, [sessionId]: rows } }))
+        set((s) => (s.sessions[sessionId] ? { watches: { ...s.watches, [sessionId]: rows } } : {}))
       })
     },
 
