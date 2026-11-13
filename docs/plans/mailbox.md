@@ -3721,8 +3721,8 @@ go on waiting. Copy follows ux-writing §1: the session's name, not its address,
 placement is the owner's (2026-11-13, §18.14 Q3 = a).
 
 **Protocol (additions only, protocol.md §4):** methods `watches.list { sessionId }` → `{ watches: WatchView[] }` and
-`watches.cancel { id }`; event `watches_changed { sessionId }`. `WatchView` is `{ id, source, what, until, note,
-createdAt }`, with `source` an enum with `.catch()`. An older host answers neither method, and the window then shows no
+`watches.cancel { id }`; event `watches_changed { sessionId }`. `WatchView` is `{ id, source, what, at, everyMinutes,
+until, note, createdAt }`, with `source` an enum with `.catch('other')`; the window words the row from these fields. An older host answers neither method, and the window then shows no
 badge (`e2e/older-host.spec.ts`). The badge's count is a selector over the listed rows, not a stored field
 (state-management §3). The platform mock and the web mock implement both methods.
 
