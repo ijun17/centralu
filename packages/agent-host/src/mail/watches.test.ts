@@ -438,6 +438,25 @@ describe('a pull request watch (§18.3, PR 2)', () => {
     expect(notices(w, A).map((m) => m.body)).toEqual(['No checks ran on #7.'])
   })
 
+  it('starts the count again when gh cannot answer between two polls, or the host stops between them', async () => {
+    const w = started()
+    gh.answer.set(7, checks({ pending: 1 }))
+    await watchPr(w, 'a', '#7')
+    gh.answer.set(7, checks({}))
+    await w.advance(60_000)
+    gh.answer.delete(7)
+    await w.advance(60_000)
+    gh.answer.set(7, checks({}))
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    w.delivery.stop()
+    w.delivery.start()
+    await w.advance(60_000)
+    expect(notices(w, A)).toEqual([])
+    await w.advance(60_000)
+    expect(notices(w, A).map((m) => m.body)).toEqual(['The checks on #7 finished: none failed.'])
+  })
+
   it('a watch closed while gh is asked stays closed when gh answers with a new head', async () => {
     const w = started()
     gh.answer.set(7, checks({ pending: 1 }))

@@ -3617,13 +3617,14 @@ timeout, `unavailable` without gh). It runs one call per pull request per tick, 
 delivery's 60-second sweep. It fires when every check on the current head has concluded (the notice names how many
 failed and how many were cancelled; a newer run cancels an older one, so a cancel is not counted as failed) or when the
 PR is merged or closed. A finish is believed when two polls in a row agree: none running, the same head and the same
-number of checks, since a check can appear after the others ended and a push's checks a moment after it. So the notice
-comes one to two minutes after the last check ends. A head with no checks on two polls in a row fires once, "No checks
-ran on #123", one to two minutes after the push (a repository whose checks take longer than that to appear gets it
-early). A gh that cannot answer between the two starts the count again. A push that changes the head starts the wait
-again; the new head is written to the row re-read in a transaction, so a watch closed or moved while gh was asked stays
-so. At registration gh is
-asked first: gh not installed, or signed out (its "gh auth login"), is refused `unavailable` and writes no row; a PR
+number of checks, since a check can appear after the others ended and a push's checks a moment after it. A poll runs at
+the first sweep at least 60 seconds after the one before, so two polls are 60 to about 120 seconds apart, and the
+notice comes within about four minutes of the last check's end (two minutes when the sweep keeps time). A head with no
+checks on two polls in a row fires once, "No checks ran on #123", as long after the push (a repository whose checks
+take longer than a poll's gap to appear gets it early). A gh that cannot answer between the two, or a host stopped
+between them, starts the count again. A push that changes the head starts the wait again; the new head is written to the
+row re-read in a transaction, so a watch closed or moved while gh was asked stays so. At registration gh is asked
+first: gh not installed, or signed out (its "gh auth login"), is refused `unavailable` and writes no row; a PR
 already merged, closed or with its checks done answers so and writes none. gh gone or signed out later ends each watch
 on it with one quiet notice saying so, and gh is not asked again for it; a gh that cannot answer now (offline) is asked
 at the next tick.

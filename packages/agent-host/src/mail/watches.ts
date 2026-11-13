@@ -195,6 +195,8 @@ export class Watches {
     this.cancelTimer?.()
     this.cancelTimer = null
     this.schedule = null
+    // A start after it asks gh afresh: one poll before a stop and one after are not two in a row
+    this.settledAt = new Map()
   }
 
   /** Sets a watch, or extends the same one (same owner, source and target) with this note; returns the answer the tool gives (§18.2) */
@@ -467,6 +469,7 @@ export class Watches {
         const first = watches[0]?.spec
         if (first?.source !== 'pr') continue
         const r = await this.host.prChecks(first.project, first.number).catch(() => null)
+        // A gh that cannot answer now keeps nothing of the poll before it: the finish waits for two fresh polls that agree
         if (!this.schedule || r === null) continue
         // A check can appear after the others ended, or a push's checks a moment after it: one more poll that sees the same is the finish
         const seen = typeof r === 'object' && r.pending === 0 ? `${r.headOid}:${r.total}` : null
@@ -474,7 +477,7 @@ export class Watches {
         if (seen !== null) settled.set(target, seen)
         for (const w of watches) this.prChanged(w, r, agreed)
       }
-      this.settledAt = settled
+      if (this.schedule) this.settledAt = settled
     } catch (e) {
       console.error(`[mail] asking gh for the watched pull requests failed: ${errorMessage(e)}`)
     } finally {
