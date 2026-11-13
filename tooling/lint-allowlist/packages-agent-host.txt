@@ -324,7 +324,6 @@ packages/agent-host/src/sessions/host-leaving.test.ts @typescript-eslint/no-unne
 packages/agent-host/src/sessions/interruption-watch.ts @typescript-eslint/consistent-type-assertions 1
 packages/agent-host/src/sessions/interruption-watch.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/interruptions.test.ts @typescript-eslint/no-floating-promises 2
-packages/agent-host/src/sessions/interruptions.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/sessions/launch-records.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/sessions/linked-reports.ts @typescript-eslint/no-unsafe-type-assertion 5
 packages/agent-host/src/sessions/machine-asks.ts @typescript-eslint/no-non-null-assertion 1

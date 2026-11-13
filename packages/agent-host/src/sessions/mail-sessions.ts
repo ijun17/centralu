@@ -5,7 +5,7 @@ import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
-import type { StopTold, StopWhy } from '../mail/stop-notices.js'
+import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
 import type { MailToolArgs, MailToolResult } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { TurnInputs } from '../mail/delivery.js'
@@ -27,6 +27,8 @@ export type MailHooks = {
   sessionGone(sessionId: string): void
   /** A session stopped without answering (docs/plans/mailbox.md "The stop notice"): the senders of the questions it left unanswered are told once */
   stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
+  /** The wait of a stop Centralu continues by itself ended, continued or not (#1415): who the stop's notice was held from hears it once */
+  waitEnded?(sessionId: string, why: 'limit' | 'network', starter: string | null, end: WaitEnd): void
   /** This host leaves, with these sessions in a turn: what an earlier build that may take over reads of their open tasks is written (`leaveForEarlierBuild`) */
   leaving?(inTurn: readonly string[]): void
   /**
@@ -144,6 +146,16 @@ export class MailSessionsView {
       this.hooks?.stopped?.(sessionId, why, opts)
     } catch (e) {
       console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to the senders (${errorMessage(e)})`)
+    }
+  }
+
+  /** Tells the mailbox the wait of a stop Centralu continues by itself ended (`MailHooks.waitEnded`). Never throws: the wait is over already */
+  mailWaitEnded(sessionId: string, why: 'limit' | 'network', starter: string | null, end: WaitEnd): void {
+    if (this.host.closing) return
+    try {
+      this.hooks?.waitEnded?.(sessionId, why, starter, end)
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: the end of its wait could not be told to the senders (${errorMessage(e)})`)
     }
   }
 

@@ -1,5 +1,5 @@
 {
-  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05",
+  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05; 4 files of #2239 timed on a local Windows run, 2026-11-13",
   "files": {
     "packages/agent-host/src/adapters/acp/adapter.test.ts": 0,
     "packages/agent-host/src/adapters/acp/normalize.test.ts": 0,
@@ -15,6 +15,7 @@
     "packages/agent-host/src/adapters/antigravity/sign-in.test.ts": 0.1,
     "packages/agent-host/src/adapters/centralu-calls.test.ts": 0,
     "packages/agent-host/src/adapters/claude/always-allow.test.ts": 0.3,
+    "packages/agent-host/src/adapters/claude/api-url.test.ts": 0,
     "packages/agent-host/src/adapters/claude/apps.test.ts": 16.5,
     "packages/agent-host/src/adapters/claude/auto-question.test.ts": 0.2,
     "packages/agent-host/src/adapters/claude/background-tasks.test.ts": 0.2,
@@ -56,6 +57,7 @@
     "packages/agent-host/src/adapters/claude/tool-prefix.test.ts": 2,
     "packages/agent-host/src/adapters/claude/usage-probe.test.ts": 2.9,
     "packages/agent-host/src/adapters/claude/windows-start.test.ts": 1.6,
+    "packages/agent-host/src/adapters/codex/api-url.test.ts": 0,
     "packages/agent-host/src/adapters/codex/app-bridge.test.ts": 5.8,
     "packages/agent-host/src/adapters/codex/apps.test.ts": 34.2,
     "packages/agent-host/src/adapters/codex/auto-compact.test.ts": 0.3,
@@ -353,6 +355,7 @@
     "packages/agent-host/src/sessions/assistant-seat.test.ts": 3,
     "packages/agent-host/src/sessions/auto-boundaries.test.ts": 24.7,
     "packages/agent-host/src/sessions/auto-compact.test.ts": 2.7,
+    "packages/agent-host/src/sessions/auto-continue.test.ts": 3,
     "packages/agent-host/src/sessions/background-tasks-swap.test.ts": 3.1,
     "packages/agent-host/src/sessions/background-tasks.test.ts": 4.3,
     "packages/agent-host/src/sessions/busy-requests.test.ts": 16.7,
@@ -470,6 +473,7 @@
     "packages/agent-host/src/sessions/trash.test.ts": 0.9,
     "packages/agent-host/src/sessions/trust-commands.test.ts": 15.2,
     "packages/agent-host/src/sessions/turn-answer.test.ts": 0,
+    "packages/agent-host/src/sessions/turn-continue.test.ts": 1.6,
     "packages/agent-host/src/sessions/turn-origin.test.ts": 5.2,
     "packages/agent-host/src/sessions/ui-preferences.test.ts": 0.8,
     "packages/agent-host/src/sessions/unconfirmed-stop.test.ts": 0.7,

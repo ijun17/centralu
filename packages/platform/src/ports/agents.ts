@@ -173,6 +173,8 @@ export interface AgentPort {
    * conversation. `cleared` is false when a newer row exists (`newer`: a later error) and the state is left for the person to look at.
    */
   clearError(sessionId: string, seq: number): Promise<{ cleared: boolean; newer: boolean }>
+  /** Don't continue (#1415): the stop Centralu would continue by itself is left for the person. `stopped`: false when nothing waited */
+  stopContinue(sessionId: string): Promise<{ stopped: boolean }>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /**

@@ -1,6 +1,6 @@
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
-import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
+import { CONTINUE_WORDS, applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
 import type { SessionHandle } from '../adapters/contract.js'
 import { centraluInputId } from '../adapters/input-receipts.js'
@@ -24,7 +24,7 @@ import { isHubSender } from './hub-sender.js'
 import { truncate } from './external-conversations.js'
 import { labelOf } from './transcript-view.js'
 import type { InterruptionWatch } from './interruption-watch.js'
-import type { OverloadRetry } from './overload-retry.js'
+import type { TurnContinue } from './turn-continue.js'
 import type { RoutedCards } from './routed-cards.js'
 import type { SessionRecordHost } from './session-record.js'
 import type { SessionStartsHost } from './session-start.js'
@@ -56,8 +56,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
-    /** A turn the provider ended for want of capacity, waiting to be continued (overload-retry.ts) */
-    readonly overloadRetry: OverloadRetry
+    /** A stopped turn waiting for its cause to clear to be continued (turn-continue.ts) */
+    readonly turnContinue: TurnContinue
     /** Refuses a session whose worktree is being removed */
     notBeingRemoved: (sessionId: string) => void
     readonly reports: ChildReports
@@ -131,9 +131,9 @@ export class SessionEvents {
       if (!m || !e.ended?.length) return
       return this.onEvent({ ...e, live: m.backgroundTasks.filter((t) => t.status === 'running') })
     }
-    // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693)
-    if (e.type === 'error') e = this.host.overloadRetry.hold(e)
-    if (e.sessionId) this.host.overloadRetry.observe(e)
+    // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693, turn-continue.ts)
+    if (e.type === 'error') e = this.host.turnContinue.hold(e)
+    if (e.sessionId) this.host.turnContinue.observe(e)
     const unborn = e.sessionId && !this.host.meta.has(e.sessionId) ? this.host.record.unborn.get(e.sessionId) : undefined
     if (unborn) {
       unborn.push(e)
@@ -178,6 +178,8 @@ export class SessionEvents {
         this.host.cardRests.note(e, m.id, before)
         interruptionBefore = m.interruption ?? null
         this.host.interruptions.trackInterruption(e, m, wasBusy && !inTurn(m.state))
+        // A stop the network or a usage limit made waits to be continued, stored with the interruption below (#1415)
+        this.host.turnContinue.armAfter(e, m, wasBusy && !inTurn(m.state))
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
         if (this.host.restartPolicy.backgroundUnknown.has(m.id)) this.host.restartPolicy.backgroundUnknown.set(m.id, Date.now())
         /*
@@ -300,7 +302,9 @@ export class SessionEvents {
     const stopWhy = workEnded && e.sessionId && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
     if (stopWhy && e.sessionId) {
       this.host.reports.turnStopped(e.sessionId)
-      this.host.mailStopped(e.sessionId, stopWhy, this.stopTold(e.sessionId, waited, delegation?.callerId))
+      // A stop Centralu waits to continue is told when the wait ends (#1415: told once, when the work continues)
+      const held = !!nowInterrupted?.autoContinue
+      this.host.mailStopped(e.sessionId, stopWhy, { ...this.stopTold(e.sessionId, waited, delegation?.callerId), ...(held ? { held } : {}) })
     } else if (workEnded && e.sessionId) {
       // It ended as a turn does: the requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to
       // (docs/plans/mailbox.md §10.6.3). A call still waiting reads its own answer as it returns, which marks the report read (`answerRecorder`)
@@ -501,20 +505,24 @@ export class SessionEvents {
   }
 
   /**
-   * What goes into a session's conversation (`deliverNow`), after the retry of a turn the provider ended for want of capacity (#1693) is
-   * taken away: a message into the session carries the work on itself, and wins over a retry note on its way (a restart waited out
+   * What goes into a session's conversation (`deliverNow`), after a continue waiting for its cause to clear (turn-continue.ts: an overloaded
+   * provider, the network, a usage limit) is taken away: a message into the session carries the work on itself, and wins over a retry note on its way (a restart waited out
    * while it is sent). Taken away first, before any wait: the retry's own send checks it right before it hands the note to the tool.
    * If the message is then refused, the turn it was meant to carry on is over, and the error the retry stood in for ends it.
    */
   async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
-    const sessionId = args[0]
-    const held = this.host.overloadRetry.supersede(sessionId)
+    const [sessionId, text, , from, relayed, fromApp] = args
+    // The person's own Continue (the inbox's, the header's Continue now): told as the work going on once it went in, as the stop if it did not
+    const continued = text === CONTINUE_WORDS && !from && !relayed && !fromApp ? this.host.turnContinue.personContinues(sessionId) : null
+    const held = this.host.turnContinue.supersede(sessionId)
     try {
       await this.deliverNow(...args)
     } catch (e) {
-      if (held !== null) this.host.overloadRetry.lost(sessionId, held)
+      continued?.(false)
+      if (held !== null) this.host.turnContinue.lost(sessionId, held)
       throw e
     }
+    continued?.(true)
   }
 
   /**

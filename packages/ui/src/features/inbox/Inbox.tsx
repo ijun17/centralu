@@ -11,11 +11,12 @@ import { useInbox } from '../../store/selectors.js'
 import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
+import { CONTINUE_WORDS } from '@cc/protocol/client'
 import {
-  CONTINUE_TEXT,
   Kbd,
   StateDot,
   canContinue,
+  waitStands,
   formatWaiting,
   waitingTone,
 } from '../../components/primitives.jsx'
@@ -324,17 +325,17 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
         </button>
         {/*
           Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
-          still has its conversation. Never sent by itself: a resent turn can repeat a push or a release.
+          still has its conversation. A stop Centralu continues by itself (#1415) says when, and this sends it now.
         */}
         {canContinue(it.interruption) && !isInTurn(it.state) && (
           <button
             className="mr-1.5 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink transition-colors hover:bg-surface-hover"
-            onClick={() => void send(it.id, CONTINUE_TEXT)}
+            onClick={() => void send(it.id, CONTINUE_WORDS)}
             aria-label={`Continue: ${it.name}`}
-            title={`Sends "${CONTINUE_TEXT}"`}
+            title={`Sends "${CONTINUE_WORDS}"`}
             data-testid={`inbox-continue-${it.id}`}
           >
-            Continue
+            {waitStands(it.interruption) ? 'Continue now' : 'Continue'}
           </button>
         )}
         {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}

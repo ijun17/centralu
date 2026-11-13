@@ -277,6 +277,12 @@ export const sessionsParams = {
    * line stays in the conversation. The person's alone (the window): an agent's script may not hide a failure.
    */
   'sessions.clearError': z.object({ sessionId: SessionId, seq: z.number() }),
+  /**
+   * Don't continue (#1415): the stopped turn Centralu was going to continue by itself (`Interruption.autoContinue`) is left for the
+   * person. The stop stays, with its Continue. `stopped` is false when nothing was waiting (it continued or was already left).
+   * Routed to the session's machine, whose host holds the wait. The person's alone (the window), like Done
+   */
+  'sessions.stopContinue': z.object({ sessionId: SessionId }),
   'messages.load': z.object({
     sessionId: SessionId,
     limit: z.number().default(200),

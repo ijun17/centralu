@@ -153,7 +153,7 @@ export function ChatStream({
   const { runs, runOf } = useMemo(() => foldRuns(chat, (id) => !!views?.[id]), [chat, views])
   /*
    * A run opens with a fade of its rows (`cc-fade`) and closes with one (`cc-fade-out`): a short change of brightness,
-   * no travel (none at all under reduced motion, `index.css`). The press never waits and is never at the fade's mercy:
+   * no travel (none at all under reduced motion: `toggleFold` sets no fade then, though `cc-fade` itself is a 100ms fade there). The press never waits and is never at the fade's mercy:
    * the store takes it at once, and only the rows stay on the page a moment longer to fade (`closing`), so a panel
    * closed or a session left in that moment has still folded the run.
    */

@@ -1,8 +1,9 @@
-import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
+import { CONTINUE_WORDS, SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
 import { isInTurn } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { CONTINUE_TEXT, canContinue, interruptionLabel } from '../../components/primitives.jsx'
+import { canContinue, interruptionLabel, waitStands } from '../../components/primitives.jsx'
+import { usePresence } from '../../components/presence.js'
 import { Button } from '../../components/Button.jsx'
 
 /*
@@ -29,8 +30,11 @@ export function useSessionNotes(session: NotedSession | undefined, away: boolean
     error,
     interrupted,
     dormant,
-    /** A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking) */
-    hasButton: error || interrupted || (dormant && !!wakeError && !waking),
+    /**
+     * A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking).
+     * A stop Centralu continues by itself has its buttons in the header (#1415), so its note has none
+     */
+    hasButton: error || (interrupted && !waitStands(session.interruption)) || (dormant && !!wakeError && !waking),
   }
 }
 
@@ -80,10 +84,15 @@ export function InterruptedNote({
   interruption: Interruption
 }) {
   const send = useStore((s) => s.send)
+  // Centralu continues it by itself (#1415): the header says when, with Continue now; this line says only the stop
+  // It fades out as a wait comes and in as one goes (design-system.md §9), taking no press while it leaves
+  const button = usePresence(!waitStands(interruption))
   const why =
     interruption.reason === 'network'
       ? 'A network error ended the last turn before it finished.'
-      : interruption.reason === 'quit'
+      : interruption.reason === 'limit'
+        ? 'The usage limit ended the last turn before it finished.'
+        : interruption.reason === 'quit'
         ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
         : interruption.reason === 'shutdown'
           ? `The last turn did not finish: ${SHUTDOWN_WORDS} while it was running.`
@@ -98,16 +107,19 @@ export function InterruptedNote({
       <span className="min-w-0 flex-1 break-words">
         <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
       </span>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="shrink-0"
-        onClick={() => void send(sessionId, CONTINUE_TEXT)}
-        title={`Sends "${CONTINUE_TEXT}"`}
-        data-testid="interrupted-continue"
-      >
-        Continue
-      </Button>
+      {button.shown && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className={`${button.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} shrink-0`}
+          aria-hidden={button.leaving || undefined}
+          onClick={() => void send(sessionId, CONTINUE_WORDS)}
+          title={`Sends "${CONTINUE_WORDS}"`}
+          data-testid="interrupted-continue"
+        >
+          Continue
+        </Button>
+      )}
     </p>
   )
 }

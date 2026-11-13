@@ -14,7 +14,8 @@ import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { HOST_FAMILY } from '../os/real.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
-import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
+import { isNetworkFailure } from './error-kind.js'
+import { RECONNECTING_FLAG_MS, interruptionAfter, stopOf } from './interruptions.js'
 import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -143,6 +144,8 @@ function host(o: { updateResume?: UpdateResumeFolder } = {}) {
     ...(o.updateResume ? { updateResume: o.updateResume } : {}),
   })
   mgr.prLookup = async () => null
+  // Each stop here is told when it happens, as #698 tells it: Centralu's own continue (#1415) holds a network stop's notice until its wait ends (auto-continue.test.ts)
+  mgr.prefs.setUiPreferences({ continueOnNetwork: false, continueAfterLimit: false })
   hosts.push(mgr)
   return { mgr, claude }
 }
@@ -215,6 +218,26 @@ describe('a turn the network stopped (#698)', () => {
     expect(mailReportsTo(parent)).toHaveLength(1)
     expect(reportsTo(parent, child)).toEqual([])
     expect(a.claude.handles.get(parent)!.sent).toEqual([])
+  })
+
+  it('with Centralu continuing it (#1415, on by default), its starter is told once, when the work continues: nothing at the stop', async () => {
+    const a = host()
+    a.mgr.prefs.setUiPreferences({ continueOnNetwork: true })
+    wireHostMail(a.mgr, store)
+    const { parent, child } = await parentAndChild(a)
+    const kid = a.claude.handles.get(child)!
+    kid.answer('waiting on pnpm verify with a Monitor')
+    await eventually(() => mailReportsTo(parent).length === 1)
+
+    kid.ownTurnFails(ECONNREFUSED)
+    expect(info(a, child).interruption).toMatchObject({ reason: 'network', autoContinue: { tries: 0 } })
+    expect(starterNotices(parent)).toEqual([])
+    // Another turn of the tool finishing says its API answers: the child goes on
+    a.claude.handles.get(parent)!.emit({ type: 'turn_complete', sessionId: parent })
+    await eventually(() => starterNotices(parent).length === 1)
+    const [told] = starterNotices(parent)
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'continued' } })
+    expect(told!.body).toBe(`${info(a, child).name} lost the network, which is back, so Centralu continued it. What it owes you comes when it answers or ends.`)
   })
 
   it('an open task is told unanswered by the stop notice, saying the network stopped it, not that the work failed, with no report', async () => {
@@ -1424,5 +1447,25 @@ describe('a tool reconnecting for too long (#698)', () => {
     h.emit({ type: 'activity', sessionId: id, activity: null })
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     expect(interruptions(id)).toEqual([])
+  })
+})
+
+describe('a turn a usage limit stopped (#1415)', () => {
+  const S = 's1'
+  const limitError = (message: string): NormalizedEvent => ({ type: 'error', sessionId: S, error: { code: 'internal', message, retryable: false } })
+
+  it("the tool's limit event that ended a turn marks it limit; one at rest marks nothing", () => {
+    const e: NormalizedEvent = { type: 'limit_reached', sessionId: S, resumeAt: new Date(5_000).toISOString() }
+    expect(interruptionAfter(e, 1_000, true)).toEqual({ reason: 'limit', at: 1_000 })
+    expect(interruptionAfter(e, 1_000, false)).toBeUndefined()
+    expect(stopOf(e, { reason: 'limit', at: 1_000 })).toBe('limit')
+  })
+
+  it("an error its words call a usage limit is a limit stop, with the tool's sentence; another error is not", () => {
+    const limit = limitError("You've hit your limit · resets 1am (Europe/Berlin)")
+    expect(interruptionAfter(limit, 1_000, true)).toMatchObject({ reason: 'limit', at: 1_000 })
+    expect(stopOf(limit, interruptionAfter(limit, 1_000, true))).toBe('limit')
+    expect(interruptionAfter(limitError('The model refused the request'), 1_000, true)).toBeNull()
+    expect(interruptionAfter(limit, 1_000, false)).toBeUndefined()
   })
 })

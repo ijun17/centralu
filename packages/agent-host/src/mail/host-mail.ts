@@ -264,7 +264,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     linkedGone: linkedGoneRecorder(service, store.mailbox),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) =>
-      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
+      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) }),
+    waitEnded: (id, why, starter, end) => service.stops.stopWaitEnded(addressOf(id), why, starter ? addressOf(starter) : null, end),
     leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
     handOver: (from, to, which, children) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),

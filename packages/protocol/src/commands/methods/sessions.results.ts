@@ -141,6 +141,7 @@ export const sessionsResults = {
     cleared: z.boolean(),
     newer: z.boolean().default(false),
   }),
+  'sessions.stopContinue': z.object({ ok: z.literal(true), stopped: z.boolean() }),
   'messages.load': z.array(StoredMessage),
   'messages.subagent': z.array(StoredMessage),
   'messages.subagentTrashed': z.object({ steps: z.number() }),

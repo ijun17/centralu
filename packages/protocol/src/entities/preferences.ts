@@ -277,6 +277,13 @@ export const UiPreferences = z.object({
    */
   hubAuto: z.boolean().optional(),
   /**
+   * Whether a turn a usage limit stopped is continued by itself at the reset, and one the network stopped once the network is
+   * back (#1415, #2238). On by default (owner decision 2026-10-26); read by this computer's host for its own sessions. Optional,
+   * as hubAuto: a record from before them has none and reads as on (`autoContinueOf`)
+   */
+  continueAfterLimit: z.boolean().optional(),
+  continueOnNetwork: z.boolean().optional(),
+  /**
    * The sidebar groups the person folded (#666): the children of a session (`session:<id>`) and the
    * sessions of an app (`app:<key>`). Only folded groups are listed, so a group nobody touched is
    * open and an unknown or stale key does nothing. A way of looking, kept with the other screen
@@ -357,6 +364,11 @@ export const MAX_AGENT_DEPTH = 3
 /** Whether this computer takes `auto` from its hub's `auto` sessions (#1273): on unless the person turned it off */
 export function hubAutoOf(prefs: Pick<UiPreferences, 'hubAuto'>): boolean {
   return prefs.hubAuto !== false
+}
+
+/** Which stops this computer continues by itself (#1415): each on unless the person turned it off */
+export function autoContinueOf(prefs: Pick<UiPreferences, 'continueAfterLimit' | 'continueOnNetwork'>): { limit: boolean; network: boolean } {
+  return { limit: prefs.continueAfterLimit !== false, network: prefs.continueOnNetwork !== false }
 }
 
 /** The auto-compact setting in force: the saved one, else the default (on, at 60%) */

@@ -36,7 +36,9 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  *
  *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
  *                 response, the computer slept), after the tool's own retries
- *   quit          Centralu quit or restarted while the turn ran, and the process went with it: a start
+ *   limit         the turn ended on the account's usage limit (five-hour or weekly, #1415): the tool's limit event,
+ *                 or an error its words call one
+ *   quit         Centralu quit or restarted while the turn ran, and the process went with it: a start
  *                 found the session `working` with no process left and reset it to `idle`
  *   shutdown      the computer shut down, restarted or signed out while the turn ran (#1397): the last host was told
  *                 the system was ending and recorded it as it went; the next start found the session in that turn, or
@@ -50,7 +52,7 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  * newer host reads as `interrupted`, which still says "this turn did not finish".
  */
 export const InterruptionReason = z
-  .enum(['network', 'quit', 'shutdown', 'interrupted', 'reconnecting'])
+  .enum(['network', 'limit', 'quit', 'shutdown', 'interrupted', 'reconnecting'])
   .catch('interrupted')
 export type InterruptionReason = z.infer<typeof InterruptionReason>
 
@@ -60,12 +62,27 @@ export type InterruptionReason = z.infer<typeof InterruptionReason>
  */
 export const SHUTDOWN_WORDS = 'the computer shut down, restarted or signed out'
 
+/**
+ * What going on with a stopped turn asks of the agent (#698): the person's Continue sends it as their message, and each continue
+ * note of Centralu's ends with it (#1618, #1693, #1415). Short, since the agent still has its conversation; the second sentence
+ * because a cut turn may have done part of a step already
+ */
+export const CONTINUE_WORDS = 'Continue where you stopped. Check what already happened before repeating a step.'
+
 export const Interruption = z.object({
   reason: InterruptionReason,
   /** When it happened (ms); for `reconnecting`, when the reconnecting began */
   at: z.number(),
   /** The tool's own words, where it gave some (the error's message) */
   detail: z.string().optional(),
+  /**
+   * Centralu continues the turn by itself once its cause clears (#1415, #2238; docs/agent-host/lifecycle/auto-continue.md). The host
+   * decides it and says it here, so a window shows the wait without working it out. `at`: when (ms), a usage limit's reset; absent
+   * for the network, which continues once the tool's API answers again. `tries`: the continues already made for this run of stops.
+   * Absent: nothing continues it by itself (the setting is off, the person said Don't continue, the tries ran out, or the cause
+   * does not clear with time). An older host never sets it, and an older window drops it
+   */
+  autoContinue: z.object({ at: z.number().optional(), tries: z.number().int().min(0) }).optional(),
 })
 export type Interruption = z.infer<typeof Interruption>
 

@@ -7,6 +7,7 @@ import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { withCodexClient } from './short-lived.js'
 import { codexHome } from './home.js'
+import { codexApiUrl } from './api-url.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
@@ -45,6 +46,10 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+  /** The API a ChatGPT sign-in talks to, or the one a key's base URL names (`AgentAdapter.apiUrl`, `codexApiUrl`) */
+  apiUrl(): Promise<string> {
+    return codexApiUrl()
+  }
   readonly cacheBilling = 'openai' as const
   readonly contextAtRequest = true
   /** What Codex offers against what this adapter limits (#270) */

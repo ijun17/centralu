@@ -63,7 +63,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'archiveLosses' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'clearError' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'archiveLosses' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'clearError' | 'stopContinue' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -379,6 +379,16 @@ export class SessionsMock {
     markRead: async (sessionId: string, seq: number) => {
       const s = this.store.sessions.get(sessionId)
       if (s) s.lastReadSeq = Math.max(s.lastReadSeq, seq)
+    },
+    stopContinue: async (sessionId: string) => {
+      const s = this.store.sessions.get(sessionId)
+      if (!s) throw new Error(`No session ${sessionId}`)
+      const i = s.interruption
+      if (!i?.autoContinue) return { stopped: false }
+      const { autoContinue: _, ...stop } = i
+      s.interruption = stop
+      this.emit({ type: 'interruption', sessionId, interruption: stop })
+      return { stopped: true }
     },
     clearError: async (sessionId: string, seq: number) => {
       const s = this.store.sessions.get(sessionId)

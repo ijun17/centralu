@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { CONTINUE_WORDS } from '@cc/protocol'
 import type { InputObserver } from './contract.js'
 
 const UUID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -37,7 +38,7 @@ export function isCentraluInputId(id: unknown): boolean {
 export const UPDATE_NOTE_HEAD = '[Centralu] Centralu on this machine was updated'
 export const UPDATE_CONTINUE_TEXT =
   `${UPDATE_NOTE_HEAD} while your turn was running, which stopped the turn before it finished. ` +
-  'Continue where you stopped. Check what already happened before repeating a step.'
+  CONTINUE_WORDS
 
 /**
  * What a session whose turn the provider ended for want of capacity is sent when the host retries it (#1693): through Centralu's
@@ -45,11 +46,19 @@ export const UPDATE_CONTINUE_TEXT =
  */
 export const RETRY_NOTE_HEAD = "[Centralu] The model provider's servers were at capacity"
 export const RETRY_NOTE =
-  `${RETRY_NOTE_HEAD}, which ended your last turn. Nothing you did caused it. ` +
-  'Continue where you stopped. Check what already happened before repeating a step.'
+  `${RETRY_NOTE_HEAD}, which ended your last turn. Nothing you did caused it. ` + CONTINUE_WORDS
 
 /**
- * Whether a line read back is one of Centralu's own notes (the update's, #1618, #1902, or the retry's, #1693), by the words it begins
+ * What a session whose turn the network or a usage limit stopped is sent when the host continues it once the cause cleared (#1415,
+ * #2238): through Centralu's channel, never as the person's message, asking the agent to check what already happened like the others
+ */
+export const NETWORK_NOTE_HEAD = '[Centralu] The network dropped'
+export const NETWORK_NOTE = `${NETWORK_NOTE_HEAD} during your last turn and ended it before it finished. It is back now. ${CONTINUE_WORDS}`
+export const LIMIT_NOTE_HEAD = "[Centralu] The account's usage limit"
+export const LIMIT_NOTE = `${LIMIT_NOTE_HEAD} ended your last turn before it finished. The limit has reset. ${CONTINUE_WORDS}`
+
+/**
+ * Whether a line read back is one of Centralu's own notes (the update's, #1618, #1902, or a continue's, #1693, #1415), by the words it begins
  * with: Centralu's own, which the person does not type. The update's note can go on with what else the update stopped (`updateNote`), so
  * a note is not matched whole. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
  * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
@@ -57,7 +66,7 @@ export const RETRY_NOTE =
  */
 export function isCentraluNote(text: string): boolean {
   const t = text.trim()
-  return t.startsWith(UPDATE_NOTE_HEAD) || t.startsWith(RETRY_NOTE_HEAD)
+  return [UPDATE_NOTE_HEAD, RETRY_NOTE_HEAD, NETWORK_NOTE_HEAD, LIMIT_NOTE_HEAD].some((head) => t.startsWith(head))
 }
 
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */

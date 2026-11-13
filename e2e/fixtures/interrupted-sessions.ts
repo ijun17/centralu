@@ -130,4 +130,40 @@ export function interruptedSessionTests() {
     await emit(page, [{ type: 'interruption', sessionId: s, interruption: null }])
     await expect(item(page, s)).toHaveCount(0)
   })
+
+  test("a stop Centralu continues by itself shows the wait in the header, with Continue now and Don't continue (#1415)", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const other = await newSession(page, 'alpha')
+    const s = await newSession(page, 'alpha')
+    const at = new Date(2030, 0, 1, 1, 20).getTime()
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now(), autoContinue: { at, tries: 0 } } }])
+    const wait = page.getByTestId('auto-continue-wait')
+    await expect(wait).toHaveText('Usage limit · continues at 01:20')
+    await expect(page.getByTestId('session-name').locator('xpath=..').getByTestId('auto-continue-now')).toBeVisible()
+    // The line above the composer says the stop as before, without the header's buttons: none shows twice
+    const note = page.getByTestId('interrupted-note')
+    await expect(note).toContainText('Stopped: usage limit')
+    await expect(page.getByTestId('interrupted-continue')).toHaveCount(0)
+
+    // Don't continue: the wait leaves the header, and the line's Continue is back
+    await page.getByTestId('auto-continue-stop').click()
+    await expect(page.getByTestId('auto-continue')).toHaveCount(0)
+    await expect(note).toContainText('Stopped: usage limit')
+    await expect(page.getByTestId('interrupted-continue')).toHaveText('Continue')
+
+    // The inbox row says the wait in the header's words; a network wait says what it waits for
+    const failure = networkFailure(other)
+    await emit(page, [...failure.slice(0, -1), { type: 'interruption', sessionId: other, interruption: { reason: 'network', at: Date.now(), autoContinue: { tries: 1 } } }])
+    await openInbox(page)
+    await expect(item(page, other)).toContainText('Network lost · continues when the network is back')
+    await expect(page.getByTestId(`inbox-continue-${other}`)).toHaveText('Continue now')
+
+    // Continue now in the header sends the one message, and the wait and the line go
+    await page.keyboard.press('Escape')
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'network', at: Date.now(), autoContinue: { tries: 1 } } }])
+    await expect(wait).toHaveText('Network lost · continues when the network is back')
+    await page.getByTestId('auto-continue-now').click()
+    await expect(note).toHaveCount(0)
+    await expect(page.getByTestId('auto-continue')).toHaveCount(0)
+  })
 }

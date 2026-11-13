@@ -472,6 +472,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /** Provided by Codex (confirmed at M0) */
     usedPercent: z.number().optional(),
     windowMins: z.number().optional(),
+    /** A limit on credits or spend (Codex), which no time resets: never continued by itself (#1415) */
+    credits: z.boolean().optional(),
   }),
   /**
    * A session's name changed.

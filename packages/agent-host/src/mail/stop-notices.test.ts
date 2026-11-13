@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
 import { MessageService } from './messages.js'
-import type { SessionStop, StopWhy } from './stop-notices.js'
+import type { SessionStop, StopWhy, WaitEnd } from './stop-notices.js'
 import { A, B, C, HOST, ORC, world } from './messages.test-helpers.js'
 import { wakesMessage } from './rules.js'
 
@@ -32,7 +32,7 @@ function stopWorld() {
   const noticesTo = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
   /** What Centralu told `who` of a stop of a session it started and is owed nothing by */
   const startersNotices = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.about && p.message.facts.reason)
-  return { ...w, busy, cut, stops, ask, noticesTo, startersNotices }
+  return { ...w, busy, cut, service, stops, ask, noticesTo, startersNotices }
 }
 
 const CAUSES: { why: StopWhy; says: string }[] = [
@@ -366,5 +366,63 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
     expect(w.noticesTo(PERSON).map((n) => n.message.facts.unanswered)).toEqual([[{ id: mine.id, recipient: B, why: 'quit' }]])
     expect(w.noticesTo(PERSON)[0]!.message.body).toBe('Centralu quit while beta worked on your message, so it did not answer. Send it a message when you want it to go on.')
+  })
+})
+
+describe('a stopped session Centralu continues by itself (#1415: told once, when the work continues)', () => {
+  const continued = (n: { message: { facts: { reason?: string } } }) => n.message.facts.reason === 'continued'
+  const end = (continued: WaitEnd['continued'], first = true): WaitEnd => ({ continued, first })
+
+  it('the stop tells nobody while the wait stands; the continue tells each sender, and the starter, once; the questions stay open', () => {
+    const w = stopWorld()
+    const q = w.ask(A, B)
+    w.stops.sessionStopped(B, 'network', { starter: C, held: true })
+    expect(w.noticesTo(A)).toEqual([])
+    expect(w.startersNotices(C)).toEqual([])
+    w.service.stops.stopWaitEnded(B, 'network', C, end('centralu'))
+    const toA = w.startersNotices(A).filter(continued)
+    expect(toA).toHaveLength(1)
+    expect(toA[0]!.message.body).toBe('beta lost the network, which is back, so Centralu continued it. What it owes you comes when it answers or ends.')
+    expect(w.noticesTo(A)).toEqual([])
+    expect(w.startersNotices(C).filter(continued)).toHaveLength(1)
+    expect(w.rowOf(q.id, B)).toMatchObject({ releasedWhy: 'network', settled: null })
+    // The same continue again tells nothing more, nor does a second continue of the run tell the starter
+    w.service.stops.stopWaitEnded(B, 'network', C, end('centralu', false))
+    expect(w.startersNotices(A).filter(continued)).toHaveLength(1)
+    expect(w.startersNotices(C).filter(continued)).toHaveLength(1)
+  })
+
+  it('a wait that ends without a continue (Stop, a message, Don\'t continue, the tries spent) tells the stop as it would have been told, once', () => {
+    const w = stopWorld()
+    const q = w.ask(A, B)
+    w.stops.sessionStopped(B, 'limit', { starter: C, held: true })
+    w.service.stops.stopWaitEnded(B, 'limit', C, end(false))
+    const [told, ...rest] = w.noticesTo(A)
+    expect(rest).toEqual([])
+    expect(told?.message.body).toContain('beta reached its usage limit before it answered')
+    expect(told?.message.facts.unanswered).toEqual([{ id: q.id, recipient: B, why: 'limit' }])
+    expect(w.startersNotices(C).map((n) => n.message.facts.reason)).toEqual(['limit'])
+    w.service.stops.stopWaitEnded(B, 'limit', C, end(false))
+    expect(w.noticesTo(A)).toHaveLength(1)
+    expect(w.startersNotices(C)).toHaveLength(1)
+  })
+
+  it('a question released for another cause is not told of this one, and nobody is told of a session continuing itself', () => {
+    const w = stopWorld()
+    w.ask(A, B)
+    w.stops.sessionStopped(B, 'error')
+    w.service.stops.stopWaitEnded(B, 'limit', B, end('centralu'))
+    expect(w.startersNotices(A).filter(continued)).toEqual([])
+    expect(w.startersNotices(B).filter(continued)).toEqual([])
+  })
+
+  it('work that went on in a turn of its own (the person\'s Continue, mail it was given) is told so, not as Centralu continuing it (ux-writing.md §3)', () => {
+    const w = stopWorld()
+    w.ask(A, B)
+    w.stops.sessionStopped(B, 'network', { starter: C, held: true })
+    w.service.stops.stopWaitEnded(B, 'network', C, end('other'))
+    const toA = w.startersNotices(A).filter(continued)
+    expect(toA.map((n) => n.message.body)).toEqual(['beta lost the network, and its work has gone on. What it owes you comes when it answers or ends.'])
+    expect(w.noticesTo(A)).toEqual([])
   })
 })

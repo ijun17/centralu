@@ -151,6 +151,7 @@ type LifecycleActions = Pick<
   | 'rename'
   | 'markRead'
   | 'markDone'
+  | 'stopContinue'
   | 'markOpened'
   | 'reorderSessions'
 >
@@ -409,6 +410,13 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) },
       })),
     )
+  },
+
+  async stopContinue(sessionId) {
+    const platform = get().platform
+    if (!platform) return
+    // The wait goes when the host says so (its `interruption` event): every window hears the same
+    await platform.agents.stopContinue(sessionId).catch((e: unknown) => set({ toast: `Could not stop the continue: ${errorMessage(e)}` }))
   },
 
   async markDone(sessionId) {

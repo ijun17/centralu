@@ -5,7 +5,7 @@
  * told in the Inbox. A quit or the system's end found at the next start goes through the same rule, and a cut turn Centralu continues or a turn that
  * ended normally tells no one.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
@@ -22,6 +22,9 @@ beforeEach(async () => {
   w = await crossWorld()
   m = wireHostMail(w.mgr, w.store)
   read = mailReader(w.store)
+  // Each stop here is told when it happens, as #698 tells it: Centralu's own continue (#1415) holds a network or limit stop's
+  // notice until its wait ends (mail/stop-notices.test.ts, interruptions.test.ts)
+  w.mgr.prefs.setUiPreferences({ continueOnNetwork: false, continueAfterLimit: false })
 })
 afterEach(async () => {
   m.delivery.stop()
@@ -108,6 +111,28 @@ const ENDINGS: Ending[] = [
 ]
 
 describe('a turn ends without finishing', () => {
+  it.each(ENDINGS.filter((x) => x.why === 'network' || x.why === 'limit'))(
+    '$name with Centralu continuing it (#1415, on by default): nothing at the stop; one notice when the wait ends, through the manager',
+    async ({ end, says }) => {
+      w.mgr.prefs.setUiPreferences({ continueOnNetwork: true, continueAfterLimit: true })
+      // No probe reaches out of the test
+      vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')))
+      onTestFinished(() => void vi.unstubAllGlobals())
+      const { asker, child, question } = await asked(true)
+      handleOf(child).event(end(child))
+      await w.until(() => !!w.mgr.sessionInfo(child)?.interruption?.autoContinue)
+      await new Promise((r) => setTimeout(r, 20))
+      expect(stopNotices(asker)).toEqual([])
+      // Don't continue: the wait ends without a continue, and the asker hears the stop it was owed, once
+      expect(w.mgr.stopContinue(child)).toBe(true)
+      await w.until(() => stopNotices(asker).length === 1)
+      expect(stopNotices(asker)[0]!.message.body).toContain(says)
+      expect(stopNotices(asker)[0]!.message.body).toContain(question.id)
+      await new Promise((r) => setTimeout(r, 20))
+      expect(stopNotices(asker)).toHaveLength(1)
+    },
+  )
+
   it.each(ENDINGS)('$name: the asker is told once, in words that say what happened and what it can do, and the question stays open', async ({ end, why, says }) => {
     const { asker, child, question, task } = await asked(true)
     handleOf(child).event(end(child))

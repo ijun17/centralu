@@ -352,7 +352,7 @@ export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: numbe
       m.activity = e.activity
       break
     case 'limit_reached':
-      m.limit = { resumeAt: e.resumeAt, usedPercent: e.usedPercent, windowMins: e.windowMins }
+      m.limit = { resumeAt: e.resumeAt, usedPercent: e.usedPercent, windowMins: e.windowMins, ...(e.credits ? { credits: true } : {}) }
       break
   }
   return step

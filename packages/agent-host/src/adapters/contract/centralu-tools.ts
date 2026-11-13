@@ -43,6 +43,9 @@ export type PreferenceChanges = {
   moveIdleSessionsToNewAgentCli?: boolean
   /** "Send with Ctrl+Enter instead of Enter" (#1219, fourth slice): a way of typing, kept on the host with the other screen preferences */
   sendWithModifierEnter?: boolean
+  /** "Continue after a usage limit resets" and "Continue when the network is back" (#1415): this computer continues such stops by itself */
+  continueAfterLimit?: boolean
+  continueOnNetwork?: boolean
   /** The sidebar groups to fold or unfold (#666), by the session whose children they hide: a way of looking, nothing more */
   foldedGroups?: { fold?: string[]; unfold?: string[] }
   /**

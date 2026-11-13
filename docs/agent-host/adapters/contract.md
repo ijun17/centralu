@@ -152,7 +152,7 @@ Implementation rules:
   Claude Code's notices carry `from: 'Claude Code'` and a label (`hook` — `for you`, `notice`, `model switch`,
   `refusal`). The explanation is the host's because recognizing a notice means knowing the tool's wording; the screen
   only draws what it is given, and Codex's own words stay one click away.
-- **A turn the provider ends for want of capacity is retried by the host** (#1693, `sessions/overload-retry.ts`). Codex ends
+- **A turn the provider ends for want of capacity is retried by the host** (#1693, `sessions/turn-continue.ts`, the overloaded case of [../lifecycle/auto-continue.md](../lifecycle/auto-continue.md)). Codex ends
   a turn with `TurnError.codexErrorInfo: "serverOverloaded"` ("Selected model is at capacity"; the turns of the issue had run
   14 to 44 minutes) with no `Reconnecting…` of its own first, and the adapter marks that error alone with
   `data: {reason: 'server_overloaded'}` (never a usage limit or any other error; the marker comes from Codex's kind, not from
@@ -172,7 +172,7 @@ Implementation rules:
   end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
   no process when the time comes ends the same way. **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
   fails, before the host sees the error: the failure takes the mark down only when no retry stands once the error was seen
-  (`OverloadRetry.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
+  (`TurnContinue.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
   tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029).
   **A crash of the host** during the wait ends the process with it: the next start finds the session `working` with no
   process and marks the turn stopped, as any crash's ([../lifecycle/turn-endings-and-mail.md](../lifecycle/turn-endings-and-mail.md)). The retry is not resumed (it lived in the dead host).
@@ -180,6 +180,7 @@ Implementation rules:
   swap could not continue (Codex's `adoptedIdle()`, #2020). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
+- **`apiUrl()` names the API host the tool's turns reach** (optional; #1415): Claude `env.ANTHROPIC_BASE_URL` of its user `settings.json`, then the environment's, then `https://api.anthropic.com`, Codex `chatgpt_base_url` of its user `config.toml`, then `OPENAI_BASE_URL`, then `https://chatgpt.com`. The host probes it to know the network is back ([../lifecycle/auto-continue.md](../lifecycle/auto-continue.md)); a tool without one is taken as reachable at the first probe, 15 s after the stop; a probe that never answers ends the waits after 80 failures in a row. Codex marks a credits or spend limit `limit_reached.credits`, which is never continued by itself, whether it comes before or after the turn's error.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
 - **What both adapters do the same way is written once, in `adapters/session-kit.ts`** (#428), since copies of it
   drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an

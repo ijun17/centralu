@@ -6,7 +6,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { DELAYS_MS } from './overload-retry.js'
+import { DELAYS_MS } from './turn-continue.js'
 
 /**
  * A hub's ask_project task whose turn Codex ends for want of capacity (#2015). The real manager and the real Codex

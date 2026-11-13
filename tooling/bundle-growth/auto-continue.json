@@ -1,0 +1,4 @@
+{
+  "bytes": 3000,
+  "reason": "A turn the network or a usage limit stopped continues by itself (#1415, #2238): two settings rows, the wait line above the composer with Continue now and Don't continue, the 'limit' label and sentence, the stopContinue port (web and mock) and store action. Plain components and store code with no dependency. Measured locally at 1,937,552 B, 1,452 B over the ceiling; not compared with a build of main here (CI's verify job compares it)."
+}

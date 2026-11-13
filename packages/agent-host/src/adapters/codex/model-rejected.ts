@@ -62,7 +62,7 @@ function refusedModelIn(sentence: string): string | null {
 /** An error event for a turn that failed with `message`: its own kind when the model was refused, else Codex's sentence as it is */
 export function turnError(message: string, errorInfo?: unknown): ProtocolError {
   const rejected = modelRejection(message, errorInfo)
-  // Said by Codex's own kind, never by the sentence: only this error is retried by the host (`OverloadRetry`)
+  // Said by Codex's own kind, never by the sentence: only this error is retried by the host (`TurnContinue`)
   if (!rejected) return { code: 'internal', message, retryable: true, ...(isServerOverloaded(errorInfo) ? { data: { reason: SERVER_OVERLOADED } } : {}) }
   return {
     code: 'internal',

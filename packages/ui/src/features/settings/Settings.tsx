@@ -44,6 +44,7 @@ import { ThemeSection } from './ThemeSection.jsx'
 import { TypographySection } from './TypographySection.jsx'
 import { AgentCliUpdates, UpdatesSection } from './UpdatesSection.jsx'
 import { SleepSection } from './SleepSection.jsx'
+import { AutoContinueSection } from './AutoContinueSection.jsx'
 import { MachinesSection } from './MachinesSection.jsx'
 import { AgentModelsSection } from './AgentModelsSection.jsx'
 import type { BackgroundPort } from '@cc/platform/ports'
@@ -308,6 +309,7 @@ export function Settings() {
                     </SettingsEmpty>
                   )}
                   <SleepSection first={!platform.background} />
+                  <AutoContinueSection />
                 </SettingsGroup>
                 <UpdatesSection />
                 <AgentCliUpdates />

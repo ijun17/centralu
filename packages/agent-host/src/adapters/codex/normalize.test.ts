@@ -549,7 +549,14 @@ describe('state and gauges', () => {
     const out = n('account/rateLimits/updated', {
       rateLimits: { primary: { usedPercent: 40 }, spendControlReached: true },
     })
-    expect(out[0]).toMatchObject({ type: 'limit_reached' })
+    expect(out[0]).toMatchObject({ type: 'limit_reached', credits: true })
+  })
+
+  it('a credits limit is marked so Centralu never continues it by itself (#1415); a five-hour or weekly one is not', () => {
+    const credits = n('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 40 }, rateLimitReachedType: 'credits_depleted' } })
+    expect(credits[0]).toMatchObject({ type: 'limit_reached', credits: true })
+    const window = n('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1787100000 }, rateLimitReachedType: 'rate_limit_reached' } })
+    expect(window[0]).not.toHaveProperty('credits')
   })
 
   it('thread/name/updated → session_title (FR-18 automatic naming), from the `threadName` Codex sends (#1339)', () => {

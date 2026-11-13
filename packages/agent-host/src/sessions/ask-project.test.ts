@@ -604,6 +604,8 @@ describe('asking another project', () => {
     // The stop notice is the mailbox's (docs/plans/mailbox.md "The stop notice"): without mail nobody is told
     // Delivery is not started: nothing here waits on it
     wireHostMail(w.mgr, w.store)
+    // Told at the stop, as #698 tells it: with Centralu continuing the turn (#1415) the notice waits for the wait's end (auto-continue.test.ts)
+    w.mgr.prefs.setUiPreferences({ continueOnNetwork: false })
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -621,6 +623,43 @@ describe('asking another project', () => {
     handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
     // The asker is owed the answer to its task: it is told the task went unanswered and why, in one notice that wakes it
     const told = () => w.store.mailbox.feedOf(addressOf(s), { limit: 50 }).filter((x) => x.sender === 'centralu' && x.kind === 'notice')
+    await w.until(() => told().length > 0)
+    expect(told()).toHaveLength(1)
+    expect(told()[0]!.facts).toEqual({ unanswered: [{ id: task.id, recipient: addressOf(d), why: 'network' }] })
+    expect(told()[0]!.body).toBe(`Sprites lost the network before it answered ${task.id}. Send it a message once the network is back to go on.`)
+    expect(w.store.mailbox.recipient(task.id, addressOf(d))).toMatchObject({ releasedWhy: 'network', toldAt: expect.any(Number), settled: null })
+    // No second telling: no report in its conversation, and no starter notice beside the one it is owed
+    expect(w.store.messages.loadMessages(s, 50).map((x) => JSON.stringify(x.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(d))).toEqual([])
+  })
+
+  it('with Centralu continuing it (#1415, on by default), the session that asked hears the stop once, when its wait ends', async () => {
+    // The stop notice is the mailbox's (docs/plans/mailbox.md "The stop notice"): without mail nobody is told
+    // Delivery is not started: nothing here waits on it
+    wireHostMail(w.mgr, w.store)
+    // No probe reaches out of the test
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')))
+    onTestFinished(() => void vi.unstubAllGlobals())
+    const s = await w.callerSession()
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const first = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
+    for (let i = 0; i < 50 && !delegatedIn(s)[0]; i++) await vi.advanceTimersByTimeAsync(0)
+    const d = delegatedIn(s)[0]!.id
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+    expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: d })
+    vi.useRealTimers()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => quiet.mockRestore())
+    const task = w.store.mailbox.newestTask(addressOf(s), addressOf(d))!
+    expect(task.body).toBe('export')
+    handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
+    // The asker is owed the answer to its task: it is told the task went unanswered and why, in one notice that wakes it
+    const told = () => w.store.mailbox.feedOf(addressOf(s), { limit: 50 }).filter((x) => x.sender === 'centralu' && x.kind === 'notice')
+    // Held while Centralu waits to continue it; told when the wait ends without a continue (Don't continue)
+    await w.until(() => !!w.mgr.sessionInfo(d)?.interruption?.autoContinue)
+    expect(told()).toEqual([])
+    w.mgr.stopContinue(d)
     await w.until(() => told().length > 0)
     expect(told()).toHaveLength(1)
     expect(told()[0]!.facts).toEqual({ unanswered: [{ id: task.id, recipient: addressOf(d), why: 'network' }] })

@@ -752,6 +752,7 @@ export function createRpcHandler(
     'sessions.clearError': async ({ sessionId, seq }) => {
       return { ok: true as const, ...mgr.clearError(sessionId, seq) }
     },
+    'sessions.stopContinue': async ({ sessionId }) => ({ ok: true as const, stopped: mgr.stopContinue(sessionId) }),
     'sessions.markRead': async ({ sessionId, seq }) => ack(mgr.sessionSettings.markRead(sessionId, seq)),
     'messages.load': async ({ sessionId, limit, beforeSeq }) => {
       return mgr.record.loadMessages(sessionId, limit, beforeSeq)

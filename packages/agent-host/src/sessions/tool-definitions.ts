@@ -260,6 +260,8 @@ export const CENTRALU_TOOLS = [
         autoUpdate: z.boolean().optional().describe('Automatic updates: check for, install, and apply a newer Centralu when idle.'),
         moveIdleSessionsToNewAgentCli: z.boolean().optional(),
         sendWithModifierEnter: z.boolean().optional().describe('Send a message with Ctrl+Enter (or Cmd+Enter) instead of Enter.'),
+        continueAfterLimit: z.boolean().optional().describe('Continue a turn a usage limit stopped once it resets.'),
+        continueOnNetwork: z.boolean().optional().describe('Continue a turn the network stopped once it is back.'),
         foldedGroups: z
           .object({
             fold: z.array(z.string()).max(50).optional().describe('Sessions whose children to fold away in the sidebar.'),

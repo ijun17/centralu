@@ -142,6 +142,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'sessions.rename': session(),
   'sessions.markRead': session(),
   'sessions.clearError': session(),
+  'sessions.stopContinue': session(),
   'messages.load': session(messages),
   'messages.subagent': session(messages),
   'messages.subagentTrashed': session(),

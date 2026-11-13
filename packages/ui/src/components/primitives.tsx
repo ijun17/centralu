@@ -31,6 +31,8 @@ export function interruptionLabel(i: Interruption): string {
   switch (i.reason) {
     case 'network':
       return 'Stopped: network'
+    case 'limit':
+      return 'Stopped: usage limit'
     case 'quit':
       return 'Stopped: Centralu quit or restarted'
     case 'shutdown':
@@ -46,10 +48,22 @@ export function interruptionLabel(i: Interruption): string {
 export const canContinue = (i: Interruption | null | undefined): i is Interruption => !!i && i.reason !== 'reconnecting'
 
 /**
- * What Continue sends: short, since the agent still has its whole conversation. The second sentence is there because a
- * turn cut short may have done part of a step already (a push, a comment) that its record does not show as finished.
+ * Whether Centralu continues the stop by itself (#1415): the one test of a wait, for the header, the line above the composer and the inbox.
+ * A limit wait always has its time (the reset said, or 30 minutes after the stop); one without is no wait anything shows
  */
-export const CONTINUE_TEXT = 'Continue where you stopped. Check what already happened before repeating a step.'
+export const waitStands = (i: Interruption | null | undefined): i is Interruption =>
+  !!i?.autoContinue && (i.reason === 'network' || (i.reason === 'limit' && i.autoContinue.at !== undefined))
+
+/**
+ * The wait of a stop Centralu continues by itself (#1415), as the host said it (`Interruption.autoContinue`): what stopped it and
+ * when it goes on. Null when nothing continues it by itself. One wording for the header and the inbox row
+ */
+export function autoContinueLabel(i: Interruption, clock: (d: Date) => string): string | null {
+  const at = i.autoContinue?.at
+  if (!waitStands(i)) return null
+  // A standing wait with a time is a limit's (`waitStands`); a network wait has none
+  return at === undefined ? 'Network lost · continues when the network is back' : `Usage limit · continues at ${clock(new Date(at))}`
+}
 
 export function StateDot({ state }: { state: SessionState }) {
   const s = SIGNAL[state]
