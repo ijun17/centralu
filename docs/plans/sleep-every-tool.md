@@ -170,7 +170,20 @@ worst run against best live: 47 MB 4.8 s. **(3)** The first `thread/resume` of t
 `excludeTurns` (my probe's first call, not the adapter's) took 28-36 s and 33-35 s of the whole warm turn; the adapter
 does not send it that way, and the page cache was warm for every wake here (cold disk: unchecked).
 
-**Inventory at rest** (§3, M1): not run in this pass (see §11).
+**Inventory at rest** (§3, M1), run in a second pass the same day on the Mac (codex-cli 0.160.0, `gpt-5.6-luna` low, a
+`CODEX_HOME` of its own; `probe-codex-background.mts --inventory shell|goal`) **[checked: the RESULT lines, relayed by
+the orchestrator]**:
+
+- **A command outlives its turn, and dies with the app-server.** Asked to keep `sleep 23; echo kept-done` running past
+  the turn (no `&`; the model ran `/bin/zsh -lc 'sleep 23; echo kept-done'`, source `unifiedExecStartup`), the turn
+  ended with its item `inProgress` and the `sleep` alive; its `item/completed` (`completed`, exit 0) came at 28 s,
+  **outside any turn**. The same with `sleep 197`: alive 5 s after the turn, **gone 3 s after the app-server closed**.
+  So a sleep would end it: guard (a) of §4a stays.
+- **A goal starts turns by itself.** `thread/goal/set` on an idle thread (no `turn/start` sent) answered `active`, and a
+  turn started 2 ms later, worked the goal, marked it `complete` and ended (12.8 s); nothing more in 5 minutes. A goal
+  still active after a turn may start more: guard (b) stays.
+- Recorded with the adapter (`scripts/frames-record.mts codex background-kept goal-set`): in `background-kept` turn 1
+  ended at 7.1 s with the `sleep 25` item open, and it completed (exit 0) at 31.2 s, inside turn 2.
 
 **M1b, Codex through a host** (`agents.restartSession` as the sleep/wake; `restartMs` = the RPC; 3 runs per arm, 2 min
 idle, a small project, 8k-token unique block; the code word from turn 1 recalled in the woken turn):
@@ -257,19 +270,19 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
 
 - `adapters/codex/index.ts`: `sleep: true`, its comment the numbers of §3a.
 - **Both preconditions are guarded where Codex's background work is already listed**, `CodexChildTracker`
-  (`adapters/codex/child-tracker.ts`), as the inventory at rest was not run (§11), on the rule "unknown keeps it awake":
+  (`adapters/codex/child-tracker.ts`); the inventory at rest (§3a) showed both kinds of work exist and a sleep would end them:
   - a command item a turn's `turn/completed` leaves `inProgress` is listed (kind `shell`, not stoppable) until its
-    `item/completed`. Grounded in the recordings: a command's item stays `inProgress` until its process exits, waits
-    for output included (`long-command`), and no recorded turn, an interrupted one included, ended with one open
-    [checked: every 0.160.0 recording scanned]. When the app-server ends, a listed command is ended `stopped`, as a
-    child's is (a child's command went with the app-server, `probe-codex-background.mts`);
+    `item/completed`, which comes between turns or in a later one. A command's item stays `inProgress` until its process
+    exits (`long-command`, `background-kept`), and no other recorded turn, an interrupted one included, ended with one
+    open [checked: every 0.160.0 recording scanned]. When the app-server ends, a listed command is ended `stopped`: it
+    went with the app-server (§3a);
   - a goal whose status is `active` (from `thread/goal/updated`, and `thread/goal/get` on resume) is listed (kind
     `other`) until it is cleared, completed or paused. The process ending does not end it as a task: it is the thread's.
 
   Both make `sessionIdle` say `background`, so they also hold off a move to a new CLI, which ends the app-server too.
-  **The probe that decides them** (`probe-codex-background.mts --inventory shell|goal`, and the scenarios
-  `background-kept` and `goal-set` recorded by `scripts/frames-record.mts codex`) runs on the Mac; a guard the probe
-  shows unneeded (nothing outlives a turn, or a goal starts no turn by itself) is deleted in the same pull request.
+  Their tests replay `background-kept` and `goal-set` (`adapters/codex/replay.test.ts`): the shell is listed before
+  turn 1's end goes out and ended `completed` later; the goal listed while active and gone once cleared. Both fail with
+  the tracker's hook taken out.
 - Tests: `sessions/sleep.test.ts` "a Codex session, on the recording of a real app-server": the real adapter on
   `resume.jsonl` through `SessionManager`; the sleeper puts it to sleep (`session_live asleep`), and the next message
   resumes the thread in a new process and the turn answers with the code word; every recorded line used, none
@@ -413,11 +426,10 @@ and Windows.
 
 After the 2026-11-13 Mac run (§3a):
 
-- Run with the Codex PR, on the Mac (Codex is not installed on the Windows machine it was built on): the inventory at rest,
-  `probe-codex-background.mts --inventory shell` and `--inventory goal`, and the recordings `background-kept` and
-  `goal-set`; their results replace this line.
-- Not run before it: the **inventory at rest** of M1 (a background shell and an active goal past a turn on Codex; A's preconditions
-  in §4 stay unknown); the rest of M2 (g): whether memory returns later than 3 s after `thread/unsubscribe`; a **cold
+- The inventory at rest ran once per question, on the Mac only, one model; a command kept by other means (`&`, `nohup`)
+  is not seen by the guard, as for Claude. A goal's turn that starts while the session is asleep cannot happen (no
+  process); whether a woken thread with an active goal starts one on resume: unchecked.
+- Not run: the rest of M2 (g): whether memory returns later than 3 s after `thread/unsubscribe`; a **cold
   page cache** for a 500 MB rollout wake (every wake here had the file in memory); the 1 MB (not 0.9 MB) and 500 MB (513 MB)
   sizes are the nearest real rollouts, no padded ones; M1b ran 2 min only, 3 runs, one account.
 - M3: Cursor and Antigravity not measured (above); OpenCode's background check inconclusive; no ACP tool measured at
