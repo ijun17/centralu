@@ -264,14 +264,15 @@ describe('movePendingThreadMail', () => {
     store.close()
   })
 
-  it('moved undelivered rows stay pending, and every old hold is carried: the move lets nothing held go', () => {
+  it('moved undelivered rows stay pending, and every old hold is carried but the ones nothing holds now (#2243)', () => {
     const { store, db, ids } = upgraded()
     movePendingThreadMail(db, NOW, () => null)
     expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([ids.n, ids.e, ids.rep])
     expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toEqual([ids.q])
-    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBe('policy')
+    // The auto receiver's first-contact hold went with D10: ended as it is moved, not listed in Waiting
+    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBe('dismissed')
     expect(store.mailbox.recipient(ids.ap ?? '', S1)?.held).toBe('loop')
-    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap, ids.pol])
+    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap])
     // A moved row is settled `legacy`: never watched, so neither reminded nor waited on
     expect(store.mailbox.watchedTo(S3)).toEqual([])
     store.close()
@@ -446,5 +447,52 @@ describe('the move is at most once, whatever the old receipts were', () => {
     }
     // The root rule above was checked on replies that were linked, not only on messages that answer nothing
     expect(linked).toBeGreaterThan(5)
+  })
+})
+
+describe('holds an earlier build left, on a store opened from v64 (#2243)', () => {
+  it('ends the token guard and the first-contact hold as the move carries them, and keeps the untrusted asker’s request listed', () => {
+    const store = v64Store()
+    const r = store.mail
+    const at = NOW - 60_000
+    const SA = sessionAddress(HOST, 'sa')
+    // The Assistant: a session with no project that is the orchestrator (the v64 build's columns)
+    store.raw
+      .prepare(`INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, created_at, permission_preset)
+        VALUES ('sa', NULL, 'claude', NULL, 'assistant', 0, 'idle', 1, 0, 1, 'normal')`)
+      .run()
+    const thread = (id: string, owner: string, assignee: string | null) =>
+      r.insertThread({ id: `${HOST}.${id}`, home: HOST, projectId: null, subject: id, origin: 'mail', depth: 0, parentId: null, follows: [], state: 'open', owner, assignee, next: null, links: {} }, at)
+    const post = (id: string, threadId: string, sender: string, kind: 'assign' | 'note', to: string) => {
+      r.insertMessage({ id: `${HOST}.${id}`, threadId: `${HOST}.${threadId}`, sender, kind, urgent: false, needsOwner: false, wake: null, replyTo: null, body: id, facts: {}, dedupeKey: null, createdAt: at })
+      r.insertReceipt(`${HOST}.${id}`, to, at)
+      return `${HOST}.${id}`
+    }
+    // An untrusted project's session asks the Assistant (held `policy` by the old trust gate); a note held by the `auto` receiver's hold; one by the token guard
+    thread('t_ask', S2, SA)
+    const request = post('m_request', 't_ask', S2, 'assign', SA)
+    thread('t_auto', S1, null)
+    const auto = post('m_auto', 't_auto', S2, 'note', S1)
+    const budget = post('m_budget', 't_auto', S2, 'note', S3)
+    heldV64(store, SA, [request], 'policy')
+    heldV64(store, S1, [auto], 'policy')
+    heldV64(store, S3, [budget], 'budget')
+
+    // This build opens the store: steps 65 to 72 run (72 finds nothing yet), and then the host's start moves what the v64 build left pending
+    newest = 72
+    try {
+      store.migrate()
+    } finally {
+      newest = 65
+    }
+    expect(store.mailbox.heldRows()).toEqual([])
+    expect(movePendingThreadMail(store.raw, NOW, () => null).recipients).toBe(3)
+    expect(store.mailbox.heldRows().map((h) => [h.messageId, h.held])).toEqual([[request, 'policy']])
+    expect(store.mailbox.recipient(auto, S1)?.held).toBe('dismissed')
+    expect(store.mailbox.recipient(budget, S3)?.held).toBe('dismissed')
+    // Never delivered, as before: neither an ended hold nor the request is pending for a turn
+    expect(store.mailbox.pendingFor(S1, NOW)).toEqual([])
+    expect(store.mailbox.pendingFor(S3, NOW)).toEqual([])
+    store.close()
   })
 })

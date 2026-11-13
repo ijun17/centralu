@@ -1,3 +1,4 @@
+import { endEarlierBuildHolds } from '../earlier-holds.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
 /** The migration steps v65 to v71. The rule it follows is written above `migrationSteps` in `index.ts` */
@@ -217,28 +218,15 @@ export class StepsV65 extends MigrationRange {
          * The holds of an earlier build, ended (#2243). The mail token guard (`budget`) went with D32 (#2014, beta.49) and the `auto` receiver's
          * first-contact hold (`holdsInbound`) with D10, but the rows an earlier build held kept their hold when the v65 move carried them (settled
          * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
-         * without asking" weeks after nothing could write such a hold. A row held `budget`, or held `policy` and settled `legacy`, is now `dismissed`:
-         * the hold word the person's Dismiss sets, which every build since v65 reads as "not held for the person any more, never delivered". A
-         * `policy` row of today's rule (`reach.holdFor`) was never moved, so its `settled` is NULL and it keeps its Release. A moved `policy` row
-         * that began a chain of `ask_project` is left as it is, too: v61's other `policy` hold was the untrusted asker's request (D10 replaced both
-         * holds with the one trust gate), and a request may still be the person's pending decision. The v61 mail has no `request` kind, so the
-         * chain's origin on the message (`mail.origin`, set from the chain's own on its first message) says it.
-         *
-         * The honest word is the hold's own, not a `settled` one: `gone` says the sender or recipient is gone, and `withdrawn` that the sender said
-         * it no longer waits, and neither is so; `settled` stays as it was (`legacy`: settled, never awaited). Dismiss also clears the delivery's
-         * attempt state, as here. The sender is not told: the person did not dismiss it, and nobody has waited on these rows for two weeks.
+         * without asking" weeks after nothing could write such a hold. `endEarlierBuildHolds` (store/earlier-holds.ts, which says what it ends and
+         * why `dismissed`) is the one predicate, used by this step for the rows moved already and by the move for those it moves from now on: a
+         * store of v64 or before opened by this build runs steps 65 to 72 and then the move, which would bring the holds back.
          *
          * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
-         * and does not bring the holds back. Nothing is deleted: the message and its row stay.
+         * and does not bring the holds back. Nothing is deleted: the message and its row stay. The sender is not told: the person did not dismiss it.
          */
         run: () => {
-          if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
-          this.db.exec(
-            `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
-              WHERE held = 'budget'
-                 OR (held = 'policy' AND settled = 'legacy'
-                     AND COALESCE((SELECT m.origin FROM mail m WHERE m.id = mail_recipients.message_id), '') <> 'ask_project')`,
-          )
+          endEarlierBuildHolds(this.db)
         },
       },
     ]

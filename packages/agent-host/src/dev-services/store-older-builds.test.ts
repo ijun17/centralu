@@ -161,7 +161,7 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     const written = (first as unknown as { db: Database.Database }).db
     const at = 1_800_000_000_000
     const message = written.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES (?, 'session:h1/a', 'message', 1, ?, 'hi', '{}', ?)`)
-    const origin = written.prepare(`UPDATE mail SET origin = ? WHERE id = ?`)
+    const via = written.prepare(`UPDATE mail_recipients SET via = ? WHERE message_id = ?`)
     const recipient = written.prepare(
       `INSERT INTO mail_recipients (message_id, recipient, due_at, held, settled, attempts, last_error, attempt_at) VALUES (?, 'session:h1/b', ?, ?, ?, 2, 'x', ?)`,
     )
@@ -169,8 +169,9 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     const rows: [string, string, string | null][] = [
       ['m_budget', 'budget', 'legacy'],
       ['m_old_policy', 'policy', 'legacy'],
-      // An untrusted asker's request an earlier build held (a chain of `ask_project`): the person may still have to decide it
+      // An untrusted asker's request an earlier build held: the move wrote it to the Assistant's role (`via`), under either name
       ['m_request', 'policy', 'legacy'],
+      ['m_request_old', 'policy', 'legacy'],
       ['m_new_policy', 'policy', null],
       ['m_loop', 'loop', 'legacy'],
       ['m_uncertain', 'uncertain', 'legacy'],
@@ -179,7 +180,8 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     for (const [id, held, settled] of rows) {
       message.run(`h1.${id}`, `h1.${id}`, at)
       recipient.run(`h1.${id}`, at, held, settled, at)
-      if (id === 'm_request') origin.run('ask_project', `h1.${id}`)
+      if (id === 'm_request') via.run('assistant', `h1.${id}`)
+      if (id === 'm_request_old') via.run('orchestrator', `h1.${id}`)
     }
     written.pragma('user_version = 71')
     written.close()
@@ -188,7 +190,7 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     expect(second.migrationsRun).toBe(1)
     // Waiting lists what is held for the person today: a `policy` hold of today's rule, a legacy request, and the holds nothing here ended
     const waiting = second.mailbox.heldRows().map((r) => `${r.messageId.slice(3)}:${r.held}`)
-    expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_request:policy', 'm_uncertain:uncertain'])
+    expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_request:policy', 'm_request_old:policy', 'm_uncertain:uncertain'])
     // The ended rows stay, dismissed and settled as they were, with the delivery's attempt state cleared as the person's Dismiss clears it
     const db = (second as unknown as { db: Database.Database }).db
     const ended = db.prepare(`SELECT message_id AS id, held, settled, attempts, last_error AS err, attempt_at AS at FROM mail_recipients WHERE message_id IN ('h1.m_budget', 'h1.m_old_policy') ORDER BY message_id`).all()

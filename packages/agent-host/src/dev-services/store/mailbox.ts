@@ -178,7 +178,7 @@ const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
  * before. A row keeps the word it was written with and stays on this machine, and every build that can open the store (v68 on) reads both
  */
 export const ROLE_VIA = 'assistant'
-const ROLE_VIA_WORDS = [ROLE_VIA, 'orchestrator'] as const
+export const ROLE_VIA_WORDS = [ROLE_VIA, 'orchestrator'] as const
 /** Whether a row's `via` is the Assistant's role, under either name */
 export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly unknown[]).includes(via)
 /** The same, as an SQL list */

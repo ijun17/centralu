@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { parseAddress } from '../../mail/address.js'
 import { wakes } from '../../mail/rules.js'
+import { endEarlierBuildHolds } from './earlier-holds.js'
 import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail-types.js'
 import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKind } from './mailbox.js'
 
@@ -12,7 +13,7 @@ import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKin
 /** v61 mail older than this is not moved: retention would not have kept it waiting (§6.4) */
 const MOVE_WITHIN_MS = 180 * 24 * 60 * 60 * 1000
 
-/** v61 holds carried by a move: every recipient hold, so the move lets nothing held go, and the person's `released` (sent as it is, never held again) */
+/** v61 holds carried by a move: every recipient hold, and the person's `released` (sent as it is, never held again). What an earlier build held that nothing holds now is ended after the copy (`endEarlierBuildHolds`, #2243) */
 const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS, 'released'])
 
 type PendingSql = MessageSql & {
@@ -134,6 +135,8 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         }).changes
         handled.run({ now, id: m.id, recipient: p.r_recipient })
       }
+      // What an earlier build held and nothing holds now is not carried as held (#2243): the same ending store step 72 gives the rows moved before it
+      endEarlierBuildHolds(db)
       return { messages, recipients }
     })
     .immediate()
