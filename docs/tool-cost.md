@@ -1041,13 +1041,15 @@ Measured without a model, as §12: each profile's served list on each CLI, Centr
 servers' tools counted as the CLI received them (Codex the whole definition, Claude the name behind tool search).
 Both columns were measured on the same base (the commit before #2231); #2232, merged after, changes the `mail` and
 `agent_session` definitions in both alike (its own measurement is in its section).
+The After column was measured again on the branch merged with main (`servedDefinitions`, `servedInstructions`; the reader's 94 characters
+of app instructions added as before, computed): builder and scoped did not move, the reader and the Assistant did.
 
 | Profile, CLI | Before: 0 / 3 / 10 apps | After: 0 / 3 / 10 apps | Tools before → after |
 |---|---|---|---|
-| reader (an ordinary session), Claude | 3,579 / 3,871 / 4,350 | 3,602 / 3,696 / 3,696 | 12 / 21 / 42 → 13 |
-| reader, Codex | 6,492 / 8,959 / 14,513 | 6,959 / 7,053 / 7,053 | 12 / 21 / 42 → 13 |
-| assistant, Claude | 10,711 / 10,915 / 11,394 | 10,761 | 12 / 21 / 42 → 13 |
-| assistant, Codex | 10,769 / 13,148 / 18,702 | 11,263 | 12 / 21 / 42 → 13 |
+| reader (an ordinary session), Claude | 3,579 / 3,871 / 4,350 | 3,578 / 3,672 / 3,672 | 12 / 21 / 42 → 13 |
+| reader, Codex | 6,492 / 8,959 / 14,513 | 6,970 / 7,064 / 7,064 | 12 / 21 / 42 → 13 |
+| assistant, Claude | 10,711 / 10,915 / 11,394 | 10,740 | 12 / 21 / 42 → 13 |
+| assistant, Codex | 10,769 / 13,148 / 18,702 | 11,236 | 12 / 21 / 42 → 13 |
 | builder, Claude | 1,432 / 1,636 / 2,115 | 1,480 | 1 / 10 / 31 → 2 |
 | builder, Codex | 1,484 / 3,863 / 9,417 | 1,976 | 1 / 10 / 31 → 2 |
 | scoped (a coordinator), Claude | 2,533 / 2,737 / 3,216 | 2,551 | 3 / 12 / 33 → 4 |
