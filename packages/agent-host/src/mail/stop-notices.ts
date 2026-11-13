@@ -424,7 +424,7 @@ function lastWordsText(name: string, said: string): string {
 ${quoted(clipped)}`
 }
 
-/** What a continued session's notice says cleared (`sessionContinued`) */
+/** What a continued session's notice says cleared (`stopWaitEnded`) */
 const CONTINUED_WORDS: Record<'limit' | 'network', string> = {
   limit: 'was stopped by its usage limit, which has reset',
   network: 'lost the network, which is back',
