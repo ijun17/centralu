@@ -2929,27 +2929,33 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   })
 
   it('reports the end of a turn it was not waited on to the session that started it, and takes sends, a stop and a delete', async () => {
-    const { remote, answer, start, agent, told, reports, control } = await rig()
+    const { remote, hub, answer, start, agent, told, reports, control } = await rig()
     const call = start({ wait: false })
     await answer('allow')
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'working', reported: true })
     if (!r.ok) return
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
-    // More work, waited on: its answer is the call's, and no second report comes
-    expect(await agent(r.sessionId, 'send', 'and now this')).toMatchObject({ ok: true, state: 'working' })
-    expect(await agent(r.sessionId, 'wait')).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('and now this') })
     const before = reports()
+    const id = r.sessionId.slice('m1.'.length)
+    // More work, waited on: its answer is the call's, and no second report comes. The turn ends once the wait is in (#2252): a turn that ended and
+    // was reported before the wait came is at rest to it, as a local child's is
+    expect(await agent(r.sessionId, 'send', 'a long job: and now this')).toMatchObject({ ok: true, state: 'working' })
+    const waited = agent(r.sessionId, 'wait')
+    const waits = (hub.mgr as unknown as { delegationFlow: { remote: { waits: Map<string, unknown> } } }).delegationFlow.remote.waits
+    // Its turn opened there, and the wait is in, before the turn ends
+    await eventually(() => waits.has(r.sessionId) && remote.store.messages.loadMessages(id, 5).some((m) => (m.payload as { text?: string }).text === 'working on it…'))
+    ;(remote.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!.finish('done: and now this')
+    expect(await waited).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('and now this') })
     // A turn that waits on the person there, stopped from here
     expect(await agent(r.sessionId, 'send', 'please approve the command')).toMatchObject({ ok: true, state: 'working' })
-    const id = r.sessionId.slice('m1.'.length)
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
     expect(await agent(r.sessionId, 'stop')).toMatchObject({ ok: true, state: 'stopped' })
     // Deleted there, into that machine's session archive, and no longer the hub's to follow
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining("Remote box's session archive") })
     expect(remote.mgr.listSessions().some((s) => s.id === id)).toBe(false)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: false, error: expect.stringContaining('is not a session this session started') })
-    // The stopped turn's report, if one were owed, would have come before the next child's
+    // The waited turn's report and the stopped turn's, if one were owed, would have come before the next child's
     await control()
     expect(reports()).toBe(before + 1)
   })
