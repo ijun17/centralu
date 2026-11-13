@@ -15,7 +15,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { HOST_FAMILY } from '../os/real.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { isNetworkFailure } from './error-kind.js'
-import { RECONNECTING_FLAG_MS } from './interruptions.js'
+import { RECONNECTING_FLAG_MS, interruptionAfter, stopOf } from './interruptions.js'
 import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -1425,5 +1425,25 @@ describe('a tool reconnecting for too long (#698)', () => {
     h.emit({ type: 'activity', sessionId: id, activity: null })
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     expect(interruptions(id)).toEqual([])
+  })
+})
+
+describe('a turn a usage limit stopped (#1415)', () => {
+  const S = 's1'
+  const limitError = (message: string): NormalizedEvent => ({ type: 'error', sessionId: S, error: { code: 'internal', message, retryable: false } })
+
+  it("the tool's limit event that ended a turn marks it limit; one at rest marks nothing", () => {
+    const e: NormalizedEvent = { type: 'limit_reached', sessionId: S, resumeAt: new Date(5_000).toISOString() }
+    expect(interruptionAfter(e, 1_000, true)).toEqual({ reason: 'limit', at: 1_000 })
+    expect(interruptionAfter(e, 1_000, false)).toBeUndefined()
+    expect(stopOf(e, { reason: 'limit', at: 1_000 })).toBe('limit')
+  })
+
+  it("an error its words call a usage limit is a limit stop, with the tool's sentence; another error is not", () => {
+    const limit = limitError("You've hit your limit · resets 1am (Europe/Berlin)")
+    expect(interruptionAfter(limit, 1_000, true)).toMatchObject({ reason: 'limit', at: 1_000 })
+    expect(stopOf(limit, interruptionAfter(limit, 1_000, true))).toBe('limit')
+    expect(interruptionAfter(limitError('The model refused the request'), 1_000, true)).toBeNull()
+    expect(interruptionAfter(limit, 1_000, false)).toBeUndefined()
   })
 })

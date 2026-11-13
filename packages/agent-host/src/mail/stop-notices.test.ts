@@ -32,7 +32,7 @@ function stopWorld() {
   const noticesTo = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
   /** What Centralu told `who` of a stop of a session it started and is owed nothing by */
   const startersNotices = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.about && p.message.facts.reason)
-  return { ...w, busy, cut, stops, ask, noticesTo, startersNotices }
+  return { ...w, busy, cut, service, stops, ask, noticesTo, startersNotices }
 }
 
 const CAUSES: { why: StopWhy; says: string }[] = [
@@ -366,5 +366,33 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
     expect(w.noticesTo(PERSON).map((n) => n.message.facts.unanswered)).toEqual([[{ id: mine.id, recipient: B, why: 'quit' }]])
     expect(w.noticesTo(PERSON)[0]!.message.body).toBe('Centralu quit while beta worked on your message, so it did not answer. Send it a message when you want it to go on.')
+  })
+})
+
+describe('a stopped session Centralu continued (#1415)', () => {
+  const continued = (n: { message: { facts: { reason?: string } } }) => n.message.facts.reason === 'continued'
+
+  it('tells each sender of what the stop released, and the starter, once; the questions stay open for the continued turn to answer', () => {
+    const w = stopWorld()
+    const q = w.ask(A, B)
+    w.stops.sessionStopped(B, 'network', { starter: C })
+    w.service.stops.sessionContinued(B, 'network', C)
+    const toA = w.startersNotices(A).filter(continued)
+    expect(toA).toHaveLength(1)
+    expect(toA[0]!.message.body).toBe('beta lost the network, which is back, so Centralu continued it. What it owes you comes when it answers or ends.')
+    expect(w.startersNotices(C).filter(continued)).toHaveLength(1)
+    expect(w.rowOf(q.id, B)).toMatchObject({ releasedWhy: 'network', settled: null })
+    // The same continue again tells nothing more
+    w.service.stops.sessionContinued(B, 'network', C)
+    expect(w.startersNotices(A).filter(continued)).toHaveLength(1)
+  })
+
+  it('a question released for another cause is not told of this one, and nobody is told of a session continuing itself', () => {
+    const w = stopWorld()
+    w.ask(A, B)
+    w.stops.sessionStopped(B, 'error')
+    w.service.stops.sessionContinued(B, 'limit', B)
+    expect(w.startersNotices(A).filter(continued)).toEqual([])
+    expect(w.startersNotices(B).filter(continued)).toEqual([])
   })
 })

@@ -130,4 +130,26 @@ export function interruptedSessionTests() {
     await emit(page, [{ type: 'interruption', sessionId: s, interruption: null }])
     await expect(item(page, s)).toHaveCount(0)
   })
+  test('a stop Centralu continues by itself shows the wait, with Continue now and Don't continue (#1415)', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    const at = new Date(2030, 0, 1, 1, 20).getTime()
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now(), autoContinue: { at, tries: 0 } } }])
+    const note = page.getByTestId('interrupted-note')
+    await expect(page.getByTestId('auto-continue-wait')).toHaveText('Usage limit · continues at 01:20')
+    await expect(page.getByTestId('interrupted-continue')).toHaveText('Continue now')
+
+    // Don't continue leaves the stop and its Continue; the wait goes
+    await page.getByTestId('auto-continue-stop').click()
+    await expect(page.getByTestId('auto-continue-wait')).toHaveCount(0)
+    await expect(page.getByTestId('auto-continue-stop')).toHaveCount(0)
+    await expect(note).toContainText('Stopped: usage limit')
+    await expect(page.getByTestId('interrupted-continue')).toHaveText('Continue')
+
+    // A network wait says what it waits for; Continue now sends the one message
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'network', at: Date.now(), autoContinue: { tries: 1 } } }])
+    await expect(page.getByTestId('auto-continue-wait')).toHaveText('Network lost · continues when the network is back')
+    await page.getByTestId('interrupted-continue').click()
+    await expect(note).toHaveCount(0)
+  })
 }
