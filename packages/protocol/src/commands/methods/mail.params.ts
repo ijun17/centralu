@@ -18,7 +18,7 @@ export const mailParams = {
     threadId: z.string(),
     text: z.string().min(1).max(16_000),
     kind: z.enum(['note', 'answer', 'question']).optional(),
-    /** A pick (#1630): the id of the question in this thread whose choice `text` is. The answer goes to that question, not to the newest open one, and a question already answered refuses it (`answered`). An older host ignores it */
+    /** The id of the question in this thread that `text` answers (#1630, #2191): a pick of one of its choices, or the person's own words. The answer goes to that question, not to the newest open one, and a question already answered refuses it (`answered`). An older host takes only a choice of the question, and refuses other words */
     answers: z.string().optional(),
   }),
   /** The person closes a thread */

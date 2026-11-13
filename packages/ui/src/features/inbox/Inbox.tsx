@@ -26,6 +26,7 @@ import { arrangeInbox, CURSOR_START, rowKeyOf, settleCursor, type InboxCursor } 
 import { Fold } from '../../components/Fold.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { mailAttention } from '../../store/mail.js'
+import { useLeavingCards } from './useLeavingCards.js'
 import { MailThread } from './MailThread.jsx'
 
 /**
@@ -46,6 +47,7 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
   const openMailThread = useStore((s) => s.openMailThread)
+  const closeMail = useStore((s) => s.closeMail)
   const markDone = useStore((s) => s.markDone)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
@@ -54,6 +56,7 @@ export function Inbox() {
   const closeMailThread = useStore((s) => s.closeMailThread)
   const mail = useStore((s) => s.mail)
   const list = useMemo(() => arrangeInbox(items, mail), [items, mail])
+  const shownRows = useLeavingCards(list.waiting)
   // Nothing to act on: what is read is folded under Earlier, which is no reason for the list to look as if something waited
   const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
   const [earlierOpen, setEarlierOpen] = useState(false)
@@ -68,6 +71,9 @@ export function Inbox() {
   const placed = settleCursor(list.waiting, at, open)
   if (placed !== at) setAt(placed)
   const cursor = placed.row
+  // The choices of the card the keyboard is on, for the hint: the number keys pick on that card only, never on the one under the pointer
+  const onRow = list.waiting[cursor]
+  const choices = onRow?.kind === 'mail' ? (onRow.thread.ask?.choices?.length ?? 0) : 0
   const panelRef = useRef<HTMLDivElement>(null)
   useKeepInView(panelRef, cursor)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
@@ -122,6 +128,12 @@ export function Inbox() {
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
+        // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`). So does a card: a question is answered, never closed by a key
+        else if (row?.kind === 'mail') void (row.thread.working === true || row.thread.ask !== null ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
+      } else if (action === 'choose') {
+        // The number is the choice's own, on the card under the cursor: the key presses its button, so it answers exactly what a click would, and never a card that has taken a press already
+        const button = row?.kind === 'mail' ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-testid="mail-ask-choices-${CSS.escape(row.thread.id)}-${e.key}"]`) : null
+        if (button && !button.disabled) button.click()
       } else if (action === 'allow' || action === 'deny') {
         /*
          * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
@@ -139,7 +151,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, mailThread, closeMailThread])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -185,6 +197,11 @@ export function Inbox() {
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
               <Kbd>↵</Kbd> Open
+              {choices > 0 && (
+                <>
+                  <Kbd>1-{choices}</Kbd> Choose
+                </>
+              )}
               <Kbd>D</Kbd> Done
               <Kbd>esc</Kbd> Close
             </span>
@@ -207,9 +224,9 @@ export function Inbox() {
             {nothingWaiting && <Nothing />}
             {list.waiting.length > 0 && (
               <ul className="flex flex-col gap-0.5 p-1">
-                {list.waiting.map((row, place) =>
+                {shownRows.map(({ row, place }) =>
                   row.kind === 'mail' ? (
-                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} />
+                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} leaving={place === null} />
                   ) : (
                     <SessionRow
                       key={row.item.id}

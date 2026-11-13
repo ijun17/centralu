@@ -3,7 +3,7 @@ import type { WaitingCounts } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import type { Notice } from '../../store/state/notifications.js'
 import { MailIcon } from '../../components/icons.jsx'
-import { mailAttention } from '../../store/mail.js'
+import { mailAsksYou, mailAttention } from '../../store/mail.js'
 
 /** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-18: 4 s;
  * 2026-10-20: 5 s, as 4 s sometimes folded before it was read); a finished turn on screen is judged seen at the same
@@ -23,14 +23,19 @@ export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; on
   const peek = useNoticePeek()
   // What waits on the person: the sessions, and the threads of the mailbox that have something for them (#1347)
   const mailWaiting = useStore((s) => mailAttention(s.mail))
+  const mailAsks = useStore((s) => mailAsksYou(s.mail))
   const total = counts.approval + counts.input + counts.error + mailWaiting
   // Brightness says what kind of wait: an approval or an error is the signal, plain waiting stays quiet
   const tone = counts.approval + counts.error > 0 ? 'signal' : total > 0 ? 'text-ink-muted' : 'text-ink-faint'
   /*
-   * The border says what waits that only the person can settle (owner, 2026-10-18): white and solid for an approval,
-   * white and dashed for an error. An error outranks an approval, so with both the border is dashed.
+   * The border says what waits that only the person can settle (owner, 2026-10-18): the signal ink and solid for an approval or a question
+   * waiting on their answer (a card, or mail: #2227), the signal ink and dashed for an error. `ink-signal` is the strongest ink of each theme
+   * (white in the dark presets, near black in the light ones, a custom theme's own), so one token gives the edge its role on every theme.
+   * An error outranks the rest, so with both the border is dashed: it is the one shape that tells a failure from a wait, and a failure
+   * is what the person has not been expecting. The colour changes with the short fade of the capsule's `transition-colors` (design-system §9).
    */
-  const edge = counts.error > 0 ? 'border-dashed border-ink-signal' : counts.approval > 0 ? 'border-solid border-ink-signal' : 'border-solid border-line'
+  const answers = counts.approval > 0 || mailAsks > 0
+  const edge = counts.error > 0 ? 'border-dashed border-ink-signal' : answers ? 'border-solid border-ink-signal' : 'border-solid border-line'
   return (
     <button
       type="button"
@@ -38,7 +43,7 @@ export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; on
       onClick={onOpen}
       data-testid="counter"
       title={title}
-      data-edge={counts.error > 0 ? 'error' : counts.approval > 0 ? 'approval' : undefined}
+      data-edge={counts.error > 0 ? 'error' : counts.approval > 0 ? 'approval' : mailAsks > 0 ? 'question' : undefined}
       aria-label={`${total} waiting`}
     >
       {/* 20px, the size of the settings gear and the usage donuts in the same bar */}

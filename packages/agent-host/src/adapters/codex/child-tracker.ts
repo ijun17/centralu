@@ -160,9 +160,11 @@ export class CodexChildTracker {
     }
     // A launch card still held open closes with the reason, as a Claude agent that never reported back does
     const held: NormalizedEvent[] = [...this.held.keys()].map((callId) => ({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why }))
+    const carded = new Set(this.held.keys())
     this.held.clear()
     if (live.length === 0) return held
-    return [...this.changed(live.map((task) => ({ ...task, status: 'stopped' as const, summary: why }))), ...held]
+    // A child whose launch card was just closed with the reason leaves no line of its own
+    return [...this.changed(live.map((task) => ({ ...task, status: 'stopped' as const, summary: why })), carded), ...held]
   }
 
   private ended(thread: string, status: 'completed' | 'failed' | 'stopped', summary?: string): BackgroundTask | null {
@@ -195,10 +197,12 @@ export class CodexChildTracker {
   }
 
   /** The event when the live set or an ending moved; nothing when neither did. */
-  private changed(ended: (BackgroundTask | null)[] = []): NormalizedEvent[] {
+  private changed(ended: (BackgroundTask | null)[] = [], carded?: ReadonlySet<string>): NormalizedEvent[] {
     return this.events.event(
       this.live(),
       ended.filter((t): t is BackgroundTask => t !== null),
+      false,
+      carded,
     )
   }
 }

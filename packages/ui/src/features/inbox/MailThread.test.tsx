@@ -22,7 +22,7 @@ const centralu: MailParty = { address: 'centralu', kind: 'centralu', sessionId: 
 
 function view(over: Partial<MailThreadView> = {}): MailThreadView {
   return {
-    thread: { id: 't1', subject: 'Land #12', state: 'running', outcome: null, next: 'write the parser', projectId: null, owner: you, assignee: parser, unread: 0, held: 0, blocked: 0, createdAt: 0, updatedAt: 0, last: null },
+    thread: { id: 't1', subject: 'Land #12', state: 'running', outcome: null, next: 'write the parser', projectId: null, owner: you, assignee: parser, unread: 0, held: 0, blocked: 0, ask: null, createdAt: 0, updatedAt: 0, last: null },
     parties: [{ party: you, role: 'owner' }, { party: parser, role: 'assignee' }],
     blockers: [],
     messages: [],
@@ -78,6 +78,34 @@ describe('the thread in the inbox', () => {
     expect(text).toContain('State: open to running.')
   })
 
+  it('draws a body’s Markdown as the session view does (#2228): bold, a list and a code span, with no raw marks left', () => {
+    const body = '**Background** done:\n\n- one\n- two\n\nRun `pnpm verify` <script>alert(1)</script>'
+    const { html } = render(view({ messages: [{ id: 'm1', seq: 1, sender: parser, kind: 'note', urgent: false, body, facts: {}, createdAt: 1_800_000_000_000 }] }))
+    expect(html).toContain('<strong>Background</strong>')
+    expect(html).toContain('<li>one</li>')
+    expect(html).toContain('<code>pnpm verify</code>')
+    expect(html).not.toContain('**')
+    expect(html).not.toContain('<script>')
+  })
+
+  it('the person’s own words stay as typed (no Markdown), while others’ are drawn as Markdown (#2228)', () => {
+    const at = 1_800_000_000_000
+    const body = '**bold** and `code`\n- not a list'
+    const { html } = render(
+      view({
+        messages: [
+          { id: 'm1', seq: 1, sender: parser, kind: 'note', urgent: false, body, facts: {}, createdAt: at },
+          { id: 'm2', seq: 2, sender: you, kind: 'answer', urgent: false, body, facts: {}, createdAt: at },
+        ],
+      }),
+    )
+    const mineHtml = html.slice(html.indexOf('data-testid="mail-message-2"'))
+    expect(html.slice(0, html.indexOf('data-testid="mail-message-2"'))).toContain('<strong>bold</strong>')
+    expect(mineHtml).toContain('**bold** and `code`')
+    expect(mineHtml).not.toContain('<strong>')
+    expect(mineHtml).toContain('whitespace-pre-wrap')
+  })
+
   it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {
     const { html, text } = render(
       view({
@@ -130,6 +158,37 @@ describe('the thread in the inbox', () => {
     expect(open.html).toContain('placeholder="Reply"')
     expect(open.html).toContain('aria-label="Your reply"')
     expect(open.text).not.toMatch(/thread/i)
+  })
+
+  describe('which question the reply box answers (#2191)', () => {
+    const q = (id: string, seq: number, who: MailParty, body: string) => ({ id, seq, sender: who, kind: 'question', urgent: false, body, facts: {}, createdAt: 1_800_000_000_000 })
+    const builder: MailParty = { address: 'session:h/s2', kind: 'session', sessionId: 's2', name: 'Builder', state: 'idle' }
+    const first = q('m1', 1, parser, 'Which branch should I build on?')
+    const second = q('m2', 2, builder, 'Keep the old settings format?')
+    const mine = { id: 'm3', seq: 3, sender: you, kind: 'answer', urgent: false, body: 'main', facts: { picked: true }, replyTo: 'm1', createdAt: 1_800_000_000_000 }
+
+    // The host names the questions that are open (`ask.open`); the window offers those
+    const asking = (messages: ReturnType<typeof q>[], open: string[]) => view({ messages, thread: { ...view().thread, ask: { id: open.at(-1) ?? '', sender: parser, text: '', open } } })
+
+    it('says which one the words answer, the newest by default, and how many others are open, once two are', () => {
+      const { html, text } = render(asking([first, second], ['m1', 'm2']))
+      expect(text).toContain('Answering Builder · “Keep the old settings format?”')
+      expect(text).toContain('1 other open')
+      expect(html).toContain('data-testid="mail-answering"')
+      // The list opens from the button, and is not drawn closed
+      expect(html).not.toContain('data-testid="mail-answering-list"')
+      // Once the other is answered only one is open, and the box says nothing of a target
+      expect(render(asking([first, second, mine], ['m2'])).html).not.toContain('data-testid="mail-answering"')
+    })
+
+    it('offers only the questions the host says are open: a host of an older build, which names none, gets the box as it was, with words as a plain reply (#2233)', () => {
+      // The host names both: they are offered
+      expect(render(asking([first, second], ['m1', 'm2'])).html).toContain('data-testid="mail-answering"')
+      // Two questions in the messages, and no `ask` on the thread: nothing to choose between, and nothing sent with `answers`, which an older host refuses for words that are no choice
+      expect(render(view({ messages: [first, second] })).html).not.toContain('data-testid="mail-answering"')
+      // One of them is not open on the host (its sender is gone): it is not offered
+      expect(render(asking([first, second], ['m2'])).html).not.toContain('data-testid="mail-answering"')
+    })
   })
 
   describe('the choices of a question (#1630)', () => {

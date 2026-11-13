@@ -1,3 +1,5 @@
+import { partyName } from '@cc/core'
+import { plainLine } from '@cc/protocol/client'
 import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
@@ -5,9 +7,10 @@ import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 
-/** The thread's state as a word, with how it ended when it is done */
-export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): string {
+/** The thread's state as a word, with how it ended when it is done; a thread that waits on the person's answer says so (#2229) */
+export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'ask'>): string {
   if (t.state === 'done') return t.outcome && t.outcome !== 'finished' ? `Done (${t.outcome})` : 'Done'
+  if (t.ask) return 'Waiting on you'
   switch (t.state) {
     case 'open':
       return 'Open'
@@ -78,4 +81,29 @@ export function choicesLabel(answered: boolean, picked: boolean, open: boolean):
   if (picked) return 'You chose'
   if (answered) return 'Answered'
   return open ? 'Choose one' : 'Not answered'
+}
+
+/**
+ * The questions to the person in a thread that wait for their answer (#2191), oldest first, as the host names them (`thread.ask.open`: its one rule, which
+ * decides who can still be answered and what the person may read), the ones this view holds. A reply box offers a choice of which one its words answer when there is more than one; with one, the words answer it as before
+ */
+export function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>): MailMessage[] {
+  const open = view.thread.ask?.open ?? []
+  return view.messages.filter((m) => open.includes(m.id))
+}
+
+/**
+ * The question the reply box's words answer, and the open ones to switch between. With more than one question waiting the box says which one its words answer (the
+ * newest by default); with one, nothing changes (no target, the words answer it as before). A question the person named stays the one named until their words are
+ * sent: if another window answered it meanwhile, the host refuses these words ("answered") and the toast says so, and they do not go to another question unseen
+ */
+export function answeringTarget(view: Pick<MailThreadView, 'thread' | 'messages'>, chosen: string | null): { questions: MailMessage[]; target: MailMessage | undefined } {
+  const questions = openQuestions(view)
+  const named = chosen === null ? undefined : view.messages.find((m) => m.id === chosen)
+  return { questions, target: named ?? (questions.length > 1 ? questions.at(-1) : undefined) }
+}
+
+/** A question as one line, for the person to tell which is which: the session that asked it and its words */
+export function questionLine(m: Pick<MailMessage, 'sender' | 'body'>): string {
+  return `${partyName(m.sender)} · “${plainLine(m.body, 120)}”`
 }

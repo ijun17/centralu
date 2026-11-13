@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -66,6 +66,7 @@ export class MailMock {
       projectId: null,
       owner: spec.from,
       assignee: spec.assignee ?? null,
+      ask: null,
       unread: 1,
       held: 0,
       blocked: 0,
@@ -74,7 +75,9 @@ export class MailMock {
       updatedAt: now,
       last: { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: now },
     }
-    this.threads.set(id, { row, messages: [message], read: 0, canReply: !spec.onlyHeld })
+    const thread: Thread = { row, messages: [message], read: 0, canReply: !spec.onlyHeld }
+    row.ask = this.asking(thread)
+    this.threads.set(id, thread)
     if (spec.held) {
       this.heldRows.push({ messageId: message.id, threadId: id, subject: spec.subject, sender: spec.from, recipient: spec.held.recipient, kind: message.kind, reason: spec.held.reason, preview: spec.body.slice(0, 140), since: now })
       row.held = 1
@@ -115,7 +118,15 @@ export class MailMock {
     }
   }
 
+  /** What the thread waits on the person to answer, as the host works it out (`MailPerson.asking`): a session's questions that none of the person's messages names, until the thread is done */
+  private asking(t: Thread): MailThreadRow['ask'] {
+    const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
+    const newest = open.at(-1)
+    return newest ? mailAsk(newest, newest.sender, open.map((m) => m.id)) : null
+  }
+
   private touch(t: Thread): void {
+    t.row.ask = this.asking(t)
     t.row.updatedAt = this.clock.now()
     this.emit({ type: 'mail_changed', threadId: t.row.id, toPerson: false })
   }
@@ -149,14 +160,17 @@ export class MailMock {
     reply: async (threadId, text, kind, answers) => {
       const t = this.must(threadId)
       if (t.row.state === 'done') throw mockError('this thread is done; open a follow-up', 'refused')
-      // As the host does (`pickTarget`): a pick names its question, whose choices include the words, and a question is answered once
+      // As the host does (`pickTarget`): an answer names its question, a pick being one of its choices and other words the person's own, and a question is answered once
       const open = t.messages.findLast((m) => m.sender.kind !== 'person' && m.kind === 'question' && !t.messages.some((a) => a.replyTo === m.id))
       const question = answers === undefined ? open : t.messages.find((m) => m.id === answers)
-      if (answers !== undefined && !question?.choices?.includes(text)) throw mockError(`${answers} does not offer that choice.`, 'refused')
+      if (answers !== undefined && !question) throw mockError(`There is no message ${answers} to answer.`, 'refused')
       if (answers !== undefined && question && t.messages.some((m) => m.replyTo === question.id && m.sender.kind === 'person')) throw mockError(`${question.id} is answered already: a question is answered once. Write to say more.`, 'refused')
-      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: answers !== undefined ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
+      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? (question ? 'answer' : 'note'), urgent: false, body: text, facts: answers !== undefined && question?.choices?.includes(text) ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
+      // As the host does (`MailPerson.reply`): the answer reads what it answers and what came before it, not what came after
+      const answered = (question ?? t.messages.findLast((m) => m.sender.kind !== 'person'))?.seq ?? 0
+      t.row.unread = Math.min(t.row.unread, t.messages.filter((m) => m.sender.kind !== 'person' && m.seq > answered).length)
       t.row.last = { sender: PERSON, kind: message.kind, preview: text.slice(0, 140), at: message.createdAt }
       this.touch(t)
       return this.view(t, [message])
@@ -169,6 +183,9 @@ export class MailMock {
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
       t.row.working = false
+      // As the host does (`closeFor`): what was said to the person in it is theirs to have read, so the row leaves the list of what waits
+      t.row.unread = 0
+      t.read = t.messages.at(-1)?.seq ?? t.read
       this.touch(t)
       return { ...t.row }
     },

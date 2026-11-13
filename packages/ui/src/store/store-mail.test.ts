@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MockPlatform, mockSessionParty } from '@cc/platform/mock'
 import { notifyPolicyOf } from '@cc/protocol/client'
 import { useStore } from './store.js'
-import { mailAttention } from './mail.js'
+import { mailAsksYou, mailAttention } from './mail.js'
 import { resetStore } from './store.test-helpers.js'
 
 beforeEach(resetStore)
@@ -30,7 +30,7 @@ describe('the list', () => {
     expect(useStore.getState().mail).toEqual({ threads: [], held: [], waiting: 0 })
     expect(mailAttention(useStore.getState().mail)).toBe(0)
 
-    const id = platform.seedMail({ subject: 'Which branch?', from: worker, body: 'main or release?' })
+    const id = platform.seedMail({ subject: 'Which branch?', from: worker, body: 'main or release?', kind: 'note' })
     await vi.waitFor(() => expect(useStore.getState().mail?.threads.map((t) => t.id)).toEqual([id]))
     expect(mailAttention(useStore.getState().mail)).toBe(1)
 
@@ -39,7 +39,7 @@ describe('the list', () => {
   })
 
   it('counts held mail in a thread the person is not in, and the crowd question, once each', () => {
-    const row = { id: 't', subject: 's', state: 'open', outcome: null, next: null, projectId: null, owner: worker, assignee: null, unread: 0, held: 0, blocked: 0, createdAt: 0, updatedAt: 0, last: null }
+    const row = { id: 't', subject: 's', state: 'open', outcome: null, next: null, projectId: null, owner: worker, assignee: null, unread: 0, held: 0, blocked: 0, ask: null, createdAt: 0, updatedAt: 0, last: null }
     const held = { messageId: 'm', threadId: 'elsewhere', subject: 's', sender: worker, recipient: worker, kind: 'assign', reason: 'loop', preview: '', since: 0 }
     expect(mailAttention({ threads: [row], held: [held, { ...held, messageId: 'n' }], waiting: 0 })).toBe(1)
     expect(mailAttention({ threads: [row], held: [], waiting: 12 })).toBe(1)
@@ -48,7 +48,7 @@ describe('the list', () => {
 
   it('counts a thread with mail held for the person too, and nothing before it is read', () => {
     expect(mailAttention(null)).toBe(0)
-    const row = { id: 't', subject: 's', state: 'open', outcome: null, next: null, projectId: null, owner: worker, assignee: null, unread: 0, held: 1, blocked: 0, createdAt: 0, updatedAt: 0, last: null }
+    const row = { id: 't', subject: 's', state: 'open', outcome: null, next: null, projectId: null, owner: worker, assignee: null, unread: 0, held: 1, blocked: 0, ask: null, createdAt: 0, updatedAt: 0, last: null }
     expect(mailAttention({ threads: [row, { ...row, id: 'u', held: 0 }], held: [], waiting: 0 })).toBe(1)
   })
 
@@ -184,6 +184,45 @@ describe('a thread in the Inbox', () => {
     expect(await useStore.getState().replyMail('more')).toBe(false)
     expect(useStore.getState().toast).toBe('Could not send that: this thread is done; open a follow-up')
     expect(useStore.getState().mailThread?.messages.map((m) => m.body)).toEqual(['which?'])
+  })
+
+  it('a question read but not answered still counts, in the badge and its edge, until it is answered (#2233)', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })
+    await useStore.getState().openMailThread(id)
+    await vi.waitFor(() => expect(useStore.getState().mail?.threads[0]?.unread).toBe(0))
+    expect(mailAttention(useStore.getState().mail)).toBe(1)
+    expect(mailAsksYou(useStore.getState().mail)).toBe(1)
+    expect(await useStore.getState().replyMail('main')).toBe(true)
+    await vi.waitFor(() => expect(mailAttention(useStore.getState().mail)).toBe(0))
+  })
+
+  it('answers a question the list’s card names without opening the thread, and the badge asks only while one waits (#2229, #2227)', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?', choices: ['main', 'release'] })
+    await useStore.getState().loadMail()
+    expect(mailAsksYou(useStore.getState().mail)).toBe(1)
+    const question = useStore.getState().mail!.threads[0]!.ask!
+    expect(question).toMatchObject({ text: 'which?', choices: ['main', 'release'], open: [question.id] })
+    expect(await useStore.getState().replyMail('release', 'answer', question.id, id)).toBe(true)
+    expect(useStore.getState().mailThread).toBeNull()
+    await vi.waitFor(() => expect(mailAsksYou(useStore.getState().mail)).toBe(0))
+    expect(mailAsksYou(null)).toBe(0)
+  })
+
+  it('closes a thread the list names without opening it, and says why when the host refuses (#2226)', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })
+    await useStore.getState().loadMail()
+    expect(useStore.getState().mail?.threads.map((t) => [t.id, t.state])).toEqual([[id, 'open']])
+    expect(await useStore.getState().closeMail('finished', id)).toBe(true)
+    expect(useStore.getState().mailThread).toBeNull()
+    await vi.waitFor(() => expect(useStore.getState().mail?.threads.map((t) => [t.id, t.state])).toEqual([[id, 'done']]))
+    platform.mail.close = async () => {
+      throw new Error('the link is down')
+    }
+    expect(await useStore.getState().closeMail('finished', id)).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not close this mail: the link is down')
   })
 
   it('says what failed when a close is refused, and the same for a thread that cannot be opened', async () => {

@@ -715,6 +715,96 @@ describe('work a script started (§8.1, #1468)', () => {
   })
 })
 
+describe('the thread row says what waits on the person’s answer (#2229)', () => {
+  it('names the newest unanswered question with its first lines as plain words and its choices, and counts them; an answer, a close or a sender that is gone clears it', () => {
+    const w = ready(hostWorld())
+    const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
+    expect(w.person.list().threads[0]?.ask).toBeNull()
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: '**Which** branch?\n\nline two\nline three\nline four\nline five', choices: ['main', 'release'] })
+    w.clock.t += 10
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'And the tag?' })
+    const row = () => w.person.list().threads.find((t) => t.id === root.id)!
+    expect(row().ask).toMatchObject({ text: 'And the tag?', open: [expect.any(String), expect.any(String)], sender: { address: A } })
+    expect(row().ask?.choices).toBeUndefined()
+    const first = w.person.thread(root.id).messages.find((m) => m.body.startsWith('**Which**'))!
+    w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
+    expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three\nline four', choices: ['main', 'release'], open: [first.id] })
+    w.person.close(root.id)
+    expect(row().ask).toBeNull()
+  })
+
+  it('is not set for a note: nothing in it asks for an answer', () => {
+    const w = ready(hostWorld())
+    const note = w.service.send(A, { to: [PERSON], text: 'FYI.', needsReply: false }).message
+    expect(w.person.list().threads.find((t) => t.id === note.id)?.ask).toBeNull()
+  })
+})
+
+describe('an answer reads what it answers (#2233)', () => {
+  const askTwice = () => {
+    const w = ready(hostWorld())
+    const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'First?', choices: ['x', 'y'] })
+    w.clock.t += 10
+    w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'Second?' })
+    const row = () => w.person.list().threads.find((t) => t.id === root.id)!
+    const asked = (body: string) => w.store.mailbox.feedOf(PERSON, { limit: 50 }).find((m) => m.body === body)!
+    return { w, root, row, asked }
+  }
+
+  it('the row of a question answered from the list is read and no longer asks: unread is 0 and it leaves the waiting list; a later question stays unread until its own answer', () => {
+    const { w, root, row, asked } = askTwice()
+    expect(row()).toMatchObject({ unread: 2, ask: { open: [asked('First?').id, asked('Second?').id] } })
+    // The list's card answers without the thread ever being opened: `thread()` has not read anything
+    w.person.reply(root.id, 'x', 'answer', asked('First?').id)
+    expect(row()).toMatchObject({ unread: 1, ask: { id: asked('Second?').id, open: [asked('Second?').id] } })
+    expect(w.row(asked('First?').id, PERSON)?.readAt).not.toBeNull()
+    w.person.reply(root.id, 'my own words', 'answer', asked('Second?').id)
+    expect(row().unread).toBe(0)
+    expect(row().ask).toBeNull()
+  })
+
+  it('the reply box’s free reply reads what it answers too: the newest question and what came before it, and the older question still asks', () => {
+    const { w, root, row, asked } = askTwice()
+    w.person.reply(root.id, 'for the newest')
+    expect(row()).toMatchObject({ unread: 0, ask: { id: asked('First?').id, open: [asked('First?').id] } })
+  })
+
+  it('Done from the list reads what it closes: the row is done with nothing unread, though the thread was never opened', () => {
+    const { w, root, row } = askTwice()
+    expect(row().unread).toBe(2)
+    w.person.close(root.id)
+    expect(row()).toMatchObject({ state: 'done', unread: 0, ask: null })
+  })
+
+  it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(30), owner: A, at: t }, [
+      { id: mid(30), sender: at('gone'), kind: 'question', body: 'from a session since trashed', receipts: [{ recipient: PERSON }] },
+      { id: mid(31), sender: A, kind: 'question', body: 'held for its depth', receipts: [{ recipient: PERSON, held: 'loop' }] },
+      { id: mid(32), sender: A, kind: 'note', body: 'only a note', receipts: [{ recipient: PERSON }] },
+      { id: mid(33), sender: A, kind: 'question', body: 'Which one?', receipts: [{ recipient: PERSON }] },
+    ])
+    const r = ready(w)
+    const view = r.person.thread(tid(30))
+    expect(view.thread.ask?.open).toEqual([mid(33)])
+    // The same question is the one a free reply answers
+    expect(r.person.reply(tid(30), 'this one').messages.find((m) => m.body === 'this one')).toMatchObject({ replyTo: mid(33) })
+  })
+})
+
+describe('Markdown in a one-line text (#2228)', () => {
+  it('the thread subject and the row preview are the words, without the marks', () => {
+    const w = hostWorld()
+    const { person } = ready(w)
+    const sent = w.mail.send(A, { to: [PERSON], text: '**Background** #2218: see `pnpm verify`', needsReply: false }).message
+    const row = person.list().threads.find((t) => t.id === sent.id)
+    expect(row?.subject).toBe('Background #2218: see pnpm verify')
+    expect(row?.last?.preview).toBe('Background #2218: see pnpm verify')
+  })
+})
+
 describe('what the person is notified of (#1630)', () => {
   it('each new message they can read, once and of any kind; not their own, and not a change to one stored', () => {
     const w = hostWorld()
@@ -823,14 +913,17 @@ describe('a session asks the person by mail (#1630)', () => {
       expect(w.person.thread(root.id).messages.filter((m) => m.kind === 'answer').map((m) => m.body)).toEqual(['x', 'q'])
     })
 
-    it('a question is answered once: a second pick, from any window, is refused and writes nothing; so is a pick of words it did not offer', () => {
+    it('a question is answered once: a second pick, from any window, is refused and writes nothing', () => {
       const { w, thread, qa } = twoAsk()
       w.person.reply(thread, 'main', 'answer', qa.id)
       expect(refusedFor(() => w.person.reply(thread, 'dev', 'answer', qa.id))).toBe('answered')
       expect(refusedFor(() => w.person.reply(thread, 'main', 'answer', qa.id))).toBe('answered')
       expect(w.person.thread(thread).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === qa.id)).toHaveLength(1)
       const { w: w2, thread: t2, qa: other } = twoAsk()
-      expect(refusedFor(() => w2.person.reply(t2, 'neither', 'answer', other.id))).toBe('bad_value')
+      // Words that are none of its choices are the person's own answer to that question (#2191): it is answered once with them, and not as a pick
+      w2.person.reply(t2, 'neither', 'answer', other.id)
+      expect(w2.person.thread(t2).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === other.id).map((m) => [m.body, m.facts.picked])).toEqual([['neither', undefined]])
+      expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', other.id))).toBe('answered')
       expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', 'hub-aaaaaaaa.m_missing'))).toBe('unknown_message')
       // The free reply box stays free: it answers the newest open question, as before
       w2.person.reply(t2, 'my own words')
@@ -870,5 +963,20 @@ describe("a send's subject names its chain (#2229)", () => {
     // Without one, the message's words, as before
     w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which branch?\nmain or next' })
     expect(w.person.list().threads.map((t) => t.subject)).toContain('Which branch? main or next')
+  })
+
+  it("the subject goes through the plain-line rule like a body's: marks dropped, and the ask card is titled by it, not by the question", () => {
+    const w = ready(hostWorld())
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', subject: '**Release** `2.4`', text: 'Ship it tonight?', choices: ['yes', 'no'] })
+    const row = w.person.list().threads.find((t) => t.ask !== null)!
+    expect(row.subject).toBe('Release 2.4')
+    expect(row.ask).toMatchObject({ text: 'Ship it tonight?', choices: ['yes', 'no'] })
+  })
+
+  it('a thread with no stored subject (a row from before the column, or a send without one) keeps the first message’s words, marks dropped', () => {
+    const w = ready(hostWorld())
+    w.mail.send(A, { to: [PERSON], text: '**Which** branch?', needsReply: true })
+    const row = w.person.list().threads.find((t) => t.ask !== null)!
+    expect(row.subject).toBe('Which branch?')
   })
 })
