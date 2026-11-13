@@ -1,7 +1,7 @@
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PermissionPreset } from '@cc/protocol'
+import { APP_CALL, type PermissionPreset } from '@cc/protocol'
 import { MANIFEST_FILE } from '../apps/external/manifest.js'
 import * as kit from '../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
@@ -338,9 +338,9 @@ describe('joining a call to its card id (B-1)', () => {
  * for the live agent, and `auto` never asks.
  */
 describe("the person's say on an app call, at the call (#2231)", () => {
-  type Asked = { sessionId: string; raw: string; signal: AbortSignal }
+  type Asked = { sessionId: string; raw: string; about: string | undefined; signal: AbortSignal }
   let asked: Asked[]
-  let answer: 'allow' | 'deny' | 'wait'
+  let answer: 'allow' | 'always' | 'deny' | 'wait'
   let preset: PermissionPreset
   let bypassed: boolean
 
@@ -357,7 +357,7 @@ describe("the person's say on an app call, at the call (#2231)", () => {
         preset: () => preset,
         bypassed: () => bypassed,
         ask: (sessionId, detail, signal) => {
-          asked.push({ sessionId, raw: detail.raw, signal })
+          asked.push({ sessionId, raw: detail.raw, about: detail.about, signal })
           if (answer !== 'wait') return Promise.resolve(answer)
           return new Promise((resolve) => signal.addEventListener('abort', () => resolve(null), { once: true }))
         },
@@ -387,6 +387,18 @@ describe("the person's say on an app call, at the call (#2231)", () => {
       expect(ran()).toEqual(['poke', 'peek'])
     })
   }
+
+  it('the card is marked as an app call (no "always" in a window), and an "always" from an older window runs this call only: nothing is remembered', async () => {
+    answer = 'always'
+    const a = hub.attach(worker('p1'))
+    expect(await a.call('app-notes', 'poke', { to: 6 })).toMatchObject({ isError: false })
+    expect(await a.call('app-notes', 'poke', { to: 7 })).toMatchObject({ isError: false })
+    expect(asked.map((x) => [x.about, x.raw])).toEqual([
+      [APP_CALL, 'notes: poke {"to":6}'],
+      [APP_CALL, 'notes: poke {"to":7}'],
+    ])
+    expect(ran()).toEqual(['poke', 'poke'])
+  })
 
   it("the person's Deny runs nothing and says so", async () => {
     answer = 'deny'

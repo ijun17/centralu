@@ -4,6 +4,7 @@ import {
   isCentraluApply,
   isMachineChange,
   isAssistantChange,
+  isAppCall,
   isUnknownCard,
   SESSION_HANDOFF,
   sessionOnlyAlways,
@@ -619,10 +620,10 @@ function ActionKey({
  * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
  * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
  * question the person never saw in full. Nor for the Assistant's change to a linked machine (#1219): each one is
- * asked on its own, and the host remembers nothing for it. Nor for the Assistant's change to its settings or the session archive (#1219).
+ * asked on its own, and the host remembers nothing for it. Nor for the Assistant's change to its settings or the session archive (#1219). Nor for a call of an app's tool (#2231): each is asked on its own.
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
-  if (isUnknownCard(detail) || isMachineChange(detail) || isAssistantChange(detail)) return false
+  if (isUnknownCard(detail) || isMachineChange(detail) || isAssistantChange(detail) || isAppCall(detail)) return false
   return (detail.kind !== 'file_edit' && detail.kind !== 'command') || alwaysAllowKey(detail) !== ''
 }
 

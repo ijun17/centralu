@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { createListeners } from '@cc/common'
-import { APP_SERVER_PREFIX, appKeyOf, appServerName, errorMessage, isAssistantKind, sameApp } from '@cc/protocol'
+import { APP_SERVER_PREFIX, appKeyOf, appServerName, APP_CALL, errorMessage, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
 import type { AppCallOpts, AppToolResult, AppToolSpec, SessionAppEntry, SessionApps, SessionAppTools } from '../adapters/contract.js'
 import { presetAsks, runsUnasked } from '../apps/contract.js'
@@ -613,7 +613,7 @@ class Attachment implements SessionAppAttachment {
     const timer = waitMs === undefined ? null : setTimeout(() => ((late = true), card.abort()), waitMs)
     try {
       const raw = `${appNameOf(server)}: ${tool} ${JSON.stringify(args).slice(0, 300)}`
-      const answer = await approval.ask(this.session.id, { kind: 'other', raw }, card.signal)
+      const answer = await approval.ask(this.session.id, { kind: 'other', raw, about: APP_CALL }, card.signal)
       if (answer === 'deny') return 'The person denied this call. Nothing ran.'
       if (answer !== null) return null
       return late
