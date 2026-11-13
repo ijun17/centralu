@@ -3583,8 +3583,8 @@ description. Result: **1,170**. `MAIL_BUDGET_CHARS` falls from 1,355 to 1,175, r
 Codex session started before the update that still calls `update` gets a schema error instead of the "removed"
 sentence. This is accepted: that call has done nothing since threads went.
 
-Whether ordinary sessions and the Assistant are told that watches exist (a resident phrase) is the owner's decision:
-§18.14 Q1.
+Ordinary sessions and the Assistant are not told that watches exist by any resident phrase (owner, 2026-11-13, §18.14
+Q1 = b): a session finds the `watch` action in the `mail` definition itself, and a brief names it.
 
 ### 18.3 Sources
 
@@ -3609,7 +3609,7 @@ read (`mayRead`, `adapters/contract/centralu-tools.ts:570`, the one read rule); 
 another computer (`elsewhere`, as mail was refused before linked mail; later the target's host keeps the watch). A
 session watch ends after 24 hours; setting it again extends it.
 
-**A pull request's checks** (`#123`) are the owner's choice: §18.14 Q2. If the host keeps them, the watch is a
+**A pull request's checks** (`#123`, PR 2): the host keeps them (owner, 2026-11-13, §18.14 Q2 = a). The watch is a
 one-shot. It polls `gh pr view <n> --json state,headRefOid,statusCheckRollup` (these fields checked against gh
 2.83.0's `--help`) every 60 seconds through the same runner as `gitBranchPr` (`dev-services/git-pr.ts:55`: 10 s
 timeout, `unavailable` without gh). It runs one call per project per tick, however many watches name it. It fires when
@@ -3718,7 +3718,7 @@ with a `Cancel` `Button`:
 
 When the person cancels, the owner gets one quiet notice, `The person cancelled your watch on <what>.`, so it does not
 go on waiting. Copy follows ux-writing §1: the session's name, not its address, and no "watch id" on screen. The
-placement is a layout choice: §18.14 Q3.
+placement is the owner's (2026-11-13, §18.14 Q3 = a).
 
 **Protocol (additions only, protocol.md §4):** methods `watches.list { sessionId }` → `{ watches: WatchView[] }` and
 `watches.cancel { id }`; event `watches_changed { sessionId }`. `WatchView` is `{ id, source, what, until, note,
@@ -3731,9 +3731,10 @@ badge (`e2e/older-host.spec.ts`). The badge's count is a selector over the liste
 - The mail tool's six dead fields and `update` (§18.2), and `close`'s blanket refusal.
 - Orchestrators' background shell loops that sleep in order to wake themselves (CI polling; the periodic usage check,
   [guess] on its exact form, since no document describes it) become a time or PR watch. These loops live in briefs and
-  habits, not in code; Q1's phrase is what reaches them.
-- `.centralu/apps/project-board/bin/wait-checks.mjs`, the CI wait agents start in the background, once the PR source
-  lands (Q2 (a)).
+  habits, not in code; with no resident phrase (Q1 = b), the briefs that start them name the `watch` action.
+- The pull-request form of `.centralu/apps/project-board/bin/wait-checks.mjs`, the CI wait agents start in the
+  background, once the PR source lands (PR 2). Its `--ref <branch|sha>` form stays as long as releasing.md waits for
+  main's checks with it: a PR watch does not cover a commit.
 - §13's watches bullet and §16's "Later: Watches" now point here.
 - Unchanged: start_agent children (already mail), and the merge queue's notices (the apps slice, §13). Nothing on a
   path #1948 removes is touched: watches use only `MessageService.notice` and MailDelivery.
@@ -3800,10 +3801,12 @@ a due time (Windows and macOS); the person cancels from the badge and the sessio
 
 1. **PR 1** (carries this section, branch `host-watches`): the store step, `Watches` with the time and session sources,
    the tool change with the dead fields deleted, the inline case, the warning, the protocol and the person's list.
-2. **PR 2**, only if the owner picks the host for pull requests (Q2 (a)): the `#123` source, and `wait-checks.mjs`
-   deleted.
+2. **PR 2** (Q2 = a): the `#123` source, and what of `wait-checks.mjs` nothing else needs deleted (§18.9).
 
-### 18.14 Open questions for the owner
+### 18.14 The owner's questions, decided 2026-11-13
+
+Q1 = (b), no resident phrase; `READER_BUDGET_CHARS` is unchanged and `MAIL_BUDGET_CHARS` falls 1,355 → 1,175. Q2 = (a),
+the host polls `gh` for a PR's checks (PR 2). Q3 = (a), the header badge. The questions as they were put:
 
 1. **Telling sessions that watches exist (resident characters).** (a) One phrase in `readerFirst`
    (`sessions/tool-definitions.ts:945`) and in the Assistant's preamble (`sessions/assistant-home.ts:17`):
