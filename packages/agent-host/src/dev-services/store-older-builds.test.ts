@@ -116,7 +116,7 @@ describe('a store written before a question’s choices had a column (v69, #1630
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(2) // v70, then v71 (#2229)
+    expect(second.migrationsRun).toBe(3) // v70, then v71 (#2229), v72 (#2243)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v69 writes: its own column list, none of ours
@@ -142,12 +142,69 @@ describe('a store written before a chain’s subject had a column (v70, #2229)',
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(1)
+    expect(second.migrationsRun).toBe(2) // v71, then v72 (#2243)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?', subject: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v70 writes: its own column list, none of ours
     db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, choices, created_at) VALUES ('h1.m_2', 'session:h1/a', 'message', 1, 'h1.m_2', 'old', '{}', NULL, ?)`).run(at)
     expect(second.mailbox.message('h1.m_2')).toMatchObject({ body: 'old', subject: null })
+    db.close()
+  })
+})
+
+describe('a store holding mail an earlier build held (v71, #2243)', () => {
+  it('ends the holds today’s gate would not hold, keeps what it would hold whoever held it, and leaves every other row as it was', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-holds-'))
+    dirs.push(dir)
+    const file = join(dir, 'store.db')
+    const first = new Store(file)
+    first.projects.addProject({ id: 'px', path: join(dir, 'px'), name: 'Pex' })
+    first.projects.addProject({ id: 'pt', path: join(dir, 'pt'), name: 'Pet' })
+    first.projects.addProject({ id: 'pb', path: join(dir, 'pb'), name: 'Pbe' })
+    first.projects.setProjectTrusted('pt', true)
+    const written = (first as unknown as { db: Database.Database }).db
+    written.prepare(`INSERT INTO sessions (id, project_id, tool, name, is_orchestrator, created_at) VALUES ('b', 'pb', 'claude', 'b', 0, 0)`).run()
+    written.prepare(`INSERT INTO sessions (id, project_id, tool, name, is_orchestrator, created_at, deleted_at) VALUES ('t', 'pb', 'claude', 't', 0, 0, 1)`).run()
+    const at = 1_800_000_000_000
+    const message = written.prepare(`INSERT INTO mail (id, sender, sender_project, kind, needs_reply, root_id, body, facts, created_at) VALUES (?, 'session:h1/a', ?, ?, 1, ?, 'hi', '{}', ?)`)
+    const recipient = written.prepare(
+      `INSERT INTO mail_recipients (message_id, recipient, due_at, held, settled, attempts, last_error, attempt_at) VALUES (?, ?, ?, ?, ?, 2, 'x', ?)`,
+    )
+    // [id, held, settled, the sender's project, kind]. `settled` legacy: moved by v65, and held by an earlier build or, for the `policy` ones the gate holds, by the delivery since
+    const rows: [string, string, string | null, string | null, string][] = [
+      ['m_budget', 'budget', 'legacy', 'px', 'message'],
+      ['m_untrusted', 'policy', 'legacy', 'px', 'message'],
+      ['m_trusted', 'policy', 'legacy', 'pt', 'message'],
+      ['m_no_project', 'policy', 'legacy', null, 'message'],
+      ['m_same_project', 'policy', 'legacy', 'pb', 'message'],
+      ['m_task', 'policy', 'legacy', 'px', 'task'],
+      // To a session that was trashed: the live session lookup skips it, so the gate holds nothing for it
+      ['m_trashed', 'policy', 'legacy', 'px', 'message'],
+      ['m_new_policy', 'policy', null, 'pt', 'message'],
+      ['m_loop', 'loop', 'legacy', 'pt', 'message'],
+      ['m_uncertain', 'uncertain', 'legacy', null, 'message'],
+      ['m_failed', 'failed', null, null, 'message'],
+    ]
+    for (const [id, held, settled, project, kind] of rows) {
+      message.run(`h1.${id}`, project, kind, `h1.${id}`, at)
+      recipient.run(`h1.${id}`, id === 'm_trashed' ? 'session:h1/t' : 'session:h1/b', at, held, settled, at)
+    }
+    written.pragma('user_version = 71')
+    written.close()
+
+    const second = new Store(file)
+    expect(second.migrationsRun).toBe(1)
+    // Waiting lists what today's gate holds (an untrusted project's message to a session of another project), and the holds nothing here judged
+    const waiting = second.mailbox.heldRows().map((r) => `${r.messageId.slice(3)}:${r.held}`)
+    expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_uncertain:uncertain', 'm_untrusted:policy'])
+    // The ended rows stay, dismissed and settled as they were, with the delivery's attempt state cleared as the person's Dismiss clears it
+    const db = (second as unknown as { db: Database.Database }).db
+    const ended = db
+      .prepare(`SELECT message_id AS id, held, settled, attempts, last_error AS err, attempt_at AS at FROM mail_recipients WHERE held = 'dismissed' ORDER BY message_id`)
+      .all()
+    expect(ended.map((r) => (r as { id: string }).id)).toEqual(['h1.m_budget', 'h1.m_no_project', 'h1.m_same_project', 'h1.m_task', 'h1.m_trashed', 'h1.m_trusted'])
+    for (const r of ended) expect(r).toMatchObject({ settled: 'legacy', attempts: 0, err: null, at: null })
+    expect(db.prepare(`SELECT held, settled, attempts, last_error AS err FROM mail_recipients WHERE message_id = 'h1.m_new_policy'`).get()).toEqual({ held: 'policy', settled: null, attempts: 2, err: 'x' })
     db.close()
   })
 })

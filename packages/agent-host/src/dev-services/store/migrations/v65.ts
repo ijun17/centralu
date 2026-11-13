@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v71. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v72. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -208,6 +208,54 @@ export class StepsV65 extends MigrationRange {
          */
         run: () => {
           this.addColumn('mail', 'subject', 'TEXT')
+        },
+      },
+      {
+        to: 72,
+        breaksOlderReaders: false,
+        /**
+         * The holds of an earlier build, ended (#2243). The mail token guard (`budget`) went with D32 (#2014, beta.49) and the `auto` receiver's
+         * first-contact hold (`holdsInbound`) with D10, but the rows an earlier build held kept their hold when the v65 move carried them (settled
+         * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
+         * without asking" weeks after nothing could write such a hold.
+         *
+         * **One meaning: a hold from an earlier build stays only if today's gate would hold the mail now.** `budget` is never set by today's code, so every
+         * such row goes. A `policy` row settled `legacy` stays while `reach.holdFor` (mail/reach.ts) would hold it: a `message` from an untrusted project (a
+         * missing project row is untrusted) to a session of another project, which is how a genuine untrusted asker's request is still held. The
+         * delivery also holds moved rows that way (it judges a `legacy` row like any other, and `records.hold` writes `held` alone), so the same row looks
+         * the same whoever held it, and this step cannot tell them apart; it asks the gate, as the move asks it for the rows it moves from now on. What the
+         * gate would not hold goes, and what goes is `dismissed`, the hold word the person's Dismiss sets (not held for the person, never delivered):
+         * `gone` says a sender or recipient is gone and `withdrawn` that the sender said it no longer waits, and neither is so. `settled` stays `legacy`.
+         *
+         * **This is a frozen copy of `holdFor`'s conditions, on purpose.** A step runs once on every store and must not call code that may change later;
+         * if `holdFor` changes, this step does not. It mirrors: `m.kind === 'message'`; `leaves(senderProject, recipientProject)` = the sender's project is
+         * not null and untrusted (`projects.trusted = 0`, or no such project) and is not the recipient session's project; the recipient is a session of this
+         * host that is kept (a `sessions` row with `deleted_at` NULL: the live session lookup skips a trashed one, so the gate holds nothing for it). The
+         * recipient's project is read from `sessions.project_id` and the sender's from `mail.sender_project`, as the move wrote it.
+         *
+         * **Not mirrored: a recipient on another machine** (a linked hub's session, a linked-machine child), which the live gate holds and this step
+         * dismisses, since it compares the session id with this host's `sessions` rows only. That is acceptable: no such row is on the owner's store (read
+         * only, 2026-11-13: all six held rows leave), and an old hold on another machine's session could not be released from this one in any case (Release
+         * sends through this host's delivery to a session it keeps). There is no cheap exact way: the far session's project is not stored here.
+         *
+         * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
+         * and does not bring the holds back. Nothing is deleted: the message and its row stay. The sender is not told: the person did not dismiss it.
+         */
+        run: () => {
+          // A store with no table, or no row held `budget` or `policy`, has nothing to judge (and a test's partial schema lacks the tables the judgement reads)
+          if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
+          if (this.db.prepare(`SELECT 1 FROM mail_recipients WHERE held IN ('budget', 'policy') LIMIT 1`).get() === undefined) return
+          this.db.exec(
+            `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
+              WHERE held = 'budget'
+                 OR (held = 'policy' AND settled = 'legacy' AND NOT EXISTS (
+                      SELECT 1 FROM mail m, sessions s
+                       WHERE m.id = mail_recipients.message_id AND m.kind = 'message' AND s.deleted_at IS NULL
+                         AND m.sender_project IS NOT NULL
+                         AND COALESCE((SELECT p.trusted FROM projects p WHERE p.id = m.sender_project), 0) = 0
+                         AND mail_recipients.recipient LIKE 'session:%' AND substr(mail_recipients.recipient, instr(mail_recipients.recipient, '/') + 1) = s.id
+                         AND s.project_id IS NOT m.sender_project))`,
+          )
         },
       },
     ]

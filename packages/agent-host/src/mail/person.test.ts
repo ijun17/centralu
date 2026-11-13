@@ -86,16 +86,23 @@ describe("the person's old mail, moved at ready, in the window", () => {
 })
 
 describe('mail held for the person, moved still held, released or dismissed from the window', () => {
-  /** Held for the trust of the sender's project (told of or not) and for a session's budget, as an older build left them */
+  /**
+   * Held for the trust of the sender's project (told of or not) and for a session's budget. The move ends the holds an earlier build left (#2243: the
+   * token guard and the first-contact hold are gone), so the holds are put on the moved rows after it, as today's trust gate and an older host's still-served
+   * mail would leave them
+   */
   function heldWorld() {
     const w = hostWorld()
     const t = w.clock.t - 1_000
     oldThread(w.store, { id: tid(2), owner: X, projectId: 'px', at: t }, [
-      { id: mid(3), sender: X, kind: 'note', body: 'untold policy', receipts: [{ recipient: B, held: 'policy' }] },
-      { id: mid(4), sender: X, kind: 'question', body: 'told policy', receipts: [{ recipient: B, held: 'policy', deliveredAt: t }] },
+      { id: mid(3), sender: X, kind: 'note', body: 'untold policy', receipts: [{ recipient: B }] },
+      { id: mid(4), sender: X, kind: 'question', body: 'told policy', receipts: [{ recipient: B, deliveredAt: t }] },
     ])
-    oldThread(w.store, { id: tid(3), owner: A, projectId: 'p1', at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'budget held', receipts: [{ recipient: B, held: 'budget' }] }])
-    return ready(w)
+    oldThread(w.store, { id: tid(3), owner: A, projectId: 'p1', at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'budget held', receipts: [{ recipient: B }] }])
+    const r = ready(w)
+    r.store.mailbox.hold(B, [mid(3), mid(4)], 'policy')
+    r.store.mailbox.hold(B, [mid(5)], 'budget')
+    return r
   }
 
   it("lists each with why and its chain; Release sends the budget's now, says the project's waits for its trust, and Dismiss keeps one from ever going", async () => {
@@ -232,8 +239,9 @@ describe('held mail the window lets go or drops, more cases', () => {
 
   it("Release on a row held for a project trusted since lets the project's held mail go", async () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(10), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', receipts: [{ recipient: B, held: 'policy' }] }])
+    oldThread(w.store, { id: tid(10), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', receipts: [{ recipient: B }] }])
     const r = ready(w)
+    r.store.mailbox.hold(B, [mid(10)], 'policy')
     w.store.projects.setProjectTrusted('px', true)
     expect(r.person.held('release', B, [mid(10)])).toEqual({ changed: 1 })
     await r.advance(2_000)
@@ -242,8 +250,9 @@ describe('held mail the window lets go or drops, more cases', () => {
 
   it("a deleted project's held mail is dropped after it is gone, and its senders are told its name", () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(11), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(11), sender: X, kind: 'note', body: 'held', receipts: [{ recipient: B, held: 'policy' }] }])
+    oldThread(w.store, { id: tid(11), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(11), sender: X, kind: 'note', body: 'held', receipts: [{ recipient: B }] }])
     const r = ready(w)
+    r.store.mailbox.hold(B, [mid(11)], 'policy')
     const name = r.person.projectName('px')
     dbOf(w).prepare(`DELETE FROM projects WHERE id = 'px'`).run()
     r.person.projectDeleted('px', name)
@@ -351,9 +360,11 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
   it('Release over rows of a trusted and an untrusted project is refused whole, before any goes', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'budget', receipts: [{ recipient: B, held: 'budget' }] }])
-    oldThread(w.store, { id: tid(24), owner: X, projectId: 'px', at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', receipts: [{ recipient: B, held: 'policy' }] }])
+    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'budget', receipts: [{ recipient: B }] }])
+    oldThread(w.store, { id: tid(24), owner: X, projectId: 'px', at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', receipts: [{ recipient: B }] }])
     const r = ready(w)
+    r.store.mailbox.hold(B, [mid(26)], 'budget')
+    r.store.mailbox.hold(B, [mid(27)], 'policy')
     expect(refusedFor(() => r.person.held('release', B, [mid(26), mid(27)]))).toBe('untrusted_project')
     expect(w.row(mid(26), B)?.held).toBe('budget')
   })

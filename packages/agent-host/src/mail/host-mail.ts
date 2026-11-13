@@ -344,7 +344,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         console.error(`[mail] taking back the notices of ended cards failed: ${errorMessage(e)}`)
       }
       try {
-        const moved = store.movePendingThreadMail(now(), (address) => reach.projectOf(address))
+        const moved = store.movePendingThreadMail(
+          now(),
+          (address) => reach.projectOf(address),
+          (m, recipient) => reach.holdFor(m, recipient) !== null,
+        )
         if (moved.messages > 0) console.error(`[mail] moved ${moved.messages} pending message(s) an older build left in its threads`)
       } catch (e) {
         // The move is one transaction: nothing moved, and the next ready tries again

@@ -241,7 +241,7 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
     const message = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
     const thread = { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07' }
     oldThread(w.store, { id: thread.id, owner: A, subject: 'about #12', at: w.clock.t }, [{ id: message.id, sender: A, kind: 'question', body: 'still open?', receipts: [{ recipient: B }] }])
-    w.store.movePendingThreadMail(w.clock.t, () => null)
+    w.store.movePendingThreadMail(w.clock.t, () => null, () => false)
     w.clock.t += 10
     w.run('b', { action: 'reply', thread: thread.id, text: 'yes' })
     expect(w.store.mailbox.feedOf(B, { limit: 1 })[0]).toMatchObject({ replyTo: message.id })

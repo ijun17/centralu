@@ -123,14 +123,22 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.tool.run('b', { action: 'read' }).text).toContain('CI is green on #12')
   })
 
-  it('mail an older build held for the person after telling its recipient of it is moved still held: the move releases nothing', () => {
+  it('mail an older build held for the person is moved: a hold today’s gate would not set is ended (#2243), one it would set, and the other holds, are kept, and nothing is released', () => {
     const w = hostWorld()
     const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, held: 'budget' })
     const note = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F05' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F05', owner: X, subject: 'fyi', at: w.clock.t }, [{ id: note.id, sender: X, kind: 'note', body: 'A note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'policy' }] }])
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F05', owner: A, subject: 'fyi', at: w.clock.t }, [{ id: note.id, sender: A, kind: 'note', body: 'A note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'policy' }] }])
+    // A note from Pex, whose project is not trusted, to a session of another project: today's gate holds it too (`reach.holdFor`)
+    const asked = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07', owner: X, projectId: 'px', subject: 'hello', at: w.clock.t }, [{ id: asked.id, sender: X, kind: 'note', body: 'May I?', receipts: [{ recipient: B, held: 'policy' }] }])
+    const kept = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F06' }
+    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F06', owner: X, subject: 'later', at: w.clock.t }, [{ id: kept.id, sender: X, kind: 'note', body: 'A later note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'uncertain' }] }])
     started(w)
-    expect(w.row(q.id, B)).toMatchObject({ held: 'budget' })
-    expect(w.row(note.id, B)).toMatchObject({ held: 'policy' })
+    // The token guard and the first-contact hold are gone: dismissed, not delivered, not listed. What today's gate holds, and the other holds, are carried as they were
+    expect(w.row(q.id, B)).toMatchObject({ held: 'dismissed' })
+    expect(w.row(note.id, B)).toMatchObject({ held: 'dismissed' })
+    expect(w.row(asked.id, B)).toMatchObject({ held: 'policy' })
+    expect(w.row(kept.id, B)).toMatchObject({ held: 'uncertain' })
   })
 })
 

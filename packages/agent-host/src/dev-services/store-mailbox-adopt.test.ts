@@ -46,6 +46,16 @@ class Versioned extends Store {
     newest = 65
     this.migrate()
   }
+
+  /** Runs every step up to `version` (this build's newest, for a store opened as the next host opens it) */
+  upgradeTo(version: number): void {
+    newest = version
+    try {
+      this.migrate()
+    } finally {
+      newest = 65
+    }
+  }
 }
 
 function v64Store(): Versioned {
@@ -195,7 +205,7 @@ const moved = (db: Database.Database) => rawRows<Moved>(db, `SELECT message_id, 
 describe('movePendingThreadMail', () => {
   it('the move copies each pending thread message once with its id and marks the old receipt handled', () => {
     const { store, db, ids } = upgraded()
-    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
+    expect(movePendingThreadMail(db, NOW, () => null, () => false)).toEqual({ messages: 7, recipients: 8 })
     const m = (k: string) => store.mailbox.message(ids[k] ?? '')
     expect(m('q')).toMatchObject({ kind: 'message', needsReply: true, legacyThread: ids.thread, origin: 'mail', facts: { legacyKind: 'question' }, rootId: ids.q, causeId: null, depth: 0 })
     expect(m('n')).toMatchObject({ kind: 'message', needsReply: false, facts: { legacyKind: 'note' } })
@@ -225,7 +235,7 @@ describe('movePendingThreadMail', () => {
 
   it('the move keeps a quiet report quiet and an app’s needsOwner', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(store.mailbox.message(ids.rep ?? '')?.facts.quiet).toBe(true)
     expect(store.mailbox.message(ids.t ?? '')?.facts.quiet).toBeUndefined()
     expect(store.mailbox.message(ids.ap ?? '')?.facts).toMatchObject({ needsOwner: true })
@@ -235,9 +245,9 @@ describe('movePendingThreadMail', () => {
 
   it('a second move finds nothing', () => {
     const { store, db } = upgraded()
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     const after = moved(db)
-    expect(movePendingThreadMail(db, NOW + 1, () => null)).toEqual({ messages: 0, recipients: 0 })
+    expect(movePendingThreadMail(db, NOW + 1, () => null, () => false)).toEqual({ messages: 0, recipients: 0 })
     expect(moved(db)).toEqual(after)
     store.close()
   })
@@ -247,31 +257,32 @@ describe('movePendingThreadMail', () => {
     const was = receipts(db)
     // The last statement of the move fails after the copies were written: the crash of a host between the two sides
     db.exec(`CREATE TRIGGER fail_handled BEFORE UPDATE OF handled_at ON mail_receipts BEGIN SELECT RAISE(ABORT, 'crash'); END`)
-    expect(() => movePendingThreadMail(db, NOW, () => null)).toThrow(/crash/)
+    expect(() => movePendingThreadMail(db, NOW, () => null, () => false)).toThrow(/crash/)
     expect(moved(db)).toEqual([])
     expect(rawRows(db, `SELECT id FROM mail`)).toEqual([])
     expect(receipts(db)).toEqual(was)
     db.exec(`DROP TRIGGER fail_handled`)
-    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
+    expect(movePendingThreadMail(db, NOW, () => null, () => false)).toEqual({ messages: 7, recipients: 8 })
     store.close()
   })
 
   it('the move leaves history and mail past retention alone', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(store.mailbox.message(ids.a ?? '')).toBeUndefined()
     expect(store.mailbox.message(ids.old ?? '')).toBeUndefined()
     store.close()
   })
 
-  it('moved undelivered rows stay pending, and every old hold is carried: the move lets nothing held go', () => {
+  it('moved undelivered rows stay pending, and every old hold is carried but the ones nothing holds now (#2243)', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([ids.n, ids.e, ids.rep])
     expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toEqual([ids.q])
-    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBe('policy')
+    // The auto receiver's first-contact hold went with D10: ended as it is moved, not listed in Waiting
+    expect(store.mailbox.recipient(ids.pol ?? '', S1)?.held).toBe('dismissed')
     expect(store.mailbox.recipient(ids.ap ?? '', S1)?.held).toBe('loop')
-    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap, ids.pol])
+    expect(store.mailbox.heldRows().map((r) => r.messageId)).toEqual([ids.ap])
     // A moved row is settled `legacy`: never watched, so neither reminded nor waited on
     expect(store.mailbox.watchedTo(S3)).toEqual([])
     store.close()
@@ -279,11 +290,11 @@ describe('movePendingThreadMail', () => {
 
   it('a reply whose target moved in an earlier run keeps the target’s root', () => {
     const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     const reply = `${HOST}.m_agreed`
     store.mail.insertMessage({ id: reply, threadId: ids.thread ?? '', sender: S3, kind: 'answer', urgent: false, needsOwner: false, wake: null, replyTo: ids.q ?? null, body: 'agreed', facts: {}, dedupeKey: null, createdAt: NOW + 10 })
     store.mail.insertReceipt(reply, S1, NOW + 10)
-    movePendingThreadMail(db, NOW + 20, () => null)
+    movePendingThreadMail(db, NOW + 20, () => null, () => false)
     expect(store.mailbox.message(reply)).toMatchObject({ replyTo: ids.q, rootId: ids.q })
     store.close()
   })
@@ -294,7 +305,7 @@ describe('movePendingThreadMail', () => {
     const inHand = (threadId: string, recipient: string) =>
       rawRows(db, `SELECT 1 FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id WHERE m.thread_id = ? AND r.recipient = ? AND r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released')`, threadId, recipient).length > 0
     expect(inHand(`${HOST}.t_work`, S2)).toBe(true)
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(inHand(`${HOST}.t_work`, S2)).toBe(false)
     expect(inHand(ids.thread ?? '', S3)).toBe(false)
     expect(receipts(db).find((r) => r.message_id === ids.q && r.recipient === S2)?.read_at).toBe(NOW)
@@ -309,7 +320,7 @@ describe('movePendingThreadMail', () => {
     heldV64(store, S3, [id], 'policy')
     store.mail.releaseHeld(S3, [id], null, NOW - 500)
     expect(receipts(db).find((r) => r.message_id === id)?.held).toBe('released')
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(store.mailbox.recipient(id, S3)).toMatchObject({ held: 'released', deliveredAt: null })
     expect(store.mailbox.pendingFor(S3, NOW).map((p) => p.message.id)).toContain(id)
     store.close()
@@ -323,7 +334,7 @@ describe('movePendingThreadMail', () => {
     }
     post(`${HOST}.m_first`, null, NOW - 1000)
     post(`${HOST}.m_back`, `${HOST}.m_first`, NOW - 5000)
-    movePendingThreadMail(db, NOW, () => null)
+    movePendingThreadMail(db, NOW, () => null, () => false)
     expect(store.mailbox.message(`${HOST}.m_back`)).toMatchObject({ replyTo: `${HOST}.m_first`, rootId: `${HOST}.m_first` })
     store.close()
   })
@@ -360,7 +371,7 @@ describe('movePendingThreadMail', () => {
   it('the move does not fail on such a row: it moves as a message with the kind it was written with, and facts that are not an object as {}', () => {
     const { store, db, ids } = upgraded()
     spoil(db, ids)
-    expect(movePendingThreadMail(db, NOW, () => null)).toEqual({ messages: 7, recipients: 8 })
+    expect(movePendingThreadMail(db, NOW, () => null, () => false)).toEqual({ messages: 7, recipients: 8 })
     expect(store.mailbox.message(ids.n ?? '')).toMatchObject({ kind: 'message', needsReply: false, facts: { legacyKind: 'from_a_newer_build' } })
     expect(store.mailbox.message(ids.q ?? '')).toMatchObject({ kind: 'message', needsReply: true, facts: { legacyKind: 'question' } })
     expect(store.mailbox.message(ids.t ?? '')).toMatchObject({ kind: 'task', facts: { legacyKind: 'assign' } })
@@ -418,12 +429,12 @@ describe('the move is at most once, whatever the old receipts were', () => {
         store.upgrade()
         if (expected.length > 0 && random() < 0.5) {
           db.exec(`CREATE TRIGGER crash BEFORE UPDATE OF handled_at ON mail_receipts BEGIN SELECT RAISE(ABORT, 'crash'); END`)
-          expect(() => movePendingThreadMail(db, NOW, () => null)).toThrow(/crash/)
+          expect(() => movePendingThreadMail(db, NOW, () => null, () => false)).toThrow(/crash/)
           db.exec(`DROP TRIGGER crash`)
           expect(moved(db), `seed ${seed}`).toEqual([])
         }
-        const first = movePendingThreadMail(db, NOW, () => null)
-        const second = movePendingThreadMail(db, NOW + 1, () => null)
+        const first = movePendingThreadMail(db, NOW, () => null, () => false)
+        const second = movePendingThreadMail(db, NOW + 1, () => null, () => false)
         expect(moved(db).map((r) => `${r.message_id}|${r.recipient}`), `seed ${seed}`).toEqual(expected)
         expect(first.recipients, `seed ${seed}`).toBe(expected.length)
         expect(second, `seed ${seed}`).toEqual({ messages: 0, recipients: 0 })
@@ -446,5 +457,58 @@ describe('the move is at most once, whatever the old receipts were', () => {
     }
     // The root rule above was checked on replies that were linked, not only on messages that answer nothing
     expect(linked).toBeGreaterThan(5)
+  })
+})
+
+describe('holds an earlier build left, on a store opened from v64 (#2243)', () => {
+  it('ends the token guard and the first-contact hold as the move carries them, and keeps the untrusted asker’s request while today’s gate holds it', () => {
+    const store = v64Store()
+    const r = store.mail
+    const at = NOW - 60_000
+    const SA = sessionAddress(HOST, 'sa')
+    // The Assistant: a session with no project that is the orchestrator (the v64 build's columns)
+    store.raw
+      .prepare(`INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, created_at, permission_preset)
+        VALUES ('sa', NULL, 'claude', NULL, 'assistant', 0, 'idle', 1, 0, 1, 'normal')`)
+      .run()
+    const thread = (id: string, owner: string, assignee: string | null) =>
+      r.insertThread({ id: `${HOST}.${id}`, home: HOST, projectId: null, subject: id, origin: 'mail', depth: 0, parentId: null, follows: [], state: 'open', owner, assignee, next: null, links: {} }, at)
+    const post = (id: string, threadId: string, sender: string, kind: 'assign' | 'note', to: string) => {
+      r.insertMessage({ id: `${HOST}.${id}`, threadId: `${HOST}.${threadId}`, sender, kind, urgent: false, needsOwner: false, wake: null, replyTo: null, body: id, facts: {}, dedupeKey: null, createdAt: at })
+      r.insertReceipt(`${HOST}.${id}`, to, at)
+      return `${HOST}.${id}`
+    }
+    // An untrusted project's session asks the Assistant (held `policy` by the old trust gate); a note held by the `auto` receiver's hold; one by the token guard
+    thread('t_ask', S2, SA)
+    const request = post('m_request', 't_ask', S2, 'assign', SA)
+    thread('t_auto', S1, null)
+    const auto = post('m_auto', 't_auto', S3, 'note', S1)
+    const budget = post('m_budget', 't_auto', S1, 'note', S3)
+    // Not held by the old build: the delivery will judge it by today's gate, and may hold it
+    const plain = post('m_plain', 't_auto', S3, 'note', S1)
+    heldV64(store, SA, [request], 'policy')
+    heldV64(store, S1, [auto], 'policy')
+    heldV64(store, S3, [budget], 'budget')
+
+    // This build opens the store: steps 65 to 72 run (72 finds nothing yet), and then the host's start moves what the v64 build left pending
+    store.upgradeTo(72)
+    expect(store.mailbox.heldRows()).toEqual([])
+    // Today's gate, as the host gives it (`reach.holdFor`): a message from the project of S2, which is untrusted here, is held
+    const holdsNow = (m: { kind: string; senderProject: string | null }) => m.kind === 'message' && m.senderProject === 'px'
+    expect(movePendingThreadMail(store.raw, NOW, (address) => (address === S2 ? 'px' : null), holdsNow).recipients).toBe(4)
+    expect(store.mailbox.heldRows().map((h) => [h.messageId, h.held])).toEqual([[request, 'policy']])
+    expect(store.mailbox.recipient(auto, S1)?.held).toBe('dismissed')
+    expect(store.mailbox.recipient(budget, S3)?.held).toBe('dismissed')
+    // Never delivered, as before: neither an ended hold nor the request is pending for a turn
+    expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([plain])
+    expect(store.mailbox.pendingFor(S3, NOW)).toEqual([])
+    // A moved row is judged by the delivery like any other: held `policy` by today's gate, it is still held after the next starts' moves (`records.hold` writes `held` alone)
+    expect(store.mailbox.recipient(plain, S1)).toMatchObject({ held: null, settled: 'legacy' })
+    store.mailbox.hold(S1, [plain], 'policy')
+    movePendingThreadMail(store.raw, NOW + 1_000, (address) => (address === S2 ? 'px' : null), holdsNow)
+    movePendingThreadMail(store.raw, NOW + 2_000, (address) => (address === S2 ? 'px' : null), holdsNow)
+    expect(store.mailbox.recipient(plain, S1)).toMatchObject({ held: 'policy', settled: 'legacy' })
+    expect(store.mailbox.heldRows().map((h) => h.messageId).sort()).toEqual([plain, request].sort())
+    store.close()
   })
 })

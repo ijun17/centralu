@@ -177,8 +177,12 @@ export class Store extends MigrationRunner {
    * The thread mail an older build left pending, moved into the message tables and marked handled in the old ones, in one transaction
    * (docs/plans/mailbox.md §6.3): run after every `ready` from M3a to M7, before delivery starts. A second run finds nothing
    */
-  movePendingThreadMail(now: number, projectOf: (address: string) => string | null): { messages: number; recipients: number } {
-    return movePendingThreadMail(this.db, now, projectOf)
+  movePendingThreadMail(
+    now: number,
+    projectOf: (address: string) => string | null,
+    holdsNow: Parameters<typeof movePendingThreadMail>[3],
+  ): { messages: number; recipients: number } {
+    return movePendingThreadMail(this.db, now, projectOf, holdsNow)
   }
 
   /** An old thread's messages, read-only (§6.3): the earlier history of a moved message (`legacy_thread`) */
