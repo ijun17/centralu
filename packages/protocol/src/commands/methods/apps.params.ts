@@ -342,6 +342,12 @@ export const appsParams = {
    */
   'apps.setShared': z.object({ appId: AppId, projectId: ProjectId, shared: z.boolean() }),
   /**
+   * Turns a project app off on this computer, or back on (#1938, docs/plans/remote-hub.md §13.7). For the copy of an app
+   * that another computer runs for the same repository: off, it never starts, is never called and is given to no session
+   * here, and a running copy stops. On by default; a user-folder app has no such switch (refused).
+   */
+  'apps.setOff': z.object({ appId: AppId, projectId: ProjectId, off: z.boolean() }),
+  /**
    * Sets, changes (`value`) or removes (`null`) one of an app's secret values (M4 E, the secrets
    * field). The value lives only in a 0600 file on this machine — never in the response, the
    * list, logs or run history (the list only says whether each name is present or not,

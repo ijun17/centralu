@@ -113,6 +113,7 @@ export const appsResults = {
     ),
   }),
   'apps.setShared': z.object({ ok: z.literal(true) }),
+  'apps.setOff': z.object({ ok: z.literal(true) }),
   'apps.setSecret': z.object({ ok: z.literal(true) }),
   'apps.importPrepare': z.object({ token: z.string(), review: AppReview }),
   'apps.importCommit': ExternalAppInfo,

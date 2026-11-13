@@ -7,7 +7,7 @@ import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { rpcError } from '../rpc-error.js'
-import { AppAccess, writeShared } from './app-access.js'
+import { AppAccess, writeOff, writeShared } from './app-access.js'
 import type { WhenAsked } from './asked-gate.js'
 import type { AppSessions, AppSessionsHost } from './app-sessions.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -243,6 +243,20 @@ export class SessionAppWiring {
     }
     writeShared(this.host.store.settings, ref, shared)
     rt.sharingChanged()
+  }
+
+  /**
+   * Turns a project app off on this computer, or back on (#1938, `apps.setOff`, docs/plans/remote-hub.md §13.7). Stored
+   * beside sharing; the runtime reads it in `blocker`, stops a running copy, and the session side recounts, so no
+   * session here keeps an app that is off.
+   */
+  setAppOff(ref: { projectId: string; appId: string }, off: boolean): void {
+    const rt = this.requireAppsHub().rt
+    if (!rt.list().some((a) => sameApp(a, ref))) {
+      throw rpcError(`No such app: ${ref.appId}`)
+    }
+    writeOff(this.host.store.settings, ref, off)
+    rt.offChanged(ref)
   }
 
   requireAppAccess(): AppAccess {

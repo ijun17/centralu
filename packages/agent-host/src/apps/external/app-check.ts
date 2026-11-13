@@ -23,6 +23,7 @@ const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
   invalid: 'centralu.app.json',
   untrusted: 'trust',
   unconfirmed: 'review',
+  off: 'app',
   removing: 'app',
   failed: 'start',
 }

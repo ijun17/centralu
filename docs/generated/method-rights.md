@@ -187,6 +187,7 @@ Asks only for some parameters (everyday otherwise):
 
 - `agents.createSession`, when the preset is above `normal`, or it carries a hub's preset (`fromHub`)
 - `agents.updateSettings`, when it sets a preset other than `safe`
+- `apps.setOff`, when it turns the app back on
 - `apps.setShared`, when it shares the app
 - `machines.setAsks`, when it turns the switch on
 - `machines.update`, when `when` is `now`, or the hub's automatic updates are off, or the machine does not run an older release that the update brings to the hub's own version

@@ -143,6 +143,7 @@ The schemas are in `packages/protocol/src/commands/methods/apps.ts` (the `apps.*
 | `apps.create`, `apps.builder`, `apps.createBuilder`, `apps.check`, `apps.askBuilder`, `apps.sendError` | The build loop ([build-loop.md](build-loop.md)) |
 | `apps.setSecret` | Set, replace or clear one declared secret ([what-an-app-is.md](what-an-app-is.md#where-apps-live)); the value is never returned |
 | `apps.setShared` | Share a project app with the person's other projects, or stop ([other-projects-apps.md](other-projects-apps.md)) |
+| `apps.setOff` | Turn a project app off on this computer, or back on: the copy of an app another computer runs ([plans/remote-hub.md](../plans/remote-hub.md) §13.7) |
 | `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | Stage an import and return the review; bring it in, turned off or enabled with the review's key; drop the staging ([handing-over.md](handing-over.md)) |
 | `apps.review`, `apps.enable` | The review of an imported app waiting for the person; enable it with that review's key ([handing-over.md](handing-over.md)) |
 | `apps.versions`, `apps.restoreVersion` | Kept versions of a user-folder app, or the git commits that touched a project app; restore a kept version ([handing-over.md](handing-over.md)) |

@@ -2,7 +2,7 @@ import { storePermissionBook } from '../app-permission-book.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import type { Store } from '../dev-services/store.js'
-import { readShared, writeShared } from '../sessions/app-access.js'
+import { readOff, readShared, writeShared } from '../sessions/app-access.js'
 import type { SessionManager } from '../sessions/manager.js'
 import { plantAttachApp, type PlantKit } from '../sessions/session-apps.test-helpers.js'
 import { LinkedApps } from './linked-apps.js'
@@ -23,6 +23,7 @@ export function hostApps(store: Store, mgr: SessionManager) {
     runs: storeRunLedger(store),
     permissions: storePermissionBook(store),
     shared: (ref) => readShared(store.settings, ref),
+    off: (ref) => readOff(store.settings, ref),
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()

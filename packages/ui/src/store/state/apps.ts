@@ -72,6 +72,11 @@ export type AppsSlice = {
    */
   setAppShared(projectId: string, appId: string, shared: boolean): Promise<void>
   /**
+   * Turns a project app off on its computer, or back on (#1938): for the copy of an app another computer runs for the
+   * same repository. The list follows from the host's broadcast; a failure is reported as a toast.
+   */
+  setAppOff(projectId: string, appId: string, off: boolean): Promise<void>
+  /**
    * The app-import window (M4 E-3) — opened by the sidebar's Import and by deep links (E-4).
    * `source` is the origin to pre-fill in the window (the deep link's address), and `fromLink`
    * tells the window it was "opened by a link." The window reads or downloads nothing until the

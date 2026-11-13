@@ -71,6 +71,14 @@ export function userAppMachine(info: ExternalAppInfo): string | undefined {
 
 /** An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11) */
 export function appStatus(info: ExternalAppInfo): AppStatusView {
+  /*
+   * Turned off on its computer (#1938): the copy of an app another computer runs for the same repository. Its status
+   * reads `stopped` (an older window's word for it), so `off` comes first
+   */
+  if (info.off === true) {
+    const where = info.machine ? 'that computer, so it does not start there' : 'this computer, so it does not start here'
+    return { label: 'Off', reason: `It is turned off on ${where}. Turn it on in Settings → Apps.`, runnable: false, tone: 'quiet' }
+  }
   switch (info.status) {
     case 'running':
       return { label: 'Running', reason: null, runnable: true, tone: 'quiet' }

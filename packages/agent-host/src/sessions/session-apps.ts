@@ -5,7 +5,7 @@ import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@
 import type { AppCallOpts, AppToolResult, AppToolSpec, SessionAppEntry, SessionApps, SessionAppTools } from '../adapters/contract.js'
 import { presetAsks, runsUnasked } from '../apps/contract.js'
 import { issuesText } from './tool-answers.js'
-import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { unusableAs, type AppCallOutcome, type AppRef, type ExternalApps } from '../apps/external/runtime.js'
 import { LINKED_FRESH_MS, LinkedApps, type LinkedTool } from '../links/linked-apps.js'
 import { linkedRunStatus, runsNotHere, standIns, type GivenApp } from './linked-session-apps.js'
 import { failure, toResult } from './app-results.js'
@@ -90,14 +90,6 @@ export type SessionAppCall = {
   /** The call's outcome (the real one, even for a call that was already handed back early) */
   outcome: Promise<AppCallOutcome>
 }
-
-/**
- * States of an app that cannot be attached to a session (decision 4) — an invalid manifest, an
- * untrusted project, halted after repeated failures, and an imported app the person has not
- * turned on yet (M4 E-3). Even when not attached, the runtime blocks it again on every call (in
- * case the name lingers in a Codex thread).
- */
-const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 /** An app of the session by its server name; `withheld`: a checkout's copy it is not run as, and why (`standIns`) */
 type Hit = { ref: AppRef; server: string; withheld?: string }
@@ -354,8 +346,11 @@ export class SessionAppsHub {
      * own project's included, and under `auto` too. #603's opening of an untrusted project's apps to an auto session
      * no longer applies to apps; the project's sessions still run and may read its code
      */
-    const usable = this.appsOf(session.id).filter((a) => !UNUSABLE.has(a.status))
-    // A started agent on a machine works for its parent's project on the hub (#1938): its checkout's copies never run for it
+    /*
+     * A started agent on a machine works for its parent's project on the hub (#1938): its checkout's copies never run for it,
+     * so one that cannot run here (off on this computer, §13.7, or broken) still holds its name for the hub's app
+     */
+    const usable = this.appsOf(session.id).filter((a) => unusableAs(a) === null || runsNotHere(this.opts.linked, session, a))
     const given = standIns(this.opts.linked, session, usable.filter((a) => this.gives(session, a)))
     const hits = this.named(session, given).sort((x, y) => x.server.localeCompare(y.server))
     /*
@@ -465,7 +460,8 @@ export class SessionAppsHub {
     if (runsNotHere(this.opts.linked, session, app)) return { reachable: false, reason: 'unavailable' }
     // An untrusted project's apps attach nowhere, auto included (owner, #1141)
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
-    if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
+    const unusable = unusableAs(app)
+    if (unusable !== null) return { reachable: false, reason: 'app-unusable', status: unusable }
     if (selfServed && !this.opts.onDemand!.allowed(session, app)) return { reachable: false, reason: 'other-project' }
     return { reachable: true }
   }

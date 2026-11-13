@@ -625,6 +625,11 @@ export function createRpcHandler(
       mgr.apps.setAppShared({ projectId, appId }, shared)
       return { ok: true as const }
     },
+    'apps.setOff': async ({ appId, projectId, off }) => {
+      // The copy of an app another computer runs, off on this one (#1938) — the manager stores it and the runtime stops it
+      mgr.apps.setAppOff({ projectId, appId }, off)
+      return { ok: true as const }
+    },
     // Import (M4 E-3) — prepare (waiting room) → the person looks it over → admit (disabled at first,
     // with a review step if requested). All the judgment calls are made by the runtime's handoff
     'apps.importCommit': async ({ token, enable, reviewKey, parent }) => {

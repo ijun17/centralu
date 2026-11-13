@@ -121,6 +121,13 @@ export const ExternalAppInfo = z.object({
    */
   shared: z.boolean().optional(),
   /**
+   * The person turned this project app off on this computer (#1938, `apps.setOff`, docs/plans/remote-hub.md §13.7): its
+   * project's checkout here carries a copy of an app another computer runs, so the copy never starts, is never called and
+   * is given to no session here. True only when so; its `status` then reads `stopped`. Absent from an older host, which
+   * has no such switch: on.
+   */
+  off: z.boolean().optional(),
+  /**
    * A root app (#1141): the manifest stands at its project's own root, so the project is the app — `dir` is the
    * project's folder, and the app is listed with its project rather than under it. True only when so; absent from an
    * older host, which has none.

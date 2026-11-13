@@ -270,6 +270,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'apps.askBuilder': { kind: 'view', keys: ['projectId', 'instanceId'], orMachine: true, result: builderSession },
   'apps.check': project(),
   'apps.setShared': project(),
+  'apps.setOff': project(),
   'apps.setSecret': app(),
   'apps.review': project(),
   'apps.enable': project(appInfo),

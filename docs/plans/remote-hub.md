@@ -1634,11 +1634,11 @@ would be dead code after one use, and no other app has the split today. In this 
    (idempotent, at most 500, words-tools.mjs l.10).
 3. **The owner's answers.** Record the copy's unrecorded ones (`list_owner_answers`, then `comment` and
    `mark_answer_recorded`, as AGENTS.md says).
-4. **`opened-prs.json`.** Entries of pull requests still open are added to the app's machine's file by `repo#number`,
-   never over an existing entry, with that app stopped. Their `notice` is dropped: it is a MAC under the copy machine's
-   key naming that machine's session, and opens nothing on the app's machine. The queue then cannot post a conflict to
-   those few authors [unchecked how opened.mjs treats an entry without `notice`; PR 2 checks it, and leaves such
-   entries out if it cannot].
+4. **`opened-prs.json`: nothing moves** (checked in PR 2). An entry's only use is its `notice`, a MAC under the copy
+   machine's key that opens nothing on the app's machine; without it the queue routes nothing by the entry
+   (`authorRoute` relays, `ownDraft` is false, queue.mjs and queue-driver.mjs), and `noteOpened` never keeps one.
+   A conflict on one of those pull requests is relayed by the session that queues it, as for one opened by an older
+   Centralu.
 5. Turn the copy off (§13.7).
 
 Afterwards there is one private word list, on the app's machine. Every session that posts through the board app, on any
@@ -1778,3 +1778,19 @@ Where the code differs from the design above, and why:
   never sent again by itself: it ends as "may or may not have done this", said once, with the whole `run_status` call
   when the run id is known. A session's long calls are kept by session and run id: a linked host chooses its run ids.
 - **Not in PR 1:** the hub's window showing a machine's app capability question (unchecked whether it does).
+
+### 13.16 As built: PR 2
+
+- **The switch is "Off on this computer"** on a project app's row in that project's Settings → Apps ("Off on <machine>"
+  for a linked machine's project), and nowhere else: a user-folder app has none. Turning it off stops a running copy
+  and announces the list; the row reads "Off" with the reason. Turning it back on is asked under a session's
+  credential, as trusting is (method-rights.ts); turning it off is not, since it only takes reach away.
+- **One reading of "cannot run"** (`unusableAs`, runtime.ts) replaces the three copies of the unusable states in
+  session-apps.ts, app-access.ts and linked-app-calls.ts, so `off` is refused the same way on every path.
+- **What a session on the copy's machine gets.** An ordinary session (not started by a hub) runs its checkout's copy,
+  in PR 1 as before it, until the copy is turned off here; then it has no such app, as with an untrusted one, and attaching it is refused
+  with the switch named. A
+  session started by a hub that gives apps never runs the copy (§13.5), and an off or broken copy still holds the name
+  the hub's app takes.
+- **The merge (§13.8) is not run by this PR.** It comes with a read-only readout of steps 1 to 4 for two data folders
+  (in the PR's description, not the repository: it is used once), checked on made-up folders only.

@@ -73,6 +73,19 @@ import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsD
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
 export { resultText } from './app-calls.js'
 
+const UNUSABLE_STATUS = new Set<ExternalAppInfo['status']>(['invalid', 'untrusted', 'unconfirmed', 'failed'])
+
+/**
+ * Why a listed app is given to no session, here or on a linked host (decision 4), or null when it may be: an invalid
+ * manifest, an untrusted project, an imported app not turned on yet (M4 E-3), halted after repeated failures, or turned
+ * off on this computer (#1938, `off`). The one rule for every list a session is given; `blocker` refuses each call again
+ * (in case the name lingers in a Codex thread).
+ */
+export function unusableAs(a: Pick<ExternalAppInfo, 'status' | 'off'>): string | null {
+  if (a.off === true) return 'off'
+  return UNUSABLE_STATUS.has(a.status) ? a.status : null
+}
+
 export class ExternalApps {
   /** Scope key → (app id → entry) */
   private scopes = new Map<string, { scope: Scope; apps: Map<string, AppEntry> }>()
@@ -406,6 +419,17 @@ export class ExternalApps {
    * attached (a session that attached the app from another project loses it when sharing goes off).
    */
   sharingChanged(): void {
+    this.appsChanged()
+  }
+
+  /**
+   * The person turned a project app off on this computer, or back on (#1938, §13.7); the store already says which. Off
+   * stops a running copy at once, as losing trust does, and the list is announced again so the session side takes it
+   * from every session here. On starts nothing: the app starts the next time it is needed.
+   */
+  offChanged(ref: AppRef): void {
+    const e = this.find(ref)
+    if (e && this.blocker(e)?.kind === 'off') void this.lifecycle.halt(e, 'turned off on this computer')
     this.appsChanged()
   }
 
@@ -899,6 +923,7 @@ export class ExternalApps {
       // A root app has no share switch: its project's trust decides (#1141), so it never carries the mark
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
+      ...(this.isOff(e) ? { off: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141). Always, once the manifest is read, an empty
       // one too: absent then means it could not be read (or an older host said nothing), which the Assistant's trust
       // card tells apart from asking for nothing (#1219)
@@ -932,6 +957,8 @@ export class ExternalApps {
    *                included (owner, #1141; #603's opening no longer applies to apps, so no caller is asked about)
    *   unconfirmed  an imported app the person has not reviewed and enabled (E-3) — checked on every call: if server
    *                or uses changes after being enabled, it is blocked starting from the next startup
+   *   off          a project app the person turned off on this computer (#1938, §13.7): the copy of an app another
+   *                computer runs, so it never starts here, and a busy one is not started again after a restart
    *   removing     its folder is moving to the trash (`removeUserApp`) — nothing starts it meanwhile
    *   failed       it stopped after `maxFailures` failures in a row. `fresh` leaves this out: for a door that is
    *                about to give the app a fresh start itself (a check, a reload on changed files)
@@ -943,6 +970,9 @@ export class ExternalApps {
     }
     const held = this.held(e)
     if (held) return { kind: 'unconfirmed', reason: held }
+    if (this.isOff(e)) {
+      return { kind: 'off', reason: 'This app is turned off on this computer. Turn it on in its project’s Settings → Apps to run it here.' }
+    }
     if (this.removing.has(appKeyOf(e.ref))) return { kind: 'removing', reason: 'This app is being removed' }
     if (e.life.gaveUp && !opts.fresh) {
       return {
@@ -953,6 +983,11 @@ export class ExternalApps {
     return null
   }
 
+  /** A project app the person turned off here (#1938); a user-folder app has no such switch */
+  private isOff(e: AppEntry): boolean {
+    return e.ref.projectId !== null && this.deps.off?.(e.ref) === true
+  }
+
   private status(e: AppEntry): ExternalAppInfo['status'] {
     const blocked = this.blocker(e)
     /*
@@ -961,7 +996,9 @@ export class ExternalApps {
      * It reads as what it is until its folder moves: running while `removeUserApp` stops it, then stopped — or
      * failed, if it had stopped after repeated failures (`blocker` names removal before that).
      */
-    if (blocked && blocked.kind !== 'removing') return blocked.kind
+    if (blocked && blocked.kind !== 'removing' && blocked.kind !== 'off') return blocked.kind
+    // Nor has an app turned off here (#1938), for the same reason: it reads stopped, and the list's `off` says why
+    if (blocked?.kind === 'off') return 'stopped'
     const L = e.life
     if (L.gaveUp) return 'failed'
     if (L.proc?.alive) return 'running'

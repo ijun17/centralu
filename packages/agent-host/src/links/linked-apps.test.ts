@@ -72,6 +72,21 @@ describe("a hub's session uses a machine's project app (#1938)", () => {
     expect(machine.apps!.rt.runs({ projectId: 'p-remote', appId: 'board' })).toEqual([])
   })
 
+  it('is not offered, and is refused there, once the person turns it off on the machine (§13.7)', async () => {
+    const { machine, hub, access, live } = await world()
+    await access.refreshLinked('h1')
+    const attaching = access.attach('h1', 'Remote box/remote-project/board')
+    await hub.answer('allow')
+    expect(await attaching).toMatchObject({ ok: true })
+
+    machine.mgr.apps.setAppOff({ projectId: 'p-remote', appId: 'board' }, true)
+    const r = await live.call('app-board', 'peek', {})
+    expect(r.isError).toBe(true)
+    expect(machine.apps!.rt.runs({ projectId: 'p-remote', appId: 'board' })).toEqual([])
+    await access.refreshLinked('h1')
+    expect(access.find('h1')).toEqual({ ok: true, apps: [] })
+  })
+
   it('answers that the machine is away, naming it, and runs nothing; a link lost mid-call says it may have run, with its run id', async () => {
     const { machine, hub, access, live } = await world()
     await access.refreshLinked('h1')
