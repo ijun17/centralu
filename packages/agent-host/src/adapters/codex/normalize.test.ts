@@ -963,24 +963,27 @@ describe('what a Codex thread keeps past a turn, when the process ends (#2027)',
 })
 
 describe('an active goal whose turn was stopped (#2027, #2248 review)', () => {
-  // Real frames: the goal set, a turn the person stopped and the next turn's start
+  // Real frames, in the order they came: the goal set, then from `interrupt` the turn the person stopped and the turn that started after it
   const goal = recordedNotifications('goal-set', 'thread/goal/updated')
-  const stopped = recordedNotifications('interrupt', 'turn/completed').filter((n) => asObj(asObj(n.params).turn).status === 'interrupted')
-  const started = recordedNotifications('interrupt', 'turn/started')
+  const frames = recordedNotifications('interrupt')
+  const stop = frames.findIndex((n) => n.method === 'turn/completed' && asObj(asObj(n.params).turn).status === 'interrupted')
+  const stopped = frames[stop]
+  const next = frames.slice(stop + 1).find((n) => n.method === 'turn/started')
   const listed = (out: ReturnType<CodexChildTracker['own']>) => out.flatMap((e) => (e.type === 'background_tasks' ? [e.live.map((t) => t.kind)] : []))
 
-  it('is not listed once the turn ends stopped, so the session can sleep; a turn that starts lists it again', () => {
-    expect(stopped).toHaveLength(1)
+  it('is not listed once the turn ends stopped, so the session can sleep; the next turn that starts lists it again', () => {
+    expect(stopped).toBeDefined()
+    expect(next).toBeDefined()
     const tracker = new CodexChildTracker(S)
     expect(listed(goal.flatMap((n) => tracker.own(n)))).toEqual([['other']])
-    expect(listed(tracker.own(stopped[0]!))).toEqual([[]])
-    expect(listed(tracker.own(started[0]!))).toEqual([['other']])
+    expect(listed(tracker.own(stopped!))).toEqual([[]])
+    expect(listed(tracker.own(next!))).toEqual([['other']])
   })
 
   it('is listed again when Codex says more of it', () => {
     const tracker = new CodexChildTracker(S)
     goal.forEach((n) => tracker.own(n))
-    tracker.own(stopped[0]!)
+    tracker.own(stopped!)
     expect(listed(goal.flatMap((n) => tracker.own(n)))).toEqual([['other']])
   })
 })

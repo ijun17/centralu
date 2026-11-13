@@ -297,7 +297,10 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
   Their tests replay `background-kept` and `goal-set` (`adapters/codex/replay.test.ts`): the shell is listed before
   turn 1's end goes out and ended `completed` later; the goal listed while active and gone once cleared. Both fail with
   the tracker's hook taken out. The stopped-goal rule is tested on real frames (`normalize.test.ts`: the goal of
-  `goal-set`, the stopped turn and the next turn's start of `interrupt`) and fails without it.
+  `goal-set`, then from `interrupt` the stopped turn and the `turn/started` that follows it, in recorded order) and
+  fails without it. Known and left: the stop is not remembered across a process end, so a resume with no turn (an app
+  restart) reads `thread/goal/get` active and lists the goal again until a turn runs or it is cleared; and a
+  `thread/goal/updated` active sent after the stopped turn would list it again with no turn (not seen live).
 - **Deep review** (#2248, Opus on the Mac with a live codex-cli 0.160.0): an idle sleep and wake (live again in 0.15 s,
   first text +3.0 s, the turn-1 word recalled); a command kept past its turn (listed, slept only after it ended); an
   active goal (listed across three turns Codex started, slept after it completed); a Stop during a running command
