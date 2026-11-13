@@ -73,6 +73,8 @@ import { offRefusal } from './unusable.js'
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
 export { resultText } from './app-calls.js'
+/** What keeps a listed app from being given or run, and its wording to an agent (`unusable.ts`) — the same door */
+export { offRefusal, unusableAs } from './unusable.js'
 
 export class ExternalApps {
   /** Scope key → (app id → entry) */
