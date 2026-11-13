@@ -235,6 +235,19 @@ describe('evaluation (§18.5)', () => {
     expect(notices(next, A)).toHaveLength(1)
   })
 
+  it('an owner deleted while no delivery ran loses its watches when one starts, and nothing fires to it', () => {
+    const w = hostWorld()
+    worlds.push(w)
+    w.delivery.start()
+    const id = idOf(watch(w, 'a', 'in 10m'))
+    w.delivery.stop()
+    delete w.table.a
+    w.clock.t += HOUR_MS
+    w.delivery.start()
+    expect(w.watches.read(id)).toBeUndefined()
+    expect(notices(w, A)).toEqual([])
+  })
+
   it('a handoff moves the session’s watches to its heir, and the watches on it wait for the heir', () => {
     const w = started({ extra: { h: { name: 'heir', projectId: 'p1' } } })
     const mine = idOf(watch(w, 'a', 'beta'))

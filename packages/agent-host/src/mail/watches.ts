@@ -292,6 +292,10 @@ export class Watches {
 
   /** Every active session watch against its target's stored state (§18.5 catch-up): a change while no delivery ran fires once */
   private catchUp(): void {
+    // An owner deleted while no host ran (its `sessionGone` never came) takes its watches with it, as that hook would have
+    for (const owner of new Set(this.host.records.activeWatches().map((r) => r.owner))) {
+      if (!this.host.session(owner)) this.host.records.deleteWatchesOf(owner)
+    }
     for (const row of this.host.records.activeWatches()) {
       const w = readWatch(row)
       if (w?.spec.source !== 'session') continue

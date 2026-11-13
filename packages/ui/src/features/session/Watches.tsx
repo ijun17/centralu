@@ -42,7 +42,7 @@ export function watchLine(w: WatchView, now: number): string {
     case 'session':
       return `Until ${w.what} ends its turn, asks or stops · until ${moment(w.until, now)}`
     case 'time': {
-      if (w.everyMinutes) return `Every ${w.everyMinutes === 1 ? 'minute' : `${w.everyMinutes} minutes`} · until ${moment(w.until, now)}`
+      if (w.everyMinutes) return `Every ${w.everyMinutes} minutes · until ${moment(w.until, now)}`
       const at = w.at ?? w.until
       const day = dayOf(at, now)
       return `At ${formatClock(at)}${day === '' ? '' : day === 'tomorrow' ? ' tomorrow' : ` on ${day}`}`
