@@ -1006,6 +1006,7 @@ export class SessionManager {
       mailStopped: (id, why, o) => self.mail.mailStopped(id, why, o),
       mailRequestTurnEnded: (id) => self.mail.mailRequestTurnEnded(id),
       mailLastResponse: (id, last) => self.mail.mailLastResponse(id, last),
+      mailWatchedAtRest: (id) => self.mail.mailWatchedAtRest(id),
       mailTurnInputs: (id, turn) => self.mail.mailTurnInputs(id, turn),
       mailEvent: (e, ended) => {
         try {

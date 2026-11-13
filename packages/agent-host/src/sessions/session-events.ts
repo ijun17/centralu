@@ -13,7 +13,7 @@ import { MailNotAtRest, MailWithdrawn, type MailInput } from '../mail/delivery.j
 import { takeInput } from './mail-accept.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import type { TurnInputs } from '../mail/delivery.js'
-import { stopOf } from './interruptions.js'
+import { heldToContinue, stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
 import { scriptMessageFrame } from './script-messages.js'
@@ -303,7 +303,7 @@ export class SessionEvents {
     if (stopWhy && e.sessionId) {
       this.host.reports.turnStopped(e.sessionId)
       // A stop Centralu waits to continue is told when the wait ends (#1415: told once, when the work continues)
-      const held = !!nowInterrupted?.autoContinue
+      const held = heldToContinue(nowInterrupted)
       this.host.mailStopped(e.sessionId, stopWhy, { ...this.stopTold(e.sessionId, waited, delegation?.callerId), ...(held ? { held } : {}) })
     } else if (workEnded && e.sessionId) {
       // It ended as a turn does: the requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to

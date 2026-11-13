@@ -66,6 +66,8 @@ export type MailHooks = {
   finishedWith?(callerId: string, childId: string): void
   /** A session at rest answers the tasks it did not reply to with its last response (docs/plans/mailbox.md §10.6.3); `body` is for a session id, or null for the person */
   lastResponse?(sessionId: string, last: SessionLastResponse): void
+  /** A watch on the session waits for its rest: a turn of it ended since the watch was set (docs/plans/mailbox.md §18.3), so settling at rest tells it */
+  watchedAtRest?(sessionId: string): boolean
   /** The sessions with a task open between them and the session (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's), or its own tasks' receivers (`from`) */
   openTasks?(sessionId: string, side: 'to' | 'from'): string[]
   /** A session's cards and the givers of its open work (docs/plans/mailbox.md §10.6.4) */
@@ -174,6 +176,16 @@ export class MailSessionsView {
       this.hooks?.lastResponse?.(sessionId, last)
     } catch (e) {
       console.error(`[mail] ${sessionId.slice(0, 8)}: its last response could not answer its tasks (${errorMessage(e)})`)
+    }
+  }
+
+  /** Whether a watch waits for the session's rest (`MailHooks.watchedAtRest`). Never throws */
+  mailWatchedAtRest(sessionId: string): boolean {
+    try {
+      return this.hooks?.watchedAtRest?.(sessionId) === true
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: its watches could not be read (${errorMessage(e)})`)
+      return false
     }
   }
 

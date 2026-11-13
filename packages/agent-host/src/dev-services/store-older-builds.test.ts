@@ -116,7 +116,7 @@ describe('a store written before a question’s choices had a column (v69, #1630
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(3) // v70, then v71 (#2229), v72 (#2243)
+    expect(second.migrationsRun).toBe(4) // v70, then v71 (#2229), v72 (#2243), v73 (#1324)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v69 writes: its own column list, none of ours
@@ -142,7 +142,7 @@ describe('a store written before a chain’s subject had a column (v70, #2229)',
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(2) // v71, then v72 (#2243)
+    expect(second.migrationsRun).toBe(3) // v71, then v72 (#2243), v73 (#1324)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?', subject: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v70 writes: its own column list, none of ours
@@ -193,7 +193,7 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(1)
+    expect(second.migrationsRun).toBe(2) // v72, then v73 (#1324)
     // Waiting lists what today's gate holds (an untrusted project's message to a session of another project), and the holds nothing here judged
     const waiting = second.mailbox.heldRows().map((r) => `${r.messageId.slice(3)}:${r.held}`)
     expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_uncertain:uncertain', 'm_untrusted:policy'])
@@ -205,6 +205,35 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     expect(ended.map((r) => (r as { id: string }).id)).toEqual(['h1.m_budget', 'h1.m_no_project', 'h1.m_same_project', 'h1.m_task', 'h1.m_trashed', 'h1.m_trusted'])
     for (const r of ended) expect(r).toMatchObject({ settled: 'legacy', attempts: 0, err: null, at: null })
     expect(db.prepare(`SELECT held, settled, attempts, last_error AS err FROM mail_recipients WHERE message_id = 'h1.m_new_policy'`).get()).toEqual({ held: 'policy', settled: null, attempts: 2, err: 'x' })
+    db.close()
+  })
+})
+
+describe('a store written before watches had a table (v71, #1324)', () => {
+  it('migrates with its mail intact and no watch, and a watch set then stays unseen by an older build’s reads', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-watches-'))
+    dirs.push(dir)
+    const file = join(dir, 'store.db')
+    const first = new Store(file)
+    const written = (first as unknown as { db: Database.Database }).db
+    const at = 1_800_000_000_000
+    written
+      .prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES ('h1.m_1', 'session:h1/a', 'message', 1, 'h1.m_1', 'Ship it?', '{}', ?)`)
+      .run(at)
+    written.exec(`DROP TABLE mail_watches`)
+    written.pragma('user_version = 71')
+    written.close()
+
+    const second = new Store(file)
+    expect(second.migrationsRun).toBe(2) // v72 (#2243), then v73
+    expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?' })
+    expect(second.mailbox.activeWatches()).toEqual([])
+    const watch = { id: 'h1.w_1', owner: 'session:h1/a', source: 'time', target: 'in 30m', spec: '{"kind":"in","slotMs":1}', note: '', state: 'active', lastKey: null, firedCount: 0, createdAt: at, expiresAt: at, nextAt: at, endedAt: null, endedBy: null }
+    second.mailbox.saveWatch(watch)
+    expect(second.mailbox.activeWatches()).toEqual([watch])
+    // What an older build reads of the mail: the tables it names, none of which a watch is in
+    const db = (second as unknown as { db: Database.Database }).db
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM mail`).get()).toEqual({ n: 1 })
     db.close()
   })
 })

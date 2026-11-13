@@ -5,6 +5,7 @@ import { LIMIT_NOTE, NETWORK_NOTE } from '../adapters/input-receipts.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { tempRoot } from '../temp-dir.test-helpers.js'
+import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
 import { SessionManager } from './manager.js'
 import { Adapter } from './turn-continue.test-helpers.js'
 import { MAX_FAILED_PROBES, MAX_TRIES, PROBE_STEPS_MS, RESET_MARGIN_MS, STAGGER_MS, TICK_MS } from './turn-continue.js'
@@ -370,5 +371,39 @@ describe("who the stop's notice was held from hears it once, however the wait en
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
     expect(ended).toHaveBeenCalledTimes(1)
     expect(ended).toHaveBeenCalledWith(id, 'network', null, { continued: false, first: false })
+  })
+})
+
+describe('a watch on a session whose stop Centralu holds to continue (#1324, docs/plans/mailbox.md §18.3)', () => {
+  /** The watch notices `watcher` was sent */
+  const fired = (watcher: string) =>
+    store.mailbox
+      .feedOf(addressOf(watcher), { limit: 20 })
+      .filter((m) => m.facts.watch !== undefined)
+      .map((m) => m.facts.reason)
+
+  it('the stop is told as held, and a restart during the wait fires nothing; the wait ending without going on fires `stopped`', async () => {
+    const a = host()
+    const m = wireHostMail(a.mgr, store)
+    m.delivery.start()
+    const stopped = vi.spyOn(a.mgr.mail, 'mailStopped')
+    const { id: watcher } = await started(a)
+    a.adapter.last.emit({ type: 'turn_complete', sessionId: watcher })
+    const { id } = await started(a)
+    m.watches.register(addressOf(watcher), addressOf(id), '', (w) => w)
+    a.adapter.last.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: NO_DNS, retryable: true } })
+    expect(stopped).toHaveBeenCalledWith(id, 'network', expect.objectContaining({ held: true }))
+    expect(fired(watcher)).toEqual([])
+    m.delivery.stop()
+    await a.mgr.tenure.disposeAll()
+
+    const b = host()
+    const n = wireHostMail(b.mgr, store)
+    n.delivery.start()
+    expect(b.session(id).interruption?.autoContinue).toEqual({ tries: 0 })
+    expect(fired(watcher)).toEqual([])
+    await b.rpc('agents.send', { sessionId: id, text: 'use the other branch' })
+    expect(fired(watcher)).toEqual(['stopped'])
+    n.delivery.stop()
   })
 })

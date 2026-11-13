@@ -289,12 +289,16 @@
   {
    "to": 72,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 73,
+   "breaksOlderReaders": false
   }
  ],
- "version": 72,
- "ran": 71,
+ "version": 73,
+ "ran": 72,
  "store": {
-  "userVersion": 72,
+  "userVersion": 73,
   "master": [
    {
     "type": "index",
@@ -421,6 +425,18 @@
     "name": "mail_turns_open",
     "tbl_name": "mail_turns",
     "sql": "CREATE INDEX mail_turns_open ON mail_turns(thread_id) WHERE ended_at IS NULL"
+   },
+   {
+    "type": "index",
+    "name": "mail_watches_due",
+    "tbl_name": "mail_watches",
+    "sql": "CREATE INDEX mail_watches_due ON mail_watches(state, next_at)"
+   },
+   {
+    "type": "index",
+    "name": "mail_watches_owner",
+    "tbl_name": "mail_watches",
+    "sql": "CREATE INDEX mail_watches_owner ON mail_watches(owner, state)"
    },
    {
     "type": "index",
@@ -594,6 +610,12 @@
     "type": "index",
     "name": "sqlite_autoindex_mail_turns_1",
     "tbl_name": "mail_turns",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_mail_watches_1",
+    "tbl_name": "mail_watches",
     "sql": null
    },
    {
@@ -823,6 +845,12 @@
     "name": "mail_turns",
     "tbl_name": "mail_turns",
     "sql": "CREATE TABLE mail_turns (\n              session_id TEXT NOT NULL,\n              turn_seq   INTEGER NOT NULL,\n              thread_id  TEXT,\n              started_by TEXT NOT NULL,\n              started_at INTEGER NOT NULL,\n              ended_at   INTEGER,\n              outcome    TEXT, message_id TEXT, starter_id TEXT, ended_how TEXT,\n              PRIMARY KEY (session_id, turn_seq)\n            )"
+   },
+   {
+    "type": "table",
+    "name": "mail_watches",
+    "tbl_name": "mail_watches",
+    "sql": "CREATE TABLE mail_watches (\n              id          TEXT PRIMARY KEY,\n              owner       TEXT NOT NULL,\n              source      TEXT NOT NULL,\n              target      TEXT NOT NULL,\n              spec        TEXT NOT NULL,\n              note        TEXT NOT NULL DEFAULT '',\n              state       TEXT NOT NULL,\n              last_key    TEXT,\n              fired_count INTEGER NOT NULL DEFAULT 0,\n              created_at  INTEGER NOT NULL,\n              expires_at  INTEGER NOT NULL,\n              next_at     INTEGER,\n              ended_at    INTEGER,\n              ended_by    TEXT\n            )"
    },
    {
     "type": "table",
@@ -1200,6 +1228,36 @@
     ]
    },
    {
+    "name": "mail_watches_due",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 6,
+      "name": "state"
+     },
+     {
+      "seqno": 1,
+      "cid": 11,
+      "name": "next_at"
+     }
+    ]
+   },
+   {
+    "name": "mail_watches_owner",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 1,
+      "name": "owner"
+     },
+     {
+      "seqno": 1,
+      "cid": 6,
+      "name": "state"
+     }
+    ]
+   },
+   {
     "name": "subagent_messages_trash",
     "list": [
      {
@@ -1301,6 +1359,7 @@
    "mail_recipients": [],
    "mail_threads": [],
    "mail_turns": [],
+   "mail_watches": [],
    "messages": [
     {
      "id": 0,
@@ -1754,6 +1813,25 @@
      "message_id TEXT notnull=0 default=null pk=0",
      "starter_id TEXT notnull=0 default=null pk=0",
      "ended_how TEXT notnull=0 default=null pk=0"
+    ],
+    "rows": []
+   },
+   "mail_watches": {
+    "columns": [
+     "id TEXT notnull=0 default=null pk=1",
+     "owner TEXT notnull=1 default=null pk=0",
+     "source TEXT notnull=1 default=null pk=0",
+     "target TEXT notnull=1 default=null pk=0",
+     "spec TEXT notnull=1 default=null pk=0",
+     "note TEXT notnull=1 default='' pk=0",
+     "state TEXT notnull=1 default=null pk=0",
+     "last_key TEXT notnull=0 default=null pk=0",
+     "fired_count INTEGER notnull=1 default=0 pk=0",
+     "created_at INTEGER notnull=1 default=null pk=0",
+     "expires_at INTEGER notnull=1 default=null pk=0",
+     "next_at INTEGER notnull=0 default=null pk=0",
+     "ended_at INTEGER notnull=0 default=null pk=0",
+     "ended_by TEXT notnull=0 default=null pk=0"
     ],
     "rows": []
    },

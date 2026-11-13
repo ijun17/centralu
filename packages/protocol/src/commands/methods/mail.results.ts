@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { MailHeldRow, MailThreadRow, MailThreadView } from '../../entities/mail.js'
+import { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '../../entities/mail.js'
 
 /** The results of the `mail` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./mail.params.ts */
 export const mailResults = {
@@ -15,4 +15,7 @@ export const mailResults = {
   'mail.held': z.object({ changed: z.number() }),
   'mail.resume': z.object({ ok: z.literal(true) }),
   'mail.wake': z.object({ ok: z.literal(true) }),
+  'watches.list': z.object({ watches: z.array(WatchView).default([]) }),
+  /** `cancelled: false`: the watch had ended already (it fired, expired or was cancelled), and nothing changed */
+  'watches.cancel': z.object({ cancelled: z.boolean() }),
 } as const

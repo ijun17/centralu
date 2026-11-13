@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 72, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 73, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -310,6 +310,22 @@ erDiagram
     TEXT message_id
     TEXT starter_id
     TEXT ended_how
+  }
+  mail_watches {
+    TEXT id PK
+    TEXT owner
+    TEXT source
+    TEXT target
+    TEXT spec
+    TEXT note
+    TEXT state
+    TEXT last_key
+    INTEGER fired_count
+    INTEGER created_at
+    INTEGER expires_at
+    INTEGER next_at
+    INTEGER ended_at
+    TEXT ended_by
   }
   messages {
     TEXT session_id PK, FK
@@ -904,6 +920,32 @@ Added in v61.
 Indexes:
 
 - `mail_turns_open`: `thread_id`
+
+### `mail_watches`
+
+Added in v73.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v73 |
+| `owner` | TEXT | no |  |  | v73 |
+| `source` | TEXT | no |  |  | v73 |
+| `target` | TEXT | no |  |  | v73 |
+| `spec` | TEXT | no |  |  | v73 |
+| `note` | TEXT | no | `''` |  | v73 |
+| `state` | TEXT | no |  |  | v73 |
+| `last_key` | TEXT | yes |  |  | v73 |
+| `fired_count` | INTEGER | no | `0` |  | v73 |
+| `created_at` | INTEGER | no |  |  | v73 |
+| `expires_at` | INTEGER | no |  |  | v73 |
+| `next_at` | INTEGER | yes |  |  | v73 |
+| `ended_at` | INTEGER | yes |  |  | v73 |
+| `ended_by` | TEXT | yes |  |  | v73 |
+
+Indexes:
+
+- `mail_watches_due`: `state`, `next_at`
+- `mail_watches_owner`: `owner`, `state`
 
 ### `messages`
 

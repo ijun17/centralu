@@ -956,11 +956,13 @@ export class MailboxRecords {
       .run({ messageId, from, to })
   }
 
-  /** The trash was emptied of `address`: its rows go, and each message left with no row but the person's own. Returns the rows deleted */
+  /** The trash was emptied of `address`: its rows and watches go, and each message left with no row but the person's own. Returns the rows deleted */
   purgeParty(address: string): number {
     return this.transaction(() => {
       const ids = this.db.prepare<[string], { id: string }>(`SELECT message_id AS id FROM mail_recipients WHERE recipient = ?`).all(address).map((r) => r.id)
       const n = this.db.prepare(`DELETE FROM mail_recipients WHERE recipient = ?`).run(address).changes
+      // Its watches go with its mail (docs/plans/mailbox.md §18.4)
+      this.deleteWatchesOf(address)
       // The person's own words stay in their window, sent to nobody kept (§12)
       this.dropOrphans(ids, { keepPerson: true })
       return n
@@ -995,8 +997,11 @@ export class MailboxRecords {
         return this.db.prepare(`DELETE FROM mail WHERE id IN (SELECT value FROM json_each(?))`).run(ids).changes
       })
       messages += n
-      if (n === 0) return { messages }
+      if (n === 0) break
     }
+    // An ended watch is kept as long as a read notice (§18.4)
+    this.db.prepare(`DELETE FROM mail_watches WHERE state <> 'active' AND ended_at <= ?`).run(now - l.readNoticeMs)
+    return { messages }
   }
 
   // ── Turns (`mail_turns`, read and written by `MailTurns`, M3a) ──
@@ -1024,10 +1029,68 @@ export class MailboxRecords {
     return row ? toTurnRecord(row) : null
   }
 
-  /** Centralu's notices of cards in `session` (an address, `facts.card.session`; every session's when null) that no delivery has begun to give (mailbox.md §10.6.4) */
-  undeliveredCardNotices(session: string | null): PendingRow[] {
-    const card = `json_extract(m.facts, '$.card.session')`
-    return this.withMessages(this.rows(`m.sender = 'centralu' AND m.kind = 'notice' AND r.delivered_at IS NULL AND r.attempt_at IS NULL AND json_valid(m.facts) AND ${card} = COALESCE(?, ${card}) ORDER BY m.created_at, m.id`, session))
+  /**
+   * Centralu's notices that no delivery has begun to give whose fact `fact` is `value` (any value when null): a card's in a session (`$.card.session`,
+   * mailbox.md §10.6.4) or a watch's (`$.watch.id`, §18.5), taken back once the card or the watch no longer stands
+   */
+  undeliveredNotices(fact: '$.card.session' | '$.watch.id', value: string | null): PendingRow[] {
+    const of = `json_extract(m.facts, '${fact}')`
+    return this.withMessages(this.rows(`m.sender = 'centralu' AND m.kind = 'notice' AND r.delivered_at IS NULL AND r.attempt_at IS NULL AND json_valid(m.facts) AND ${of} = COALESCE(?, ${of}) ORDER BY m.created_at, m.id`, value))
+  }
+
+  /** The number of the session's last turn that ended (a canceled delivery is no turn), 0 for none: a session watch's baseline (§18.3) */
+  lastEndedTurn(sessionId: string): number {
+    return this.count(`SELECT COALESCE(MAX(turn_seq), 0) AS n FROM mail_turns WHERE session_id = ? AND ended_at IS NOT NULL AND COALESCE(outcome, '') <> 'canceled'`, sessionId)
+  }
+
+  // ── Watches (`mail_watches`, read and written by `Watches`, docs/plans/mailbox.md §18.4) ──
+
+  /** Writes the watch as given, a new one or one changed */
+  saveWatch(w: WatchRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO mail_watches (id, owner, source, target, spec, note, state, last_key, fired_count, created_at, expires_at, next_at, ended_at, ended_by)
+         VALUES (@id, @owner, @source, @target, @spec, @note, @state, @lastKey, @firedCount, @createdAt, @expiresAt, @nextAt, @endedAt, @endedBy)
+         ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, target = excluded.target, spec = excluded.spec, note = excluded.note, state = excluded.state,
+           last_key = excluded.last_key, fired_count = excluded.fired_count, expires_at = excluded.expires_at, next_at = excluded.next_at,
+           ended_at = excluded.ended_at, ended_by = excluded.ended_by`,
+      )
+      .run(w)
+  }
+
+  watch(id: string): WatchRow | undefined {
+    return this.watchRows(`id = @id`, { id })[0]
+  }
+
+  /** The active watches, of an owner, on a target, or due by a time, oldest first */
+  activeWatches(by: { owner?: string; target?: string; dueBy?: number } = {}): WatchRow[] {
+    return this.watchRows(
+      `state = 'active' AND (@owner IS NULL OR owner = @owner) AND (@target IS NULL OR target = @target) AND (@due IS NULL OR next_at <= @due)`,
+      { owner: by.owner ?? null, target: by.target ?? null, due: by.dueBy ?? null },
+    )
+  }
+
+  /** The owner's watches go with it (a session deleted) */
+  deleteWatchesOf(owner: string): number {
+    return this.db.prepare(`DELETE FROM mail_watches WHERE owner = ?`).run(owner).changes
+  }
+
+  /** The watch firings `owner` was sent since `since`, its quiet notices apart: what the person's warning counts (§18.7) */
+  watchFiringsSince(owner: string, since: number): number {
+    return this.count(
+      `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+        WHERE m.sender = 'centralu' AND r.recipient = ? AND m.created_at >= ? AND json_valid(m.facts) AND json_type(m.facts, '$.watch') IS NOT NULL
+          AND COALESCE(json_extract(m.facts, '$.quiet'), 0) = 0`,
+      owner,
+      since,
+    )
+  }
+
+  private watchRows(where: string, args: Record<string, unknown>): WatchRow[] {
+    return this.db
+      .prepare<Record<string, unknown>, WatchSql>(`SELECT * FROM mail_watches WHERE ${where} ORDER BY created_at, id`)
+      .all(args)
+      .map((r) => ({ id: r.id, owner: r.owner, source: r.source, target: r.target, spec: r.spec, note: r.note, state: r.state, lastKey: r.last_key, firedCount: r.fired_count, createdAt: r.created_at, expiresAt: r.expires_at, nextAt: r.next_at, endedAt: r.ended_at, endedBy: r.ended_by }))
   }
 
   nextTurnSeq(sessionId: string): number {
@@ -1174,6 +1237,40 @@ export class MailboxRecords {
       )
       .run(idList(ids), opts.keepPerson ? 1 : 0)
   }
+}
+
+/** A watch as stored (§18.4): its words as written, which `Watches` reads into its shape (mail/watches.ts) */
+export type WatchRow = {
+  id: string
+  owner: string
+  source: string
+  target: string
+  spec: string
+  note: string
+  state: string
+  lastKey: string | null
+  firedCount: number
+  createdAt: number
+  expiresAt: number
+  nextAt: number | null
+  endedAt: number | null
+  endedBy: string | null
+}
+type WatchSql = {
+  id: string
+  owner: string
+  source: string
+  target: string
+  spec: string
+  note: string
+  state: string
+  last_key: string | null
+  fired_count: number
+  created_at: number
+  expires_at: number
+  next_at: number | null
+  ended_at: number | null
+  ended_by: string | null
 }
 
 /** A turn as this build records it (§6.1): its work message and its starter; `thread_id` is the older build's */

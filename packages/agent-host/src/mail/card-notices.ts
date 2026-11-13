@@ -42,7 +42,7 @@ export function tellCard(service: MessageService, giver: string, card: CardFact,
  */
 export function withdrawEndedCards(records: MailboxRecords, session: string | null, stands: (session: string, requestId: string) => boolean): void {
   records.transaction(() => {
-    const gone = records.undeliveredCardNotices(session).filter(({ message: { facts } }) => facts.card && !stands(facts.card.session, facts.card.requestId))
+    const gone = records.undeliveredNotices('$.card.session', session).filter(({ message: { facts } }) => facts.card && !stands(facts.card.session, facts.card.requestId))
     if (gone.length) records.deleteRows(gone.map(({ row }) => ({ messageId: row.messageId, recipient: row.recipient })))
   })
 }

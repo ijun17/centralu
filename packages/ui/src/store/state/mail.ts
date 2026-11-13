@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import type { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '@cc/protocol/client'
 
 /** The person's mailbox (#1347): the threads the Inbox lists among its rows and the thread open in it. */
 export type MailSlice = {
@@ -35,4 +35,13 @@ export type MailSlice = {
   resumeMail: (target: { sessionId: string } | { threadId: string }) => Promise<boolean>
   /** The answer to "N sessions have mail from while Centralu was off" */
   wakeMail: (wake: boolean) => Promise<boolean>
+  /**
+   * The watches each session keeps (#1324), as the host last listed them for its header; read again on `watches_changed`. A session
+   * the host has not listed (an older host has no such method) has no entry, and its header shows no badge
+   */
+  watches: Record<string, WatchView[]>
+  /** Reads a session's watches again; quiet when it fails, keeping what it had */
+  loadWatches: (sessionId: string) => Promise<void>
+  /** The person cancels a watch; false, with the host's words in a toast, when it could not */
+  cancelWatch: (sessionId: string, id: string) => Promise<boolean>
 }

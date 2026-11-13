@@ -355,6 +355,9 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'mail.held': 'window',
   'mail.resume': 'window',
   'mail.wake': 'window',
+  // The person's list and cancel of the watches sessions keep (#1324): an agent cancels its own through the `mail` tool
+  'watches.list': 'window',
+  'watches.cancel': 'window',
 
   // Host to host: a hub linked to this host
   'host.activity': 'everyday',

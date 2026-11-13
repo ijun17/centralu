@@ -105,6 +105,8 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
   Pick<RoutedCardsHost, 'toolProfileOf'> & {
     /** A session at rest answers its open tasks with its last response (`MailSessionsView.mailLastResponse`) */
     mailLastResponse(sessionId: string, last: SessionLastResponse): void
+    /** A watch waits for the session's rest (`MailSessionsView.mailWatchedAtRest`): its settle tells it as it answers tasks */
+    mailWatchedAtRest(sessionId: string): boolean
   } &
   Pick<ProjectRegistry, 'projectRow'>
 
@@ -167,13 +169,13 @@ export class ChildReports {
   /**
    * The session's own background work changed, or this host started: once that work is over and no turn runs, the turn its end may start (Claude starts
    * one within a second) answers; if none starts within `OWN_WORK_SETTLE_MS`, its last response answers the tasks no stop released (#721), the
-   * person's own work's too. Only for a session with something to answer
+   * person's own work's too, and a watch on it hears its turn ended (docs/plans/mailbox.md §18.3). Only for a session with something to answer or tell
    */
   settleAtRest(sessionId: string): void {
     this.stopSettling(sessionId)
     const m = this.host.meta.get(sessionId)
     if (this.host.disposing || !m || inTurn(m.state) || this.ownTasksRunning(sessionId).length > 0) return
-    if (this.host.children.openTasks(sessionId, 'to').length === 0) return
+    if (this.host.children.openTasks(sessionId, 'to').length === 0 && !this.host.mailWatchedAtRest(sessionId)) return
     const timer = setTimeout(() => {
       this.settles.delete(sessionId)
       const now = this.host.meta.get(sessionId)

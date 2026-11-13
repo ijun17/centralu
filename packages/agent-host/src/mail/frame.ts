@@ -134,6 +134,7 @@ export type MessageCalls = {
   done(id: string): string
   inbox(): string
   sessions(): string
+  close(id: string): string
 }
 
 /**
@@ -155,6 +156,7 @@ export function mailCalls(version: 1 | 2, form: 'plain' | 'command'): MessageCal
     done: (id) => call(version === 2 ? 'done' : 'handled', { [target]: id }),
     inbox: () => call('inbox'),
     sessions: () => call('sessions'),
+    close: (id) => call('close', { thread: id }),
   }
 }
 

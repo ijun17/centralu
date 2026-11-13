@@ -1,5 +1,5 @@
 import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
-import type { MailThreadRow, MailThreadView, NormalizedEvent } from '@cc/protocol/client'
+import type { MailThreadRow, MailThreadView, NormalizedEvent, WatchView } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
@@ -13,7 +13,7 @@ import { coalescedRead } from './single-flight.js'
 
 type MailActions = Pick<
   AppState,
-  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail'
+  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
 >
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
@@ -141,6 +141,26 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
         await get().loadMail()
       })
     },
+
+    /*
+     * Only a session the window lists: the news of one it does not list, a reconnect's reload of one that left, and an answer that comes after
+     * its session was deleted keep nothing (`forgetSessions` takes its rows away)
+     */
+    loadWatches(sessionId) {
+      if (!get().sessions[sessionId]) return Promise.resolve()
+      return coalescedRead(`watches:${sessionId}`, get, (platform) => platform.mail.watches(sessionId), (rows) => {
+        set((s) => (s.sessions[sessionId] ? { watches: { ...s.watches, [sessionId]: rows } } : {}))
+      })
+    },
+
+    async cancelWatch(sessionId, id) {
+      const platform = get().platform
+      if (!platform) return false
+      return act('cancel that watch', async () => {
+        await platform.mail.cancelWatch(id)
+        await get().loadWatches(sessionId)
+      })
+    },
   }
 }
 
@@ -174,8 +194,15 @@ export function mailAsksYou(mail: AppState['mail']): number {
   return mail ? mail.threads.filter((t) => t.ask !== null).length : 0
 }
 
-/** The mailbox's news (`mail_changed`): the list is read again, and the thread open in the Inbox if it is the one named. True when it was one */
+/** How many watches a session's header counts: a selector over the host's rows, never kept (docs/state-management.md §3) */
+export const watchCount = (rows: readonly WatchView[] | undefined): number => rows?.length ?? 0
+
+/** The mailbox's news (`mail_changed`): the list is read again, and the thread open in the Inbox if it is the one named; `watches_changed`: that session's watches. True when it was one */
 export function mailEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boolean {
+  if (e.type === 'watches_changed') {
+    void get().loadWatches(e.sessionId)
+    return true
+  }
   if (e.type !== 'mail_changed') return false
   // A new message the person can read: one notification each, of any kind (#1630)
   const notice = e.arrived ? mailNotification(e.arrived, { appFocused: get().appFocused, policy: notifyPolicyOf(get().prefs) }) : null

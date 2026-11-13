@@ -1,18 +1,18 @@
 import { randomBytes } from 'node:crypto'
 
 /**
- * The ids of threads and messages (docs/plans/mailbox.md §5.2): `<hostId>.t_<ulid>` and `<hostId>.m_<ulid>`, minted by
- * the host that created the thread or sent the message, so an id is unique everywhere and a forwarded copy is the same
- * row (`INSERT OR IGNORE` by id, §11.6). A ULID sorts by time, then by a counter within one millisecond.
+ * The ids of threads, messages and watches (docs/plans/mailbox.md §5.2, §18.2): `<hostId>.t_<ulid>`, `<hostId>.m_<ulid>` and
+ * `<hostId>.w_<ulid>`, minted by the host that created the thread, sent the message or keeps the watch, so an id is unique
+ * everywhere and a forwarded copy is the same row (`INSERT OR IGNORE` by id, §11.6). A ULID sorts by time, then by a counter within one millisecond.
  *
  * The host id is the one a hub already keeps (`hubSelfId`, `hub-` and 8 hex digits). No dependency for the ULID: it is
  * 26 characters of Crockford's base32, 10 of time and 16 of randomness.
  */
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-const ID_RE = /^([a-z0-9][a-z0-9-]*)\.(t|m)_([0-9A-HJKMNP-TV-Z]{26})$/
+const ID_RE = /^([a-z0-9][a-z0-9-]*)\.(t|m|w)_([0-9A-HJKMNP-TV-Z]{26})$/
 
-export type MailIdKind = 'thread' | 'message'
+export type MailIdKind = 'thread' | 'message' | 'watch'
 
 export type ParsedMailId = { host: string; kind: MailIdKind; ulid: string }
 
@@ -83,10 +83,11 @@ export function messageIdFloor(host: string, ms: number): string {
 
 export const threadIdOf = (host: string, ulid: string): string => `${host}.t_${ulid}`
 export const messageIdOf = (host: string, ulid: string): string => `${host}.m_${ulid}`
+export const watchIdOf = (host: string, ulid: string): string => `${host}.w_${ulid}`
 
-/** What an id is made of, or null for text that is not a mail id: a thread id or a message id of any host */
+/** What an id is made of, or null for text that is not a mail id: a thread, message or watch id of any host */
 export function parseMailId(id: string): ParsedMailId | null {
   const m = ID_RE.exec(id)
   const [, host, kind, ulid] = m ?? []
-  return host !== undefined && ulid !== undefined ? { host, kind: kind === 't' ? 'thread' : 'message', ulid } : null
+  return host !== undefined && ulid !== undefined ? { host, kind: kind === 't' ? 'thread' : kind === 'w' ? 'watch' : 'message', ulid } : null
 }

@@ -618,6 +618,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // The mailbox (#1347): a thread changed, named and nothing of its content; an older sender omits `toPerson`
   { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J', toPerson: true },
   { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J' },
+  // A session's watches changed (#1324): the header lists them again
+  { type: 'watches_changed', sessionId: 's1' },
   {
     type: 'update_status',
     status: {

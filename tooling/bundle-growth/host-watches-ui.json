@@ -1,0 +1,4 @@
+{
+  "bytes": 6000,
+  "reason": "The watches badge in a session's header (#1324, docs/plans/mailbox.md §18.8): Watches.tsx (the badge, its list with Cancel, the row wording and its exit), the store slice and its watches_changed read, the two mail-port calls in the web platform and the mock, and a clock icon. Measured with the production build tooling/styles.test.ts runs: 1,944,938 B on this branch against 1,939,272 B with packages/ui and packages/platform as on its base 1d9ad3d1b, +5,666 B; the base itself was 172 B over the 1,939,100 B ceiling (the protocol's WatchView and watches_changed schemas, which the UI bundle carries), which this declaration covers too. Plain components and store code with no dependency; not compared with a build of main here (CI's verify job compares it)."
+}

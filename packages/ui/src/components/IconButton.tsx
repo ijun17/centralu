@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { Tooltip } from './primitives.jsx'
 
 /**
@@ -25,6 +25,8 @@ export function IconButton({
   align = 'left',
   lit = false,
   haspopup,
+  expanded,
+  ref,
   className = '',
 }: {
   /** Both the tooltip text and the name a screen reader announces — kept as one */
@@ -45,13 +47,18 @@ export function IconButton({
    * to something that can shift between builds. Here, only one of the two is ever attached.
    */
   lit?: boolean
-  /** The button opens a menu (announced to a screen reader) */
-  haspopup?: 'menu'
+  /** The button opens a menu or a list (announced to a screen reader) */
+  haspopup?: 'menu' | 'dialog'
+  /** What it opened is open */
+  expanded?: boolean
+  /** For a list anchored under the button */
+  ref?: Ref<HTMLButtonElement>
   className?: string
 }) {
   return (
     <Tooltip content={label} placement={placement} align={align}>
       <button
+        ref={ref}
         type={type}
         className={`flex items-center justify-center rounded-md p-1 transition-colors hover:bg-surface-hover/60 hover:text-ink disabled:opacity-50 ${
           lit ? 'text-ink' : 'text-ink-faint'
@@ -60,6 +67,7 @@ export function IconButton({
         disabled={disabled}
         aria-label={label}
         aria-haspopup={haspopup}
+        aria-expanded={expanded}
         data-testid={testId}
       >
         {children}

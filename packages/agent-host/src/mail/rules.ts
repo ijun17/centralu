@@ -158,6 +158,18 @@ export const REMINDER = {
   unansweredAfterMs: 2 * HOUR_MS,
 } as const
 
+/** A watch's limits (§18.7): checks at registration, answered in the call; nothing a watch posts is held */
+export const WATCH = {
+  perSession: 20,
+  everyAtLeastMs: 10 * MINUTE_MS,
+  aheadAtMostMs: 7 * 24 * HOUR_MS,
+  /** How long a session or `every` watch lasts; setting it again extends it */
+  lastsMs: 24 * HOUR_MS,
+  noteChars: 300,
+  /** Firings to one session in an hour past which the person is warned once per clock hour */
+  warnWakesPerHour: 6,
+} as const
+
 /** The words of the refusals mail itself raises (§15, S9 and S15), without the `Refused (<reason>): ` the tool puts in front. `name` is the address until the tool resolves names */
 export const REFUSAL_TEXT = {
   gone: (address: string) => `${address} is gone: it is in the session archive or deleted.`,
@@ -187,6 +199,8 @@ export const WARNING_TEXT = {
     `Mail between sessions started ${turns} turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.`,
   compactCycles: (session: string, cycles: number) =>
     `${session} asked to compact its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
+  watchWakes: (session: string, wakes: number) =>
+    `${session}'s watches woke it ${wakes} times in the last hour. They keep firing: look at it if that is more than you expect.`,
   /** The three guards that refuse rather than warn (#1684, #2035): the person hears of the first refusal of each kind a clock hour */
   repeat: (sender: string, to: string) => `Centralu refused mail from ${sender} to ${to}: the same text again within ${durationText(REPEAT_WINDOW_MS)}. ${sender} was told; nothing else was stopped.`,
   rate_limited: (sender: string, limit: number) => `Centralu refused mail from ${sender}: more than ${limit} messages in a minute. ${sender} was told to wait; nothing else was stopped.`,
@@ -276,11 +290,12 @@ export function pickWork(candidates: readonly WorkPick[], now: number): string |
 
 /**
  * Whether a body is inline in the wake (§8.2 step 4), after the frame and quoted: the person's words; a `task` from a session to a session that is
- * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant. Everything else is pulled
- * with `mail read`: a session's words to the Assistant never flow down, whatever their kind
+ * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant; a watch's notice to the session that
+ * set it (§18.5: Centralu's words and the session's own note). Everything else is pulled with `mail read`: a session's words to the Assistant never
+ * flow down, whatever their kind
  */
-export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean }): boolean {
-  if (f.fromPerson) return true
+export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean }): boolean {
+  if (f.fromPerson || f.watch) return true
   if (!f.fromSession || f.toAssistant) return false
   return f.kind === 'task' || (f.kind === 'message' && f.fromParent)
 }

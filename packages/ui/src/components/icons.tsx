@@ -446,6 +446,16 @@ export function ChangesIcon({ size = 12 }: { size?: number }) {
  * the sidebar's marks, so the rail reads as the same family.
  */
 
+/** A clock face — a watch: Centralu wakes the session at a time, or when something it waits on happens (#1324) */
+export function ClockIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 4.8V8l2.2 1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** A bell — notifications */
 export function BellIcon({ size = 14 }: { size?: number }) {
   return (

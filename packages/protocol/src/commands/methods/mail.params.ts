@@ -41,4 +41,8 @@ export const mailParams = {
     ),
   /** The person's answer to "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn (§7.9) */
   'mail.wake': z.object({ wake: z.boolean() }),
+  /** The watches a session keeps (#1324, docs/plans/mailbox.md §18.8): what its header's badge lists. An older host answers `unknown_method`, and the window shows no badge */
+  'watches.list': z.object({ sessionId: z.string() }),
+  /** The person cancels a watch: it ends, its firing not given yet is taken back, and its session gets one quiet notice saying so */
+  'watches.cancel': z.object({ id: z.string() }),
 } as const

@@ -729,6 +729,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     snapshot: z.boolean().optional(),
   }),
   /**
+   * The watches a session keeps changed (#1324, docs/plans/mailbox.md §18.8): one was set, fired, ended or cancelled. A signal, not
+   * the list: the header asks `watches.list` again. Live-only and never stored
+   */
+  z.object({ ...base, type: z.literal('watches_changed') }),
+  /**
    * The version of the agent CLI this session's process runs (#297): Claude's init message (`claude_code_version`), the
    * Codex app-server's `initialize` answer (its `userAgent`). Sent once per process. Live-only and never stored, like
    * `goal`; the host keeps the latest on `SessionInfo.agentVersion` so a reconnecting window reads it back.

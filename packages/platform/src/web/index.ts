@@ -531,6 +531,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       held: (action, recipient, messageIds) => rpc.call('mail.held', { action, recipient, messageIds }),
       resume: (target) => done(rpc.call('mail.resume', target)),
       wake: (wake) => done(rpc.call('mail.wake', { wake })),
+      watches: (sessionId) => rpc.call('watches.list', { sessionId }).then((r) => r.watches),
+      cancelWatch: (id) => rpc.call('watches.cancel', { id }).then((r) => r.cancelled),
     },
     trash: {
       list: () => rpc.call('trash.list', {}),

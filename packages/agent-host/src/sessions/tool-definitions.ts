@@ -812,19 +812,13 @@ export const MAIL_TOOLS = [
     name: 'mail',
     description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind "question". In a report, say what each claim was checked against, and what was not.`,
     schema: z.object({
-      action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close', 'find']),
+      action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'close', 'find', 'watch']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer. For watch: a session, "in 30m", "at 16:30" or "every 30m"'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),
-      state: z.string().optional(),
-      outcome: z.string().optional(),
-      next: z.string().optional(),
-      blocker: z.string().optional(),
-      unblock: z.number().int().optional(),
       urgent: z.boolean().optional(),
-      follows: z.array(z.string()).optional(),
       cite: z.boolean().optional(),
       choices: z.array(z.string()).optional(),
       // A fork instead of a mail task, for a busy session the caller started (#1948); the mailed answer names it
@@ -838,9 +832,10 @@ export const MAIL_TOOLS = [
  * The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md.
  * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231). 1240 → 1355 for #1948 (owner 2026-11-12, measured 1350): `ifBusy`
  * moved here from agent_session (+55), and the sentence on reports (+72), since every report an agent writes is mail; #2133 took " or checkpoint" from
- * `parent` (-14). AGENT_BUDGET_CHARS fell by 70.
+ * `parent` (-14). AGENT_BUDGET_CHARS fell by 70. 1355 → 1175 for watches (#1324, docs/plans/mailbox.md §18.2, measured 1170): the six thread-era fields no
+ * code read and `update` went, and `watch` and its words in `to` came.
  */
-export const MAIL_BUDGET_CHARS = 1355
+export const MAIL_BUDGET_CHARS = 1175
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
@@ -1040,6 +1035,7 @@ export const READER_BUDGET_CHARS = 1960
  * #2231: every profile carries the `app` tool (APP_BUDGET_CHARS) in place of one MCP server per app, whose tools rode outside these ceilings.
  * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
  * #1948 (owner 2026-11-12): `send` leaves agent_session for mail with its `ifBusy`, and mail's description gains the sentence on reports: the reader's sum rises by MAIL_BUDGET_CHARS' 115 less AGENT_BUDGET_CHARS' 70 (measured +41 on Codex; Claude defers both).
+ * #1324 (watches): MAIL_BUDGET_CHARS falls by 180 (1,355 → 1,175), and the reader's sum with it.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   assistant: 10_180 + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,

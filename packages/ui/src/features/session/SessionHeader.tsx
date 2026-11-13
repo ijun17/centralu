@@ -8,6 +8,7 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
+import { WatchesBadge } from './Watches.jsx'
 import { AgentVersionNotice } from './AgentVersionNotice.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { PresetTag } from './PresetTag.jsx'
@@ -120,6 +121,8 @@ export function SessionHeader({
           <SubagentSteps sessionId={session.id} callId={callId} projectRoot={projectRoot} projectId={session.projectId} />
         )}
       />
+      {/* What the session asked Centralu to wake it for (#1324): a time, or another session's turn end; each can be cancelled */}
+      <WatchesBadge sessionId={session.id} />
 
       {/* The agent CLI installed is newer than the one this session's process runs (#297) */}
       <AgentVersionNotice session={session} />

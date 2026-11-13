@@ -454,6 +454,8 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
 })
 hostMailbox.service.onChange((c) => events.push(mailPerson.changeEvent(c)))
+// A session's watches changed (#1324): its header lists them again
+hostMailbox.watches.onChange((sessionId) => events.push({ type: 'watches_changed', sessionId }))
 // Terminal and command output can arrive before the server exists: a restarted one writes as it starts (HO11, lifecycle/gate.ts)
 const terminals = new TerminalService(screens.push, ptyBroker ? brokerPtyModule(ptyBroker) : undefined)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
@@ -796,6 +798,7 @@ const router: Router = new Router({
     hubs,
     mailAcross: hostMailbox.across,
     mail: mailPerson,
+    watches: hostMailbox.watches,
     requests,
   }),
   machines: () => links.all(),

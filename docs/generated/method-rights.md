@@ -233,6 +233,8 @@ With the limited credential: refused, never a card: the person's own answers and
 - `ui.reportCrash`
 - `updates.answerApply`
 - `updates.reportApply`
+- `watches.cancel`
+- `watches.list`
 - `workspace.save`
 
 ## link

@@ -37,6 +37,8 @@ test('a window on an older host draws its sessions and a conversation without cr
   const port = await freePort()
   const relay = new Relay(() => port)
   const stripped = new Set<string>()
+  // The methods the page called that this older host does not have, answered as the host answers a method it does not know
+  const unknown = new Set<string>()
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
 
@@ -45,6 +47,12 @@ test('a window on an older host draws its sessions and a conversation without cr
     const methods = new Map<string, RpcMethodName>()
     route.onMessage((m) => {
       const f = JSON.parse(String(m)) as { kind?: string; id?: string; method?: string }
+      // The watches a session keeps (#1324) came after every older host
+      if (f.kind === 'rpc' && f.id && (f.method === 'watches.list' || f.method === 'watches.cancel')) {
+        unknown.add(f.method)
+        route.send(JSON.stringify({ kind: 'res', id: f.id, ok: false, error: { code: 'internal', message: `Unknown method: ${f.method}. This Centralu host does not have it; the window may be from another build.`, retryable: false } }))
+        return
+      }
       if (f.kind === 'rpc' && f.id && f.method && f.method in RpcMethods) methods.set(f.id, f.method as RpcMethodName)
       server.send(m)
     })
@@ -74,6 +82,10 @@ test('a window on an older host draws its sessions and a conversation without cr
 
     await row.click()
     await expect(page.getByTestId('session-view')).toBeVisible()
+    // The header asked for the session's watches and the host did not know the method: no badge, and no toast saying so
+    await expect.poll(() => unknown.has('watches.list')).toBe(true)
+    await expect(page.getByTestId('watches-badge')).toHaveCount(0)
+    await expect(page.getByTestId('toast')).toHaveCount(0)
     /*
      * An event in the older shape too, about a session the screen holds. Only that it is survived
      * is checked: taking out a default that was there from the start can change what the event
