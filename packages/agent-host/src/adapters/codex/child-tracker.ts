@@ -205,7 +205,7 @@ export class CodexChildTracker {
 
   /** The app-server went away and its child threads with it. */
   release(why: string): NormalizedEvent[] {
-    // The goal outlives the process (it is the thread's), so it is not among what the process took with it
+    // The goal is the thread's and outlives the process: it leaves the list with no ending (nothing runs it now; a resume reads it back)
     const live = this.live().filter((t) => t.id !== GOAL_ID)
     this.commands.clear()
     this.goal = null
@@ -217,7 +217,7 @@ export class CodexChildTracker {
     const held: NormalizedEvent[] = [...this.held.keys()].map((callId) => ({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why }))
     const carded = new Set(this.held.keys())
     this.held.clear()
-    if (live.length === 0) return held
+    if (live.length === 0) return [...this.changed(), ...held]
     // A child whose launch card was just closed with the reason leaves no line of its own
     return [...this.changed(live.map((task) => ({ ...task, status: 'stopped' as const, summary: why })), carded), ...held]
   }
