@@ -1,0 +1,4 @@
+{
+  "bytes": 1600,
+  "reason": "Off on this computer (#1938 PR 2): the switch on a project app's row in Settings → Apps with its folding reason, the 'Off' status and its notice, setAppOff in the store, and apps.setOff in the web platform and its protocol shape. The tree measured 1,947,347 B, 1,532 B over #2254's 1,945,815 B on this machine. No new dependency."
+}

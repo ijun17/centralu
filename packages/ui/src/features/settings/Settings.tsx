@@ -621,9 +621,9 @@ function ShareLine({ app }: { app: ExternalCatalogApp }) {
  * turned off on that machine, so the line names it.
  */
 function OffLine({ app }: { app: ExternalCatalogApp }) {
-  const setOff = useStore((s) => s.setAppOff)
   const machineName = useMachineName(app.info.machine)
-  if (app.projectId === null) return null
+  const { projectId, appId } = app
+  if (projectId === null) return null
   const where = machineName ? `on ${machineName}` : 'on this computer'
   return (
     <label
@@ -631,7 +631,7 @@ function OffLine({ app }: { app: ExternalCatalogApp }) {
       title={`For a copy of an app another computer runs for this project. Off, it never starts ${where} and no session there gets it.`}
       data-testid="external-app-off"
     >
-      <Switch checked={app.info.off === true} onChange={(e) => void setOff(app.projectId!, app.appId, e.target.checked)} />
+      <Switch checked={app.info.off === true} onChange={(e) => void useStore.getState().setAppOff(projectId, appId, e.target.checked)} />
       <span>Off {where}</span>
     </label>
   )
