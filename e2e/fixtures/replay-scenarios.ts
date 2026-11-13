@@ -180,6 +180,8 @@ export type Replay = {
   stopAt?: 'thinking' | 'folded'
   /** What this scenario draws that every recording does not */
   shows?(page: Page, held: Held, seen: Seen): Promise<void>
+  /** What the pane shows between the person's steps, once step `step` has settled: what is there only until a later step */
+  between?(page: Page, step: number): Promise<void>
 }
 
 /** The words of `s` as a person reads them: the marks of Markdown (a heading's hashes, a bullet or a list's number, a code fence, a table's rule and bars, emphasis, a link's address) are not words */
@@ -263,6 +265,7 @@ async function play(page: Page, replay: Replay, held: Held, run: ReplayRun): Pro
     // A turn that is stopped does not end by itself, and one that has another prompt sent into it ends after that: the next step ends it
     const next = held.steps[i + 1]
     if (next?.kind !== 'stop' && !(next?.kind === 'prompt' && next.during)) await settled(page, answers)
+    await replay.between?.(page, i)
   }
   expect(answers, 'every answer the entry and the recording hold was asked for').toEqual({ cards: [], picks: [] })
 }
@@ -573,6 +576,19 @@ export const REPLAYS: Replay[] = [
       expect(cards.every((c) => c.includes('gone.txt'))).toBe(true)
     },
   },
+  {
+    tool: 'codex',
+    scenario: 'background-kept',
+    async between(page, step) {
+      // The command turn 1 left running is background work once that turn has ended (#2027): the badge counts it
+      if (step === 0) await expect(page.getByTestId('background-badge')).toHaveAttribute('data-count', '1', POLL)
+    },
+    async shows(page) {
+      // It completed during turn 2: its card holds its output, and nothing is left running
+      expect(await cardTexts(page)).toEqual([expect.stringContaining('kept-done')])
+      await expect(page.getByTestId('background-badge')).toHaveCount(0, POLL)
+    },
+  },
   { tool: 'codex', scenario: 'compact' },
   {
     tool: 'codex',
@@ -671,6 +687,8 @@ const NOT_PLAYED: Record<string, string> = {
   'codex/adopt-running': 'it opens an app-server that a keeper kept running through a host swap, and a replay host starts its processes itself, with no keeper to hold one; the adapter replay test plays it',
   'codex/centralu-wake': 'the second turn is started by the host from a mail that another session answers with; the replay host has no other session to send it, and the words typed as a person would be drawn as theirs, not as a mail',
   'codex/centralu-compact-real': 'the host starts the compaction (thread/compact/start) after the agent calls Centralu\'s compact_self, and a replay host never serves that call (the bridge is the recording host\'s); playing it would mean typing /compact, which draws a bubble the real session never draws, and the host-started compaction would go unexercised',
+  'codex/goal-set':
+    "no turn runs: the person's two steps are /goal commands, which the adapter sends as thread/goal/set and thread/goal/clear and answers in the chat with confirmation lines of its own words, which the recording does not hold, and the goal is cleared before Codex starts a turn for it; the adapter replay test plays it and checks the goal listed as background work, then gone",
   'codex/adopt-failed': 'the same: a kept app-server answering the new host thread/resume',
 }
 
