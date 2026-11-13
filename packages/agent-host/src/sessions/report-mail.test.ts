@@ -223,11 +223,11 @@ describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', 
   it('its task’s session stopping with an error is told the old way too, in the words of that ending: the task is released, the notice recorded as told', async () => {
     const { parent, child } = await parentAndChild()
     scoped(parent)
-    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'rate limit reached, retry later ERROR_TEXT', retryable: false } })
+    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'The model refused the request ERROR_TEXT', retryable: false } })
     await w.until(() => oldReports(parent, child).length === 1)
     const [told] = oldReports(parent, child)
     expect(told).toContain('[Centralu] The assigned work failed.')
-    expect(told).toContain("Its tool's error, by kind: usage limit.")
+    expect(told).toContain("Its tool's error, by kind: refused.")
     expect(told).not.toContain('ERROR_TEXT')
     expect(taskRow(parent, child)).toMatchObject({ settled: null, releasedWhy: 'error', toldAt: expect.any(Number) })
     expect(reportsIn(parent, child)).toEqual([])

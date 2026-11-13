@@ -229,6 +229,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `mail.wake`
 - `requests.answer`
 - `sessions.clearError`
+- `sessions.stopContinue`
 - `ui.reportCrash`
 - `updates.answerApply`
 - `updates.reportApply`
