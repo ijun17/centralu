@@ -127,6 +127,30 @@ describe(`what the adapter makes of the app-server’s real turns (${recordedVer
     expect(of(events, 'tool_output_delta').map((d) => d.text).join('')).toBe('long-done\n')
     expect(of(events, 'tool_result')).toMatchObject([{ ok: true, output: 'long-done\n' }])
     expect(ended(events)).toBe(1)
+    // Done within its turn: nothing is kept past it
+    expect(of(events, 'background_tasks')).toEqual([])
+  })
+
+  it('background-kept: a command the turn leaves running is background work from that turn’s end until it completes (#2027)', async () => {
+    const { events } = await run('background-kept')
+    const command = "/bin/zsh -lc 'sleep 25; echo kept-done'"
+    const kept = events.findIndex((e) => e.type === 'background_tasks' && e.live.length > 0)
+    // Listed before the turn's end goes out, so the session is never idle without it
+    expect(kept).toBeGreaterThan(-1)
+    expect(kept).toBeLessThan(events.findIndex((e) => e.type === 'turn_complete'))
+    expect(of(events, 'background_tasks')).toEqual([
+      { type: 'background_tasks', sessionId: 'replay-background-kept', live: [{ id: expect.any(String), kind: 'shell', description: command, parentCallId: expect.any(String), stopsWithTurn: false, stoppable: false, status: 'running' }] },
+      { type: 'background_tasks', sessionId: 'replay-background-kept', live: [], ended: [expect.objectContaining({ kind: 'shell', description: command, status: 'completed' })] },
+    ])
+    expect(ended(events)).toBe(2)
+  })
+
+  it('goal-set: an active goal is background work until it is cleared (#2027)', async () => {
+    const { events } = await run('goal-set')
+    expect(of(events, 'background_tasks').map((e) => e.live.map((t) => `${t.kind} ${t.description}`))).toEqual([
+      ['other Goal: Create a file named goal.txt in the current folder that holds the word ok. The goal is complete once that file exists.'],
+      [],
+    ])
   })
 
   it('command-failed: a command that exits with an error is one call that ends not ok with its own words, and the turn goes on to say so', async () => {
