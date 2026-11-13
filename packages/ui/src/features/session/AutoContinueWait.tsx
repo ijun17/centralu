@@ -13,7 +13,6 @@ import { usePresence } from '../../components/presence.js'
  * said and takes no press.
  */
 export function AutoContinueWait({ sessionId, interruption }: { sessionId: string; interruption: Interruption | null | undefined }) {
-  const send = useStore((s) => s.send)
   const stopContinue = useStore((s) => s.stopContinue)
   const label = interruption ? autoContinueLabel(interruption, formatClock) : null
   const { shown, leaving } = usePresence(label !== null)
@@ -34,7 +33,7 @@ export function AutoContinueWait({ sessionId, interruption }: { sessionId: strin
         variant="secondary"
         size="sm"
         className="shrink-0"
-        onClick={() => void send(sessionId, CONTINUE_WORDS)}
+        onClick={() => void useStore.getState().send(sessionId, CONTINUE_WORDS)}
         title={`Sends "${CONTINUE_WORDS}"`}
         data-testid="auto-continue-now"
       >
