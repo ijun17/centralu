@@ -798,6 +798,8 @@ task is never reminded: its report settles it.
 | `compactCycles` | notice | `{ session, count }`: the session went through more than 6 compact_self cycles with a next step in the hour (D32, S20); for the person only |
 | `guardRefused` | notice | `{ sender, reason }`: a send `repeat`, `rate_limited` or `ask_rate` refused (§7.5, S21); for the person only |
 | `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S18); for the person only |
+| `watch` | notice | `{ id, source, change, late? }`: a watch's notice to the session that set it (§18.5): what changed (`turn_ended`, `asked`, `stopped`, `gone`, a time's `due`) or how it ended (`expired`, `cancelled`, both quiet); `late` when the host was not there at its time |
+| `watchWakes` | notice | `{ session, count }`: a session's watches woke it more than 6 times in the hour (§18.7); for the person only |
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
@@ -1279,7 +1281,9 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
    `rules.ts`, replacing `flowsDown`, `rules.ts:122`):
    - it is from the person;
    - or it is a `task` from a session to a session that is not the orchestrator;
-   - or it is a `message` from the recipient's `askedBy` (its parent) and the recipient is not the orchestrator.
+   - or it is a `message` from the recipient's `askedBy` (its parent) and the recipient is not the orchestrator;
+   - or it is a watch's notice (`facts.watch`, §18.5), which goes only to the session that set it: Centralu's words and
+     that session's own note.
 
    Everything else is pulled with `mail read`.
 5. **Result** (`DrainResult`, M2): the fields of today, with `workMessage: string | null` and `asker: string | null`
@@ -3594,7 +3598,7 @@ already learns it, through the mail hooks built in `mail/host-mail.ts:261`, so t
 | Change (`reason` in the frame) | Hook | When |
 |---|---|---|
 | `turn_ended` | `lastResponse` (`host-mail.ts:286`) | the moment a last response answers tasks. A turn that ended while the session's own background work runs is still working (owner 2026-11-04, `mail/rest.ts`) |
-| `asked` | `cards.tell` (`host-mail.ts:313`) | it raised a question or approval card |
+| `asked` | the session's `question_request` or `approval_request` event (`sessionEvent` in `host-mail.ts`) | it raised a question or approval card. Not `cards.tell`: that runs only for givers of open work there, and a watcher has none (it is refused one) |
 | `stopped` | `stopped` | interrupted, error, usage limit, quit |
 | `gone` | `sessionGone` (`host-mail.ts:263`) | deleted |
 
@@ -3635,7 +3639,9 @@ and fire nothing; an update back picks them up, and the late ones fire once.
 Indexes: `(owner, state)` and `(state, next_at)`. A row ends at `expires_at` (24 hours for session and `every`
 watches, the time itself for `in` and `at`, never more than 7 days), when a one-shot fires, when it is cancelled, or
 when its owner is deleted. The owner's rows are deleted with its mail on the party-gone path (`host-mail.ts:263`). A
-row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):
+handoff that moves a session's mailbox to its heir (`MessageService.handOver`, scope `all`: the original goes) moves its
+active watches with it, the same rows with `owner` rewritten to the heir, and the watches others keep on the original wait
+for the heir, from the heir's state then. A row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):
 `Your watch on <what> ended after 24 hours without a change.` Ended rows are kept 14 days, like a read notice (§6.4),
 and the same retention sweeps them.
 
@@ -3643,7 +3649,7 @@ and the same retention sweeps them.
 
 One owner: `Watches` in a new `mail/watches.ts`, with `register(owner, to, note)`, `cancel(id, by)`, `list(owner)`,
 `changed(target, change)` and `due(now)`. `changed` is called from the four hooks in §18.3, one line each in
-`host-mail.ts`.
+`host-mail.ts`. The warning (§18.7) is `Watches`' own, after each firing.
 
 - **Time.** One timer to the earliest `next_at`, through MailDelivery's injected `schedule` (`mail/delivery.ts:178`).
   The delivery's 60-second sweep (`sweep()`, `delivery.ts:250`, which already notices a computer that slept) calls
@@ -3738,7 +3744,7 @@ badge (`e2e/older-host.spec.ts`). The badge's count is a selector over the liste
 |---|---|
 | `agent-host/src/mail/watches.ts` (new) | `Watches`: register, cancel, list, changed, due, the firing transaction, catch-up |
 | `dev-services/store/migrations/v<n>.ts`, `store/mailbox.ts` | the `mail_watches` step; row methods; the undelivered-notice query by fact name |
-| `mail/host-mail.ts` | builds `Watches`; one call each in `lastResponse`, `cards.tell`, `stopped`, `sessionGone`; the warning |
+| `mail/host-mail.ts` | builds `Watches`; one call each in `lastResponse`, `sessionEvent` (a card), `stopped`, `sessionGone`, `handOver` |
 | `mail/delivery.ts` | starts and stops `Watches`; `due(now)` in `sweep`; the timer through `schedule` |
 | `mail/tool.ts` | `watch`, `close` with a `w_` id, the `inbox` lines; `MailToolArgs` loses the dead fields |
 | `mail/ids.ts` | the `w_` kind |

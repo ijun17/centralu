@@ -6,6 +6,7 @@ import { PERSON, parseAddress } from './address.js'
 import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
+import type { Watches } from './watches.js'
 
 /**
  * Waking is the mailbox's job (docs/plans/mailbox.md §5): a sender only posts, and `MailDelivery` hands each receiver its mail.
@@ -125,6 +126,8 @@ export type MailDeliveryOptions = {
    * tries it (a notice there is passed on by `MailAcross`, a sent copy is written delivered)
    */
   across?: (address: string) => boolean
+  /** The watches sessions keep (docs/plans/mailbox.md §18.5): they start and stop with the delivery, their timer is its `schedule`, and its sweep runs what is due */
+  watches?: Pick<Watches, 'start' | 'stop' | 'due'>
 }
 
 const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2, warnPairTurns: WARN_PAIR_TURNS_PER_HOUR, warnHostTurns: WARN_HOST_TURNS_PER_HOUR }
@@ -132,8 +135,9 @@ const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_00
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'across'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'across' | 'watches'>>
   private readonly across: ((address: string) => boolean) | undefined
+  private readonly watches: MailDeliveryOptions['watches']
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
   private readonly turns: MailTurns | undefined
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
@@ -181,8 +185,9 @@ export class MailDelivery {
       })
     this.heartbeat = opts.heartbeat
     this.turns = opts.turns
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'across')) }
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'across' && k !== 'watches')) }
     this.across = opts.across
+    this.watches = opts.watches
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -216,6 +221,7 @@ export class MailDelivery {
       })
     }
     loop()
+    this.watches?.start(this.schedule)
     void this.sweep()
   }
 
@@ -223,6 +229,7 @@ export class MailDelivery {
     // While the person has not answered for the crowd, the host is still as it was when it started: a restart asks again
     if (!this.crowd) this.heartbeat?.write(this.now())
     this.running = false
+    this.watches?.stop()
     this.stopListening?.()
     this.stopSweep?.()
     for (const cancel of this.timers.values()) cancel()
@@ -261,6 +268,11 @@ export class MailDelivery {
       this.catchUpPending = true
     }
     this.lastSweepAt = now
+    try {
+      this.watches?.due(now)
+    } catch (e) {
+      console.error(`[mail] the watches' sweep failed; it runs again at the next one: ${errorMessage(e)}`)
+    }
     this.moveOnWorkOfGoneSessions()
     const recipients = this.records.dueRecipients().filter(this.here)
     if (this.catchUpPending) {

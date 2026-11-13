@@ -82,7 +82,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
   })
 
   describe('flowsDownTo (§8.2 step 4)', () => {
-    const f = (over: Partial<Parameters<typeof flowsDownTo>[0]> = {}) => flowsDownTo({ fromPerson: false, fromSession: true, kind: 'message', toAssistant: false, fromParent: false, ...over })
+    const f = (over: Partial<Parameters<typeof flowsDownTo>[0]> = {}) => flowsDownTo({ fromPerson: false, fromSession: true, kind: 'message', toAssistant: false, fromParent: false, watch: false, ...over })
 
     it('is the person’s words, a task from a session, and a parent’s message; never a session’s words to the Assistant', () => {
       expect(f({ fromPerson: true, fromSession: false })).toBe(true)
@@ -94,6 +94,11 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
       expect(f({ fromParent: true, toAssistant: true })).toBe(false)
       expect(f({ kind: 'report', fromSession: false })).toBe(false)
       expect(f({ kind: 'notice', fromParent: true })).toBe(false)
+    })
+
+    it('carries a watch’s notice to the session that set it (§18.5); every other Centralu notice is pulled', () => {
+      expect(f({ kind: 'notice', fromSession: false, watch: true })).toBe(true)
+      expect(f({ kind: 'notice', fromSession: false })).toBe(false)
     })
   })
 

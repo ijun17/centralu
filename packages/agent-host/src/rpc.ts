@@ -34,6 +34,7 @@ import { centraluToolSchemas } from './sessions/centralu-tools.js'
 import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
+import type { Watches } from './mail/watches.js'
 import type { MailAcross } from './mail/across.js'
 import type { InlineViews } from './inline-views.js'
 import type { CredentialsReport } from './lifecycle/serve-credentials.js'
@@ -122,6 +123,8 @@ export type RpcServices = {
   mailAcross?: Pick<MailAcross, 'fromHub' | 'rows'>
   /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
   mail?: MailPerson
+  /** The watches sessions keep (#1324, mail/watches.ts): the person lists and cancels them where they look at the session */
+  watches?: Pick<Watches, 'views' | 'cancel'>
   /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
   requests?: Pick<HostRequests, 'list' | 'answer'>
   /** A `centralu serve` host's full credentials as the launcher lists them (#1405, `host.credentials`); absent or null: none */
@@ -169,7 +172,7 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, mail, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
@@ -267,6 +270,9 @@ export function createRpcHandler(
       requireMail().wake(RpcMethods['mail.wake'].params.parse(p).wake)
       return { ok: true as const }
     },
+    // A host without watches (a test's) lists none and cancels nothing
+    'watches.list': async (p: unknown) => ({ watches: watches?.views(RpcMethods['watches.list'].params.parse(p).sessionId) ?? [] }),
+    'watches.cancel': async (p: unknown) => ({ cancelled: watches?.cancel(RpcMethods['watches.cancel'].params.parse(p).id, 'person') ?? false }),
     'apps.inlineViews': async (p: unknown) => inlineViews?.list(RpcMethods['apps.inlineViews'].params.parse(p).sessionId) ?? [],
     'apps.importPrepare': async (p: unknown) => requireExternalApps().prepareImport(RpcMethods['apps.importPrepare'].params.parse(p).source),
     'apps.importCancel': async (p: unknown) => {

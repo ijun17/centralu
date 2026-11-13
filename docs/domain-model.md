@@ -71,6 +71,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Report mark | What a build before #1948 step 3 kept for "you will be told when it ends": a session that owed a report of its work's end to the session that gave it work (#646, #1233). This build reads and keeps none: an open task is the record of an owed answer, answered by its reply or by the session's last response once it is at rest (plans/mailbox.md §10.6.3). At each start a mark whose caller has no open task to its session becomes a delivered task, and every mark is deleted; as the host leaves it writes one for each session still in a turn, for an earlier build after a rollback | `takeOverFromEarlierBuild`, `leaveForEarlierBuild` (`mail/adoption.ts`); `report_marks` (store v49) | |
 | Delegated turn | Retired word (#1948 step 4): a turn belongs to no one, so no session owns the turn its work started. A card in a session goes to every giver of open work there, and one of them answers it only as the gate allows (plans/mailbox.md §10.6.4). `delegated_turns` (store v51) is neither read nor written; every start deletes its rows | `RoutedCards`, `sessions/routed-cards.ts`; `openTaskParties`, `mail/delegation.ts` | |
 | Mailed send | Work one session sends a session that cannot take it now (a `mail` send to a session the sender started, `ask_project`, `send_to_session`): a mail task from the sender, which reaches the session as a turn of its own once it is free, reported to the sender (#1948 step 2). Replaced the queued request (#677), which an older build may still leave in `queued_requests`: the next start turns each into such a task | `MailSessionsView.takesSendNow` / `mailTask`; plans/mailbox.md §10.6.2 | Queued request |
+| Watch | A condition a session asks Centralu to keep for it: a time (`in 30m`, `at 16:30`, `every 30m`) or another session's change (its turn ended, it asked, it stopped, it is gone). When it changes, the session that set it gets one notice from Centralu as mail, which wakes it like any mail. Set with `mail(action="watch")`, cancelled with `close` by its id or by the person; a session's watches end after 24 hours, a time's at that time (#1324) | `Watches`, `mail/watches.ts`; `mail_watches` (store v73); plans/mailbox.md §18 | sleep loop, poll |
 | Fork | A sub-session started from a copy of a busy session's conversation for another session's request (`ifBusy: "fork"`): linked to the requester, hung under the original in the sidebar (#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id` (store v52) | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
@@ -423,8 +424,11 @@ Where it is stored:
   delivery started, whether and how it was settled (`answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy`), its
   reminders, and when it was released and its sender told.
 - `mail_numbers`: the number the person's window gives each message of a chain, given once and never again (v67).
+- `mail_watches`: the watches sessions keep (v73, [plans/mailbox.md](plans/mailbox.md) §18.4, #1324): whose, what they wait for, their
+  state (`active` until it fires, expires, is cancelled or its session is gone), the last change fired, and when they end. Ended rows are
+  kept 14 days, swept with the read notices.
 
-An older build serving the same store during a swap never names these tables (steps v61, v65 and v67 only add), and a session deleted for good
+An older build serving the same store during a swap never names these tables (steps v61, v65, v67 and v73 only add), and a session deleted for good
 from the session archive takes its receipts, its place in threads and its turn records with it. Retention (done threads after 30
 and 180 days, read notices after 14) is `MessageService.sweep`, which the host runs with the delivery's 60 s sweep ([plans/mailbox.md](plans/mailbox.md) §6.4). The heartbeat the delivery keeps
 to tell how long the host was off is the setting `mail.heartbeat`.

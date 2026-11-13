@@ -957,6 +957,22 @@ of every seat with mail, and would need per-session tool definitions, which do n
 no longer says `parent` is for "a question or checkpoint": a checkpoint is the progress report the frame says is not needed. Not
 measured live.
 
+**#1324 (watches, [plans/mailbox.md](plans/mailbox.md) §18.2; owner Q1 (b), no resident phrase).** The six thread-era fields no code
+read (`state`, `outcome`, `next`, `blocker`, `unblock`, `follows`) and the action `update` go; the action `watch` comes, and `to` gains
+`. For watch: a session, "in 30m", "at 16:30" or "every 30m"` (59). The definition is 1,350 → 1,170, `MAIL_BUDGET_CHARS` 1,355 → 1,175,
+and the reader's resident ceiling (the sum) falls by 180. A session learns of watches from this definition only: nothing resident names
+them, so on Claude, where `mail` is deferred, a session finds `watch` once it loads the tool. Measured with `residentCost`:
+
+| Seat | Tool | Before | After |
+|---|---|---|---|
+| ordinary or child, Claude | resident (`mail` deferred) | 3,431 | 3,431 |
+| ordinary or child, Claude | deferred | 3,509 | 3,329 |
+| ordinary or child, Codex | loaded (all) | 6,998 | 6,818 |
+| Assistant, Claude / Codex | resident (mail is a command) | 10,743 / 11,263 | 10,743 / 11,263 |
+
+A Codex session started before the update that still calls `update` gets a schema error instead of the "removed" sentence; that call has
+done nothing since threads went. Not measured live.
+
 Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds

@@ -584,7 +584,7 @@ export class MessageService {
         row,
         message,
         request,
-        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender }),
+        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined }),
       })
     }
 

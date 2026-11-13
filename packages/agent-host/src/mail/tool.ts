@@ -8,25 +8,20 @@ import { CITE_MS, SUBJECT_CHARS, type MessageService, type ReadItem, type SendRe
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
+import { isTimeWatch, type Watches } from './watches.js'
 
 /**
  * The arguments of the `mail` tool a session calls, as the version-1 schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts, unchanged in
  * M3a: docs/plans/mailbox.md §11.3). This is what the tool reads once they are checked.
  */
 export type MailToolArgs = {
-  action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'update' | 'close' | 'find'
+  action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'close' | 'find' | 'watch'
   thread?: string | undefined
   to?: string | undefined
   kind?: string | undefined
   subject?: string | undefined
   text?: string | undefined
-  state?: string | undefined
-  outcome?: string | undefined
-  next?: string | undefined
-  blocker?: string | undefined
-  unblock?: number | undefined
   urgent?: boolean | undefined
-  follows?: string[] | undefined
   cite?: boolean | undefined
   /** A question to the person: the answers it offers to pick from (#1630) */
   choices?: string[] | undefined
@@ -69,14 +64,16 @@ export type MailToolHost = {
   across?: Pick<MailAcross, 'send' | 'foreign' | 'find' | 'named'>
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
+  /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */
+  watches?: Pick<Watches, 'register' | 'cancel' | 'read' | 'list' | 'what' | 'clock'>
   now?: () => number
 }
 
 /**
  * A session's mailbox through the version-1 tool (§11.3, `mapV1`): every old action runs on the message service. `reply {thread}` answers a message
  * (`needsReply` false unless `kind: "question"`; a task only with `kind: "answer"`, docs/plans/mailbox.md §10.6.3), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
- * (`needsReply` true unless `kind: "note"`), and `update` and `close` are gone with threads. `thread` names a message id, or a legacy thread id, which
- * means the newest message of that thread sent to the caller. The address a session acts as is the host's, never one the call names (§7.1).
+ * (`needsReply` true unless `kind: "note"`), `watch` sets a watch (§18.2) and `close` cancels one: threads, which it closed before, are gone. `thread`
+ * names a message id, or a legacy thread id, which means the newest message of that thread sent to the caller. The address a session acts as is the host's, never one the call names (§7.1).
  *
  * What other parties wrote comes back quoted line by line, under Centralu's word for who they are to the reader (§8.3).
  */
@@ -228,13 +225,31 @@ export class MailTool {
       }
       case 'find':
         throw refuse('bad_value', 'find searches other computers too, which this call does not reach')
-      case 'update':
-      case 'close':
+      case 'watch':
+        return this.watch(sessionId, me, a, calls)
+      case 'close': {
+        const id = a.thread?.trim() ?? ''
+        const w = parseMailId(id)?.kind === 'watch' ? this.host.watches?.read(id) : undefined
+        if (w?.owner === me.address) return this.host.watches?.cancel(id, 'owner') ? `Cancelled watch ${id}.` : `Watch ${id} had ended already.`
         throw refuse(
           'removed',
-          `Centralu's mail has no threads any more, so "${a.action}" is gone. Answer a message with ${calls.answer('<message id>')}, and mark one that needs nothing with ${calls.done('<message id>')}.`,
+          `Centralu's mail has no threads any more, so "close" closes only a watch of yours. Answer a message with ${calls.answer('<message id>')}, and mark one that needs nothing with ${calls.done('<message id>')}.`,
         )
+      }
     }
+  }
+
+  /** `watch` (§18.2): `to` a session, resolved as `send` resolves it, or a time; `text` the session's note. No other field */
+  private watch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
+    const watches = this.host.watches
+    if (!watches) throw refuse('no_mailbox', 'watches are not available here')
+    const other = (['thread', 'kind', 'subject', 'urgent', 'cite', 'choices', 'ifBusy'] as const).find((k) => a[k] !== undefined)
+    if (other) throw refuse('field_not_allowed', `a watch takes to and text only, not ${other}.`)
+    const to = a.to?.trim() ?? ''
+    if (!to) return `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time) or "every 30m" (at least 10 minutes); text is your note, at most 300 characters.`
+    // Itself is the watch's to refuse, in its words (`party` refuses it as a message's recipient)
+    const target = isTimeWatch(to) ? to : to === sessionId || to === me.address ? me.address : this.party(sessionId, me, to).address
+    return watches.register(me.address, target, a.text?.trim() ?? '', (id) => calls.close(id))
   }
 
   private need(value: string | undefined, name: string): string {
@@ -344,14 +359,17 @@ export class MailTool {
   /** `inbox` (S6): what waits for the caller's answer, what is unread, what it asked and is not answered, and its mail held for the person */
   private inbox(me: string, calls: MessageCalls): string {
     const v = this.service.inbox(me)
+    const ws = this.host.watches
+    const watching = ws ? ws.list(me).map((w) => `Watching: ${w.id} ${ws.what(w)} until ${ws.clock(w.expiresAt)}${w.note ? `: ${w.note}` : ''}`) : []
     const total = v.needReply.length + v.unread.length + v.waiting.length + v.held.length
-    if (total === 0) return 'Your mailbox is empty.'
+    if (total === 0) return ['Your mailbox is empty.', ...watching].join('\n')
     const lines = [
       `${v.needReply.length} waiting for your reply, ${v.unread.length} unread, ${v.waiting.length} of yours waiting for a reply, ${v.held.length} held. Read with ${calls.read()}.`,
       ...v.needReply.map((i) => `reply     ${i.message.id} from ${i.relation} ${this.name(i.message.sender)}, ${this.age(i.message.createdAt)} ago${i.row?.readAt === null ? ', unread' : ''}`),
       ...v.unread.map((i) => `unread    ${i.message.id} ${i.message.kind} from ${i.relation} ${this.name(i.message.sender)}, ${this.age(i.message.createdAt)} ago${i.withheld ? ' (a request: its words are shown in the turn it starts)' : ''}`),
       ...v.waiting.map((w) => `you asked ${w.message.id} ${this.name(w.row.recipient)}, ${this.age(w.message.createdAt)} ago: ${w.row.answerId ? 'answered, the answer held for the person' : 'not answered'}`),
       ...v.held.map((h) => `held      ${h.message.id} to ${this.name(h.row.recipient)}: ${h.why === 'loop' ? 'waits until the person lets it go' : `waits until the person trusts ${h.message.senderProject ?? 'your project'}`}`),
+      ...watching,
     ]
     return lines.join('\n')
   }

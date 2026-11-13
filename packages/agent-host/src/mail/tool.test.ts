@@ -1,7 +1,7 @@
 /**
  * The version-1 `mail` tool mapped onto the message service (docs/plans/mailbox.md §11.3, M3a): a process started before the switch keeps its schema,
- * and every old action runs on the new tables. `reply` answers, `handled` is done, `read` reads a message and its chain, `send` sends; `update` and
- * `close` are gone with threads.
+ * and every old action runs on the new tables. `reply` answers, `handled` is done, `read` reads a message and its chain, `send` sends; `watch` sets a
+ * watch and `close` cancels one (threads are gone).
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
@@ -291,15 +291,31 @@ describe('handled, read and inbox', () => {
   })
 })
 
-describe('update and close are gone with threads (S9)', () => {
-  it('are refused removed, naming the old tool’s calls', () => {
+describe('watch, and close with its id (docs/plans/mailbox.md §18.2)', () => {
+  it('takes to and text only, answers the usage line without to, and lists the watches in the inbox', () => {
     const w = world()
-    for (const action of ['update', 'close'] as const) {
-      expect(w.run('a', { action, thread: 'hub-aaaaaaaa.t_01', state: 'review' })).toEqual({
-        text: `Refused (removed): Centralu's mail has no threads any more, so "${action}" is gone. Answer a message with mail(action="reply", thread="<message id>", text="…"), and mark one that needs nothing with mail(action="handled", thread="<message id>").`,
+    w.delivery.start()
+    stops.push(() => w.stop())
+    expect(w.run('a', { action: 'watch', to: 'beta', kind: 'note' })).toEqual({ text: 'Refused (field_not_allowed): a watch takes to and text only, not kind.', isError: true })
+    expect(w.run('a', { action: 'watch' }).text).toBe(
+      `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time) or "every 30m" (at least 10 minutes); text is your note, at most 300 characters.`,
+    )
+    const id = /id (\S+)\./.exec(w.run('a', { action: 'watch', to: 'beta', text: 'its review' }).text)?.[1] ?? ''
+    expect(w.run('a', { action: 'inbox' }).text.split('\n')).toEqual(['Your mailbox is empty.', `Watching: ${id} beta (${B}) until ${w.watches.clock(w.clock.t + 24 * 3_600_000)}: its review`])
+    expect(w.run('a', { action: 'close', thread: id })).toEqual({ text: `Cancelled watch ${id}.` })
+    expect(w.run('a', { action: 'inbox' }).text).toBe('Your mailbox is empty.')
+  })
+
+  it('close refuses any id but a watch of the caller’s, as threads are gone (S9)', () => {
+    const w = world()
+    const id = /id (\S+)\./.exec(w.run('b', { action: 'watch', to: 'in 1h' }).text)?.[1] ?? ''
+    for (const thread of ['hub-aaaaaaaa.t_01', id]) {
+      expect(w.run('a', { action: 'close', thread })).toEqual({
+        text: `Refused (removed): Centralu's mail has no threads any more, so "close" closes only a watch of yours. Answer a message with mail(action="reply", thread="<message id>", text="…"), and mark one that needs nothing with mail(action="handled", thread="<message id>").`,
         isError: true,
       })
     }
+    expect(w.watches.read(id)?.state).toBe('active')
   })
 })
 
