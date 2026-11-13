@@ -116,7 +116,7 @@ describe('a store written before a question’s choices had a column (v69, #1630
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(2) // v70, then v71 (#2229)
+    expect(second.migrationsRun).toBe(3) // v70, then v71 (#2229), v72 (#2243)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v69 writes: its own column list, none of ours
@@ -142,12 +142,57 @@ describe('a store written before a chain’s subject had a column (v70, #2229)',
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(1)
+    expect(second.migrationsRun).toBe(2) // v71, then v72 (#2243)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?', subject: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v70 writes: its own column list, none of ours
     db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, choices, created_at) VALUES ('h1.m_2', 'session:h1/a', 'message', 1, 'h1.m_2', 'old', '{}', NULL, ?)`).run(at)
     expect(second.mailbox.message('h1.m_2')).toMatchObject({ body: 'old', subject: null })
+    db.close()
+  })
+})
+
+describe('a store holding mail an earlier build held (v71, #2243)', () => {
+  it('ends the holds of the token guard and the first-contact hold, and keeps every other row as it was', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-holds-'))
+    dirs.push(dir)
+    const file = join(dir, 'store.db')
+    const first = new Store(file)
+    const written = (first as unknown as { db: Database.Database }).db
+    const at = 1_800_000_000_000
+    const message = written.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES (?, 'session:h1/a', 'message', 1, ?, 'hi', '{}', ?)`)
+    const recipient = written.prepare(
+      `INSERT INTO mail_recipients (message_id, recipient, due_at, held, settled, attempts, last_error, attempt_at) VALUES (?, 'session:h1/b', ?, ?, ?, 2, 'x', ?)`,
+    )
+    // What an earlier build left (carried by the v65 move, settled `legacy`), and what today's build holds (never moved, so `settled` is NULL)
+    const rows: [string, string, string | null][] = [
+      ['m_budget', 'budget', 'legacy'],
+      ['m_old_policy', 'policy', 'legacy'],
+      ['m_new_policy', 'policy', null],
+      ['m_loop', 'loop', 'legacy'],
+      ['m_uncertain', 'uncertain', 'legacy'],
+      ['m_failed', 'failed', null],
+    ]
+    for (const [id, held, settled] of rows) {
+      message.run(`h1.${id}`, `h1.${id}`, at)
+      recipient.run(`h1.${id}`, at, held, settled, at)
+    }
+    written.pragma('user_version = 71')
+    written.close()
+
+    const second = new Store(file)
+    expect(second.migrationsRun).toBe(1)
+    // Waiting lists what is held for the person today: a `policy` hold of today's rule, and the holds nothing here ended
+    const waiting = second.mailbox.heldRows().map((r) => `${r.messageId.slice(3)}:${r.held}`)
+    expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_uncertain:uncertain'])
+    // The ended rows stay, dismissed and settled as they were, with the delivery's attempt state cleared as the person's Dismiss clears it
+    const db = (second as unknown as { db: Database.Database }).db
+    const ended = db.prepare(`SELECT message_id AS id, held, settled, attempts, last_error AS err, attempt_at AS at FROM mail_recipients WHERE message_id IN ('h1.m_budget', 'h1.m_old_policy') ORDER BY message_id`).all()
+    expect(ended).toEqual([
+      { id: 'h1.m_budget', held: 'dismissed', settled: 'legacy', attempts: 0, err: null, at: null },
+      { id: 'h1.m_old_policy', held: 'dismissed', settled: 'legacy', attempts: 0, err: null, at: null },
+    ])
+    expect(db.prepare(`SELECT held, settled, attempts, last_error AS err FROM mail_recipients WHERE message_id = 'h1.m_new_policy'`).get()).toEqual({ held: 'policy', settled: null, attempts: 2, err: 'x' })
     db.close()
   })
 })

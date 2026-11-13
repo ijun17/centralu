@@ -210,6 +210,32 @@ export class StepsV65 extends MigrationRange {
           this.addColumn('mail', 'subject', 'TEXT')
         },
       },
+      {
+        to: 72,
+        breaksOlderReaders: false,
+        /**
+         * The holds of an earlier build, ended (#2243). The mail token guard (`budget`) went with D32 (#2014, beta.49) and the `auto` receiver's
+         * first-contact hold (`holdsInbound`) with D10, but the rows an earlier build held kept their hold when the v65 move carried them (settled
+         * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
+         * without asking" weeks after nothing could write such a hold. A row held `budget`, or held `policy` and settled `legacy`, is now `dismissed`:
+         * the hold word the person's Dismiss sets, which every build since v65 reads as "not held for the person any more, never delivered". A
+         * `policy` row of today's rule (`reach.holdFor`) was never moved, so its `settled` is NULL and it keeps its Release.
+         *
+         * The honest word is the hold's own, not a `settled` one: `gone` says the sender or recipient is gone, and `withdrawn` that the sender said
+         * it no longer waits, and neither is so; `settled` stays as it was (`legacy`: settled, never awaited). Dismiss also clears the delivery's
+         * attempt state, as here. The sender is not told: the person did not dismiss it, and nobody has waited on these rows for two weeks.
+         *
+         * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
+         * and does not bring the holds back. Nothing is deleted: the message and its row stay.
+         */
+        run: () => {
+          if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
+          this.db.exec(
+            `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
+              WHERE held = 'budget' OR (held = 'policy' AND settled = 'legacy')`,
+          )
+        },
+      },
     ]
   }
 

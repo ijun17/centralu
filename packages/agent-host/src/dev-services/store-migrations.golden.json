@@ -285,12 +285,16 @@
   {
    "to": 71,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 72,
+   "breaksOlderReaders": false
   }
  ],
- "version": 71,
- "ran": 70,
+ "version": 72,
+ "ran": 71,
  "store": {
-  "userVersion": 71,
+  "userVersion": 72,
   "master": [
    {
     "type": "index",
