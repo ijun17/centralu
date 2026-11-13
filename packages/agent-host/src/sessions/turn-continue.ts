@@ -4,6 +4,7 @@ import { LIMIT_NOTE, NETWORK_NOTE, RETRY_NOTE } from '../adapters/input-receipts
 import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { inTurn } from '../idle.js'
 import type { WaitEnd } from '../mail/stop-notices.js'
+import { planLimitResetAt } from './error-kind.js'
 
 /**
  * The one owner of "continue a stopped turn once its cause clears" (#1693, #1415, #2238; docs/agent-host/lifecycle/auto-continue.md).
@@ -186,7 +187,8 @@ export class TurnContinue {
       return
     }
     const now = Date.now()
-    const at = cause === 'limit' ? resetAt(e.type === 'limit_reached' ? e.resumeAt : m.limit?.resumeAt, now) : undefined
+    const worded = e.type === 'error' ? planLimitResetAt(e.error.message, now) : undefined
+    const at = cause === 'limit' ? resetAt(e.type === 'limit_reached' ? e.resumeAt : m.limit?.resumeAt, worded, now) : undefined
     i.autoContinue = at === undefined ? { tries } : { at, tries }
     this.wait(m.id, { cause, tool: m.tool, at, tries, phase: 'waiting' })
   }
@@ -468,10 +470,14 @@ export class TurnContinue {
   }
 }
 
-/** When a usage limit's continue goes: its reset (ISO, as the tool said it) and a margin; with no reset said, a slow retry */
-function resetAt(resumeAt: string | undefined, now: number): number {
-  const reset = resumeAt ? Date.parse(resumeAt) : NaN
-  return Number.isFinite(reset) ? Math.max(reset, now) + RESET_MARGIN_MS : now + NO_RESET_RETRY_MS
+/**
+ * When a usage limit's continue goes: its reset and a margin. The reset the tool's data says first (ISO), else the one its words say (`worded`, a
+ * Codex 429's "try again at 6:17 PM"); with neither, a slow retry
+ */
+function resetAt(resumeAt: string | undefined, worded: number | undefined, now: number): number {
+  const said = resumeAt ? Date.parse(resumeAt) : NaN
+  const reset = Number.isFinite(said) ? said : worded
+  return reset !== undefined ? Math.max(reset, now) + RESET_MARGIN_MS : now + NO_RESET_RETRY_MS
 }
 
 /** The turn's end, as the provider's error said it (without the marker, which would hold it again) */

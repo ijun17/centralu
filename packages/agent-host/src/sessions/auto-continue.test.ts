@@ -221,6 +221,15 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(probes).toBe(0)
   })
 
+  it("a Codex 429 with no reset in its data continues at the time its words say, not 30 minutes on", async () => {
+    vi.setSystemTime(new Date(2026, 10, 13, 17, 30))
+    const a = host()
+    const { id } = await started(a)
+    // Codex 0.160.0's words, with no `account/rateLimits/updated` before them (measured on a live run)
+    a.adapter.last.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), or try again at 6:17 PM.", retryable: false } })
+    expect(a.session(id).interruption?.autoContinue?.at).toBe(new Date(2026, 10, 13, 18, 17).getTime() + RESET_MARGIN_MS)
+  })
+
   it('a Codex credits limit does not reset with time and waits for the person', async () => {
     const { a, id, handle } = await limited(60_000, { credits: true })
     expect(a.session(id).interruption).toMatchObject({ reason: 'limit' })
