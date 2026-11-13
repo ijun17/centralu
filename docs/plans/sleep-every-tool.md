@@ -1,6 +1,6 @@
 # Idle sessions of every tool sleep (#2027)
 
-> **Status: design, not built (2026-11-13).** The owner decided on #2027 (2026-11-12): idle sessions of every tool sleep,
+> **Status: Codex built (outcome A, §4a), the ACP tools not yet (§6a), 2026-11-13.** The owner decided on #2027 (2026-11-12): idle sessions of every tool sleep,
 > not only Claude's; for Codex, measure a resume first (time to first token, cache read on the first request, threads of
 > 1, 50 and 500 MB), then choose between a sleep rule and one shared app-server per account. #1895 option C stands: no
 > new keeper agent-holding code. The setting stays the one of #568, "Put idle sessions to sleep after" (15 minutes).
@@ -253,6 +253,30 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
 - No protocol, store or UI change: the asleep line and "Waking session…" exist; only the comments that explain a slow
   Codex resume (`packages/ui/src/store/connection.ts` ~621, `Composer.tsx:633`) are corrected.
 
+## 4a. As built (Codex, outcome A)
+
+- `adapters/codex/index.ts`: `sleep: true`, its comment the numbers of §3a.
+- **Both preconditions are guarded where Codex's background work is already listed**, `CodexChildTracker`
+  (`adapters/codex/child-tracker.ts`), as the inventory at rest was not run (§11), on the rule "unknown keeps it awake":
+  - a command item a turn's `turn/completed` leaves `inProgress` is listed (kind `shell`, not stoppable) until its
+    `item/completed`. Grounded in the recordings: a command's item stays `inProgress` until its process exits, waits
+    for output included (`long-command`), and no recorded turn, an interrupted one included, ended with one open
+    [checked: every 0.160.0 recording scanned]. When the app-server ends, a listed command is ended `stopped`, as a
+    child's is (a child's command went with the app-server, `probe-codex-background.mts`);
+  - a goal whose status is `active` (from `thread/goal/updated`, and `thread/goal/get` on resume) is listed (kind
+    `other`) until it is cleared, completed or paused. The process ending does not end it as a task: it is the thread's.
+
+  Both make `sessionIdle` say `background`, so they also hold off a move to a new CLI, which ends the app-server too.
+  **The probe that decides them** (`probe-codex-background.mts --inventory shell|goal`, and the scenarios
+  `background-kept` and `goal-set` recorded by `scripts/frames-record.mts codex`) runs on the Mac; a guard the probe
+  shows unneeded (nothing outlives a turn, or a goal starts no turn by itself) is deleted in the same pull request.
+- Tests: `sessions/sleep.test.ts` "a Codex session, on the recording of a real app-server": the real adapter on
+  `resume.jsonl` through `SessionManager`; the sleeper puts it to sleep (`session_live asleep`), and the next message
+  resumes the thread in a new process and the turn answers with the code word; every recorded line used, none
+  unexpected. Fails with `sleep: false`. `sessions/auto-continue.test.ts`: a session asleep through a usage limit's
+  wait is woken by the continue, and the note goes to the new process. The guards' tests replay the two Mac recordings.
+- No protocol, store or UI change. The UI comments §4 named describe the old grid wake as history and stay.
+
 ## 5. Outcome B: one shared app-server per account
 
 - New `adapters/codex/server-pool.ts`, `CodexServerPool`, keyed by account = `codexHome()` + the binary's identity, so
@@ -305,6 +329,17 @@ restart case too.
 **Order per tool**: OpenCode first (load measured fast and whole), then Antigravity, then Cursor (needs the fix above and
 the subagent check). Each tool's PR carries its M3 numbers.
 
+### 6a. OpenCode does not sleep yet (decided with the Codex PR, 2026-11-13)
+
+Two findings of §3a M3 keep it awake. Its background check was inconclusive, and an ACP tool with unreported
+background work never sleeps (the orchestrator's rule, §9 Q2). And its `session/load` loses the prompt cache (.08
+read after a restart against .996 live): every wake re-reads about 20k input tokens at full price. A rule "sleep only
+past the provider's cache lifetime" was not taken: OpenCode runs many providers with lifetimes from minutes to hours,
+the host cannot read which one applies, and past that lifetime the live session loses the cache too. What would let it sleep: a
+background check that shows nothing kept past a turn (then `backgroundTasks: true` in its profile, as above), and the
+owner weighing ~20k tokens per wake against its 150-260 MB idle. Cursor and Antigravity were not measured and stay
+awake.
+
 ## 7. What wakes a sleeping session, and who waits
 
 | Wake | Path | Who waits |
@@ -313,7 +348,7 @@ the subagent check). Each tool's PR carries its M3 numbers.
 | The person's, a script's or an app's message (`send()`) | `sessions/session-events.ts:572-588` | Same as above, without the typing to hide it |
 | Mail (a report, a task, a reply), not quiet | `deliverMail`, `session-events.ts:690-712` | Nobody on screen; the turn starts after the wake |
 | Quiet mail | Does not wake; read at the next wake (`session-events.ts:697-706`) | Nobody |
-| Auto-continue after a network failure or a limit reset (#2239, branch `auto-continue`) | The continue is a non-quiet `deliverMail` | Nobody; `STAGGER_MS` (5 s per tool) spaces several |
+| Auto-continue after a network failure or a limit reset (#2239, `sessions/turn-continue.ts`) | The continue is a non-quiet `deliverMail` (`SessionManager`'s `send`), which resumes a session with no process | Nobody; `STAGGER_MS` (5 s per tool) spaces several |
 | An update's continue of a cut turn, or its note about ended background work | `deliverMail` (`lifecycle/update-resume.ts`, [continue-after-update.md](../agent-host/lifecycle/continue-after-update.md)) | Nobody |
 
 [checked: the code paths named; whether watches and scheduled deliveries all go through `deliverMail`: unchecked]
@@ -366,7 +401,7 @@ sleeps again 15 minutes after the new host started (`sleep.ts`: the quiet period
    `--tool`/`--idle`; their rows in `packages/agent-host/scripts/README.md`; a "Measured" section here with the numbers,
    who ran them on which machine and CLI version, and the choice by §2's rule (or Q1 to the owner).
 2. **Codex**, the chosen outcome (§4 or §5), with agent-cli-updates.md's sleep section, the vendor-drift row and the
-   two UI comments.
+   two UI comments. Built as §4a (outcome A), with the probe of the inventory at rest; OpenCode stays awake (§6a).
 3. **ACP**, per tool as each is measured (§6), with the Cursor empty-conversation fix before Cursor;
    acp-adapter.md §7 (the capability table) and §5.7, antigravity-acp.md:393 (sleep not offered yet). Independent of PR 2.
 
@@ -378,7 +413,10 @@ and Windows.
 
 After the 2026-11-13 Mac run (§3a):
 
-- Not run: the **inventory at rest** of M1 (a background shell and an active goal past a turn on Codex; A's preconditions
+- Run with the Codex PR, on the Mac (Codex is not installed on the Windows machine it was built on): the inventory at rest,
+  `probe-codex-background.mts --inventory shell` and `--inventory goal`, and the recordings `background-kept` and
+  `goal-set`; their results replace this line.
+- Not run before it: the **inventory at rest** of M1 (a background shell and an active goal past a turn on Codex; A's preconditions
   in §4 stay unknown); the rest of M2 (g): whether memory returns later than 3 s after `thread/unsubscribe`; a **cold
   page cache** for a 500 MB rollout wake (every wake here had the file in memory); the 1 MB (not 0.9 MB) and 500 MB (513 MB)
   sizes are the nearest real rollouts, no padded ones; M1b ran 2 min only, 3 runs, one account.

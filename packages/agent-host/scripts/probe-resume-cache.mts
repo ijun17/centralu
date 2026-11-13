@@ -34,7 +34,7 @@ const { values: opt } = parseArgs({
     'gap-sec': { type: 'string', default: '0' },
     'min-read': { type: 'string', default: '0.9' },
     model: { type: 'string', default: '' },
-    // A tool that does not sleep yet (Codex): `--tool codex --model gpt-5.6-luna --idle-sec 120 --arm resumed|live` (docs/plans/sleep-every-tool.md M1b)
+    // Another tool that sleeps (Codex, #2027): `--tool codex --model gpt-5.6-luna`. With `--idle-sec 120 --arm resumed|live`, a restart in place of the sleep, for a tool that does not sleep (docs/plans/sleep-every-tool.md M1b, M3)
     tool: { type: 'string', default: 'claude' },
     'idle-sec': { type: 'string', default: '0' },
     arm: { type: 'string', default: 'resumed' },
@@ -46,11 +46,13 @@ const { values: opt } = parseArgs({
 if (!opt.model && (opt.tool ?? 'claude') === 'claude') opt.model = 'haiku'
 const root = mkdtempSync(join(tmpdir(), 'cc-probe-resume-cache-'))
 const sleepMs = Number(opt['sleep-sec']) * 1000
+/** A restart in place of the sleep (M1b, M3): the host must not put the session to sleep on its own meanwhile, so its quiet period is a day */
+const restartArm = opt.background || Number(opt['idle-sec']) > 0
 const ENV: Record<string, string> = {
   ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
   ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-  CC_SLEEP_AFTER_MS: String(sleepMs),
+  CC_SLEEP_AFTER_MS: String(restartArm ? 24 * 3600_000 : sleepMs),
 }
 
 function project(): string {
@@ -101,8 +103,8 @@ try {
   show('warm turn', warm)
   console.log(`  the turn took ${warmMs} ms (send to its end)`)
 
-  if (opt.tool !== 'claude') {
-    // No sleep yet: the idle time passes, then (arm `resumed`) `agents.restartSession` swaps the process as a sleep and a wake would; `live` leaves it
+  if (restartArm) {
+    // The idle time passes, then (arm `resumed`) `agents.restartSession` swaps the process as a sleep and a wake would; `live` leaves it
     if (opt.background) {
       const mark = '30' + Math.floor(Math.random() * 90 + 10)
       await host.turn(s.id, `Start this exact shell command in the background and reply "started" as soon as it is started: nohup sleep ${mark} >/dev/null 2>&1 &`)
