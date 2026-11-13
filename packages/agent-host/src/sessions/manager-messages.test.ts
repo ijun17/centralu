@@ -152,11 +152,11 @@ describe('approvals, read state, and messages', () => {
     const gone = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
-    // What its turn's end would have consumed: a restart for an app change
-    internals.restartPolicy.appsRestartAfterTurn.add(gone.id)
+    // What its turn's end would have consumed: a restart for a settings change
+    internals.restartPolicy.restartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
     expect(internals.events.pendingCommits.size).toBe(0)
-    expect(internals.restartPolicy.appsRestartAfterTurn.has(gone.id)).toBe(false)
+    expect(internals.restartPolicy.restartAfterTurn.has(gone.id)).toBe(false)
   })
 
   it('messages are persisted and reloaded', async () => {

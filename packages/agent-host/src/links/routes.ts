@@ -397,6 +397,4 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'orchestrator.tool': INTERNAL,
   'assistant.tools': INTERNAL,
   'assistant.tool': INTERNAL,
-  'apps.sessionTools': INTERNAL,
-  'apps.sessionCall': INTERNAL,
 }

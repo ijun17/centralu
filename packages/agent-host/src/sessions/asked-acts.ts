@@ -179,8 +179,11 @@ const CANNOT_BE_UNDONE: ReadonlySet<string> = new Set([
   'answer_question',
 ])
 
-/** Tools whose kind is read from their arguments (`askedAct`, `stepKind`): an action, or who the mail is for */
-const BY_ARGUMENTS: ReadonlySet<string> = new Set(['agent_session', 'mail'])
+/**
+ * Tools whose kind is read from their arguments (`askedAct`, `stepKind`): an action, or who the mail is for. An `app` call is put to the request's
+ * gate by the session's attachment with the app's own tool (`Attachment.call`, #2231), so here it is the listing that reads and a call that asks
+ */
+const BY_ARGUMENTS: ReadonlySet<string> = new Set(['agent_session', 'mail', 'app'])
 
 /** Every list above: the test holds every tool and command definition to exactly one */
 export const CLASSIFIED = { reads: READS, undoable: UNDOABLE, handsOn: HANDS_ON, asks: CANNOT_BE_UNDONE, byArguments: BY_ARGUMENTS } as const
@@ -209,6 +212,7 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
+  if (name === 'app' && args.action === 'list') return null
   if (name === 'mail') {
     const action = args.action
     if (action === 'inbox' || action === 'read') return null

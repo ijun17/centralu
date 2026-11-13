@@ -15,7 +15,7 @@ import { adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js
 import { MidTurnLedger } from '../core/mid-turn-ledger.js'
 import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
-import { appToolOf, editAskRuleExists, isCentraluToolName, permissionOptionsFor, settingSourcesFor } from './permissions.js'
+import { editAskRuleExists, isCentraluToolName, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
 import { requestTurnHooks } from './request-hook.js'
@@ -101,9 +101,8 @@ export class ClaudeSession implements SessionHandle {
   private readonly stream: ClaudeStreamNormalizer
   /** The approval and question cards (see `ClaudeCards`) */
   private readonly cards: ClaudeCards
-  /** The Assistant's server and the attached apps' proxies (see `ClaudeServers`) */
+  /** Centralu's in-process server (see `ClaudeServers`) */
   private readonly servers: ClaudeServers
-  private stopAppWatch: (() => void) | null = null
   /**
    * Whether this session's CLI offers `/goal` — undefined until it has said (see `send`). Decided by
    * what the CLI advertises, never by a version number: `supportedCommands()` (answered at
@@ -157,13 +156,7 @@ export class ClaudeSession implements SessionHandle {
       exitWords: PROCESS_LOST,
       connectionEnded: () => this.releaseAgents(PROCESS_LOST),
     })
-    this.servers = new ClaudeServers({
-      sessionId,
-      opts,
-      closed: () => this.closed,
-      query: () => this.query,
-      warn: (text) => this.emit({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'apps', text }),
-    })
+    this.servers = new ClaudeServers({ sessionId, opts })
     this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.centraluToolsServer !== null, livePreset: () => this.livePreset })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
@@ -201,6 +194,14 @@ export class ClaudeSession implements SessionHandle {
     this.livePreset = preset
   }
 
+  /** The mode the CLI was started in (`permissionOptionsFor`): the person's own under `normal` and `edits` */
+  private launchMode: string | null = null
+
+  /** The person's own `bypassPermissions`, which lets the CLI's own tools run unasked under `normal` and `edits`: an app call does too (#2231) */
+  bypassesApprovals(): boolean {
+    return (this.livePreset === 'normal' || this.livePreset === 'edits') && this.launchMode === 'bypassPermissions'
+  }
+
   async start(): Promise<void> {
     const preset = this.opts.permissionPreset
     // Read once for the process: the CLI loads its settings at start too. Until it is known, and if it cannot be read, no grant
@@ -218,6 +219,7 @@ export class ClaudeSession implements SessionHandle {
     this.servers.load()
     const servers = this.servers.mcpServers()
     const permissionOptions = await permissionOptionsFor(this.opts)
+    this.launchMode = permissionOptions.permissionMode
     // Code intelligence off for this session alone (#686): its language-server plugins disabled in the flag layer
     const codeIntelligence = this.opts.noCodeIntelligence
       ? { settings: await noCodeIntelligenceSettings(this.opts.cwd, settingSourcesFor(this.opts) as { settingSources?: SettingSource[] }) }
@@ -258,9 +260,6 @@ export class ClaudeSession implements SessionHandle {
       })
       .catch(() => {})
       .finally(() => this.settleGoalKnown())
-
-    // Follows the server set when apps come and go, and that server's list when its tools change — never restarting the session.
-    this.stopAppWatch = this.opts.apps?.onChange(() => this.servers.syncApps()) ?? null
 
     void this.read(q)
   }
@@ -500,7 +499,7 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * A call to one of our in-process servers (the Centralu tools, an app proxy) that was in
+   * A call to our in-process server (the Centralu tools, apps included since #2231) that was in
    * flight when the previous host went away: the CLI asked that host, nobody will ever answer, and
    * the turn would wait forever. Measured (CLI 2.1.282, SDK 0.3.263, haiku, 2026-10-04): the
    * adopted claude sat silent for 8 s with the call open; `interrupt()` from the new owner ended
@@ -510,7 +509,7 @@ export class ClaudeSession implements SessionHandle {
    */
   private releaseLostCalls(q: QueryHandle): void {
     const open = this.opts.processSource?.adopt?.openCalls ?? []
-    const lost = open.filter((c) => isCentraluToolName(c.tool) || appToolOf(c.tool) !== null)
+    const lost = open.filter((c) => isCentraluToolName(c.tool))
     if (lost.length === 0) return
     this.ledger.turnStarted(CLAUDE_TURN)
     this.stream.stopped()
@@ -826,7 +825,6 @@ export class ClaudeSession implements SessionHandle {
     // A message held behind an unanswered /goal is reported as undelivered, like the queue below
     this.settleGoalKnown()
     // App attachment closes along with the handle — a new handle gets its own.
-    this.stopAppWatch?.()
     this.opts.apps?.close()
     /*
      * A message left in the queue follows the same rule (symmetric with the codex adapter's

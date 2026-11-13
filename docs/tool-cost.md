@@ -207,8 +207,9 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
   CLI reads it (`tools/list` on every server, the tools marked `anthropic/alwaysLoad`), is byte-identical
   before and after an app is attached and detached, even an app that declares `anthropic/alwaysLoad`
-  itself; the app proxy drops that flag (apps/other-projects-apps.md). Loading a deferred tool is the CLI's own doing;
+  itself: since #2231 no app is a server of the session (§16). Loading a deferred tool is the CLI's own doing;
   dry mode runs it against the real CLI.
+- `sessions/assistant-app-cost.test.ts`: every profile's served list is the same with 0, 3 and 10 apps, on both CLIs (§16).
 
 ## 6. What the baseline found
 
@@ -881,7 +882,7 @@ assistant now attaches a root app when it needs one: `find_apps`, `attach_app` a
 commands, so their 874 characters ride in none of its requests; one line of its instructions (+75 characters) names
 "the find_apps command", as the others name theirs, so the first call is not a refused bare name. Its resident cost
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
-9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps/attaching.md "Which session gets which apps").
+9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app` (since #2231 nothing: §16). The user-folder apps stay given (apps/attaching.md "Which session gets which apps").
 
 The preferences and archive commands (#1219: `get_preferences`, `set_preferences` and five commands for the session archive, all rare; the archive was called the trash until #1404, and `list_trash` became `list_archive`) came with
 almost no more resident cost. The machine line, which named six commands, now names one and says to look for the rest with
@@ -1028,3 +1029,59 @@ with every request (18 estimates, one per 3 s, from 35k to 301k; the tool's read
 at 11% (106k) and 26% (256k), once each, in the middle of the Read calls, with no turn started. The agent **kept reading** to the end of the step it was
 on, wrote the summary, and **called `compact_self` once right after it** (its answer: "Asked to compact"), not at either notice: the behaviour the
 notice asks for ("when this step of the work is done"). One run on one model: not a rate. Codex was not run (no Codex CLI on the machine that did it).
+
+## 16. Apps through one Centralu tool (#2231, 2026-11-13)
+
+Until #2231 every app a session had was its own MCP server in the session, so its tool list grew with each app (§12 took the
+Assistant's root apps out; a project session's own apps, the user-folder apps and every attached app still rode). Now a
+session reaches every app through Centralu's one `app` tool (`list`, `call`; [apps/attaching.md](apps/attaching.md#apps-through-one-centralu-tool-2231)).
+Measured without a model, as §12: each profile's served list on each CLI, Centralu's definitions plus its instructions
+(`servedDefinitions`, `definitionChars`; on Claude a deferred tool counts its name), with 0, 3 and 10 of the apps
+`create_app` makes attached (`show`, `increment`, the host's `run_status`). Before is the commit before #2231 with the app
+servers' tools counted as the CLI received them (Codex the whole definition, Claude the name behind tool search).
+Both columns were measured on the same base (the commit before #2231); #2232, merged after, changes the `mail` and
+`agent_session` definitions in both alike (its own measurement is in its section).
+The After column was measured again on the branch merged with main (`servedDefinitions`, `servedInstructions`; the reader's 94 characters
+of app instructions added as before, computed): builder and scoped did not move, the reader and the Assistant did.
+
+| Profile, CLI | Before: 0 / 3 / 10 apps | After: 0 / 3 / 10 apps | Tools before → after |
+|---|---|---|---|
+| reader (an ordinary session), Claude | 3,579 / 3,871 / 4,350 | 3,578 / 3,672 / 3,672 | 12 / 21 / 42 → 13 |
+| reader, Codex | 6,492 / 8,959 / 14,513 | 6,970 / 7,064 / 7,064 | 12 / 21 / 42 → 13 |
+| assistant, Claude | 10,711 / 10,915 / 11,394 | 10,740 | 12 / 21 / 42 → 13 |
+| assistant, Codex | 10,769 / 13,148 / 18,702 | 11,236 | 12 / 21 / 42 → 13 |
+| builder, Claude | 1,432 / 1,636 / 2,115 | 1,480 | 1 / 10 / 31 → 2 |
+| builder, Codex | 1,484 / 3,863 / 9,417 | 1,976 | 1 / 10 / 31 → 2 |
+| scoped (a coordinator), Claude | 2,533 / 2,737 / 3,216 | 2,551 | 3 / 12 / 33 → 4 |
+| scoped, Codex | 2,585 / 4,964 / 10,518 | 3,047 | 3 / 12 / 33 → 4 |
+
+The `app` definition is 462 characters (`APP_BUDGET_CHARS` 500), each profile's `RESIDENT_BUDGET_CHARS` rises by that ceiling:
+the characters it adds were outside every ceiling before, arriving with the first app. With no app a Codex session carries
+about 470 more; from the first app (793 characters each on Codex) it carries fewer: with three about 1,900 fewer, with ten
+about 7,450 fewer. On Claude, where the tool waits behind tool search, the cost with no app is 18 to 50 characters, and the
+list no longer moves.
+The reader's instructions grow by 94 characters once it has an app (#957's line naming an app's help tool), as before.
+The list is the same with 0, 3 and 10 apps on both CLIs (`sessions/assistant-app-cost.test.ts`), so attaching an app
+never rebuilds a cached prefix (§4 "Cache per event": the `thread_restart` and server-change rebuilds are gone).
+
+One tool, not two (`app_list`, `app_call`): a second tool carries its own name and schema envelope, about 210 characters
+(§8), in every request. Kept as one unless a model chooses worse with it.
+
+**Selection, measured live** (Claude Code, a host on a temporary data folder, this repository's project board as the app,
+preset `safe` with every card denied so nothing reached GitHub). Eight fixed prompts, one per board tool (`ci_status`,
+`list_items`, `read_discussion`, `list_owner_answers`, `set_item_fields`, `add_item`, `comment`, `commit_check`), one
+session each; haiku twice over, sonnet once. "Reached" is a call of the wanted tool; "args" is that first call's
+arguments passing the schema.
+
+| Build | haiku: reached, args | sonnet: reached, args |
+|---|---|---|
+| Before (a server per app, the commit before #2231) | 14/16, 14/14 | 7/8, 7/7 |
+| One `app` tool, the overview naming tools only | 13/16, 11/13 | 6/8, 5/6 |
+| One `app` tool, the overview naming each tool's arguments | 12/16, 11/12 | 6/8, 6/6 |
+
+No session called a wrong tool, and none mixed up `list` and `call`. `commit_check` was reached by none, before or after
+(the models read the conventions document). The first overview cost `read_discussion` its arguments three times of
+three (a guessed key), so the overview now names each tool's arguments (`read_discussion(item, comments?)`, required
+first, optional with `?`). The misses after are `gh` run by hand for `read_discussion` (denied) and `set_item_fields`
+sessions that looked the item up and stopped; neither is a choice between two tools, so a second tool would not meet
+them. The samples are small (24 sessions an arm): the drop in reach is possible, not shown.

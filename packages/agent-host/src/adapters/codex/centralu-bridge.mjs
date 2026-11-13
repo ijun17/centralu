@@ -17,39 +17,26 @@
  *   CC_HOST_URL       the host's WS address (under the keeper, its front door: stable across host swaps)
  *   CC_BRIDGE_TOKEN   this session's bridge credential (transport/bridge-token.ts). Not the host's
  *                     token: any process of the same user can read this environment (`ps eww`), so
- *                     it opens only the four calls below, and only for CC_SESSION_ID (#382)
+ *                     it opens only the calls below, and only for CC_SESSION_ID (#382)
  *   CC_SESSION_ID     this session's id (the host judges permission by this)
- *   CC_APP_SERVER     (if present) this is the bridge for a single external app — that app's session server name `app-<id>` (M4 A-5)
  *
- * **Why there is one bridge, not two.** The Centralu tools and an external app take the same
- * path back to the host (the WS address, token and session id). Splitting this into two files
- * would double the bundle copy, path lookup and reconnection logic. Only two RPCs called differ:
- * for an app it is `apps.sessionTools`/`apps.sessionCall`, otherwise `assistant.tools`/
- * `assistant.tool`. The app bridge also makes no decisions — decision 4 (which apps attach),
- * exposure scope, and logging are all re-checked by the host using the session id.
+ * External apps come through here too, as Centralu's `app` tool (#2231): the host lists, checks,
+ * asks and calls; an app's own result is relayed as the host gives it.
  */
 import { WebSocket } from 'ws'
 
 const URL_ = process.env.CC_HOST_URL
 const TOKEN = process.env.CC_BRIDGE_TOKEN
 const SESSION_ID = process.env.CC_SESSION_ID
-const APP_SERVER = process.env.CC_APP_SERVER || null
 /**
- * An app call that takes longer than this gets a run id and "still running" back from the host
- * first (M4 A-5, "long-running calls"). The value is decided by the adapter alongside Codex's own
- * ceiling and passed down — the bridge only carries it through.
- */
-const APP_WAIT_MS = Number(process.env.CC_APP_WAIT_MS) || undefined
-
-/**
- * The ceiling for waiting on a single app tool call. It must be shorter than Codex's own ceiling
+ * The ceiling for waiting on a single tool call. It must be shorter than Codex's own ceiling
  * (`tool_timeout_sec`, 300 seconds — set explicitly by the adapter) so the bridge is the one that
  * states the reason first. If the bridge cuts it off first, the model reads "the bridge gave up
  * waiting"; if Codex cuts it off first, all that is left is a timeout with no reason. It must also
- * be longer than the point where the host returns early (APP_WAIT_MS) — otherwise "still running"
- * cannot make it past the bridge to the model.
+ * be longer than the point where the host answers a long call (`BRIDGE_ANSWER_MS`, 240 seconds) —
+ * otherwise "still running" cannot make it past the bridge to the model.
  */
-const APP_CALL_TIMEOUT_MS = 280_000
+const CALL_TIMEOUT_MS = 280_000
 
 /** stdout is reserved for MCP — every diagnostic goes to stderr instead (mixing them breaks the protocol) */
 const log = (...a) => process.stderr.write(`[cc-bridge] ${a.join(' ')}\n`)
@@ -137,13 +124,11 @@ async function handle(msg) {
     return ok(id, {
       protocolVersion: params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },
-      serverInfo: { name: APP_SERVER ?? 'centralu', version: '1' },
+      serverInfo: { name: 'centralu', version: '1' },
     })
   }
   if (method === 'notifications/initialized') return
   if (method === 'ping') return ok(id, {})
-
-  if (APP_SERVER) return handleApp(id, method, params)
 
   if (method === 'tools/list') {
     try {
@@ -158,16 +143,18 @@ async function handle(msg) {
   if (method === 'tools/call') {
     try {
       /*
-       * The app call's ceiling, not the 60-second default: ask_project (#371) waits for another project's turn, and
-       * the host answers "still working" at 240 seconds — the default would cut that call first and the model would
-       * read a timeout instead. Every other tool here answers in well under a second, so the longer bound costs
-       * them nothing.
+       * The long call's ceiling, not the 60-second default: ask_project (#371) waits for another project's turn, and an
+       * app's call (#2231) for its run or the person's card; the host answers either at 240 seconds — the default would
+       * cut that call first and the model would read a timeout instead. Every other tool here answers in well under a
+       * second, so the longer bound costs them nothing.
        */
       const r = await rpc(
         'assistant.tool',
         { sessionId: SESSION_ID, name: params?.name, args: params?.arguments ?? {} },
-        APP_CALL_TIMEOUT_MS,
+        CALL_TIMEOUT_MS,
       )
+      // An app's own result (#2231) goes on as the host gives it, its structured part included
+      if (Array.isArray(r.content)) return ok(id, { content: r.content, isError: r.isError === true, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) })
       return ok(id, { content: [{ type: 'text', text: r.text }], isError: r.isError === true })
     } catch (e) {
       // Does not silently pretend it succeeded — pretending the model's request went through leaves only the person unaware
@@ -186,36 +173,6 @@ async function handle(msg) {
     }
   }
 
-  if (id !== undefined) err(id, `Unsupported method: ${method}`)
-}
-
-/**
- * The bridge for a single external app (M4 A-5). The tool list and results are surfaced exactly
- * in the MCP shape the host gave — trimming the description, annotations or schema here would let
- * the tool Codex sees drift apart from the one Claude sees.
- */
-async function handleApp(id, method, params) {
-  if (method === 'tools/list') {
-    try {
-      const r = await rpc('apps.sessionTools', { sessionId: SESSION_ID, server: APP_SERVER })
-      return ok(id, { tools: r.tools })
-    } catch (e) {
-      return err(id, `Could not get the app's tool list — ${e.message}`)
-    }
-  }
-  if (method === 'tools/call') {
-    try {
-      const r = await rpc(
-        'apps.sessionCall',
-        { sessionId: SESSION_ID, server: APP_SERVER, name: params?.name, args: params?.arguments ?? {}, ...(APP_WAIT_MS ? { waitMs: APP_WAIT_MS } : {}) },
-        APP_CALL_TIMEOUT_MS,
-      )
-      return ok(id, r)
-    } catch (e) {
-      return ok(id, { content: [{ type: 'text', text: `Could not run the app's tool — ${e.message}` }], isError: true })
-    }
-  }
-  // There is nothing to answer for a notification (notifications/cancelled, etc.) — stopping a session lets the host cut off that session's app calls directly
   if (id !== undefined) err(id, `Unsupported method: ${method}`)
 }
 

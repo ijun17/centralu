@@ -276,10 +276,13 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    // A tool of an attached app (another MCP server)
+    // A tool of an attached app, called through Centralu's `app` tool since #2231 (until then the app was an MCP server of its own)
     name: 'mcp-app',
     tools: ['claude'],
-    session: () => ({ apps: fakeApps() }),
+    session: () => {
+      const apps = fakeApps()
+      return { apps, centraluTools: { ...fakeCentraluTools(), apps: () => apps }, toolProfile: 'reader' as const }
+    },
     async run(d) {
       await turn(d, 'Use the forecast tool of the weather app for the city Paris, and tell me what it says.')
     },

@@ -7,7 +7,7 @@ import type { ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts } from '../adapters/contract.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps } from '../apps/external/runtime.js'
-import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
+import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
@@ -22,8 +22,8 @@ import { DEFAULT_RARE_TIER, setRareTier } from './centralu-tools.js'
  * passed through neither an intermediary nor a record, and there was no listing and no removal.
  * This is checked here with a real store, a real runtime and a real app process (a fixture); only
  * the adapter is fake — it records the options it received, and an attached app is called through
- * those options' `apps` (session attachment) — the same door an adapter's proxy server calls
- * through.
+ * the session's live attachment (`liveFor`) — the same door Centralu's `app` tool calls through
+ * (#2231).
  */
 
 const LEGACY_KEY = 'orchestrator_mcp_servers'
@@ -76,7 +76,8 @@ const manifestPath = (id: string) => join(dataRoot, 'apps', id, 'centralu.app.js
 const readManifest = (id: string) => JSON.parse(readFileSync(manifestPath(id), 'utf8')) as Record<string, unknown>
 const userApps = () => rt.list().filter((a) => a.projectId === null).map((a) => a.appId)
 const attached = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server) ?? []
-const tick = () => new Promise((r) => setTimeout(r, 20))
+/** The session's live attachment, as Centralu's `app` tool reaches it (#2231) */
+const live = (sessionId: string) => mgr.apps.sessionAppsHub()!.liveFor(sessionId)!
 
 async function proposeAndApprove(name: string, server = SERVER, why?: string) {
   const orc = await mgr.assistant()
@@ -93,7 +94,7 @@ beforeAll(() => setRareTier('resident'))
 afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
 describe('an approved MCP server becomes a user-folder app (A-7)', () => {
-  it('a proposal creates nothing; approval creates the app and restarts the Assistant, and the tool is recorded going through the intermediary', async () => {
+  it('a proposal creates nothing; approval creates the app, which the Assistant reaches with no restart, and the tool is recorded going through the intermediary', async () => {
     connect()
     const orc = await mgr.assistant()
     await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: 'test server' })
@@ -114,17 +115,28 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     // It is not written to the legacy registry
     expect(store.settings.appSetting(LEGACY_KEY)).toBeNull()
 
-    // The Assistant has restarted, and that server is attached as an app proxy server — no server is loaded raw
-    expect(adapter.seen.length).toBe(before + 1)
+    // Nothing restarted (#2231): that server is the Assistant's app at once, reached through the `app` tool — no server is loaded raw
+    expect(adapter.seen.length).toBe(before)
     const o = adapter.last()
     expect(o.sessionId).toBe(orc.id)
     expect(attached(o)).toEqual(['app-echoer'])
     expect(o).not.toHaveProperty('extraMcpServers')
 
-    // Calling that tool goes through the intermediary and is recorded with the caller (this Assistant)
-    const out = await o.apps!.call('app-echoer', 'poke', { to: 3 })
+    // Calling that tool goes through the intermediary and is recorded with the caller (this Assistant). It writes, and the
+    // Assistant's preset asks about a write: the host's card, which the person allows
+    const call = live(orc.id).call('app-echoer', 'poke', { to: 3 })
+    const card = await until(() => mgr.sessionInfo(orc.id)?.pendingApproval, (p) => p !== undefined && p !== null)
+    expect(card!.detail).toMatchObject({ kind: 'other', raw: 'echoer: poke {"to":3}', about: 'app_call' })
+    // The card offers no "always": one sent anyway is read as allow, once, and nothing is remembered for the next call
+    mgr.inputs.respondApproval(orc.id, card!.requestId, 'always')
+    const out = await call
     expect(out.isError).toBeFalsy()
     expect(out.content).toEqual([{ type: 'text', text: 'poked 3' }])
+    const again = live(orc.id).call('app-echoer', 'poke', { to: 4 })
+    const second = await until(() => mgr.sessionInfo(orc.id)?.pendingApproval, (p) => p !== undefined && p !== null && p.requestId !== card!.requestId)
+    expect(second!.detail).toMatchObject({ kind: 'other', raw: 'echoer: poke {"to":4}', about: 'app_call' })
+    mgr.inputs.respondApproval(orc.id, second!.requestId, 'deny')
+    await again
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([
       expect.objectContaining({ tool: 'poke', status: 'ok', callerKind: 'session', callerSessionId: orc.id }),
     ])
@@ -223,24 +235,20 @@ describe('removal (apps.remove, A-7)', () => {
   it('removing a user-folder app drops it from the list and the Assistant, and its folder goes to app-trash', async () => {
     connect()
     const { orc } = await proposeAndApprove('echoer')
-    const apps = adapter.last().apps!
+    const apps = live(orc.id)
     await apps.call('app-echoer', 'peek', {})
-    let changed = 0
-    apps.onChange(() => changed++)
 
     await rpc('apps.remove', { appId: 'echoer', projectId: null })
 
     expect(userApps()).toEqual([])
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
     expect(readdirSync(join(dataRoot, 'app-trash'))).toEqual([expect.stringMatching(/^echoer-\d+$/)])
-    // The attached session detaches it — Claude changes its set of servers on this notification
-    await tick()
-    expect(changed).toBeGreaterThan(0)
+    // The session has it no more
     expect(apps.current().map((a) => a.server)).toEqual([])
-    // Even a caller that still knows the tool's name (Codex, waiting for its next thread) is refused
+    // Even a call that still names it is refused
     const late = await apps.call('app-echoer', 'poke', { to: 1 })
     expect(late.isError).toBe(true)
-    expect(JSON.stringify(late.content)).toContain('not attached to this session')
+    expect(JSON.stringify(late.content)).toContain('This session has no app named echoer')
     // The removed app's run record stays
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([expect.objectContaining({ tool: 'peek', callerSessionId: orc.id })])
     // The same name can be proposed again

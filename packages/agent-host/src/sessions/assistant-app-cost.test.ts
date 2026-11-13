@@ -1,21 +1,21 @@
 import type { ExternalAppInfo } from '@cc/protocol'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AttachedApp } from '../adapters/contract.js'
+import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { AppAccess } from './app-access.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
-import { definitionChars, servedDefinitions, type ToolServingCapabilities } from './tool-cost.js'
+import { servedDefinitions, type ToolServingCapabilities } from './tool-cost.js'
 
 /**
- * What the Assistant's tool list costs as the person trusts more projects that are apps (#1205). Since #1141 every
- * trusted project's root app was its own MCP server in the Assistant, so the list grew with each one, used or not.
- * The Assistant now reaches them on demand (find_apps / attach_app, through centralu_run): the list is Centralu's
- * definitions, its user-folder apps, and what it attached itself, whatever the number of root apps.
+ * What a session's tool list costs as it gets more apps (#1205, #2231). Since #1141 every trusted project's root app was its
+ * own MCP server in the Assistant, so the list grew with each one, used or not; #1205 made the Assistant attach the one it
+ * needs. Since #2231 no session carries an app's tools at all: it reaches every app through Centralu's one `app` tool, so
+ * its list is Centralu's definitions whatever the number of apps it has, attached or given, on Claude and on Codex.
  *
  * Each root app here is the one create_app makes (packages/agent-host/app-template/server.mjs): the agent sees `show`
- * and `increment` (`reset` is the screen's alone), and the host adds `run_status`. Counted as the model is sent them:
- * `mcp__<server>__<tool>` with its description and input schema (`definitionChars`, the same count as tool-cost.ts).
- * Claude defers app tools behind tool search (only their names ride along); Codex loads them.
+ * and `increment` (`reset` is the screen's alone), and the host adds `run_status`. Counted as the model is sent them
+ * (`definitionChars`, the same count as tool-cost.ts). The before and after figures are in docs/tool-cost.md §16.
  */
 
 const TEMPLATE_TOOLS = [
@@ -85,10 +85,6 @@ function world(rootApps: number, extra: FakeApp[] = []): World {
     },
     projects: () => projects,
     ensureAccess: async () => ({ ok: false, error: 'no card in this test' }),
-    attachedChanged: (id) => {
-      hub.sessionAppsChanged(id)
-      return 'now'
-    },
   }))
   const w = { hub, access, apps, projects }
   worlds.push(w)
@@ -103,25 +99,33 @@ afterEach(() => {
   worlds = []
 })
 
-/** The Assistant's whole tool list on one CLI: Centralu's definitions and every attached app's tools */
-function cost(attached: AttachedApp[], capabilities: ToolServingCapabilities) {
-  const centralu = servedDefinitions('assistant', capabilities)
-  const appTools = attached.flatMap((a) => (a.tools ?? []).map((t) => ({ name: `mcp__${a.server}__${t.name}`, description: t.description ?? '', inputSchema: t.inputSchema })))
-  const appChars = appTools.reduce((n, t) => n + definitionChars(t.name, t.description, t.inputSchema), 0)
-  const deferredApps = capabilities.toolDeferral === true
+/**
+ * A seat's whole served tool list on one CLI: Centralu's definitions, which are what the adapter sends since #2231 (no app is a
+ * server of the session). `apps` is what the seat has, counted to show it adds nothing.
+ */
+function cost(profile: ToolProfile, apps: readonly AttachedApp[], capabilities: ToolServingCapabilities) {
+  const served = servedDefinitions(profile, capabilities)
   return {
-    servers: 1 + attached.length,
-    tools: centralu.length + appTools.length,
-    // What rides in every request: Centralu's resident definitions, the app tools Codex loads, or their names alone on Claude
-    chars: centralu.filter((d) => d.resident).reduce((n, d) => n + d.chars, 0) + (deferredApps ? appTools.reduce((n, t) => n + t.name.length, 0) : appChars),
+    apps: apps.length,
+    tools: served.length,
+    chars: served.filter((d) => d.resident).reduce((n, d) => n + d.chars, 0) + served.filter((d) => !d.resident).reduce((n, d) => n + d.name.length, 0),
   }
 }
 
 describe("the Assistant's tool list as root apps are trusted (#1205)", () => {
-  it('stays the same size with 0, 3 and 10 trusted root apps, on Claude and on Codex', () => {
+  it('stays the same size with 0, 3 and 10 apps it has, on Claude and on Codex, for the Assistant and a project session alike (#2231)', async () => {
     for (const capabilities of [CLAUDE, CODEX]) {
-      const sizes = [0, 3, 10].map((n) => cost(world(n).hub.attach(ORCH).current(), capabilities))
-      expect(sizes, capabilities.instructionChannel).toEqual([sizes[0], sizes[0], sizes[0]])
+      const sizes: { assistant: ReturnType<typeof cost>; reader: ReturnType<typeof cost> }[] = []
+      for (const n of [0, 3, 10]) {
+        const { hub, access } = world(n)
+        const live = hub.attach(ORCH)
+        for (let i = 1; i <= n; i++) expect(await access.attach(ORCH.id, `Project p${i}/app${i}`)).toMatchObject({ ok: true })
+        sizes.push({ assistant: cost('assistant', live.current(), capabilities), reader: cost('reader', live.current(), capabilities) })
+      }
+      expect(sizes.map((s) => s.assistant.apps)).toEqual([0, 3, 10])
+      const strip = ({ apps: _a, ...rest }: ReturnType<typeof cost>) => rest
+      expect(sizes.map((s) => [strip(s.assistant), strip(s.reader)]), capabilities.instructionChannel).toEqual([0, 1, 2].map(() => [strip(sizes[0]!.assistant), strip(sizes[0]!.reader)]))
+      expect(servedDefinitions('assistant', capabilities).map((d) => d.name).filter((n) => n.startsWith('mcp__app-'))).toEqual([])
     }
   })
 
@@ -136,7 +140,7 @@ describe("the Assistant's tool list as root apps are trusted (#1205)", () => {
     expect(live.current()).toEqual([])
     const found = access.find(ORCH.id, 'app3')
     expect(found.ok && found.apps.map((a) => a.ref)).toEqual(['Project p3/app3'])
-    expect(await access.attach(ORCH.id, 'Project p3/app3')).toMatchObject({ ok: true, server: 'app-app3', tools: ['show', 'increment'], when: 'now' })
+    expect(await access.attach(ORCH.id, 'Project p3/app3')).toMatchObject({ ok: true, server: 'app-app3', tools: ['show', 'increment'] })
     expect(live.current().map((a) => a.server)).toEqual(['app-app3'])
     expect((await live.tools('app-app3')).map((t) => t.name)).toEqual(['show', 'increment', 'run_status'])
     expect(hub.reach(ORCH, { projectId: 'p3', appId: 'app3' })).toEqual({ reachable: true })

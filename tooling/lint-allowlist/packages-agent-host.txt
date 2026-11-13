@@ -77,9 +77,7 @@ packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/no-unsafe
 packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/no-unsafe-member-access 7
 packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/scripts/write-store-fixture.mts @typescript-eslint/restrict-template-expressions 1
-packages/agent-host/src/adapters/claude/app-proxy.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/background-tracker.ts @typescript-eslint/no-unsafe-type-assertion 1
-packages/agent-host/src/adapters/claude/centralu-mcp.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/cli-messages.ts @typescript-eslint/no-base-to-string 2
 packages/agent-host/src/adapters/claude/cli-messages.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/exe-link.ts @typescript-eslint/no-unsafe-type-assertion 3
@@ -100,7 +98,6 @@ packages/agent-host/src/adapters/claude/schedules.test.ts @typescript-eslint/no-
 packages/agent-host/src/adapters/claude/schedules.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/sdk-query.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/session-cards.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/adapters/claude/session-servers.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/adapters/claude/session-servers.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/adapters/claude/session.ts @typescript-eslint/no-unnecessary-type-assertion 1
@@ -111,10 +108,10 @@ packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-non-n
 packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/turn-ending.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/claude/windows-start.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-base-to-string 1
-packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
-packages/agent-host/src/adapters/codex/apps.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
+packages/agent-host/src/adapters/codex/apps.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/adapters/codex/background-tasks.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/agent-host/src/adapters/codex/bridge-apps.test.ts @typescript-eslint/no-base-to-string 1
+packages/agent-host/src/adapters/codex/bridge-apps.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
 packages/agent-host/src/adapters/codex/bridge-reconnect.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/bridge-utf8.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/child-threads.ts @typescript-eslint/no-unsafe-type-assertion 1
@@ -136,12 +133,11 @@ packages/agent-host/src/adapters/codex/project-trust.test.ts @typescript-eslint/
 packages/agent-host/src/adapters/codex/rollout.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/adapters/codex/sandbox.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/codex/sandbox.ts @typescript-eslint/no-unsafe-type-assertion 1
-packages/agent-host/src/adapters/codex/server-requests.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/agent-host/src/adapters/codex/server-requests.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/codex/session.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/codex/slash-commands.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/adapters/codex/thread-open.ts @typescript-eslint/no-unsafe-type-assertion 5
 packages/agent-host/src/adapters/codex/thread-servers.ts @typescript-eslint/no-non-null-assertion 2
-packages/agent-host/src/adapters/codex/thread-servers.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/adapters/codex/thread-servers.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/codex/thread-settings.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/codex/turn-reads.ts @typescript-eslint/no-unsafe-type-assertion 5
@@ -240,7 +236,7 @@ packages/agent-host/src/links/linked-sessions.ts @typescript-eslint/no-unsafe-ty
 packages/agent-host/src/links/links.test.ts @typescript-eslint/await-thenable 11
 packages/agent-host/src/links/links.test.ts @typescript-eslint/no-base-to-string 2
 packages/agent-host/src/links/links.test.ts @typescript-eslint/no-floating-promises 1
-packages/agent-host/src/links/links.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
+packages/agent-host/src/links/links.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/links/links.test.ts @typescript-eslint/prefer-promise-reject-errors 1
 packages/agent-host/src/links/node-floor.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/links/probe.ts @typescript-eslint/no-non-null-assertion 4
@@ -349,10 +345,8 @@ packages/agent-host/src/sessions/remote-agents.test.ts @typescript-eslint/no-unn
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unnecessary-type-assertion 3
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unsafe-type-assertion 6
-packages/agent-host/src/sessions/session-app-wiring.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-non-null-assertion 9
-packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-unsafe-type-assertion 5
+packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/sessions/session-events.ts @typescript-eslint/consistent-type-assertions 1
 packages/agent-host/src/sessions/session-events.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/sessions/session-layout.ts @typescript-eslint/no-non-null-assertion 1

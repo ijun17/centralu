@@ -80,14 +80,17 @@ enabled, or whose `server` or `uses` changed since, [handing-over.md](handing-ov
 
 ```
 view (iframe) ─ apps.invoke ──────────────────────────────────┐
-session agent ─ app-<id> proxy (Claude: in-process;           │
-                Codex: stdio bridge) ─────────────────────────┼─▶ ExternalApps.call ─▶ app process
+session agent ─ Centralu's `app` tool (Claude: in-process;    │
+                Codex, ACP: stdio bridge) → Attachment.call ──┼─▶ ExternalApps.call ─▶ app process
 another app ─── broker on fd 3 (call_app, broker-and-rpcs.md) ─┘          │
                                                                           ├─ run record (app_runs)
                                                                           └─ "changed" to open views (views.md)
 ```
 
-Every call to an app tool, whoever makes it, goes through `ExternalApps.call` (`runtime.ts`).
+Every call to an app tool, whoever makes it, goes through `ExternalApps.call` (`runtime.ts`). A session's call comes
+through Centralu's `app` tool since #2231, never an MCP server of the app's: the hub's `Attachment.call` counts the
+session's apps, checks the arguments against the tool's schema and asks the person where the preset says, then calls
+([attaching.md](attaching.md#apps-through-one-centralu-tool-2231)).
 Visibility, the run id, cancellation, the change notification and the run record happen there,
 once, in one piece of code. A second path would sooner or later skip a check.
 
@@ -113,7 +116,7 @@ screen), or both, the default.
   own app's**: the app is fixed by the frame ([views.md](views.md#how-a-view-is-hosted)), never by the message.
 - Hiding a tool from a list is not the same as refusing it when called by name. The call path checks
   both directions. A server cannot tell who called it (ext-apps #746), so the host enforces this.
-- The host adds one read-only tool to every app attached to a session, `run_status` ([attaching.md](attaching.md#long-calls-and-cancellation)). An
+- The host adds one read-only tool to every app a session has, `run_status` ([attaching.md](attaching.md#long-calls-and-cancellation)). An
   app's own tool of the same name is hidden behind it.
 
 ### Run records

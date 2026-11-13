@@ -1,4 +1,4 @@
-import type { CentraluTools, SessionApps } from '../contract.js'
+import type { CentraluTools, SessionApps, SessionAppTools } from '../contract.js'
 
 /**
  * What a recorded session is given in place of a host (#1498): Centralu's own tools and an attached app, answered with fixed words.
@@ -53,8 +53,11 @@ export function notingCentraluTools(handed: Handed[]): CentraluTools {
   }
 }
 
-/** An attached app with one read-only tool, as `SessionApps` hands them to an adapter */
-export function fakeApps(): SessionApps {
+/**
+ * A session's one app with one read-only tool, as its live attachment hands it to an adapter (`SessionApps`) and to
+ * Centralu's `app` tool (`SessionAppTools`, #2231)
+ */
+export function fakeApps(): SessionApps & SessionAppTools {
   const server = 'app-weather'
   const tools = [
     {
@@ -65,14 +68,11 @@ export function fakeApps(): SessionApps {
     },
   ]
   return {
-    current: () => [{ server, appId: 'weather', tools }],
-    onChange: () => () => {},
+    current: () => [{ name: 'weather', server, appId: 'weather', title: 'Weather', description: 'Forecasts by city', tools }],
     tools: async () => tools,
     call: async (_server, tool, args) => ({ content: [{ type: 'text', text: tool === 'forecast' ? `Forecast for ${String(args.city)}: sunny, 21 degrees.` : `No such tool: ${tool}` }], isError: tool !== 'forecast' }),
     noteCall: () => {},
     callEnded: () => {},
-    readOnly: (_server, tool) => tools.find((t) => t.name === tool)?.annotations.readOnlyHint === true,
-    unasked: (_server, tool) => tools.find((t) => t.name === tool)?.annotations.readOnlyHint === true,
     cancelAll: () => {},
     close: () => {},
   }

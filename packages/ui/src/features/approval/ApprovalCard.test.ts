@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, ASSISTANT_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
+import { ApprovalDetail, NO_PATH, APP_CALL, MACHINE_CHANGE, ASSISTANT_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
 import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
@@ -250,5 +250,11 @@ describe('keyScope — the scope a key answers with', () => {
     const command = { kind: 'command', command: 'ls', cwd: '/x' } as ApprovalDetail
     expect(keyScope(command, { decision: 'always', scope: 'project' })).toBe('project')
     expect(keyScope(start(''), { decision: 'allow' })).toBeUndefined()
+  })
+
+  // A call of an app's tool (#2231): the host allows that one call and asks again next time, so "always" would be a promise it does not keep
+  it("is off for a call of an app's tool", () => {
+    expect(offersAlways({ kind: 'other', raw: 'notes: poke {"to":2}', about: APP_CALL })).toBe(false)
+    expect(offersAlways({ kind: 'other', raw: 'notes: poke {"to":2}' })).toBe(true)
   })
 })

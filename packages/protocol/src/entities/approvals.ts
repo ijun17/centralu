@@ -413,3 +413,15 @@ export const ASSISTANT_CHANGE = 'orchestrator_change'
 export function isAssistantChange(d: ApprovalDetail): boolean {
   return d.kind === 'other' && (d.about === ASSISTANT_CHANGE || d.about === 'assistant_change')
 }
+
+/**
+ * The `about` of the card for an app's tool a session calls (#2231, `app` with `call`), on an `other` detail: the call
+ * is whole in `raw`. Allow or deny only, every time: a window that knows the name offers no "always", and the host
+ * remembers nothing for one (an older window's "always" is read as allow, once).
+ */
+export const APP_CALL = 'app_call'
+
+/** The card for one call of an app's tool (#2231) */
+export function isAppCall(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === APP_CALL
+}

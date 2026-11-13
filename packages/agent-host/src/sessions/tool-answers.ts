@@ -1,5 +1,6 @@
+import type { z } from 'zod'
 import { frameField } from '@cc/protocol'
-import type { AgentListRow, ChildRunResult, AskProjectResult, CentraluTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
+import type { AgentListRow, AppToolResult, AppToolSpec, ChildRunResult, AskProjectResult, CentraluTools, RoutedCard, SessionAppEntry, TurnProgress } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
 
@@ -269,3 +270,62 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
 
 /** "1 file", "3 files": a count with its noun, `many` where adding an s is not the plural */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** A schema's complaints, one per argument, the same way for a tool, a command run through centralu_run and an app's tool (#2231) */
+export function issuesText(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')
+}
+
+/** A tool's name as the `app` listing writes it (#2231): marked when the app says it only reads, so it is never asked about */
+const toolName = (t: AppToolSpec): string => (t.annotations?.readOnlyHint === true ? `${t.name} (reads)` : t.name)
+
+/**
+ * A tool in the apps overview with its argument names, `read_discussion(item, comments?) (reads)` (#2231): measured on the project
+ * board, a model that called after the overview alone guessed the arguments' names (3 of 3 first calls of read_discussion refused),
+ * so the overview names them; the types and descriptions stay in one app's list
+ */
+function toolWithArgs(t: AppToolSpec): string {
+  const props = t.inputSchema.properties
+  const required = new Set(Array.isArray(t.inputSchema.required) ? t.inputSchema.required.filter((r): r is string => typeof r === 'string') : [])
+  const names = props && typeof props === 'object' && !Array.isArray(props) ? Object.keys(props).map((k) => (required.has(k) ? k : `${k}?`)) : []
+  return toolName({ ...t, name: `${t.name}(${names.join(', ')})` })
+}
+
+/** The first line of an app author's text, JSON-quoted: their words, not ours (#121) */
+const authorLine = (text: string | undefined): string => trustedJsonText((text ?? '').split('\n')[0]?.trim() ?? '')
+
+/** The session's apps in one sentence, for an answer that names a wrong one */
+export function appListLine(apps: readonly SessionAppEntry[]): string {
+  return apps.length ? `Its apps: ${apps.map((a) => a.name).join(', ')}.` : 'It has no apps.'
+}
+
+/**
+ * `app` `list` with no app (#2231): this session's apps, one per line, with their tool names when the host has read them
+ * (listing one app starts it). `find` is how this seat finds apps to attach, where it has that.
+ */
+export function appsText(apps: readonly SessionAppEntry[], find: string | undefined): string {
+  const more = find ? ` ${find} finds apps it can attach.` : ''
+  if (!apps.length) return `This session has no apps.${more}`
+  const lines = apps.map(
+    (a) =>
+      `- ${a.name}: ${trustedJsonText(a.title)}${a.description ? ` ${authorLine(a.description)}` : ''}\n` +
+      `    tools: ${a.tools ? a.tools.map(toolWithArgs).join(', ') || '(none)' : '(listed with app(action="list", app=…))'}`,
+  )
+  return `${lines.join('\n')}\napp(action="list", app=…) gives one app's tools and arguments; app(action="call", app=…, tool=…, args={…}) calls one.${more}`
+}
+
+/** `app` `list` with an app (#2231): its tools, one line each with the read-only mark, and each one's arguments as JSON Schema */
+export function appToolsText(app: string, tools: readonly AppToolSpec[]): string {
+  if (!tools.length) return `${app} lists no tools yet.`
+  const lines = tools.map((t) => `- ${toolName(t)}: ${authorLine(t.description)}\n    args: ${JSON.stringify(t.inputSchema)}`)
+  return `${lines.join('\n')}\nCall one with app(action="call", app=${JSON.stringify(app)}, tool=…, args={…}).`
+}
+
+/** An app's own result as a tool's answer (#2231): its content and structured part as the app gave them, its text joined for a path that reads text only */
+export function toolOutputOf(r: AppToolResult): ToolOutput {
+  const text = r.content
+    .map((c) => (typeof c === 'object' && c !== null && 'type' in c && c.type === 'text' && 'text' in c && typeof c.text === 'string' ? c.text : ''))
+    .filter(Boolean)
+    .join('\n')
+  return { text, content: r.content, isError: r.isError === true, ...(r.structuredContent ? { structuredContent: r.structuredContent } : {}) }
+}

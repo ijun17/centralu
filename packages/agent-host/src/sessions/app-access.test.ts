@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
 import { MANIFEST_FILE } from '../apps/external/manifest.js'
 import { AppAccess, readShared, writeShared, type AppAccessStore } from './app-access.js'
-import { SERVER_NAME_MAX, SessionAppsHub, type AppSessionKey } from './session-apps.js'
+import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
 import { attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
 
 /**
@@ -25,7 +25,6 @@ let access: AppAccess
 let consents: Set<string>
 let asks: { sessionId: string; to: string; text: string }[]
 let answer: 'always' | 'once' | 'deny'
-let when: 'now' | 'next_turn'
 const projects = [
   { id: 'p1', name: 'Alpha', trusted: true },
   { id: 'p2', name: 'Beta', trusted: true },
@@ -63,10 +62,6 @@ function newAccess(boundaryOpen?: () => boolean): AppAccess {
       if (answer === 'always') consents.add(`${from}>${to}`)
       return { ok: true }
     },
-    attachedChanged: (id) => {
-      hub.sessionAppsChanged(id)
-      return when
-    },
     toolListWaitMs: 10_000,
   })
 }
@@ -84,7 +79,6 @@ beforeEach(() => {
   consents = new Set()
   asks = []
   answer = 'always'
-  when = 'now'
   sessions.clear()
   hub = new SessionAppsHub(w.rt, {
     toolListWaitMs: 10_000,
@@ -141,22 +135,20 @@ describe('attaching and detaching', () => {
   it("attaching makes the app's tools appear on the session, under its own server, and detaching takes them away", async () => {
     const key = session('w1', 'p1')
     const a = hub.attach(key)
-    let heard = 0
-    a.onChange(() => heard++)
     expect(a.current().map((x) => x.server)).toEqual(['app-notes'])
 
     const r = await access.attach('w1', 'Beta/board')
-    expect(r).toMatchObject({ ok: true, server: 'app-board', when: 'now' })
+    expect(r).toMatchObject({ ok: true, server: 'app-board' })
     expect((r as { tools: string[] }).tools.sort()).toEqual(['echo', 'hold', 'peek', 'poke'])
-    expect(a.current().map((x) => x.server)).toEqual(['app-notes', 'app-board'])
-    expect(heard).toBeGreaterThan(0)
+    // The `app` tool lists it from the next call: its name there is the server's without `app-`
+    expect(a.current().map((x) => [x.server, x.name])).toEqual([['app-notes', 'notes'], ['app-board', 'board']])
     // The app's agent tools, plus the host's run_status — the same as an app the rule gives
     expect((await a.tools('app-board')).map((t) => t.name).sort()).toEqual(['echo', 'hold', 'peek', 'poke', 'run_status'])
     // Already attached is said, not attached twice
     expect(await access.attach('w1', 'Beta/board')).toMatchObject({ ok: true, already: true, server: 'app-board' })
     expect(refs('w1')).toEqual(['helper'])
 
-    expect(access.detach('w1', 'Beta/board')).toEqual({ ok: true, server: 'app-board', when: 'now' })
+    expect(access.detach('w1', 'Beta/board')).toEqual({ ok: true, server: 'app-board' })
     expect(a.current().map((x) => x.server)).toEqual(['app-notes'])
     expect((await a.call('app-board', 'peek', {})).isError).toBe(true)
     // Its own project's app is not one detach_app can take away
@@ -230,13 +222,6 @@ describe('attaching and detaching', () => {
     expect(await access.attach('w1', 'Beta/secret')).toMatchObject({ ok: false, error: expect.stringContaining('not shared') })
     expect(asks).toEqual([])
   })
-
-  it('says when the agent gets the tools — the next turn for an agent that keeps its servers (Codex)', async () => {
-    session('w1', 'p1')
-    when = 'next_turn'
-    expect(await access.attach('w1', 'Beta/board')).toMatchObject({ ok: true, when: 'next_turn' })
-    expect(access.detach('w1', 'app-board')).toMatchObject({ ok: true, when: 'next_turn' })
-  })
 })
 
 describe('consent per pair of projects', () => {
@@ -277,7 +262,7 @@ describe('consent per pair of projects', () => {
     consents.clear()
     w.rt.sharingChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-board'))
-    expect((await a.call('app-board', 'peek', {})).content).toEqual([{ type: 'text', text: 'This app is not attached to this session: app-board' }])
+    expect((await a.call('app-board', 'peek', {})).content).toEqual([{ type: 'text', text: 'This session has no app named board.' }])
 
     consents.add('p1>p2')
     w.rt.sharingChanged()
@@ -438,10 +423,10 @@ describe('stable app names (#1141)', () => {
   })
 
   /*
-   * #1141, third review: a tool reads `mcp__<server>__<tool>`, capped at 64 characters. A name qualified by a project's
-   * name (`app-<id>-<project>`) could take 61 of them before the tool; none is longer than a plain `app-<id>` now
+   * #1141: a name qualified by its project (`app-<id>-<project>`) or numbered stays unique. Since #2231 a name is no
+   * longer part of a tool's name (the `app` tool takes it as an argument), so a long id or project name is kept whole
    */
-  it('a qualified name is never longer than the longest plain name, and stays unique by its number', async () => {
+  it('a qualified or numbered name keeps a long id whole, and stays unique by its number', async () => {
     const id = 'quarterly-planning-board-for-tea'
     expect(id).toHaveLength(32)
     projects[1]!.name = 'A project whose name goes on and on'
@@ -453,7 +438,7 @@ describe('stable app names (#1141)', () => {
     })
     access = newAccess()
     try {
-      // The longest id: a user-folder app holds the plain name, and each root app the Assistant attaches is numbered within the cap
+      // The longest id: a user-folder app holds the plain name, and each root app the Assistant attaches is numbered
       w.plant('user', id)
       w.plantRoot('p1', id)
       w.plantRoot('p2', id)
@@ -463,8 +448,8 @@ describe('stable app names (#1141)', () => {
       expect(await access.attach('o', `Alpha/${id}`)).toMatchObject({ ok: true })
       expect(await access.attach('o', `A project whose name goes on and on/${id}`)).toMatchObject({ ok: true })
       const longest = Object.fromEntries(hub.refsFor(assistant).map((h) => [h.server, h.ref.projectId]))
-      expect(longest).toEqual({ 'app-helper': null, [`app-${id}`]: null, [`app-${id.slice(0, 30)}-2`]: 'p1', [`app-${id.slice(0, 30)}-3`]: 'p2' })
-      // A shorter id, given by the rule to a session that already holds its plain name: a long project name is cut
+      expect(longest).toEqual({ 'app-helper': null, [`app-${id}`]: null, [`app-${id}-2`]: 'p1', [`app-${id}-3`]: 'p2' })
+      // A shorter id, given by the rule to a session that already holds its plain name: qualified by its project's slug
       const shorter = 'kit-for-team'
       w.plant('user', shorter)
       w.rt.refresh()
@@ -473,12 +458,8 @@ describe('stable app names (#1141)', () => {
       w.plantRoot('p2', shorter)
       w.rt.refresh()
       const mine = hub.refsFor(own).map((h) => h.server)
-      expect(mine).toContain('app-kit-for-team-a-project-whose-nam')
+      expect(mine).toContain('app-kit-for-team-a-project-whose-name-goe')
       expect(new Set(mine).size).toBe(mine.length)
-      for (const server of [...mine, ...Object.keys(longest)]) {
-        expect(server.length).toBeLessThanOrEqual(SERVER_NAME_MAX)
-        expect(`mcp__${server}__${'t'.repeat(21)}`.length).toBeLessThanOrEqual(64)
-      }
     } finally {
       projects[1]!.name = 'Beta'
     }

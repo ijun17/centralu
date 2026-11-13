@@ -124,7 +124,8 @@ describe('an approval announces once, when what it changes is saved', () => {
     proposals.proposeMcpServer({ name: 'db', command: 'node', args: ['s.js'] })
     seen.length = 0
 
-    expect(proposals.resolveMcpProposal('db', true)).toEqual({ ok: true, restart: true })
+    // Nothing restarts: the app tool counts the Assistant's apps at its next call (#2231)
+    expect(proposals.resolveMcpProposal('db', true)).toEqual({ ok: true, restart: false })
     expect(seen).toEqual([{ proposals: [], installed: ['db'] }])
   })
 

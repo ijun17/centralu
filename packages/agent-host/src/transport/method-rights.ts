@@ -298,8 +298,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'apps.versions': 'everyday',
   /** A snapshot comes back, and the one it replaces is kept */
   'apps.restoreVersion': 'everyday',
-  'apps.sessionTools': 'bridge',
-  'apps.sessionCall': 'bridge',
 
   // Updates
   'updates.status': 'everyday',

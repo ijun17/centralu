@@ -236,12 +236,6 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
 
   const approving = await session(mock, centralu.id, 'codex', 'Clean up leftover processes')
   talk(mock, approving.id, [['user', 'Run a script that picks out only the orphaned processes and stops them.']])
-  mock.emit({
-    type: 'approval_request',
-    sessionId: approving.id,
-    requestId: 'demo-approval',
-    detail: { kind: 'command', command: 'kill -TERM 40321', cwd: '/Users/you/code/centralu' },
-  })
 
   const asking = await session(mock, site.id, 'claude', 'Pick the hero copy')
   talk(mock, asking.id, [['user', 'Give me some candidate lines for the landing hero.']])
@@ -260,6 +254,18 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
         ],
       },
     ],
+  })
+
+  /*
+   * The approval is raised **after** the question. "Next waiting" (Ctrl+Shift+A) takes the newest wait, and two waits
+   * raised in the same millisecond tie on the session id, where the approval's, made first, sorts first; raised before
+   * the question, a tick between the two put the question on top and the shortcut opened the wrong session.
+   */
+  mock.emit({
+    type: 'approval_request',
+    sessionId: approving.id,
+    requestId: 'demo-approval',
+    detail: { kind: 'command', command: 'kill -TERM 40321', cwd: '/Users/you/code/centralu' },
   })
 
   const done = await session(mock, site.id, 'codex', 'Optimize images')

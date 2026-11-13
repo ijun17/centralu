@@ -79,14 +79,6 @@ describe('a restart deferred to the end of a turn', () => {
     expect(restarts).toEqual([])
     expect(policy.restartAfterTurn.has('s')).toBe(false)
   })
-
-  it('an app change restarts the thread even with the settings unchanged', async () => {
-    policy.restartAfterTurn.add('s')
-    policy.appsRestartAfterTurn.add('s')
-    policy.applyDeferredRestart('s')
-    await settle()
-    expect(restarts).toEqual([{ id: 's', cause: 'thread_restart' }])
-  })
 })
 
 describe('background work (#648)', () => {

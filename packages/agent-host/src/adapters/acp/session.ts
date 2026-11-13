@@ -97,7 +97,11 @@ const TREE_NOTE_MS = 2_000
 const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
 export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
-  constructor(opts: CreateSessionOpts, emit: EventSink, deps: AcpSessionDeps) {
+  constructor(
+    private readonly opts: CreateSessionOpts,
+    emit: EventSink,
+    deps: AcpSessionDeps,
+  ) {
     super(
       { sessionId: opts.sessionId, resumeExternalId: opts.resumeExternalId ?? null, start: deps.start, stopConfirmMs: deps.stopConfirmMs },
       emit,
@@ -105,8 +109,13 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
     )
   }
 
-  appAttachment(): 'attached' | 'restart' | 'failed' {
-    return 'failed'
+  /**
+   * The Stop also stops this session's app calls, a card standing for one included, with or without a turn running: an ACP agent
+   * reaches apps through the bridge's `app` tool since #2231, and the agent sends no cancellation to it. As on Claude and Codex
+   */
+  override interrupt(): void {
+    this.opts.apps?.cancelAll()
+    super.interrupt()
   }
 
   respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
@@ -143,6 +152,8 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
     try {
       await super.dispose()
     } finally {
+      // The app attachment closes with the handle: no app is called in the name of a session with no handle
+      this.opts.apps?.close()
       await this.wire.removeSignInWatch()
     }
   }

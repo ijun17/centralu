@@ -58,7 +58,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
         close: () => {},
         supportedCommands: async () => [],
         getContextUsage: async () => undefined,
-        setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
       }
     },
   }

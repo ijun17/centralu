@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { RequestTurn, RequestTurnAnswer, SessionApps } from '../contract.js'
+import type { RequestTurn, RequestTurnAnswer } from '../contract.js'
 import { requestTurnHooks } from './request-hook.js'
 
 /**
@@ -58,18 +58,12 @@ function world(preset: 'auto' | 'normal' = 'auto') {
   const events: NormalizedEvent[] = []
   const start = (sessionId: string) =>
     new ClaudeAdapter().createSession({ sessionId, cwd: '/tmp', permissionPreset: preset, requestTurn, centraluTools: {} as never, toolProfile: 'assistant' }, (e) => events.push(e))
-  /** The hook as built for a session that has these apps attached (the adapter builds app proxies of its own from them, which the fake SDK has no server for) */
-  const hookWithApps = (servers: string[]) => {
-    const apps = { current: () => servers.map((server) => ({ server, appId: server.slice(4), tools: null })) } as unknown as SessionApps
-    const built = requestTurnHooks({ requestTurn, apps }, () => true)!.PreToolUse[0]!.hooks[0]!
-    return (tool: string, input: unknown = {}) => built({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input } as never, 'toolu_3', { signal: new AbortController().signal }) as Promise<HookOutput>
-  }
   /** What the CLI’s hook says to a tool call */
   const hook = (tool: string, input: unknown = {}, id = 'toolu_1') => cli.options!.hooks!.PreToolUse[0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, id, { signal: new AbortController().signal })
   /** The CLI saying a call ran (`PostToolUse`) or failed (`PostToolUseFailure`) */
   const after = (event: 'PostToolUse' | 'PostToolUseFailure', tool: string, id: string) =>
     cli.options!.hooks!.PostToolUse[0]!.hooks[0]!({ hook_event_name: event, tool_name: tool, tool_input: {} }, id, { signal: new AbortController().signal })
-  return { turn, events, start, hook, after, hookWithApps }
+  return { turn, events, start, hook, after }
 }
 
 describe('a hook in front of every tool call of a session’s request', () => {
@@ -134,22 +128,21 @@ describe('a hook in front of every tool call of a session’s request', () => {
     await handle.dispose()
   })
 
-  it('Centralu’s own tools and an attached app’s ask in the call itself, so the hook leaves them; an app-looking server that is not attached is asked about', async () => {
+  it('Centralu’s own tools, the app tool among them, ask in the call itself, so the hook leaves them; an app- server is not Centralu’s and is asked about', async () => {
     const w = world('auto')
     const handle = await w.start('h8')
     w.turn.active = true
     w.turn.answer = { allowed: false, message: 'no' }
-    const withApps = w.hookWithApps(['app-board'])
     expect(await w.hook('mcp__centralu__read_session')).toEqual({})
-    // (allowed here, so the CLI puts no card of its own before the one the call raises, naming the session)
-    expect(await withApps('mcp__app-board__queue_merge')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
+    // An app is reached through Centralu’s `app` tool, whose call the host asks about knowing the app’s tool (#2231)
+    expect(await w.hook('mcp__centralu__app', { action: 'call', app: 'board', tool: 'queue_merge', args: {} })).toEqual({})
     expect(await w.hook('AskUserQuestion', { questions: [] })).toEqual({})
     expect(w.turn.asked).toEqual([])
-    // A server called app-x that this session was never given is not Centralu’s: it asks like any other (#93)
-    expect(await withApps('mcp__app-evil__run')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    // A server named app-x is never Centralu’s since #2231: it asks like any other (#93)
+    expect(await w.hook('mcp__app-board__queue_merge')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     // Nor is Centralu’s own name on a server that is not Centralu’s (it has three parts, and the server is the one the session was given)
-    expect(await withApps('mcp__centralu__pw__navigate')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
-    expect(w.turn.asked.map((a) => a.tool)).toEqual(['mcp__app-evil__run', 'mcp__centralu__pw__navigate'])
+    expect(await w.hook('mcp__centralu__pw__navigate')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    expect(w.turn.asked.map((a) => a.tool)).toEqual(['mcp__app-board__queue_merge', 'mcp__centralu__pw__navigate'])
     await handle.dispose()
   })
 

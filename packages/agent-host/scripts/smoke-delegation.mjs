@@ -32,8 +32,8 @@
  *                turns seed two projects; the fourth asks about its project. Passes when it calls read_session and recall,
  *                finds the sibling's decision, and gets nothing from the other project.
  *
- * TOOL=codex runs the asking session of app-access and reader on Codex (through the bridge). Its thread keeps the servers
- * it started with, so the app's tools arrive the turn after attach_app, and app-access says "Go on." once, as the person would.
+ * TOOL=codex runs the asking session of app-access and reader on Codex (through the bridge). Since #2231 an attached app is
+ * called through Centralu's `app` tool on every CLI, so Codex too uses it in the turn it attached it.
  *
  * Run with: node packages/agent-host/scripts/smoke-delegation.mjs <start-agent|ask-project|app-access|reader>
  */
@@ -265,11 +265,15 @@ async function appAccess() {
     return { here, pHere, pThere }
   }
 
-  /** Tool calls of the turn — a native subagent's too (#222), marked: haiku sometimes hands the whole errand to one */
+  /**
+   * Tool calls of the turn — a native subagent's too (#222), marked: haiku sometimes hands the whole errand to one. An app's
+   * tool, called through Centralu's `app` tool since #2231, reads `<app>.<tool>` from its card's mark
+   */
+  const named = (summary) => (summary?.centralu?.app ? `${summary.centralu.app}.${summary.centralu.tool}` : String(summary?.tool))
   const tools = (evs) =>
     evs.flatMap((e) =>
-      e.type === 'tool_call' ? [String(e.summary.tool)]
-      : e.type === 'subagent_event' && e.step?.type === 'tool_call' ? [`(subagent) ${String(e.step.summary?.tool)}`]
+      e.type === 'tool_call' ? [named(e.summary)]
+      : e.type === 'subagent_event' && e.step?.type === 'tool_call' ? [`(subagent) ${named(e.step.summary)}`]
       : [],
     )
   let passed = 0
@@ -281,17 +285,12 @@ async function appAccess() {
       'One of my other Centralu projects shares a counter app. Use it to set the shared number to 7, ' +
         'then detach it so it stops taking up your context. Tell me what you did.',
     )
-    if (TOOL === 'codex' && !tools(asked).some((t) => t.includes('poke'))) {
-      // The thread restarts through resume when the turn ends; let that settle, then go on as the person would
-      await new Promise((r) => setTimeout(r, 5000))
-      asked.push(...(await c.turn(s.id, 'Go on.')))
-    }
     const calls = tools(asked)
     console.log(`\n── Trial ${i}: tool calls ──\n` + (calls.join('\n') || '(none)'))
     console.log('── What it said ──\n' + said(asked).trim().slice(0, 600))
     // Is the tool gone? The agent's own view on the next turn, and the host's answer for that session
     const before = (await c.call('apps.runs', { appId: 'counter', projectId: pThere.id })).filter((r) => r.callerSessionId === s.id).length
-    const after = await c.turn(s.id, 'Call the counter app tool mcp__app-counter__peek now, directly, without attaching anything. If you do not have that tool, say exactly: NO SUCH TOOL.')
+    const after = await c.turn(s.id, "Call the counter app's tool peek now, directly, without attaching anything. If you cannot, say exactly: NO SUCH TOOL.")
     const reach = await c.call('apps.reach', { sessionId: s.id, appId: 'counter', projectId: pThere.id })
     const runs = await c.call('apps.runs', { appId: 'counter', projectId: pThere.id })
     const poked = runs.some((r) => r.tool === 'poke' && r.callerSessionId === s.id && r.status === 'ok')
@@ -301,7 +300,8 @@ async function appAccess() {
       verdict([
         ['found it (find_apps)', calls.some((t) => t.includes('find_apps'))],
         ['attached it (attach_app)', calls.some((t) => t.includes('attach_app'))],
-        [TOOL === 'claude' ? 'used poke in the same turn' : 'used poke (next turn)', calls.some((t) => t.includes('poke')) && poked],
+        // Every CLI in the same turn since #2231: the app tool counts the session's apps at each call
+        ['used poke in the same turn', calls.some((t) => t.includes('poke')) && poked],
         ['detached it (detach_app)', calls.some((t) => t.includes('detach_app'))],
         // Gone means no call of this session reached the app again — a model may still try the name, and the CLI refuses it
         ['tool gone afterwards', runs.filter((r) => r.callerSessionId === s.id).length === before && reach.reachable === false],

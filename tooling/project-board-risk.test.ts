@@ -23,7 +23,7 @@ import { tools as wordsTools } from '../.centralu/apps/project-board/words-tools
  * added without a declaration asks, as before.
  */
 const ALL = { ...boardTools, ...ciTools, ...contributeTools, ...decisionTools, ...queueTools, ...releaseTools, ...wordsTools } as Record<string, { config: RiskTool }>
-const own = { own: true, preset: 'normal' } as const
+const own = { own: true, preset: 'normal', args: {} } as const
 
 describe("the project board's writes and the cards they raise", () => {
   const local = ['ack', 'unqueue', 'mark_answer_recorded']
@@ -37,7 +37,7 @@ describe("the project board's writes and the cards they raise", () => {
       const t = ALL[name]!.config
       expect(declaredRisk(t), name).toBe('local')
       // under every preset, even in a project the person has not trusted: it touches only the app's own data
-      expect(runsUnasked(t, { own: false, preset: 'safe' }), name).toBe(true)
+      expect(runsUnasked(t, { own: false, preset: 'safe', args: {} }), name).toBe(true)
     }
   })
 

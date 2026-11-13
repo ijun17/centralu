@@ -17,13 +17,15 @@ import type { CentraluTools, SessionHandle } from '../contract.js'
  * So the resident prefix this host controls is the set of alwaysLoad tools across the session's
  * servers, read here the way the CLI reads it: `tools/list` on each server.
  *
+ * Since #2231 an app is never a server of the session: it is reached through Centralu's `app` tool,
+ * so attaching or detaching one changes no server and no tool.
+ *
  * The only fake is `query`, as in apps.test.ts: the servers are the real ones the adapter builds,
  * and the apps are real fixture processes.
  */
 
 const captured = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
-  setCalls: [] as Record<string, unknown>[],
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
@@ -37,10 +39,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (importActual) => ({
       close: () => {},
       supportedCommands: async () => [],
       getContextUsage: async () => undefined,
-      setMcpServers: async (servers: Record<string, unknown>) => {
-        captured.setCalls.push(servers)
-        return { added: [], removed: [], errors: {} }
-      },
     }
   },
 }))
@@ -116,12 +114,21 @@ async function residentPrefix(servers: Record<string, unknown>): Promise<string>
   return JSON.stringify(resident)
 }
 
+/** Every tool a server set offers, loaded or not, as the CLI lists them */
+async function everyTool(servers: Record<string, unknown>): Promise<string> {
+  const all: unknown[] = []
+  for (const [name, config] of Object.entries(servers).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const t of await listTools(config as ServerConfig)) all.push({ server: name, ...t })
+  }
+  return JSON.stringify(all)
+}
+
 const initial = () => (captured.options?.mcpServers ?? {}) as Record<string, unknown>
-const last = () => captured.setCalls.at(-1) ?? null
+/** The apps the session's attachment has now */
+const attached = () => hub.liveFor(READER.id)?.current().map((a) => a.server) ?? []
 
 beforeEach(() => {
   captured.options = null
-  captured.setCalls = []
   lists = new WeakMap()
   w = attachWorld(kit)
   w.plant('p1', 'notes')
@@ -150,27 +157,27 @@ describe('the resident tool prefix of a Claude session', () => {
     }
   })
 
-  it('stays byte-identical when an app is attached and detached, even an app that asks to stay loaded', async () => {
+  it('has no app server, and every tool it offers stays byte-identical when an app is attached and detached', async () => {
     await start()
-    const before = await residentPrefix(initial())
-    const centralu = initial()['centralu']
+    const options = captured.options
+    // The session's own app is reached through `app`, not as a server of its own
+    expect(attached()).toEqual(['app-notes'])
+    expect(Object.keys(initial())).toEqual(['centralu'])
+    const before = await everyTool(initial())
 
-    // `--resident`: the app's `pinned` tool declares anthropic/alwaysLoad
-    w.plant('p1', 'pinned-app', ['--mode', 'attach', '--resident'])
+    w.plant('p1', 'later')
     w.rt.refresh()
-    await kit.until(() => last(), (s) => s !== null && 'app-pinned-app' in s)
-    const attached = last()!
-    const listed = await listTools(attached['app-pinned-app'] as ServerConfig)
-    expect(listed.map((t) => t.name)).toContain('pinned')
-    expect(await residentPrefix(attached)).toBe(before)
-    // The same server object: a new one for the same name would be ignored or reconnected by the SDK
-    expect(attached['centralu']).toBe(centralu)
+    await kit.until(attached, (s) => s.includes('app-later'))
+    // The same query and the same server objects: nothing was restarted or swapped in for it
+    expect(captured.options).toBe(options)
+    expect(Object.keys(initial())).toEqual(['centralu'])
+    expect(await everyTool(initial())).toBe(before)
 
     // The manifest, not the folder: on Windows the running app holds its folder as its working directory
-    rmSync(join(w.roots.p1, '.centralu', 'apps', 'pinned-app', 'centralu.app.json'))
+    rmSync(join(w.roots.p1, '.centralu', 'apps', 'later', 'centralu.app.json'))
     w.rt.refresh()
-    await kit.until(() => last(), (s) => s !== null && !('app-pinned-app' in s))
-    expect(await residentPrefix(last()!)).toBe(before)
-    expect(last()!['centralu']).toBe(centralu)
+    await kit.until(attached, (s) => !s.includes('app-later'))
+    expect(captured.options).toBe(options)
+    expect(await everyTool(initial())).toBe(before)
   })
 })

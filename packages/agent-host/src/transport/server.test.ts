@@ -809,11 +809,11 @@ describe("the Codex bridge's credential (#382)", () => {
     const { port } = await start(onRpc)
     const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
     c.send({ kind: 'rpc', id: 'a', method: 'orchestrator.tool', params: { sessionId: 's1', name: 'list_sessions', args: {} } })
-    c.send({ kind: 'rpc', id: 'b', method: 'apps.sessionCall', params: { sessionId: 's1', server: 'app-x', name: 't', args: {} } })
+    c.send({ kind: 'rpc', id: 'b', method: 'orchestrator.tools', params: { sessionId: 's1' } })
     expect(await resOf(c, 'a')).toMatchObject({ ok: true })
     expect(await resOf(c, 'b')).toMatchObject({ ok: true })
     expect(c.frames[0]).toMatchObject({ kind: 'hello_ok' })
-    expect(calls.map(([m]) => m)).toEqual(['orchestrator.tool', 'apps.sessionCall'])
+    expect(calls.map(([m]) => m)).toEqual(['orchestrator.tool', 'orchestrator.tools'])
     c.ws.close()
   })
 
@@ -826,6 +826,8 @@ describe("the Codex bridge's credential (#382)", () => {
       ['projects.setTrusted', { projectId: 'p1', trusted: true }],
       ['sessions.list', {}],
       ['terminals.open', { sessionId: 's1' }],
+      // The per-app door of before #2231: an app is reached through orchestrator.tool's `app` now
+      ['apps.sessionCall', { sessionId: 's1', server: 'app-x', name: 't', args: {} }],
     ]
     attempts.forEach(([method, params], i) => c.send({ kind: 'rpc', id: `x${i}`, method, params }))
     for (let i = 0; i < attempts.length; i++) {

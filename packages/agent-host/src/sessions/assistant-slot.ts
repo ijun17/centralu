@@ -1,6 +1,7 @@
 import type { LaunchDemands, SessionInfo, ToolName } from '@cc/protocol'
 import { ASSISTANT_DEMANDS, isAssistantKind, ASSISTANT_KIND } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
+import { BRIDGE_ANSWER_MS } from '../adapters/contract.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { assistantHome } from './assistant-home.js'
 import { AssistantProposals, type ProposalOutcome } from './assistant-proposals.js'
@@ -75,8 +76,8 @@ export class AssistantSlot {
     if (orch) await this.host.restartSession(orch.id, 'instructions').catch(() => {})
   }
 
-  /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app and the
-   * assistant is restarted (AssistantProposals.resolveMcpProposal) */
+  /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app the Assistant's
+   * `app` tool reaches on its next call (AssistantProposals.resolveMcpProposal) */
   async resolveMcpProposal(name: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
     return this.afterProposal(this.proposals.resolveMcpProposal(name, approve))
   }
@@ -109,7 +110,8 @@ export class AssistantSlot {
     if (!profileAllows(profile, name)) {
       throw rpcError(notAToolText(profile, name))
     }
-    return runCentraluTool(tools()!, name, args, { sessionId, profile })
+    // The bridge cuts a call it waits on too long: an app's call answers within the bound (#2231)
+    return runCentraluTool(tools()!, name, args, { sessionId, profile }, undefined, { waitMs: BRIDGE_ANSWER_MS })
   }
 
   /**

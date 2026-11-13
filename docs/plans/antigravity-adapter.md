@@ -449,6 +449,7 @@ host's node), one entry for Centralu's own tools and one per attached app (`CC_A
 the environment (§3.2). `bridge-path.ts` moves from `adapters/codex/` to `adapters/` (shared with the ACP work, which
 plans the same move). The servers are fixed when the process starts, so an app attached later is
 `appAttachment: 'restart'`: the next process start (any input after an interrupt, or a forced restart) picks it up.
+Superseded by #2231: only Centralu's own entry is served, and apps are reached through its `app` tool.
 
 Tools are reached through `call_mcp_tool` after the model reads a descriptor file (§1.3), so their definitions are not
 in the prompt prefix: `toolDeferral` is true in effect (to confirm against how the host counts the prefix).

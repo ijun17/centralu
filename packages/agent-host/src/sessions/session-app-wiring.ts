@@ -4,7 +4,6 @@ import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type Per
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
-import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { AppAccess, writeShared } from './app-access.js'
 import type { WhenAsked } from './asked-gate.js'
@@ -42,7 +41,7 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     readonly appSessions: Pick<AppSessions, 'appHostData' | 'runAppAgent' | 'agentRunEnded'>
     /** An app's notice into a session that called it (#1161 item 1) — `TurnInputs.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
-    readonly hostCards: Pick<HostCards, 'askCapability'>
+    readonly hostCards: Pick<HostCards, 'askCapability' | 'askHost'>
     migrateApprovedMcpServers: AssistantProposals['migrateApprovedMcpServers']
     /** An app tool's call, asked about when a session's request is the session's turn (§9.7, #1447) */
     whenAsked: WhenAsked
@@ -94,6 +93,13 @@ export class SessionAppWiring {
     this.appsHub = new SessionAppsHub(rt, {
       ...opts,
       whenAsked: (id, call, signal, run, refused) => this.host.whenAsked(id, call, signal, run, refused),
+      // The person's say on an app call, at the call (#2231): the preset now, the person's own bypass on the live agent, the host's card
+      approval: {
+        preset: (id) => (this.host.meta.get(id) ?? this.starting.get(id))?.permissionPreset ?? 'safe',
+        bypassed: (id) => this.host.handles.get(id)?.bypassesApprovals?.() === true,
+        // The preset is decided here (`presetAsks`), so the card asks whatever auto's boundary would say
+        ask: (id, detail, signal) => this.host.hostCards.askHost(id, detail, signal, { alwaysAsk: true }),
+      },
       // The names a session has seen stay with their apps for its life (#1141), kept with the session
       names: {
         load: (id) => {
@@ -129,7 +135,6 @@ export class SessionAppWiring {
       },
       projects: () => this.host.store.projects.listProjects().map((p) => ({ id: p.id, name: p.name })),
       ensureAccess: (id, to, what, signal) => this.host.ensureProjectAccess(id, to, 'apps', what, signal),
-      attachedChanged: (id) => this.sessionAppsChanged(id),
       ...(opts?.toolListWaitMs !== undefined ? { toolListWaitMs: opts.toolListWaitMs } : {}),
     })
     /*
@@ -150,28 +155,15 @@ export class SessionAppWiring {
   }
 
   /**
-   * The list of app tools and calls a bridge makes (M4 A-5, the Codex path). Answered by whatever is
-   * attached to **the session's currently living handle** — decision 4, the caller (that session), and
-   * the record all pass through the exact same place as Claude's in-process path.
-   */
-  /**
    * Whether a session can use one app's tools right now (#308, `apps.reach`) — asked when an item from
    * that app's view is dropped on the session's composer. Decision 4 with the session as `appsFor`
-   * sees it (a session stood up by an app gets none), and what its live agent actually has.
+   * sees it (a session stood up by an app gets none).
    */
   appReach(sessionId: string, ref: AppRef): AppReach {
     const m = this.host.sessionOf(sessionId)
     if (!this.appsHub) return { reachable: false, reason: 'unavailable' }
     const key = this.isAppAgentSession(m) ? null : { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.host.builderRefOf(m) }
-    return this.appsHub.reach(key, ref, this.host.handles.get(sessionId))
-  }
-
-  async appSessionTools(sessionId: string, server: string): Promise<Record<string, unknown>[]> {
-    return (await this.requireAppsHub().forSession(sessionId).tools(server)) as Record<string, unknown>[]
-  }
-
-  async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>, waitMs?: number) {
-    return this.requireAppsHub().forSession(sessionId).call(server, name, args, { waitMs })
+    return this.appsHub.reach(key, ref)
   }
 
   /** The hub for a session's app attachments — an inline app view (M4 B-1) listens to a session's app calls
@@ -188,32 +180,6 @@ export class SessionAppWiring {
   recordAppView(e: Extract<NormalizedEvent, { type: 'app_view' }>): void {
     if (!this.host.meta.has(e.sessionId)) return
     this.host.onEvent(e)
-  }
-
-  /**
-   * A session attached or detached an app itself (#371 part A). Claude follows its set live, so the
-   * tools are there now. A Codex thread keeps the servers it started with (`appAttachment`), so it is
-   * restarted through resume: when the turn ends if it is in one (the tool call that asked is), at once
-   * otherwise. Every call is checked against the current set either way, so a detached app's name
-   * that lingers in the thread until then is refused.
-   */
-  sessionAppsChanged(sessionId: string): 'now' | 'next_turn' {
-    this.appsHub?.sessionAppsChanged(sessionId)
-    const handle = this.host.handles.get(sessionId)
-    if (!handle) return 'next_turn'
-    // Claude takes the new tools at once, and a changed tool list is a changed prompt (§6.1)
-    if (!handle.appAttachment) {
-      this.host.cacheLedger.note(sessionId, 'instructions')
-      return 'now'
-    }
-    const m = this.host.meta.get(sessionId)
-    if (m && inTurn(m.state)) {
-      this.host.restartPolicy.restartAfterTurn.add(sessionId)
-      this.host.restartPolicy.appsRestartAfterTurn.add(sessionId)
-    } else {
-      void this.host.restartSession(sessionId, 'thread_restart').catch(() => {})
-    }
-    return 'next_turn'
   }
 
   /**
