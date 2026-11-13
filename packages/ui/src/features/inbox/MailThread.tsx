@@ -148,8 +148,8 @@ function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
         {fromScript !== undefined ? `script ${fromScript}` : partyName(m.sender)} · {m.kind}
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
-      {/* The person's own words stay as they typed them, as in the session view's `ChatRow`; others' are Markdown (#2228) */}
-      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'whitespace-pre-wrap border-line-strong bg-surface-hover/40' : 'border-line'}`}>
+      {/* The person's own words stay as they typed them, as in the session view's `ChatRow`; others' are Markdown (#2228), on the session panel's surface (#2242) so a message reads as a card on the Inbox's panel */}
+      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'whitespace-pre-wrap border-line-strong bg-surface-hover/40' : 'border-line bg-surface-floor'}`}>
         {mine ? m.body : <Markdown text={m.body} projectRoot={null} />}
       </div>
       {m.choices && <Choices m={m} open={open} answer={answer} onPicking={onPicking} />}
