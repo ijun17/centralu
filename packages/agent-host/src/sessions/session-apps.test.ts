@@ -1,6 +1,7 @@
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { APP_CALL, type PermissionPreset } from '@cc/protocol'
 import { MANIFEST_FILE } from '../apps/external/manifest.js'
 import * as kit from '../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
@@ -61,16 +62,12 @@ describe('decision 4 — which apps attach', () => {
     const a = hub.attach(worker('p1'))
     expect(a.current().map((x) => x.server)).toEqual(['app-broken', 'app-notes'])
 
-    let heard = 0
-    a.onChange(() => heard++)
     // The fixture dies the moment it starts up — maxFailures is 1, so it halts after just one
     await w.rt.tools({ projectId: 'p1', appId: 'broken' }).catch(() => {})
-    await kit.until(() => heard, (n) => n > 0)
-    expect(a.current().map((x) => x.server)).toEqual(['app-notes'])
+    await kit.until(() => a.current().map((x) => x.server).join(), (n) => n === 'app-notes')
 
     await w.rt.restart({ projectId: 'p1', appId: 'broken' })
-    await kit.until(() => heard, (n) => n > 1)
-    expect(a.current().map((x) => x.server)).toEqual(['app-broken', 'app-notes'])
+    await kit.until(() => a.current().map((x) => x.server).join(), (n) => n === 'app-broken,app-notes')
   })
 
   it('an imported app does not attach to the Assistant before the person turns it on, calling it by name is refused, and turning it on attaches it (M4 E-3)', async () => {
@@ -83,11 +80,8 @@ describe('decision 4 — which apps attach', () => {
     const refused = await w.rt.call({ projectId: null, appId: 'imp' }, 'peek', {}, { kind: 'session', sessionId: 'o1' })
     expect(refused).toMatchObject({ status: 'rejected', error: expect.stringContaining('not enabled yet') })
 
-    let heard = 0
-    a.onChange(() => heard++)
     w.rt.enableApp({ projectId: null, appId: 'imp' }, review.reviewKey)
-    await kit.until(() => heard, (n) => n > 0)
-    expect(a.current().map((x) => x.server)).toEqual(['app-helper', 'app-imp'])
+    await kit.until(() => a.current().map((x) => x.server).join(), (n) => n === 'app-helper,app-imp')
   })
 })
 
@@ -116,77 +110,40 @@ describe('whether a session can reach an app, and why not (#308, apps.reach)', (
     w.rt.refresh()
     expect(hub.reach(worker('p1'), { projectId: 'p1', appId: 'tasks' })).toEqual({ reachable: false, reason: 'app-unusable', status: 'invalid' })
   })
-
-  it('what the live agent has decides last: a thread started without the app, or a bridge that failed', () => {
-    const asked: string[] = []
-    const live = (answer: 'attached' | 'restart' | 'failed') => ({
-      appAttachment: (server: string) => (asked.push(server), answer),
-    })
-    expect(hub.reach(worker('p1'), notes, live('restart'))).toEqual({ reachable: false, reason: 'restart' })
-    expect(hub.reach(worker('p1'), notes, live('failed'))).toEqual({ reachable: false, reason: 'bridge-failed' })
-    expect(hub.reach(worker('p1'), notes, live('attached'))).toEqual({ reachable: true })
-    expect(asked).toEqual(['app-notes', 'app-notes', 'app-notes'])
-    // An agent that follows the set live (Claude) has no say, and one asleep has none either
-    expect(hub.reach(worker('p1'), notes, {})).toEqual({ reachable: true })
-    // The agent is not asked about an app the rule does not give the session
-    expect(hub.reach(worker('p1'), { projectId: 'p2', appId: 'other' }, live('attached'))).toEqual({ reachable: false, reason: 'other-project' })
-    expect(asked).toHaveLength(3)
-  })
 })
 
-describe('hearing about it when the set of attached apps changes', () => {
-  it('a notification arrives when an app folder appears or disappears, and current() follows along', async () => {
+/**
+ * The session's apps are counted again at each read (#2231): the `app` tool lists and calls what the session has at that
+ * moment, so nothing is announced to an adapter, and an app that comes or goes mid-session is there, or gone, at once.
+ */
+describe("the session's apps as they come and go", () => {
+  it('current() follows an app folder appearing and disappearing', async () => {
     const a = hub.attach(worker('p1'))
-    let heard = 0
-    a.onChange(() => heard++)
-
-    /*
-     * Rescanning calls the same function (rescan) that the folder watcher calls. It is called
-     * directly here rather than waiting on the watcher's fs events — under parallel test runs,
-     * macOS fs events were measured lagging by several seconds, and the watcher itself is
-     * covered by discovery.test.ts. What is checked here is only "if a rescan finds a change, it
-     * announces it."
-     */
     w.plant('p1', 'fresh')
     w.rt.refresh()
     await kit.until(() => a.current().map((x) => x.server), (s) => s.includes('app-fresh'))
-    expect(heard).toBeGreaterThan(0)
-
-    const before = heard
     rmSync(join(w.roots.p1, '.centralu', 'apps', 'fresh'), { recursive: true, force: true })
     w.rt.refresh()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-fresh'))
-    expect(heard).toBeGreaterThan(before)
+    expect(await a.call('app-fresh', 'peek', {})).toMatchObject({ isError: true })
   })
 
-  it('flipping trust off detaches every attached app, and flipping it back on reattaches them', async () => {
+  it('an app made after the session started is callable on its next call, with nothing restarted', async () => {
     const a = hub.attach(worker('p1'))
-    let heard = 0
-    a.onChange(() => heard++)
+    expect(await a.call('app-made', 'peek', {})).toMatchObject({ isError: true })
+    w.plant('p1', 'made')
+    w.rt.refresh()
+    expect(await a.call('app-made', 'peek', {})).toMatchObject({ isError: false })
+  })
 
+  it('flipping trust off takes every app away, and flipping it back on gives them back', async () => {
+    const a = hub.attach(worker('p1'))
     w.trust.p1 = false
     w.rt.refresh()
-    await kit.until(() => heard, (n) => n === 1)
     expect(a.current()).toEqual([])
-
     w.trust.p1 = true
     w.rt.refresh()
-    await kit.until(() => heard, (n) => n === 2)
     expect(a.current().map((x) => x.server)).toEqual(['app-notes', 'app-tasks'])
-  })
-
-  it('does not announce a change that only concerns another session — a project session stays quiet even when a user-folder app is added', async () => {
-    const a = hub.attach(worker('p1'))
-    const o = hub.attach(ORCH)
-    let heardA = 0
-    let heardO = 0
-    a.onChange(() => heardA++)
-    o.onChange(() => heardO++)
-
-    w.plant('user', 'second')
-    w.rt.refresh()
-    await kit.until(() => heardO, (n) => n > 0)
-    expect(heardA).toBe(0)
   })
 })
 
@@ -197,8 +154,6 @@ describe('the tool list', () => {
     // Attaching alone does not spin up the app (performance budget: zero app processes while nothing is happening)
     expect(w.records('notes').filter((r) => r.t === 'start')).toEqual([])
 
-    let heard = 0
-    a.onChange(() => heard++)
     const tools = await a.tools('app-notes')
     const names = tools.map((t) => t.name).sort()
     // app_only is UI-only — it never appears in the agent's list. run_status is a tool the host added
@@ -214,27 +169,23 @@ describe('the tool list', () => {
     })
 
     // The list read is remembered — even after the app goes down, the next session knows the list without spinning the app up
-    await kit.until(() => heard, (n) => n > 0)
     await w.rt.restart({ projectId: 'p1', appId: 'notes' })
     const b = hub.attach(worker('p1', 'w2'))
     expect(b.current().find((x) => x.server === 'app-notes')?.tools?.map((t) => t.name).sort()).toEqual(names)
     expect(w.records('notes').filter((r) => r.t === 'start')).toHaveLength(1)
   })
 
-  it('announces it when the tools change after the app comes back up', async () => {
+  it('lists the new tools once the app comes back up with them', async () => {
     const extra = join(w.root, 'extra.json')
     w.plant('p1', 'grows', ['--mode', 'attach', '--extra-from', extra])
     w.rt.refresh()
     const a = hub.attach(worker('p1'))
     await a.tools('app-grows')
-    let heard = 0
-    a.onChange(() => heard++)
 
     writeFileSync(extra, JSON.stringify(['added_later']))
     await w.rt.restart({ projectId: 'p1', appId: 'grows' })
     await a.tools('app-grows') // returns the remembered list — spinning the app up happens on the next need
     await w.rt.tools({ projectId: 'p1', appId: 'grows' }, 'model')
-    await kit.until(() => heard, (n) => n > 0)
     expect(a.current().find((x) => x.server === 'app-grows')?.tools?.map((t) => t.name)).toContain('added_later')
   })
 })
@@ -256,7 +207,7 @@ describe('calling', () => {
     for (const server of ['app-other', 'app-helper']) {
       const out = await a.call(server, 'echo', { text: 'x' })
       expect(out.isError).toBe(true)
-      expect(JSON.stringify(out.content)).toContain('This app is not attached to this session')
+      expect(JSON.stringify(out.content)).toContain('This session has no app named')
     }
     expect(w.rt.runs({ projectId: 'p2', appId: 'other' })).toEqual([])
     expect(w.rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
@@ -378,5 +329,128 @@ describe('joining a call to its card id (B-1)', () => {
     const out = await a.call('app-notes', 'poke', { to: 6 })
     expect(out.isError).toBe(false)
     expect(await calls[0]!.callId).toBeNull()
+  })
+})
+
+/**
+ * The person's say on an app call (#2231, decision 5): decided by the host at the call, with its arguments, the same on every
+ * CLI. A read never asks; otherwise `safe` asks, `normal` and `edits` ask unless the person's own settings bypass approvals
+ * for the live agent, and `auto` never asks.
+ */
+describe("the person's say on an app call, at the call (#2231)", () => {
+  type Asked = { sessionId: string; raw: string; about: string | undefined; signal: AbortSignal }
+  let asked: Asked[]
+  let answer: 'allow' | 'always' | 'deny' | 'wait'
+  let preset: PermissionPreset
+  let bypassed: boolean
+
+  beforeEach(() => {
+    asked = []
+    answer = 'allow'
+    preset = 'safe'
+    bypassed = false
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      callJoinWaitMs: 100,
+      approval: {
+        preset: () => preset,
+        bypassed: () => bypassed,
+        ask: (sessionId, detail, signal) => {
+          asked.push({ sessionId, raw: detail.raw, about: detail.about, signal })
+          if (answer !== 'wait') return Promise.resolve(answer)
+          return new Promise((resolve) => signal.addEventListener('abort', () => resolve(null), { once: true }))
+        },
+      },
+    })
+  })
+
+  const ran = () => w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => r.tool)
+
+  const matrix: [PermissionPreset, boolean, boolean][] = [
+    ['safe', false, true],
+    ['safe', true, true],
+    ['normal', false, true],
+    ['normal', true, false],
+    ['edits', false, true],
+    ['edits', true, false],
+    ['auto', false, false],
+  ]
+  for (const [p, bypass, asks] of matrix) {
+    it(`${p}${bypass ? " with the person's bypass" : ''}: a read never asks, and a write ${asks ? 'asks with its arguments' : 'runs unasked'}`, async () => {
+      preset = p
+      bypassed = bypass
+      const a = hub.attach(worker('p1', 'sess-matrix'))
+      expect(await a.call('app-notes', 'peek', {})).toMatchObject({ isError: false })
+      expect(await a.call('app-notes', 'poke', { to: 2 })).toMatchObject({ isError: false })
+      expect(asked.map((x) => [x.sessionId, x.raw])).toEqual(asks ? [['sess-matrix', 'notes: poke {"to":2}']] : [])
+      expect(ran()).toEqual(['poke', 'peek'])
+    })
+  }
+
+  it('the card is marked as an app call (no "always" in a window), and an "always" from an older window runs this call only: nothing is remembered', async () => {
+    answer = 'always'
+    const a = hub.attach(worker('p1'))
+    expect(await a.call('app-notes', 'poke', { to: 6 })).toMatchObject({ isError: false })
+    expect(await a.call('app-notes', 'poke', { to: 7 })).toMatchObject({ isError: false })
+    expect(asked.map((x) => [x.about, x.raw])).toEqual([
+      [APP_CALL, 'notes: poke {"to":6}'],
+      [APP_CALL, 'notes: poke {"to":7}'],
+    ])
+    expect(ran()).toEqual(['poke', 'poke'])
+  })
+
+  it("the person's Deny runs nothing and says so", async () => {
+    answer = 'deny'
+    const a = hub.attach(worker('p1'))
+    const out = await a.call('app-notes', 'poke', { to: 3 })
+    expect(out).toMatchObject({ isError: true, content: [{ type: 'text', text: 'The person denied this call. Nothing ran.' }] })
+    expect(ran()).toEqual([])
+  })
+
+  it('arguments its schema refuses are answered with the schema, before any card, and nothing runs; so is an unknown tool', async () => {
+    const a = hub.attach(worker('p1'))
+    const wrong = await a.call('app-notes', 'poke', { to: 'seven' })
+    expect(wrong.isError).toBe(true)
+    expect(JSON.stringify(wrong.content)).toContain('Wrong arguments for poke: to: ')
+    expect(JSON.stringify(wrong.content)).toContain('the new value')
+    const missing = await a.call('app-notes', 'nope', {})
+    expect(JSON.stringify(missing.content)).toContain('notes has no tool \\"nope\\". Nothing ran.')
+    expect(asked).toEqual([])
+    // The unknown tool reached the runtime, which refused it and kept the row: the app's runs show what the agent tried
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => `${r.tool} ${r.status}`)).toEqual(['nope rejected'])
+  })
+
+  it("a tool the caller's list did not hold never runs, even one the runtime would run (a stale list): refused and recorded", async () => {
+    const out = await w.rt.call({ projectId: 'p1', appId: 'notes' }, 'poke', { to: 4 }, { kind: 'session', sessionId: 'claude-s1' }, { notListed: true })
+    expect(out).toMatchObject({ status: 'rejected', error: "poke was not in the caller's tool list when it called" })
+    expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => `${r.tool} ${r.status}`)).toEqual(['poke rejected'])
+  })
+
+  it('a card the person has not answered within the bridge bound is withdrawn, and nothing runs', async () => {
+    answer = 'wait'
+    const a = hub.attach(worker('p1'))
+    const out = await a.call('app-notes', 'poke', { to: 4 }, { waitMs: 1_000 })
+    expect(JSON.stringify(out.content)).toContain('did not answer the card for this call within 1 s, so it was withdrawn')
+    expect(asked[0]!.signal.aborted).toBe(true)
+    expect(ran()).toEqual([])
+  })
+
+  it('stopping the session while its card stands withdraws the card and refuses the call', async () => {
+    answer = 'wait'
+    const a = hub.attach(worker('p1'))
+    const p = a.call('app-notes', 'poke', { to: 5 })
+    await kit.until(() => asked.length, (n) => n === 1)
+    a.cancelAll()
+    expect(await p).toMatchObject({ isError: true, content: [{ type: 'text', text: 'The card for this call was withdrawn. Nothing ran.' }] })
+    expect(asked[0]!.signal.aborted).toBe(true)
+    expect(ran()).toEqual([])
+  })
+
+  it('an app the session does not have is refused before any card, whatever the preset', async () => {
+    preset = 'auto'
+    const a = hub.attach(worker('p1'))
+    expect(await a.call('app-other', 'peek', {})).toMatchObject({ isError: true })
+    expect(w.rt.runs({ projectId: 'p2', appId: 'other' })).toEqual([])
   })
 })

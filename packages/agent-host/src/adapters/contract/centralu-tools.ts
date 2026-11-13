@@ -1,4 +1,5 @@
 import type { IfBusy, MailToolArgs } from '../../mail/tool.js'
+import type { SessionAppTools } from './session-apps.js'
 import type {
   UsageHistory,
   AgentDifficulty,
@@ -710,6 +711,11 @@ export type CentraluTools = {
    * runner calls it around every tool; absent, or in a turn that is not a session's request, it just runs
    */
   whenAsked?(call: { name: string; args: Record<string, unknown> }, signal: AbortSignal | undefined, run: () => Promise<{ text: string; isError?: boolean }>): Promise<{ text: string; isError?: boolean }>
+  /**
+   * This session's apps (#2231), what the `app` tool lists and calls: its live attachment, or null when the session has no
+   * live agent (nothing calls then) or the host runs no apps. Absent on a bundle that has no session behind it
+   */
+  apps?(): SessionAppTools | null
   /** compact_self (#1451): asks Centralu to compact this session when its turn ends, with an optional focus line and (#2024) the step to continue with after it. The answer says what will happen */
   compactSelf?(focus?: string, then?: string): { text: string; isError?: boolean }
   /** Works with a session the caller started (#561, agent_session): status, wait, stop, delete, answer; more work is mail (#1948) */
@@ -856,16 +862,15 @@ export type CentraluTools = {
    * Another project's app tools, on demand (#371 part A, sessions/app-access.ts) — for a project's
    * ordinary session. `findApps` lists what it could attach (apps other projects share, and the
    * person's own user-folder apps), `attachApp` attaches one (asking the person once per pair of
-   * projects for another project's app), `detachApp` takes it away again. `when` says when the agent
-   * has the change: `now` (Claude) or `next_turn` (a Codex thread restarts once the turn ends).
-   * Every other seat answers with a refusal.
+   * projects for another project's app), `detachApp` takes it away again. The `app` tool reaches it
+   * from the next call, on every CLI (#2231). Every other seat answers with a refusal.
    */
   findApps(query?: string): Promise<
     | { ok: true; apps: { ref: string; name: string; project: string | null; description: string; tools: string[] | null }[] }
     | { ok: false; error: string }
   >
   attachApp(app: string): Promise<
-    { ok: true; server: string; tools: string[]; when: 'now' | 'next_turn'; already?: boolean } | { ok: false; error: string }
+    { ok: true; server: string; tools: string[]; already?: boolean } | { ok: false; error: string }
   >
-  detachApp(app: string): Promise<{ ok: true; server: string; when: 'now' | 'next_turn' } | { ok: false; error: string }>
+  detachApp(app: string): Promise<{ ok: true; server: string } | { ok: false; error: string }>
 }

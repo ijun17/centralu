@@ -18,10 +18,10 @@ import { CodexSession, LAZY_RESUME_WAIT_MS } from './session.js'
 import { CODEX_SURFACE } from './surface.js'
 import { CODEX_SUBAGENT_TOOL } from './thread-open.js'
 import { launchPreset } from '../edit-grant.js'
-import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
+import { CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 import { execText } from '../../os/exec.js'
 
-export { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, LAZY_RESUME_WAIT_MS, repoFilesConfig }
+export { CODEX_TOOL_TIMEOUT_SEC, LAZY_RESUME_WAIT_MS, repoFilesConfig }
 
 
 /**

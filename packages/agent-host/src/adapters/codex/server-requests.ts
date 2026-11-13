@@ -21,7 +21,6 @@ export type RequestsHost = {
   /** Answers a server request on the session's connection */
   respond(id: number | string, result: unknown): void
   threadId(): string | null
-  appServers(): ReadonlySet<string>
   ownServer(): boolean
   /** The folder whose file edits need no card (#1525): the session's own, under `edits`; null under any other preset */
   editsFolder(): string | null
@@ -124,30 +123,11 @@ export class CodexRequests {
      * screen only showed "permission denied", with no way to know the actual cause (measured).
      *
      * We accept our own server and reject unknown ones. Silently approving when there is no
-     * screen to ask on would mean deciding on the user's behalf.
+     * screen to ask on would mean deciding on the user's behalf. An app's tool is asked about by
+     * the host inside the `app` call (#2231), so no elicitation of Codex's stands for one.
      */
     if (r.method.toLowerCase().includes('elicitation')) {
       const p = paramsOf(r, 'mcpServer/elicitation/request')
-      /*
-       * **Tool approval for an attached app goes to our own approval card** (M4 A-5, decision 5).
-       *
-       * Codex asks whether to use an MCP tool through this same elicitation, and marks in `_meta`
-       * that it is a tool approval. Rejecting it as before would mean the app tool never runs on
-       * Codex, not even once (the same shape as plan "to confirm separately" 2). We only route to
-       * a card for **tool approval on an app server we ourselves loaded onto this thread** — a
-       * third party's server whose name happens to start with `app-` (from the user's
-       * config.toml), and any elicitation that is not a tool approval (an input form), are still
-       * rejected as before.
-       *
-       * Confirmed from source only (logged out, S-3): the string in the installed 0.153.4 binary
-       * is `codex_approval_kind`, while current codex source uses `codex/approval_kind` — we read both.
-       */
-      if (typeof p.serverName === 'string' && this.host.appServers().has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
-        const requestId = this.ids.next('codex-req')
-        this.approvals.set(requestId, { ...requestOrigin(r), elicitation: true })
-        this.host.emit({ type: 'approval_request', sessionId: this.host.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
-        return
-      }
       // Only the server we loaded: without it, a `centralu` server could come from the person's own config.toml (#382)
       const ours = p.serverName === CENTRALU_MCP_NAME && this.host.ownServer()
       this.host.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
@@ -239,21 +219,6 @@ export class CodexRequests {
     if (open === undefined) return false
     const serverId = open.serverId
 
-    if (open.elicitation) {
-      /*
-       * The answer to an app tool approval (M4 A-5). `always` is passed to Codex as "remember
-       * this for the rest of the session" (`_meta.persist: "session"` -> ApprovedForSession).
-       * Confirmed from source only (logged out, S-3): codex's
-       * `parse_mcp_tool_approval_elicitation_response` reads accept together with this value.
-       */
-      this.host.respond(serverId, {
-        action: decision === 'deny' ? 'decline' : 'accept',
-        content: null,
-        _meta: decision === 'always' ? { persist: 'session' } : null,
-      })
-      this.host.emit({ type: 'approval_resolved', sessionId: this.host.sessionId, requestId, decision })
-      return true
-    }
     this.grants.answered(decision, matcher)
     this.host.respond(serverId, { decision: toCodexDecision(decision) })
     this.host.emit({ type: 'approval_resolved', sessionId: this.host.sessionId, requestId, decision })
@@ -266,33 +231,8 @@ function changesOfLegacy(params: Record<string, unknown>): FileChange[] {
   return Object.entries(asObj(params.fileChanges)).map(([path, c]) => ({ path, diff: '', ...changeKindOf(asObj(c)) }))
 }
 
-/** The approval kind named by an elicitation's `_meta` — 0.153.4 uses `codex_approval_kind`, current source uses `codex/approval_kind` */
-function approvalKindOf(meta: unknown): string | null {
-  if (typeof meta !== 'object' || meta === null) return null
-  const m = meta as Record<string, unknown>
-  const kind = m.codex_approval_kind ?? m['codex/approval_kind']
-  return typeof kind === 'string' ? kind : null
-}
-
-/**
- * The content of an app tool approval card — which app's tool, with what arguments. Uses the tool
- * title (`tool_title`) and arguments (`tool_params`) that Codex loads into `_meta`, and falls back
- * to Codex's own sentence (`message`) when those are absent.
- */
-function appApprovalDetail(server: string, message: unknown, meta: unknown): ApprovalDetail {
-  const m = asObj(meta)
-  const title = typeof m.tool_title === 'string' && m.tool_title ? m.tool_title : typeof message === 'string' ? message : ''
-  const params = m.tool_params === undefined ? '' : ` ${JSON.stringify(m.tool_params).slice(0, 1000)}`
-  return { kind: 'other', raw: `${server} · ${title}${params}` }
-}
-
-/** Where a server request was asked, for closing its card when Codex ends it (see `approvals`) */
-/**
- * A Codex server request behind one of our cards: its id, and the thread and turn it was asked in. `elicitation`
- * marks a card raised for an app tool's approval (M4 A-5), whose answer has a different shape (elicitation's
- * `{ action }`, not `{ decision }`).
- */
-export type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null; elicitation?: true }
+/** A Codex server request behind one of our cards: its id, and the thread and turn it was asked in, for closing its card when Codex ends it (see `approvals`) */
+export type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null }
 
 function requestOrigin(r: ServerRequest): OpenRequest {
   // One params object read as each request it serves, so a rename of threadId or turnId in any of them fails the build

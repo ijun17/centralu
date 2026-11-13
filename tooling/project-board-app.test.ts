@@ -211,7 +211,7 @@ describe('the project board app', { timeout: 30_000 * SLOW }, () => {
   })
 
   it('answers reads compactly, with the text saying exactly what the structured part says, and the rest only on request', async () => {
-    // Claude Code hands the model structuredContent, not the text (docs/apps/attaching.md "Claude and Codex")
+    // Claude Code hands the model structuredContent, not the text (docs/apps/attaching.md "What the model reads from a result")
     runtime()
     for (const [name, args] of [
       ['list_items', {}],

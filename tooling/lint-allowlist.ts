@@ -50,6 +50,29 @@ export const ASSERTION_RULE = 'guard/type-assertions'
  */
 export const guardOptions = (cwd: string): ESLint.Options => ({ cwd, concurrency: Math.max(2, Math.min(4, availableParallelism())), overrideConfigFile: join(cwd, 'tooling', 'eslint-guard-pass.js') })
 
+/** The guard pass over every file under `root`, without the notices about comments and ignored files that are not findings. tooling/lint.ts and the test of the ceilings both run it (the test on a temp folder, with `configRoot` the repository). */
+export async function guardRun(root: string, configRoot = root): Promise<ESLint.LintResult[]> {
+  // Imported here: the module's other users (tests, hooks) only need its types and lists, and ESLint is a slow load
+  const { ESLint: Linter } = await import('eslint')
+  const results = await new Linter({ ...guardOptions(root), overrideConfigFile: join(configRoot, 'tooling', 'eslint-guard-pass.js') }).lintFiles(['.'])
+  for (const r of results) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
+  return results
+}
+
+/**
+ * The guard pass of a run over `paths` ([] is the whole repository): it reads every file under `root` even for some paths, because the
+ * ceilings count every file of a package (#1860). `totals` are taken before the files are narrowed to `paths` (counting strips the counting
+ * messages), `shown` are the results of the named files, `over` and `under` come from `overAndUnder`, and `all` is every result, for the other
+ * counts of the pass (ARCHIVE_ALLOWED). tooling/lint.ts and the test of the ceilings both call it.
+ */
+export async function guardPassFor(root: string, paths: string[], configRoot = root, ceiling: Readonly<Record<string, number>> = ASSERTIONS): Promise<{ all: ESLint.LintResult[]; shown: ESLint.LintResult[]; totals: Record<string, number>; over: string[]; under: string[] }> {
+  const all = await guardRun(root, configRoot)
+  const totals = assertionTotals(root, all)
+  const named = (file: string) => paths.length === 0 || paths.some((p) => relative(root, file).split(sep).join('/').startsWith(p.split(sep).join('/').replace(/^\.\//, '').replace(/\/$/, '')))
+  const shown = all.filter((r) => r.messages.length > 0 && named(r.filePath))
+  return { all, shown, totals, ...overAndUnder(totals, ceiling) }
+}
+
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
 

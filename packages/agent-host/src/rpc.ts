@@ -679,12 +679,6 @@ export function createRpcHandler(
     'assistant.tool': async ({ sessionId, name, args }) => {
       return mgr.runCentraluTool(sessionId, name, args)
     },
-    'apps.sessionTools': async ({ sessionId, server }) => {
-      return { tools: await mgr.apps.appSessionTools(sessionId, server) }
-    },
-    'apps.sessionCall': async ({ sessionId, server, name, args, waitMs }) => {
-      return mgr.apps.callAppForSession(sessionId, server, name, args, waitMs)
-    },
     'grid.get': async () => mgr.layout.grid(),
     'grid.set': async (p) => mgr.layout.setGridView(p.panels),
     'processes.strays': async () => findStrays(mgr.projectRegistry.folderRoots(), process.pid),

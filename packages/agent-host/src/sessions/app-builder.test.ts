@@ -229,7 +229,7 @@ describe('it is found by that app\'s building session', () => {
 describe('a building session tries out its own app (C-3)', () => {
   const servers = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server)
 
-  it('a project app\'s building session: the project\'s apps attach, and the tool profile is check alone', async () => {
+  it('a project app\'s building session: the project\'s apps attach, and the tool profile is check and the app tool its apps are reached through', async () => {
     plantApp(join(repo, ...PROJECT_APPS), 'other', { server: { command: 'node', args: ['server.mjs'] } })
     rt.refresh()
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
@@ -239,9 +239,9 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(o.centraluTools).toBeDefined()
     expect(o.centraluBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
     expect(mgr.tools.toolProfileOf(builder!.id)).toBe('builder')
-    // The list the bridge (Codex) asks for is the same profile
+    // The list the bridge (Codex) asks for is the same profile: every profile reaches its apps through `app` (#2231)
     const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
-    expect(tools.map((t) => t.name)).toEqual(['check'])
+    expect(tools.map((t) => t.name)).toEqual(['check', 'app'])
     await expect(mgr.runCentraluTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
   })
 
@@ -257,7 +257,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(servers(claude.last())).toEqual(['app-extra', 'app-timer'])
     expect(claude.last().toolProfile).toBe('builder')
     // Actually calls the attached app's tool — the template's increment
-    const out = await claude.last().apps!.call('app-timer', 'increment', { by: 2 })
+    const out = await mgr.apps.sessionAppsHub()!.liveFor(builder!.id)!.call('app-timer', 'increment', { by: 2 })
     expect(out.structuredContent).toEqual({ count: 2 })
   })
 

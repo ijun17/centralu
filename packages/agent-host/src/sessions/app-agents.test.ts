@@ -128,7 +128,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
   describe('held to every call open into the app (owner decision 2026-11-05)', () => {
     const ref = () => ({ projectId, appId: 'notes' })
     const sessionCall = (session: SessionInfo, tool: string, args: Record<string, unknown>, signal: AbortSignal) =>
-      claude.opened.find((o) => o.sessionId === session.id)!.apps!.call('app-notes', tool, args, { signal })
+      w.appCall(session, 'app-notes', tool, args, { signal })
     const answering = () => {
       claude.onSend = (h) => {
         h.say('ok')
@@ -346,8 +346,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
       agent = h
       h.emit({ type: 'approval_request', sessionId: h.sessionId, requestId: 'req-write', detail: { kind: 'command', command: 'touch notes.md', cwd: repo } })
     }
-    const opts = claude.opened.find((o) => o.sessionId === caller.id)!
-    const call = opts.apps!.call('app-notes', 'ask_broker', { mode: 'run', relay: true, args: { prompt: 'Write the notes down.' } }, { callId: 'toolu_notes' })
+    const call = w.appCall(caller, 'app-notes', 'ask_broker', { mode: 'run', relay: true, args: { prompt: 'Write the notes down.' } }, { callId: 'toolu_notes' })
     const said = () =>
       events.filter((e): e is Extract<NormalizedEvent, { type: 'tool_output_delta' }> => e.type === 'tool_output_delta' && e.sessionId === caller.id)
     // First the capability question (this test world allows it right away), then the agent session's approval — both stand on that call's card

@@ -134,18 +134,18 @@ describe('the commands tier', () => {
     const tools = {
       ...fakeTools(),
       findApps: vi.fn(async () => ({ ok: true as const, apps: [{ ref: 'Board/board', name: 'Board', project: 'Board', description: 'Issues', tools: ['list'] }] })),
-      attachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', tools: ['list'], when: 'now' as const })),
-      detachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', when: 'now' as const })),
+      attachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board', tools: ['list'] })),
+      detachApp: vi.fn(async () => ({ ok: true as const, server: 'app-board' })),
     } as unknown as CentraluTools
     // The instructions name it as a command, as they name the other rare ones: a bare call would be refused first
-    expect(assistantInstructions()).toContain('the find_apps command lists them')
+    expect(assistantInstructions()).toContain('attach on demand (the find_apps command)')
     expect(assistantInstructions()).not.toMatch(/: find_apps lists/)
     const found = await runCentraluTool(tools, 'centralu_run', { command: 'find_apps', args: {} }, assistant)
     expect(found.text).toContain('Attach one with centralu_run(command="attach_app", args={app: "<the name before ·>"})')
     const attached = await runCentraluTool(tools, 'centralu_run', { command: 'attach_app', args: { app: 'Board/board' } }, assistant)
-    expect(attached.text).toContain('as the app-board server. Tools: mcp__app-board__list.')
+    expect(attached.text).toContain('Attached: Board/board as "board". Its tools: list.')
     expect(attached.text).toContain('call centralu_run(command="detach_app", args={app: "Board/board"})')
-    expect(await runCentraluTool(tools, 'centralu_run', { command: 'detach_app', args: { app: 'Board/board' } }, assistant)).toMatchObject({ text: 'Detached Board/board: the app-board tools are gone.' })
+    expect(await runCentraluTool(tools, 'centralu_run', { command: 'detach_app', args: { app: 'Board/board' } }, assistant)).toMatchObject({ text: 'Detached Board/board: calls to "board" are refused from now on.' })
     // Not as bare tools, and a reader still calls them by name
     expect(await runCentraluTool(tools, 'attach_app', { app: 'Board/board' }, assistant)).toMatchObject({ isError: true, text: expect.stringContaining('centralu_run(command="attach_app"') })
     const reader = await runCentraluTool(tools, 'find_apps', {}, { sessionId: 'r', profile: 'reader' })

@@ -1,6 +1,6 @@
 import { resolveSettings, filterEscalatingDefaultMode, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
-import { APP_SERVER_PREFIX, mcpNameParts, type Question } from '@cc/protocol'
+import { mcpNameParts, type Question } from '@cc/protocol'
 import type { CreateSessionOpts } from '../contract.js'
 import { CENTRALU_MCP_NAME } from './centralu-mcp.js'
 
@@ -58,20 +58,6 @@ function ownServerTool(toolName: string): { server: string; tool: string } | nul
  */
 export function isCentraluToolName(toolName: string): boolean {
   return ownServerTool(toolName)?.server === CENTRALU_MCP_NAME
-}
-
-/**
- * If this tool belongs to an external app's proxy server, its server and tool name (M4 A-5) —
- * `mcp__app-<id>__<tool>`.
- *
- * This reads the name for the same reason as above. An app id never contains an underscore and
- * an app's own tool names never contain `__` (two rules enforced in manifest.ts), so a tool that
- * is ours has no `__` in its tool part. This never grants anything based on the name alone —
- * whether it is read-only is asked of the attached app's own list (`SessionApps.readOnly`).
- */
-export function appToolOf(toolName: string): { server: string; tool: string } | null {
-  const parts = ownServerTool(toolName)
-  return parts?.server.startsWith(APP_SERVER_PREFIX) ? parts : null
 }
 
 /** The tools that only read — the ones a read grant (#371, `CreateSessionOpts.mayRead`) lets through without a card */

@@ -17,7 +17,7 @@ import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
  * How long one ask_project call waits for the delegated turn before it answers "still working".
  *
  * Under Codex's own ceiling for an MCP call (`tool_timeout_sec`, 300 s, set by the adapter) with the same margin as
- * an app's long call (`APP_CALL_WAIT_MS`), so "still working" reaches the model before Codex cuts the call. Claude
+ * an app's call through the bridge (`BRIDGE_ANSWER_MS`), so "still working" reaches the model before Codex cuts the call. Claude
  * uses the same bound: one rule for both callers, and a model that calls again every four minutes costs a few
  * tokens, while a call that hangs past an unknown ceiling costs the answer.
  */

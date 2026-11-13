@@ -3,14 +3,16 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { isAppCall } from '@cc/protocol'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AppToolResult, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AppCallOpts, AppToolResult, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { storePermissionBook } from '../app-permission-book.js'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { appNameOf } from './session-apps.js'
 import { FIXTURE_APP, type PlantKit } from './session-apps.test-helpers.js'
 
 /**
@@ -160,9 +162,16 @@ export type BrokerWorld = {
    * inspects the card and answers it directly.
    */
   answerCapabilities: 'allow' | 'deny' | null
+  /**
+   * Answers the host's card for an app call made through `appCall` (#2231: a write asks under safe and normal) in place
+   * of a person — allowed by default, for a test about something else. null means nobody answers.
+   */
+  answerAppCalls: 'allow' | 'deny' | null
   /** Plants the fixture app (`--mode mediation`) — in the project (`repo`) or the user folder, with the manifest's `uses` */
   plant(where: 'project' | 'user', id: string, uses: Record<string, unknown>): string
-  /** Calls the attached app's `ask_broker` as a session's agent would — the same path an agent calls an app tool through (A-5) */
+  /** Calls one of the session's apps as its agent would: through the session's live attachment, the door Centralu's `app` tool calls through (#2231) */
+  appCall(session: SessionInfo, server: string, tool: string, args: Record<string, unknown>, opts?: AppCallOpts): Promise<AppToolResult>
+  /** Calls the attached app's `ask_broker` as a session's agent would (`appCall`) */
   callFromSession(session: SessionInfo, server: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult>
   /** The sessions the app stood up (excluding the calling session) */
   agentSessions(): SessionInfo[]
@@ -190,8 +199,23 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   const events: NormalizedEvent[] = []
   // eslint-disable-next-line prefer-const -- the world (w) is only assigned after the manager is created. The broadcast listener reads that later w
   let w: BrokerWorld
+  /** The app calls open through `appCall`, by session: the start of the card each would raise (`<app>: <tool> `) */
+  const openCalls = new Map<string, string[]>()
   const onEvent = (e: NormalizedEvent) => {
     events.push(e)
+    if (e.type === 'approval_request' && e.detail.kind === 'other' && isAppCall(e.detail) && w?.answerAppCalls) {
+      const raw = e.detail.raw
+      if ((openCalls.get(e.sessionId) ?? []).some((start) => raw.startsWith(start))) {
+        const answer = w.answerAppCalls
+        timers.after(5, () => {
+          try {
+            w.mgr.inputs.respondApproval(e.sessionId, e.requestId, answer)
+          } catch {
+            // the card was already closed in the meantime
+          }
+        })
+      }
+    }
     // Answer in place of the person — **after** the card has stood up, as a real person would (answering on the same tick would test an ordering that does not actually occur)
     if (e.type === 'approval_request' && e.detail.kind === 'capability' && w?.answerCapabilities) {
       const answer = w.answerCapabilities
@@ -221,6 +245,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   await rpc('projects.setTrusted', { projectId, trusted: true })
   w = {
     answerCapabilities: 'allow',
+    answerAppCalls: 'allow',
     root,
     repo,
     dataRoot,
@@ -238,9 +263,15 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
         uses,
       })
     },
+    appCall(session, server, tool, args, opts = {}) {
+      const start = `${appNameOf(server)}: ${tool} `
+      const open = openCalls.get(session.id) ?? []
+      openCalls.set(session.id, open)
+      open.push(start)
+      return mgr.apps.sessionAppsHub()!.liveFor(session.id)!.call(server, tool, args, opts).finally(() => void open.splice(open.indexOf(start), 1))
+    },
     callFromSession(session, server, args, signal) {
-      const opts = (session.tool === 'codex' ? codex : claude).opened.find((o) => o.sessionId === session.id)!
-      return opts.apps!.call(server, 'ask_broker', { mode: 'run', ...args }, signal ? { signal } : {})
+      return w.appCall(session, server, 'ask_broker', { mode: 'run', ...args }, signal ? { signal } : {})
     },
     agentSessions: () => mgr.listSessions().filter((s) => s.appId !== null),
     async dispose() {

@@ -102,74 +102,13 @@ function realPathOr(path: string): string {
   }
 }
 
-/**
- * How an external app server's tool calls get approved (M4 decision 5) — session preset to
- * Codex's per-server `default_tools_approval_mode`.
- *
- *   auto    approve  asks about nothing. Our auto uses `approvalPolicy: never`, so if this
- *                    value is not set, Codex **rejects an unannotated MCP tool on its own**
- *                    ("requires approval, but approval policy is never")
- *   normal  writes   asks only about tools that lack a read-only annotation — the same rule
- *                    the Claude side uses
- *   safe    prompt   asks about everything. Read-only tools are handled separately per tool
- *                    with `approve` (appBridgeConfig)
- *
- * **Confirmed from source only** (Codex was logged out, so we could not re-verify by running it,
- * plan S-3/S-7): the vocabulary of the values comes from the installed 0.153.4's generated type
- * (`AppToolApproval = "auto" | "prompt" | "writes" | "approve"`) and the binary's settings field
- * names (`default_tools_approval_mode`, per-tool `tools.<name>.approval_mode`); the meaning of
- * each value was read from codex source (`requires_mcp_tool_approval_for_mode` in
- * `core/src/mcp_tool_call.rs`).
- *
- * Normal follows the person's own policy (#382, owner decision 2026-10-11). Normal defers to the
- * person's config.toml (permissionOptionsFor), and with their `approval_policy = "never"` Codex
- * refuses a tool that `writes` would have asked about ("requires approval, but approval policy is
- * never"), where Claude lets the same call through under the person's bypass. So under normal the
- * mode comes from that policy (`appApprovalModeFor`, read by `CodexSession.personsApprovalPolicy`):
- * `never` → `approve`, anything else → `writes`.
- */
-export const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt'> = {
-  auto: 'approve',
-  edits: 'writes',
-  normal: 'writes',
-  safe: 'prompt',
-}
-
 /** The presets that leave the thread's approval policy and sandbox to the person's own Codex settings: `normal`, and `edits` (#1525), which is `normal` plus a grant */
 export const followsPersonsPolicy = (preset: PermissionPreset): boolean => preset === 'normal' || preset === 'edits'
-
-export type AppApprovalMode = 'approve' | 'writes' | 'prompt'
-
-/**
- * The mode for an app bridge, given the policy the person's own Codex settings resolve to (#382). Only normal
- * reads it: safe and auto set the thread's policy themselves (permissionOptionsFor). Only `never` is a bypass; a
- * granular policy or an unreadable one keeps `writes`, which asks where Codex can ask and refuses where the
- * person's policy refuses, as before.
- */
-export function appApprovalModeFor(preset: PermissionPreset, personsPolicy: unknown): AppApprovalMode {
-  if (!followsPersonsPolicy(preset)) return APP_APPROVAL_MODE[preset]
-  return personsPolicy === 'never' ? 'approve' : 'writes'
-}
 
 /**
  * The ceiling for a single MCP tool call — **pinned in writing** to Codex's own code default
  * (300 seconds since 0.145). Relying on the default means that the day Codex changes the value,
- * our handling of long calls (returning early at 240 seconds) would silently go out of sync.
+ * our handling of long calls (answering at 240 seconds, `BRIDGE_ANSWER_MS`) would silently go out of sync.
  * The field name (`tool_timeout_sec`) was confirmed only from the binary and source.
  */
 export const CODEX_TOOL_TIMEOUT_SEC = 300
-/**
- * If an app call takes longer than this, we return the run id and "still running" first (plan
- * "long-running calls"). This is 60 seconds shorter than the ceiling above — the round trip
- * between the bridge and the host, plus Codex's own processing, has to fit inside that margin
- * for "still running" to reach the model before the timeout does. The result is then followed
- * up through each app server's own `run_status`.
- */
-export const APP_CALL_WAIT_MS = 240_000
-/**
- * The ceiling for how long it can take from the app bridge starting to it producing a tool list.
- * We read the list ahead of time before starting the thread (mcpConfig), so this is usually
- * instant. For an app whose list we do not already know, we wait while the host starts the app
- * and reads it (up to 15 seconds).
- */
-export const APP_STARTUP_TIMEOUT_SEC = 30

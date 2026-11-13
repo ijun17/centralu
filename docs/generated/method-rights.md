@@ -255,8 +255,6 @@ With the limited credential: refused: a hub linked to this host calls it, with t
 
 With the limited credential: refused: a session's own tool channel, which a Codex bridge reaches with its own credential.
 
-- `apps.sessionCall`
-- `apps.sessionTools`
 - `assistant.tool`
 - `assistant.tools`
 - `orchestrator.tool`

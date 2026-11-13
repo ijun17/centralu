@@ -426,9 +426,9 @@ export const REPLAYS: Replay[] = [
     tool: 'claude',
     scenario: 'mcp-app',
     async shows(page) {
-      // A tool of an attached app: marked as the app's, named by the app and its tool
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['weather: forecast'])
-      await expect(page.getByTestId('centralu-call-mark')).toHaveAttribute('data-mark', 'app')
+      // Through the one app tool (#2231): the listing is Centralu's own step, and the call is marked as the app's, named by the app and its tool
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Looked for apps', 'Listed its apps', 'weather: forecast'])
+      await expect(page.getByTestId('centralu-call-mark').last()).toHaveAttribute('data-mark', 'app')
     },
   },
   {

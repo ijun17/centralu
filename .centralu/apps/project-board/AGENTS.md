@@ -23,7 +23,7 @@ length). Those are plain, non-secret values; change them there, not in code.
   with the fix (`classify` in `github.mjs`). Agent tools answer them with `isError`; `show`
   answers them as data (`ok: false`) so the screen can say why there is no board.
 - **Agents read short answers.** Claude Code hands the model a result's `structuredContent`, not
-  its text (docs/apps/attaching.md "Claude and Codex"), so the agent tools answer `{ summary, items }` (or `results` and
+  its text (docs/apps/attaching.md "What the model reads from a result"), so the agent tools answer `{ summary, items }` (or `results` and
   `failed` for writes) as one line per item, `#113 Title — Status · Priority · Area`, and the text
   is the same lines. URLs, ids and whole item objects only with `detail: "full"`. `get_items` (or
   `list_items` with `numbers`) reads a few items in the order asked and names the ones not in the

@@ -417,8 +417,6 @@ export class SessionTrash {
     this.host.restartPolicy.trustRestartNotice.delete(sessionId)
     // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
     this.host.prCheckedAt.delete(sessionId)
-    // Kept until its turn ends, which a deleted session's never does (#392)
-    this.host.restartPolicy.appsRestartAfterTurn.delete(sessionId)
     // What was kept of its turns for a hub that followed it (#1604)
     this.host.children.forgetTurns(sessionId)
     this.host.forgetCommits(sessionId)

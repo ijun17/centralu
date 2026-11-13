@@ -2,7 +2,7 @@
 
 Decision 4 keeps a session to its own project's apps. The owner's decision for #371 (2026-10-05)
 lets a session reach further only while it needs to: it **finds** an app it could attach,
-**attaches** it (the app's tools join this session) and **detaches** it (they leave), so another
+**attaches** it (the `app` tool reaches it from then on, #2231) and **detaches** it (it no longer does), so another
 project's tools cost no context when they are not in use. Code: `sessions/app-access.ts`, the hub's
 `OnDemandApps` port in `session-apps.ts`, the tools in `centralu-tools.ts`.
 
@@ -22,15 +22,14 @@ the tools (they ride with the reader set, below), and so does the Assistant (#12
 coordinator, a builder and an agent an app stood up do not.
 
 **The Assistant** (#1205) is given the user-folder apps and attaches the root apps of trusted
-projects here, the one it needs when it needs it, under the same name book (`app-<id>`, a name once
+projects here, the one it needs when it needs it, under the same name book (`<id>`, a name once
 seen stays with its app). Nothing else: a project's inner app, shared or not, is that project's
 (`find_apps` does not list it and `attach_app` refuses it, naming `send_to_session`), and no card is
 asked, as for any root app. The three are among its rare commands, behind `centralu_run`
 (`RARE_COMMANDS` in `tool-seats.ts`): as tools they would not fit its ceiling, and its instructions
 name `find_apps` in one line. Each answer names the next call in the form the seat makes it
 (`centralu_run(command="attach_app", …)`). The attachment is kept per session like any other, so it
-lasts across restarts until `detach_app`; a Codex Assistant's thread restarts when the turn ends,
-as a project session's does. `apps.reach` answers `reachable` for a root app it could attach and has
+lasts across restarts until `detach_app`; nothing restarts on any CLI (#2231). `apps.reach` answers `reachable` for a root app it could attach and has
 not: its agent attaches it with nothing for the person to do; and `untrusted` for one it attached whose
 project has since lost trust (so for a project session's too), since trusting the project again is the fix.
 An Assistant that had root apps attached before #1205 reads, once, before its first turn since, that
@@ -51,8 +50,9 @@ decision 2026-10-20, always on).
 | Tool | Does | Result names |
 |---|---|---|
 | `find_apps({ query? })` | Lists what this session could attach: `<project>/<app>` for another project's app, `<app>` for a user-folder app, with the project, the manifest's name and first description line (JSON-quoted: the author's words), and the tool names if the app has listed them since the host started (finding starts no app) | `attach_app` |
-| `attach_app({ app })` | Asks for consent if needed, attaches, starts the app to list its tools (within the 15 s cap) | the tools as `mcp__<server>__<tool>`, when they are there, and `detach_app` |
-| `detach_app({ app })` | Detaches an app this tool attached (a name from `find_apps`, or the server name). An app decision 4 gives stays | — |
+| `attach_app({ app })` | Asks for consent if needed, attaches, starts the app to list its tools (within the 15 s cap) | the app's name in the session and its tool names, when they are there, the `app` calls that list and call them, and `detach_app` |
+| `detach_app({ app })` | Detaches an app this tool attached (a name from `find_apps`, or the app's name in the session). An app decision 4 gives stays | — |
+| `app({ action, app?, tool?, args? })` (#2231, every profile) | What the session *has*: `list` its apps or one app's tools with schemas, `call` one tool ([attaching.md](attaching.md#apps-through-one-centralu-tool-2231)) | `find_apps` where nothing matches |
 
 They are counted against their own ceiling (`APP_ACCESS_BUDGET_CHARS`, 900; the set is 874, of
 which about 210 per tool is the name and schema envelope), not the reader set's. Claude defers all
@@ -70,19 +70,19 @@ That smoke test ran before `ask_project` (#371 part B) was loaded on the same se
 `detach_app` stay deferred. 9 of 10 runs, and 8 of 10 in a second, then called `attach_app`
 ([tool-cost.md](../tool-cost.md) §8).
 
-**Attaching and detaching, per agent:**
+**Attaching and detaching, per agent** (#2231): the same on every CLI, ACP agents included. The `app` tool counts the
+session's apps at each call, so an app attached is callable on the next call, the same turn included, and a detached
+one is refused at once; the session's tool list does not change and nothing restarts. Until #2231 Claude added the
+app's proxy server with `setMcpServers` (same turn) and Codex restarted its thread when the turn ended, refusing the
+old name meanwhile.
 
-| | Claude | Codex |
-|---|---|---|
-| Attach | The hub recounts the live handle; the adapter's `setMcpServers` adds the app's proxy server. The tools are there **in the same turn** (measured above: the model loaded `mcp__app-counter__poke` through tool search right after `attach_app` and called it). They always wait behind tool search: the proxy drops `anthropic/alwaysLoad` from what an app declares (#513), so attaching or detaching changes the deferred names and never the request's tool list, and costs no cache rebuild (measured, [tool-cost.md](../tool-cost.md)) | A thread keeps the servers it started with ([attaching.md](attaching.md#claude-and-codex)), so the manager restarts the session through resume **when the turn ends** (`appsRestartAfterTurn`, beside #164's settings restart), and `mcpConfig` then includes the app. The result says the tools arrive next turn and tells the model to finish the turn. Run for real (codex-cli 0.160.0, `TOOL=codex` in the same script): the model attached the app and said it would finish next turn; after "Go on." it called `poke`, detached the app, and on the following turn no longer had the tool. That is also the first logged-in run showing the MCP configuration sent with `thread/resume` takes effect ([attaching.md](attaching.md#claude-and-codex), S-7) |
-| Detach | The proxy server is removed at once | Every call is checked against the current set, so a call by the old name is refused at once; the name leaves the thread with the same end-of-turn restart |
-
-**Names.** The app attaches as `app-<id>`, or `app-<id>-2` (and so on) when that name is taken in
+**Names.** The app attaches as `<id>`, or `<id>-2` (and so on) when that name is taken in
 the session, for instance by its own project's app of the same id, or was ever given to another app
 of the session, one gone for the moment included (#1141, the session's book `session_app_names`,
 `SessionAppsHub.claimAttachName`). The name is written in that book, so it stays with the app for the
 session's life, and attaching it again after a detach gives it the same name; an app that later
-appears in the session's own project with the same id gets a name of its own (`app-<id>-<project>`).
+appears in the session's own project with the same id gets a name of its own (`<id>-<project>`). The book keeps the
+server names of before (`app-<id>`), and `app` takes either form.
 
 **Where it runs and what is recorded.** Nothing about the app changes: it runs where it lives, with
 its own folder as working directory and its own data folder, one instance per (project, app) shared
@@ -93,5 +93,4 @@ name, and approval follows the calling session's preset (decision 5).
 **How long.** Until `detach_app`, or until the session is deleted. The list is kept per session in
 the store's settings table (`session_apps:<session>`), so it survives the host restarting and the
 session resuming. It is checked again on every count: sharing turned off, the "always" revoked,
-either project untrusted, or the app becoming unusable takes it away (Claude at once; a Codex thread
-refuses the call, and the name leaves at its next thread).
+either project untrusted, or the app becoming unusable takes it away at once, on every CLI.

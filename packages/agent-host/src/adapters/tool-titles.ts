@@ -135,11 +135,13 @@ const CENTRALU_LABELS: Record<string, string> = {
  */
 export function centraluMark(server: string, tool: string, args: Record<string, unknown>): { centralu: NonNullable<ToolSummary['centralu']>; title?: string } | null {
   const origin = centraluServer(server)
-  if (!origin) return null
+  // An `app-<id>` server is never ours since #2231: apps are reached through the `app` tool, so such a server is the
+  // repository's or the person's own, and its calls are not marked as an app's
+  if (!origin || origin.app) return null
+  if (tool === 'app') return appMark(args)
   const action = trimmed(args.action)
   const sessionId = tool === 'mail' ? (action === 'send' ? sessionAddressed(trimmed(args.to)) : undefined) : trimmed(args.sessionId)
-  const base = { tool, ...origin, ...(sessionId ? { sessionId } : {}) }
-  if (origin.app) return { centralu: base }
+  const base = { tool, ...(sessionId ? { sessionId } : {}) }
   const text = (v: unknown) => {
     const t = trimmed(v)
     return t ? firstLine(t, 160) : undefined
@@ -189,16 +191,44 @@ export function centraluMark(server: string, tool: string, args: Record<string, 
 }
 
 /**
- * An app's mark stays only on a call to a server this session has an app attached under (#730 review): `app-<x>` is
- * only a name's shape, and a repository's `.mcp.json` or the person's CLI config may hold a server of that name. The
- * title is left as it is (an app's call is never retitled). Applied where each session emits, on its own calls and its
- * subagents' steps; `attached` is read only for a marked app call.
+ * The app call an `app` tool call stands for (#2231): the app, the tool and the arguments inside it, read the same way for
+ * a Claude call and a Codex item; null for any other call and for a listing. The one reading of an `app` call's arguments
+ * for its card (`centraluMark`) and for matching its card to the call (`SessionApps.noteCall`).
+ */
+export function appCallOf(call: { name: string } | { server: string; tool: string }, input: unknown): { app: string; tool: string; args: Obj } | null {
+  if (!isCentraluTool(call, 'app')) return null
+  const a = jsonObject(input)
+  const app = trimmed(a.app)
+  const tool = trimmed(a.tool)
+  return a.action === 'call' && app && tool ? { app, tool, args: jsonObject(a.args) } : null
+}
+
+/**
+ * An `app` call's card (#2231): a call is drawn as the app's tool was before (the mark names the app and its tool, titled by
+ * its arguments), a listing as what it read
+ */
+function appMark(args: Obj): { centralu: NonNullable<ToolSummary['centralu']>; title?: string } {
+  const call = appCallOf({ server: CENTRALU_MCP_NAME, tool: 'app' }, args)
+  if (call) {
+    const shown = Object.keys(call.args).length ? firstLine(JSON.stringify(call.args), 160) : undefined
+    return { centralu: { tool: call.tool, app: call.app }, ...(shown ? { title: shown } : {}) }
+  }
+  const app = trimmed(args.app)
+  const label = app ? `Read the tools of ${app}` : 'Listed its apps'
+  return { centralu: { tool: 'app', label }, title: app ?? label }
+}
+
+/**
+ * An app's mark stays only on an `app` call naming an app this session has (#730 review, #2231): the agent may name one it
+ * does not have, and that call is refused, not the app's. `attached` is the session's app server names. Applied where each
+ * session emits, on its own calls and its subagents' steps; `attached` is read only for a marked app call.
  */
 export function keepAttachedAppMarks(e: NormalizedEvent, attached: () => Iterable<string>): NormalizedEvent {
   const stray = (s: ToolSummary): ToolSummary | null => {
     if (!s.centralu?.app) return null
+    // The name the agent wrote, or the server name earlier turns used (`namedApp`)
     const server = appServerName(s.centralu.app)
-    for (const a of attached()) if (a === server) return null
+    for (const a of attached()) if (a === server || a === s.centralu.app) return null
     const { centralu: _gone, ...rest } = s
     return rest as ToolSummary
   }

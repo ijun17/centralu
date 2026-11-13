@@ -35,7 +35,7 @@ another host has not been tested.
 - The manifest's `csp` field is not read; the per-app origin is chosen only in the manifest.
 - Resource templates are not accepted by the spoof check; a Claude subagent's app calls get no
   inline view.
-- The Codex path is unverified by a run ([attaching.md](attaching.md#claude-and-codex)), and so is `run_agent` on Codex (its `outputSchema`
+- The `app` tool on Codex is unverified by a live run ([attaching.md](attaching.md#apps-through-one-centralu-tool-2231): Claude's was run), and so is `run_agent` on Codex (its `outputSchema`
   is checked against the app-server protocol and a fake adapter only). fd 3 on Windows (spike
   S-5, [broker-and-rpcs.md](broker-and-rpcs.md#the-broker-agents-other-apps-host-data)) passes the broker test suites in the Windows CI job with Node apps; a Python app, and
   any app in the packaged Windows app, have not been tried.

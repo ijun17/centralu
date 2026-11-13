@@ -98,6 +98,8 @@ Recorded through the adapter itself (`scripts/frames-record.mts`, §10.5) in eig
   a crashed host (the EOF finding above), which is why the keeper's spawn is used whenever the host has one.
 - **No apps** are attached to an ACP agent in PR 1 (`appAttachment` answers `failed`): an app's tool calls would reach
   the agent's own approval, which is not Centralu's per-app policy (#382). Centralu's own tools are attached (§6).
+  Superseded by #2231: an ACP agent reaches apps through Centralu's `app` tool, with the host's card and presets
+  (security-boundaries/app-servers.md).
 - **No model list, modes or effort** (PR 2): Cursor runs its default model.
 - **Mid-turn cancel.** A cancel that reaches the agent before its turn has begun is lost (ACP's cancel is a
   notification, answered only by the turn's end); the turn going on after it gets the cancel once more. Measured on
@@ -654,7 +656,8 @@ session's bridge credential, #382), one entry for Centralu's own tools and one p
 stdio although both tools advertise `mcpCapabilities.http`: the bridge already survives host swaps and is scoped to one
 session; an HTTP endpoint would be a second way in to secure. `bridge-path.ts` moves from `adapters/codex/` to
 `adapters/` (the bundled file name stays). The servers are fixed when the session opens, so an app attached later is
-`appAttachment: 'restart'`, as for Codex.
+`appAttachment: 'restart'`, as for Codex. Superseded by #2231: no app is a server of the session any more; apps are
+reached through the one `app` tool of Centralu's bridge (apps/attaching.md "Apps through one Centralu tool (#2231)").
 
 Tool approvals inside our own bridge are the host's, as now. `instructionChannel` is `server` (the bridge's MCP
 instructions); ACP has no system-prompt field, so `systemPromptAppend` has no standard path (open question 2).

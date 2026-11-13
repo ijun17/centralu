@@ -5,8 +5,8 @@ import type { PermissionPreset } from '@cc/protocol'
  *
  * `annotations.readOnlyHint: true` already lets a tool run with no card (decision 5). That left every other write,
  * from a note in the app's own data folder to a merge on GitHub, behind a card under `safe` and `normal`, and
- * "always" is not remembered for an app tool on Claude (`alwaysAllowKey` has no key for an `other` card), so a
- * session that worked through an app was asked again for each call. This adds two levels an app can declare in
+ * the app call card asks every time and offers no "always", so a session that worked through an app was asked again
+ * for each call. This adds two levels an app can declare in
  * the tool's `_meta`, and the host decides what each is worth. A declaration is a claim, like `readOnlyHint`:
  * it is read from the tool list of an app the person turned on (or trusted with its project), never from a
  * name, and an undeclared tool keeps asking.
@@ -74,8 +74,8 @@ export type RiskScope = {
   /** The app belongs to the session's own project (its project's session, not the Assistant, not an app attached from elsewhere) */
   own: boolean
   preset: PermissionPreset
-  /** The call's arguments; absent where they are not known yet (Codex fixes approval before the call) */
-  args?: Record<string, unknown> | undefined
+  /** The call's arguments: the host decides at the call on every CLI (#2231) */
+  args: Record<string, unknown>
 }
 
 /** Whether a tool runs with no card, by what it declares and where it is called. Reads are decided before this (`readOnlyHint`). */
@@ -89,10 +89,17 @@ export function runsUnasked(tool: RiskTool, scope: RiskScope): boolean {
   if (!when && tool._meta?.[ASK_WHEN_META_KEY] !== undefined) return false
   if (!unless && tool._meta?.[ASK_UNLESS_META_KEY] !== undefined) return false
   if (!when && !unless) return true
-  // The arguments are unknown (Codex): ask
   const args = scope.args
-  if (args === undefined) return false
   // Any one argument that is what `askWhen` names asks; so does none being what `askUnless` names
   if (when && Object.entries(when).some(([k, v]) => matches(args[k], v))) return false
   return !unless || Object.entries(unless).some(([k, v]) => matches(args[k], v))
+}
+
+/**
+ * Whether the session's preset asks the person about an app tool that does not run unasked (#2231, decision 5), the same on
+ * every CLI since the host decides at the call: `safe` always, `auto` never, `normal` and `edits` unless the person's own
+ * settings let this agent run without asking (Claude's `bypassPermissions`, Codex's `approval_policy = "never"`)
+ */
+export function presetAsks(preset: PermissionPreset, personBypasses: boolean): boolean {
+  return preset === 'safe' || (preset !== 'auto' && !personBypasses)
 }

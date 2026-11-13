@@ -142,11 +142,9 @@ session). When they match, the host is asked as above, with no machine in the re
 | `other-project` | Another project's app, a user-folder app outside the Assistant, or a session an app stood up | Ask in a session of that project (or: only the Assistant can use your apps) |
 | `untrusted` | The app's project, which is this session's or that of an app it attached, is not trusted | Trust the project |
 | `app-unusable` | The app is `invalid`, `unconfirmed` or `failed` (`status`) | Fix the manifest, turn it on, or restart it |
-| `restart` | A Codex thread started before the app was attached: Codex keeps the servers a thread started with ([attaching.md](attaching.md#claude-and-codex)). The adapter answers from the servers it configured (`appAttachment`) | Restart the session |
-| `bridge-failed` | Codex reported the app's bridge failed to start (`mcpServer/startupStatus/updated`), until it reports it ready | Restart the session |
+| `restart`, `bridge-failed` | Only from a host before #2231: a Codex thread started before the app was attached, or whose bridge for the app failed. Since then a session reaches every app through the `app` tool, so nothing produces them | Restart the session |
 | `unavailable` | No app runtime, or the app is gone | That the app is not available |
 
-A session that is not running answers from decision 4 alone: it attaches what the rule gives it when
-it wakes, and a Codex resume carries the current servers. Claude follows the attached set live
-through in-process proxies, so its sessions never answer `restart`. A host from before this answers
+A session that is not running answers from decision 4 alone: it has what the rule gives it when
+it wakes. A running session's `app` tool counts its apps at each call (#2231), so no session answers `restart`. A host from before this answers
 nothing, and the line stays off.

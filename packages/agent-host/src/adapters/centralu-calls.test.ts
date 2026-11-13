@@ -49,8 +49,15 @@ describe.each([
     expect(summary('centralu', 'agent_session', { sessionId: 'c1', action: 'send', text: 'also this' }).centralu).toEqual({ tool: 'agent_session', label: 'Sent more to an agent', sessionId: 'c1' })
   })
 
-  it("an app's tool names the app; another server's tool of a Centralu name is not marked", () => {
-    expect(summary('app-board', 'list_items', {}).centralu).toEqual({ tool: 'list_items', app: 'board' })
+  it("an app's call through `app` names the app and its tool, titled by its arguments; an app- server's or another server's tool is not marked", () => {
+    const call = summary('centralu', 'app', { action: 'call', app: 'board', tool: 'list_items', args: { status: 'open' } })
+    expect(call.centralu).toEqual({ tool: 'list_items', app: 'board' })
+    expect(call.title).toBe('{"status":"open"}')
+    // A listing says what it read
+    expect(summary('centralu', 'app', { action: 'list' })).toMatchObject({ centralu: { tool: 'app', label: 'Listed its apps' }, title: 'Listed its apps' })
+    expect(summary('centralu', 'app', { action: 'list', app: 'board' })).toMatchObject({ centralu: { tool: 'app', label: 'Read the tools of board' }, title: 'board' })
+    // Since #2231 an app-<x> server is the repository's or the person's, never Centralu's
+    expect(summary('app-board', 'list_items', {}).centralu).toBeUndefined()
     const other = summary('other', 'start_agent', { task: 'x' })
     expect(other.centralu).toBeUndefined()
     expect(other.title).not.toBe('x')
@@ -79,11 +86,13 @@ describe('review follow-ups (#730)', () => {
     expect(codex('centralu', 'ask_project', { project: '' }).title).toBe('ask_project')
   })
 
-  it("keeps an app's mark only for an app attached to the session; a repository's own app-<x> server is ordinary", () => {
-    const call = { type: 'tool_call' as const, sessionId: 's', callId: 'c', summary: toolSummary('mcp__app-notes__add', { text: 'x' }) }
+  it("keeps an app's mark only for an app the session has; a call naming another is the refused call it is", () => {
+    const call = { type: 'tool_call' as const, sessionId: 's', callId: 'c', summary: toolSummary('mcp__centralu__app', { action: 'call', app: 'notes', tool: 'add', args: { text: 'x' } }) }
+    expect(call.summary.centralu).toEqual({ tool: 'add', app: 'notes' })
     expect(keepAttachedAppMarks(call, () => ['app-notes'])).toBe(call)
     const stray = keepAttachedAppMarks(call, () => ['app-board'])
-    expect(stray.type === 'tool_call' && stray.summary).toEqual({ tool: 'mcp__app-notes__add', title: 'mcp__app-notes__add', paths: [] })
+    const { centralu: _mark, ...unmarked } = call.summary
+    expect(stray.type === 'tool_call' && stray.summary).toEqual(unmarked)
     const step = { type: 'subagent_event' as const, sessionId: 's', parentCallId: 'p', step: call }
     const strayStep = keepAttachedAppMarks(step, () => [])
     expect(strayStep.type === 'subagent_event' && strayStep.step.type === 'tool_call' && strayStep.step.summary.centralu).toBeUndefined()

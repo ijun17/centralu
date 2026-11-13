@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import type { CentraluTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
-import { trimmed } from '../json-value.js'
+import { isObj, jsonObject, trimmed, tryParseJson } from '../json-value.js'
 import { appGuide } from './app-guide.js'
+import { appNameOf, namedApp } from './session-apps.js'
 import { toolLinesOf } from './session-lines.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
 import { usageHistoryText } from './usage-history.js'
@@ -11,7 +12,7 @@ import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
 import type { AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingRequest } from './housekeeping-flow.js'
-import { ANSWER_FORM, agentListText, agentRunText, askProjectText, cardsText, listSessionsText, mailedText, trustedJsonText } from './tool-answers.js'
+import { ANSWER_FORM, agentListText, appListLine, appsText, appToolsText, issuesText, toolOutputOf, agentRunText, askProjectText, cardsText, listSessionsText, mailedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, COMPACT_TOOLS, MAIL_TOOLS, CENTRALU_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
@@ -20,7 +21,7 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
  * may run which (tool-seats.ts), the texts the answers are built from (tool-answers.ts), and here the runner both
  * paths call. The names the callers still import are re-exported from here.
  */
-export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, assistantInstructions, CENTRALU_TOOLS, READER_BUDGET_CHARS, READER_TOOLS, REPO_WORK_FIRST, readerFirst, readerInstructions, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
+export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, APP_BUDGET_CHARS, APP_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, assistantInstructions, CENTRALU_TOOLS, READER_BUDGET_CHARS, READER_TOOLS, REPO_WORK_FIRST, readerFirst, readerInstructions, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
 export { callForm, codexToolInstructionsFor, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, centraluToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
@@ -33,18 +34,23 @@ export { trustedJsonText } from './tool-answers.js'
  */
 export { CENTRALU_MCP_NAME, proposedMcpServerNameError } from '../apps/contract.js'
 
-/** One call of a tool: what it reaches, who called, and the call's own signal where the path has one */
-type ToolCall = { tools: CentraluTools; caller: ToolCaller; signal?: AbortSignal }
+/**
+ * One call of a tool: what it reaches, who called, the call's own signal where the path has one, and what the path says
+ * of the call (`ToolPath`)
+ */
+type ToolCall = { tools: CentraluTools; caller: ToolCaller; signal?: AbortSignal } & ToolPath
+
+/**
+ * What the path a call came by says of it (#2231): the conversation card's id where the agent's MCP client sends it
+ * (Claude Code's in-process server), and the bound a call must answer within where the path cuts calls itself (the stdio
+ * bridge, `BRIDGE_ANSWER_MS`). Only the `app` tool reads them.
+ */
+export type ToolPath = { callId?: string; waitMs?: number }
 
 /** Every tool's arguments as its handler receives them: the output of its one schema in TOOL_ARGS */
 export type CentraluToolArgs = { [N in keyof typeof TOOL_ARGS]: z.output<(typeof TOOL_ARGS)[N]> }
 
 type ToolHandlers = { [N in keyof CentraluToolArgs]: (args: CentraluToolArgs[N], call: ToolCall) => Promise<ToolOutput> | ToolOutput }
-
-/** A schema's complaints, one per argument, the same way for a tool and for a command run through centralu_run */
-function issuesText(error: z.ZodError): string {
-  return error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')
-}
 
 /**
  * Tools only some seats have (profileAllows), checked here too since this runner is shared by every seat: ask_project a
@@ -71,6 +77,7 @@ export async function runCentraluTool(
   caller: ToolCaller = { sessionId: null, profile: 'human' },
   /** The tool call's own signal, where the path has one (Claude's in-process MCP) — ask_project stops the delegated turn on it */
   signal?: AbortSignal,
+  path: ToolPath = {},
 ): Promise<ToolOutput> {
   if (SEATED.has(name) && (caller.profile === 'human' || !profileAllows(caller.profile, name))) {
     return { text: caller.profile === 'human' ? `Not a tool of this session: ${name}` : notAToolText(caller.profile, name), isError: true }
@@ -82,7 +89,7 @@ export async function runCentraluTool(
     if (name === 'centralu_run') logRun(caller, typeof args.command === 'string' ? args.command : '', 'wrong arguments')
     return { text: `Wrong arguments for ${name}: ${issuesText(parsed.error)}.`, isError: true }
   }
-  return runParsed(name, parsed.data as CentraluToolArgs[typeof name], { tools, caller, signal })
+  return runParsed(name, parsed.data as CentraluToolArgs[typeof name], { tools, caller, signal, ...path })
 }
 
 /**
@@ -109,7 +116,12 @@ function isToolName(name: string): name is keyof typeof TOOL_ARGS {
 /** A tool whose arguments its schema has already read: the handler itself */
 function runParsed<N extends keyof CentraluToolArgs>(name: N, args: CentraluToolArgs[N], call: ToolCall): Promise<ToolOutput> {
   const run = () => Promise.resolve(HANDLERS[name](args, call))
-  // The one place every tool and command passes (a command run through centralu_run too): a session's request asks the person before it acts (#1447, §9.7)
+  /*
+   * The one place every tool and command passes (a command run through centralu_run too): a session's request asks the
+   * person before it acts (#1447, §9.7). Not `app`, whose call the hub asks about itself (`Attachment.call`), knowing
+   * whether the app's tool only reads; its list only reads
+   */
+  if (name === 'app') return run()
   return call.tools.whenAsked ? call.tools.whenAsked({ name, args }, call.signal, run) : run()
 }
 
@@ -487,12 +499,15 @@ const HANDLERS: ToolHandlers = {
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.apps.length === 0) {
+      // The session's own apps are not in this list: say they are there (#2231, where "no app" misled a session that had one)
+      const own = tools.apps?.()?.current().map((a) => a.name) ?? []
+      const mine = own.length ? ` This session's own apps, which app(action="list") gives: ${own.join(', ')}.` : ''
       return {
-        text: query
+        text: (query
           ? `No app matches ${trustedJsonText(query)}. Try ${namedCall(caller.profile, 'find_apps', {})} with no query to see every app you can attach.`
           : caller.profile === 'assistant'
             ? "No app can be attached: no trusted project is an app, and the person's own apps are attached already."
-            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).",
+            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).") + mine,
       }
     }
     return {
@@ -513,15 +528,12 @@ const HANDLERS: ToolHandlers = {
     if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
     const r = await tools.attachApp(app)
     if (!r.ok) return { text: `Not attached: ${r.error}`, isError: true }
-    const names = r.tools.length ? r.tools.map((t) => `mcp__${r.server}__${t}`).join(', ') : '(it listed none yet)'
-    const when =
-      r.when === 'now'
-        ? 'Its tools are available now.'
-        : "This agent keeps the tools its thread started with, so the session restarts its thread when this turn ends and the tools are there from the next turn. Finish this turn and tell the person the app is attached."
+    const name = appNameOf(r.server)
     return {
       text:
-        `${r.already ? 'Already attached' : 'Attached'}: ${app} as the ${r.server} server. Tools: ${names}. ${when}\n` +
-        `When you no longer need it, call ${namedCall(caller.profile, 'detach_app', { app })} so its tools stop taking up context.`,
+        `${r.already ? 'Already attached' : 'Attached'}: ${app} as ${JSON.stringify(name)}. Its tools: ${r.tools.join(', ') || '(it listed none yet)'}. ` +
+        `app(action="list", app=${JSON.stringify(name)}) gives their arguments; app(action="call", app=${JSON.stringify(name)}, tool=…, args={…}) calls one.\n` +
+        `When you no longer need it, call ${namedCall(caller.profile, 'detach_app', { app })}.`,
     }
   },
 
@@ -530,12 +542,30 @@ const HANDLERS: ToolHandlers = {
     if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
     const r = await tools.detachApp(app)
     if (!r.ok) return { text: `Not detached: ${r.error}`, isError: true }
-    return {
-      text:
-        r.when === 'now'
-          ? `Detached ${app}: the ${r.server} tools are gone.`
-          : `Detached ${app}: calls to the ${r.server} tools are refused from now on, and the names leave when this turn ends (the thread restarts).`,
+    return { text: `Detached ${app}: calls to ${JSON.stringify(appNameOf(r.server))} are refused from now on.` }
+  },
+
+  async app(args, { tools, caller, signal, callId, waitMs }) {
+    const live = tools.apps?.() ?? null
+    const apps = live?.current() ?? []
+    const name = trimmed(args.app)
+    const entry = name ? namedApp(apps, name) : undefined
+    if (name && !entry) {
+      const find = callForm(caller.profile, 'find_apps', {})
+      return { text: `This session has no app named ${trustedJsonText(name)}. ${appListLine(apps)}${find ? ` ${find} finds apps it can attach.` : ''}`, isError: true }
     }
+    if (args.action === 'list') {
+      if (!entry || !live) return { text: appsText(apps, callForm(caller.profile, 'find_apps', {})) }
+      return { text: appToolsText(entry.name, await live.tools(entry.server)) }
+    }
+    const tool = trimmed(args.tool)
+    if (!entry || !tool || !live) return { text: 'Give app and tool: app(action="list") names them.', isError: true }
+    // JSON text of an object is read as the object (TOOL_ARGS takes nothing else); text that is not one is refused, never read as no arguments
+    if (typeof args.args === 'string' && !isObj(tryParseJson(args.args))) {
+      return { text: 'args is not a JSON object. Nothing ran. Give the arguments as an object, as app(action="list", app=...) shows them.', isError: true }
+    }
+    const callArgs = jsonObject(args.args)
+    return toolOutputOf(await live.call(entry.server, tool, callArgs, { ...(signal ? { signal } : {}), ...(callId ? { callId } : {}), ...(waitMs ? { waitMs } : {}) }))
   },
 
   // Does not go through the manager — text baked into the build plus the tool registry is the whole guide (#30, M4 P-4)

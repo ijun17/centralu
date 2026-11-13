@@ -20,12 +20,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 
 class Handle implements SessionHandle {
   externalId = 'ext-1'
-  /** What the live agent says about an attached app (#308) — a Codex thread can lack one or have it fail */
-  static attachment: 'attached' | 'restart' | 'failed' = 'attached'
   constructor(readonly sessionId: string) {}
-  appAttachment() {
-    return Handle.attachment
-  }
   send() {}
   respondApproval() {
     return false
@@ -127,7 +122,8 @@ describe('apps handed to a session by the manager (decision 4)', () => {
   it('in a session’s request an app tool of the Assistant asks the person, naming the session, and a refused call never reaches the app', async () => {
     mgr.mail.useMail({ askedBy: () => ({ messageId: 'hub-aaaaaaaa.m_01', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 1, at: Date.now() } }), sessionGone: () => {}, sessionChanged: () => {} })
     const orc = await mgr.assistant()
-    const apps = adapter.last().apps!
+    // The session's live attachment, as Centralu's `app` tool calls it (#2231)
+    const apps = mgr.apps.sessionAppsHub()!.liveFor(orc.id)!
     const card = () => {
       const pending = mgr.sessionInfo(orc.id)?.pendingApproval
       return pending?.detail.kind === 'other' && pending.detail.about === ASSISTANT_CHANGE ? { requestId: pending.requestId, text: pending.detail.raw } : undefined
@@ -162,19 +158,11 @@ describe('apps handed to a session by the manager (decision 4)', () => {
 describe('apps.reach — whether a session can use an app\'s tools (#308)', () => {
   const reach = (sessionId: string, appId: string, pid: string | null) => rpc('apps.reach', { sessionId, appId, projectId: pid })
 
-  afterEach(() => {
-    Handle.attachment = 'attached'
-  })
-
-  it('answers from decision 4 and the live agent, and refuses a session that does not exist', async () => {
+  it('answers from decision 4, and refuses a session that does not exist', async () => {
     const s = await create()
     expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: true })
     // A user-folder app goes only to the Assistant
     expect(await reach(s.id, 'helper', null)).toEqual({ reachable: false, reason: 'other-project' })
-
-    Handle.attachment = 'restart'
-    expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: false, reason: 'restart' })
-    Handle.attachment = 'attached'
 
     await rpc('projects.setTrusted', { projectId, trusted: false })
     expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: false, reason: 'untrusted' })

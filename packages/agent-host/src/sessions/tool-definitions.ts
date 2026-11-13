@@ -915,6 +915,37 @@ export type CompactToolName = (typeof COMPACT_TOOLS)[number]['name']
 export const APP_ACCESS_BUDGET_CHARS = 900
 
 /**
+ * A session's apps (#2231, owner decision 2026-11-12, option B; #512's apps row): one fixed tool in every profile instead of
+ * one MCP server per app, so the tool list a session starts with never changes as apps come, go or change their tools, on
+ * every CLI. `list` with no app names the session's apps and their tools; with an app, that app's tools with their read-only
+ * marks and input schemas, one app at a time; `call` runs one tool, checked on the host against its schema, the person
+ * asked where the preset says (session-apps.ts `Attachment.call`). One tool with an action, as `mail` is: a second tool
+ * would carry its own name and schema envelope (about 210 characters) in every request. Deferred on Claude where its set
+ * is loaded tool by tool (the reader's): its name rides, and the reader's first line names it (docs/tool-cost.md §16).
+ */
+export const APP_TOOLS = [
+  {
+    name: 'app',
+    description: "Lists this session's apps or one app's tools (list), or calls a tool (call).",
+    schema: z.object({
+      action: z.enum(['list', 'call']),
+      app: z.string().optional(),
+      tool: z.string().optional(),
+      args: z.record(z.string(), z.unknown()).optional(),
+    }),
+    deferred: true,
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+export type AppToolName = (typeof APP_TOOLS)[number]['name']
+
+/**
+ * The ceiling for APP_TOOLS, counted like READER_BUDGET_CHARS; it rides in every profile (#2231), and each profile's ceiling
+ * rises by it: the per-app tools it replaces rode outside every ceiling. Measured 467 (docs/tool-cost.md §16)
+ */
+export const APP_BUDGET_CHARS = 500
+
+/**
  * Repository work by hand (#957 follow-up, owner decision 2026-10-17): an attached app such as the project board serves
  * its task-to-tool table on demand from its own guide (its `help` tool), never in these instructions, which sit in
  * the prompt's cached prefix and must not change when an app is added or changed (#512). This one line, the same
@@ -925,7 +956,7 @@ export const APP_ACCESS_BUDGET_CHARS = 900
  * prefix never changes under it; an app attached later is found through its tools. Not the Assistant's: it does
  * no repository work itself ("You have no hands").
  */
-export const REPO_WORK_FIRST = "an attached app's help tool before repository work by hand (PRs, CI, merges, releases)"
+export const REPO_WORK_FIRST = "an app's help tool (the app tool) before repository work by hand (PRs, CI, merges, releases)"
 
 /**
  * The words that put a Centralu tool before the CLI's own subagent tool, the one phrase both the reader's and the Assistant's
@@ -948,7 +979,7 @@ export function readerFirst(subagentTool?: string): readonly string[] {
   return [
     'recall for earlier conversations',
     'read_session for other sessions',
-    "find_apps to use another project's app",
+    "app for apps (find_apps: other projects')",
     'update_centralu to update Centralu',
     'ask_project to have another project do work',
     /*
@@ -1006,19 +1037,20 @@ export const READER_BUDGET_CHARS = 1960
  * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the Assistant's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
  * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `assistant` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
  * #2039 (a name for `to`): the description of `to` says a session may be named by its name or id and what a shared name gets (`MAIL_BUDGET_CHARS` 1,110 → 1,170, measured 1,160, so the reader's sum rises by 60).
+ * #2231: every profile carries the `app` tool (APP_BUDGET_CHARS) in place of one MCP server per app, whose tools rode outside these ceilings.
  * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
  * #1948 (owner 2026-11-12): `send` leaves agent_session for mail with its `ifBusy`, and mail's description gains the sentence on reports: the reader's sum rises by MAIL_BUDGET_CHARS' 115 less AGENT_BUDGET_CHARS' 70 (measured +41 on Codex; Claude defers both).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  assistant: 10_180 + COMPACT_BUDGET_CHARS,
-  scoped: 2_600,
-  builder: 1_500,
-  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS,
+  assistant: 10_180 + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
+  scoped: 2_600 + APP_BUDGET_CHARS,
+  builder: 1_500 + APP_BUDGET_CHARS,
+  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
 }
 
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
 export const BUILDER_INSTRUCTIONS = [
-  "You are the session that builds one Centralu app. This server's check inspects your app.",
+  "You are the session that builds one Centralu app. This server's check inspects your app; the app tool calls its tools.",
   'After changing an app file, call check to confirm the result — do not leave testing to the person.',
   'If there is a problem, fix it and call check again. Once it passes, tell the person in one line what you changed.',
   /*
@@ -1048,7 +1080,7 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences archive".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the Assistant attaches the one it needs
-  'Projects that are apps attach on demand: the find_apps command lists them.',
+  'Apps: the app tool lists and calls yours; projects that are apps attach on demand (the find_apps command).',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
   'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',
@@ -1140,6 +1172,8 @@ export const TOOL_ARGS = {
   app_guide: CENTRALU_TOOL_ARGS.app_guide.extend({ topic: z.string().optional() }),
   ...schemasOf(DELEGATE_TOOLS),
   ...schemasOf(APP_ACCESS_TOOLS),
+  // Codex's exec may hand an app call's arguments over as JSON text, as for centralu_run
+  app: APP_TOOLS[0].schema.extend({ args: z.union([z.record(z.string(), z.unknown()), z.string()]).optional() }),
   ...schemasOf(MAIL_TOOLS),
   ...schemasOf(COMPACT_TOOLS),
   ...schemasOf(COMMAND_TOOLS),

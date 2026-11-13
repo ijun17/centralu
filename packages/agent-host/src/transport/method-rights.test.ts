@@ -54,7 +54,7 @@ describe('the method classification (#1405)', () => {
     // #1970: a program of this user must not be able to plant a system end
     expect(limitedRight('host.systemEnding', {})).toBe('window')
     for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession']) expect(limitedRight(m, {}), m).toBe('link')
-    for (const m of ['orchestrator.tool', 'orchestrator.tools', 'apps.sessionCall', 'apps.sessionTools']) expect(limitedRight(m, {}), m).toBe('bridge')
+    for (const m of ['orchestrator.tool', 'orchestrator.tools']) expect(limitedRight(m, {}), m).toBe('bridge')
   })
 
   it("never lets the limited credential read or write the person's mail: every mail.* call is the window's (#1347)", () => {

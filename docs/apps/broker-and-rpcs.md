@@ -142,7 +142,6 @@ The schemas are in `packages/protocol/src/commands/methods/apps.ts` (the `apps.*
 | `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | Stage an import and return the review; bring it in, turned off or enabled with the review's key; drop the staging ([handing-over.md](handing-over.md)) |
 | `apps.review`, `apps.enable` | The review of an imported app waiting for the person; enable it with that review's key ([handing-over.md](handing-over.md)) |
 | `apps.versions`, `apps.restoreVersion` | Kept versions of a user-folder app, or the git commits that touched a project app; restore a kept version ([handing-over.md](handing-over.md)) |
-| `apps.sessionTools`, `apps.sessionCall` | Used by the Codex bridge |
 | `projects.setTrusted` | Trust ([trust-lifecycle-calls.md](trust-lifecycle-calls.md#trust)) |
 
 Events: `external_apps_changed` (the list or an app's status changed: read `apps.list` again),

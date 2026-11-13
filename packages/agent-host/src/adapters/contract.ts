@@ -177,12 +177,11 @@ export type CreateSessionOpts = {
    * goal would leave the badge up. Absent after a host restart, since the goal is live-only.
    */
   knownGoal?: SessionGoal
-  /** If given, this session receives app tools — each adapter attaches them its own way */
+  /** If given, this session receives Centralu's own tools — each adapter attaches them its own way */
   centraluTools?: CentraluTools
   /**
-   * External apps attached to this session (M4 A-5). Separate from Centralu's own tools
-   * (`centraluTools`) — an ordinary worker receives these too (decision 4 changes #81's "a
-   * worker has no tools" only for external apps).
+   * External apps of this session (M4 A-5), reached through Centralu's `app` tool (#2231). The adapter only tells the
+   * host which card a call is and stops the calls with the session (`SessionApps`).
    */
   /*
    * An MCP server the person approved (propose_mcp_server) does not arrive here separately — it
@@ -439,19 +438,12 @@ export interface SessionHandle {
    */
   stopBackgroundTask?(taskId: string): Promise<void>
   /**
-   * Whether this live agent can call one attached app server (`app-<id>`), as far as the agent's own
-   * configuration goes (#308). The manager asks only about a server decision 4 gives the session, so
-   * this answers what the rule cannot know:
-   *
-   *   attached       the agent has it (or will, when its thread starts)
-   *   restart        the agent started without it and cannot take it in now (a Codex thread keeps the
-   *                  servers it started with)
-   *   failed         the agent tried and the server did not start
-   *
-   * An adapter that follows the attached set live (Claude, through in-process proxies) leaves it
-   * unimplemented, which reads as `attached`.
+   * Whether this live agent runs under the person's own setting that lets it act without asking (#2231): Claude's
+   * `bypassPermissions` mode, Codex's `approval_policy = "never"`, read where the preset leaves the choice to the person
+   * (`normal`, `edits`). The host asks about an app call under those presets unless this says so, as each CLI's own card
+   * did. An adapter that cannot tell leaves it out, which reads as no.
    */
-  appAttachment?(server: string): 'attached' | 'restart' | 'failed'
+  bypassesApprovals?(): boolean
   dispose(): Promise<void>
 }
 

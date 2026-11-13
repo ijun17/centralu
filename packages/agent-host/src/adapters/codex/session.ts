@@ -1,6 +1,7 @@
 import { hostAccessEnv } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
+import { followsPersonsPolicy } from './launch-config.js'
 import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import type { CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
@@ -122,14 +123,12 @@ export class CodexSession implements SessionHandle {
       sessionId: opts.sessionId,
       opts,
       request: (method, params) => this.client.request(method, params),
-      threadId: () => this.threadId,
     })
     this.serverRequests = new CodexRequests({
       sessionId: opts.sessionId,
       emit: (e) => this.emit(e),
       respond: (id, result) => this.client.respond(id, result),
       threadId: () => this.threadId,
-      appServers: () => this.threadServers.appServers,
       ownServer: () => this.threadServers.ownServer,
       editsFolder: () => (this.livePreset === 'edits' && launchPreset(opts.permissionPreset) === 'normal' ? opts.cwd : null),
     })
@@ -237,7 +236,7 @@ export class CodexSession implements SessionHandle {
         if (this.opts.model) this.shown = { model: opened.settings.model, effort: this.opts.effort ?? null }
         this.adoptOpened(opened.settings)
       }
-      this.threadServers.checkAppMode(res)
+      this.threadServers.noteThreadPolicy(res)
       this.networkAccess = networkAccessOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
       if (adopted && this.ledger.taken([], runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))) this.threadWritten()
@@ -258,7 +257,7 @@ export class CodexSession implements SessionHandle {
       const res = await this.client.request<Record<string, unknown>>('thread/start', startThreadParams(this.opts, await this.threadServers.mcpConfig(), workspaceConfig))
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
-      this.threadServers.checkAppMode(res)
+      this.threadServers.noteThreadPolicy(res)
       this.networkAccess = networkAccessOf(res)
       // No rollout yet: the thread is named at its first turn (see externalId)
       return
@@ -548,8 +547,9 @@ export class CodexSession implements SessionHandle {
     this.serverRequests.applyRules(matchers)
   }
 
-  appAttachment(server: string): 'attached' | 'restart' | 'failed' {
-    return this.threadServers.appAttachment(server)
+  /** The person's own `approval_policy = "never"` under `normal` and `edits`, which the thread runs under: an app call runs unasked too (#2231) */
+  bypassesApprovals(): boolean {
+    return followsPersonsPolicy(this.livePreset) && this.threadServers.policyIsNever()
   }
 
   /** Slash commands (skills) — the app-server's official RPC (see `CodexSlashCommands.list`) */

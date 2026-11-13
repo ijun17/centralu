@@ -6,7 +6,6 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ExternalAppInfo, NormalizedEvent } from '@cc/protocol'
 import { runtimeViewSource } from '../../packages/agent-host/src/app-view-source.js'
-import type { SessionApps } from '../../packages/agent-host/src/adapters/contract.js'
 import {
   ExternalApps,
   resultText,
@@ -17,7 +16,7 @@ import {
 } from '../../packages/agent-host/src/apps/external/runtime.js'
 import { MANIFEST_FILE } from '../../packages/agent-host/src/apps/external/manifest.js'
 import { InlineViews } from '../../packages/agent-host/src/inline-views.js'
-import { SessionAppsHub } from '../../packages/agent-host/src/sessions/session-apps.js'
+import { SessionAppsHub, type SessionAppAttachment } from '../../packages/agent-host/src/sessions/session-apps.js'
 import { HostServer } from '../../packages/agent-host/src/transport/server.js'
 import { OriginPorts, type PortBook } from '../../packages/agent-host/src/views/origin-ports.js'
 import { ViewHost } from '../../packages/agent-host/src/views/view-host.js'
@@ -156,7 +155,7 @@ export type PublicAppsHost = {
   /** The app list the host would broadcast — for the mock's `setExternalApps` */
   list(): ExternalAppInfo[]
   /** A session attachment, the way the session manager gives one to an adapter */
-  session(sessionId: string, projectId: string): SessionApps
+  session(sessionId: string, projectId: string): SessionAppAttachment
   /** The view's tool call, the way `apps.invoke` (rpc.ts) and `viewToolResult` (platform/web) handle it */
   callAsView(ref: AppRef, tool: string, args: Record<string, unknown>): Promise<ToolResult>
   /** Where host events (`app_view`) go; null drops them */

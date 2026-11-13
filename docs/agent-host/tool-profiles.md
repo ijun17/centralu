@@ -93,12 +93,21 @@ definition, +11 the pointer: 326 → 412). The variants and their numbers are in
 [tool-cost.md](../tool-cost.md) §8. #523 made `app_guide`'s `topic` an enum of its seven topics (the
 reader set is 983 characters with it).
 
+**The `app` tool** (#2231, [apps/attaching.md](../apps/attaching.md#apps-through-one-centralu-tool-2231)) is in every
+profile (`APP_TOOLS`): one tool with an action, `list` (the session's apps, or one app's tools with schemas) and `call`
+(one tool of one app), in place of one MCP server per attached app, whose tools rode outside every ceiling and grew
+with each app. Its ceiling is `APP_BUDGET_CHARS` (500; the definition is 462), and each profile's resident ceiling
+(`RESIDENT_BUDGET_CHARS`) rises by it: the characters it adds are the ones that used to arrive with the first app.
+Claude defers it behind tool search; the instruction line naming it is the one where a seat learns about apps (the
+reader's first-tools line: `app for apps (find_apps: other projects')`). The list no longer changes with the apps a
+session has, on any CLI ([tool-cost.md](../tool-cost.md) §16).
+
 **Measuring it again** (#513). `pnpm measure:tools` measures every profile on both CLIs the same way,
 repeatably: resident tokens (the API's usage, and `count_tokens` with and without Centralu's tools), cache
 reads and writes per request and which event caused a rebuild, tool selection and first-try argument
 validity on a fixed prompt set, and what tool results add over a longer session. `centralu-tools.test.ts`
-pins each profile's resident characters (`RESIDENT_BUDGET_CHARS`), and `adapters/claude/tool-prefix.test.ts`
-that attaching or detaching an app never changes a Claude session's tool list. How to run it and read it,
+pins each profile's resident characters (`RESIDENT_BUDGET_CHARS`), and `sessions/assistant-app-cost.test.ts`
+that the list is the same with 0, 3 or 10 apps on both CLIs. How to run it and read it,
 and the baseline: [tool-cost.md](../tool-cost.md). That baseline (2026-10-12) found that Codex no longer puts
 MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
 deferral" above describes the CLI the numbers above were taken with.
@@ -127,7 +136,7 @@ measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no reg
 since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
 (`readerInstructions`): one sentence naming which tool answers which need (`readerFirst`: `recall` for earlier
 conversations, `read_session` for other sessions, `ask_project` for another project's work,
-`find_apps` for another project's apps, and `start_agent`, not the CLI's own subagent tool (Claude's `Agent`, Codex's
+`app` for the session's apps and `find_apps` for another project's, and `start_agent`, not the CLI's own subagent tool (Claude's `Agent`, Codex's
 `spawn_agent`: each adapter declares its own as `subagentTool`, #1587), for long work, another CLI
 or a worktree, or work the person will follow; the CLI's own subagents stay the way to hand off short helper work
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states

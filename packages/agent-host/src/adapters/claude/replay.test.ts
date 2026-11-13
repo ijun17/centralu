@@ -314,9 +314,11 @@ describe(`what the adapter makes of the CLI's real turns, the tools Centralu's s
     expect(of(events, 'compaction')).toEqual([])
   })
 
-  it("mcp-app: a tool of an attached app is named by its app and tool, asks nothing as a read tool, and returns the app's words", async () => {
+  it("mcp-app: an app's tool, called through Centralu's app tool, is named by its app and tool, asks nothing as a read tool, and returns the app's words (#2231)", async () => {
     const { events } = await run('mcp-app')
-    const call = calls(events).find((c) => c.summary.tool === 'mcp__app-weather__forecast')
+    // The CLI sees one tool, `app`; the card is drawn as the app's tool was (no app is an MCP server of the session)
+    expect(calls(events).filter((c) => c.summary.tool.startsWith('mcp__app-'))).toEqual([])
+    const call = calls(events).find((c) => c.summary.tool === 'mcp__centralu__app' && c.summary.centralu?.app)
     expect(call?.summary.centralu).toEqual({ tool: 'forecast', app: 'weather' })
     expect(of(events, 'approval_request')).toEqual([])
     expect(results(events).find((r) => r.callId === call?.callId)).toMatchObject({ ok: true, summary: 'Forecast for Paris: sunny, 21 degrees.' })

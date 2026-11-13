@@ -8,7 +8,7 @@ import { claudeEditPath } from '../edit-grant.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { newFile } from './new-file.js'
 import { approvalDetail } from './normalize.js'
-import { appToolOf, isCentraluToolName, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
+import { isCentraluToolName, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
 import { asObj } from '../../json-value.js'
 
 const ALLOW: StepAnswer = { grant: 'allow' }
@@ -162,7 +162,7 @@ export class ClaudeCards {
       ownTool: isCentraluToolName(toolName) && this.host.ownServer(),
       before: [],
       auto: preset === 'auto',
-      after: [() => this.appToolUnasked(preset, toolName, toolInput), () => this.readGranted(toolName, toolInput)],
+      after: [() => this.readGranted(toolName, toolInput)],
       /*
        * The rule's key — for a command it is the full command text, for a file edit it is
        * **the path** (#170). This matches what the UI carries on "always allow" (both come
@@ -204,29 +204,6 @@ export class ClaudeCards {
       this.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })
       this.releaseOnCancel(requestId, signal)
     })
-  }
-
-  /**
-   * **A read-only app tool is never asked about** (M4 decision 5).
-   *
-   * The criterion is the annotation the app attached to the tool (`readOnlyHint: true`),
-   * and the judgment is made from the attached app's own list, not the name — a server
-   * simply starting with `app-` is never trusted on its own (the lesson from #93). Every
-   * other app tool goes through the ordinary approval card: safe always asks, normal
-   * asks whenever this callback is called. In auto, this callback is never reached
-   * (bypassPermissions lets it through — see the measurement above). This is the same
-   * criterion as Codex's `writes` approach, so the two adapters behave the same way.
-   *
-   * This is separate from the centralu exception — that exception is never widened.
-   *
-   * `unasked` is that read-only judgment plus the two levels an app can declare for a write (`tool-risk.ts`):
-   * `local` (its own data on this computer), and `routine` for the app of this session's own project under
-   * `normal`. "Always" cannot do this job: an app tool's card is an `other` one, which has no rule key, so
-   * nothing it remembers reaches the next call.
-   */
-  private appToolUnasked(preset: PermissionPreset, toolName: string, toolInput: Record<string, unknown>): StepAnswer | null {
-    const appTool = appToolOf(toolName)
-    return appTool && this.host.opts.apps?.unasked(appTool.server, appTool.tool, preset, toolInput) ? ALLOW : null
   }
 
   /**

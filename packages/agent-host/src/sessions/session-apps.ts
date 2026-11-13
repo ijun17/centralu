@@ -1,11 +1,12 @@
+import { z } from 'zod'
 import { createListeners } from '@cc/common'
-import { APP_ID_MAX_LENGTH, appKeyOf, appServerName, isAssistantKind, sameApp } from '@cc/protocol'
+import { APP_SERVER_PREFIX, appKeyOf, appServerName, APP_CALL, errorMessage, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
-import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
-import { runsUnasked } from '../apps/contract.js'
+import type { AppCallOpts, AppToolResult, AppToolSpec, SessionAppEntry, SessionApps, SessionAppTools } from '../adapters/contract.js'
+import { presetAsks, runsUnasked } from '../apps/contract.js'
+import { issuesText } from './tool-answers.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { durationText, raceTimeout, withTimeout } from '../timing.js'
-import { rpcError } from '../rpc-error.js'
 
 /**
  * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
@@ -182,16 +183,8 @@ const nameSlug = (name: string) =>
     .replace(/-+$/, '')
 
 /**
- * The longest server name an app is given: `app-<id>` of the longest id (#1141, third review). A tool reads
- * `mcp__<server>__<tool>`, which tools cap at 64 characters, so a name qualified by its project or numbered never leaves
- * a tool less room than a plain `app-<id>` does: at most 43 characters before the tool, 21 for it.
- */
-export const SERVER_NAME_MAX = appServerName('x'.repeat(APP_ID_MAX_LENGTH)).length
-
-/**
  * `app-<id>` when `taken` does not hold it; else, with a `qualifier` (a project's slug), `app-<id>-<qualifier>`, then
- * `-2`, `-3`, …; without one, `app-<id>-2`, `-3`, …. Never longer than `SERVER_NAME_MAX`: the stem is cut before the
- * number, so a long id or project name stays unique by its number.
+ * `-2`, `-3`, …; without one, `app-<id>-2`, `-3`, ….
  */
 export function freeServerName(appId: string, taken: ReadonlySet<string> | readonly string[], qualifier?: string): string {
   const has = (name: string) => (Array.isArray(taken) ? taken.includes(name) : (taken as ReadonlySet<string>).has(name))
@@ -199,11 +192,16 @@ export function freeServerName(appId: string, taken: ReadonlySet<string> | reado
   if (!has(base)) return base
   const stem = qualifier ? `${base}-${qualifier}` : base
   for (let n = qualifier ? 1 : 2; ; n++) {
-    const suffix = n === 1 ? '' : `-${n}`
-    const name = stem.slice(0, SERVER_NAME_MAX - suffix.length).replace(/-+$/, '') + suffix
+    const name = n === 1 ? stem : `${stem}-${n}`
     if (!has(name)) return name
   }
 }
+
+/**
+ * An app's name in a session as the model writes it (#2231): its server name of before without `app-` (`board`,
+ * `board-centralu`, `board-2`). The book (#1141) keeps the server names, which a session's earlier turns used.
+ */
+export const appNameOf = (server: string): string => (server.startsWith(APP_SERVER_PREFIX) ? server.slice(APP_SERVER_PREFIX.length) : server)
 
 /**
  * The order apps new to a session are named in, when several arrive in one count: by id, the user folder's first, then
@@ -221,7 +219,6 @@ export class SessionAppsHub {
    * about it with the same id.
    */
   readonly detached = new Map<string, Detached>()
-  private stopListening: () => void
   private callListeners = createListeners<SessionAppCall>((err) => console.error(`[apps] session-call listener failed:`, err))
   private progressListeners = createListeners<SessionAppProgress>((err) => console.error(`[apps] session-call progress listener failed:`, err))
   private goneListeners = createListeners<string>((err) => console.error(`[apps] session-gone listener failed:`, err))
@@ -247,12 +244,13 @@ export class SessionAppsHub {
         run: () => Promise<AppToolResult>,
         refused: (text: string) => AppToolResult,
       ) => Promise<AppToolResult>
+      /**
+       * The person's say on an app tool that does not run unasked (#2231, decision 5): the host decides at the call, with
+       * its arguments, on every CLI. Absent only in tests that run no card, where every call runs
+       */
+      approval?: AppApproval
     } = {},
-  ) {
-    this.stopListening = rt.onAppsChanged(() => {
-      for (const a of [...this.live.values()]) a.recheck()
-    })
-  }
+  ) {}
 
   /**
    * A session moved into a project behind its handle's back (#1141: a user-folder app's builder or agent, when the app's
@@ -264,27 +262,21 @@ export class SessionAppsHub {
     if (!a) return
     a.session.projectId = projectId
     if (a.session.builderOf && a.session.builderOf.projectId === null) a.session.builderOf = { projectId, appId: a.session.builderOf.appId }
-    a.recheck()
   }
 
   /** Creates the attachment for one handle — handed to the adapter, and closed by the adapter when the handle closes */
-  attach(session: AppSessionKey): SessionApps {
+  attach(session: AppSessionKey): SessionAppAttachment {
     const a = new Attachment(this, session)
     this.live.set(session.id, a)
     return a
   }
 
   /**
-   * The door the bridge (the adapter that cannot attach in-process — Codex) comes in through.
-   * Since the bridge is a separate process, it only carries a session id and a server name — the
-   * attachment of that session's **currently live handle** answers on its behalf. If there is no
-   * live handle (the session is asleep or closed), it is refused: an app cannot be called under
-   * the name of a session with no handle.
+   * The door the `app` tool comes in through (#2231), on every CLI: the attachment of the session's **currently live
+   * handle**, or null when it has none (asleep or closed), so no app is called in the name of a session with no handle.
    */
-  forSession(sessionId: string): SessionApps {
-    const a = this.live.get(sessionId)
-    if (!a) throw rpcError(`This session cannot call apps right now (it is not running): ${sessionId}`, 'session_not_found')
-    return a
+  liveFor(sessionId: string): SessionAppAttachment | null {
+    return this.live.get(sessionId) ?? null
   }
 
   /**
@@ -324,15 +316,6 @@ export class SessionAppsHub {
   /** @internal The attachment announces one call — a listener's failure does not block the call */
   announce(c: SessionAppCall): void {
     this.callListeners.emit(c)
-  }
-
-  /**
-   * A session attached or detached an app itself (#371 part A) — recount what its live handle sees.
-   * Claude follows at once (`setMcpServers`); a Codex thread keeps what it started with, and the
-   * caller restarts it when the turn ends.
-   */
-  sessionAppsChanged(sessionId: string): void {
-    this.live.get(sessionId)?.recheck()
   }
 
   /** @internal A closed attachment vacates its spot — does not touch it if a new handle has already taken over */
@@ -388,7 +371,6 @@ export class SessionAppsHub {
   /** The books changed behind this hub (#1141: an app moved into a project carries its names to its new key): read again */
   reloadNames(): void {
     this.names.clear()
-    for (const a of [...this.live.values()]) a.recheck()
   }
 
   /**
@@ -453,13 +435,12 @@ export class SessionAppsHub {
    * Whether a session can use one app's tools right now, and if not, why (#308, `apps.reach`). The same
    * rule as `refsFor`, asked the other way round so the answer can name what fails first: an app this
    * session is never given (`other-project`) before one it would be given but cannot be attached
-   * (trust, then the app's own state), and then what the live agent has (`live.appAttachment`: a Codex
-   * thread keeps the servers it started with). `session` is null for a session that gets no apps at
-   * all (one stood up by an app, manager `appsFor`). With no live agent the session attaches what the
-   * rule gives it when it wakes, so the rule's answer stands. A root app the Assistant may attach and
-   * has not is reachable (#1205): its agent attaches it with `attach_app`, and the person has nothing to do.
+   * (trust, then the app's own state). `session` is null for a session that gets no apps at all (one stood
+   * up by an app, manager `appsFor`). Every agent reaches its apps through Centralu's `app` tool (#2231), so
+   * what the rule gives is what the agent can call, at once. A root app the Assistant may attach and has not
+   * is reachable (#1205): its agent attaches it with `attach_app`, and the person has nothing to do.
    */
-  reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
+  reach(session: AppSessionKey | null, ref: AppRef): AppReach {
     const app = this.rt.list().find((a) => sameApp(a, ref))
     if (!app) return { reachable: false, reason: 'unavailable' }
     // An app the session attached itself (#371 part A) counts like one the rule gives, under the name it was given
@@ -474,11 +455,6 @@ export class SessionAppsHub {
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
     if (selfServed && !this.opts.onDemand!.allowed(session, app)) return { reachable: false, reason: 'other-project' }
-    if (selfServed) return { reachable: true }
-    const server = givesApp(session, app) ? (this.refsFor(session).find((h) => sameApp(h.ref, ref))?.server ?? appServerName(app.appId)) : own!.server
-    const attached = live?.appAttachment?.(server) ?? 'attached'
-    if (attached === 'restart') return { reachable: false, reason: 'restart' }
-    if (attached === 'failed') return { reachable: false, reason: 'bridge-failed' }
     return { reachable: true }
   }
 
@@ -496,25 +472,43 @@ export class SessionAppsHub {
   }
 
   dispose(): void {
-    this.stopListening()
     this.callListeners.clear()
     this.goneListeners.clear()
     for (const a of [...this.live.values()]) a.close()
   }
 }
 
-/** The attachment for one handle — the implementation of `SessionApps` as the adapter sees it */
-class Attachment implements SessionApps {
-  private listeners = createListeners((err) => console.error(`[apps] session ${this.session.id.slice(0, 8)} change listener failed:`, err))
+/**
+ * The app a name means in this session (#2231): the name the `app` tool lists (`board`), or the server name a session's
+ * earlier turns used (`app-board`). The listed name wins where both would match.
+ */
+export function namedApp<T extends { server: string }>(apps: readonly T[], name: string): T | undefined {
+  const n = name.trim()
+  return apps.find((a) => a.server === appServerName(n)) ?? apps.find((a) => a.server === n)
+}
+
+/** What the `app` tool and the adapter see of a session's live attachment (#2231) */
+export type SessionAppAttachment = SessionApps & SessionAppTools
+
+/**
+ * The person's say on an app call (#2231): the session's preset now, whether its live agent runs under the person's own
+ * bypass (`SessionHandle.bypassesApprovals`), and the host's card in the session's approval slot (`HostCards.askHost`)
+ */
+export type AppApproval = {
+  preset(sessionId: string): PermissionPreset
+  bypassed(sessionId: string): boolean
+  ask(sessionId: string, detail: { kind: 'other'; raw: string; about: typeof APP_CALL }, signal: AbortSignal): Promise<'allow' | 'always' | 'always_project' | 'deny' | null>
+}
+
+/** The attachment for one handle — what the adapter and the `app` tool see of a session's apps */
+class Attachment implements SessionAppAttachment {
   /**
-   * Calls made by this handle that have not finished yet (including early-returned ones). When
-   * the session stops or the handle closes, everything here is cancelled — the cancellation is
-   * carried by the runtime all the way down to the app (notifications/cancelled) and any
-   * intermediary work beneath it (A-4's parent signal).
+   * Calls made by this handle that have not finished yet (including early-returned ones, and ones waiting on the person's
+   * card). When the session stops or the handle closes, everything here is cancelled — the cancellation is carried by the
+   * runtime all the way down to the app (notifications/cancelled) and any intermediary work beneath it (A-4's parent
+   * signal), and a card still standing is withdrawn.
    */
   private inflight = new Set<AbortController>()
-  /** The shape last announced (or first seen) — if it is unchanged, nothing is announced */
-  private seen: string
   private closed = false
   /** Card-id joining (B-1) — call starts seen by the adapter, and calls waiting to be joined */
   private noted: Noted[] = []
@@ -523,72 +517,123 @@ class Attachment implements SessionApps {
   constructor(
     private hub: SessionAppsHub,
     readonly session: AppSessionKey,
-  ) {
-    this.seen = JSON.stringify(this.current())
-  }
+  ) {}
 
-  current(): AttachedApp[] {
+  current(): SessionAppEntry[] {
     if (this.closed) return []
+    const infos = this.hub.rt.list()
     return this.hub.refsFor(this.session).map(({ ref, server }) => {
       const known = this.hub.rt.knownTools(ref, 'model')
-      return { server, appId: ref.appId, tools: known ? withRunStatus(known.map(toSpec)) : null }
+      const info = infos.find((a) => sameApp(a, ref))
+      return {
+        name: appNameOf(server),
+        server,
+        appId: ref.appId,
+        title: info?.name ?? ref.appId,
+        description: info?.description ?? '',
+        tools: known ? withRunStatus(known.map(toSpec)) : null,
+      }
     })
-  }
-
-  onChange(listener: () => void): () => void {
-    return this.listeners.add(listener)
-  }
-
-  /** @internal The runtime says "something may have changed" — announce only if what this session sees actually changed */
-  recheck(): void {
-    if (this.closed) return
-    const now = JSON.stringify(this.current())
-    if (now === this.seen) return
-    this.seen = now
-    this.listeners.emit()
   }
 
   async tools(server: string): Promise<AppToolSpec[]> {
     const hit = this.find(server)
-    if (!hit) throw new Error(`This app is not attached to this session: ${server}`)
+    if (!hit) throw new Error(`This session has no app named ${appNameOf(server)}`)
     const known = this.hub.rt.knownTools(hit.ref, 'model')
     if (known) return withRunStatus(known.map(toSpec))
     /*
-     * This is the first moment it is needed — spin up the app and read its list. If the cap is
-     * exceeded or it fails to start, attach it with an empty list and log the reason. Starting
-     * itself keeps going in the background, and the runtime announces once the list is read.
+     * This is the first moment it is needed — spin up the app and read its list. If the cap is exceeded or it fails to
+     * start, answer with an empty list and log the reason. Starting itself keeps going in the background, and the next
+     * listing has the tools.
      */
     try {
       return withRunStatus((await withTimeout(this.hub.rt.tools(hit.ref, 'model'), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
     } catch (err) {
-      console.error(`[apps] ${server} attached with no tools for now: ${(err as Error).message.split('\n')[0]}`)
+      console.error(`[apps] ${server} listed no tools for now: ${errorMessage(err).split('\n')[0]}`)
       return withRunStatus([])
     }
   }
 
-  async call(
-    server: string,
-    tool: string,
-    args: Record<string, unknown>,
-    opts: { signal?: AbortSignal; waitMs?: number; callId?: string } = {},
-  ): Promise<AppToolResult> {
-    const gate = this.hub.opts.whenAsked
-    if (!gate || this.closed || !this.find(server)) return this.callNow(server, tool, args, opts)
-    // A tool that only reads is not asked about, as for the CLI's own card (`readOnly`). Anything else of an app asks when a session's request is the
-    // turn, and is recorded once it ran. Named with a dot so no app tool can pass for one of the Assistant's own reading tools or undoable commands
-    const call = { name: `${server}.${tool}`, args, ...(this.readOnly(server, tool) ? { readOnly: true as const } : {}) }
-    return gate(this.session.id, call, opts.signal, () => this.callNow(server, tool, args, opts), failure)
+  /**
+   * One call of the `app` tool (#2231), in order: the app must be this session's now; the tool must exist and the arguments
+   * fit its schema, or the answer is the schema and nothing runs; a session's request turn asks the Assistant's person
+   * (`whenAsked`, #1447); the person's card where the preset asks (`approve`); then the runtime's one call path.
+   */
+  async call(server: string, tool: string, args: Record<string, unknown>, opts: AppCallOpts = {}): Promise<AppToolResult> {
+    if (this.closed || !this.find(server)) return failure(`This session has no app named ${appNameOf(server)}.`)
+    const tools = await this.tools(server)
+    const spec = tools.find((t) => t.name === tool)
+    /*
+     * A tool not in the session's list (an app-only tool, a guess) goes to the runtime all the same, unasked: it is refused
+     * there and recorded as every refused call is (`notListed`), so the app's runs show what an agent tried. Never run
+     */
+    if (!spec) {
+      await this.callNow(server, tool, args, { notListed: true, ...(opts.callId ? { callId: opts.callId } : {}) })
+      return failure(`${appNameOf(server)} has no tool ${JSON.stringify(tool)}. Nothing ran. Its tools: ${tools.map((t) => t.name).join(', ') || '(none listed yet)'}.`)
+    }
+    const issues = schemaIssues(spec.inputSchema, args)
+    if (issues) return failure(`Wrong arguments for ${tool}: ${issues}. Nothing ran. Its arguments: ${JSON.stringify(spec.inputSchema)}`)
+    const abort = new AbortController()
+    const onUp = () => abort.abort()
+    if (opts.signal?.aborted) abort.abort()
+    else opts.signal?.addEventListener('abort', onUp, { once: true })
+    this.inflight.add(abort)
+    const deadline = opts.waitMs ? Date.now() + opts.waitMs : null
+    const left = () => (deadline === null ? undefined : Math.max(1_000, deadline - Date.now()))
+    const run = async (): Promise<AppToolResult> => {
+      const refused = await this.approve(server, tool, args, abort.signal, left())
+      return refused ? failure(refused) : this.callNow(server, tool, args, { signal: abort.signal, waitMs: left(), callId: opts.callId })
+    }
+    try {
+      const gate = this.hub.opts.whenAsked
+      if (!gate) return await run()
+      // Named with a dot so no app tool can pass for one of the Assistant's own reading tools or undoable commands
+      const call = { name: `${server}.${tool}`, args, ...(this.readOnly(server, tool) ? { readOnly: true as const } : {}) }
+      return await gate(this.session.id, call, abort.signal, run, failure)
+    } finally {
+      this.inflight.delete(abort)
+      opts.signal?.removeEventListener('abort', onUp)
+    }
+  }
+
+  /**
+   * Decision 5 at the call (#2231): null when the call may run, else why it may not. A tool that runs unasked never asks;
+   * otherwise the preset decides (`presetAsks`), and a card the person has not answered within the path's bound is
+   * withdrawn, so the bridge's ceiling never cuts a call that is waiting on them.
+   */
+  private async approve(server: string, tool: string, args: Record<string, unknown>, signal: AbortSignal, waitMs: number | undefined): Promise<string | null> {
+    const approval = this.hub.opts.approval
+    if (!approval || tool === RUN_STATUS_TOOL) return null
+    const preset = approval.preset(this.session.id)
+    if (this.unasked(server, tool, preset, args) || !presetAsks(preset, approval.bypassed(this.session.id))) return null
+    const card = new AbortController()
+    const withdraw = () => card.abort()
+    signal.addEventListener('abort', withdraw, { once: true })
+    let late = false
+    const timer = waitMs === undefined ? null : setTimeout(() => ((late = true), card.abort()), waitMs)
+    try {
+      const raw = `${appNameOf(server)}: ${tool} ${JSON.stringify(args).slice(0, 300)}`
+      const answer = await approval.ask(this.session.id, { kind: 'other', raw, about: APP_CALL }, card.signal)
+      if (answer === 'deny') return 'The person denied this call. Nothing ran.'
+      if (answer !== null) return null
+      return late
+        ? `The person did not answer the card for this call within ${Math.round(waitMs! / 1000)} s, so it was withdrawn and nothing ran. Tell them what you want to do, and call again once they agree.`
+        : 'The card for this call was withdrawn. Nothing ran.'
+    } finally {
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener('abort', withdraw)
+    }
   }
 
   private async callNow(
     server: string,
     tool: string,
     args: Record<string, unknown>,
-    opts: { signal?: AbortSignal; waitMs?: number; callId?: string },
+    opts: { signal?: AbortSignal; waitMs?: number; callId?: string; notListed?: true },
   ): Promise<AppToolResult> {
     const hit = this.find(server)
     // An unattached app never reaches the runtime — the only apps this session can call are the ones decision 4 gave it
-    if (!hit) return failure(`This app is not attached to this session: ${server}`)
+    if (!hit) return failure(`This session has no app named ${appNameOf(server)}.`)
     if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
 
     /*
@@ -612,7 +657,7 @@ class Attachment implements SessionApps {
         if (callId) this.hub.progress({ sessionId, callId, message })
       })
     const pending = this.hub.rt
-      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress })
+      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress, ...(opts.notListed ? { notListed: true as const } : {}) })
       // Vanished mid-call (the app's folder was deleted) — return it as a failed call instead of throwing
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
       .finally(() => {
@@ -654,7 +699,7 @@ class Attachment implements SessionApps {
           type: 'text',
           text:
             `This call is still running (past ${seconds} s). Run id: ${runId}\n` +
-            `The call has not stopped and carries on. Do not call it again: pass this id as run_id to the ${RUN_STATUS_TOOL} tool of the same server to get its result.`,
+            `The call has not stopped and carries on. Do not call it again: app(action="call", app=${JSON.stringify(appNameOf(server))}, tool="${RUN_STATUS_TOOL}", args={"run_id": ${JSON.stringify(runId)}}) gives its result.`,
         },
       ],
       isError: false,
@@ -702,7 +747,7 @@ class Attachment implements SessionApps {
     }
   }
 
-  readOnly(server: string, tool: string): boolean {
+  private readOnly(server: string, tool: string): boolean {
     const hit = this.find(server)
     if (!hit) return false
     // A tool the host added — it only reads status
@@ -716,7 +761,7 @@ class Attachment implements SessionApps {
     return found?.annotations?.readOnlyHint === true
   }
 
-  unasked(server: string, tool: string, preset: PermissionPreset, args?: Record<string, unknown>): boolean {
+  private unasked(server: string, tool: string, preset: PermissionPreset, args: Record<string, unknown>): boolean {
     if (this.readOnly(server, tool)) return true
     const hit = this.find(server)
     if (!hit) return false
@@ -736,8 +781,10 @@ class Attachment implements SessionApps {
     for (const abort of [...this.inflight]) abort.abort()
   }
 
-  noteCall(callId: string, server: string, tool: string, args: unknown): void {
+  noteCall(callId: string, app: string, tool: string, args: unknown): void {
     if (this.closed || !callId) return
+    const server = namedApp(this.hub.refsFor(this.session), app)?.server
+    if (!server) return
     const key = argsKey(args)
     // The bridge arrived first — the waiting call is exactly this card
     const w = this.waiters.findIndex((x) => x.server === server && x.tool === tool && x.args === key)
@@ -802,7 +849,6 @@ class Attachment implements SessionApps {
     this.closed = true
     // A closed handle's calls have nowhere to be received — stop even the early-returned ones
     this.cancelAll()
-    this.listeners.clear()
     this.noted = []
     for (const w of this.waiters.splice(0)) {
       clearTimeout(w.timer)
@@ -873,7 +919,7 @@ function toSpec(t: RuntimeTool): AppToolSpec {
     name: t.name,
     ...(t.title !== undefined ? { title: t.title } : {}),
     ...(t.description !== undefined ? { description: t.description } : {}),
-    inputSchema: t.inputSchema as Record<string, unknown>,
+    inputSchema: t.inputSchema,
     ...(t.annotations ? { annotations: t.annotations } : {}),
     ...(t._meta ? { _meta: t._meta } : {}),
   }
@@ -890,6 +936,20 @@ export function toResult(o: AppCallOutcome): AppToolResult {
   }
   const what = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
   return failure(`The app call ${what} — ${o.error ?? 'no reason was given'}`)
+}
+
+/**
+ * What a tool's input schema refuses in a call's arguments, or null (#2231): read with zod's JSON Schema reader, so the
+ * check is the one Centralu's own tools get. A schema zod cannot read is not checked, as neither CLI checked it before.
+ */
+function schemaIssues(schema: Record<string, unknown>, args: Record<string, unknown>): string | null {
+  let checked
+  try {
+    checked = z.fromJSONSchema(schema).safeParse(args)
+  } catch {
+    return null
+  }
+  return checked.success ? null : issuesText(checked.error)
 }
 
 function failure(text: string): AppToolResult {

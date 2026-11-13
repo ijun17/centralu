@@ -86,10 +86,11 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
 | `attach_app` by the Assistant (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the Assistant has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
-| An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
-| An app tool the app declares `local` (its own data, undoable, next to `destructiveHint: false`) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `SessionApps.unasked` → `runsUnasked` (`apps/external/tool-risk.ts`), the same call sites as `readOnly` (Claude `canUseTool`; Codex per-tool `approval_mode`) |
-| An app tool the app declares `routine`, in the session's own project's app | asks | allowed | allowed | open | asks | allowed | allowed | open | `runsUnasked`: `own` is the session's project (never the Assistant, a user-folder app or an app attached from elsewhere), and the project is trusted or the app would not attach. `centralu/askWhen` makes the call ask when any argument it names matches (or is set, for `"*"`), `centralu/askUnless` unless one does; a declaration it cannot read (including a value that is a list or an object) always asks; Codex, which fixes approval before arguments exist, then always asks |
-| Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
+| `app` with `list` (a session reads its apps or one app's tools, #2231) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `runCentraluTool` (`sessions/centralu-tools.ts`): only reads, so no gate; ACP agents the same |
+| An app tool the app marks `readOnlyHint`, through `app` with `call` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | The host at the call, on every CLI, ACP agents included (#2231): `Attachment.approve` → `runsUnasked` (`sessions/session-apps.ts`, `apps/external/tool-risk.ts`), read from the session's own app's tool list, never from a name |
+| An app tool the app declares `local` (its own data, undoable, next to `destructiveHint: false`) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `runsUnasked`, as above |
+| An app tool the app declares `routine`, in the session's own project's app | asks | allowed | allowed | open | asks | allowed | allowed | open | `runsUnasked`: `own` is the session's project (never the Assistant, a user-folder app or an app attached from elsewhere), and the project is trusted or the app would not attach. `centralu/askWhen` makes the call ask when any argument it names matches (or is set, for `"*"`), `centralu/askUnless` unless one does, read with the call's arguments on every CLI (#2231; Codex, which fixed approval when the thread started, always asked before); a declaration it cannot read (including a value that is a list or an object) always asks |
+| Any other app tool | asks (every time; no "always") | asks | allowed | open | asks | asks | allowed | open | `Attachment.approve` → `presetAsks` → `HostCards.askHost` with `alwaysAsk` (an `other` card `<app>: <tool> {arguments}` with `about: "app_call"`: every time; no "always". A window that knows the name offers none, and an older window's "always" is read as allow, once; nothing is remembered). Bypass is read from the live session (`SessionHandle.bypassesApprovals`: Claude launched in `bypassPermissions`, a Codex thread whose `approvalPolicy` is the person's `never`; an ACP agent never). Since #2231 the CLI never sees an app tool, so Claude's own permission rules naming `mcp__app-…` tools no longer apply. Through the bridge (Codex, ACP) a card unanswered after 240 s (`BRIDGE_ANSWER_MS`) is withdrawn and nothing runs |
 | The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | open | asks, reads run | the person's settings | allowed | open | `permissionOptionsFor` in each adapter |
 
 **The person's own "Archive session…" in the window** is not `delete_session`, and takes no card of the call table: it is the
@@ -160,13 +161,11 @@ Rows that differ by session:
 The **Codex `normal` + bypass** cell follows the person's policy, as Claude's does (owner decision
 2026-10-11, #382). With `writes`, the person's `approval_policy = "never"` turned "needs approval"
 into a refusal ("requires approval, but approval policy is never", codex source `mcp_tool_call.rs`).
-So under `normal` the adapter asks Codex for the policy before it loads the app bridges
-(`config/read`, `personsApprovalPolicy`) and gives them `approve` when it resolves to `never`, `writes`
-otherwise. Which layers count follows what the thread loads, measured with codex-cli 0.160.0 in a
-scratch `CODEX_HOME` (the person's policy and a repository's `.codex/config.toml` set to opposite
-values): `config/read` without a folder returns the person's layers only, and with the folder adds the
-repository's only when Codex trusts that folder, as `thread/start` does. A session whose repository
-files are kept out (an untrusted project, the Assistant, coordinators) reads without the folder, so
-a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thread's own
-`approvalPolicy` is compared afterwards and a difference logged. The refusal itself is still from
-Codex source, and no logged-in app call was run.
+Until #2231, under `normal` the adapter asked Codex for the policy before it loaded the app bridges
+(`config/read`, `personsApprovalPolicy`) and gave them `approve` or `writes`. Since #2231 no app is a server of the
+thread: the host asks at the call, and under `normal` and `edits` it reads the person's bypass from the policy the
+thread itself reports at `thread/start` and `thread/resume` (`CodexServers.noteThreadPolicy`, `policyIsNever`,
+`CodexSession.bypassesApprovals`). That is the policy the CLI's own commands run under, so an app call is let through
+unasked exactly when Codex would run a command unasked; a repository's `.codex/config.toml` counts only where Codex
+itself loads it (a folder Codex trusts), as for those commands. `safe` and `auto` never read it. No logged-in Codex
+app call was run (#2231: Codex was not installed where it was built).

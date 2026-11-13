@@ -121,10 +121,4 @@ export const appsResults = {
   'apps.enable': ExternalAppInfo,
   'apps.versions': AppVersions,
   'apps.restoreVersion': ExternalAppInfo,
-  'apps.sessionTools': z.object({ tools: z.array(z.record(z.string(), z.unknown())) }),
-  'apps.sessionCall': z.object({
-    content: z.array(z.unknown()),
-    isError: z.boolean().optional(),
-    structuredContent: z.record(z.string(), z.unknown()).optional(),
-  }),
 } as const
