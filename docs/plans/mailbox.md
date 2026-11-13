@@ -1014,7 +1014,7 @@ sender about its messages, that is the sender.
 | A delegation refused for an untrusted project (the record, §7.4) | `refused:<recipient>:<first 16 hex of sha256 of tool, target and text>:<minute>` |
 | A caller told its refused calls may be given again (S16) | `trusted:<recipient>:<project id>:<trust time>` |
 | A handoff or the role's move | `handover:<recipient>:<message id>` |
-| A watch firing (§13) | `watch:<recipient>:<watch id>:<change>` |
+| A watch firing (§18) | `watch:<recipient>:<watch id>:<change>` |
 | The person warned about the host's mail-started turns (S19, D32; an earlier build's cap notice used the same key, so the two write one line an hour between them) | `hostcap:person:<the clock hour's start, ms>` |
 | The person warned about a pair (S18, D32) | `pairturns:<a>\|<b>:<the clock hour's start, ms>`, the two addresses sorted |
 | The person warned about a session's compaction cycles (S20, D32, #2024) | `compactcycles:<the session's address>:<the clock hour's start, ms>` |
@@ -2426,7 +2426,7 @@ section when it is briefed:
   reminder after 30 minutes) are keyed by (session, app).
 - **The merge queue (old §8.3):** a queue item's first notice to its owner is a root. Later notices about the same item
   have `reply_to` = the previous notice. "Released" is one notice per owner per release.
-- **Watches (#1324):** a watch firing is a Centralu notice to the session that set it (key §6.5).
+- **Watches (#1324):** briefed; designed in §18. A watch firing is a Centralu notice to the session that set it (key §6.5).
 - **The task board (#1577):** Q3, decided: its own design.
 
 ## 14. Linked machines
@@ -3465,7 +3465,7 @@ then.`
 
 - Linked machines on messages (§14), with `LinkedReports` and `endOwed`, and listing their sessions.
 - Apps and the board app on messages (§13).
-- Watches.
+- Watches: briefed, §18.
 - `read_session` of any session but the orchestrator's (#1684 item 4, §1.6).
 
 ## 17. Code that goes away
@@ -3517,3 +3517,301 @@ permission (about 120 product and 150 test lines not written); sender notices ga
 row. **What it added:** cause and depth (~40), the host cap (~30); round 3's ingress and held tasks were removed in
 round 4.
 About a third of the 27 mail test files are about thread state and go or are rewritten smaller.
+
+## 18. Watches (#1324)
+
+Owner, 2026-10-26: a watch is part of the mailbox. A watch the host keeps delivers its event as mailbox mail to the
+session that set it, from Centralu (not the person). It ships in the same branch as its first implementation PR
+(`host-watches`). Also binding: #1948 (one channel; the stop floor and approval cards are not watches) and D32
+(#2014, #2035: guards warn, never hold or refuse mail). This section was written from main at 4b3be7aa4, and the
+file:line references are to that commit.
+
+### 18.1 What a watch is, and what is not one
+
+A **watch** is a condition a session asks Centralu to keep for it. When the condition changes, Centralu sends that
+session one `notice` (§5.2 `origin` `watch`, key §6.5). MailDelivery brings it like any other mail: it wakes a session
+at rest or asleep, and joins a running turn (§8, §10.6.2). There is no second channel into a CLI, so no new vendor
+behaviour: the model reads the `<centralu-mail>` frame it already reads. PR 1 adds "Watch" to docs/domain-model.md §1
+with this definition.
+
+These are not watches, because they already arrive as mail without one:
+
+- **A child's end.** The giver of a task gets the last response or the reply (§10.6.3), and the stop notice when the
+  child cannot answer (§10.6.1). A watch on a session the caller has an open task to is refused with that sentence.
+- **A stop.** Floor a of #1948 is a fixed rule for everyone owed an answer, not something a session registers.
+- **An approval card.** The person's card is not mail (owner 2026-11-06). Givers of open work get the card notice
+  (§10.6.4).
+- **An app's event.** An app that knows its event posts its own notice (§13, the apps slice). The old design's
+  `centralu.mail.sourceChanged` is dropped: the app can say what changed itself, so the host keeps no app conditions.
+
+### 18.2 The tool: one action on `mail`
+
+`mail(action="watch", to=<what>, text=<note>)`. It adds no field:
+
+| `to` | Source | Repeats |
+|---|---|---|
+| a session by name or id (resolved like `send`, `MailTool.party`, `mail/tool.ts:259`) | session | no |
+| `in 30m`, `in 2h`, `at 16:30` (the host's local time, the next such minute) | time | no |
+| `every 30m` (at least 10 minutes) | time | yes |
+| `#123` (only if §18.14 Q2 picks the host) | pull request | no |
+
+`text` is the session's own note, up to 300 characters, quoted back in the notice. Any other field is refused with one
+sentence that names it. A call with no `to` answers the usage line. The answer names the watch, its end, the target's
+current state and the way to cancel:
+`Watching <name> (<address>) until <time>; it is working now. id <w id>. Cancel with mail(action="close", thread="<w id>").`
+
+- **Ids.** `<hostId>.w_<ulid>`, a third `MailIdKind` beside `t_` and `m_` (`mail/ids.ts:4`).
+- **Cancel** is `close` with a watch id. Today `close` and `update` both refuse with the "no threads" sentence
+  (`mail/tool.ts:231-236`). With any other id, `close` keeps that sentence.
+- **List.** `inbox` adds one line per active watch: `Watching: <w id> <what> until <time>[: <note>]`.
+- **The same watch set again** (same owner, source and target) extends the existing row's end and replaces its note.
+  It adds no row, so a session that sets it again after a compact, or out of habit, does not double its wakes.
+- **The Assistant** gets it unchanged through `centralu_run`'s `mail` command (`sessions/tool-seats.ts` RARE_COMMANDS).
+  The seats without a mailbox (coordinator, builder, app agent) have no watches.
+
+**Cost, measured.** The definition was counted the way `sessions/tool-cost.ts:39` counts it
+(`JSON.stringify({name, description, input_schema})` over `z.toJSONSchema`, zod 4.4.3). It is **1,350 today**, the
+figure recorded at `MAIL_BUDGET_CHARS` (`sessions/tool-definitions.ts:841`). The same PR deletes the six thread-era
+fields that no code reads (`state`, `outcome`, `next`, `blocker`, `unblock`, `follows`: no non-test reader in
+`packages/` or `apps/`; only the type `MailToolArgs`, `mail/tool.ts:16-34`, names them) and the enum value `update`.
+It adds `watch`, and adds `. For watch: a session, "in 30m", "at 16:30" or "every 30m"` (59 characters) to `to`'s
+description. Result: **1,170**. `MAIL_BUDGET_CHARS` falls from 1,355 to 1,175, recorded in docs/tool-cost.md §13. A
+Codex session started before the update that still calls `update` gets a schema error instead of the "removed"
+sentence. This is accepted: that call has done nothing since threads went.
+
+Whether ordinary sessions and the Assistant are told that watches exist (a resident phrase) is the owner's decision:
+§18.14 Q1.
+
+### 18.3 Sources
+
+**Time.** `in` and `at` fire once at their minute, at most 7 days ahead. `every` fires at each slot for 24 hours. The
+change key is the slot (`2026-11-13T16:30`). A slot the host missed (the computer slept, or the host was down) fires
+once, late, with `facts.watch.late = true`. Several missed `every` slots collapse into one firing.
+
+**Session.** One-shot. It fires on the first of these changes of the target. Each change is read where the host
+already learns it, through the mail hooks built in `mail/host-mail.ts:261`, so there is no new feed:
+
+| Change (`reason` in the frame) | Hook | When |
+|---|---|---|
+| `turn_ended` | `lastResponse` (`host-mail.ts:286`) | the moment a last response answers tasks. A turn that ended while the session's own background work runs is still working (owner 2026-11-04, `mail/rest.ts`) |
+| `asked` | `cards.tell` (`host-mail.ts:313`) | it raised a question or approval card |
+| `stopped` | `stopped` | interrupted, error, usage limit, quit |
+| `gone` | `sessionGone` (`host-mail.ts:263`) | deleted |
+
+It never fires for the state it was set in. The row keeps the target's last ended turn and pending cards at
+registration as its baseline, and the answer says what the target is doing now. A session may watch a session it may
+read (`mayRead`, `adapters/contract/centralu-tools.ts:570`, the one read rule); otherwise the call is refused as
+`read_session` would refuse it. Also refused: itself; a session it has an open task to (§18.1); and a session on
+another computer (`elsewhere`, as mail was refused before linked mail; later the target's host keeps the watch). A
+session watch ends after 24 hours; setting it again extends it.
+
+**A pull request's checks** (`#123`) are the owner's choice: §18.14 Q2. If the host keeps them, the watch is a
+one-shot. It polls `gh pr view <n> --json state,headRefOid,statusCheckRollup` (these fields checked against gh
+2.83.0's `--help`) every 60 seconds through the same runner as `gitBranchPr` (`dev-services/git-pr.ts:55`: 10 s
+timeout, `unavailable` without gh). It runs one call per project per tick, however many watches name it. It fires when
+every check on the current head has concluded (the notice names how many failed) or when the PR is merged or closed. A
+push that changes the head starts the wait again.
+
+**Not sources.** A session quiet for a long time (a time watch and `read_session` cover it); the merge queue (the
+board app's own notices); an app's event (§18.1).
+
+### 18.4 Storage and expiry
+
+A new table, `mail_watches`. **A store step is needed**: expand only, its number from the orchestrator (the highest
+today is 71, `store/migrations/v65.ts:199`). An older build does not read the table. After a rollback the watches sleep
+and fire nothing; an update back picks them up, and the late ones fire once.
+
+| Column | |
+|---|---|
+| `id` | `<hostId>.w_<ulid>` |
+| `owner` | the session's address |
+| `source`, `target` | `session` + an address; `time` + the text as given; `pr` + `<project>#<n>` |
+| `spec` | JSON: the slot, the period, the baseline (last ended turn, pending cards), the PR's head |
+| `note` | the owner's text, at most 300 characters |
+| `state` | `active`, `fired`, `expired`, `cancelled`, `gone` |
+| `last_key`, `fired_count` | the last change fired; how many times it fired |
+| `created_at`, `expires_at`, `next_at`, `ended_at`, `ended_by` | `ended_by` is `owner`, `person` or `host` |
+
+Indexes: `(owner, state)` and `(state, next_at)`. A row ends at `expires_at` (24 hours for session and `every`
+watches, the time itself for `in` and `at`, never more than 7 days), when a one-shot fires, when it is cancelled, or
+when its owner is deleted. The owner's rows are deleted with its mail on the party-gone path (`host-mail.ts:263`). A
+row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):
+`Your watch on <what> ended after 24 hours without a change.` Ended rows are kept 14 days, like a read notice (§6.4),
+and the same retention sweeps them.
+
+### 18.5 Evaluation and firing: `mail/watches.ts`
+
+One owner: `Watches` in a new `mail/watches.ts`, with `register(owner, to, note)`, `cancel(id, by)`, `list(owner)`,
+`changed(target, change)` and `due(now)`. `changed` is called from the four hooks in §18.3, one line each in
+`host-mail.ts`.
+
+- **Time.** One timer to the earliest `next_at`, through MailDelivery's injected `schedule` (`mail/delivery.ts:178`).
+  The delivery's 60-second sweep (`sweep()`, `delivery.ts:250`, which already notices a computer that slept) calls
+  `due(now)` as the safety net.
+- **Catch-up.** When the delivery starts (`start()`, `delivery.ts:189`), `due(now)` runs once. Every active session
+  watch is compared with its target's stored state (a last ended turn above the baseline while at rest, a pending card,
+  the session gone), so a change during a restart or a host swap fires once.
+- **Only a running delivery evaluates.** `Watches` starts and stops with MailDelivery. A host that is handing over or
+  closing evaluates nothing, and the new host catches up.
+- **Firing is one transaction.** Re-read the row and check that it is `active`; compute the change key; stop if it
+  equals `last_key`; call `service.notice(owner, { body, facts, dedupeKey })` (`MessageService.notice`,
+  `mail/messages.ts:449`); write `last_key`, `fired_count` and `next_at`, and end a one-shot. The `dedupeKey` is
+  `watch:<owner>:<w id>:<change>` (§6.5) under `UNIQUE(sender, dedupe_key)`, so two evaluations (two hosts on one
+  store, or a sweep racing an event) post one notice. Delivery hears it through `service.onChange`, as it hears every
+  notice.
+- **Facts:** `{ watch: { id, source, change, late? }, about: { session } }` for a session watch, plus
+  `reason: <change>`. The frame line already prints `about` and `reason` (`frameItem`, `messages.ts:1064`;
+  `messageLine` in `mail/frame.ts`), so the line says what changed even before the body is read.
+- **Body:** Centralu's words from host fields, then the note quoted. For example `Your watch on <name> (<address>): its
+  turn ended. Read what it said with read_session.`, `Your timer set at 14:05 for 16:30 is due.`, or `The checks on
+  #123 finished: 2 failed.` Then `Your note:` and the note under `> `. The body never carries the watched session's
+  text, only a pointer to `read_session` (security-boundaries/mailbox-and-requests.md on quoted words).
+- **Inline.** Today `flowsDownTo` (`mail/rules.ts:282`, §8.2 step 4) pulls every Centralu notice: only the person's
+  words, a session's task and a parent's message ride inline. A watch firing becomes one more case that rides inline,
+  to its owner only. Its words are Centralu's plus the owner's own note, nothing a third party wrote. A pulled body would
+  cost one `mail read` call for each firing of something the session asked for. The change is in that one rule, and
+  PR 1 adds the case to §8.2 step 4.
+- **A cancelled watch's undelivered firing is withdrawn**, as an answered card's notice is (`withdrawEndedCards`,
+  `mail/card-notices.ts:43`). The card-only query (`undeliveredCardNotices`, `store/mailbox.ts:1028`) becomes one query
+  by fact name, used by both, rather than a second copy.
+
+### 18.6 Delivery: busy, asleep, elsewhere
+
+MailDelivery is unchanged. A firing wakes a session at rest or asleep (`wakesMessage`, `rules.ts:217`). On Claude or
+Codex it joins a running turn (§10.6.2). On ACP, or while a card, a limit or a compact holds the session, it waits for
+the turn's end. A watch firing is never `urgent`: urgent is for sessions and the person. An expiry notice is quiet.
+
+A watch lives on its owner's host, which keeps the owner's mailbox (§14). A target on another computer is refused in
+v1. The person's window lists the watches of the sessions on the host it talks to. A linked machine's sessions show
+theirs once per-session methods cross links with linked mail (docs/plans/linked-mail.md), not before.
+
+### 18.7 Guards: warn, never hold (D32)
+
+Nothing a watch posts is held or refused. The limits are checks at registration, answered in the call:
+
+- at most 20 active watches per session (`Cancel one with mail(action="close", thread="<id>").`);
+- `every` at least 10 minutes; `in` and `at` at most 7 days ahead; session and `every` watches last 24 hours.
+
+One warning goes to the person, in the shape of `compactCycles` (`host-mail.ts:275`). When a session's watches started
+more than 6 of its turns in an hour: `service.notice(PERSON, { body: WARNING_TEXT.watchWakes(session, n), facts: {
+watchWakes }, dedupeKey: hourlyKey('watchwakes:<address>', now) })` (`mail/rules.ts:183`). The count is read from the
+store (firings in the last hour), so a restart does not reset it. The old design's "watches paused, Resume" is not
+built: it would be a hold.
+
+### 18.8 The person
+
+The person sees and cancels watches where they look at the session: a badge in the session header beside
+`BackgroundTasksBadge` (`SessionHeader.tsx:112-118`), built like it (`BackgroundTasks.tsx:55`: `IconButton` with a
+count, an anchored list, `Tooltip`, `usePresence`, `useDismiss`). It is hidden when there are none. The list opens and
+closes with `cc-drop` and `usePresence` (design-system §9; with reduced motion, the short fade). Each row is one watch,
+with a `Cancel` `Button`:
+
+- `Until <name> ends its turn, asks or stops · until 16:30`
+- `At 16:30`, `Every 30 minutes · until tomorrow 14:05`, `Until the checks on #123 finish`
+- the note, one line, muted.
+
+When the person cancels, the owner gets one quiet notice, `The person cancelled your watch on <what>.`, so it does not
+go on waiting. Copy follows ux-writing §1: the session's name, not its address, and no "watch id" on screen. The
+placement is a layout choice: §18.14 Q3.
+
+**Protocol (additions only, protocol.md §4):** methods `watches.list { sessionId }` → `{ watches: WatchView[] }` and
+`watches.cancel { id }`; event `watches_changed { sessionId }`. `WatchView` is `{ id, source, what, until, note,
+createdAt }`, with `source` an enum with `.catch()`. An older host answers neither method, and the window then shows no
+badge (`e2e/older-host.spec.ts`). The badge's count is a selector over the listed rows, not a stored field
+(state-management §3). The platform mock and the web mock implement both methods.
+
+### 18.9 What it replaces and deletes
+
+- The mail tool's six dead fields and `update` (§18.2), and `close`'s blanket refusal.
+- Orchestrators' background shell loops that sleep in order to wake themselves (CI polling; the periodic usage check,
+  [guess] on its exact form, since no document describes it) become a time or PR watch. These loops live in briefs and
+  habits, not in code; Q1's phrase is what reaches them.
+- `.centralu/apps/project-board/bin/wait-checks.mjs`, the CI wait agents start in the background, once the PR source
+  lands (Q2 (a)).
+- §13's watches bullet and §16's "Later: Watches" now point here.
+- Unchanged: start_agent children (already mail), and the merge queue's notices (the apps slice, §13). Nothing on a
+  path #1948 removes is touched: watches use only `MessageService.notice` and MailDelivery.
+
+### 18.10 Files
+
+| File | Change |
+|---|---|
+| `agent-host/src/mail/watches.ts` (new) | `Watches`: register, cancel, list, changed, due, the firing transaction, catch-up |
+| `dev-services/store/migrations/v<n>.ts`, `store/mailbox.ts` | the `mail_watches` step; row methods; the undelivered-notice query by fact name |
+| `mail/host-mail.ts` | builds `Watches`; one call each in `lastResponse`, `cards.tell`, `stopped`, `sessionGone`; the warning |
+| `mail/delivery.ts` | starts and stops `Watches`; `due(now)` in `sweep`; the timer through `schedule` |
+| `mail/tool.ts` | `watch`, `close` with a `w_` id, the `inbox` lines; `MailToolArgs` loses the dead fields |
+| `mail/ids.ts` | the `w_` kind |
+| `mail/rules.ts` | `flowsDownTo`'s watch case; `WARNING_TEXT.watchWakes` |
+| `mail/card-notices.ts` | uses the shared undelivered query |
+| `sessions/tool-definitions.ts` | the mail schema (§18.2); `MAIL_BUDGET_CHARS` 1,175; Q1's phrase if chosen |
+| `protocol` (`commands/methods/`, `events.ts`) | `watches.list`, `watches.cancel`, `watches_changed` |
+| `ui` (`SessionHeader.tsx`, a new `Watches.tsx`, a store slice) | the badge and the list |
+| docs | domain-model §1 "Watch"; tool-cost.md §13; stored-shapes; the §8.2 step 4 case |
+| `dev-services/git-pr.ts` | PR 2 only: reading the checks |
+
+### 18.11 Tests and real-environment checks
+
+Each test fails with its part of the change disabled. Time comes from a fake clock and the injected `schedule`; no
+test sleeps.
+
+- `watches.test.ts`: `in` fires once at its minute and ends; a slot missed across a sleep fires once with `late`;
+  missed `every` slots collapse into one; a session watch set while the target is at rest fires at the next turn's end,
+  not at once; `asked`, `stopped` and `gone` fire and end the watch; a turn that ends while the target's own background
+  work runs does not fire; setting the same watch twice keeps one row with the later end; each refusal (a 21st watch,
+  `every 5m`, an unreadable target, a target with an open task from the caller, `elsewhere`, itself); expiry posts one
+  quiet notice; cancel withdraws an undelivered firing; two `Watches` on one store, interleaved, post one notice for
+  one change; a turn end while the delivery is stopped fires once at `start()`.
+- `rules.test.ts`: a watch firing to its owner rides inline; every other Centralu notice is still pulled.
+- `tool.test.ts`: `watch` answers the id and the state; `close` with a `w_` id cancels, and with another id keeps its
+  sentence; `inbox` lists watches; a dead field is refused.
+- `centralu-tools.test.ts` at the lowered `MAIL_BUDGET_CHARS`; `store-migrations.test.ts`,
+  `store-older-builds.test.ts` and `schema-doc.test.ts` for the step; `protocol.test.ts` golden fixtures;
+  `e2e/older-host.spec.ts` (no badge); a UI test for the badge, the list and Cancel; the `watchWakes` warning at the
+  7th turn in an hour and not at the 6th.
+- No new vendor recordings: there is no new channel into a CLI.
+
+In the real environment (the deep review's cases): a Claude and a Codex session each set `in 2m`, end their turn and
+are woken by the firing, once at rest and once asleep; a busy Codex session gets a firing joined to its turn; a session
+watches a sibling it gave no work; the host restarts between registration and the due time; the computer sleeps across
+a due time (Windows and macOS); the person cancels from the badge and the session is told.
+
+### 18.12 Risks
+
+| Case | Handling |
+|---|---|
+| Two hosts on one store, or a host swap during a firing | only a running delivery evaluates; the dedupe key makes a second evaluation post nothing |
+| A change while no host runs | catch-up at `start()` compares the stored state with the baseline |
+| Concurrent writers (the person cancels while it fires) | the firing re-reads `active` inside its transaction; a cancel after the post withdraws the undelivered notice |
+| A storm of watches | the registration limits and the hourly warning to the person; nothing is held |
+| A clock change, DST, Windows sleep | `at` is resolved to an instant once, at registration; the sweep's slept check catches late timers |
+| Rollback to a build without the table | the rows sleep; nothing fires until an update back |
+| The owner or the target deleted | the owner's rows are deleted with its mail; the target's watchers fire `gone` |
+| A compact or a model switch | the row is the host's, not the conversation's; the firing names the watch and the note |
+| gh missing or signed out (PR 2) | the registration answers `unavailable` and creates no row |
+
+### 18.13 PR order
+
+1. **PR 1** (carries this section, branch `host-watches`): the store step, `Watches` with the time and session sources,
+   the tool change with the dead fields deleted, the inline case, the warning, the protocol and the person's list.
+2. **PR 2**, only if the owner picks the host for pull requests (Q2 (a)): the `#123` source, and `wait-checks.mjs`
+   deleted.
+
+### 18.14 Open questions for the owner
+
+1. **Telling sessions that watches exist (resident characters).** (a) One phrase in `readerFirst`
+   (`sessions/tool-definitions.ts:945`) and in the Assistant's preamble (`sessions/assistant-home.ts:17`):
+   `mail's watch, not a sleep or polling loop, to wait for a session or a time`. It adds 76 characters to every request
+   of every ordinary session and of the Assistant (80 with "a time or CI"), and `READER_BUDGET_CHARS` rises by that,
+   while `MAIL_BUDGET_CHARS` falls by 180. (b) No phrase: a session learns of watches only from a brief or the person.
+   On Claude `mail` is deferred, so nothing resident names it, and the sleep loops stay. **Recommended: (a).** The
+   loops are what this replaces, and the mail tool's own shrink pays for the phrase twice over.
+2. **A pull request's checks.** (a) A host source `#123` (§18.3) in PR 2: it works in every project with gh signed in,
+   gives one wake instead of a polling loop, and deletes `wait-checks.mjs`; the cost is one more polled command in the
+   host. (b) The board app keeps it: no host code, but only where the board is attached, and it posts through `notify`
+   until the apps slice. (c) None: an `every` watch plus `ci_status`, one paid wake per poll. **Recommended: (a).** CI
+   is the most common wait today, and the host already runs `gh pr view`.
+3. **Where the person sees and cancels watches.** (a) A header badge beside the background tasks (§18.8). (b) A row in
+   the session's menu (`SessionHeaderMenu.tsx:15`), out of sight until opened. (c) Only in the Inbox.
+   **Recommended: (a).** It is where the session's other running things are shown, and it disappears when there are
+   none.
