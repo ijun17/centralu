@@ -219,7 +219,10 @@ export class StepsV65 extends MigrationRange {
          * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
          * without asking" weeks after nothing could write such a hold. A row held `budget`, or held `policy` and settled `legacy`, is now `dismissed`:
          * the hold word the person's Dismiss sets, which every build since v65 reads as "not held for the person any more, never delivered". A
-         * `policy` row of today's rule (`reach.holdFor`) was never moved, so its `settled` is NULL and it keeps its Release.
+         * `policy` row of today's rule (`reach.holdFor`) was never moved, so its `settled` is NULL and it keeps its Release. A moved `policy` row
+         * that began a chain of `ask_project` is left as it is, too: v61's other `policy` hold was the untrusted asker's request (D10 replaced both
+         * holds with the one trust gate), and a request may still be the person's pending decision. The v61 mail has no `request` kind, so the
+         * chain's origin on the message (`mail.origin`, set from the chain's own on its first message) says it.
          *
          * The honest word is the hold's own, not a `settled` one: `gone` says the sender or recipient is gone, and `withdrawn` that the sender said
          * it no longer waits, and neither is so; `settled` stays as it was (`legacy`: settled, never awaited). Dismiss also clears the delivery's
@@ -232,7 +235,9 @@ export class StepsV65 extends MigrationRange {
           if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
           this.db.exec(
             `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
-              WHERE held = 'budget' OR (held = 'policy' AND settled = 'legacy')`,
+              WHERE held = 'budget'
+                 OR (held = 'policy' AND settled = 'legacy'
+                     AND COALESCE((SELECT m.origin FROM mail m WHERE m.id = mail_recipients.message_id), '') <> 'ask_project')`,
           )
         },
       },
