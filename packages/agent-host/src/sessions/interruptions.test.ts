@@ -144,6 +144,8 @@ function host(o: { updateResume?: UpdateResumeFolder } = {}) {
     ...(o.updateResume ? { updateResume: o.updateResume } : {}),
   })
   mgr.prLookup = async () => null
+  // Each stop here is told when it happens, as #698 tells it: Centralu's own continue (#1415) holds a network stop's notice until its wait ends (auto-continue.test.ts)
+  mgr.prefs.setUiPreferences({ continueOnNetwork: false, continueAfterLimit: false })
   hosts.push(mgr)
   return { mgr, claude }
 }
@@ -216,6 +218,26 @@ describe('a turn the network stopped (#698)', () => {
     expect(mailReportsTo(parent)).toHaveLength(1)
     expect(reportsTo(parent, child)).toEqual([])
     expect(a.claude.handles.get(parent)!.sent).toEqual([])
+  })
+
+  it('with Centralu continuing it (#1415, on by default), its starter is told once, when the work continues: nothing at the stop', async () => {
+    const a = host()
+    a.mgr.prefs.setUiPreferences({ continueOnNetwork: true })
+    wireHostMail(a.mgr, store)
+    const { parent, child } = await parentAndChild(a)
+    const kid = a.claude.handles.get(child)!
+    kid.answer('waiting on pnpm verify with a Monitor')
+    await eventually(() => mailReportsTo(parent).length === 1)
+
+    kid.ownTurnFails(ECONNREFUSED)
+    expect(info(a, child).interruption).toMatchObject({ reason: 'network', autoContinue: { tries: 0 } })
+    expect(starterNotices(parent)).toEqual([])
+    // Another turn of the tool finishing says its API answers: the child goes on
+    a.claude.handles.get(parent)!.emit({ type: 'turn_complete', sessionId: parent })
+    await eventually(() => starterNotices(parent).length === 1)
+    const [told] = starterNotices(parent)
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'continued' } })
+    expect(told!.body).toBe(`${info(a, child).name} lost the network, which is back, so Centralu continued it. What it owes you comes when it answers or ends.`)
   })
 
   it('an open task is told unanswered by the stop notice, saying the network stopped it, not that the work failed, with no report', async () => {

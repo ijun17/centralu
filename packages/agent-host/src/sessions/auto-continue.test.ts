@@ -7,7 +7,7 @@ import { createRpcHandler } from '../rpc.js'
 import { tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
 import { Adapter } from './turn-continue.test-helpers.js'
-import { MAX_TRIES, PROBE_STEPS_MS, RESET_MARGIN_MS, STAGGER_MS, TICK_MS } from './turn-continue.js'
+import { MAX_FAILED_PROBES, MAX_TRIES, PROBE_STEPS_MS, RESET_MARGIN_MS, STAGGER_MS, TICK_MS } from './turn-continue.js'
 
 /**
  * A turn the network or a usage limit stopped is continued by the host once the cause clears (#1415, #2238): the stop stays a stop
@@ -108,11 +108,15 @@ describe('a turn the network stopped (#2238)', () => {
     expect(a.session(id).state).toBe('working')
   })
 
-  it(`is left for the person after ${MAX_TRIES.network} continues that the network ended again`, async () => {
+  it(`is left for the person after ${MAX_TRIES.network} continues that the network ended again, each try waiting longer than the one before`, async () => {
     const { a, id, handle } = await cutByNetwork()
+    // The probe answers, but the turn fails again (#1415 review: a gateway that answers HEAD and drops the API's requests spent the tries in 75 s)
     online = true
     for (let i = 1; i <= MAX_TRIES.network; i++) {
-      await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[0] + TICK_MS)
+      const step = PROBE_STEPS_MS[Math.min(i - 1, PROBE_STEPS_MS.length - 1)]
+      await vi.advanceTimersByTimeAsync(step - TICK_MS)
+      expect(handle.sent).toHaveLength(i - 1)
+      await vi.advanceTimersByTimeAsync(2 * TICK_MS)
       expect(handle.sent).toHaveLength(i)
       handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: NO_DNS, retryable: true } })
     }
@@ -123,13 +127,29 @@ describe('a turn the network stopped (#2238)', () => {
     expect(handle.sent).toHaveLength(MAX_TRIES.network)
   })
 
+  it(`a probe that never answers leaves the stop for the person after ${MAX_FAILED_PROBES} tries, saying so`, async () => {
+    const { a, id, handle } = await cutByNetwork()
+    const last = PROBE_STEPS_MS[PROBE_STEPS_MS.length - 1]
+    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS.reduce((x, y) => x + y, 0) + (MAX_FAILED_PROBES - PROBE_STEPS_MS.length) * last - last)
+    expect(a.session(id).interruption?.autoContinue).toBeDefined()
+    await vi.advanceTimersByTimeAsync(last + TICK_MS)
+    expect(probes).toBe(MAX_FAILED_PROBES)
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    expect(lines(id, 'continue').at(-1)?.text).toBe("Centralu could not reach this tool's API for hours, so it does not continue this turn by itself. Send a message to go on.")
+    online = true
+    await vi.advanceTimersByTimeAsync(10 * last)
+    expect(handle.sent).toEqual([])
+  })
+
   it('a finished turn starts the count over', async () => {
     const { a, id, handle } = await cutByNetwork()
     online = true
     await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[0] + TICK_MS)
     handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: NO_DNS, retryable: true } })
     expect(a.session(id).interruption?.autoContinue?.tries).toBe(1)
-    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[0] + TICK_MS)
+    // The second try waits the next step
+    await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[1] + TICK_MS)
+    expect(handle.sent).toHaveLength(2)
     handle.emit({ type: 'turn_complete', sessionId: id })
     handle.emit({ type: 'state_change', sessionId: id, state: 'working' })
     handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: NO_DNS, retryable: true } })
@@ -207,6 +227,26 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
     expect(handle.sent).toEqual([])
+  })
+
+  it("a Codex credits limit said after the turn's error takes the wait away again", async () => {
+    const a = host()
+    const { id, handle } = await started(a)
+    // Codex's failed turn first, its rate-limit notice after, at rest
+    handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: "You've hit your usage limit. Upgrade to Pro or try again later.", retryable: false } })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit', autoContinue: { tries: 0 } })
+    handle.emit({ type: 'limit_reached', sessionId: id, credits: true })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit' })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    expect(handle.sent).toEqual([])
+  })
+
+  it("a 429 or a quota that is not the account's own limit is no limit stop, and waits for nothing", async () => {
+    const a = host()
+    const { id } = await started(a)
+    a.adapter.last.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: '429 rate_limit_error: too many requests', retryable: true } })
+    expect(a.session(id).interruption ?? null).toBeNull()
   })
 
   it('sessions of one tool that clear together go a few seconds apart', async () => {

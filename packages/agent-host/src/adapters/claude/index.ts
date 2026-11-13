@@ -8,6 +8,7 @@ import { whichTool } from '../../env-path.js'
 import { launchFor, toolCommand, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import { claudeAutoCompactWindow } from './sdk-query.js'
+import { claudeApiUrl } from './api-url.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
@@ -164,9 +165,9 @@ const WINDOWS_START_GAP_MS = 1500
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
-  /** The CLI's API, which it reads from the same variable it inherits from the host (`AgentAdapter.apiUrl`) */
-  apiUrl(): string {
-    return process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
+  /** The CLI's API (`AgentAdapter.apiUrl`, `claudeApiUrl`) */
+  apiUrl(): Promise<string> {
+    return claudeApiUrl()
   }
   /** The session reads the window with its requests during a turn (`ClaudeSession.readContextMidTurn`, #1526) */
   readonly contextAtRequest = true

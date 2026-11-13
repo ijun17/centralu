@@ -246,6 +246,8 @@ export const SessionInfo = z.object({
       resumeAt: z.string().optional(),
       usedPercent: z.number().optional(),
       windowMins: z.number().optional(),
+      /** A Codex credits or spend limit (#1415): it does not reset with time, so Centralu never continues it by itself */
+      credits: z.boolean().optional(),
     })
     .nullable()
     .default(null),

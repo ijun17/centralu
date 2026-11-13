@@ -383,7 +383,7 @@ export class SessionManager {
       running: (id) => this.handles.has(id),
       settings: () => autoContinueOf(this.prefs.uiPreferences()),
       reachable: async (tool) => {
-        const url = this.adapters.get(tool)?.apiUrl?.()
+        const url = await this.adapters.get(tool)?.apiUrl?.()
         return url ? apiAnswers(url) : true
       },
       note: (e) => this.events.onEvent(e),
@@ -391,7 +391,7 @@ export class SessionManager {
         this.store.sessions.upsertSession(m)
         this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption ?? null })
       },
-      continued: (id, cause) => this.mail.mailContinued(id, cause, this.meta.get(id)?.askedBy ?? null),
+      waitEnded: (id, cause, end) => this.mail.mailWaitEnded(id, cause, this.meta.get(id)?.askedBy ?? null, end),
       // Through Centralu's channel, as an update's continue: sent only while the wait still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
       send: (id, cause, gate) => {
         const note = CONTINUE_NOTES[cause]

@@ -27,8 +27,8 @@ export type MailHooks = {
   sessionGone(sessionId: string): void
   /** A session stopped without answering (docs/plans/mailbox.md "The stop notice"): the senders of the questions it left unanswered are told once */
   stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
-  /** Centralu continued a session a usage limit or the network stopped (#1415): who that stop told hears it once */
-  continued?(sessionId: string, why: 'limit' | 'network', starter: string | null): void
+  /** The wait of a stop Centralu continues by itself ended, continued or not (#1415): who the stop's notice was held from hears it once */
+  waitEnded?(sessionId: string, why: 'limit' | 'network', starter: string | null, end: { continued: boolean; first: boolean }): void
   /** This host leaves, with these sessions in a turn: what an earlier build that may take over reads of their open tasks is written (`leaveForEarlierBuild`) */
   leaving?(inTurn: readonly string[]): void
   /**
@@ -149,13 +149,13 @@ export class MailSessionsView {
     }
   }
 
-  /** Tells the mailbox Centralu continued a stopped session (`MailHooks.continued`). Never throws: the continue is in already */
-  mailContinued(sessionId: string, why: 'limit' | 'network', starter: string | null): void {
+  /** Tells the mailbox the wait of a stop Centralu continues by itself ended (`MailHooks.waitEnded`). Never throws: the wait is over already */
+  mailWaitEnded(sessionId: string, why: 'limit' | 'network', starter: string | null, end: { continued: boolean; first: boolean }): void {
     if (this.host.closing) return
     try {
-      this.hooks?.continued?.(sessionId, why, starter)
+      this.hooks?.waitEnded?.(sessionId, why, starter, end)
     } catch (e) {
-      console.error(`[mail] ${sessionId.slice(0, 8)}: its continue could not be told to the senders (${errorMessage(e)})`)
+      console.error(`[mail] ${sessionId.slice(0, 8)}: the end of its wait could not be told to the senders (${errorMessage(e)})`)
     }
   }
 

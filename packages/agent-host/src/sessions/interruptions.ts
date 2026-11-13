@@ -1,7 +1,7 @@
 import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 import type { StopWhy } from '../mail/stop-notices.js'
-import { errorKind, failureSentence, isNetworkFailure } from './error-kind.js'
+import { failureSentence, isNetworkFailure, isPlanLimit } from './error-kind.js'
 
 /**
  * How an event changes a session's interruption, or `undefined` when it does not. Live state stays with the event's
@@ -25,7 +25,7 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
        */
       if (!e.sessionId || !endedTurn || e.error.code === 'adapter_crashed') return undefined
       if (isNetworkFailure(e.error.message)) return { reason: 'network', at: now, detail: failureSentence(e.error.message).slice(0, 600) }
-      return errorKind(e.error.message) === 'usage limit' ? { reason: 'limit', at: now, detail: failureSentence(e.error.message).slice(0, 600) } : null
+      return isPlanLimit(e.error.message) ? { reason: 'limit', at: now, detail: failureSentence(e.error.message).slice(0, 600) } : null
     case 'limit_reached':
       // Only one that ended a turn: Codex reports its limits at any time (`account/rateLimits/updated`), and one at rest stopped nothing
       return e.sessionId && endedTurn ? { reason: 'limit', at: now } : undefined

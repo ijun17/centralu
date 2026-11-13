@@ -68,6 +68,15 @@ export const STAGGER_MS = 5_000
 /** How often the waits are looked at while any stands; a tick much later than this means the computer slept */
 export const TICK_MS = 5_000
 const SLEPT_MS = 30_000
+/**
+ * Failed probes of a tool's API in a row before its network waits are left for the person: about 6 hours of the computer awake at the
+ * last step. An outage that long is not a drop, and an address the probe cannot see (a gateway set where it is not read) would wait for ever
+ */
+export const MAX_FAILED_PROBES = 80
+const UNREACHABLE_WORDS = "Centralu could not reach this tool's API for hours, so it does not continue this turn by itself. Send a message to go on."
+
+/** A tool's probe while its network waits stand: which step it is on, when the next is, whether one is out, how many failed in a row */
+type Probe = { step: number; next: number; out: boolean; failed: number }
 
 /** What the engine reaches of the host */
 export type TurnContinueHost = {
@@ -88,8 +97,11 @@ export type TurnContinueHost = {
   note(e: NormalizedEvent): void
   /** The session's interruption changed outside an event of its: stored and said to the windows */
   changed(m: SessionInfo): void
-  /** The first continue of a stop went in: who that stop told hears it once (the delegation's stop notice path) */
-  continued(sessionId: string, cause: StopCause): void
+  /**
+   * A stop's wait ended: `continued` when its continue went in (`first` of a run of stops), else it was dropped (Stop, a message, Don't continue,
+   * the trash, the setting, the tries spent). Who the stop's notice was held from hears it now, once (the stop notice path, #1948)
+   */
+  waitEnded(sessionId: string, cause: StopCause, end: { continued: boolean; first: boolean }): void
 }
 
 /** What a send is given: whether the wait still stands, and the word that the tool is being handed the note (from then on the turn is the tool's) */
@@ -101,7 +113,7 @@ export type RetryPhase = 'waiting' | 'sending' | 'handed'
 /** A held retry and the error it stands in for, to say if the turn ends without it */
 type Held = { timer: ReturnType<typeof setTimeout> | null; message: string; phase: RetryPhase }
 /** A stop's wait: its cause, its tool (the account it waits with), and for a limit when */
-type StopWait = { cause: StopCause; tool: ToolName; at?: number; phase: 'waiting' | 'due' | 'sending' }
+type StopWait = { cause: StopCause; tool: ToolName; at?: number; tries: number; phase: 'waiting' | 'due' | 'sending' }
 
 export class TurnContinue {
   /** Retries an overloaded turn's work used since it was done */
@@ -111,7 +123,7 @@ export class TurnContinue {
   private readonly stopTries = new Map<string, { cause: StopCause; n: number }>()
   private readonly stops = new Map<string, StopWait>()
   /** Per tool while its network waits stand: which probe step it is on, when the next is, and whether one is out */
-  private readonly probes = new Map<ToolName, { step: number; next: number; out: boolean }>()
+  private readonly probes = new Map<ToolName, Probe>()
   /** Per tool: the earliest a next continue may go, so sessions that clear together go `STAGGER_MS` apart */
   private readonly slots = new Map<ToolName, number>()
   private ticker: ReturnType<typeof setInterval> | null = null
@@ -162,7 +174,7 @@ export class TurnContinue {
     const i = m.interruption
     if (!endedTurn || (i?.reason !== 'network' && i?.reason !== 'limit')) return
     const cause = i.reason
-    if (!this.host.settings()[cause] || (e.type === 'limit_reached' && e.credits) || this.host.leaving() || this.host.compactTurn(m.id)) return
+    if (!this.host.settings()[cause] || (e.type === 'limit_reached' ? e.credits : m.limit?.credits) || this.host.leaving() || this.host.compactTurn(m.id)) return
     const run = this.stopTries.get(m.id)
     const tries = run?.cause === cause ? run.n : 0
     if (tries >= MAX_TRIES[cause]) {
@@ -173,7 +185,7 @@ export class TurnContinue {
     const now = Date.now()
     const at = cause === 'limit' ? resetAt(e.type === 'limit_reached' ? e.resumeAt : m.limit?.resumeAt, now) : undefined
     i.autoContinue = at === undefined ? { tries } : { at, tries }
-    this.wait(m.id, { cause, tool: m.tool, at, phase: 'waiting' })
+    this.wait(m.id, { cause, tool: m.tool, at, tries, phase: 'waiting' })
   }
 
   /** The stops a host before this one left waiting (stored with each session): taken up again as they were */
@@ -183,7 +195,7 @@ export class TurnContinue {
       const a = i?.autoContinue
       if (!a || (i.reason !== 'network' && i.reason !== 'limit')) continue
       this.stopTries.set(m.id, { cause: i.reason, n: a.tries })
-      this.wait(m.id, { cause: i.reason, tool: m.tool, at: a.at, phase: 'waiting' })
+      this.wait(m.id, { cause: i.reason, tool: m.tool, at: a.at, tries: a.tries, phase: 'waiting' })
     }
   }
 
@@ -192,7 +204,9 @@ export class TurnContinue {
     const id = e.sessionId
     if (!id) return
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancelHeld(id)
-    if (e.type === 'session_deleted') this.dropStop(id)
+    if (e.type === 'session_deleted') this.dropStop(id, false)
+    // Codex says a credits limit when it likes, also after the turn it ended (#1415 review): a wait armed on the error's words goes
+    if (e.type === 'limit_reached' && e.credits && this.stops.get(id)?.cause === 'limit') this.stopContinue(id)
     if (e.type !== 'turn_complete') return
     this.stopTries.delete(id)
     const tool = this.host.meta.get(id)?.tool
@@ -240,7 +254,7 @@ export class TurnContinue {
   /** Don't continue (`sessions.stopContinue`), or the person acted on the session: its stop waits for the person. Whether a wait stood */
   stopContinue(sessionId: string): boolean {
     this.stopTries.delete(sessionId)
-    return this.dropStop(sessionId)
+    return this.dropStop(sessionId, true)
   }
 
   /** The session goes to the trash: a restore from there continues nothing by itself, so the stored wait goes with the row */
@@ -272,14 +286,16 @@ export class TurnContinue {
     return w.phase
   }
 
-  /** Takes a stop's wait away, stored too: whether one stood */
-  private dropStop(sessionId: string): boolean {
+  /** Takes a stop's wait away, stored too: whether one stood. `tell`: it ends without a continue, so who its stop's notice was held from hears it */
+  private dropStop(sessionId: string, tell: boolean): boolean {
     const had = this.stops.delete(sessionId)
     const m = this.host.meta.get(sessionId)
-    if (m?.interruption?.autoContinue) {
-      const { autoContinue: _, ...stop } = m.interruption
+    const i = m?.interruption
+    if (m && i?.autoContinue) {
+      const { autoContinue: _, ...stop } = i
       m.interruption = stop
       this.host.changed(m)
+      if (tell && (i.reason === 'network' || i.reason === 'limit')) this.host.waitEnded(sessionId, i.reason, { continued: false, first: false })
     }
     if (!this.stops.size) this.idle()
     return had
@@ -287,7 +303,11 @@ export class TurnContinue {
 
   private wait(sessionId: string, w: StopWait): void {
     this.stops.set(sessionId, w)
-    if (w.cause === 'network' && !this.probes.has(w.tool)) this.probes.set(w.tool, { step: 0, next: Date.now() + PROBE_STEPS_MS[0], out: false })
+    // Backs off by the session's own tries: a probe that answers while the turn still fails (a gateway that answers but drops the API's requests) does not spend the tries in a minute
+    if (w.cause === 'network' && !this.probes.has(w.tool)) {
+      const step = Math.min(w.tries, PROBE_STEPS_MS.length - 1)
+      this.probes.set(w.tool, { step, next: Date.now() + (PROBE_STEPS_MS[step] ?? PROBE_STEPS_MS[0]), out: false, failed: 0 })
+    }
     if (this.ticker) return
     this.lastTick = Date.now()
     this.ticker = setInterval(() => this.tick(), TICK_MS)
@@ -315,14 +335,25 @@ export class TurnContinue {
     }
   }
 
-  private async probe(tool: ToolName, p: { step: number; next: number; out: boolean }): Promise<void> {
+  private async probe(tool: ToolName, p: Probe): Promise<void> {
     p.out = true
     const up = await this.host.reachable(tool)
     p.out = false
     if (this.probes.get(tool) !== p) return
     if (up) return this.release(tool, 'network')
+    if (++p.failed >= MAX_FAILED_PROBES) return this.unreachable(tool)
     p.step = Math.min(p.step + 1, PROBE_STEPS_MS.length - 1)
     p.next = Date.now() + (PROBE_STEPS_MS[p.step] ?? PROBE_STEPS_MS[0])
+  }
+
+  /** The tool's API has not answered for hours (or its address is one the probe cannot see): its network waits are left for the person */
+  private unreachable(tool: ToolName): void {
+    this.probes.delete(tool)
+    for (const [id, w] of [...this.stops]) {
+      if (w.tool !== tool || w.cause !== 'network' || w.phase !== 'waiting') continue
+      this.stopContinue(id)
+      this.host.note({ type: 'notice', sessionId: id, level: 'warning', from: 'Centralu', label: 'continue', text: UNREACHABLE_WORDS })
+    }
   }
 
   /** The cause cleared for every session of a tool waiting on it */
@@ -346,8 +377,11 @@ export class TurnContinue {
     if (this.stops.get(id) !== w) return
     const m = this.host.meta.get(id)
     // Its stored wait is the truth: gone (a new turn cleared the interruption, the person acted), or the setting turned off meanwhile
-    if (!m?.interruption?.autoContinue || inTurn(m.state) || !this.host.settings()[w.cause] || this.host.leaving()) {
-      this.dropStop(id)
+    // Leaving: the stored wait is the next host's
+    if (this.host.leaving()) return
+    // A new turn cleared it (its end answers what the stop held), or the setting went off meanwhile (the stop is the person's now)
+    if (!m?.interruption?.autoContinue || inTurn(m.state) || !this.host.settings()[w.cause]) {
+      this.dropStop(id, !!m?.interruption?.autoContinue && !inTurn(m.state))
       return
     }
     w.phase = 'sending'
@@ -362,7 +396,7 @@ export class TurnContinue {
         // Handed: the stored wait goes before the tool has it, so a host that starts after this one does not continue the turn again
         handed: () => {
           handed = true
-          this.dropStop(id)
+          this.dropStop(id, false)
         },
       })
     } catch (err) {
@@ -371,8 +405,8 @@ export class TurnContinue {
       this.host.note({ type: 'notice', sessionId: id, level: 'warning', from: 'Centralu', label: 'continue', text: `Centralu could not continue this turn: ${errorMessage(err)}` })
       return
     }
-    if (live()) this.dropStop(id)
-    if (handed && n === 1) this.host.continued(id, w.cause)
+    if (live()) this.dropStop(id, false)
+    if (handed) this.host.waitEnded(id, w.cause, { continued: true, first: n === 1 })
   }
 
   private async fireHeld(id: string, w: Held): Promise<void> {

@@ -302,7 +302,9 @@ export class SessionEvents {
     const stopWhy = workEnded && e.sessionId && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
     if (stopWhy && e.sessionId) {
       this.host.reports.turnStopped(e.sessionId)
-      this.host.mailStopped(e.sessionId, stopWhy, this.stopTold(e.sessionId, waited, delegation?.callerId))
+      // A stop Centralu waits to continue is told when the wait ends (#1415: told once, when the work continues)
+      const held = !!nowInterrupted?.autoContinue
+      this.host.mailStopped(e.sessionId, stopWhy, { ...this.stopTold(e.sessionId, waited, delegation?.callerId), ...(held ? { held } : {}) })
     } else if (workEnded && e.sessionId) {
       // It ended as a turn does: the requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to
       // (docs/plans/mailbox.md §10.6.3). A call still waiting reads its own answer as it returns, which marks the report read (`answerRecorder`)

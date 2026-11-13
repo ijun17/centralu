@@ -499,7 +499,7 @@ export interface AgentAdapter {
    * a turn the network stopped (`TurnContinue`). A request with no credentials, so no quota is spent; any HTTP answer counts. Absent:
    * nothing to ask, and the continue goes on the probe steps alone
    */
-  apiUrl?(): string
+  apiUrl?(): string | Promise<string>
   /**
    * Who this tool is, for the screens that draw a row per tool.
    *

@@ -11,6 +11,18 @@ const USAGE_LIMIT = /usage limit|rate.?limit|\b429\b|quota|limit reached|hit you
 const OVERLOADED = /overload|\b529\b|\b503\b|capacity|temporarily unavailable/i
 const REFUSED = /refus|denied|not allowed|forbidden|\b403\b|permission/i
 
+/**
+ * A turn ended on the account's own five-hour or weekly limit, in the words Claude Code and Codex end such a turn with ("You've hit your session
+ * limit · resets 1am", "Claude AI usage limit reached", Codex's "You've hit your usage limit"; #1415). Narrower than the `usage limit` kind,
+ * which also names a per-minute 429 of an API key, a gateway's quota or another tool's plan: those are no limit that resets for the account,
+ * so Centralu does not wait for one and continue
+ */
+export function isPlanLimit(message: string): boolean {
+  return PLAN_LIMIT.test(message)
+}
+
+const PLAN_LIMIT = /hit your (?:\w+ ){0,2}limit\b|Claude AI usage limit reached/i
+
 export function errorKind(message: string): ErrorKind {
   if (USAGE_LIMIT.test(message)) return 'usage limit'
   if (OVERLOADED.test(message)) return 'overloaded'
