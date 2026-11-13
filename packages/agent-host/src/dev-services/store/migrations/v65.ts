@@ -258,6 +258,41 @@ export class StepsV65 extends MigrationRange {
           )
         },
       },
+      {
+        to: 73,
+        breaksOlderReaders: false,
+        /**
+         * The watches sessions keep (#1324, docs/plans/mailbox.md §18.4): `mail_watches`, one row per watch. `source` and `target` say what it
+         * waits for (`session` and an address, `time` and the words given), `spec` the rest as JSON (a slot and period, or a session's baseline),
+         * `state` one of `active`, `fired`, `expired`, `cancelled`, `gone`. No CHECK on a word, as v58: a newer build may write one this build
+         * does not know.
+         *
+         * **Expand only (#292's rule).** A new table and its indexes. An older build never names it: after a rollback the watches sleep and fire
+         * nothing, and an update back picks them up.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS mail_watches (
+              id          TEXT PRIMARY KEY,
+              owner       TEXT NOT NULL,
+              source      TEXT NOT NULL,
+              target      TEXT NOT NULL,
+              spec        TEXT NOT NULL,
+              note        TEXT NOT NULL DEFAULT '',
+              state       TEXT NOT NULL,
+              last_key    TEXT,
+              fired_count INTEGER NOT NULL DEFAULT 0,
+              created_at  INTEGER NOT NULL,
+              expires_at  INTEGER NOT NULL,
+              next_at     INTEGER,
+              ended_at    INTEGER,
+              ended_by    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS mail_watches_owner ON mail_watches(owner, state);
+            CREATE INDEX IF NOT EXISTS mail_watches_due ON mail_watches(state, next_at);
+          `)
+        },
+      },
     ]
   }
 

@@ -33,6 +33,13 @@ export const MailFacts = z.looseObject({
   pairTurns: z.object({ sessions: z.array(z.string()), turns: z.number() }).optional(),
   /** On Centralu's warning to the person (#2024): the session that went through more compaction cycles (`compact_self` with `then`) in the hour than it warns at, and how many */
   compactCycles: z.object({ session: z.string(), count: z.number() }).optional(),
+  /** On Centralu's warning to the person (#1324): the session whose watches woke it more times in the hour than it warns at, and how many */
+  watchWakes: z.object({ session: z.string(), count: z.number() }).optional(),
+  /**
+   * On a watch's notice to the session that set it (docs/plans/mailbox.md §18.5): the watch, what it waits for, what changed (`turn_ended`, `asked`,
+   * `stopped`, `gone`, a time's slot `due`, or its end: `expired`, `cancelled`) and whether the host fired it late
+   */
+  watch: z.object({ id: z.string(), source: z.string(), change: z.string(), late: z.boolean().optional() }).optional(),
   /** On Centralu's warning to the person (#1684): a send a guard refused (`repeat`, `rate_limited`, `ask_rate`), and whose */
   guardRefused: z.object({ sender: z.string(), reason: z.string() }).optional(),
   answerHeld: z.object({ question: z.string(), answer: z.string() }).optional(),
