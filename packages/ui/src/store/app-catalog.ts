@@ -73,9 +73,10 @@ export function userAppMachine(info: ExternalAppInfo): string | undefined {
 export function appStatus(info: ExternalAppInfo): AppStatusView {
   /*
    * Turned off on its computer (#1938): the copy of an app another computer runs for the same repository. Its status
-   * reads `stopped` (an older window's word for it), so `off` comes first
+   * reads `stopped` (an older window's word for it) only when off is what stops it; an app also invalid, untrusted or
+   * not enabled reads that first, as the host's `blocker` orders them, so the row names what turning it on would not fix
    */
-  if (info.off === true) {
+  if (info.off === true && info.status === 'stopped') {
     const where = info.machine ? 'that computer, so it does not start there' : 'this computer, so it does not start here'
     return { label: 'Off', reason: `It is turned off on ${where}. Turn it on in Settings → Apps.`, runnable: false, tone: 'quiet' }
   }

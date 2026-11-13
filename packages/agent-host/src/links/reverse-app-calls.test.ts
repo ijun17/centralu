@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
-import { linkedNotices } from './apps-across.js'
+import { appsPeers, linkedNotices } from './apps-across.js'
 import { recordStartingHub } from '../sessions/hub-preset.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -123,6 +123,41 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     expect(r.isError).toBe(true)
     expect(text(r)).toMatch(/Hub mac is not reachable.*nothing ran.*copy of board is not used/)
     expect(boardRuns(machine, 'p-remote')).toEqual([])
+  })
+
+  it("answers that the hub did not answer in time when it is linked but its list does not come, and never runs the copy", async () => {
+    const { machine, hub, attach } = await world()
+    machine.apps!.linked.forget('w1')
+    // Linked and offering apps, but its `hub.apps` ends as a link's timeout does
+    const link = { id: hub.id, name: hub.name, reachable: true, answers: true, gives: true, call: () => Promise.reject(new Error('timed out after 2000 ms')) }
+    machine.apps!.linked.usePeers({ machines: () => [], startedBy: () => ({ hub: { id: hub.id, name: hub.name, apps: true }, link }) })
+    const r = await attach('w1').call('app-board', 'peek', {})
+    expect(r.isError).toBe(true)
+    expect(text(r)).toMatch(/Hub mac did not answer in time.*nothing ran.*copy of board is not used/)
+    expect(text(r)).not.toMatch(/does not offer|not be trusted|may be gone/)
+    expect(boardRuns(machine, 'p-remote')).toEqual([])
+    expect(boardRuns(hub, 'p-hub')).toEqual([])
+  })
+
+  it.each([
+    ['recorded as offering no apps', 'runs', JSON.stringify({ id: 'HUB', name: 'Hub mac', apps: false })],
+    ['recorded by a build from before `apps`', 'is withheld', JSON.stringify({ id: 'HUB', name: 'Hub mac' })],
+  ] as const)('after a restart, its hub away and %s: the copy %s, as stored-shapes.md says', async (_, then, record) => {
+    const { machine, hub, attach } = await world()
+    machine.apps!.linked.forget('w1')
+    // As a restarted host before its hub is back: no link, only the session's stored record, read as main.ts wires it
+    machine.store.settings.setAppSetting('started_from_hub_by:w1', record.replace('HUB', hub.id))
+    machine.apps!.linked.usePeers(appsPeers({ settings: machine.store.settings }))
+    const r = await attach('w1').call('app-board', 'peek', {})
+    if (then === 'runs') {
+      expect(text(r)).toBe('peeked')
+      expect(boardRuns(machine, 'p-remote')).toMatchObject([{ tool: 'peek', callerSessionId: 'w1' }])
+    } else {
+      expect(r.isError).toBe(true)
+      expect(text(r)).toMatch(/Hub mac is not reachable.*nothing ran.*copy of board is not used/)
+      expect(boardRuns(machine, 'p-remote')).toEqual([])
+    }
+    expect(boardRuns(hub, 'p-hub')).toEqual([])
   })
 
   it("an ordinary session runs the checkout's copy until it is off on this computer; the started agent uses the hub's either way (§13.7)", async () => {

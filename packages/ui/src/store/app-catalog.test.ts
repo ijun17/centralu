@@ -96,7 +96,7 @@ describe('the rule for reading status', () => {
     })
   })
 
-  it('an app turned off on its computer (#1938) reads Off whatever its status, and cannot be opened', () => {
+  it('an app turned off on its computer (#1938) reads Off when that is what stops it, and cannot be opened', () => {
     expect(appStatus(info('a', { status: 'stopped', off: true }))).toEqual({
       label: 'Off',
       reason: 'It is turned off on this computer, so it does not start here. Turn it on in Settings → Apps.',
@@ -109,5 +109,8 @@ describe('the rule for reading status', () => {
       runnable: false,
     })
     expect(appStatus(info('a', { status: 'stopped', off: false }))).toMatchObject({ label: 'Stopped', runnable: true })
+    // What else stops it comes first, as the host orders it: turning it on would not fix that
+    expect(appStatus(info('a', { status: 'untrusted', trusted: false, off: true }))).toMatchObject({ label: 'Not trusted', reason: UNTRUSTED_REASON })
+    expect(appStatus(info('a', { status: 'invalid', error: 'server.command is missing', off: true }))).toMatchObject({ label: 'Invalid', reason: 'server.command is missing' })
   })
 })

@@ -1792,5 +1792,12 @@ Where the code differs from the design above, and why:
   with the switch named. A
   session started by a hub that gives apps never runs the copy (§13.5), and an off or broken copy still holds the name
   the hub's app takes.
+- **Where else off shows.** The row reads "Off" only when off is what stops the app: one also invalid, untrusted or not
+  enabled reads that first, as the runtime's `blocker` orders them, since turning it on would not fix it. An open view
+  of an app turned off closes with the reason, as one of an untrusted project does: it reads stopped, but no call of
+  it starts it again. A root app keeps the switch (unlike sharing): its copy on a second computer is the case this
+  section is about. An older window shows an off app as "Stopped" and its calls come back refused with the switch named.
+- **From the review of #2254.** A hub that is linked but did not answer in time with its list is said to be that, not
+  "does not offer" (`LinkedApps.withheldWhy` reads why the last ask got no list); still nothing runs.
 - **The merge (§13.8) is not run by this PR.** It comes with a read-only readout of steps 1 to 4 for two data folders
   (in the PR's description, not the repository: it is used once), checked on made-up folders only.

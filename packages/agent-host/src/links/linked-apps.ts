@@ -73,8 +73,8 @@ const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 const LOST_KEPT = 500
 
 export class LinkedApps {
-  /** `<host id>\0<session id>` → what that host last listed for the session */
-  private lists = new Map<string, { apps: LinkedApp[]; at: number }>()
+  /** `<host id>\0<session id>` → what that host last listed for the session; `missed`: why the last ask got no list */
+  private lists = new Map<string, { apps: LinkedApp[]; at: number; missed?: string }>()
   /** A linked host's project by its qualified id → `<host>/<project>`, as last listed to any session: how an app there is named */
   private labels = new Map<string, string>()
   /** Runs whose call lost its link: `run_status` asks the app's host about them. The oldest go past `LOST_KEPT` */
@@ -124,12 +124,18 @@ export class LinkedApps {
 
   /**
    * Why an app of the session's own project is not run for a session its hub gives apps to (`givingHub`), when that hub
-   * does not list it now: the hub is away, or it withholds the app (its project there is not trusted, the app cannot run
-   * there, or it has no record of starting this session)
+   * does not list it now: the hub is away, its last ask got no list (it did not answer in time, or its answer could not
+   * be read), or it withholds the app (its project there is not trusted, the app cannot run there, or it has no record of
+   * starting this session)
    */
-  withheldWhy(hub: AppsPeer, appId: string): string {
+  withheldWhy(hub: AppsPeer, appId: string, sessionId: string): string {
     const copy = `This computer's copy of ${appId} is not used in its place.`
     if (!hub.reachable) return `${awayRefusal(hub.name, NOT_REACHABLE, `${appId} there was not called; nothing ran`)} ${copy}`
+    const missed = this.lists.get(key(hub.id, sessionId))?.missed
+    if (missed) {
+      const what = missed === NOT_REACHABLE ? 'did not answer in time with the apps it offers this session' : `could not be asked for its apps (${missed})`
+      return `${hub.name} ${what}, so ${appId} there was not called; nothing ran. Try again in a moment. ${copy}`
+    }
     return `${hub.name} does not offer ${appId} to this session now: there its project may not be trusted, the app may not be able to run, or the session that started this one may be gone. ${copy} Nothing ran.`
   }
 
@@ -210,8 +216,9 @@ export class LinkedApps {
         } catch (err) {
           away.push({ name: peer.name, why: older(err) ? 'it runs a Centralu from before this; update it there to use its apps from here' : NOT_REACHABLE })
         }
-        // Not asked again within `maxAgeMs`, so a host that hangs does not hold every call of the session; the list it gave last stays
-        this.lists.set(k, { apps: this.listed(peer, sessionId), at: Date.now() })
+        // Not asked again within `maxAgeMs`, so a host that hangs does not hold every call of the session; the list it gave
+        // last stays, and why this ask got none, which `withheldWhy` says rather than blaming the hub's project or app
+        this.lists.set(k, { apps: this.listed(peer, sessionId), at: Date.now(), missed: away.at(-1)?.why })
       }),
     )
     return { away }
