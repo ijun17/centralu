@@ -74,7 +74,7 @@ export class CodexAdapter implements AgentAdapter {
     // translates). This is a guarantee that every record change while we hold the handle is ours,
     // and the manager marks a catch-up skip on top of it (the basis for skipping a 48.6MB/8-second thread/read).
     exclusiveWriter: true,
-    // Child agents, from their threads' status and turns (#290, CodexChildTracker)
+    // Child agents, from their threads' status and turns (#290), and a command or an active goal kept past a turn (#2027): CodexChildTracker
     backgroundTasks: true,
     toolDeferral: false,
     instructionChannel: 'developer',
@@ -85,11 +85,12 @@ export class CodexAdapter implements AgentAdapter {
     // 0.160 TurnStartParams: turn/start steers an already-active regular turn; compact/review input is queued.
     midTurnInput: true,
     /*
-     * Not put to sleep (#568). Waking a large thread measured 7-13 s (`thread/resume` scales with the rollout, ~13.5 s for
-     * 550 MB), and its cache on resume is unmeasured. The memory is better won by one shared app-server per account
-     * (#561 E3: 379 MB vs 2,584 MB for ten threads), decided separately.
+     * Put to sleep like Claude (#568, #2027; docs/plans/sleep-every-tool.md §3a, measured 2026-11-13 on codex-cli 0.160.0,
+     * gpt-5.6-luna): the woken turn read the cache as the live one did (.99 against .91-.97 live, at 2 and 16 min, rollouts
+     * of 1, 47 and 513 MB), and the wake added 3.4-4.8 s, nearly all of it the new process's first model request: a new
+     * app-server was ready in 30-70 ms and `thread/resume` without turns took 33-73 ms even for 513 MB.
      */
-    sleep: false,
+    sleep: true,
   }
 
   launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {

@@ -147,8 +147,8 @@ export class CodexSession implements SessionHandle {
          * way to find the actual cause.
          */
         /*
-         * The ledger says whether it went with work in flight (a crash) or idle (asleep: a Codex session keeps its app-server
-         * while idle, #568, so a shutdown or a kill lands on sessions doing nothing, #1397). What it printed last is the reason
+         * The ledger says whether it went with work in flight (a crash) or idle (asleep: an idle Codex session keeps its
+         * app-server until it is put to sleep, #568, #2027, so a shutdown or a kill lands on sessions doing nothing, #1397). What it printed last is the reason
          * a person can act on: a lock, a bad config line, a panic
          */
         onExit: (code, expected) => this.ledger.exited(expected, withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client)),
@@ -251,6 +251,7 @@ export class CodexSession implements SessionHandle {
           // goalFromCodex folds complete into null — the default state is already null, so there is nothing to emit then
           const g = r.goal ? goalFromCodex(r.goal) : null
           if (g) this.emit({ type: 'goal', sessionId: this.sessionId, goal: g })
+          for (const e of this.childThreads.children.goalIs(g)) this.emit(e)
         })
         .catch(() => {})
     } else {
@@ -359,6 +360,8 @@ export class CodexSession implements SessionHandle {
       return
     }
     if (n.method === 'mcpServer/startupStatus/updated' && !this.threadServers.firstMcpFailure(n.params)) return
+    // What the thread keeps running past the turn is listed before the turn's end goes out, so the session is never idle without it (#2027)
+    for (const e of this.childThreads.children.own(n)) this.emit(e)
     this.emitNotification(n)
     this.childThreads.noteSpawn(n)
     this.childThreads.noteTurnEnd(n)

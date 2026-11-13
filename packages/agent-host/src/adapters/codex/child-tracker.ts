@@ -1,10 +1,10 @@
 import { asObj, str } from '../../json-value.js'
-import { type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
+import { type BackgroundTask, type NormalizedEvent, type SessionGoal } from '@cc/protocol'
 import { BackgroundEvents, endedSummary } from '../background-events.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { firstLine } from '../tool-titles.js'
 import { codexItemOk } from './items.js'
-import { messageIdOf, normalizeNotification, type Notification } from './normalize.js'
+import { goalFromCodex, messageIdOf, normalizeNotification, type Notification } from './normalize.js'
 
 /**
  * A child thread's notification, as steps of the subagent a `spawnAgent` call launched (#222).
@@ -47,8 +47,23 @@ export function launchedThreads(n: Notification): string[] {
   return (Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []).filter((t): t is string => typeof t === 'string' && t !== '')
 }
 
+/** The background list's entry for the thread's active goal: one per thread */
+const GOAL_ID = 'goal'
+
 /**
- * A Codex session's background work: its child agents (#290).
+ * A Codex session's background work: its child agents (#290), and what its own thread keeps going once a turn has ended
+ * (#2027): a command still running, and an active goal. The list is what keeps the session from being put to sleep or
+ * restarted on a new CLI (`sessionIdle`), since both end the app-server and its work with it.
+ *
+ * **A command kept past its turn.** A command's item stays `inProgress` until its process exits, waits for output
+ * included (recorded: `long-command`, codex-cli 0.160.0), and a command running when the app-server ends goes with it
+ * (measured below for a child's). So a command item the turn's `turn/completed` leaves open is still running, and it is
+ * listed (kind `shell`) until its `item/completed` comes, in a later turn or between turns, or the process ends.
+ *
+ * **An active goal.** Codex works toward a goal (`thread/goal/set`) in turns it starts itself, which a sleep would end.
+ * So a goal whose status is `active` is listed (kind `other`) until it is cleared, completed or paused. The goal itself
+ * lives in the thread and outlives the process (the adapter reads it back on resume), so the process ending does not end
+ * it as a task.
  *
  * A child runs on its own thread, and its notifications arrive on the parent's connection (#222). It is live while
  * its thread is active. Measured (scripts/probe-codex-background.mts, codex-cli 0.160.0, gpt-5.6-luna, 2026-10-04):
@@ -82,6 +97,10 @@ export class CodexChildTracker {
   private readonly held = new Map<string, { result: NormalizedEvent; threads: Set<string> }>()
   /** Children whose turn already ended, so a launch result arriving after that is not held (the latest few) */
   private done: string[] = []
+  /** The session's own commands started and not completed, by item id; `kept` once a turn ended with it running (#2027) */
+  private readonly commands = new Map<string, { command: string; kept: boolean }>()
+  /** The objective of the thread's goal while it is active (#2027) */
+  private goal: string | null = null
 
   constructor(private readonly sessionId: string) {
     this.events = new BackgroundEvents(sessionId)
@@ -146,6 +165,39 @@ export class CodexChildTracker {
     return []
   }
 
+  /** A notification of the session's own thread: the commands and the goal it keeps past a turn (#2027) */
+  own(n: Notification): NormalizedEvent[] {
+    const p = asObj(n.params)
+    if (n.method === 'item/started' || n.method === 'item/completed') {
+      const item = asObj(p.item)
+      const id = str(item.id)
+      if (str(item.type) !== 'commandExecution' || !id) return []
+      if (n.method === 'item/started') {
+        if (!this.commands.has(id)) this.commands.set(id, { command: str(item.command), kept: false })
+        return []
+      }
+      const c = this.commands.get(id)
+      this.commands.delete(id)
+      return c?.kept ? this.changed([{ ...this.keptTask(id, c.command), status: codexItemOk(item) ? 'completed' : 'failed' }]) : []
+    }
+    if (n.method === 'turn/completed') {
+      const open = [...this.commands.values()].filter((c) => !c.kept)
+      for (const c of open) c.kept = true
+      return open.length > 0 ? this.changed() : []
+    }
+    if (n.method === 'thread/goal/updated') return this.goalIs(goalFromCodex(asObj(p.goal)))
+    if (n.method === 'thread/goal/cleared') return this.goalIs(null)
+    return []
+  }
+
+  /** The thread's goal as read: a notification, or `thread/goal/get` on resume */
+  goalIs(g: SessionGoal | null): NormalizedEvent[] {
+    const objective = g?.status === 'active' ? g.objective : null
+    if (objective === this.goal) return []
+    this.goal = objective
+    return this.changed()
+  }
+
   /** The turn to interrupt to stop this child, if one is running. */
   turnOf(thread: string): string | null {
     return this.threads.get(thread)?.turnId ?? null
@@ -153,7 +205,10 @@ export class CodexChildTracker {
 
   /** The app-server went away and its child threads with it. */
   release(why: string): NormalizedEvent[] {
-    const live = this.live()
+    // The goal outlives the process (it is the thread's), so it is not among what the process took with it
+    const live = this.live().filter((t) => t.id !== GOAL_ID)
+    this.commands.clear()
+    this.goal = null
     for (const t of this.threads.values()) {
       t.active = false
       t.turnId = null
@@ -187,12 +242,18 @@ export class CodexChildTracker {
     }
   }
 
+  private keptTask(id: string, command: string): BackgroundTask {
+    return { id, kind: 'shell', description: firstLine(command.trim()) || 'Command', parentCallId: id, stopsWithTurn: false, stoppable: false, status: 'running' }
+  }
+
   private live(): BackgroundTask[] {
     const out: BackgroundTask[] = []
     for (const [thread, t] of this.threads) {
       const task = t.active ? this.task(thread) : null
       if (task) out.push(task)
     }
+    for (const [id, c] of this.commands) if (c.kept) out.push(this.keptTask(id, c.command))
+    if (this.goal !== null) out.push({ id: GOAL_ID, kind: 'other', description: `Goal: ${firstLine(this.goal.trim())}`, stopsWithTurn: false, stoppable: false, status: 'running' })
     return out
   }
 
