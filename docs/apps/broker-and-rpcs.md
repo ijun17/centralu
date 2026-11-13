@@ -96,7 +96,8 @@ gate happens in one place, the broker desk (`desk.ts`).
   The answer, allow or deny, is kept per app and capability in the store, used until the manifest's
   `uses` changes, and listed in the Runs panel, where it can be forgotten. While the person decides
   (up to 5 minutes; no answer is a refusal that is not remembered), the request is kept alive with a
-  progress notification every 10 s.
+  progress notification every 10 s. Designed to change (#2237, not built): only a caller under `safe`
+  is asked ([app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent)).
 - **Runaway limits.** A chain holds at most 3 app calls (the view's or session's app is the first),
   and the same app tool cannot be called again inside its own chain; both are checked before the
   person is asked. An app runs one agent at a time (a second request is refused, not queued) and at

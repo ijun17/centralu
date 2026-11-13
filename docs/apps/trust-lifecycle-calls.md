@@ -50,7 +50,9 @@ either to act.
 - **User-folder apps** are trusted: the person put them there. An app **imported** from elsewhere
   is someone else's code, so it gets its own confirmation: it arrives turned off and runs only
   after the person has seen what it runs ([handing-over.md](handing-over.md)). A project app that arrives with `git pull` is
-  governed by the project's trust above; it gets no second gate.
+  governed by the project's trust above; it gets no second gate. Designed, not built (#2237): that
+  trust also stands for what an app declares in `uses`, with no card at first use
+  ([app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent)).
 
 ## Lifecycle
 
