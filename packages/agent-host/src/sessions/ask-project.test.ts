@@ -604,6 +604,8 @@ describe('asking another project', () => {
     // The stop notice is the mailbox's (docs/plans/mailbox.md "The stop notice"): without mail nobody is told
     // Delivery is not started: nothing here waits on it
     wireHostMail(w.mgr, w.store)
+    // Told at the stop, as #698 tells it: with Centralu continuing the turn (#1415) the notice waits for the wait's end (auto-continue.test.ts)
+    w.mgr.prefs.setUiPreferences({ continueOnNetwork: false })
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })

@@ -22,6 +22,9 @@ beforeEach(async () => {
   w = await crossWorld()
   m = wireHostMail(w.mgr, w.store)
   read = mailReader(w.store)
+  // Each stop here is told when it happens, as #698 tells it: Centralu's own continue (#1415) holds a network or limit stop's
+  // notice until its wait ends (mail/stop-notices.test.ts, interruptions.test.ts)
+  w.mgr.prefs.setUiPreferences({ continueOnNetwork: false, continueAfterLimit: false })
 })
 afterEach(async () => {
   m.delivery.stop()
