@@ -29,9 +29,7 @@ describe('Markdown: a numbered list that starts above 1', () => {
     const out = html('- a\n  - nested\n\n**More**\n2. two')
     expect(out).toContain('<p><strong>More</strong></p>')
     expect(out).toContain('<ol start="2">')
-  })
-
-  it('leaves the lazy line of a tight list tight', () => {
+    // The lazy line of a tight list is its own: the list stays tight
     expect(html('1. one\nlazy\n2. two')).not.toContain('<p>')
   })
 })
