@@ -21,28 +21,25 @@ import './lint-crash.js'
 import { ESLint } from 'eslint'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { totalmem } from 'node:os'
-import { join, relative, sep } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getHeapStatistics, setFlagsFromString } from 'node:v8'
 import {
   applyAllowlist,
   archiveUses,
-  ASSERTIONS,
-  assertionTotals,
   ALLOWLIST_DIR,
   baseCommit,
   countedFiles,
   countFindings,
   disabledFindings,
   eslintOptions,
-  guardRun,
+  guardPassFor,
   LISTABLE_RULES,
   lintHeapMb,
   lintFailed,
   lintHints,
   listFileOf,
   otherErrors,
-  overAndUnder,
   packageOf,
   readAllowlist,
   renamesSince,
@@ -71,16 +68,15 @@ setFlagsFromString(`--max-old-space-size=${Math.max(lintHeapMb(totalmem()), Math
 const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
 // The guard pass: its own configuration, and no comment configures it. A file none of its rules reads is not a result.
-// It reads the whole repository even for some paths: the ceilings below count every file of a package, and it is a run of seconds
-const guardAll = await guardRun(ROOT)
+// Its ceilings count the whole repository, and not shown: they are not findings (#1607)
+const guardPass = await guardPassFor(ROOT, paths)
+const guardAll = guardPass.all
 const disabled = disabledFindings(ROOT, results)
-// Counted over the whole repository, and not shown: they are not findings (#1607)
-const assertions = assertionTotals(ROOT, guardAll)
+const assertions = guardPass.totals
 const archiveUsed = archiveUses(guardAll)
-const named = (file: string) => paths.length === 0 || paths.some((p) => relative(ROOT, file).split(sep).join('/').startsWith(p.split(sep).join('/').replace(/^\.\//, '').replace(/\/$/, '')))
-const guardResults = guardAll.filter((r) => r.messages.length > 0 && named(r.filePath))
+const guardResults = guardPass.shown
 const whole = paths.length === 0 && !recording
-const { over: assertionsOver, under: assertionsUnder } = recording ? { over: [], under: [] } : overAndUnder(assertions, ASSERTIONS)
+const { over: assertionsOver, under: assertionsUnder } = recording ? { over: [], under: [] } : guardPass
 const archiveStale = whole ? unusedArchiveEntries(archiveUsed) : []
 
 if (recording) {
