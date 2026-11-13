@@ -36,7 +36,7 @@ describe('the rows', () => {
     expect(watchLine(watch({ at: today(16, 30) }), now)).toBe('At 16:30')
     expect(watchLine(watch({ at: tomorrow(8, 5) }), now)).toBe('At 08:05 tomorrow')
     expect(watchLine(watch({ at: today(9, 30), everyMinutes: 30, until: tomorrow(14, 5) }), now)).toBe('Every 30 minutes · until tomorrow 14:05')
-    expect(watchLine(watch({ everyMinutes: 1, until: new Date(2026, 10, 20, 14, 5).getTime() }), now)).toBe('Every minute · until Nov 20 14:05')
+    expect(watchLine(watch({ everyMinutes: 60, until: new Date(2026, 10, 20, 14, 5).getTime() }), now)).toBe('Every 60 minutes · until Nov 20 14:05')
     expect(watchLine(watch({ source: 'pr', what: '#123' }), now)).toBe('Until the checks on #123 finish')
     expect(watchLine(watch({ source: 'other', what: 'a newer host’s watch' }), now)).toBe('a newer host’s watch')
   })
