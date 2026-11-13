@@ -484,6 +484,8 @@ describe('holds an earlier build left, on a store opened from v64 (#2243)', () =
     thread('t_auto', S1, null)
     const auto = post('m_auto', 't_auto', S3, 'note', S1)
     const budget = post('m_budget', 't_auto', S1, 'note', S3)
+    // Not held by the old build: the delivery will judge it by today's gate, and may hold it
+    const plain = post('m_plain', 't_auto', S3, 'note', S1)
     heldV64(store, SA, [request], 'policy')
     heldV64(store, S1, [auto], 'policy')
     heldV64(store, S3, [budget], 'budget')
@@ -493,26 +495,20 @@ describe('holds an earlier build left, on a store opened from v64 (#2243)', () =
     expect(store.mailbox.heldRows()).toEqual([])
     // Today's gate, as the host gives it (`reach.holdFor`): a message from the project of S2, which is untrusted here, is held
     const holdsNow = (m: { kind: string; senderProject: string | null }) => m.kind === 'message' && m.senderProject === 'px'
-    expect(movePendingThreadMail(store.raw, NOW, (address) => (address === S2 ? 'px' : null), holdsNow).recipients).toBe(3)
+    expect(movePendingThreadMail(store.raw, NOW, (address) => (address === S2 ? 'px' : null), holdsNow).recipients).toBe(4)
     expect(store.mailbox.heldRows().map((h) => [h.messageId, h.held])).toEqual([[request, 'policy']])
     expect(store.mailbox.recipient(auto, S1)?.held).toBe('dismissed')
     expect(store.mailbox.recipient(budget, S3)?.held).toBe('dismissed')
     // Never delivered, as before: neither an ended hold nor the request is pending for a turn
-    expect(store.mailbox.pendingFor(S1, NOW)).toEqual([])
+    expect(store.mailbox.pendingFor(S1, NOW).map((p) => p.message.id)).toEqual([plain])
     expect(store.mailbox.pendingFor(S3, NOW)).toEqual([])
-    store.close()
-  })
-
-  it('does not undo a hold the delivery set on a moved row: the next start’s move leaves a `policy` row of today’s gate held (#2243)', () => {
-    const { store, db, ids } = upgraded()
-    movePendingThreadMail(db, NOW, () => null, () => false)
-    // The delivery judges a moved row (settled `legacy`) by today's gate and holds it: `records.hold` writes `held` and nothing else
-    expect(store.mailbox.recipient(ids.n ?? '', S1)).toMatchObject({ held: null, settled: 'legacy' })
-    store.mailbox.hold(S1, [ids.n ?? ''], 'policy')
-    movePendingThreadMail(db, NOW + 1_000, () => null, () => false)
-    movePendingThreadMail(db, NOW + 2_000, () => null, () => false)
-    expect(store.mailbox.recipient(ids.n ?? '', S1)).toMatchObject({ held: 'policy', settled: 'legacy' })
-    expect(store.mailbox.heldRows().map((r) => r.messageId)).toContain(ids.n)
+    // A moved row is judged by the delivery like any other: held `policy` by today's gate, it is still held after the next starts' moves (`records.hold` writes `held` alone)
+    expect(store.mailbox.recipient(plain, S1)).toMatchObject({ held: null, settled: 'legacy' })
+    store.mailbox.hold(S1, [plain], 'policy')
+    movePendingThreadMail(store.raw, NOW + 1_000, (address) => (address === S2 ? 'px' : null), holdsNow)
+    movePendingThreadMail(store.raw, NOW + 2_000, (address) => (address === S2 ? 'px' : null), holdsNow)
+    expect(store.mailbox.recipient(plain, S1)).toMatchObject({ held: 'policy', settled: 'legacy' })
+    expect(store.mailbox.heldRows().map((h) => h.messageId).sort()).toEqual([plain, request].sort())
     store.close()
   })
 })
