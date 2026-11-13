@@ -8,6 +8,7 @@ import { isTextEntry, pressesItself } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
 import { projectLabelOf } from '../../store/names.js'
 import { useInbox } from '../../store/selectors.js'
+import { appCanLines } from '../../store/uses-lines.js'
 import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -379,9 +380,9 @@ function doneable(it: { state: string; interruption?: { reason: string } | null 
 }
 
 /**
- * What an app a trusted project gained declares it may ask for (#1141), for its inbox notice: it is trusted with the
- * project, so this is what that trust now lets it ask
+ * What an app a trusted project gained can do (#1141, `appCanLines`), for its inbox notice: it is trusted with the
+ * project, so what it declares runs without asking (#2237)
  */
 function arrivalAsks(asks: readonly string[]): string {
-  return asks.length > 0 ? `Trusted with its project. May ask to: ${asks.map((a) => a.charAt(0).toLowerCase() + a.slice(1)).join('; ')}` : 'Trusted with its project. Asks for nothing beyond its own tools'
+  return `Trusted with its project. ${appCanLines(asks).join('. ')}`
 }

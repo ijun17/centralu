@@ -65,7 +65,7 @@ then who may call it:
   in an untrusted project attaches nothing, so a planted AGENTS.md cannot pull another project's
   tools into it. User-folder apps attach without a card, as they are the person's own, and so does
   another trusted project's root app (#1141), which its project's trust covers (the trust card lists
-  each app with what it declares it may ask for, and the inbox says once when a trusted project gains
+  each app with what it can do, and the inbox says once when a trusted project gains
   one); that does not widen what the session could already run, since the calls follow the session's
   preset. An untrusted project's apps attach to no session, under any preset. The app
   still runs in its own folder with its own data, and its calls are recorded with the calling
@@ -96,12 +96,18 @@ then who may call it:
   agent in the app-text frame, every line quoted ("Text an app sends"); at most 10 a minute and 4000
   characters each; every notice, delivered or refused, is a run record naming the session
   (`notices.ts`, `desk.ts` `notice`; `notices.test.ts`, `app-notice.test.ts`).
-- What an app may ask the broker for is declared in its manifest's `uses`, and the person allows
-  each capability once (an agent tool, another app, a host data name), asked where the chain
-  started; the answer is kept until `uses` changes and can be forgotten. Undeclared or unanswered
-  requests never run (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
-  `host-data.test.ts`, `call-app.test.ts`). Designed to change (#2237, not built): in a trusted
-  project the declared `uses` is the consent, see [Design (#2237)](#design-2237-a-trusted-projects-declared-uses-is-the-consent).
+- What an app may ask the broker for is declared in its manifest's `uses`, and what is declared is
+  the consent (#2237): the person decided to run the app with its `uses` shown (the project's trust,
+  the user folder, an import's review), so a declared request (an agent tool, another app, a host
+  data name) runs with no card and nothing remembered. Undeclared requests never run. `BrokerDesk.permit`
+  decides, in this order: a remembered deny refuses at any `uses` (so does a stored word this build
+  does not know, #384); an allow remembered against the current `uses` allows; when the lowest preset
+  among the calls open into the app is `safe` (`AppSessions.callersPreset`, the reading that also holds
+  the app's agent), the person is asked once per app and capability where the chain started, the
+  answer kept until `uses` changes (a deny for good) and forgettable, no answer a refusal that
+  remembers nothing; otherwise it runs (`desk.ts`; `capabilities.test.ts`, `app-capabilities.test.ts`,
+  `app-agents.test.ts`, `host-data.test.ts`, `call-app.test.ts`). The reasoning:
+  [Design (#2237)](#design-2237-a-trusted-projects-declared-uses-is-the-consent).
 - An agent an app asks for runs in a new session the person can see, under `auto`, the default
   every new session gets, never above any session with a call open into the app (owner decision
   2026-11-05; it was `safe`; the rule and its residual under "An agent an app started" in [approvals.md](approvals.md)), with no apps attached, and receives the prompt framed as the app's text ("Text an app
@@ -145,9 +151,14 @@ Limits:
   does with what they send: an attached app receives whatever the calling session's agent passes it,
   which can include that project's files or conversation. "Always for this pair" covers every app
   the other project shares, including ones shared later.
-- A permission is per capability, not per request: once an app may run an agent, the app decides
-  what to ask it. The agent runs under `auto` held to every session with a call open into the app (owner decision
+- A permission is per capability, not per request, and in a trusted project it is the app's declaration: an app
+  that declares an agent runs agents whenever it decides, with no card unless a `safe` session calls into it, and
+  the app decides what to ask them (#2237). The agent runs under `auto` held to every session with a call open into the app (owner decision
   2026-11-05; its writes and commands stopped at an approval card under `safe` before), and what it may read is whatever its session can read.
+  What bounds it: one agent per app at a time and 5 a minute, each a visible session and a run record.
+- A changed `uses` applies with the pull that brings it, as the app's code does: nothing tells the person, and outside
+  `safe` nothing asks (#2237; decided, see "Decided" under the design below). To stop an app using something, turn the
+  project's trust off, remove the app or its `uses` line, stop it, or keep a remembered deny.
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message. It never lists a session in the session archive (FR-22), and no app capability or
   agent tool restores or deletes one for good — only the person, in Settings.
@@ -156,9 +167,8 @@ Limits:
 
 ## Design (#2237): a trusted project's declared `uses` is the consent
 
-**Status: design, not built.** Everything above this heading describes the code as it is. The pull request
-that builds this rewrites the bullets it changes (named under "Changes, by file") and deletes this status line.
-Line numbers are those of main at `4b3be7aa4`.
+Built. The bullets above describe the code; this section keeps the reasoning, the decisions and what was checked.
+Line numbers are those of main at `4b3be7aa4`, before the change.
 
 ### Why
 
@@ -192,7 +202,7 @@ is already one the person decided about, with its `uses` shown.
   `dev-services/store/permissions.ts` (`app_permissions`), `rpc.ts:655-660`, `trust-flow.ts` (`listAppGrants`, `forgetAnswer`).
 - The window: `RunsPanel.tsx:102-149` (Permissions), `ApprovalCard.tsx:225-262` (the capability card),
   `CapabilityAsk.tsx`, `TrustCard.tsx`, `Inbox.tsx:386` and `noteAppArrivals` (`core/src/inbox/inbox.ts:83`).
-- PR #2235 (branch `lane-apps-tool`, open; re-read at `788ac801a`): it does not touch `desk.ts`,
+- PR #2235 (merged as `4b1982947`; read open at `788ac801a`, and again after this branch was rebased on it): it does not touch `desk.ts`,
   `capabilities.ts`, `askCapability` or the Runs panel, and its edits to this file, `trust-lifecycle-calls.md` and
   `broker-and-rpcs.md` are in other paragraphs than this design's. It adds the session-side gate this design
   leans on: a session's `app` call runs a tool that only reads (or is declared `local`, or `routine` in the
@@ -208,7 +218,8 @@ signature. Its decision becomes, in this order:
 
 1. **A remembered deny refuses, at any stamp.** Today a deny given against an older `uses` is asked again
    (`known.stamp === stamp`, `:690`); with no card that would silently become an allow. A deny holds until the
-   person forgets it.
+   person forgets it. A stored word this build does not know (a newer build's, #384) refuses with the denies, as
+   it did at the current stamp before: it is not an allow this build can read.
 2. A remembered allow at the current stamp allows (as today; such rows now come only from rule 4).
 3. **Otherwise the request is allowed with no card and nothing remembered**, unless rule 4 applies. The consent
    is the decision that lets the app run, read where it is enforced (an untrusted project's app never gets
@@ -235,7 +246,7 @@ that reaches `permit` is one that could start an agent itself without a card, or
 The desk still knows nothing about sessions or presets. `BrokerHost` gains one member,
 `asksPerson(callers: AgentCaller[]): boolean`, and `permit` calls it with `this.apps.agentCallers(app.ref)`.
 
-Why `safe` keeps the card (the issue marks it optional, so it is also open question 1): under `safe`
+Why `safe` keeps the card (the issue marks it optional; decided below, "Decided" 1): under `safe`
 `start_agent` asks (approvals.md, the `start_agent` rows) and every boundary stays closed (#606). After
 PR #2235 a `safe` session runs an app's read-only (or `local`, or own-project `routine`) tool unasked; if that tool's `run_agent` then needed no card,
 the session would start an agent through the app that it may not start itself. `normal`, `edits` and `auto`
@@ -288,8 +299,10 @@ changed is the host's rule for when it asks the person, which is not something t
   the `uses` line, stop it, or keep a remembered deny. To be asked first: run the calling session under `safe`.
 - No list is added to Settings → Permissions. Capability answers are per app and stay with the app; the consent
   itself is the project's trust, which is shown and changed where it is today.
-- What trust covers is on screen today only when it is given (the trust card, the "New app" inbox notice, the
-  import review). Showing it afterwards is open question 2.
+- What trust covers is on screen only when it is given (the trust card, the "New app" inbox notice, the import
+  review), now worded as what the app can do ("Can run your default agent in a new session", `appCanLines`).
+  Nothing new shows it afterwards ("Decided" 2): asked how an app is used, the agent looks it up (the manifest,
+  the runs) and answers.
 
 ### A linked machine
 
@@ -304,84 +317,94 @@ another (`session-apps.ts`, `app-access.ts`, `app-calls.ts` carry no machine).
 One pull request, deep tier (trust and permissions). No store step, no protocol message.
 
 - `apps/external/desk.ts`
-  - `permit`: line 690 becomes rule 1 and rule 2; after the `host` check, `if (!host.asksPerson(this.apps.agentCallers(app.ref))) return null`.
-    Nothing else in it moves. With no host (a runtime without sessions) it refuses as today.
-  - `BrokerHost`: add `asksPerson`.
-  - `permissions()`: `current` is `d.decision === 'deny' || d.stamp === stamp`.
-  - `deniedText`: drop "and Centralu asks again when the app's manifest changes what it uses".
-  - The header's "A declaration is not a grant" paragraph and `permit`'s comment say the new rule.
-- `sessions/app-sessions.ts`: one method, `callersPreset(callers)`, wraps
-  `appAgentPreset(callers, (id) => this.host.meta.get(id)?.permissionPreset)`; `runAppAgent` (`:439`) uses it.
-  The wiring's `Pick<AppSessions, …>` (`session-app-wiring.ts:42`) gains the name.
-- `sessions/session-app-wiring.ts` `brokerHost()`: `asksPerson: (callers) => this.host.appSessions.callersPreset(callers) === 'safe'`.
+  - `permit`: rule 1 is `known.decision !== 'allow'` (a deny, or a word this build does not know) at any stamp;
+    rule 2 an allow at the current stamp; after the `host` check,
+    `if (!host.asksPerson(this.apps.agentCallers(app.ref))) return null`. Nothing else in it moves. With no host
+    (a runtime without sessions) it refuses as before.
+  - `BrokerHost`: `asksPerson`.
+  - `permissions()`: `current` is `d.decision !== 'allow' || d.stamp === stamp`.
+  - `deniedText`: no "and Centralu asks again when the app's manifest changes what it uses".
+  - The header and `permit`'s comment say the rule; `capabilities.ts` `usesStamp` and `runtime.ts`
+    `permissions`/`forgetPermission` comments follow.
+- `sessions/app-sessions.ts`: `callersPreset(callers)` wraps `appAgentPreset` over the session records;
+  `runAppAgent` uses it. The wiring's `Pick<AppSessions, …>` gains the name.
+- `sessions/session-app-wiring.ts` `brokerHost()`: `asksPerson: (callers) => callersPreset(callers) === 'safe'`.
 - `apps/external/test-helpers.ts` `fakeBrokerHost`: `asksPerson: () => false` by default.
-- `packages/protocol/src/entities/apps.ts`: the comment on `AppPermission.current` (a deny is always current).
-  The shape is unchanged, so no fixture changes ([protocol.md](../protocol.md) §4). An older window shows what a
-  newer host sends correctly, and the other way round.
-- Words (ux-writing.md §1.12, one wording per state). "May ask to:" is no longer true, and the prefix is written
-  three times (`TrustCard.tsx:70`, `Inbox.tsx:386`, `trust-flow.ts:57`). It moves into one function beside
-  `usesLines` and reads "Can …" ("Can run your default agent in a new session"); "Asks for nothing beyond its own
-  tools" becomes "Uses nothing beyond its own tools".
-  - `ApprovalCard.tsx:257`: "Centralu remembers your answer for this app. You can change it later under Runs →
-    Permissions."
+  `sessions/app-broker.test-helpers.ts`: `answerCapabilities` answers a screen's question as well as a session's
+  card, so a host-level test that does not care about the question is not left waiting on one.
+- `packages/protocol/src/entities/apps.ts`: the comment on `AppPermission.current`. The shape is unchanged, so no
+  fixture changes ([protocol.md](../protocol.md) §4). An older window shows what a newer host sends correctly, and
+  the other way round.
+- Words (ux-writing.md §1.12, one wording per state). "May ask to:" was no longer true, and the prefix was written
+  four times (`TrustCard.tsx`, `Inbox.tsx`, `trust-flow.ts` twice: the trust card and the share card's "It may ask
+  to:"). One function beside `usesLines`, `appCanLines` (protocol `entities/apps.ts`), now says it: "Can …" per
+  line ("Can run your default agent in a new session"), "Uses nothing beyond its own tools" for none. The three
+  places call it; the inbox notice joins its lines with ". ". "What it may ask for is not known" became "What it
+  can do is not known", and the share card's "What … may ask for changed" "What … can do changed".
+  - `ApprovalCard.tsx`: "Centralu remembers your answer for this app. You can change it later under Runs →
+    Permissions." (the "manifest" in the old text was an internal word, ux-writing.md §3).
   - `trust-flow.ts` `listAppGrants` and `forgetAnswer`: say what forgetting does now (a forgotten deny lets the app
-    use it again; an allow matters only under `safe`).
+    use it again, asked first only under `safe`; a forgotten allow means a `safe` caller is asked again).
+- Added while building ("Decided" 4): `trust-flow.ts` `forgetAnswer` raises the Assistant-change card before it
+  forgets a deny, and reads the answer again after Allow; [approvals.md](approvals.md) has its row, and
+  approvals-from-the-assistant.md and agent-host/assistant/window-parity.md say it.
   - `RunsPanel.tsx`: the comment on `Permissions`; the markup is unchanged.
-- Documents, in the same PR: the "What an app may ask the broker for" bullet and the Limits bullet "A permission is
-  per capability" above; a row in approvals.md's table (an app's declared broker request: `safe` asks once per app
-  and capability, every other column allowed, a remembered deny refuses under all; enforced in `BrokerDesk.permit`);
-  "Asked once." in apps/broker-and-rpcs.md; the user-folder bullet in apps/trust-lifecycle-calls.md "Trust".
-  apps/build-loop.md's paragraph on a denied capability stays true (a Deny under `safe`, or one kept from before).
+- Documents: the "What an app may ask the broker for" bullet and the Limits bullets above; a row in
+  [approvals.md](approvals.md)'s table; "Asked once." in apps/broker-and-rpcs.md; the user-folder bullet in
+  apps/trust-lifecycle-calls.md "Trust". apps/build-loop.md's paragraph on a denied capability stays true (a Deny
+  under `safe`, or one kept from before).
 
-No layout, component or motion changes (design-system.md §9 has nothing to cover here).
+No layout, component or motion changes (design-system.md §9 has nothing to cover here). The trust card's list of
+what an app can do is one `<ul>` now, with the "uses nothing" line as its one item where it was a `<p>`.
 
 ### What goes away
 
 With `safe` keeping the card, little: the stamp check on a deny, the "asks again when the manifest changes"
-promise in four strings, two of the three copies of the "May ask to:" prefix, and the second copy of the
+promise in four strings, three of the four copies of the "May ask to:" prefix, and the second copy of the
 `presetOf` closure. The card, the view question and the book stay, because `safe` and older linked hosts use
 them.
 
 Considered and not taken: asking in the `safe` session instead of where the chain started would let the host
 drop the view question (`HostCards.appQuestions`, about 80 lines), but the window must keep `CapabilityAsk` for
 older linked hosts, the two RPCs would be retired rather than removed, and a person who clicked in a pinned view
-would be asked in another place. Not worth it.
-
-If the owner picks "no card under `safe` either" (question 1, option B), the host loses `asking`, its timers,
-`CapabilityQuestion`, `BrokerHost.askCapability`, `HostCards.askCapability` and `appQuestions`, `usesStamp` and
-`CapabilityBook.put` (about 300 lines with their tests); the window keeps its side for older linked hosts.
+would be asked in another place. Not worth it. "No card under `safe` either" ("Decided" 1, not taken) would have
+removed `asking`, its timers, `CapabilityQuestion`, `BrokerHost.askCapability`, `HostCards.askCapability` and
+`appQuestions`, `usesStamp` and `CapabilityBook.put` (about 300 lines with their tests).
 
 ### Tests
 
-Each fails with the change to `permit` reverted.
+Each case below fails with the change to `permit` reverted (rule 1, rule 3 or the `asksPerson` check), unless it
+says it pins what stayed.
 
-- `apps/external/capabilities.test.ts` (desk level, `fakeBrokerHost`):
-  - callers not under `safe`: `run_agent`, `call_app` and `host_data` each run with an `askCapability` that
-    throws, and the book is empty afterwards;
-  - `asksPerson` true: the existing card tests, unchanged in what they assert;
-  - a deny row written with another stamp refuses, and `askCapability` is not called (fails today: it asks);
-  - an allow row with another stamp, callers not under `safe`: allowed, no card; under `safe`: asked;
-  - undeclared requests are still refused before anything else (existing tests; they must stay green).
-- `sessions/app-capabilities.test.ts` (host level, real session manager):
-  - a `normal` session calls a tool whose app asks for an agent: no `approval_request` with
-    `detail.kind: 'capability'`, the run is `ok`, `apps.permissions` is empty;
-  - the same under `safe`: the card, as today (the existing card tests move to a `safe` session);
-  - a pinned view's call alone (`person`): no question in `apps.questions`;
-  - a pinned view's call while a `safe` session has a call open into the same app: the question is raised
-    (lowest caller), on the view;
-  - a `call_app` chain started by a `safe` session: the called app's request asks, in that session.
-- `sessions/app-agents.test.ts`: the agent's preset and the card agree (one case per preset, through
-  `callersPreset`).
-- `e2e/capabilities.spec.ts`: the session-card spec runs its session under `safe`; one new spec, "under the
-  default preset an app's first agent runs with no card"; the Permissions/Forget spec seeds its row through a
-  `safe` card. The two view-question specs cannot be reached from a view alone any more: they become the
-  host-level case above; `CapabilityAsk.test.ts` exists, and whether it covers what those two specs assert
-  (the sidebar indicator, opening the view from it) was not read.
-- `e2e/app-change-loop.spec.ts` and the suites using `fakeBrokerHost` (`broker-records`, `errors`, `limits`)
-  need no change beyond the helper's default.
-- The new words: `sessions/trust-commands.test.ts` (`:101-134`, `:176`, `:292-299`) and `e2e/apps.spec.ts`
-  (`:875-879`, `:913`) pin "May ask to:" and "Asks for nothing beyond its own tools." Their injection cases
-  (a description or app name that imitates the line must not produce it) keep their shape with the new text.
+- `apps/external/capabilities.test.ts` (desk level, `fakeBrokerHost`), "no caller under safe":
+  - `run_agent`, `call_app` and `host_data` each run unasked, the book is empty, and the host is handed the calls
+    open into the app;
+  - an undeclared request is refused before the callers are read (pins what stayed);
+  - an allow given against older `uses`: through unasked for a non-`safe` caller, asked again under `safe`;
+  - a deny refuses at any `uses` and for any caller, without asking, until forgotten (asked again before).
+  The card tests ("a caller under safe", "waiting", "where the question is attributed") run with `asksPerson`
+  true and assert what they did.
+- `sessions/app-capabilities.test.ts` (host level, real session manager and store):
+  - a session under the default preset (`auto` in a trusted project): the agent runs, no capability card, nothing
+    remembered;
+  - a pinned view's call alone: no question;
+  - a remembered deny written by an older build (another stamp) refuses a default-preset session, no card;
+  - under `safe`: the card tests as before, a deny then refusing a `normal` session too, a `call_app` chain asking
+    in the `safe` session for both apps' requests, a stored word this build does not know refusing `safe` and
+    `auto` callers alike (#384), a `uses` change asking again;
+  - a pinned view's call while a `safe` session holds a call open into the app: the question, on the view.
+- `sessions/app-agents.test.ts`: per preset (`auto`, `edits`, `normal`, `safe`), the card stands exactly when the
+  agent runs under `safe`. The tool-card case runs its caller under `safe`, where both lines it pins still appear.
+- `sessions/trust-commands.test.ts` and `e2e/apps.spec.ts`: the new words; the injection cases (a description, a
+  `uses.background` text or an app folder that imitates a line must not produce it) keep their shape with the new
+  text. `forget_app_answer`'s text is pinned, and forgetting a deny is tested both ways: Deny on its card keeps the
+  deny, Allow forgets it, and a deny that changed while the card stood is not forgotten (fails with the card removed).
+- `e2e/capabilities.spec.ts` runs on the mock platform, which raises the card or the question itself: whether the
+  host asks is not something it can show, so it keeps its specs (they are still what the window does for a `safe`
+  caller and for an older linked host). Its Permissions fixture's outdated row is an allow now, the only outdated
+  row this build reports.
+- The suites using `fakeBrokerHost` (`broker-records`, `errors`, `limits`, `mediation`, `app-template`) need no
+  change beyond the helper's default.
 
 ### Real-environment checks
 
@@ -424,30 +447,27 @@ temporary folder, with the real CLI:
   forget it, and the row says "denied".
 - **Windows**: nothing here touches processes, paths or the pipe.
 
-### Open questions for the owner
+### Decided
 
-1. **Does a caller under `safe` keep the card?**
-   - A. Yes (this design). Under `safe` the person is asked once per app and capability, as today; under every
-     other preset nothing asks. A `safe` session cannot start an agent through an app without the person.
-   - B. No card under any preset. Simpler to explain and about 300 lines less on the host, but a `safe` session
-     starts agents through an app's read-only tool with no question, which `start_agent` under `safe` does not
-     allow, and the only way to hold an app is the project's trust.
-   - Recommendation: **A**. It is #673's own rule (`safe` keeps the card, #606) and the 2026-11-05 decision, and
-     the case that hurt (a builder or a default session waiting on an unseen card) is gone either way.
-2. **After trust is given, where does the person see what an app can do?** (a layout change)
-   - A. Nowhere new. The trust card, the "New app" notice and the import review said it; Permissions lists only
-     remembered answers and is empty for most apps.
-   - B. Runs → Permissions also lists the app's `uses` lines ("Can run your default agent in a new session"),
-     read-only, above the remembered answers. The data is already in the window (`ExternalAppInfo.uses`).
-   - C. B, plus a Block control per line that writes a deny without a card (an RPC addition).
-   - Recommendation: **B**, in the same PR. With no card, this is the one place that says what the app is
-     allowed. C can follow without a migration, since a deny row already wins; #673 chose no setting.
-3. **Is the person told when an app in a trusted project starts declaring more?**
-   - A. No. The change arrives with the pull, like the app's code, which can do more than any `uses` line.
-   - B. An inbox notice once ("<app> can now: …"), by keeping each app's `uses` in the window's snapshot beside
-     the keys `noteAppArrivals` keeps.
-   - Recommendation: **A** for this change; B as its own issue if wanted. Today a changed `uses` asks again at
-     the next use; after this change nothing does, outside `safe`.
+1. **A caller under `safe` keeps the card** (decided 2026-11-13 in the implementation brief for #2237). Under
+   `safe` the person is asked once per app and capability; under every other preset nothing asks. It is #673's
+   own rule (`safe` keeps the card, #606) and the 2026-11-05 decision: a `safe` session cannot start an agent
+   through an app without the person. Not taken: no card under any preset (about 300 lines less on the host, "What
+   goes away"), because a `safe` session would then start agents through an app's read-only tool with no question,
+   which `start_agent` under `safe` does not allow.
+2. **No new place on screen shows what a trusted app can do** (owner, 2026-11-13, recorded on #2237). The trust
+   card, the "New app" notice and the import review say it when trust is given; Runs → Permissions lists only
+   remembered answers, as before, and is empty for most apps. When the person asks how an app is used, the agent
+   finds out itself (the manifest, the runs) and answers. Not taken: listing the `uses` lines under Runs →
+   Permissions, with or without a Block control per line.
+3. **Nobody is told when an app in a trusted project starts declaring more** (decided 2026-11-13 in the
+   implementation brief). The change arrives with the pull, like the app's code, which can do more than any `uses`
+   line. Not taken: an inbox notice once ("<app> can now: …").
+4. **The Assistant's `forget_app_answer` on a deny asks the person** (found in this change's review, agreed
+   2026-11-13 by the session that set the work). Before, forgetting any answer only made the next attempt ask the
+   person, so it ran with no card. Now forgetting a deny lets what the app declares run unasked for every caller not
+   under `safe`: a widening, and the Assistant's commands widen only behind a card (`TrustFlow`, "widening waits for
+   the person"). Forgetting an allow still acts at once. The window's own Forget is the person's and does not ask.
 
 ### Not in this change
 

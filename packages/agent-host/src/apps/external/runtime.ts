@@ -253,9 +253,9 @@ export class ExternalApps {
   }
 
   /**
-   * The remembered capability answers for one app (D-4), most recent first. `current` means it was
-   * given against the manifest's current `uses`; otherwise it is no longer used. Everything is
-   * non-current if the manifest is invalid or the app is gone.
+   * The remembered capability answers for one app (D-4), most recent first. `current` means it is
+   * still used: a deny always, an allow when it was given against the manifest's current `uses`
+   * (`BrokerDesk.permissions`). An allow is non-current if the manifest is invalid or the app is gone.
    */
   permissions(ref: AppRef): CapabilityDecisionListed[] {
     ref = this.resolve(ref)
@@ -263,7 +263,7 @@ export class ExternalApps {
     return this.desk.permissions(ref, m ? m.uses : null)
   }
 
-  /** Forgets one remembered answer (D-4) — the next time that capability is needed, it is asked again */
+  /** Forgets one remembered answer (D-4) — the next time that capability is needed, `permit` decides afresh (#2237) */
   forgetPermission(ref: AppRef, capability: string): void {
     ref = this.resolve(ref)
     this.desk.forgetPermission(ref, capability)

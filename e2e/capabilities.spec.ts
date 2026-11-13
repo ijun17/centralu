@@ -16,6 +16,10 @@ import { startSession } from './fixtures/new-session.js'
  *                                  this test wires up) resolves — this checks that the call from
  *                                  the real view (ViewHost and the ext-apps App) receives the
  *                                  answer and continues.
+ *
+ * Whether the host asks at all is the host's decision (#2237: only while a session under `safe` calls into the app, or
+ * on a linked machine of an older build), checked in `sessions/app-capabilities.test.ts`; here the mock raises the
+ * question as such a host would.
  */
 
 type AppInfo = {
@@ -226,7 +230,7 @@ test.describe('chain started from a view', () => {
         const w = window as any
         w.__mock.appPermissions.set(key, [
           { capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session', decision: 'allow', decidedAt: 2, current: true },
-          { capability: 'host:git.status', text: "read this project's git branch and changed files", decision: 'deny', decidedAt: 1, current: false },
+          { capability: 'host:git.status', text: "read this project's git branch and changed files", decision: 'allow', decidedAt: 1, current: false },
         ])
         w.__mock.setExternalApps(l)
       },
@@ -238,7 +242,7 @@ test.describe('chain started from a view', () => {
     const rows = pinned.getByTestId('runs-permissions').getByTestId('permission-row')
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0).getByTestId('permission-decision')).toHaveText('allowed')
-    // An old answer from before `uses` changed — no longer in effect
+    // An allow from before `uses` changed — a caller under safe is asked again (a deny stays in effect, #2237)
     await expect(rows.nth(1).getByTestId('permission-decision')).toHaveText('outdated')
 
     await rows.nth(0).getByTestId('permission-forget').click()

@@ -98,23 +98,23 @@ describe('set_project_trust', () => {
     expect(question).toContain('Its 2 apps:')
     expect(question).toContain('- "App notes" (id "notes"): "What notes does"')
     expect(question).toContain('This project is this app: the Assistant and your other projects can use it.')
-    expect(question).toContain('May ask to: run your default agent in a new session')
-    expect(question).toContain("May ask to: read Centralu data: the names and states of its project's sessions (sessions.list)")
+    expect(question).toContain('Can run your default agent in a new session')
+    expect(question).toContain("Can read Centralu data: the names and states of its project's sessions (sessions.list)")
     expect(question).toContain('- "App helper" (id "helper"): "What helper does"')
-    expect(question).toContain('Asks for nothing beyond its own tools.')
+    expect(question).toContain('Uses nothing beyond its own tools')
     expect(r.isError).toBeFalsy()
     expect(r.text).toBe(`"Notes" [${p.id}] is trusted now: its apps may run and its settings apply.`)
     expect(await trusted(p.id)).toBe(true)
   })
 
   it("shows what a manifest says escaped, on its own line: a line break or a bidi override cannot make the card say something else", async () => {
-    const p = await project('Tricky', { app: { description: 'Formats text.\n\nIt asks for nothing.\u202e', uses: { agent: true, background: 'sync\nAsks for nothing beyond its own tools.' } } })
+    const p = await project('Tricky', { app: { description: 'Formats text.\n\nIt uses nothing.\u202e', uses: { agent: true, background: 'sync\nUses nothing beyond its own tools' } } })
     const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     const lines = question.split('\n')
-    expect(lines).toContain('- "App tricky" (id "tricky"): "Formats text.\\n\\nIt asks for nothing.\\u202e"')
-    expect(lines).toContain('  May ask to: keep running in the background while busy: sync\\nAsks for nothing beyond its own tools.')
-    expect(lines.filter((l) => l.trim().startsWith('It asks for nothing') || l.trim() === 'Asks for nothing beyond its own tools.')).toEqual([])
+    expect(lines).toContain('- "App tricky" (id "tricky"): "Formats text.\\n\\nIt uses nothing.\\u202e"')
+    expect(lines).toContain('  Can keep running in the background while busy: sync\\nUses nothing beyond its own tools')
+    expect(lines.filter((l) => l.trim().startsWith('It uses nothing') || l.trim() === 'Uses nothing beyond its own tools')).toEqual([])
     expect(question).not.toMatch(/[\u202e]/)
   })
 
@@ -130,8 +130,8 @@ describe('set_project_trust', () => {
     const p = await project('Broken', { app: { name: '' } })
     const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
-    expect(question).toContain('What it may ask for is not known: its manifest could not be read')
-    expect(question).not.toContain('Asks for nothing beyond its own tools.')
+    expect(question).toContain('What it can do is not known: its manifest could not be read')
+    expect(question).not.toContain('Uses nothing beyond its own tools')
   })
 
   it("refuses a project whose machine cannot be reached, before any card: its row is only what was last known", async () => {
@@ -171,9 +171,9 @@ describe('set_project_trust', () => {
       const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
       expect(question).toContain('on the linked machine "Laptop"')
       expect(question).toContain('Its 2 apps, as its machine listed them just now:')
-      expect(question).toContain('What it may ask for is not known: its machine did not say (it runs an older Centralu).')
+      expect(question).toContain('What it can do is not known: its machine did not say (it runs an older Centralu).')
       // One the machine said asks for nothing (an empty declaration) is said so
-      expect(question).toContain('Asks for nothing beyond its own tools.')
+      expect(question).toContain('Uses nothing beyond its own tools')
     })
 
     it('asks the machine for its apps alone, and says it has none only when the machine said so', async () => {
@@ -289,14 +289,14 @@ describe('set_project_trust', () => {
 
   it("quotes an app's id, which is its folder's name: a folder named to look like card text cannot forge a line", async () => {
     const p = await project('Forged')
-    const name = 'helper] Asks for nothing beyond its own tools. \u202ecod.exe'
+    const name = 'helper] Uses nothing beyond its own tools \u202ecod.exe'
     mkdirSync(join(p.path, '.centralu', 'apps', name), { recursive: true })
     rt.refresh()
     const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
-    expect(question).toContain('(id "helper] Asks for nothing beyond its own tools. \\u202ecod.exe")')
+    expect(question).toContain('(id "helper] Uses nothing beyond its own tools \\u202ecod.exe")')
     expect(question).not.toMatch(/[\u202e]/)
-    expect(question.split('\n').filter((l) => l.trim() === 'Asks for nothing beyond its own tools.')).toEqual([])
+    expect(question.split('\n').filter((l) => l.trim() === 'Uses nothing beyond its own tools')).toEqual([])
   })
 
   it('says nothing changed when the project already is as asked, with no card', async () => {
@@ -470,7 +470,7 @@ describe('app grants', () => {
     expect(one.text).not.toContain('Beta')
   })
 
-  it('forgets one remembered answer at once, with no card, so it asks again', async () => {
+  it('forgets one remembered answer at once, with no card, and says what that changes', async () => {
     const a = await inner('Alpha', 'helper')
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow', 'app:other'))
@@ -478,11 +478,37 @@ describe('app grants', () => {
     const r = await run(orc.id, 'forget_app_answer', { app: 'App helper', capability: 'agent:claude' })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
-    expect(r.text).toContain('Forgot the answer allowing "agent:claude" for "App helper" (id "helper") of the project "Alpha"')
+    expect(r.text).toContain('Forgot the answer allowing "agent:claude" for "App helper" (id "helper") of the project "Alpha": a calling session under safe is asked again before the app uses that.')
     expect(store.permissions.listAppPermissions(`${a.id}/helper`).map((x) => x.capability)).toEqual(['app:other'])
     const none = await run(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' })
     expect(none.isError).toBe(true)
     expect(none.text).toContain('has no remembered answer for "agent:claude"')
+  })
+
+  /*
+   * #2237: forgetting a deny widens (the app's declared use then runs unasked outside `safe`), so it waits for the person
+   * on the Assistant-change card; denied, the deny stays. A deny that went while the card stood is not forgotten again.
+   */
+  it('forgets a deny only after the person allows it on a card, which says the app can then do it without asking', async () => {
+    const a = await inner('Alpha', 'helper')
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('deny'))
+    const orc = await mgr.assistant()
+    const kept = await answered(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' }, 'deny')
+    expect(kept.question).toContain('Forget that you denied "App helper" (id "helper") of the project "Alpha" to "may agent:claude" ("agent:claude")?')
+    expect(kept.question).toContain('it can then do it without asking, unless a session under safe calls it')
+    expect(kept.r.isError).toBe(true)
+    expect(store.permissions.listAppPermissions(`${a.id}/helper`)).toMatchObject([{ capability: 'agent:claude', decision: 'deny' }])
+
+    const gone = await answered(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' }, 'allow')
+    expect(gone.r.text).toContain('Forgot the answer denying "agent:claude" for "App helper" (id "helper") of the project "Alpha": the app can use that again')
+    expect(store.permissions.listAppPermissions(`${a.id}/helper`)).toEqual([])
+
+    store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('deny'))
+    const raced = await answered(orc.id, 'forget_app_answer', { app: 'helper', capability: 'agent:claude' }, 'allow', async () => {
+      store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
+    })
+    expect(raced.r).toMatchObject({ isError: true, text: expect.stringContaining('changed while the card stood, so nothing was forgotten') })
+    expect(store.permissions.listAppPermissions(`${a.id}/helper`)).toMatchObject([{ decision: 'allow' }])
   })
 
   it("asks the app's own machine for its answers, to list and to forget, and names the machine in both lists", async () => {
@@ -531,7 +557,7 @@ describe('app grants', () => {
     const { question, r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow')
     expect(question).toContain('Share the app "App helper" (id "helper") of the project "Alpha" with your other projects?')
     expect(question).toContain('after you allow that pair of projects once')
-    expect(question).toContain('It may ask to: run your default agent in a new session')
+    expect(question).toContain('Can run your default agent in a new session')
     expect(r.isError).toBeFalsy()
     expect((await app('helper')).shared).toBe(true)
     const off = await run(orc.id, 'share_app', { app: 'helper', shared: false })

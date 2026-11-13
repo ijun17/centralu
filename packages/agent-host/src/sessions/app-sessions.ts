@@ -349,6 +349,15 @@ export class AppSessions {
   }
 
   /**
+   * The lowest preset among the calls open into an app (`appAgentPreset` over `AppCalls.agentCallers`): what its agent
+   * runs under, and, at `safe`, whether the person is asked before the app uses what it declares (#2237,
+   * `BrokerHost.asksPerson`). One reading for both, so an agent that would run under `safe` is exactly one that asks first
+   */
+  callersPreset(callers: AgentRunRequest['callers']): PermissionPreset {
+    return appAgentPreset(callers, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset)
+  }
+
+  /**
    * Runs an agent an app asked for (M4 D-1, plan decision 6) — stands up **a new session per
    * request** under that app, and returns the answer once the turn ends.
    *
@@ -436,7 +445,7 @@ export class AppSessions {
       projectId: req.app.projectId,
       cwd,
       tool: req.tool,
-      permissionPreset: appAgentPreset(req.callers, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset),
+      permissionPreset: this.callersPreset(req.callers),
       appId: req.app.appId,
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })

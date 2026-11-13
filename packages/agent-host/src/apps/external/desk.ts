@@ -25,9 +25,11 @@ import { appKeyOf, sameApp } from '@cc/protocol'
  *
  * Once the gatekeeper (`broker.ts`) checks only "is there a run currently open for this pipe's app"
  * and hands it off, this is where a single request is fully processed: did the manifest declare it
- * (`uses`), what resolves it (each tool's own body), and what gets returned. A declaration is not a
- * grant — anything not declared is refused before it ever reaches the body (treating an absent
- * declaration as "everything" would be dangerous, see manifest.ts).
+ * (`uses`), what resolves it (each tool's own body), and what gets returned. Anything not declared is
+ * refused before it ever reaches the body (treating an absent declaration as "everything" would be
+ * dangerous, see manifest.ts). What is declared is the consent (#2237): the person decided to run the
+ * app with its `uses` shown (the project's trust, the user folder, an import's review), so a declared
+ * request runs with no card, unless a caller is under `safe` (`permit`).
  *
  * The part of the body that only the host's core can do (starting an agent session) is received
  * through `BrokerHost`. The runtime knows nothing about sessions
@@ -189,6 +191,11 @@ export type BrokerHost = {
    */
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null>
   /**
+   * Whether the person is asked before a declared request runs (#2237): only when the lowest preset among the calls open
+   * into the app is `safe`, the same reading that holds the app's agent (`appAgentPreset`), so the two cannot disagree
+   */
+  asksPerson(callers: AgentCaller[]): boolean
+  /**
    * A run_agent request is over and its row is closed (#378), with the outcome the app was given: the schema check
    * comes after the agent answers, so the turn's own end is not yet the run's. The host decides what becomes of the
    * session it stood up, and the app has its answer once that is done: a screen that reads the sessions after its call
@@ -279,7 +286,7 @@ export type CapabilityDecisionListed = { capability: string; text: string; decis
 
 /** The text of a denial — this goes both into the app's result and its stderr. Also states how to reverse it */
 function deniedText(tool: BrokerToolName, appName: string, text: string): string {
-  return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.`
+  return `${tool} refused: the person did not allow ${appName} to ${text}. They can change this in the app's Runs panel (Permissions → Forget).`
 }
 
 const NOT_DECLARED = 'this app did not declare "uses": { "agent": … } in centralu.app.json — an app may run an agent only if its manifest says so'
@@ -664,15 +671,20 @@ export class BrokerDesk {
   }
 
   /**
-   * Capability approval (D-4) — asks the person once, the **first** time a request past the
-   * declaration uses that capability. Returns the result to give the app if denied, or null if
-   * allowed.
+   * Capability approval (D-4, #2237) — the one decision on a request past the declaration. Returns the
+   * result to give the app if denied, or null if allowed. In this order:
    *
-   * The answer is remembered per (app, capability) — an allow and a deny alike. This is the promise
-   * that the person is never asked the same thing twice, and an answer pressed by mistake can be
-   * forgotten from the runs panel's list (`apps.forgetPermission`). If the manifest's `uses` changes,
-   * the fingerprint changes with it and the remembered answer is no longer used — the app's builder
-   * has restated what it uses, so the person looks at it again too.
+   * 1. A remembered deny (or any word but `allow`) refuses, whatever `uses` it was given against: with
+   *    no card after it, a deny that lapsed on a manifest change would become an allow nobody gave. It
+   *    holds until forgotten.
+   * 2. A remembered allow given against the current `uses` allows.
+   * 3. Otherwise the request runs with no card and nothing remembered: the declaration is the consent,
+   *    read where it is enforced (an app runs only once the person trusted it with its `uses`), so
+   *    nothing is stored that could outlive it. Except:
+   * 4. When the lowest preset among the calls open into the app is `safe` (`BrokerHost.asksPerson`),
+   *    the person is asked once per (app, capability), where the chain started, and the answer is
+   *    remembered with the `uses` fingerprint: a `safe` session never gains through an app what
+   *    `start_agent` would ask it for (#673, #606). A changed `uses` asks it again.
    *
    * The app's call stays alive while this waits (a progress notification over the broker conduit,
    * `broker.ts`). If the person never answers and the cap (5 minutes) passes, this closes as a
@@ -687,9 +699,12 @@ export class BrokerDesk {
       this.apps.denied(call.parentRunId, { app: app.ref, name: app.name, capability: key, text })
       return refuse(deniedText(tool, app.name, text))
     }
-    if (known && known.stamp === stamp) return known.decision === 'allow' ? null : denied()
+    // A word a newer build stored is not an allow this build can read (#384): it refuses with the denies
+    if (known && known.decision !== 'allow') return denied()
+    if (known && known.stamp === stamp) return null
     const host = this.host
     if (!host) return refuse('the broker is unavailable: there is no one to ask for permission')
+    if (!host.asksPerson(this.apps.agentCallers(app.ref))) return null
 
     const slot = `${appKeyOf(app.ref)} ${key}`
     let q = this.asking.get(slot)
@@ -755,15 +770,15 @@ export class BrokerDesk {
 
   /**
    * The remembered answers for one app (D-4) — shown and forgettable in the runs panel. `current`
-   * means the answer was given against the same fingerprint as the manifest's current declaration; if
-   * not, that answer is no longer used (it is asked again).
+   * means the answer is still used: a deny always (`permit` rule 1), an allow when it was given against
+   * the manifest's current declaration (otherwise a `safe` caller is asked again).
    */
   permissions(ref: AppRef, manifestUses: unknown | null): (CapabilityDecisionListed)[] {
     const stamp = manifestUses === null ? null : usesStamp(manifestUses)
     return this.book
       .list(ref)
       .sort((a, b) => b.decidedAt - a.decidedAt)
-      .map((d) => ({ capability: d.capability, text: d.text, decision: d.decision, decidedAt: d.decidedAt, current: d.stamp === stamp }))
+      .map((d) => ({ capability: d.capability, text: d.text, decision: d.decision, decidedAt: d.decidedAt, current: d.decision !== 'allow' || d.stamp === stamp }))
   }
 
   forgetPermission(ref: AppRef, capability: string): void {

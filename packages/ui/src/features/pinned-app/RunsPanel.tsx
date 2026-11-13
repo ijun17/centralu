@@ -91,9 +91,11 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
 
 /**
  * The remembered answers to capability questions for this app (M4 D-4) — an answer the person gave
- * once stays here. A decline pressed by mistake, or a grant now worth taking back, is forgotten from
- * here (Forget). Forgetting it means it is asked again the next time that capability is needed. An
- * old answer no longer applies once the manifest's `uses` has changed — it shows as "outdated."
+ * once stays here. The question is asked only when a session under `safe` calls into the app (#2237);
+ * otherwise what the app declares runs unasked. A decline holds for every caller until it is forgotten
+ * here (Forget), after which the app can use that again; forgetting an allow matters only to a `safe`
+ * caller, who is asked again. An allow given against older `uses` shows as "outdated" (a `safe` caller
+ * is asked again); a decline never does, from a host of this build.
  *
  * When it re-reads: when the panel opens, when this panel's history changes (an answered request's
  * row soon either continues into a session or ends as a decline), when the view's question changes,

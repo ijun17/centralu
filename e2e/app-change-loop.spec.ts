@@ -120,6 +120,7 @@ async function startHost(page: Page, projectId: string, opts: { unannotatedShow?
     defaultAgentTool: () => 'claude',
     agentLabel: () => 'Claude Code',
     askCapability: async () => 'allow',
+    asksPerson: () => false,
     hostData: () => Promise.reject(new Error('not part of this test')),
     runAgent: async (_req, ctx) => {
       ctx.onSession('s-agent')

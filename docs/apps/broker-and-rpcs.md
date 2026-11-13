@@ -41,9 +41,10 @@ gate happens in one place, the broker desk (`desk.ts`).
   record with no parent, its session and text in the arguments, delivered or refused, so the Runs
   panel shows what the app told which session. `centralu.notify(address, text)` resolves true once
   delivered.
-- **Declared in `uses`.** The manifest says what the app may ask for: `"agent": true` (the person's
+- **Declared in `uses`.** The manifest says what the app may use: `"agent": true` (the person's
   default agent) or a list of tools (`["codex"]`), `"apps": [ids]`, `"host": [names]`. Anything
-  undeclared is refused before anything runs. Declaring is not permission.
+  undeclared is refused before anything runs. What is declared runs once the app may run at all (#2237;
+  "The declaration is the consent" below).
 - **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
   app: a project app's in its project (working folder: the project root), a user-folder app's like
   a coordinator (no project, the Assistant's empty folder). The preset is `auto`, the default
@@ -90,14 +91,16 @@ gate happens in one place, the broker desk (`desk.ts`).
   shown in the sidebar and each session's kind, tool, state and times, never the conversations; the
   project's sessions for a project app, a root app included as its permission card says (#1141), every session for a user-folder app; never those in the session archive, FR-22) and `git.status` (the
   project's branch and changed files; project apps only). Only names declared in `uses.host`.
-- **Asked once.** The first time an app uses a capability (an agent tool, another app, a host name),
-  the person is asked where the chain started: on the approval card of the session whose agent
-  started it, or on the app's pinned view (with a mark on its sidebar row) when a view started it.
-  The answer, allow or deny, is kept per app and capability in the store, used until the manifest's
-  `uses` changes, and listed in the Runs panel, where it can be forgotten. While the person decides
-  (up to 5 minutes; no answer is a refusal that is not remembered), the request is kept alive with a
-  progress notification every 10 s. Designed to change (#2237, not built): only a caller under `safe`
-  is asked ([app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent)).
+- **The declaration is the consent; a `safe` caller is asked once** (#2237). What the manifest declares
+  runs with no card: the person let the app run with its `uses` shown. Only when the lowest preset among
+  the calls open into the app is `safe` is the person asked, the first time the app uses a capability
+  (an agent tool, another app, a host name), where the chain started: on the approval card of the
+  session whose agent started it, or on the app's pinned view (with a mark on its sidebar row) when a
+  view started it. That answer, allow or deny, is kept per app and capability in the store (an allow
+  until the manifest's `uses` changes, a deny for good, for every caller) and listed in the Runs panel,
+  where it can be forgotten. While the person decides (up to 5 minutes; no answer is a refusal that is
+  not remembered), the request is kept alive with a progress notification every 10 s. The rule and its
+  reasoning: [app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent).
 - **Runaway limits.** A chain holds at most 3 app calls (the view's or session's app is the first),
   and the same app tool cannot be called again inside its own chain; both are checked before the
   person is asked. An app runs one agent at a time (a second request is refused, not queued) and at

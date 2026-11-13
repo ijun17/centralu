@@ -1,2 +1,2 @@
 /** `uses` in plain words: one wording for every place an app's asks are shown, the Assistant's cards included (#1219) */
-export { usesLines } from '@cc/protocol/client'
+export { appCanLines, usesLines } from '@cc/protocol/client'

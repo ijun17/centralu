@@ -73,11 +73,12 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     (the names shown in the sidebar and their states, never the conversations); `git.status` gives this project's branch and changed
     files (project apps only).
 
-All three throw an error that says what Centralu answered. The first time the app uses each of them (an
-agent tool, another app, a host name), Centralu asks the person once — on the session's approval card
-when an agent's call started it, on this app's screen when the screen did — and remembers the answer
-until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
-refusal comes back as that error: show it plainly instead of retrying.
+All three throw an error that says what Centralu answered. What the manifest declares in `uses` runs
+with no question: the person trusted the app with it. Only while a session under the `safe` preset has a
+call open into the app does Centralu ask the person, once per capability (an agent tool, another app, a
+host name) — on the session's approval card when an agent's call started it, on this app's screen when
+the screen did — and the call waits while the person decides (up to 5 minutes). A refusal, then or
+remembered from before, comes back as that error: show it plainly instead of retrying.
 
 **Background work.** Centralu stops an app with no open screen and no call for 5 minutes. An app
 with work on its own clock (a timer that polls, a queue it drives) declares it in the manifest,

@@ -50,9 +50,9 @@ either to act.
 - **User-folder apps** are trusted: the person put them there. An app **imported** from elsewhere
   is someone else's code, so it gets its own confirmation: it arrives turned off and runs only
   after the person has seen what it runs ([handing-over.md](handing-over.md)). A project app that arrives with `git pull` is
-  governed by the project's trust above; it gets no second gate. Designed, not built (#2237): that
-  trust also stands for what an app declares in `uses`, with no card at first use
-  ([app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent)).
+  governed by the project's trust above; it gets no second gate. That trust also stands for what an
+  app declares in `uses` (#2237): it runs with no card, unless a session under `safe` calls into the
+  app ([app-servers.md](../security-boundaries/app-servers.md#design-2237-a-trusted-projects-declared-uses-is-the-consent)).
 
 ## Lifecycle
 
@@ -169,5 +169,5 @@ agent reads its whole context again on every call and that is the use the person
   (`external_app_runs_changed`, coalesced like [views.md](views.md#keeping-open-views-current-centralu-extension)'s notification) for every row of the app and of
   the chain under it, a read-only tool's call and the agent run it asked for included. Open views do
   not hear it; they still get no "changed" for a read-only call ([views.md](views.md#keeping-open-views-current-centralu-extension)). Above the list: the answers the person gave to this app's
-  capability questions (forgettable), and its agent use over the last day and 30 days (runs,
+  capability questions, asked only with a caller under `safe` (forgettable), and its agent use over the last day and 30 days (runs,
   duration, tokens).

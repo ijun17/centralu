@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_DEPTH, ASSISTANT_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences, sameApp } from '@cc/protocol'
+import { DEFAULT_AGENT_DEPTH, ASSISTANT_CHANGE, UiPreferencesPatch, appCanLines, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences, sameApp } from '@cc/protocol'
 import type { AgentLimitChanges, TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, findProject, onMachine, readProjects, shown, whereText, type Projects } from './app-lookup.js'
@@ -34,27 +34,25 @@ function rows<T>(items: readonly T[], line: (t: T) => string): string[] {
 type ApprovalRuleRow = RpcResult<'approvals.rules'>[number]
 
 /**
- * What an app may ask for, as card lines (`usesLines`, the window's words). Said only when the host said it: an app whose
+ * What an app can do, as card lines (`appCanLines`, the window's words). Said only when the host said it: an app whose
  * manifest could not be read, or one a linked machine listed without `uses` (an older Centralu there), is not
- * "asking for nothing", and the card says it is not known.
+ * "using nothing", and the card says it is not known.
  */
-function asksLines(a: ExternalAppInfo, indent: string, lead: string): string[] {
+function canLines(a: ExternalAppInfo, indent: string): string[] {
   if (!a.uses) {
-    if (a.status === 'invalid') return [`${indent}What it may ask for is not known: its manifest could not be read (${manifestText(a.error ?? 'invalid', 300)}).`]
-    if (a.machine) return [`${indent}What it may ask for is not known: its machine did not say (it runs an older Centralu).`]
+    if (a.status === 'invalid') return [`${indent}What it can do is not known: its manifest could not be read (${manifestText(a.error ?? 'invalid', 300)}).`]
+    if (a.machine) return [`${indent}What it can do is not known: its machine did not say (it runs an older Centralu).`]
   }
-  const asks = a.uses ? usesLines(a.uses) : []
-  if (!asks.length) return [`${indent}Asks for nothing beyond its own tools.`]
-  return asks.map((l) => `${indent}${lead}${manifestText(l.charAt(0).toLowerCase() + l.slice(1))}`)
+  return appCanLines(a.uses ? usesLines(a.uses) : []).map((l) => `${indent}${manifestText(l)}`)
 }
 
-/** One app of a project as the trust card names it: what it is, whether it is the project, what it may ask for */
+/** One app of a project as the trust card names it: what it is, whether it is the project, what it can do */
 function appLines(a: ExternalAppInfo): string[] {
   const title = a.name?.trim() ? a.name : a.appId
   const description = a.description?.trim() ? `: ${plainQuoted(a.description.trim(), 2000)}` : ''
   const out = [`- ${shown(title)} (id ${shown(a.appId)})${description}`]
   if (a.root) out.push('  This project is this app: the Assistant and your other projects can use it.')
-  out.push(...asksLines(a, '  ', 'May ask to: '))
+  out.push(...canLines(a, '  '))
   return out
 }
 
@@ -90,7 +88,7 @@ function consentWords(kind: 'delegate' | 'apps' | 'agents'): string {
   return kind === 'delegate' ? 'start sessions in' : kind === 'apps' ? 'attach the apps of' : 'start agents in'
 }
 
-/** What a trust card covered of a project's apps: each one's id, whether it is the root, and what it may ask for */
+/** What a trust card covered of a project's apps: each one's id, whether it is the root, and what it can do */
 const appsKey = (apps: readonly ExternalAppInfo[]): string =>
   JSON.stringify(apps.map((a) => [a.appId, !!a.root, a.uses ?? null]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))))
 
@@ -100,7 +98,7 @@ const appsKey = (apps: readonly ExternalAppInfo[]): string =>
  * window, and a linked machine's project is reached the way the window reaches it.
  *
  * **Widening waits for the person; narrowing does not.** Trusting a project lets its apps run and its setting files
- * apply, so it raises a card naming the project, its folder and each app with what it may ask for (the window's trust
+ * apply, so it raises a card naming the project, its folder and each app with what it can do (the window's trust
  * card's words), every time, allow or deny only (`ASSISTANT_CHANGE`). After Allow the project is read again: one
  * removed, already trusted, or whose apps changed while the card stood (a pull brought a manifest) is not what the card
  * named, and nothing is trusted. Taking trust away asks too: the project's own deny rules and blocking hooks stop
@@ -131,7 +129,7 @@ export class TrustFlow {
         case 'list_app_grants':
           return await this.listAppGrants(rpc, req.app, req.project)
         case 'forget_app_answer':
-          return await this.forgetAnswer(rpc, req.app, req.project, req.capability)
+          return await this.forgetAnswer(rpc, sessionId, req.app, req.project, req.capability, signal)
         case 'revoke_consent':
           return await this.revokeConsent(rpc, req.from, req.to, req.kind)
         case 'share_app':
@@ -300,7 +298,7 @@ export class TrustFlow {
   //
   // An app's own trust follows its project's (#1141: a root app and its inner apps run when the project is trusted, and an
   // imported app is enabled by trusting its project), so trusting is `set_project_trust`. What is left: the answers the
-  // person gave to an app's capability questions (forgetting one only makes it ask again), the remembered consents of one
+  // person gave to an app's capability questions (asked only with a caller under safe, #2237), the remembered consents of one
   // project reaching another (revoking one makes the next reach ask again), and sharing a project app with the person's
   // other projects, which widens who can attach it and so asks.
 
@@ -323,12 +321,12 @@ export class TrustFlow {
       out.push(`- ${appLabel(a, all)}: ${a.trusted ? 'trusted' : 'untrusted'}; ${sharing}`)
       if (answers === null) out.push('  Its remembered answers could not be read just now.')
       for (const p of answers ?? []) {
-        out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${plainQuoted(p.text, 300)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; no longer applies, its uses changed'}`)
+        out.push(`  ${p.decision === 'allow' ? 'Allowed' : 'Denied'}: ${shown(p.capability)} (${plainQuoted(p.text, 300)}), since ${new Date(p.decidedAt).toISOString().slice(0, 10)}${p.current ? '' : '; its uses changed, so a calling session under safe is asked again'}`)
       }
     }
     if (pool.length > ROWS) out.push(`- and ${pool.length - ROWS} more apps`)
     const lines = [
-      pool.length ? `${pool.length} ${pool.length === 1 ? 'app' : 'apps'}, with the answers the person gave to what each asked for (forget_app_answer forgets one, so it asks again; share_app shares a project app):` : 'No app.',
+      pool.length ? `${pool.length} ${pool.length === 1 ? 'app' : 'apps'}, with the answers the person gave when asked (only a calling session under safe asks; forget_app_answer forgets one; share_app shares a project app):` : 'No app.',
       ...out,
     ]
     if (!named?.trim() && !project?.trim()) {
@@ -341,16 +339,34 @@ export class TrustFlow {
     return { ok: true, text: lines.join('\n') }
   }
 
-  private async forgetAnswer(rpc: WindowRpc, named: string, project: string | undefined, capability: string): Promise<TrustAnswer> {
+  /**
+   * Forgetting an allow only narrows (a caller under `safe` is asked again), so it acts at once. Forgetting a deny widens
+   * since #2237: what the app declares then runs unasked for every caller not under `safe`, so it waits for the person,
+   * on the card every widening raises, and acts only if the deny is still there after Allow.
+   */
+  private async forgetAnswer(rpc: WindowRpc, caller: string, named: string, project: string | undefined, capability: string, signal?: AbortSignal): Promise<TrustAnswer> {
     const [apps, all] = await Promise.all([callWindow(rpc, 'apps.list', {}), readProjects(rpc)])
     const found = findApp(apps, all, named, project)
     if ('error' in found) return { ok: false, error: found.error }
     const a = found.app
-    const answers = await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...onMachine(a) })
-    const answer = answers.find((p) => p.capability === capability.trim())
-    if (!answer) return { ok: false, error: `${appLabel(a, all)} has no remembered answer for ${shown(capability.trim())}; list_app_grants names them.` }
+    const label = appLabel(a, all)
+    const remembered = async () =>
+      (await callWindow(rpc, 'apps.permissions', { appId: a.appId, projectId: a.projectId, ...onMachine(a) })).find((p) => p.capability === capability.trim())
+    const answer = await remembered()
+    if (!answer) return { ok: false, error: `${label} has no remembered answer for ${shown(capability.trim())}; list_app_grants names them.` }
+    if (answer.decision !== 'allow') {
+      const question = [
+        `Forget that you denied ${label} to ${plainQuoted(answer.text, 300)} (${shown(answer.capability)})?`,
+        'The app declares it, so it can then do it without asking, unless a session under safe calls it.',
+      ].join('\n')
+      const refused = await this.ask(caller, question, signal, 'forgotten')
+      if (refused) return { ok: false, error: refused }
+      const now = await remembered()
+      if (now?.decision !== answer.decision) return { ok: false, error: `The answer for ${shown(answer.capability)} of ${label} changed while the card stood, so nothing was forgotten.` }
+    }
     await callWindow(rpc, 'apps.forgetPermission', { appId: a.appId, projectId: a.projectId, capability: answer.capability, ...onMachine(a) })
-    return { ok: true, text: `Forgot the answer ${answer.decision === 'allow' ? 'allowing' : 'denying'} ${shown(answer.capability)} for ${appLabel(a, all)}: the next time it asks for that, the person is asked again.` }
+    const after = answer.decision === 'allow' ? 'a calling session under safe is asked again before the app uses that' : 'the app can use that again, asked first only when a calling session is under safe'
+    return { ok: true, text: `Forgot the answer ${answer.decision === 'allow' ? 'allowing' : 'denying'} ${shown(answer.capability)} for ${label}: ${after}.` }
   }
 
   private async revokeConsent(rpc: WindowRpc, from: string, to: string, kind: 'delegate' | 'apps' | 'agents'): Promise<TrustAnswer> {
@@ -387,7 +403,7 @@ export class TrustFlow {
       `Share the app ${label} with your other projects?`,
       'A session in another project can then find it and attach it (find_apps, attach_app), after you allow that pair of projects once.',
       ...(home && !home.trusted ? [`Its project is untrusted, so it attaches nowhere until you trust ${shown(home.name)}.`] : []),
-      ...asksLines(a, '', 'It may ask to: '),
+      ...canLines(a, ''),
     ].join('\n')
     const refused = await this.ask(caller, question, signal, 'shared')
     if (refused) return { ok: false, error: refused }
@@ -395,7 +411,7 @@ export class TrustFlow {
     const now = (await callWindow(rpc, 'apps.list', {})).find((x) => sameApp(x, a))
     if (!now) return { ok: false, error: `${label} was removed while the card stood, so nothing was shared.` }
     if (now.shared) return { ok: true, text: `${label} was shared while the card stood; nothing more changed.` }
-    if (appsKey([now]) !== appsKey([a])) return { ok: false, error: `What ${label} may ask for changed while the card stood, so it is not what the card named and nothing was shared. Ask again to show the person what it asks for now.` }
+    if (appsKey([now]) !== appsKey([a])) return { ok: false, error: `What ${label} can do changed while the card stood, so it is not what the card named and nothing was shared. Ask again to show the person what it can do now.` }
     await callWindow(rpc, 'apps.setShared', { ...ref, shared: true })
     return { ok: true, text: `${label} is shared now: a session in another project can attach it once the person allows that pair of projects.` }
   }

@@ -872,11 +872,11 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     // The whole description, not its first line only
     await expect(board.getByTestId('trust-card-app-description')).toHaveText('The team board\nwith more lines')
     await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the Assistant and your other projects can use it.')
-    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: run your default agent in a new session')
-    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: call other apps: notes')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('Can run your default agent in a new session')
+    await expect(board.getByTestId('trust-ask-app-uses')).toContainText('Can call other apps: notes')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText("the names and states of its project's sessions (sessions.list)")
     const notes = card.getByTestId(`trust-ask-app-${pid}/notes`)
-    await expect(notes.getByTestId('trust-ask-app-uses')).toHaveText('Asks for nothing beyond its own tools.')
+    await expect(notes.getByTestId('trust-ask-app-uses')).toHaveText('Uses nothing beyond its own tools')
     await expect(notes.getByTestId('trust-ask-app-reach')).toHaveCount(0)
 
     // Not now, then the menu's row says it lists them, and opens the card again instead of trusting at once
@@ -910,7 +910,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await page.getByTestId('counter').click()
     const item = page.getByTestId(`inbox-item-app-arrival:${pid}/timer`)
     await expect(item).toContainText('New app: Timer')
-    await expect(page.getByTestId(`inbox-arrival-asks-app-arrival:${pid}/timer`)).toContainText('May ask to: run your default agent in a new session')
+    await expect(page.getByTestId(`inbox-arrival-asks-app-arrival:${pid}/timer`)).toContainText('Can run your default agent in a new session')
     await item.click()
     await expect(page.getByTestId(`pinned-app-${pid}/timer`)).toBeVisible()
     // Read once: the next list read does not bring it back

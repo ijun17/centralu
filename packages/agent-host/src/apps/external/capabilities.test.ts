@@ -3,18 +3,22 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type CapabilityQuestion, type RuntimeTiming } from './runtime.js'
+import type { AgentCaller } from './desk.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
- * Capability approval (M4 D-4) — the person is asked once, the **first** time an app uses a
- * capability (agent, another app, host data), the answer is remembered per (app, capability), and
- * it is asked again if the manifest's `uses` changes. Where the question shows up (a session's card
- * or a screen) and the person's answer are the host's job, so here a fake host receives them
- * instead — it records what was asked, and answers at the time the test decides. The manager side
- * (the card and the screen's question) is covered by sessions/app-capabilities.test.ts.
+ * Capability approval (M4 D-4, #2237) — what an app declares is the consent: a declared capability
+ * (agent, another app, host data) runs with no card and nothing remembered, unless a caller is under
+ * `safe` (`BrokerHost.asksPerson`). Then the person is asked once, the **first** time, the answer is
+ * remembered per (app, capability), and an allow is asked again if the manifest's `uses` changes. A
+ * remembered deny refuses whoever calls, at any `uses`. Where the question shows up (a session's card
+ * or a screen), the person's answer and who counts as `safe` are the host's job, so here a fake host
+ * receives them instead — it records what was asked, and answers at the time the test decides. The
+ * manager side (the card, the screen's question, the presets) is covered by
+ * sessions/app-capabilities.test.ts.
  */
 
 const FIXTURE = fileURLToPath(new URL('./test-fixtures/app.mjs', import.meta.url))
@@ -25,6 +29,9 @@ type Asked = { q: CapabilityQuestion; answer: (d: 'allow' | 'deny') => void; wit
 let asked: Asked[] = []
 /** The answer the person gives immediately — null means it does not answer and waits instead (the test answers via asked[i].answer) */
 let autoAnswer: 'allow' | 'deny' | null = 'allow'
+/** Whether a caller is under `safe` (the host's `asksPerson`), and the callers it was handed each time */
+let underSafe = true
+let askedAbout: AgentCaller[][] = []
 
 const dir = (id: string) => join(root, 'p1', ...PROJECT_APPS, id)
 const plant = (id: string, uses: Record<string, unknown>) =>
@@ -51,6 +58,10 @@ const make = (timing: Partial<RuntimeTiming> = {}) => {
     fakeBrokerHost({
       runAgent: async (req) => ({ sessionId: 's-agent', text: `agent ran on ${req.tool}` }),
       hostData: async () => ({ sessions: [] }),
+      asksPerson: (callers) => {
+        askedAbout.push(callers)
+        return underSafe
+      },
       askCapability: (q, signal) =>
         new Promise((resolve) => {
           const a: Asked = { q, answer: (d) => resolve(d), withdrawn: false }
@@ -71,6 +82,8 @@ beforeEach(() => {
   mkdirSync(join(root, 'data'))
   asked = []
   autoAnswer = 'allow'
+  underSafe = true
+  askedAbout = []
 })
 
 afterEach(async () => {
@@ -78,7 +91,68 @@ afterEach(async () => {
   await removeTree(root)
 })
 
-describe('asks once on first use, and remembers the answer', () => {
+/** The app's builder restates what it uses — waits until the host reads the new declaration */
+const usesBecome = async (appId: string, uses: Record<string, unknown>) => {
+  const manifest = JSON.parse(readFileSync(join(dir(appId), MANIFEST_FILE), 'utf8'))
+  writeFileSync(join(dir(appId), MANIFEST_FILE), JSON.stringify({ ...manifest, uses }))
+  rt.refresh()
+  await until(() => rt.list().find((a) => a.appId === appId)?.uses, (u) => JSON.stringify(u) === JSON.stringify(uses))
+}
+
+describe('no caller under safe — what is declared runs with no card (#2237)', () => {
+  it('run_agent, call_app and host_data each run unasked and nothing is remembered; the host is handed the calls open into the app', async () => {
+    plant('notes', { agent: true, apps: ['other'], host: ['sessions.list'] })
+    plant('other', {})
+    underSafe = false
+    make()
+    expect(await ask('notes', 'run_agent', { prompt: 'x' })).toMatchObject({ isError: false, text: 'agent ran on claude' })
+    expect((await ask('notes', 'host_data', { name: 'sessions.list' })).isError).toBe(false)
+    expect((await ask('notes', 'call_app', { app: 'other', tool: 'echo', args: { text: 'x' } })).isError).toBe(false)
+    expect(asked).toEqual([])
+    expect(rt.permissions(ref('notes'))).toEqual([])
+    expect(askedAbout).toEqual([[SESSION], [SESSION], [SESSION]])
+  })
+
+  it('what is not declared is still refused, before the callers are read', async () => {
+    plant('notes', {})
+    underSafe = false
+    make()
+    expect(await ask('notes', 'run_agent', { prompt: 'x' })).toMatchObject({ isError: true, text: expect.stringContaining('did not declare') })
+    expect(askedAbout).toEqual([])
+  })
+
+  it('an allow given against older uses lets the request through unasked; a caller under safe is asked again', async () => {
+    plant('notes', { agent: true })
+    make()
+    await ask('notes', 'run_agent', { prompt: 'x' })
+    expect(asked).toHaveLength(1)
+    await usesBecome('notes', { agent: true, host: ['git.status'] })
+    underSafe = false
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(false)
+    expect(asked).toHaveLength(1)
+    underSafe = true
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(false)
+    expect(asked).toHaveLength(2)
+  })
+
+  it('a remembered deny refuses whoever calls, at any uses, without asking — until it is forgotten', async () => {
+    plant('notes', { agent: true })
+    autoAnswer = 'deny'
+    make()
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(true)
+    await usesBecome('notes', { agent: true, host: ['git.status'] })
+    expect(rt.permissions(ref('notes'))).toMatchObject([{ decision: 'deny', current: true }])
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).text).toContain('run_agent refused: the person did not allow App notes')
+    underSafe = false
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(true)
+    expect(asked).toHaveLength(1)
+    rt.forgetPermission(ref('notes'), 'agent:claude')
+    expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(false)
+    expect(asked).toHaveLength(1)
+  })
+})
+
+describe('a caller under safe — asks once on first use, and remembers the answer', () => {
   it('an allow lets the request through, and the next request for the same capability is not asked about', async () => {
     plant('notes', { agent: true })
     make()
@@ -95,7 +169,7 @@ describe('asks once on first use, and remembers the answer', () => {
     const first = await ask('notes', 'run_agent', { prompt: 'x' })
     expect(first.isError).toBe(true)
     expect(first.text).toBe(
-      "run_agent refused: the person did not allow App notes to run an agent (Claude Code) in a new session. They can change this in the app's Runs panel (Permissions → Forget), and Centralu asks again when the app's manifest changes what it uses.",
+      "run_agent refused: the person did not allow App notes to run an agent (Claude Code) in a new session. They can change this in the app's Runs panel (Permissions → Forget).",
     )
     expect((await ask('notes', 'run_agent', { prompt: 'x' })).isError).toBe(true)
     expect(asked).toHaveLength(1)
@@ -120,16 +194,14 @@ describe('asks once on first use, and remembers the answer', () => {
     ])
   })
 
-  it('when the manifest\'s uses changes, the remembered answer is not used and it asks again', async () => {
+  it('when the manifest\'s uses changes, a remembered allow is not used and it asks again', async () => {
     plant('notes', { agent: true })
     make()
     await ask('notes', 'run_agent', { prompt: 'x' })
     expect(asked).toHaveLength(1)
     // The declaration changes — the app's builder has restated what the app uses
-    const manifest = JSON.parse(readFileSync(join(dir('notes'), MANIFEST_FILE), 'utf8'))
-    writeFileSync(join(dir('notes'), MANIFEST_FILE), JSON.stringify({ ...manifest, uses: { agent: true, host: ['git.status'] } }))
-    rt.refresh()
-    await until(() => rt.permissions(ref('notes'))[0]?.current, (c) => c === false)
+    await usesBecome('notes', { agent: true, host: ['git.status'] })
+    expect(rt.permissions(ref('notes'))).toMatchObject([{ decision: 'allow', current: false }])
     await ask('notes', 'run_agent', { prompt: 'x' })
     expect(asked).toHaveLength(2)
   })

@@ -87,10 +87,10 @@ ids). The Assistant's instructions point to these and the machine commands in on
   its idle sessions restart (a busy one when its turn ends, #663). The card says so; after Allow the project is read again
   (removed, moved, unreachable, or untrusted meanwhile: nothing more changes).
 - With `trusted: true` it asks first, in every preset (`ASSISTANT_CHANGE`, allow or deny only): the card names the
-  project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
+  project, its folder and machine, and each of its apps (root and inner) with its description and what it can do,
   in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
   project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
-  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is. What a
+  can do), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is. What a
   manifest supplies (name, description, the declared background work) is quoted with control and format characters
   escaped, the folder is named whole, and an app whose manifest could not be read, or that a linked machine listed without
   `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
@@ -109,11 +109,12 @@ ids). The Assistant's instructions point to these and the machine commands in on
   imported app is enabled by trusting its project), so trusting an app is `set_project_trust`. `list_app_grants { app?,
   project? }` lists the apps (`apps.list`) with their trust and sharing and the person's remembered answers to what each
   asked for (`apps.permissions`, routed to a linked machine as the window routes it), and the remembered consents of one
-  project reaching another (`projectConsents.list`). `forget_app_answer { app, project?, capability }` and
-  `revoke_project_consent { from, to, kind }` act at once (`apps.forgetPermission`, `projectConsents.revoke`): each only
-  makes the next attempt ask the person again. `share_app { app, project?, shared }` is the inner app's share switch
+  project reaching another (`projectConsents.list`). `forget_app_answer { app, project?, capability }` of an
+  allow and `revoke_project_consent { from, to, kind }` act at once (`apps.forgetPermission`, `projectConsents.revoke`):
+  each only makes the next attempt ask the person again. Forgetting a deny widens since #2237 (what the app declares then
+  runs unasked outside `safe`), so it raises a card first and is read again after Allow. `share_app { app, project?, shared }` is the inner app's share switch
   (`apps.setShared`): off acts at once; on asks first, every preset, with a card naming the app, its project and what it
-  may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
+  can do. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
   stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
   person's answer to an app's own capability question is not given from here: the app asks the person.
 - `set_agent_limits { agentCeiling?, agentDepth? }` changes the person's limits on agents: the running agents per project
@@ -172,7 +173,7 @@ window's channel), grouped, and for each group one of three states.
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The Assistant hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through the `app` tool (#2231) |
-| App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer`, `revoke_project_consent` (they only make the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it may ask for, checked again after Allow; off acts at once) |
+| App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer` (an allow at once; a deny, which widens since #2237, behind a card), `revoke_project_consent` (it only makes the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it can do, checked again after Allow; off acts at once) |
 | App trust and imports. `apps.reach`, `apps.enable`, `apps.review`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | **Person** | Enabling an app is trusting its project since #1141 (`set_project_trust`); importing one brings code in; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage` | Has it (#1219, fourth slice) | `remove_app` behind a card (the user-folder app's folder moves to `app-trash/`, and it is detached from every session). `list_app_versions`, `list_app_runs`, `list_app_errors`, `app_usage` read; `restore_app_version` (the code it replaces is kept first), `restart_app` and `check_app` act at once but are refused while another session, screen or app has a call in progress in the app (a restart ends it, as the window's Restart does). What an app wrote is quoted as data |
 | `apps.questions`, `apps.answerQuestion` | **Person** | A capability question a chain from a screen the person is looking at is waiting on: the answer is a trust decision (it is remembered for the app), and the Assistant can already narrow one afterwards (`forget_app_answer`) |
