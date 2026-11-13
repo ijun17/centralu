@@ -362,7 +362,8 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     try {
       await platform.apps.setOff(appId, projectId, off)
     } catch (e) {
-      set({ toast: `Could not turn the app ${off ? 'off' : 'on'}: ${errorMessage(e)}` })
+      const info = get().externalApps.find((a) => isApp(a, projectId, appId))
+      set({ toast: `Could not turn ${info ? appTitleOf(info) : appId} ${off ? 'off' : 'on'}: ${errorMessage(e)}` })
     }
   },
 

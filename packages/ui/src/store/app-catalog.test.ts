@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { appKeyOf } from '@cc/core'
 import type { ExternalAppInfo } from '@cc/protocol'
-import { UNTRUSTED_REASON, appStatus, buildCatalog, isRemoteUserApp } from './app-catalog.js'
+import { UNTRUSTED_REASON, appStatus, buildCatalog, isRemoteUserApp, viewMustClose } from './app-catalog.js'
 import { isApp } from './store.js'
 
 /**
@@ -103,14 +103,28 @@ describe('the rule for reading status', () => {
       runnable: false,
       tone: 'quiet',
     })
-    expect(appStatus(info('board', { projectId: 'm1.p1', machine: 'm1', status: 'stopped', off: true }))).toMatchObject({
+    // A linked machine's app names that machine (ux-writing.md §1), as the catalog builds it
+    const remote = info('board', { projectId: 'm1.p1', machine: 'm1', status: 'stopped', off: true })
+    expect(buildCatalog([remote], { m1: { name: 'Studio' } }).external[0]?.status).toMatchObject({
       label: 'Off',
-      reason: 'It is turned off on that computer, so it does not start there. Turn it on in Settings → Apps.',
+      reason: 'It is turned off on Studio, so it does not start there. Turn it on in Settings → Apps.',
       runnable: false,
     })
     expect(appStatus(info('a', { status: 'stopped', off: false }))).toMatchObject({ label: 'Stopped', runnable: true })
     // What else stops it comes first, as the host orders it: turning it on would not fix that
     expect(appStatus(info('a', { status: 'untrusted', trusted: false, off: true }))).toMatchObject({ label: 'Not trusted', reason: UNTRUSTED_REASON })
     expect(appStatus(info('a', { status: 'invalid', error: 'server.command is missing', off: true }))).toMatchObject({ label: 'Invalid', reason: 'server.command is missing' })
+  })
+})
+
+describe('an open view of an app that can no longer run comes down (B-2)', () => {
+  it('for an untrusted project, a broken manifest, an import waiting on review, and an app turned off (#1938); not for one that failed or crashed', () => {
+    expect(viewMustClose(info('a', { status: 'stopped', off: true }))).toBe(true)
+    expect(viewMustClose(info('a', { status: 'untrusted', trusted: false }))).toBe(true)
+    expect(viewMustClose(info('a', { status: 'invalid' }))).toBe(true)
+    expect(viewMustClose(info('a', { status: 'unconfirmed' }))).toBe(true)
+    expect(viewMustClose(info('a', { status: 'failed' }))).toBe(false)
+    expect(viewMustClose(info('a', { status: 'crashed' }))).toBe(false)
+    expect(viewMustClose(info('a', { status: 'running' }))).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 import { appKeyOf, sameApp, type ExternalAppInfo, type LinkedApp, type LinkedAppCallParams, type LinkedAppCallResult } from '@cc/protocol'
-import { unusableAs, type AppCallOutcome, type AppRef, type ExternalApps } from '../apps/external/runtime.js'
+import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { unusableAs } from '../apps/external/unusable.js'
 import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/app-call-bounds.js'
 import { isObj } from '../json-value.js'
 import { raceTimeout } from '../timing.js'

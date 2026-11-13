@@ -94,6 +94,8 @@ export class AppProcess {
   exit: ExitInfo | null = null
   /** Fires when the process ends while we are not the ones stopping it — the runtime counts this as a crash */
   onUnexpectedExit?: (reason: string) => void
+  /** Why this host stopped it (`AppLifecycle.halt`), once it did: what a call it cut off is told, rather than the pipe's end */
+  stoppedFor: string | null = null
 
   private stopping: Promise<void> | null = null
   /** Settles once it has exited (or `EXIT_WAIT_MS` has passed) and, on Windows, what it left running is collected (`stop`) */

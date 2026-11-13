@@ -3,7 +3,7 @@ import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
 import { MANIFEST_FILE } from '../apps/external/manifest.js'
-import { AppAccess, readShared, writeShared, type AppAccessStore } from './app-access.js'
+import { AppAccess, type AppAccessStore, readAppFlag, writeAppFlag } from './app-access.js'
 import { SessionAppsHub, type AppSessionKey } from './session-apps.js'
 import { attachWorld, type AttachWorld } from './session-apps.test-helpers.js'
 
@@ -68,14 +68,14 @@ function newAccess(boundaryOpen?: () => boolean): AppAccess {
 
 beforeEach(() => {
   const holder: { w?: AttachWorld } = {}
-  w = holder.w = attachWorld(kit, {}, { shared: (ref) => readShared(holder.w!.store.settings, ref) })
+  w = holder.w = attachWorld(kit, {}, { shared: (ref) => readAppFlag(holder.w!.store.settings, 'shared', ref) })
   w.trust.p2 = true
   w.plant('p1', 'notes')
   w.plant('p2', 'board')
   w.plant('p2', 'secret')
   w.plant('user', 'helper')
   w.rt.refresh()
-  writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, true)
+  writeAppFlag(w.store.settings, 'shared', { projectId: 'p2', appId: 'board' }, true)
   consents = new Set()
   asks = []
   answer = 'always'
@@ -104,9 +104,9 @@ describe('finding apps (find_apps)', () => {
   it("lists another project's app only while it is shared, the person's own apps always, and never this project's own", () => {
     session('w1', 'p1')
     expect(refs('w1')).toEqual(['Beta/board', 'helper'])
-    writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, false)
+    writeAppFlag(w.store.settings, 'shared', { projectId: 'p2', appId: 'board' }, false)
     expect(refs('w1')).toEqual(['helper'])
-    writeShared(w.store.settings, { projectId: 'p2', appId: 'secret' }, true)
+    writeAppFlag(w.store.settings, 'shared', { projectId: 'p2', appId: 'secret' }, true)
     expect(refs('w1')).toEqual(['Beta/secret', 'helper'])
   })
 
@@ -213,7 +213,7 @@ describe('attaching and detaching', () => {
     const ref = { projectId: 'p2', appId: 'board' }
     for (const [value, shared] of [['1', true], ['true', false], ['yes', false], ['2', false], ['', false]] as const) {
       w.store.settings.setAppSetting('app_shared:p2/board', value)
-      expect(readShared(w.store.settings, ref)).toBe(shared)
+      expect(readAppFlag(w.store.settings, 'shared', ref)).toBe(shared)
     }
   })
 
@@ -226,8 +226,8 @@ describe('attaching and detaching', () => {
 
 describe('consent per pair of projects', () => {
   it('asks once per pair: "always" covers every later attachment from that project, and the reverse pair still asks', async () => {
-    writeShared(w.store.settings, { projectId: 'p2', appId: 'secret' }, true)
-    writeShared(w.store.settings, { projectId: 'p1', appId: 'notes' }, true)
+    writeAppFlag(w.store.settings, 'shared', { projectId: 'p2', appId: 'secret' }, true)
+    writeAppFlag(w.store.settings, 'shared', { projectId: 'p1', appId: 'notes' }, true)
     session('w1', 'p1')
     session('w2', 'p1')
     session('v1', 'p2')
@@ -260,15 +260,15 @@ describe('consent per pair of projects', () => {
     expect(a.current().map((x) => x.server)).toContain('app-board')
 
     consents.clear()
-    w.rt.sharingChanged()
+    w.rt.appSettingsChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-board'))
     expect((await a.call('app-board', 'peek', {})).content).toEqual([{ type: 'text', text: 'This session has no app named board.' }])
 
     consents.add('p1>p2')
-    w.rt.sharingChanged()
+    w.rt.appSettingsChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => s.includes('app-board'))
-    writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, false)
-    w.rt.sharingChanged()
+    writeAppFlag(w.store.settings, 'shared', { projectId: 'p2', appId: 'board' }, false)
+    w.rt.appSettingsChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-board'))
   })
 })

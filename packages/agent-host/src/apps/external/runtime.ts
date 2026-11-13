@@ -69,22 +69,10 @@ export { resourceUriOf } from './visibility.js'
 export type { AppCaller, AppCallOutcome, ExternalAppsDeps, RuntimeTiming } from './runtime-types.js'
 import { invalidReason, keepsVersions, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
+import { offRefusal } from './unusable.js'
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
 export { resultText } from './app-calls.js'
-
-const UNUSABLE_STATUS = new Set<ExternalAppInfo['status']>(['invalid', 'untrusted', 'unconfirmed', 'failed'])
-
-/**
- * Why a listed app is given to no session, here or on a linked host (decision 4), or null when it may be: an invalid
- * manifest, an untrusted project, an imported app not turned on yet (M4 E-3), halted after repeated failures, or turned
- * off on this computer (#1938, `off`). The one rule for every list a session is given; `blocker` refuses each call again
- * (in case the name lingers in a Codex thread).
- */
-export function unusableAs(a: Pick<ExternalAppInfo, 'status' | 'off'>): string | null {
-  if (a.off === true) return 'off'
-  return UNUSABLE_STATUS.has(a.status) ? a.status : null
-}
 
 export class ExternalApps {
   /** Scope key → (app id → entry) */
@@ -414,21 +402,13 @@ export class ExternalApps {
   }
 
   /**
-   * The person turned an app's sharing on or off (#371 part A). Nothing about the app itself changed,
-   * so nothing restarts: the list is announced again, and the session side recounts which apps are
-   * attached (a session that attached the app from another project loses it when sharing goes off).
+   * The person changed what the store says of an app (`ref`) or of apps generally: sharing (#371 part A), a project
+   * consent, or off on this computer (#1938, §13.7). Nothing about an app itself changed, so nothing restarts: the list
+   * is announced again and the session side recounts (an app no longer shared, or off, leaves the sessions that had it).
+   * Only an app now off stops at once, as losing trust does; on again, it starts the next time it is needed.
    */
-  sharingChanged(): void {
-    this.appsChanged()
-  }
-
-  /**
-   * The person turned a project app off on this computer, or back on (#1938, §13.7); the store already says which. Off
-   * stops a running copy at once, as losing trust does, and the list is announced again so the session side takes it
-   * from every session here. On starts nothing: the app starts the next time it is needed.
-   */
-  offChanged(ref: AppRef): void {
-    const e = this.find(ref)
+  appSettingsChanged(ref?: AppRef): void {
+    const e = ref && this.find(ref)
     if (e && this.blocker(e)?.kind === 'off') void this.lifecycle.halt(e, 'turned off on this computer')
     this.appsChanged()
   }
@@ -970,9 +950,7 @@ export class ExternalApps {
     }
     const held = this.held(e)
     if (held) return { kind: 'unconfirmed', reason: held }
-    if (this.isOff(e)) {
-      return { kind: 'off', reason: 'This app is turned off on this computer. Turn it on in its project’s Settings → Apps to run it here.' }
-    }
+    if (this.isOff(e)) return { kind: 'off', reason: offRefusal(e.ref.appId) }
     if (this.removing.has(appKeyOf(e.ref))) return { kind: 'removing', reason: 'This app is being removed' }
     if (e.life.gaveUp && !opts.fresh) {
       return {

@@ -164,7 +164,7 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     const { machine, hub, attach } = await world()
     expect(text(await attach('w3').call('app-board', 'peek', {}))).toBe('peeked')
     expect(boardRuns(machine, 'p-remote')).toMatchObject([{ tool: 'peek', status: 'ok', callerSessionId: 'w3' }])
-    machine.mgr.apps.setAppOff({ projectId: 'p-remote', appId: 'board' }, true)
+    machine.mgr.apps.setAppFlag('off', { projectId: 'p-remote', appId: 'board' }, true)
     const other = attach('w3')
     expect(other.current()).toEqual([])
     const r = await other.call('app-board', 'peek', {})

@@ -127,6 +127,6 @@ export class ProjectConsents {
     if (!this.host.store.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.host.emit({ type: 'project_consents_changed' })
     // Apps attached under that "always" step back now (#371 part A): the sessions recount, and the app is gone from them
-    if (kind === 'apps') this.host.appsHub?.rt.sharingChanged()
+    if (kind === 'apps') this.host.appsHub?.rt.appSettingsChanged()
   }
 }

@@ -1639,7 +1639,14 @@ would be dead code after one use, and no other app has the split today. In this 
    (`authorRoute` relays, `ownDraft` is false, queue.mjs and queue-driver.mjs), and `noteOpened` never keeps one.
    A conflict on one of those pull requests is relayed by the session that queues it, as for one opened by an older
    Centralu.
-5. Turn the copy off (§13.7).
+5. **`queue-driver.json` and the guard's history: nothing moves** (#2256 review). The driver file is that instance's own
+   say on guarding main (queue-driver.mjs `driverRole`): the copy, off, runs no driver and guards nothing, and the app's
+   machine guards by its own file and its own work. If the copy's said `{"drive": true}`, the person sets that on the
+   app's machine if that one is now to guard always. The guard's history (`guard` in the copy's `merge-queue.json`: a
+   hunt, the reverts it filed, the reruns it asked for) belongs to what the copy landed, so it is finished where it is,
+   not moved: the copy goes off only once `guardDrives` reads that it holds nothing of its own (no hunt or revert to
+   follow, no rerun or landing in the last hours), so no revert it filed is left without its follow-up.
+6. Turn the copy off (§13.7).
 
 Afterwards there is one private word list, on the app's machine. Every session that posts through the board app, on any
 machine, posts through that one app (a started agent by §13.5, another session by attaching it), so every post is
@@ -1676,7 +1683,7 @@ needs one step (a kind on `machine_ask_consents`); its number comes from the orc
 1. A hub's sessions using a machine's apps, and the agents they start on a machine using the parent project's apps on
    the hub (§13.2-§13.6): both directions' list and call, cancel and `run_status`, notices both ways, `apps: true` on
    the offer.
-2. The copy's switch, "Off on this computer" (`app_off:<project>/<app>`, §13.7), and the steps and a dry-run readout of
+2. The copy's switch, "Runs on this computer" (`app_off:<project>/<app>`, §13.7), and the steps and a dry-run readout of
    the one-time merge of §13.8; the merge itself is done on the owner's machines after it lands.
 3. Machine to machine through the hub (#2067), and a machine's other sessions reaching the hub's apps behind the owner's
    card (§13.13 question 1), remembered per machine in a table of its own (store step 74; why a table and not a column is
@@ -1733,7 +1740,7 @@ called from the Mac shown in the Mac's window.
 1. **A machine's session that is not a started agent, using the hub's apps: (a).** The hub shows one approval card on
    that app's row and remembers the answer per machine. The owner added that the card shows in the Inbox like other
    approval cards. Until it lands (PR 3), only the agents the hub's sessions started reach the hub's apps.
-2. **The copy in the other checkout: (a).** "Off on this computer" on the app's row in that project's Settings → Apps
+2. **The copy in the other checkout: (a).** A switch, "Runs on this computer" as built (§13.16), on the app's row in that project's Settings → Apps
    (PR 2); with the Inbox card above, the only layout addition.
 
 ### 13.14 What this rests on
@@ -1781,12 +1788,19 @@ Where the code differs from the design above, and why:
 
 ### 13.16 As built: PR 2
 
-- **The switch is "Off on this computer"** on a project app's row in that project's Settings → Apps ("Off on <machine>"
-  for a linked machine's project), and nowhere else: a user-folder app has none. Turning it off stops a running copy
-  and announces the list; the row reads "Off" with the reason. Turning it back on is asked under a session's
-  credential, as trusting is (method-rights.ts); turning it off is not, since it only takes reach away.
-- **One reading of "cannot run"** (`unusableAs`, runtime.ts) replaces the three copies of the unusable states in
-  session-apps.ts, app-access.ts and linked-app-calls.ts, so `off` is refused the same way on every path.
+- **The switch is "Runs on this computer"** on a project app's row in that project's Settings → Apps ("Runs on
+  <machine>" for a linked machine's project), on by default, and nowhere else: a user-folder app has none. It reads on
+  while the app runs there, so it is never "on" for an app that is off (the parent's wording, #2256 review). Turning it
+  off stops a running copy and announces the list; the row reads "Off" with the reason, naming the machine for a linked
+  one. Turning it back on is asked under a session's credential, as trusting is (method-rights.ts); turning it off is
+  not, since it only takes reach away. It is stored as sharing is, one per-app switch (`AppFlag`, sessions/app-access.ts),
+  and drawn as sharing's is (`SwitchLine`, features/settings/AppSwitchLines.tsx).
+- **One reading of "cannot run"** (`unusableAs`, apps/external/unusable.ts) replaces the three copies of the unusable
+  states in session-apps.ts, app-access.ts and linked-app-calls.ts, so `off` is refused the same way on every path, and
+  in one wording to an agent, for a call and `attach_app` alike (`offRefusal`): "<app> is turned off on this computer,
+  so nothing ran. Only the person can turn it on (its project's Settings → Apps)."
+- **A call running when the app is stopped under it** (turned off, trust lost, a restart) is told so, with the reason
+  the runtime stopped it, and that it may have done part of it (`AppProcess.stoppedFor`), not the pipe's end.
 - **What a session on the copy's machine gets.** An ordinary session (not started by a hub) runs its checkout's copy,
   in PR 1 as before it, until the copy is turned off here; then it has no such app, as with an untrusted one, and attaching it is refused
   with the switch named. A
@@ -1794,10 +1808,10 @@ Where the code differs from the design above, and why:
   the hub's app takes.
 - **Where else off shows.** The row reads "Off" only when off is what stops the app: one also invalid, untrusted or not
   enabled reads that first, as the runtime's `blocker` orders them, since turning it on would not fix it. An open view
-  of an app turned off closes with the reason, as one of an untrusted project does: it reads stopped, but no call of
-  it starts it again. A root app keeps the switch (unlike sharing): its copy on a second computer is the case this
+  of an app turned off closes with the reason, as one of an untrusted project does, in a conversation (inline-views.ts)
+  and pinned (`viewMustClose`, store/app-catalog.ts): it reads stopped, but no call of it starts it again. A root app keeps the switch (unlike sharing): its copy on a second computer is the case this
   section is about. An older window shows an off app as "Stopped" and its calls come back refused with the switch named.
 - **From the review of #2254.** A hub that is linked but did not answer in time with its list is said to be that, not
   "does not offer" (`LinkedApps.withheldWhy` reads why the last ask got no list); still nothing runs.
-- **The merge (§13.8) is not run by this PR.** It comes with a read-only readout of steps 1 to 4 for two data folders
+- **The merge (§13.8) is not run by this PR.** It comes with a read-only readout of steps 1 to 5 for two data folders
   (in the PR's description, not the repository: it is used once), checked on made-up folders only.

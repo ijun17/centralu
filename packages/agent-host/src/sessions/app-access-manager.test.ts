@@ -8,7 +8,7 @@ import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
-import { readOff, readShared } from './app-access.js'
+import { readAppFlag } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -92,7 +92,7 @@ beforeEach(async () => {
   ])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readShared(store.settings, ref), off: (ref) => readOff(store.settings, ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readAppFlag(store.settings, 'shared', ref), off: (ref) => readAppFlag(store.settings, 'off', ref) })
   mgr.apps.useExternalApps(rt, { toolListWaitMs: 10_000 })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   alpha = ((await rpc('projects.add', { path: a })) as { id: string }).id
@@ -195,9 +195,9 @@ describe('an app off on this computer (apps.setOff, #1938, docs/plans/remote-hub
     expect(await rpc('apps.reach', { sessionId: own.id, appId: 'board', projectId: beta })).toEqual({ reachable: false, reason: 'app-unusable', status: 'off' })
     // Not offered to attach either, and asked for by name, the agent is told who can turn it on
     expect((await tool(other.id, 'find_apps')).text).not.toContain('beta/board')
-    expect((await tool(other.id, 'attach_app', { app: 'beta/board' })).text).toContain('turned off on this computer')
+    expect((await tool(other.id, 'attach_app', { app: 'beta/board' })).text).toContain("beta/board is turned off on this computer, so nothing ran. Only the person can turn it on (its project's Settings → Apps).")
     // Its own project's session is told the same, not that the app is attached already
-    expect((await tool(own.id, 'attach_app', { app: 'beta/board' })).text).toContain('turned off on this computer')
+    expect((await tool(own.id, 'attach_app', { app: 'beta/board' })).text).toContain("beta/board is turned off on this computer, so nothing ran. Only the person can turn it on (its project's Settings → Apps).")
     // Nothing above started it again
     expect(rt.list().find((a) => a.appId === 'board')?.status).toBe('stopped')
 

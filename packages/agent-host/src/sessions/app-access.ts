@@ -1,5 +1,6 @@
 import { APP_SERVER_PREFIX, appKeyOf, type ExternalAppInfo, isAssistantKind, sameApp } from '@cc/protocol'
-import { unusableAs, type AppRef } from '../apps/external/runtime.js'
+import type { AppRef } from '../apps/external/runtime.js'
+import { offRefusal, unusableAs } from '../apps/external/unusable.js'
 import { TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
 import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps.js'
 import { withTimeout } from '../timing.js'
@@ -106,31 +107,24 @@ export type AttachOutcome =
 export type DetachOutcome = { ok: true; server: string } | { ok: false; error: string }
 
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
-const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${appKeyOf(ref)}`
-
-/** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
-export function readShared(store: Pick<AppAccessStore['settings'], 'appSetting'>, ref: AppRef): boolean {
-  return ref.projectId !== null && store.appSetting(SHARED_KEY({ projectId: ref.projectId, appId: ref.appId })) === '1'
-}
-
-export function writeShared(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, ref: { projectId: string; appId: string }, shared: boolean): void {
-  if (shared) store.setAppSetting(SHARED_KEY(ref), '1')
-  else store.deleteAppSetting(SHARED_KEY(ref))
-}
-
-const OFF_KEY = (ref: { projectId: string; appId: string }) => `app_off:${appKeyOf(ref)}`
-
 /**
- * Whether the person turned this project app off on this computer (#1938, docs/plans/remote-hub.md §13.7): the copy its
- * project's checkout here carries of an app another computer runs. The runtime's `off` dep reads this; anything but `1` is on
+ * A switch the person sets on one project app, stored as `app_<flag>:<project>/<app>` = `1` and absent when not set:
+ *   shared  shared with their other projects (#371 part A), the runtime's `shared` dep
+ *   off     turned off on this computer (#1938, docs/plans/remote-hub.md §13.7): the copy its project's checkout here
+ *           carries of an app another computer runs, the runtime's `off` dep
+ * A user-folder app has neither.
  */
-export function readOff(store: Pick<AppAccessStore['settings'], 'appSetting'>, ref: AppRef): boolean {
-  return ref.projectId !== null && store.appSetting(OFF_KEY({ projectId: ref.projectId, appId: ref.appId })) === '1'
+export type AppFlag = 'shared' | 'off'
+
+const FLAG_KEY = (flag: AppFlag, ref: { projectId: string; appId: string }) => `app_${flag}:${appKeyOf(ref)}`
+
+export function readAppFlag(store: Pick<AppAccessStore['settings'], 'appSetting'>, flag: AppFlag, ref: AppRef): boolean {
+  return ref.projectId !== null && store.appSetting(FLAG_KEY(flag, { projectId: ref.projectId, appId: ref.appId })) === '1'
 }
 
-export function writeOff(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, ref: { projectId: string; appId: string }, off: boolean): void {
-  if (off) store.setAppSetting(OFF_KEY(ref), '1')
-  else store.deleteAppSetting(OFF_KEY(ref))
+export function writeAppFlag(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, flag: AppFlag, ref: { projectId: string; appId: string }, on: boolean): void {
+  if (on) store.setAppSetting(FLAG_KEY(flag, ref), '1')
+  else store.deleteAppSetting(FLAG_KEY(flag, ref))
 }
 
 export class AppAccess implements OnDemandApps {
@@ -347,7 +341,7 @@ export class AppAccess implements OnDemandApps {
   }
 
   private whyNot(session: AppSessionKey, app: ExternalAppInfo): string {
-    if (app.off === true) return `${this.refOf(app)} is turned off on this computer. Only the person can turn it on (its project's Settings → Apps).`
+    if (app.off === true) return offRefusal(this.refOf(app))
     if (app.projectId !== null && app.projectId === session.projectId) return `${this.refOf(app)} is this project's own app; it is attached already when the project is trusted.`
     if (app.status === 'untrusted') return `${this.refOf(app)} is in a project the person has not trusted, so it does not run.`
     if (unusableAs(app) !== null) return `${this.refOf(app)} cannot run now (${app.status}${app.error ? `: ${app.error.split('\n')[0]}` : ''}).`

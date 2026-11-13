@@ -60,26 +60,28 @@ describe("a hub's session uses a machine's project app (#1938)", () => {
     expect(await access.attach('h1', 'Remote box/remote-project/board')).toMatchObject({ ok: false, error: expect.stringContaining('No app named') })
 
     // Shared, attached, then withdrawn there: the hub's list still names it, the machine refuses the call, nothing ran
-    machine.mgr.apps.setAppShared({ projectId: 'p-remote', appId: 'board' }, true)
+    machine.mgr.apps.setAppFlag('shared', { projectId: 'p-remote', appId: 'board' }, true)
     await access.refreshLinked('h1')
     const attaching = access.attach('h1', 'Remote box/remote-project/board')
     await hub.answer('allow')
     expect(await attaching).toMatchObject({ ok: true })
-    machine.mgr.apps.setAppShared({ projectId: 'p-remote', appId: 'board' }, false)
+    machine.mgr.apps.setAppFlag('shared', { projectId: 'p-remote', appId: 'board' }, false)
     const r = await live.call('app-board', 'peek', {})
     expect(r.isError).toBe(true)
     expect(text(r)).toContain('cannot use that app of this computer now')
     expect(machine.apps!.rt.runs({ projectId: 'p-remote', appId: 'board' })).toEqual([])
   })
 
-  it('is not offered, and is refused there, once the person turns it off on the machine (§13.7)', async () => {
+  it('is not offered, and is refused there, once the person turns it off on the machine from the hub window (§13.7)', async () => {
     const { machine, hub, access, live } = await world()
     await access.refreshLinked('h1')
     const attaching = access.attach('h1', 'Remote box/remote-project/board')
     await hub.answer('allow')
     expect(await attaching).toMatchObject({ ok: true })
 
-    machine.mgr.apps.setAppOff({ projectId: 'p-remote', appId: 'board' }, true)
+    // "Runs on Remote box" turned off in the hub's Settings → Apps: the hub routes it to the machine, which stores it
+    await hub.router.handle('apps.setOff', { projectId: 'm1.p-remote', appId: 'board', off: true })
+    expect(machine.apps!.rt.list().find((a) => a.appId === 'board')).toMatchObject({ status: 'stopped', off: true })
     const r = await live.call('app-board', 'peek', {})
     expect(r.isError).toBe(true)
     expect(machine.apps!.rt.runs({ projectId: 'p-remote', appId: 'board' })).toEqual([])

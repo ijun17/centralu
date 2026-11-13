@@ -7,7 +7,7 @@ import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { rpcError } from '../rpc-error.js'
-import { AppAccess, writeOff, writeShared } from './app-access.js'
+import { AppAccess, writeAppFlag, type AppFlag } from './app-access.js'
 import type { WhenAsked } from './asked-gate.js'
 import type { AppSessions, AppSessionsHost } from './app-sessions.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -232,31 +232,17 @@ export class SessionAppWiring {
   }
 
   /**
-   * Shares a project app with the person's other projects, or stops (#371 part A, `apps.setShared`).
-   * Stored beside the person's other settings; the runtime reads it into the app list, and turning it
-   * off detaches the app from every session that attached it (the hub's count asks again).
+   * Sets one of a project app's switches (`AppFlag`): sharing (#371 part A), or off on this computer (#1938, `apps.setOff`,
+   * docs/plans/remote-hub.md §13.7). The runtime reads them fresh; off also stops a running copy, and the session side
+   * recounts, so no session here keeps an app that is off.
    */
-  setAppShared(ref: { projectId: string; appId: string }, shared: boolean): void {
+  setAppFlag(flag: AppFlag, ref: { projectId: string; appId: string }, on: boolean): void {
     const rt = this.requireAppsHub().rt
     if (!rt.list().some((a) => sameApp(a, ref))) {
       throw rpcError(`No such app: ${ref.appId}`)
     }
-    writeShared(this.host.store.settings, ref, shared)
-    rt.sharingChanged()
-  }
-
-  /**
-   * Turns a project app off on this computer, or back on (#1938, `apps.setOff`, docs/plans/remote-hub.md §13.7). Stored
-   * beside sharing; the runtime reads it in `blocker`, stops a running copy, and the session side recounts, so no
-   * session here keeps an app that is off.
-   */
-  setAppOff(ref: { projectId: string; appId: string }, off: boolean): void {
-    const rt = this.requireAppsHub().rt
-    if (!rt.list().some((a) => sameApp(a, ref))) {
-      throw rpcError(`No such app: ${ref.appId}`)
-    }
-    writeOff(this.host.store.settings, ref, off)
-    rt.offChanged(ref)
+    writeAppFlag(this.host.store.settings, flag, ref, on)
+    rt.appSettingsChanged(ref)
   }
 
   requireAppAccess(): AppAccess {

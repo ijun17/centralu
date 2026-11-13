@@ -10,7 +10,7 @@ import { PROJECT_APPS, plantApp, until } from './apps/external/test-helpers.js'
 import { Store } from './dev-services/store.js'
 import { attachInlineViews, type InlineLimits, type InlineViews } from './inline-views.js'
 import { createRpcHandler } from './rpc.js'
-import { readOff } from './sessions/app-access.js'
+import { readAppFlag } from './sessions/app-access.js'
 import { SessionManager } from './sessions/manager.js'
 import { CapturingAdapter as BaseAdapter, FIXTURE_APP } from './sessions/session-apps.test-helpers.js'
 import { fixtureGit, removeTree, tempRoot } from './temp-dir.test-helpers.js'
@@ -92,7 +92,7 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
     // entries for calls that reached the app
     runs: storeRunLedger(store),
     // Off on this computer (#1938), read from the store as main.ts wires it
-    off: (ref) => readOff(store.settings, ref),
+    off: (ref) => readAppFlag(store.settings, 'off', ref),
     watchFlushMs: 40,
     timing: { idleMs, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, maxFailures },
   })

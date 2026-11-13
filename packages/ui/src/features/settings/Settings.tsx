@@ -23,7 +23,7 @@ import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
 import { ASSISTANT_DEMANDS, useRefusals } from '../project/useToolChoice.js'
-import { Switch } from '../../components/Switch.jsx'
+import { RunsHereLine, ShareLine } from './AppSwitchLines.jsx'
 import { Fold } from '../../components/Fold.jsx'
 import {
   AppIcon,
@@ -519,7 +519,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       {/* What can be set on the app, on one line under what it says about itself */}
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5 empty:hidden">
         <ShareLine app={app} />
-        <OffLine app={app} />
+        <RunsHereLine app={app} />
         <GridSpanLine app={app} />
         {app.projectId === null && !confirming && (
           <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setConfirming(true)} data-testid="external-app-remove">
@@ -587,53 +587,6 @@ function GridSpanLine({ app }: { app: ExternalCatalogApp }) {
         title="Panel size in grid cells"
       />
     </div>
-  )
-}
-
-/**
- * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
- * project app is that project's own. When on, a session in another project can find it and attach it
- * to itself for as long as it needs the tools, after the person allows that pair of projects once.
- * A user-folder app has no switch: it is the person's own and available to every project already. Nor has a root app
- * (#1141): it follows its project's trust, which already lets it reach the person's other projects (owner, 2026-10-18).
- */
-function ShareLine({ app }: { app: ExternalCatalogApp }) {
-  const setShared = useStore((s) => s.setAppShared)
-  if (app.projectId === null || app.info.root) return null
-  const shared = app.info.shared === true
-  return (
-    <label
-      className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted"
-      title="Sessions in your other projects can attach this app while they need it. Each project asks you once."
-      data-testid="external-app-share"
-    >
-      <Switch checked={shared} onChange={(e) => void setShared(app.projectId!, app.appId, e.target.checked)} />
-      <span>Share with other projects</span>
-    </label>
-  )
-}
-
-/**
- * Off on this computer (#1938, docs/plans/remote-hub.md §13.7): a repository that carries an app registers it in every
- * checkout, so a second computer with the project has a copy of an app the first one runs. Off, the copy never starts
- * and no session on its computer gets it. Nothing infers that two checkouts are one project (owner), so the person says
- * it, per project app. A user-folder app has no switch: it is not a copy of anything. A linked machine's project app is
- * turned off on that machine, so the line names it.
- */
-function OffLine({ app }: { app: ExternalCatalogApp }) {
-  const machineName = useMachineName(app.info.machine)
-  const { projectId, appId } = app
-  if (projectId === null) return null
-  const where = machineName ? `on ${machineName}` : 'on this computer'
-  return (
-    <label
-      className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted"
-      title={`For a copy of an app another computer runs for this project. Off, it never starts ${where} and no session there gets it.`}
-      data-testid="external-app-off"
-    >
-      <Switch checked={app.info.off === true} onChange={(e) => void useStore.getState().setAppOff(projectId, appId, e.target.checked)} />
-      <span>Off {where}</span>
-    </label>
   )
 }
 
