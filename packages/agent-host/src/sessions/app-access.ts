@@ -1,8 +1,11 @@
 import { APP_SERVER_PREFIX, appKeyOf, type ExternalAppInfo, isAssistantKind, sameApp } from '@cc/protocol'
 import type { AppRef } from '../apps/external/runtime.js'
-import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
+import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps.js'
 import { withTimeout } from '../timing.js'
 import { listSetting } from '../dev-services/store/settings.js'
+import { LinkedApps } from '../links/linked-apps.js'
+import { matchProjects, projectChoice } from './ask-project.js'
 
 /**
  * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
@@ -75,7 +78,7 @@ export type AppAccessDeps = {
   ensureAccess(
     sessionId: string,
     toProjectId: string,
-    what: { text: string; app: { appId: string; name: string } },
+    what: { text: string; app: { appId: string; name: string }; machine?: { name: string; project: string } },
     signal?: AbortSignal,
   ): Promise<{ ok: true } | { ok: false; error: string }>
   /** How long to wait for an app's tool list when it is attached (the hub's own cap by default) */
@@ -89,6 +92,8 @@ export type FoundApp = {
   name: string
   /** The project it lives in, or null for the person's own folder */
   project: string | null
+  /** The linked machine it runs on (#1938); absent for this computer's */
+  machine?: string
   description: string
   /** The tool names the agent would get, if the app has listed them since the host started (finding starts no app) */
   tools: string[] | null
@@ -149,12 +154,20 @@ export class AppAccess implements OnDemandApps {
 
   // ── The three tools ──
 
+  /**
+   * Asks the session's linked hosts for the apps it may reach there (#1938), so `find` and `attach` name them: the hosts
+   * that could not be asked, each with why
+   */
+  async refreshLinked(sessionId: string): Promise<{ name: string; why: string }[]> {
+    return (await this.deps.hub.opts.linked?.refresh(sessionId))?.away ?? []
+  }
+
   find(sessionId: string, query?: string): { ok: true; apps: FoundApp[] } | { ok: false; error: string } {
     const gate = this.gate(sessionId)
     if (!gate.ok) return gate
     const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean)
     const apps = this.candidates(gate.session)
-      .map((a) => this.describe(a))
+      .map((a) => this.describe(gate.session.id, a))
       .filter((f) => {
         const hay = [f.ref, f.name, f.project ?? '', f.description, ...(f.tools ?? [])].join(' ').toLowerCase()
         return words.every((w) => hay.includes(w))
@@ -166,13 +179,14 @@ export class AppAccess implements OnDemandApps {
     const gate = this.gate(sessionId)
     if (!gate.ok) return gate
     const { session } = gate
+    if (ref.includes('/')) await this.refreshLinked(sessionId)
     const already = this.deps.hub.refsFor(session)
-    const named = this.resolve(ref)
+    const named = this.resolve(sessionId, ref)
     if (!named.ok) return named
     const app = named.app
     const target: AppRef = { projectId: app.projectId, appId: app.appId }
     const has = already.find((h) => sameApp(h.ref, target))
-    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), already: true }
+    if (has) return { ok: true, server: has.server, tools: await this.toolNames(sessionId, target), already: true }
     if (!this.candidates(session).some((a) => sameApp(a, app))) {
       return { ok: false, error: this.whyNot(session, app) }
     }
@@ -180,10 +194,12 @@ export class AppAccess implements OnDemandApps {
     let consent: Record_['consent'] = 'none'
     // A root app is reached the way a user-folder app is (#1141): no consent card
     if (app.projectId !== null && app.root !== true) {
+      // One on a linked machine (#1938): the card names the machine, and its "always" is read as once (§13.4)
+      const machine = this.linkedMachine(app.projectId)
       const res = await this.deps.ensureAccess(
         sessionId,
         app.projectId,
-        { text: `use its app ${app.name ?? app.appId}`, app: { appId: app.appId, name: app.name ?? app.appId } },
+        { text: `use its app ${app.name ?? app.appId}`, app: { appId: app.appId, name: app.name ?? app.appId }, ...(machine ? { machine } : {}) },
         signal,
       )
       if (!res.ok) return res
@@ -202,7 +218,7 @@ export class AppAccess implements OnDemandApps {
     const inUse = [...this.deps.hub.refsFor(session).map((h) => h.server), ...kept.map((r) => r.server)]
     const server = this.deps.hub.claimAttachName(sessionId, target, inUse)
     this.save(sessionId, [...kept, { projectId: app.projectId, appId: app.appId, server, consent, at: Date.now() }])
-    return { ok: true, server, tools: await this.toolNames(target) }
+    return { ok: true, server, tools: await this.toolNames(sessionId, target) }
   }
 
   detach(sessionId: string, ref: string): DetachOutcome {
@@ -307,8 +323,8 @@ export class AppAccess implements OnDemandApps {
   private candidates(session: AppSessionKey): ExternalAppInfo[] {
     const have = this.deps.hub.refsFor(session)
     const assistant = isAssistantKind(session.kind)
-    return this.deps.hub.rt
-      .list()
+    return this.deps.hub
+      .appsOf(session.id)
       // An untrusted project's apps attach nowhere, auto included (owner, #1141)
       .filter((a) => !UNUSABLE.has(a.status))
       .filter((a) => a.projectId === null || (assistant ? a.root === true : a.projectId !== session.projectId && (a.shared === true || a.root === true)))
@@ -325,9 +341,9 @@ export class AppAccess implements OnDemandApps {
     return `${this.refOf(app)} cannot be attached to this session.`
   }
 
-  private resolve(ref: string): { ok: true; app: ExternalAppInfo } | { ok: false; error: string } {
+  private resolve(sessionId: string, ref: string): { ok: true; app: ExternalAppInfo } | { ok: false; error: string } {
     const want = ref.trim()
-    const all = this.deps.hub.rt.list()
+    const all = this.deps.hub.appsOf(sessionId)
     const slash = want.lastIndexOf('/')
     let app: ExternalAppInfo | undefined
     if (slash === -1) {
@@ -338,8 +354,17 @@ export class AppAccess implements OnDemandApps {
     } else {
       const project = want.slice(0, slash).trim()
       const id = want.slice(slash + 1).trim()
+      /*
+       * A project here first, as before; else one of a linked machine's that has an app this session may reach (#1938), named
+       * as ask_project names it: `<machine>/<project>`, its qualified id, or its name alone when no other machine has one
+       */
       const p = this.deps.projects().find((x) => x.id === project) ?? this.deps.projects().find((x) => x.name === project)
-      app = p ? all.find((a) => a.projectId === p.id && a.appId === id) : undefined
+      const there = p ? [] : matchProjects(project, this.deps.hub.opts.linked?.projects(sessionId) ?? [])
+      if (there.length > 1) {
+        return { ok: false, error: `More than one machine has a project named ${JSON.stringify(project)}: ${there.map(projectChoice).join('; ')}. Name it as machine/project/app.` }
+      }
+      const projectId = p?.id ?? there[0]?.id
+      app = projectId ? all.find((a) => a.projectId === projectId && a.appId === id) : undefined
     }
     if (!app) return { ok: false, error: `No app named ${JSON.stringify(want)}. Use a name find_apps gave (project/app, or app for your own apps).` }
     return { ok: true, app }
@@ -349,13 +374,15 @@ export class AppAccess implements OnDemandApps {
     return mine.find((r) => r.server === ref || this.refOf(r) === ref || (r.projectId !== null && appKeyOf(r.projectId, r.appId) === ref)) ?? mine.find((r) => r.appId === ref)
   }
 
-  private describe(a: ExternalAppInfo): FoundApp {
-    const known = this.deps.hub.rt.knownTools({ projectId: a.projectId, appId: a.appId }, 'model')
+  private describe(sessionId: string, a: ExternalAppInfo): FoundApp {
+    const known = this.deps.hub.knownTools(sessionId, { projectId: a.projectId, appId: a.appId })
+    const there = this.linkedMachine(a.projectId)
     const line = (a.description ?? '').split('\n')[0]!.trim()
     return {
       ref: this.refOf(a),
       name: a.name ?? a.appId,
-      project: a.projectId === null ? null : this.projectName(a.projectId),
+      project: a.projectId === null ? null : (there?.project ?? this.projectName(a.projectId)),
+      ...(there ? { machine: there.name } : {}),
       description: line.length > 140 ? `${line.slice(0, 139)}…` : line,
       tools: known ? known.map((t) => t.name) : null,
     }
@@ -365,16 +392,24 @@ export class AppAccess implements OnDemandApps {
     return a.projectId === null ? a.appId : `${this.projectName(a.projectId)}/${a.appId}`
   }
 
+  /** A project's name as an agent writes it: a linked machine's as `<machine>/<project>` (#1938), which `resolve` reads back */
   private projectName(id: string): string {
-    return this.deps.projects().find((p) => p.id === id)?.name ?? id
+    return this.deps.projects().find((p) => p.id === id)?.name ?? (LinkedApps.owns({ projectId: id }) ? this.deps.hub.opts.linked?.label(id) : undefined) ?? id
+  }
+
+  /** A linked machine's project (#1938): the machine's name and the project's there, as last listed */
+  private linkedMachine(projectId: string | null): { name: string; project: string } | undefined {
+    const label = projectId !== null && LinkedApps.owns({ projectId }) ? this.deps.hub.opts.linked?.label(projectId) : undefined
+    const slash = label?.indexOf('/') ?? -1
+    return label && slash > 0 ? { name: label.slice(0, slash), project: label.slice(slash + 1) } : undefined
   }
 
   /** The app's agent tools for the tool result — started here if never listed, within the hub's cap; empty on failure */
-  private async toolNames(ref: AppRef): Promise<string[]> {
-    const known = this.deps.hub.rt.knownTools(ref, 'model')
+  private async toolNames(sessionId: string, ref: AppRef): Promise<string[]> {
+    const known = this.deps.hub.knownTools(sessionId, ref)
     if (known) return known.map((t) => t.name)
     try {
-      return (await withTimeout(this.deps.hub.rt.tools(ref, 'model'), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map((t) => t.name)
+      return (await withTimeout(this.deps.hub.listTools(sessionId, ref), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map((t) => t.name)
     } catch {
       return []
     }

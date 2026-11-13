@@ -740,6 +740,11 @@ export class SessionManager {
     return this.meta.get(sessionId)?.name ?? null
   }
 
+  /** A session's project, or null when it has none or is not this host's (#1938: the project a started agent's parent works in) */
+  sessionProject(sessionId: string): string | null {
+    return this.meta.get(sessionId)?.projectId ?? null
+  }
+
   /** Whether a session's process is alive (what the UI uses to know if it can be continued) */
   isLive(sessionId: string): boolean {
     return this.handles.has(sessionId)

@@ -498,6 +498,8 @@ const HANDLERS: ToolHandlers = {
     const query = args.query?.trim() ?? ''
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
+    // A linked machine that could not be asked (#1938): its apps are not listed, and the agent is told why
+    const away = (r.away ?? []).map((m) => `\n${trustedJsonText(m.name)} could not be asked for its apps: ${m.why}.`).join('')
     if (r.apps.length === 0) {
       // The session's own apps are not in this list: say they are there (#2231, where "no app" misled a session that had one)
       const own = tools.apps?.()?.current().map((a) => a.name) ?? []
@@ -507,7 +509,7 @@ const HANDLERS: ToolHandlers = {
           ? `No app matches ${trustedJsonText(query)}. Try ${namedCall(caller.profile, 'find_apps', {})} with no query to see every app you can attach.`
           : caller.profile === 'assistant'
             ? "No app can be attached: no trusted project is an app, and the person's own apps are attached already."
-            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).") + mine,
+            : "No app can be attached: no other project shares one and there is no app in the person's own folder. Sharing is the person's choice, per app (Settings → Apps).") + mine + away,
       }
     }
     return {
@@ -515,11 +517,11 @@ const HANDLERS: ToolHandlers = {
         r.apps
           .map(
             (a) =>
-              `- ${a.ref} · ${a.project === null ? "the person's own app" : `project ${trustedJsonText(a.project)}`}` +
+              `- ${a.ref} · ${a.project === null ? "the person's own app" : `project ${trustedJsonText(a.project)}`}${a.machine ? ` on ${trustedJsonText(a.machine)}` : ''}` +
               `\n    ${trustedJsonText(a.name)}${a.description ? `: ${trustedJsonText(a.description)}` : ''}` +
               `\n    tools: ${a.tools ? a.tools.join(', ') || '(none)' : '(listed once attached)'}`,
           )
-          .join('\n') + `\nAttach one with ${namedCall(caller.profile, 'attach_app', { app: '<the name before ·>' })}.`,
+          .join('\n') + `\nAttach one with ${namedCall(caller.profile, 'attach_app', { app: '<the name before ·>' })}.${away}`,
     }
   },
 
@@ -547,6 +549,7 @@ const HANDLERS: ToolHandlers = {
 
   async app(args, { tools, caller, signal, callId, waitMs }) {
     const live = tools.apps?.() ?? null
+    await live?.ready?.()
     const apps = live?.current() ?? []
     const name = trimmed(args.app)
     const entry = name ? namedApp(apps, name) : undefined

@@ -1,0 +1,4 @@
+{
+  "bytes": 1000,
+  "reason": "A project's app used from another machine (#1938): the result shapes of host.apps and host.appCall (LinkedApp, LinkedAppCallResult in protocol/src/linked-apps.ts), declared once beside the other host.* results, which the client bundle carries. The tree measured 1,945,815 B, 715 B over the ceiling; main's own size on this machine was not measured. No new dependency."
+}

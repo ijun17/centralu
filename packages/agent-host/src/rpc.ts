@@ -2,7 +2,7 @@ import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
 import type { z } from 'zod'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type RpcMethodName, sameApp } from '@cc/protocol'
+import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type LinkedAppNoticeParams, type RpcMethodName, sameApp } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -36,6 +36,7 @@ import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { Watches } from './mail/watches.js'
 import type { MailAcross } from './mail/across.js'
+import type { LinkedAppCalls } from './links/linked-app-calls.js'
 import type { InlineViews } from './inline-views.js'
 import type { CredentialsReport } from './lifecycle/serve-credentials.js'
 import type {
@@ -115,12 +116,20 @@ export type RpcServices = {
     on?(client: number): { id: string; name: string } | undefined
     /** A session a hub created on this connection before offering here: recorded once it offers (#2067) */
     awaitOffer?(client: number, sessionId: string): void
+    /** The hub that offered apps on this connection, if one did (#1938) */
+    appsOn?(client: number): { id: string; name: string } | undefined
   }
   /**
    * Mail across linked machines (#2067 item 2, mail/across.ts): `host.mail` and `host.mailRows` from the hub that offered
    * on the connection they came in on, and from no other. Without it both are refused, as a build from before them
    */
   mailAcross?: Pick<MailAcross, 'fromHub' | 'rows'>
+  /**
+   * This host's project apps used by the hub's sessions (#1938, docs/plans/remote-hub.md §13): `host.apps`, `host.appCall`
+   * and `host.appCancel` from the hub that offered apps on the connection they came in on, and from no other; and a hub's
+   * app's notice to a session here that called it (`host.appNotice`). Without it all four are refused, as a build from before
+   */
+  appsAcross?: { calls: Pick<LinkedAppCalls, 'list' | 'call' | 'cancel'>; notice(hub: { id: string; name: string }, p: LinkedAppNoticeParams): Promise<void> }
   /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
   mail?: MailPerson
   /** The watches sessions keep (#1324, mail/watches.ts): the person lists and cancels them where they look at the session */
@@ -172,7 +181,7 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, appsAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
@@ -216,6 +225,12 @@ export function createRpcHandler(
   const requireMachines = (): MachinesPort => {
     if (!machines) throw rpcError('Linked machines are unavailable on this host')
     return machines
+  }
+  /** The hub that offered apps on the connection a call came in on, and what answers it there (#1938) */
+  const appsHub = (ctx: RpcContext | undefined) => {
+    const hub = ctx ? hubs?.appsOn?.(ctx.client) : undefined
+    if (!appsAcross || !hub) throw rpcError("Only a hub that offered apps on this connection uses this computer's apps")
+    return { hub, calls: appsAcross.calls, notice: (p: LinkedAppNoticeParams) => appsAcross.notice(hub, p) }
   }
   const requireMail = (): MailPerson => {
     if (!mail) throw rpcError('The mailbox is unavailable on this host')
@@ -905,7 +920,7 @@ export function createRpcHandler(
       const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
       // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2)
-      return { ok: true as const, ...(mailAcross && hubs ? { mail: true } : {}) }
+      return { ok: true as const, ...(mailAcross && hubs ? { mail: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
     },
     'host.mail': async (p, ctx) => {
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined
@@ -916,6 +931,23 @@ export function createRpcHandler(
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined
       if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection says what became of mail here')
       await mailAcross.rows(p.rows, { hub: hub.id })
+      return { ok: true as const }
+    },
+    'host.apps': async (p, ctx) => {
+      const { hub, calls } = appsHub(ctx)
+      return { apps: await calls.list(hub, p.session, p.start) }
+    },
+    'host.appCall': async (p, ctx) => {
+      const { hub, calls } = appsHub(ctx)
+      return calls.call(hub, p)
+    },
+    'host.appCancel': async (p, ctx) => {
+      const { hub, calls } = appsHub(ctx)
+      calls.cancel(hub, p.call)
+      return { ok: true as const }
+    },
+    'host.appNotice': async (p, ctx) => {
+      await appsHub(ctx).notice(p)
       return { ok: true as const }
     },
     'host.activity': async () => {

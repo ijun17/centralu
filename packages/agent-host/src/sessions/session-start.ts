@@ -11,7 +11,7 @@ import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
-import { presetFromHub, recordStartingHub, startedFromHubKey } from './hub-preset.js'
+import { presetFromHub, recordStartingHub, startedFromHubKey, type StartingHub } from './hub-preset.js'
 import { adoptOpenedSettings } from './opened-settings.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
@@ -185,7 +185,7 @@ export class SessionStarts {
        * The hub whose connection asked for this session with `fromHub` (#2067): the session's mail to `parent` goes to that hub
        * and no other. Not in the RPC contract: the host sets it from the connection the call came in on (`LinkedHubs.on`)
        */
-      startedByHub?: { id: string; name: string }
+      startedByHub?: StartingHub
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.host.meta.get(params.askedBy)?.projectId !== params.projectId) {

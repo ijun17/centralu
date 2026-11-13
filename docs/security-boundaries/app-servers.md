@@ -309,8 +309,17 @@ changed is the host's rule for when it asks the person, which is not something t
 An app runs under the host of the machine its project is on. That host's desk, store, project trust and
 sessions' presets decide; `apps.permissions` and `apps.forgetPermission` already route by `machine`
 (`links/routes.ts`). No message changes. A linked host on an older build keeps asking as before, and the window
-keeps the card and the view question for it. No path was found where a session on one machine calls an app on
-another (`session-apps.ts`, `app-access.ts`, `app-calls.ts` carry no machine).
+keeps the card and the view question for it.
+
+Since #1938 a session on one machine calls an app on another ([plans/remote-hub.md](../plans/remote-hub.md) §13). The
+rule above holds unchanged: the call is forwarded to the app's host and goes through `ExternalApps.call` there, so
+`BrokerDesk.permit` on that host decides the app's capability requests. The calling session's preset is not on that
+host, so a call from elsewhere counts as `safe` there (`appAgentPreset`'s default): a declared request of an app called
+from another machine is asked on the app's own row, never run without a card. The single call's approval is the calling
+session's, on its own host. Which session may reach the app is the app's host's, read at every list and call: from a hub,
+what a session of another project here may attach; from a machine, only the agents that hub's sessions started there,
+for their parent project, by the hub's own record. The machine is the link's, never a field of the call; the session id is
+attribution, qualified by it.
 
 ### Changes, by file
 

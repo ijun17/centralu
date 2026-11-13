@@ -201,6 +201,15 @@ describe('calling', () => {
     expect(runs[0]).toMatchObject({ tool: 'poke', callerKind: 'session', callerSessionId: 'sess-rec', status: 'ok' })
   })
 
+  it('answers each session its own early-returned run when two hold the same run id, as two of a linked host may (#1938)', async () => {
+    const done = (text: string) => ({ runId: 'run_same', status: 'ok' as const, result: { content: [{ type: 'text' as const, text }] }, error: null, durationMs: 5 })
+    hub.remember('run_same', { sessionId: 'w1', server: 'app-tasks', startedAt: Date.now(), outcome: done('first') })
+    hub.remember('run_same', { sessionId: 'w2', server: 'app-tasks', startedAt: Date.now(), outcome: done('second') })
+    const asked = (id: string) => hub.attach(worker('p1', id)).call('app-tasks', 'run_status', { run_id: 'run_same' })
+    expect(await asked('w1')).toMatchObject({ isError: false, content: [{ text: expect.stringContaining('has finished') }, { text: 'first' }] })
+    expect(await asked('w2')).toMatchObject({ isError: false, content: [{ text: expect.stringContaining('has finished') }, { text: 'second' }] })
+  })
+
   it('an unattached app cannot be called even by its known name — it never reaches the runtime', async () => {
     const a = hub.attach(worker('p1'))
     // another project's app, a user-folder app

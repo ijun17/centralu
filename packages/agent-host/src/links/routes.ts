@@ -384,6 +384,11 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // Mail from a hub to this host's sessions, and what became of mail that crossed (#2067 item 2): answered here, never passed on
   'host.mail': HUB,
   'host.mailRows': HUB,
+  // A project's app here used by the hub's sessions (#1938): answered here, never passed on
+  'host.apps': HUB,
+  'host.appCall': HUB,
+  'host.appCancel': HUB,
+  'host.appNotice': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
   // The hub's own sessions; the hub's Assistant asks each machine's directly (links/linked-sessions.ts, plan §12)

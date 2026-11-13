@@ -1,6 +1,8 @@
 import { HubAskResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { LOOKUP_MS } from './machine-reach.js'
+import type { AppsPeer } from './linked-apps.js'
+import type { StartingHub } from '../sessions/hub-preset.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -20,7 +22,7 @@ import { LOOKUP_MS } from './machine-reach.js'
  */
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; you: string | null }
+type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null }
 
 /** How long a message to a hub may take before the send is refused as not known to have arrived */
 const MAIL_MS = 30_000
@@ -37,7 +39,7 @@ export type LinkedHubsDeps = {
   /** How long one message may wait for the hub's answer (30 s when absent). For tests */
   mailTimeoutMs?: number
   /** Records the hub that started a session here (`recordStartingHub`), for one created before that hub offered (`awaitOffer`) */
-  record?: (sessionId: string, hub: { id: string; name: string }) => void
+  record?: (sessionId: string, hub: StartingHub) => void
 }
 
 /** The words a call that failed for an older hub says (it has no such method) */
@@ -58,20 +60,21 @@ export class LinkedHubs {
     this.mailOffered.add(fn)
   }
 
-  /** A hub's offer, on the connection it came in on. Off, and without mail, forgets it */
+  /** A hub's offer, on the connection it came in on. Off, without mail and without apps, forgets it */
   offer(client: number, o: HubOffer): void {
     const mail = o.mail === true
-    if (!o.on && !mail) {
+    const apps = o.apps === true
+    if (!o.on && !mail && !apps) {
       this.hubs.delete(o.hub.id)
       return
     }
     const prev = this.hubs.get(o.hub.id)
     const projects = o.on ? (prev?.projects ?? null) : null
     const name = oneLineText(o.hub.name, 120) || o.hub.id
-    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, you: o.you ?? null })
+    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null })
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
-    for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name })
+    for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name, apps })
     if (mail) for (const fn of this.mailOffered) fn(o.hub.id)
   }
 
@@ -142,9 +145,37 @@ export class LinkedHubs {
     return { ...r, project: oneLineText(r.project, 120), sessionName: oneLineText(r.sessionName, 120) }
   }
 
+  /**
+   * A hub's apps for a session it started here (#1938, docs/plans/remote-hub.md §13.5), called on the connection it
+   * offered on and no other. `answers`: it said it answers `hub.apps`; one that did not is never called, since a hub from
+   * before it leaves a call from a machine unanswered
+   */
+  appsPeer(hubId: string): AppsPeer | undefined {
+    const h = this.hubs.get(hubId)
+    if (!h) return undefined
+    return {
+      id: h.id,
+      name: h.name,
+      reachable: h.client !== null,
+      answers: h.apps,
+      gives: true,
+      call: (method, params, timeoutMs) => {
+        const client = this.hubs.get(hubId)?.client
+        if (client === null || client === undefined) return Promise.reject(new Error(`${h.name} is ${NOT_REACHABLE}`))
+        return this.deps.call(client, `hub.${method}`, params, { timeoutMs })
+      },
+    }
+  }
+
+  /** The hub that offered apps on this connection, if one did: only it calls `host.apps` and `host.appCall` here (#1938) */
+  appsOn(client: number): { id: string; name: string } | undefined {
+    for (const h of this.hubs.values()) if (h.client === client && h.apps) return { id: h.id, name: h.name }
+    return undefined
+  }
+
   /** The hub that offered on this connection, if one did (`startedByHub`: the hub a session it creates here records) */
-  on(client: number): { id: string; name: string } | undefined {
-    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name }
+  on(client: number): StartingHub | undefined {
+    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name, apps: h.apps }
     return undefined
   }
 

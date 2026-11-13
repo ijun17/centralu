@@ -1,6 +1,8 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind, sameApp } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, oneLineText, type AppReach, type LinkedAppNoticeParams, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind, sameApp } from '@cc/protocol'
+import { LINKED_FRESH_MS } from '../links/linked-apps.js'
+import { qualify } from '../links/machine-ids.js'
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
@@ -80,8 +82,32 @@ export class SessionAppWiring {
       askCapability: (q, signal) => this.host.hostCards.askCapability(q, signal),
       asksPerson: (callers) => this.host.appSessions.callersPreset(callers) === 'safe',
       agentRunEnded: (run) => this.host.appSessions.agentRunEnded(run),
-      appNotice: (sessionId, text, app) => this.host.appNotice(sessionId, text, app),
+      // A session of a linked host that called the app hears it there (#1938); one of this host's, here
+      appNotice: (sessionId, text, app) => this.linkedNotice?.(sessionId, text, app) ?? this.host.appNotice(sessionId, text, app),
     }
+  }
+
+  /** Where an app's notice to a session of a linked host goes (#1938, links/apps-across.ts `linkedNotices`); null: its own */
+  private linkedNotice: ((sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void> | null) | null = null
+
+  useLinkedNotices(fn: NonNullable<SessionAppWiring['linkedNotice']>): void {
+    this.linkedNotice = fn
+  }
+
+  /**
+   * A linked host's app's notice to a session here (#1938, `host.appNotice` / `hub.appNotice`): delivered as a notice of an
+   * app here is, framed as that app's words, only to a session that has that app now (it called it, so it holds it). The
+   * app's project is named by the host it came from (`hostId`, the link's), never by the notice
+   */
+  async linkedNoticeIn(hostId: string, p: LinkedAppNoticeParams): Promise<void> {
+    const m = this.host.meta.get(p.session)
+    const hub = this.appsHub
+    if (!m || !hub || this.isAppAgentSession(m)) throw rpcError('That session is not here')
+    const ref = { projectId: qualify(hostId, p.projectId), appId: p.appId }
+    await hub.opts.linked?.refresh(m.id, LINKED_FRESH_MS, undefined, hostId)
+    const key = { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.host.builderRefOf(m) }
+    if (!hub.refsFor(key).some((h) => sameApp(h.ref, ref))) throw rpcError('That session does not use this app')
+    await this.host.appNotice(m.id, p.text, { appId: p.appId, projectId: ref.projectId, name: oneLineText(p.name, 120) || p.appId })
   }
   useExternalApps(rt: ExternalApps, opts?: Omit<NonNullable<ConstructorParameters<typeof SessionAppsHub>[1]>, 'onDemand'>): void {
     this.appAccess?.dispose()

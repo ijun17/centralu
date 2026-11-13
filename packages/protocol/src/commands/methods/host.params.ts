@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { SessionId } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
 import { MachineId, RemoteShell } from '../../machines.js'
-import { HostMailParams, HubOffer, MailRowsParams } from '../../machines-hub.js'
+import { HostMailParams, HubOffer, LinkedAppCallParams, LinkedAppCancelParams, LinkedAppNoticeParams, LinkedAppsParams, MailRowsParams } from '../../machines-hub.js'
 
 /** The parameters of the `host` methods, which the host validates (docs/protocol.md §3). Their results: ./host.results.ts */
 export const hostParams = {
@@ -353,4 +353,13 @@ export const hostParams = {
   'host.mail': HostMailParams,
   /** The rows of messages that crossed, as the hub knows them (#2067 item 2). Additive */
   'host.mailRows': MailRowsParams,
+  /**
+   * A project's app here used by a session of the hub (#1938, docs/plans/remote-hub.md §13): the apps it may reach, one
+   * call, its withdrawal, and a notice of a hub's app to a session here that called it. Taken only on a connection a hub
+   * offered apps on. Asked by the hub directly, never routed. Additive
+   */
+  'host.apps': LinkedAppsParams,
+  'host.appCall': LinkedAppCallParams,
+  'host.appCancel': LinkedAppCancelParams,
+  'host.appNotice': LinkedAppNoticeParams,
 } as const

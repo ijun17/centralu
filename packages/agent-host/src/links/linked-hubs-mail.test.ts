@@ -40,7 +40,7 @@ describe('a linked machine keeps the hubs that take mail (#2067 item 1)', () => 
       hub.router.handle('agents.createSession', { projectId: 'm1.p-remote', cwd: path, tool: 'claude', ...(fromHub ? { fromHub: { callerPreset: 'normal' } } : {}) }) as Promise<{ id: string }>
     const [started, plain] = [await create(true), await create(false)]
     const here = (qualified: string) => qualified.slice('m1.'.length)
-    expect(startingHub(machine.store.settings, here(started.id))).toEqual({ id: hub.id, name: 'Hub mac' })
+    expect(startingHub(machine.store.settings, here(started.id))).toEqual({ id: hub.id, name: 'Hub mac', apps: false })
     expect(startingHub(machine.store.settings, here(plain.id))).toBeNull()
   })
 
@@ -101,7 +101,7 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
     hubs.gone(7)
     expect(await across(hubs, LAPTOP)('again')).toMatchObject({ ok: true, computer: 'Laptop' })
     // The connection a hub offered on names it, for the session it creates there
-    expect([hubs.on(8), hubs.on(7), hubs.on(9)]).toEqual([LAPTOP, undefined, undefined])
+    expect([hubs.on(8), hubs.on(7), hubs.on(9)]).toEqual([{ ...LAPTOP, apps: false }, undefined, undefined])
   })
 
   it('says each cause: no hub recorded, that hub not linked or down, a hub from before it, a link failing during the send', async () => {

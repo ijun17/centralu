@@ -866,7 +866,7 @@ export type CentraluTools = {
    * from the next call, on every CLI (#2231). Every other seat answers with a refusal.
    */
   findApps(query?: string): Promise<
-    | { ok: true; apps: { ref: string; name: string; project: string | null; description: string; tools: string[] | null }[] }
+    | { ok: true; apps: { ref: string; name: string; project: string | null; machine?: string; description: string; tools: string[] | null }[]; away?: { name: string; why: string }[] }
     | { ok: false; error: string }
   >
   attachApp(app: string): Promise<

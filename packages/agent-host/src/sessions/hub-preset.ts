@@ -37,13 +37,16 @@ export const startedFromHubKey = (sessionId: string) => `started_from_hub:${sess
  */
 export const startedByHubKey = (sessionId: string) => `started_from_hub_by:${sessionId}`
 
+/** A hub that started a session here: `apps`, whether it offered its apps then (#1938); absent in a record from before it */
+export type StartingHub = { id: string; name: string; apps?: boolean }
+
 /** Records the hub that started a session here (`startedByHubKey`): at its creation, or when that hub offers after it (`LinkedHubs.awaitOffer`) */
-export function recordStartingHub(settings: { setAppSetting(key: string, value: string): void }, sessionId: string, hub: { id: string; name: string }): void {
-  settings.setAppSetting(startedByHubKey(sessionId), JSON.stringify({ id: hub.id, name: hub.name }))
+export function recordStartingHub(settings: { setAppSetting(key: string, value: string): void }, sessionId: string, hub: StartingHub): void {
+  settings.setAppSetting(startedByHubKey(sessionId), JSON.stringify({ id: hub.id, name: hub.name, ...(hub.apps !== undefined ? { apps: hub.apps } : {}) }))
 }
 
 /** The hub that started a session here (`startedByHubKey`), or null when none was recorded or the record does not read as one */
-export function startingHub(settings: { appSetting(key: string): string | null }, sessionId: string): { id: string; name: string } | null {
+export function startingHub(settings: { appSetting(key: string): string | null }, sessionId: string): StartingHub | null {
   const raw = settings.appSetting(startedByHubKey(sessionId))
   if (!raw) return null
   try {
@@ -51,7 +54,8 @@ export function startingHub(settings: { appSetting(key: string): string | null }
     if (typeof v !== 'object' || v === null) return null
     const id: unknown = Reflect.get(v, 'id')
     const name: unknown = Reflect.get(v, 'name')
-    return typeof id === 'string' && id && typeof name === 'string' ? { id, name } : null
+    const apps: unknown = Reflect.get(v, 'apps')
+    return typeof id === 'string' && id && typeof name === 'string' ? { id, name, ...(typeof apps === 'boolean' ? { apps } : {}) } : null
   } catch {
     return null
   }

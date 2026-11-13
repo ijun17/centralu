@@ -731,10 +731,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const on = this.record.asks === true
     let note: string | null = null
     try {
-      const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}) })
+      const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
+      if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
       if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
     } catch (err) {
+      // This connection was not told: neither side calls the other's mail or apps on it
+      if (this.client === client) this.appsBack = false
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
@@ -766,7 +769,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   async withdrawOffer(): Promise<void> {
     const self = this.deps.hubSelf?.()
     const client = this.client
-    if (!self || !client || !this.reachable || (this.record.asks !== true && !this.deps.hubMail)) return
+    if (!self || !client || !this.reachable || (this.record.asks !== true && !this.deps.hubMail && !this.deps.hubApps)) return
     await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
   }
 
@@ -775,6 +778,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   get takesMail(): boolean {
     return this.mailBack
+  }
+
+  /** Whether the machine said, at this connection's offer, that it answers `host.apps` and `host.appCall` (#1938) */
+  private appsBack = false
+
+  get answersApps(): boolean {
+    return this.appsBack
   }
 
   // ── RoutedMachine ───────────────────────────────────────────────────────────────────────

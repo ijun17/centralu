@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { MachineId } from './machines.js'
+import { AppId } from './entities/ids.js'
+import { LinkedAppCallResult, LinkedAppsResult } from './linked-apps.js'
 
 /** The calls a machine makes to its hub, which only the host reads: the UI's bundle leaves them out (#1648). */
 
@@ -18,6 +20,8 @@ export const HubOffer = z.object({
   on: z.boolean(),
   mail: z.boolean().optional(),
   you: MachineId.optional(),
+  /** The hub answers `hub.apps` and `hub.appCall` (#1938, docs/plans/remote-hub.md §13.6). Additive */
+  apps: z.boolean().optional(),
 })
 export type HubOffer = z.infer<typeof HubOffer>
 /** One of a hub's projects as a machine's session may name it (#550, `hub.projects`) */
@@ -158,6 +162,53 @@ export const HubFindResult = z.object({
 })
 export type HubFindResult = z.infer<typeof HubFindResult>
 /**
+ * A project's app used from another machine (#1938, docs/plans/remote-hub.md §13.3): the calls one host makes to the app's
+ * host over their link, `host.*` from a hub to a machine and `hub.*` from a machine to its hub. `session` is the calling
+ * session by its own host's id; the app's host qualifies it by the link it came on, never by what the call says.
+ */
+/**
+ * The apps this session may reach there (`host.apps`, `hub.apps`). `start`: one of them, by the answering host's project
+ * id, is started first if it has not listed its tools yet, as attaching or listing an app here starts it
+ */
+export const LinkedAppsParams = z.object({
+  session: z.string().min(1).max(200),
+  start: z.object({ projectId: z.string().min(1).max(200), appId: AppId }).optional(),
+})
+export type LinkedAppsParams = z.infer<typeof LinkedAppsParams>
+/**
+ * One call of an app's tool (`host.appCall`, `hub.appCall`). `call` is the caller's id for it: the same id again is the
+ * same call, waited on again, never a second run. `projectId` is the app's project by the app's host's own id. The app's
+ * host answers within `waitMs`, with the outcome or `running`; `run_status` asks about a run by its id
+ */
+export const LinkedAppCallParams = z.object({
+  call: z.string().min(1).max(200),
+  session: z.string().min(1).max(200),
+  projectId: z.string().min(1).max(200),
+  appId: AppId,
+  tool: z.string().min(1).max(200),
+  args: z.record(z.string(), z.unknown()),
+  waitMs: z.number().int().min(1_000).max(600_000),
+  /** The tool was not in the session's list when its agent called (session-apps.ts): refused there and recorded, never run */
+  notListed: z.literal(true).optional(),
+})
+export type LinkedAppCallParams = z.infer<typeof LinkedAppCallParams>
+/** A call withdrawn by its caller (`host.appCancel`, `hub.appCancel`): the run there is cancelled; one already ended stays recorded */
+export const LinkedAppCancelParams = z.object({ call: z.string().min(1).max(200) })
+export type LinkedAppCancelParams = z.infer<typeof LinkedAppCancelParams>
+/**
+ * An app's notice to a session of the other side that called it (`host.appNotice`, `hub.appNotice`; `uses.notices`):
+ * `session` by the receiving host's own id, the app by the sending host's project id, `text` as the app wrote it
+ */
+export const LinkedAppNoticeParams = z.object({
+  session: z.string().min(1).max(200),
+  projectId: z.string().min(1).max(200),
+  appId: AppId,
+  name: z.string().max(500),
+  text: z.string().min(1).max(8_000),
+})
+export type LinkedAppNoticeParams = z.infer<typeof LinkedAppNoticeParams>
+
+/**
  * The calls a machine makes to a hub that linked to it (#550, the reverse direction; docs/protocol.md §1). Not RPC
  * methods: no window calls them, the router never sees them, and a hub answers them only through the handler its link
  * to that machine has, and only while that machine's switch is on; `hub.mail` whatever the switch says
@@ -173,5 +224,10 @@ export const HubMethods = {
   'hub.mailRows': { params: MailRowsParams, result: z.object({ ok: z.literal(true) }) },
   /** A search of the hub's directory of sessions, its machines' included (#2067 item 3). Additive */
   'hub.find': { params: HubFindParams, result: HubFindResult },
+  /** A project's app used from the machine (#1938): the apps a session there may reach, one call, its withdrawal, a notice back. Additive */
+  'hub.apps': { params: LinkedAppsParams, result: LinkedAppsResult },
+  'hub.appCall': { params: LinkedAppCallParams, result: LinkedAppCallResult },
+  'hub.appCancel': { params: LinkedAppCancelParams, result: z.object({ ok: z.literal(true) }) },
+  'hub.appNotice': { params: LinkedAppNoticeParams, result: z.object({ ok: z.literal(true) }) },
 } as const
 export type HubMethodName = keyof typeof HubMethods

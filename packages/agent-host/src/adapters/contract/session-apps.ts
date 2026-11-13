@@ -96,6 +96,8 @@ export type AppCallOpts = { signal?: AbortSignal; waitMs?: number; callId?: stri
  * list them, within a bound), and the one call path, which checks, asks and records (sessions/session-apps.ts).
  */
 export type SessionAppTools = {
+  /** Asks the session's linked hosts for their apps again when the list kept is old (#1938); `current` reads what it kept */
+  ready?(): Promise<void>
   current(): SessionAppEntry[]
   tools(server: string): Promise<AppToolSpec[]>
   call(server: string, tool: string, args: Record<string, unknown>, opts?: AppCallOpts): Promise<AppToolResult>

@@ -6,7 +6,11 @@ import type { AppCallOpts, AppToolResult, AppToolSpec, SessionAppEntry, SessionA
 import { presetAsks, runsUnasked } from '../apps/contract.js'
 import { issuesText } from './tool-answers.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { LINKED_FRESH_MS, LinkedApps, type LinkedTool } from '../links/linked-apps.js'
+import { linkedRunStatus, runsNotHere, standIns, type GivenApp } from './linked-session-apps.js'
+import { failure, toResult } from './app-results.js'
 import { durationText, raceTimeout, withTimeout } from '../timing.js'
+import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
 
 /**
  * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
@@ -29,37 +33,9 @@ import { durationText, raceTimeout, withTimeout } from '../timing.js'
  */
 export type AppSessionKey = { id: string; kind: SessionKind; projectId: string | null; builderOf?: AppRef | null }
 
-/**
- * The upper bound on how long we wait when an app whose tool list is unknown has to be spun up
- * to find out.
- *
- * The Claude CLI calls `tools/list` for every attached server as it starts a session, and Codex
- * waits for the bridge's `tools/list` as it starts a thread. If an app hangs while starting, the
- * session hangs with it — hence this cap; past it, the app is attached with an empty tool list.
- * If the app comes up later anyway, the list is read again and announced (immediately for
- * Claude, starting from the next thread for Codex). This must be shorter than the runtime's
- * connection cap (30 seconds) so that it is this cap that triggers first.
- */
-export const TOOL_LIST_WAIT_MS = 15_000
-
-/**
- * How long the outcome of a call that was already handed back early is kept (A-5, "long-running
- * calls"). An agent normally asks again with `run_status` within a few minutes. Anything older
- * than this is answered from the record (status and reason) only, without the result body.
- */
-export const DETACHED_KEEP_MS = 60 * 60_000
 /** The number of early-returned calls one session may hold — past this, the oldest finished ones are dropped first */
 const DETACHED_PER_SESSION = 50
 
-/**
- * A tool the host adds to every app proxy server (A-5) — to check the status and result of a
- * call that was already handed back early.
- *
- * It only reads (`readOnlyHint`) — so no preset ever asks about it (decision 5). If the app has
- * a tool with the same name, the host's own wins: the path for following up on a long-running
- * call must not differ from app to app.
- */
-export const RUN_STATUS_TOOL = 'run_status'
 const RUN_STATUS_SPEC: AppToolSpec = {
   name: RUN_STATUS_TOOL,
   title: 'Run status',
@@ -75,6 +51,8 @@ const RUN_STATUS_SPEC: AppToolSpec = {
 
 /** One call that was already handed back early — filled in once its outcome arrives */
 type Detached = { sessionId: string; server: string; startedAt: number; outcome: AppCallOutcome | null }
+/** Where one is kept (`SessionAppsHub.detached`): by session and run id */
+const detachedKey = (sessionId: string, runId: string) => `${sessionId}\0${runId}`
 
 /**
  * Card-id joining (M4 B-1) — how long a call start seen by the adapter and a call that came in
@@ -121,7 +99,8 @@ export type SessionAppCall = {
  */
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
-type Hit = { ref: AppRef; server: string }
+/** An app of the session by its server name; `withheld`: a checkout's copy it is not run as, and why (`standIns`) */
+type Hit = { ref: AppRef; server: string; withheld?: string }
 
 /**
  * Apps a session attached **itself**, outside decision 4's scope (#371 part A, `attach_app`): a
@@ -214,7 +193,8 @@ export class SessionAppsHub {
   /** session id → the attachment of the handle currently alive for it. Swapping the handle out lets a new one take its place */
   private live = new Map<string, Attachment>()
   /**
-   * run id → an early-returned call. **Kept on the hub, not on the handle** — even after a
+   * `<session id>\0<run id>` → an early-returned call (`detachedKey`): a linked host chooses its run ids, so two sessions
+   * may hold the same one (#1938). **Kept on the hub, not on the handle** — even after a
    * session respawns (resume, restart), the same session's agent must be able to keep asking
    * about it with the same id.
    */
@@ -249,8 +229,35 @@ export class SessionAppsHub {
        * its arguments, on every CLI. Absent only in tests that run no card, where every call runs
        */
       approval?: AppApproval
+      /**
+       * The apps of linked hosts (#1938, links/linked-apps.ts): a machine's project apps a hub's session attaches, and a
+       * hub's apps a session it started on a machine is given. Absent: this host's apps only
+       */
+      linked?: LinkedApps
     } = {},
   ) {}
+
+  /** The apps a session may be given or attach: this host's, and what its linked hosts last listed for it (#1938) */
+  appsOf(sessionId: string): ExternalAppInfo[] {
+    const linked = this.opts.linked?.infos(sessionId) ?? []
+    return linked.length ? [...this.rt.list(), ...linked] : this.rt.list()
+  }
+
+  /** An app's model tools as last listed: this host's runtime's, or what the app's linked host listed for this session */
+  knownTools(sessionId: string, ref: AppRef): readonly (RuntimeTool | LinkedTool)[] | null {
+    return LinkedApps.owns(ref) ? (this.opts.linked?.knownTools(sessionId, ref) ?? null) : this.rt.knownTools(ref, 'model')
+  }
+
+  /** An app's model tools, read now: this host's app is started to list them; a linked host is asked again when its list is old */
+  listTools(sessionId: string, ref: AppRef): Promise<readonly (RuntimeTool | LinkedTool)[]> {
+    if (!LinkedApps.owns(ref)) return this.rt.tools(ref, 'model')
+    return this.opts.linked ? this.opts.linked.tools(sessionId, ref) : Promise.resolve([])
+  }
+
+  /** Whether the session is given this app (decision 4), a linked host's included: a started agent's parent project's (§13.5) */
+  gives(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
+    return LinkedApps.owns(app) ? !!this.opts.linked?.gives(session.id, { projectId: app.projectId, appId: app.appId }) : givesApp(session, app)
+  }
 
   /**
    * A session moved into a project behind its handle's back (#1141: a user-folder app's builder or agent, when the app's
@@ -310,6 +317,7 @@ export class SessionAppsHub {
 
   /** Called by the manager when it deletes a session */
   sessionGone(sessionId: string): void {
+    this.opts.linked?.forget(sessionId)
     this.goneListeners.emit(sessionId)
   }
 
@@ -346,8 +354,10 @@ export class SessionAppsHub {
      * own project's included, and under `auto` too. #603's opening of an untrusted project's apps to an auto session
      * no longer applies to apps; the project's sessions still run and may read its code
      */
-    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status))
-    const hits = this.named(session, usable.filter((a) => givesApp(session, a))).sort((x, y) => x.server.localeCompare(y.server))
+    const usable = this.appsOf(session.id).filter((a) => !UNUSABLE.has(a.status))
+    // A started agent on a machine works for its parent's project on the hub (#1938): its checkout's copies never run for it
+    const given = standIns(this.opts.linked, session, usable.filter((a) => this.gives(session, a)))
+    const hits = this.named(session, given).sort((x, y) => x.server.localeCompare(y.server))
     /*
      * Then what the session attached itself (#371 part A), after decision 4's apps and in the order it
      * attached them. One the rule already gives is not added twice, and one whose server name is taken
@@ -380,12 +390,12 @@ export class SessionAppsHub {
    * (`app-<id>-<project>`, then `-2`, … if that is taken too). What it attached itself keeps the names it was given
    * then (`OnDemandApps`), and those are taken as well.
    */
-  private named(session: AppSessionKey, apps: readonly ExternalAppInfo[]): Hit[] {
+  private named(session: AppSessionKey, apps: readonly GivenApp[]): Hit[] {
     const book = this.bookOf(session.id)
     const taken = new Set([...Object.values(book), ...(this.opts.onDemand?.attached(session.id) ?? []).map((x) => x.server)])
     let added = false
     const hits: Hit[] = []
-    for (const a of [...apps].sort(byNameOrder)) {
+    for (const { app, nameAs: a, withheld } of [...apps].sort((x, y) => byNameOrder(x.nameAs, y.nameAs))) {
       const key = appKeyOf(a.projectId, a.appId)
       let server = book[key]
       if (!server) {
@@ -396,7 +406,7 @@ export class SessionAppsHub {
         taken.add(server)
         added = true
       }
-      hits.push({ ref: { projectId: a.projectId, appId: a.appId }, server })
+      hits.push({ ref: { projectId: app.projectId, appId: app.appId }, server, ...(withheld ? { withheld } : {}) })
     }
     if (added) this.opts.names?.save(session.id, book)
     return hits
@@ -451,6 +461,8 @@ export class SessionAppsHub {
     // One it attached whose project has since lost trust: the person is told to trust the project, not that it is another's
     const lostTrust = !!own && app.status === 'untrusted'
     if (!session || (!givesApp(session, app) && !onDemand && !selfServed && !lostTrust)) return { reachable: false, reason: 'other-project' }
+    // A checkout's copy a started agent never runs (#1938, `standIns`): its hub's app or nothing
+    if (runsNotHere(this.opts.linked, session, app)) return { reachable: false, reason: 'unavailable' }
     // An untrusted project's apps attach nowhere, auto included (owner, #1141)
     if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
     if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
@@ -468,7 +480,7 @@ export class SessionAppsHub {
     for (const [id, x] of mine.slice(0, Math.max(0, mine.length - DETACHED_PER_SESSION + 1))) {
       if (x.outcome) this.detached.delete(id)
     }
-    this.detached.set(runId, d)
+    this.detached.set(detachedKey(d.sessionId, runId), d)
   }
 
   dispose(): void {
@@ -519,11 +531,15 @@ class Attachment implements SessionAppAttachment {
     readonly session: AppSessionKey,
   ) {}
 
+  async ready(): Promise<void> {
+    if (!this.closed) await this.hub.opts.linked?.refresh(this.session.id, LINKED_FRESH_MS)
+  }
+
   current(): SessionAppEntry[] {
     if (this.closed) return []
-    const infos = this.hub.rt.list()
-    return this.hub.refsFor(this.session).map(({ ref, server }) => {
-      const known = this.hub.rt.knownTools(ref, 'model')
+    const infos = this.hub.appsOf(this.session.id)
+    return this.hub.refsFor(this.session).map(({ ref, server, withheld }) => {
+      const known = this.hub.knownTools(this.session.id, ref)
       const info = infos.find((a) => sameApp(a, ref))
       return {
         name: appNameOf(server),
@@ -531,7 +547,7 @@ class Attachment implements SessionAppAttachment {
         appId: ref.appId,
         title: info?.name ?? ref.appId,
         description: info?.description ?? '',
-        tools: known ? withRunStatus(known.map(toSpec)) : null,
+        tools: withheld ? [] : known ? withRunStatus(known.map(toSpec)) : null,
       }
     })
   }
@@ -539,7 +555,8 @@ class Attachment implements SessionAppAttachment {
   async tools(server: string): Promise<AppToolSpec[]> {
     const hit = this.find(server)
     if (!hit) throw new Error(`This session has no app named ${appNameOf(server)}`)
-    const known = this.hub.rt.knownTools(hit.ref, 'model')
+    if (hit.withheld) return []
+    const known = LinkedApps.owns(hit.ref) ? null : this.hub.knownTools(this.session.id, hit.ref)
     if (known) return withRunStatus(known.map(toSpec))
     /*
      * This is the first moment it is needed — spin up the app and read its list. If the cap is exceeded or it fails to
@@ -547,7 +564,7 @@ class Attachment implements SessionAppAttachment {
      * listing has the tools.
      */
     try {
-      return withRunStatus((await withTimeout(this.hub.rt.tools(hit.ref, 'model'), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
+      return withRunStatus((await withTimeout(this.hub.listTools(this.session.id, hit.ref), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
     } catch (err) {
       console.error(`[apps] ${server} listed no tools for now: ${errorMessage(err).split('\n')[0]}`)
       return withRunStatus([])
@@ -560,7 +577,14 @@ class Attachment implements SessionAppAttachment {
    * (`whenAsked`, #1447); the person's card where the preset asks (`approve`); then the runtime's one call path.
    */
   async call(server: string, tool: string, args: Record<string, unknown>, opts: AppCallOpts = {}): Promise<AppToolResult> {
-    if (this.closed || !this.find(server)) return failure(`This session has no app named ${appNameOf(server)}.`)
+    let hit = this.closed ? null : this.find(server)
+    // A copy withheld for its hub's app (#1938): the hub's list is read first, which may name its app in the copy's place
+    if (hit?.withheld) {
+      await this.ready()
+      hit = this.find(server)
+    }
+    if (!hit) return failure(`This session has no app named ${appNameOf(server)}.`)
+    if (hit.withheld) return failure(hit.withheld)
     const tools = await this.tools(server)
     const spec = tools.find((t) => t.name === tool)
     /*
@@ -568,7 +592,9 @@ class Attachment implements SessionAppAttachment {
      * there and recorded as every refused call is (`notListed`), so the app's runs show what an agent tried. Never run
      */
     if (!spec) {
-      await this.callNow(server, tool, args, { notListed: true, ...(opts.callId ? { callId: opts.callId } : {}) })
+      const refused = await this.callNow(server, tool, args, { notListed: true, ...(opts.callId ? { callId: opts.callId } : {}) })
+      // A linked host's app with no list here (its host away since this host started): that host's answer says why
+      if (LinkedApps.owns(hit.ref) && tools.every((t) => t.name === RUN_STATUS_TOOL)) return refused
       return failure(`${appNameOf(server)} has no tool ${JSON.stringify(tool)}. Nothing ran. Its tools: ${tools.map((t) => t.name).join(', ') || '(none listed yet)'}.`)
     }
     const issues = schemaIssues(spec.inputSchema, args)
@@ -634,7 +660,8 @@ class Attachment implements SessionAppAttachment {
     const hit = this.find(server)
     // An unattached app never reaches the runtime — the only apps this session can call are the ones decision 4 gave it
     if (!hit) return failure(`This session has no app named ${appNameOf(server)}.`)
-    if (tool === RUN_STATUS_TOOL) return this.runStatus(hit, args)
+    if (hit.withheld) return failure(hit.withheld)
+    if (tool === RUN_STATUS_TOOL) return await this.runStatus(hit, args)
 
     /*
      * One cancellation handle per call — whichever comes first pulls it, either the caller's
@@ -656,8 +683,14 @@ class Attachment implements SessionAppAttachment {
         // A call with no card (e.g. a call from a Claude subagent) has nowhere to attach the message — the call itself keeps running
         if (callId) this.hub.progress({ sessionId, callId, message })
       })
-    const pending = this.hub.rt
-      .call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { signal: abort.signal, onRun: (id) => (runId = id), onProgress, ...(opts.notListed ? { notListed: true as const } : {}) })
+    const how = { signal: abort.signal, onRun: (id: string) => (runId = id), ...(opts.notListed ? { notListed: true as const } : {}) }
+    // An app of a linked host is called there (#1938): the same card, wait and record here, its run on the app's host
+    const linked = LinkedApps.owns(hit.ref) ? this.hub.opts.linked : undefined
+    const pending = (
+      linked
+        ? linked.call(sessionId, hit.ref, tool, args, { ...how, name: appNameOf(server) })
+        : this.hub.rt.call(hit.ref, tool, args, { kind: 'session', sessionId: this.session.id }, { ...how, onProgress })
+    )
       // Vanished mid-call (the app's folder was deleted) — return it as a failed call instead of throwing
       .catch((err: Error): AppCallOutcome => ({ runId: runId ?? '', status: 'error', result: null, error: err.message, durationMs: 0 }))
       .finally(() => {
@@ -716,10 +749,13 @@ class Attachment implements SessionAppAttachment {
    * in time, or an old one) answers only with whatever status and reason the record knows — the
    * record keeps no result body (A-6: even the arguments are kept only as a summary).
    */
-  private runStatus(hit: Hit, args: Record<string, unknown>): AppToolResult {
+  private async runStatus(hit: Hit, args: Record<string, unknown>): Promise<AppToolResult> {
     const runId = typeof args.run_id === 'string' ? args.run_id.trim() : ''
     if (!runId) return failure(`${RUN_STATUS_TOOL} needs a run_id`)
-    const d = this.hub.detached.get(runId)
+    const d = this.hub.detached.get(detachedKey(this.session.id, runId))
+    const linked = LinkedApps.owns(hit.ref) ? this.hub.opts.linked : undefined
+    // A run on a linked host whose call lost its link (#1938): its outcome is that host's to say
+    if (linked && !(d && (!d.outcome || linked.knows(runId)))) return linkedRunStatus(linked, this.session.id, hit.ref, runId)
     if (d && d.sessionId === this.session.id && d.server === hit.server) {
       if (!d.outcome) {
         const seconds = Math.round((Date.now() - d.startedAt) / 1000)
@@ -737,7 +773,7 @@ class Attachment implements SessionAppAttachment {
         structuredContent: { runId, status: o.status, ...(done.structuredContent ? { result: done.structuredContent } : {}) },
       }
     }
-    const row = this.hub.rt.runs(hit.ref, 500).find((r) => r.id === runId && r.callerKind === 'session' && r.callerSessionId === this.session.id)
+    const row = linked ? undefined : this.hub.rt.runs(hit.ref, 500).find((r) => r.id === runId && r.callerKind === 'session' && r.callerSessionId === this.session.id)
     if (!row) return failure(`Unknown run id: ${runId} — a session can see only the runs it started on this app`)
     const why = row.error ? ` — ${row.error}` : ''
     return {
@@ -757,7 +793,7 @@ class Attachment implements SessionAppAttachment {
      * invoked over a tool from the list the model has **already seen**, so if it is invoked while
      * the list is unknown, that tool was not one the model chose from our list — in that case, ask.
      */
-    const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
+    const found = this.hub.knownTools(this.session.id, hit.ref)?.find((t) => t.name === tool)
     return found?.annotations?.readOnlyHint === true
   }
 
@@ -765,7 +801,7 @@ class Attachment implements SessionAppAttachment {
     if (this.readOnly(server, tool)) return true
     const hit = this.find(server)
     if (!hit) return false
-    const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
+    const found = this.hub.knownTools(this.session.id, hit.ref)?.find((t) => t.name === tool)
     if (!found) return false
     /*
      * "Own" is read from the session, not from the app: the app is a project's own when the session belongs to that
@@ -773,7 +809,7 @@ class Attachment implements SessionAppAttachment {
      * and an app the session attached itself (`attach_app`) belongs to another project or to the user: neither is
      * covered by this project's trust, so their tools keep asking.
      */
-    const own = !isAssistantKind(this.session.kind) && hit.ref.projectId !== null && hit.ref.projectId === this.session.projectId
+    const own = !isAssistantKind(this.session.kind) && hit.ref.projectId !== null && (hit.ref.projectId === this.session.projectId || this.hub.gives(this.session, hit.ref))
     return runsUnasked(found, { own, preset, args })
   }
 
@@ -907,7 +943,7 @@ function withRunStatus(tools: AppToolSpec[]): AppToolSpec[] {
 }
 
 /** A runtime tool (MCP `Tool`) → the shape exposed to a session. outputSchema is dropped (see below) */
-function toSpec(t: RuntimeTool): AppToolSpec {
+function toSpec(t: RuntimeTool | LinkedTool): AppToolSpec {
   /*
    * Why outputSchema is not carried over: a result that has gone through the proxy server can
    * disagree with the shape the app declared — a refusal or a cancellation is a one-line message
@@ -921,21 +957,8 @@ function toSpec(t: RuntimeTool): AppToolSpec {
     ...(t.description !== undefined ? { description: t.description } : {}),
     inputSchema: t.inputSchema,
     ...(t.annotations ? { annotations: t.annotations } : {}),
-    ...(t._meta ? { _meta: t._meta } : {}),
+    ...('_meta' in t && t._meta ? { _meta: t._meta } : {}),
   }
-}
-
-/** A runtime outcome → the tool result an agent receives */
-export function toResult(o: AppCallOutcome): AppToolResult {
-  if (o.result) {
-    return {
-      content: o.result.content,
-      isError: o.status !== 'ok',
-      ...(o.result.structuredContent ? { structuredContent: o.result.structuredContent as Record<string, unknown> } : {}),
-    }
-  }
-  const what = o.status === 'cancelled' ? 'was cancelled' : o.status === 'rejected' ? 'was refused' : 'failed'
-  return failure(`The app call ${what} — ${o.error ?? 'no reason was given'}`)
 }
 
 /**
@@ -950,8 +973,4 @@ function schemaIssues(schema: Record<string, unknown>, args: Record<string, unkn
     return null
   }
   return checked.success ? null : issuesText(checked.error)
-}
-
-function failure(text: string): AppToolResult {
-  return { content: [{ type: 'text', text }], isError: true }
 }
