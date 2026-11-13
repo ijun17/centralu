@@ -249,7 +249,7 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
   reported ([agent-cli-updates.md](../agent-host/lifecycle/agent-cli-updates.md), "The CLI's own timers count as
   background work"); Centralu sees no Codex background terminal today [checked: no `unified_exec`/background-terminal
   handling outside recordings]. If an active goal makes the server start turns by itself, an active goal counts as
-  background work (kind `other`). Neither is known [unchecked].
+  background work (kind `other`). Neither was known when this was written; §3a measured both, §4a built both.
 - **The writer lock.** Asleep releases Codex's lock on the thread, so `codex` in a terminal can take it; a wake then gets
   `conversation_locked` and the existing fork offer (`sessions/session-start.ts:936-937`), and turns added elsewhere come
   in through the resume's catch-up, as after a host restart. Nothing new.
@@ -287,7 +287,7 @@ tokens re-read at full price at each wake), which the plan's §6 assumed was fin
   `resume.jsonl` through `SessionManager`; the sleeper puts it to sleep (`session_live asleep`), and the next message
   resumes the thread in a new process and the turn answers with the code word; every recorded line used, none
   unexpected. Fails with `sleep: false`. `sessions/auto-continue.test.ts`: a session asleep through a usage limit's
-  wait is woken by the continue, and the note goes to the new process. The guards' tests replay the two Mac recordings.
+  wait is woken by the continue, and the note goes to the new process. The guards' tests are above.
 - No protocol, store or UI change. The UI comments §4 named describe the old grid wake as history and stay.
 
 ## 5. Outcome B: one shared app-server per account
