@@ -39,15 +39,11 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import type { CodexClient, ServerNotification } from '../src/adapters/codex/client.js'
+import { asObj, str } from '../src/json-value.js'
 import { probeDir, openProbe } from './codex-probe-kit.mjs'
 
 const arg = (name: string) =>
   process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : undefined
-const inventory = arg('--inventory')
-if (inventory === 'shell') await inventoryShell()
-else if (inventory === 'goal') await inventoryGoal()
-else await childMode()
-process.exit(0)
 
 async function childMode(): Promise<void> {
   const mode = arg('--mode') === 'stop' ? 'stop' : 'interrupt'
@@ -172,35 +168,26 @@ type Watch = { pick(n: ServerNotification): boolean; resolve(n: ServerNotificati
 async function inventoryShell(): Promise<void> {
   const dir = probeDir('cc-codex-rest-')
   const t = () => String(Date.now() - dir.t0).padStart(6)
-  const items = new Map<
-    string,
-    { command: string; status: string; exitCode: unknown; processId: unknown; source: unknown }
-  >()
+  const items = new Map<string, { command: string; status: string; source: string }>()
   let turnOpen = false
   const watches: Watch[] = []
   const { client } = await openProbe(dir, {
     onNotification: (n) => {
-      const p = (n.params ?? {}) as Record<string, unknown>
-      const item = p.item as Record<string, unknown> | undefined
-      if (
-        item?.type === 'commandExecution' &&
-        (n.method === 'item/started' || n.method === 'item/completed')
-      ) {
-        items.set(String(item.id), {
-          command: String(item.command),
-          status: String(item.status),
-          exitCode: item.exitCode,
-          processId: item.processId,
-          source: item.source,
-        })
+      const item = asObj(asObj(n.params).item)
+      if (str(item.type) === 'commandExecution' && (n.method === 'item/started' || n.method === 'item/completed')) {
+        items.set(str(item.id), { command: str(item.command), status: str(item.status), source: str(item.source) })
         console.log(
-          `${t()} ${n.method} commandExecution ${JSON.stringify(item.command)} status=${String(item.status)} exitCode=${String(item.exitCode)} pid=${String(item.processId)} source=${String(item.source)} ${turnOpen ? 'in a turn' : 'OUTSIDE a turn'}`,
+          `${t()} ${n.method} commandExecution ${JSON.stringify(item.command)} status=${str(item.status)} exitCode=${JSON.stringify(item.exitCode ?? null)} pid=${JSON.stringify(item.processId ?? null)} source=${str(item.source)} ${turnOpen ? 'in a turn' : 'OUTSIDE a turn'}`,
         )
       } else if (!n.method.endsWith('Delta') && !n.method.endsWith('/delta'))
         console.log(`${t()} ${n.method}`)
       if (n.method === 'turn/started') turnOpen = true
       if (n.method === 'turn/completed') turnOpen = false
-      for (const w of [...watches]) if (w.pick(n)) (watches.splice(watches.indexOf(w), 1), w.resolve(n))
+      for (const w of [...watches]) {
+        if (!w.pick(n)) continue
+        watches.splice(watches.indexOf(w), 1)
+        w.resolve(n)
+      }
     },
     onExit: () => console.log(`${t()} app-server exited`),
   })
@@ -245,16 +232,10 @@ async function inventoryShell(): Promise<void> {
   // Turn 1: does the item end by itself after the turn, and with what
   const open1 = await startKept(23)
   if (open1.length > 0) {
-    const done = await next(
-      (n) =>
-        n.method === 'item/completed' &&
-        (n.params as { item?: { type?: string; command?: string } }).item?.command?.includes('sleep 23') ===
-          true,
-      45_000,
-    )
-    const item = (done?.params as { item?: Record<string, unknown> } | undefined)?.item
+    const done = await next((n) => n.method === 'item/completed' && str(asObj(asObj(n.params).item).command).includes('sleep 23'), 45_000)
+    const item = asObj(asObj(done?.params).item)
     console.log(
-      `RESULT 23: item/completed after the turn: ${done ? `yes, status=${String(item?.status)} exitCode=${String(item?.exitCode)}` : 'no, within 45 s'}; sleep alive: ${alive(/sleep 23/)}`,
+      `RESULT 23: item/completed after the turn: ${done ? `yes, status=${str(item.status)} exitCode=${JSON.stringify(item.exitCode ?? null)}` : 'no, within 45 s'}; sleep alive: ${alive(/sleep 23/)}`,
     )
   }
 
@@ -279,11 +260,10 @@ async function inventoryGoal(): Promise<void> {
   let goal = 'none'
   const { client } = await openProbe(dir, {
     onNotification: (n) => {
-      const p = (n.params ?? {}) as Record<string, unknown>
+      const p = asObj(n.params)
       if (n.method === 'turn/started') started++
       if (n.method === 'turn/completed') completed++
-      if (n.method === 'thread/goal/updated')
-        goal = String((p.goal as { status?: string } | undefined)?.status)
+      if (n.method === 'thread/goal/updated') goal = str(asObj(p.goal).status)
       if (n.method === 'thread/goal/cleared') goal = 'cleared'
       if (!n.method.endsWith('Delta') && !n.method.endsWith('/delta'))
         console.log(
@@ -310,3 +290,10 @@ async function inventoryGoal(): Promise<void> {
   await client.dispose()
   console.log(`thread ${thread} (left in the CODEX_HOME's sessions); frames: ${dir.log}`)
 }
+
+// Last, once every const above is initialized
+const inventory = arg('--inventory')
+if (inventory === 'shell') await inventoryShell()
+else if (inventory === 'goal') await inventoryGoal()
+else await childMode()
+process.exit(0)
