@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ProjectInfo } from '@cc/protocol/client'
 import { Button } from '../../components/Button.jsx'
-import { useProjectApps, usesLines } from '../../store/app-catalog.js'
+import { appCanLines, useProjectApps, usesLines } from '../../store/app-catalog.js'
 import { useStore } from '../../store/store.js'
 
 /**
@@ -10,7 +10,8 @@ import { useStore } from '../../store/store.js'
  * Trust follows the project, with no switch per app (owner, 2026-10-18): trusting it lets its apps run, lets them reach
  * the Assistant and the person's other projects where an app may (the project's own root app), and lets its settings
  * apply. So the card lists each of the project's apps, its root app and those in `.centralu/apps` alike: its name, its
- * whole description, and what its manifest declares it may ask for, in plain words. A long list scrolls inside the card.
+ * whole description, and what its manifest declares, which it can then do without asking (#2237), in plain words
+ * (`appCanLines`). A long list scrolls inside the card.
  *
  * One card for every place that asks: under the project's row (`TrustAsk`, after registration and from the project
  * menu) and wherever a "Trust this project…" button stands (an untrusted app's screen, its Settings row, the New app
@@ -53,7 +54,7 @@ export function TrustCard({ project, onAnswer, ids }: { project: ProjectInfo; on
           </p>
           <ul className="mt-1 max-h-48 space-y-2 overflow-y-auto pr-1" data-testid={ids.apps} aria-label={`Apps of ${project.name}`} tabIndex={0}>
             {apps.map((a) => {
-              const asks = a.info.uses ? usesLines(a.info.uses) : []
+              const can = appCanLines(a.info.uses ? usesLines(a.info.uses) : [])
               const description = (a.info.description ?? '').trim()
               return (
                 <li key={a.key} className="text-xs leading-body" data-testid={ids.app(a.key)}>
@@ -64,17 +65,11 @@ export function TrustCard({ project, onAnswer, ids }: { project: ProjectInfo; on
                       This project is this app: the Assistant and your other projects can use it.
                     </p>
                   )}
-                  {asks.length > 0 ? (
-                    <ul className="text-ink-faint" data-testid="trust-ask-app-uses">
-                      {asks.map((line) => (
-                        <li key={line}>May ask to: {line.charAt(0).toLowerCase() + line.slice(1)}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-ink-faint" data-testid="trust-ask-app-uses">
-                      Asks for nothing beyond its own tools.
-                    </p>
-                  )}
+                  <ul className="text-ink-faint" data-testid="trust-ask-app-uses">
+                    {can.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
                 </li>
               )
             })}

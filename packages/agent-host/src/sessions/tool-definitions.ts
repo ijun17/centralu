@@ -388,7 +388,7 @@ export const CENTRALU_TOOLS = [
   },
   {
     name: 'forget_app_answer',
-    description: "Forgets an app grant: the person's remembered answer to one thing an app asked for, so it asks again. Acts at once.",
+    description: "Forgets an app grant, the person's answer to one thing an app asked for: an allow at once, a deny once the person agrees.",
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), capability: z.string().describe('As list_app_grants names it.') }).strict(),
   },
   {

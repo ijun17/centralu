@@ -124,6 +124,8 @@ export function fakeBrokerHost(over: Partial<BrokerHost>): BrokerHost {
     // A test that does not ask about this is treated as if the person allowed it immediately — a
     // test that checks the asking replaces this in place
     askCapability: async () => 'allow',
+    // No caller under `safe` (#2237): a declared request runs with no card. A test of the card sets this to true
+    asksPerson: () => false,
     ...over,
   }
 }

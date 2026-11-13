@@ -255,8 +255,7 @@ export function PermissionCard({
         {appName} wants to {text}.
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        Centralu remembers your answer for this app and asks again if the app&apos;s manifest changes what it
-        uses. You can change it later under Runs → Permissions.
+        Centralu remembers your answer for this app. You can change it later under Runs → Permissions.
       </p>
       <WaitFooter>
         <ActionKey k={keys.allow} label="Allow" onClick={() => onAnswer('allow')} testId="approve-allow" />

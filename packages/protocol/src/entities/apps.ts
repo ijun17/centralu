@@ -259,9 +259,10 @@ export const AppQuestion = z.object({
 export type AppQuestion = z.infer<typeof AppQuestion>
 
 /**
- * A remembered answer for one app (M4 D-4). If `current` is false, the manifest's `uses`
- * changed afterward — that answer no longer applies, and the next attempt to use that
- * capability asks again.
+ * A remembered answer for one app (M4 D-4). If `current` is false, it is an allow and the
+ * manifest's `uses` changed afterward: a caller under `safe` is asked again. A deny is always
+ * current from a host of #2237's build on (it refuses at any `uses`); an older host reports a
+ * deny given against older `uses` as not current, and asks again.
  */
 export const AppPermission = z.object({
   capability: z.string(),
@@ -367,6 +368,16 @@ export function usesLines(uses: AppUses): string[] {
   if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
   if (uses.notices) out.push('Post notices into the sessions that called it')
   return out
+}
+
+/**
+ * What a trusted app can do, said the same way on every card that shows it (the window's trust card, the inbox's app
+ * notice, the Assistant's trust card): one "Can …" line per `usesLines` line. In a trusted project what it declares runs
+ * without asking (#2237), so it is said as what the app can do, not what it may ask for
+ */
+export function appCanLines(lines: readonly string[]): string[] {
+  if (!lines.length) return ['Uses nothing beyond its own tools']
+  return lines.map((l) => `Can ${l.charAt(0).toLowerCase()}${l.slice(1)}`)
 }
 
 /** The host data names an app may declare (`HOST_CAPABILITIES`), in plain words; an unknown one is shown as it is */

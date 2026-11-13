@@ -46,7 +46,7 @@ export type InboxCandidate = {
 
 /**
  * An app a project already trusted gained since the window last looked (#1141), say a manifest a `git pull` brought: it
- * is trusted with the project (owner), so the inbox says so once, with what it declares it may ask for (`asks`, plain
+ * is trusted with the project (owner), so the inbox says so once, with what it declares (`asks`, plain
  * words, empty for nothing beyond its own tools). Dismissed by opening it or with Done. `at` is when the window noted it, the
  * time its row is ordered by (a snapshot from before it gets the time it was read).
  */

@@ -945,8 +945,8 @@ In:
 - **C. Build loop** — the New app button and `create_app`; a builder session per app; `check`, so the builder tests its own
   app instead of the person; a restart when the builder's turn ends; a "fix it here" bar under the view; errors handed to the
   builder only by the person's click
-- **D. Broker** — an app asks, through the host, for the person's agent, another app's tools or host data; capability approval
-  on first use; limits on chains and rates; cancellation and records that follow the chain
+- **D. Broker** — an app asks, through the host, for the person's agent, another app's tools or host data; what its
+  manifest declares is the consent, and a caller under `safe` approves each capability on first use (#2237); limits on chains and rates; cancellation and records that follow the chain
 
 Light: **E. Handing over, the local half** — snapshots for apps outside git, a confirmation screen when importing, a
 `centralu://` deep link. An app committed with the project is already shared with the team.

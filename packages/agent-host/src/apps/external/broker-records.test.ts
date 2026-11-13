@@ -87,7 +87,8 @@ describe('one row per request — under the run that triggered it', () => {
 
   it('a denial is also a row — outside the declaration (host data), or not allowed by the person (agent)', async () => {
     plant('notes', { agent: true })
-    make({ askCapability: async () => 'deny' })
+    // A caller under safe, so the person is asked (#2237), and denies
+    make({ asksPerson: () => true, askCapability: async () => 'deny' })
     const undeclared = await ask('notes', 'host_data', { name: 'sessions.list' })
     const denied = await ask('notes', 'run_agent', { prompt: 'x' })
     expect(brokerRows().map((r) => [r.tool, r.status, r.parentRunId])).toEqual([

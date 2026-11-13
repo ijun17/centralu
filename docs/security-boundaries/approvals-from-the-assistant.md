@@ -59,13 +59,14 @@ through these commands: it has to be in the archive first, which `agents.deleteS
 **Trust from the Assistant** (#1219, third slice). Trust is what lets a project's apps run and its setting files
 apply, so the Assistant only asks for it, and asks to take it away as well: an untrusted project's sessions read
 the person's own settings only, so its own deny rules and the hooks that block tools stop binding its agents (`auto`
-sessions included). `set_project_trust` with `trusted: true` raises a card that names the project, its folder and machine, and each app the trust covers with what it may ask for
-(the same wording as the window's trust card, `usesLines`). What the card named is checked again after Allow, so a
+sessions included). `set_project_trust` with `trusted: true` raises a card that names the project, its folder and machine, and each app the trust covers with what it can do
+(the same wording as the window's trust card, `appCanLines`). What the card named is checked again after Allow, so a
 project whose apps changed while the card stood is not trusted on an answer about other apps. Approval rules only
 narrow from the Assistant: it may list and remove them, and no command adds one, so a standing "allow" still comes
-only from the person's own "always" on a card. An app's remembered answers and the consents between projects can only
-be forgotten or revoked from the Assistant, which makes the next attempt ask the person (a forgotten "deny" too: the
-app asks the person again, never the Assistant, so no card guards it); sharing an app with other projects asks, and an
+only from the person's own "always" on a card. An app's remembered allows and the consents between projects can only
+be forgotten or revoked from the Assistant, which makes the next attempt ask the person (a forgotten allow: a caller
+under `safe` is asked again). Forgetting a deny widens since #2237, as what the app declares then runs unasked, so it
+waits for the person on a card like any widening; sharing an app with other projects asks, and an
 app's own capability question is still answered by the person alone. Every card quotes what a manifest supplies (an app's
 name, description, the background work it declares) with control and format characters escaped, so a line break or a
 bidi override in someone's repository cannot make the card say something it does not; a project's folder is named whole.

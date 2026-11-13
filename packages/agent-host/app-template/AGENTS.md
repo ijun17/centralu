@@ -51,11 +51,13 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
    `process.stdout` yourself. stderr is shown to the person when the app fails.
 10. **Asking the agent**: inside a tool handler, `await centralu.agent('prompt', { schema, tool })`
     asks the agent of the person using Centralu. Each call runs in a new session under this app
-    (the person can read it), with the `safe` approval setting, and returns the agent's final
-    answer: text, or with `schema` (a JSON Schema whose top level is an object) JSON of that shape,
-    checked by Centralu. Under `safe` the agent reads without asking, but every file write and
-    command waits for the person to approve it in that session, so ask the agent for an answer and
-    do the writing in your own tool code. Declare `"uses": { "agent": true }` in the manifest for the person's
+    (the person can read it) and returns the agent's final answer: text, or with `schema` (a JSON
+    Schema whose top level is an object) JSON of that shape, checked by Centralu. That session runs
+    under `auto`, but never above the lowest approval setting among the sessions calling into the
+    app. It runs under `safe` when nothing says who asked: no call is open, the calling session is
+    gone, or the chain of calls can no longer be followed. Under `safe` the agent reads without
+    asking, but every file write and command waits for the person to approve it in that session, so
+    ask the agent for an answer and do the writing in your own tool code. Declare `"uses": { "agent": true }` in the manifest for the person's
     default agent, or a list such as `["codex"]` to pick one with `tool`. The prompt reaches the
     agent marked as written by this app, not by the person, so say plainly what you need. A run
     takes seconds to minutes; the helper keeps the call alive while it waits. An app runs one agent
@@ -73,11 +75,12 @@ screen (`ui/index.html`) and agents call the same tools as functions. Same tools
     (the names shown in the sidebar and their states, never the conversations); `git.status` gives this project's branch and changed
     files (project apps only).
 
-All three throw an error that says what Centralu answered. The first time the app uses each of them (an
-agent tool, another app, a host name), Centralu asks the person once — on the session's approval card
-when an agent's call started it, on this app's screen when the screen did — and remembers the answer
-until the manifest's `uses` changes. The call waits while the person decides (up to 5 minutes). A
-refusal comes back as that error: show it plainly instead of retrying.
+All three throw an error that says what Centralu answered. What the manifest declares in `uses` runs
+with no question: the person trusted the app with it. Only while a session under the `safe` preset has a
+call open into the app does Centralu ask the person, once per capability (an agent tool, another app, a
+host name) — on the session's approval card when an agent's call started it, on this app's screen when
+the screen did — and the call waits while the person decides (up to 5 minutes). A refusal, then or
+remembered from before, comes back as that error: show it plainly instead of retrying.
 
 **Background work.** Centralu stops an app with no open screen and no call for 5 minutes. An app
 with work on its own clock (a timer that polls, a queue it drives) declares it in the manifest,

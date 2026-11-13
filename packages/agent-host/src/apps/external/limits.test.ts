@@ -41,6 +41,8 @@ const make = (host: Partial<BrokerHost> = {}, timing: Partial<RuntimeTiming> = {
   rt.refresh()
   rt.attachBrokerHost(
     fakeBrokerHost({
+      // A caller under safe, so the person is asked (#2237): what the limits stop is never asked about
+      asksPerson: () => true,
       askCapability: async (q) => {
         asked.push(q)
         return 'allow'

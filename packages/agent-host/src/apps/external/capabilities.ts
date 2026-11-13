@@ -78,9 +78,9 @@ export function capabilityKey(c: Capability): string {
 
 /**
  * The fingerprint of the manifest's declaration (`uses`) — an answer is remembered together with
- * this fingerprint, and if the fingerprint changes, it is asked again (plan D-4). This looks at the
- * whole declaration: whichever field changed, the app's builder has restated what the app uses, and
- * the person has a reason to look again too. The same declaration produces the same fingerprint
+ * this fingerprint, and if the fingerprint changes, a remembered allow is no longer used: a caller
+ * under `safe` is asked again (plan D-4, #2237; a deny holds at any fingerprint). This looks at the
+ * whole declaration: whichever field changed, the app's builder has restated what the app uses. The same declaration produces the same fingerprint
  * regardless of key order (`canonicalJson`).
  */
 export function usesStamp(uses: unknown): string {

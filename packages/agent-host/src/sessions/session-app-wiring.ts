@@ -38,7 +38,7 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
   Pick<RoutedCardsHost, 'toolProfileOf'> & {
     /** A session's row, or `session_not_found` */
     sessionOf: (sessionId: string) => SessionInfo
-    readonly appSessions: Pick<AppSessions, 'appHostData' | 'runAppAgent' | 'agentRunEnded'>
+    readonly appSessions: Pick<AppSessions, 'appHostData' | 'runAppAgent' | 'agentRunEnded' | 'callersPreset'>
     /** An app's notice into a session that called it (#1161 item 1) — `TurnInputs.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
     readonly hostCards: Pick<HostCards, 'askCapability' | 'askHost'>
@@ -78,6 +78,7 @@ export class SessionAppWiring {
       hostData: (name, app) => this.host.appSessions.appHostData(name, app),
       agentLabel: (tool) => this.host.adapters.get(tool)?.descriptor.label ?? tool,
       askCapability: (q, signal) => this.host.hostCards.askCapability(q, signal),
+      asksPerson: (callers) => this.host.appSessions.callersPreset(callers) === 'safe',
       agentRunEnded: (run) => this.host.appSessions.agentRunEnded(run),
       appNotice: (sessionId, text, app) => this.host.appNotice(sessionId, text, app),
     }

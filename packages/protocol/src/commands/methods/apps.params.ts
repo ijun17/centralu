@@ -275,7 +275,7 @@ export const appsParams = {
   }),
   /** The remembered capability answers for one app (M4 D-4) — shown next to the run history panel (B-7) and can be forgotten there */
   'apps.permissions': z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
-  /** Forgets one remembered answer (M4 D-4) — the next attempt to use that capability asks again */
+  /** Forgets one remembered answer (M4 D-4): a forgotten allow makes a caller under `safe` ask again, a forgotten deny lets the app use that again (#2237) */
   'apps.forgetPermission': z.object({
     appId: AppId,
     projectId: ProjectId.nullable(),

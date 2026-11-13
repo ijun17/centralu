@@ -190,4 +190,4 @@ export function useExternalApp(projectId: string | null, appId: string, machine?
 }
 
 /** `uses` in plain words (`uses-lines.ts`, which imports nothing of the store) */
-export { usesLines } from './uses-lines.js'
+export { appCanLines, usesLines } from './uses-lines.js'

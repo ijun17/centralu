@@ -1,11 +1,11 @@
 import type { AppReview } from '@cc/protocol/client'
 import { formatBytes } from '../../app/format.js'
-import { usesLines } from '../../store/app-catalog.js'
+import { appCanLines, usesLines } from '../../store/app-catalog.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
  * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
- * already-imported app that needs re-confirmation) **runs**, **what it will use**, what secrets
+ * already-imported app that needs re-confirmation) **runs**, **what it can do**, what secrets
  * it wants, and which files are coming in. The import dialog and the pinned-view confirmation
  * share this one component.
  *
@@ -37,10 +37,10 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
             </p>
           )}
           {review.changed.uses && (
-            <p className="text-ink-muted">
-              It used to ask for:{' '}
-              {usesLines(review.changed.was.uses).join('; ') || 'nothing beyond its own tools'}
-            </p>
+            <div className="text-ink-muted" data-testid="review-uses-was">
+              <p>What it could do before:</p>
+              <CanList uses={usesLines(review.changed.was.uses)} />
+            </div>
           )}
         </Section>
       )}
@@ -52,17 +52,13 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
         </p>
       </Section>
 
-      <Section title="What it asks Centralu for" testId="review-uses">
-        {uses.length === 0 ? (
-          <p className="text-ink-muted">Nothing beyond its own tools.</p>
-        ) : (
-          <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
-            {uses.map((u) => (
-              <li key={u}>{u}</li>
-            ))}
-          </ul>
+      <Section title="What it can do" testId="review-uses">
+        <CanList uses={uses} />
+        {uses.length > 0 && (
+          <p className="mt-1 text-xs text-ink-faint" data-testid="review-uses-note">
+            Once enabled, it does these without asking, unless a session set to Safe calls it.
+          </p>
         )}
-        {uses.length > 0 && <p className="mt-1 text-xs text-ink-faint">Each is asked about once, the first time the app uses it.</p>}
       </Section>
 
       <Section title="Secrets it wants" testId="review-secrets">
@@ -119,6 +115,17 @@ const SKIP_WHY: Record<string, string> = {
   link: 'a link, not followed',
   'link to nothing': 'a broken link',
   'not a regular file': 'not a regular file',
+}
+
+/** What an app's `uses` lets it do, one "Can …" line each (`appCanLines`, the trust card's wording) */
+function CanList({ uses }: { uses: string[] }) {
+  return (
+    <ul className="list-disc space-y-0.5 pl-4 text-ink-muted">
+      {appCanLines(uses).map((u) => (
+        <li key={u}>{u}</li>
+      ))}
+    </ul>
+  )
 }
 
 function Section({ title, testId, tone, children }: { title: string; testId: string; tone?: 'alert'; children: React.ReactNode }) {

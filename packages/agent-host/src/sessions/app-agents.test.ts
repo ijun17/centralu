@@ -116,9 +116,29 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
       expect(agentsMade().at(-1), preset).toMatchObject({ appId: 'notes', permissionPreset: preset })
       expect(claude.opened.at(-1)!.permissionPreset).toBe(preset)
     }
-    // The capability was allowed above and is remembered, so the screen's call asks nothing
     await rt.call({ projectId, appId: 'notes' }, 'ask_broker', { mode: 'run', args: { prompt: 'From the screen.' } }, { kind: 'view' })
     expect(agentsMade().at(-1)).toMatchObject({ appId: 'notes', permissionPreset: 'auto' })
+  })
+
+  /*
+   * #2237: whether the person is asked before an app runs an agent and the preset the agent runs under are one reading
+   * (`AppSessions.callersPreset`), so an agent that runs under `safe` is exactly one the person was asked about first.
+   */
+  it('the person is asked first exactly when the agent would run under safe', async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    claude.onSend = (h) => {
+      h.say('ok')
+      h.done()
+    }
+    const cards = () => events.filter((e) => e.type === 'approval_request' && e.detail.kind === 'capability').length
+    for (const preset of ['auto', 'edits', 'normal', 'safe'] as const) {
+      const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: preset })) as SessionInfo
+      const before = cards()
+      expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize.' } }))).toMatchObject({ isError: false })
+      expect([cards() - before, agentsMade().at(-1)!.permissionPreset], preset).toEqual([preset === 'safe' ? 1 : 0, preset])
+      rt.forgetPermission({ projectId, appId: 'notes' }, 'agent:claude')
+    }
   })
 
   /*
@@ -135,7 +155,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
         h.done()
       }
     }
-    // The capabilities asked once from an auto session, so a screen's call later asks nothing
+    // An auto and a safe session; a request made while the safe one calls in is asked about, and the world answers it
     async function primed(uses: Record<string, unknown> = { agent: true }) {
       plant('project', 'notes', uses)
       rt.refresh()
@@ -340,7 +360,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
   it('while the agent waits on the person\'s approval, what it is waiting on appears on the tool card of the session that called the app', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
-    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'safe' })) as SessionInfo
     let agent: { emit: (e: NormalizedEvent) => void; sessionId: string; done: () => void } | null = null
     claude.onSend = (h) => {
       agent = h
@@ -349,7 +369,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     const call = w.appCall(caller, 'app-notes', 'ask_broker', { mode: 'run', relay: true, args: { prompt: 'Write the notes down.' } }, { callId: 'toolu_notes' })
     const said = () =>
       events.filter((e): e is Extract<NormalizedEvent, { type: 'tool_output_delta' }> => e.type === 'tool_output_delta' && e.sessionId === caller.id)
-    // First the capability question (this test world allows it right away), then the agent session's approval — both stand on that call's card
+    // Under safe, first the capability question (this test world allows it right away), then the agent session's approval — both stand on that call's card
     await until(said, (l) => l.length >= 2)
     const name = agentSessions()[0]!.name
     expect(said().map((e) => [e.callId, e.text])).toEqual([

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, Attachment, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from './adapters/contract.js'
+import { storePermissionBook } from './app-permission-book.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { ExternalApps } from './apps/external/runtime.js'
@@ -85,6 +86,7 @@ beforeEach(async () => {
     dataRoot,
     reservedIds: ['control'],
     runs: storeRunLedger(store),
+    permissions: storePermissionBook(store),
     timing: { graceMs: 500, backoffBaseMs: 10, maxFailures: 1, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -268,15 +270,9 @@ describe('apps.sendError', () => {
     const mf = join(dir, 'centralu.app.json')
     writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), uses: { agent: true } }))
     rt.refresh()
-    const call = rpc('apps.invoke', { appId: 'notes', projectId, name: 'summarize', args: {} })
-    // A chain the view started — the prompt lands on the fixed view
-    let asked: { id: string }[] = []
-    for (let i = 0; i < 200 && asked.length === 0; i++) {
-      await new Promise((r) => setTimeout(r, 25))
-      asked = (await rpc('apps.questions', {})) as { id: string }[]
-    }
-    await rpc('apps.answerQuestion', { questionId: asked[0]!.id, decision: 'deny' })
-    await call
+    // The person denied it before (a card under safe asked, #2237): the remembered deny refuses whoever calls
+    store.permissions.putAppPermission(`${projectId}/notes`, projectId, { capability: 'agent:claude', text: 'run an agent (Claude Code) in a new session', decision: 'deny', stamp: 'earlier', decidedAt: 1 })
+    await rpc('apps.invoke', { appId: 'notes', projectId, name: 'summarize', args: {} })
     const { latest } = await errorsOf('notes')
     expect(latest).toMatchObject({ kind: 'tool', tool: 'summarize', denied: { appId: 'notes', name: 'Team notes', capability: 'agent:claude' } })
     await expect(rpc('apps.sendError', { appId: 'notes', projectId, at: latest!.at })).rejects.toThrow(

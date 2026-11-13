@@ -157,9 +157,10 @@ export type BrokerWorld = {
   events: NormalizedEvent[]
   projectId: string
   /**
-   * Answers the capability-question card (M4 D-4) in place of a person — allowed by default (for
-   * a test that does not care about the question itself). null means nobody answers, and the test
-   * inspects the card and answers it directly.
+   * Answers the capability question (M4 D-4; asked only with a caller under `safe`, #2237) in place
+   * of a person, on a session's card and on a screen alike — allowed by default (for a test that
+   * does not care about the question itself). null means nobody answers, and the test inspects the
+   * card or the screen's question and answers it directly.
    */
   answerCapabilities: 'allow' | 'deny' | null
   /**
@@ -225,6 +226,12 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
         } catch {
           // the card was already closed in the meantime
         }
+      })
+    }
+    if (e.type === 'external_app_questions_changed' && w?.answerCapabilities) {
+      const answer = w.answerCapabilities
+      timers.after(5, () => {
+        for (const q of w.mgr.hostCards.appQuestionList()) void w.rpc('apps.answerQuestion', { questionId: q.id, decision: answer }).catch(() => {})
       })
     }
   }
