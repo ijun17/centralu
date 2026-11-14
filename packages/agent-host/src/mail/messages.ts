@@ -36,6 +36,7 @@ import {
   dueAt,
   firstLineOf,
   flowsDownTo,
+  forPersonOf,
   pickWork,
   quietAnswer,
   refuse,
@@ -108,7 +109,8 @@ export type SendResult = {
 export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string } }
+/** `note`: a send that asks for nothing back (`send_to_session` without `reportBack`, #2258): a message that needs no reply, given as the task would be */
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -116,7 +118,7 @@ export type { TurnNow }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
 /** `withheld`: a request to the Assistant whose words are shown only in the turn it starts (§7.6); the body is left out */
-export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true }
+export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true; forPerson?: 'task' | 'note' }
 export type ReadView = { items: ReadItem[]; older: string | null; marked: number }
 export type InboxView = {
   needReply: ReadItem[]
@@ -362,7 +364,10 @@ export class MessageService {
     return { seq: said.seq, at: said.ts }
   }
 
-  /** Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words */
+  /**
+   * Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words.
+   * A `note` is a message that needs no reply: no report and no last response answers it
+   */
   task(sender: string, recipient: string, input: TaskInput): MailRow {
     const from = parseAddress(sender)
     if (!from || from.kind === 'centralu') throw refuse('not_allowed', 'Centralu sends with notice and report')
@@ -372,7 +377,7 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       return this.put(
-        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
+        { sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })
@@ -585,7 +590,7 @@ export class MessageService {
         row,
         message,
         request,
-        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined }),
+        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined, forPerson: this.forPerson(message) !== undefined }),
       })
     }
 
@@ -837,13 +842,14 @@ export class MessageService {
       this.records.moveRows(from, to, scope)
       /*
        * Each task `from` gave a child that is not settled is withdrawn and goes again from `to` with the same words, cause and delivery (#1936): the child's
-       * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`)
+       * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`). Its words
+       * are `from`'s, not `to`'s: fact `handedOver` says so, and keeps an heir that is the Assistant from passing them off as the person's (`forPersonOf`)
        */
       for (const row of this.records.watchedFrom(from)) {
         const m = children.includes(row.recipient) ? this.records.message(row.messageId) : undefined
         if (m?.kind !== 'task') continue
         this.records.settle(m.id, row.recipient, 'withdrawn', this.now())
-        const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: m.facts }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
+        const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: { ...m.facts, handedOver: true } }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
         // A task a stop released stays released: its sender was told, and no one is owed it twice
         if (row.releasedAt !== null && row.releasedWhy !== null) this.records.markReleased(again.id, row.recipient, row.releasedAt, row.releasedWhy)
       }
@@ -1053,7 +1059,13 @@ export class MessageService {
     const relation = this.relation(reader, m)
     if (m.sender !== reader && (!row || isHidden(row))) return { message: { ...m, body: '', facts: {} }, row: null, relation, phantom: row ? 'held' : 'not_sent' }
     if (this.isRequest(m, reader) && !this.inOpenTurn(m, row ?? undefined, turn)) return { message: { ...m, body: '' }, row, relation, withheld: true }
-    return { message: m, row, relation }
+    const forPerson = this.forPerson(m)
+    return { message: m, row, relation, ...(forPerson ? { forPerson } : {}) }
+  }
+
+  /** The Assistant's `send_to_session` words, which act for the person (`forPersonOf`) */
+  private forPerson(m: MailRow): 'task' | 'note' | undefined {
+    return forPersonOf(m, this.reach.isAssistant(m.sender))
   }
 
   /** The line for an earlier message that is no longer kept (S5) */
@@ -1081,6 +1093,7 @@ export class MessageService {
       ...(m.facts.paused !== undefined ? { paused: m.facts.paused } : {}),
       ...(m.facts.waitingOn !== undefined && m.facts.waitingOn > 0 ? { waitingOn: m.facts.waitingOn } : {}),
       ...(m.facts.personNote === true ? { personNote: true } : {}),
+      ...(this.forPerson(m) ? { forPerson: this.forPerson(m) } : {}),
       ...(maybeRepeated ? { maybeRepeated: true } : {}),
       ...(inline ? { inline: m.body } : {}),
     }

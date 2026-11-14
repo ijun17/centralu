@@ -54,8 +54,8 @@ export type MailHooks = {
   linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void
-  /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); returns its id */
-  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string): string
+  /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); a `note` needs no reply (#2258). Returns its id */
+  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean): string
   /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
   withdrawTasks?(callerId: string, childId: string): number
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1), a task answered as any task is */
@@ -299,12 +299,15 @@ export class MailSessionsView {
     return r && agentCallsFor(this.host.tools.toolProfileOf(callerId) ?? 'human', agentRunText(r))
   }
 
-  /** A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2) */
-  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
+  /**
+   * A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2).
+   * A `note` (send_to_session without reportBack, #2258) is a message that needs no reply, given the same way, busy or not
+   */
+  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note = false): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
     const hooks = this.hooks
     if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
     try {
-      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text) }
+      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note), ...(note ? { note: true as const } : {}) }
     } catch (e) {
       return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
     }

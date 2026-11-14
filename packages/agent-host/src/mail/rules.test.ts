@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON } from './address.js'
 import {
+  forPersonOf,
   HOLD_OTHER_MS,
   HOLD_UNTRUSTED_OUT,
   MAX_RECIPIENTS,
@@ -94,6 +95,21 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
       expect(f({ fromParent: true, toAssistant: true })).toBe(false)
       expect(f({ kind: 'report', fromSession: false })).toBe(false)
       expect(f({ kind: 'notice', fromParent: true })).toBe(false)
+    })
+
+    it("forPersonOf: only the Assistant's send_to_session task or note (#2258)", () => {
+      const m = (kind: MailRow['kind'], origin: string | null, facts: MailRow['facts'] = {}) => ({ kind, origin, facts }) as Pick<MailRow, 'kind' | 'origin' | 'facts'>
+      expect([forPersonOf(m('message', 'send_to_session'), true), forPersonOf(m('task', 'send_to_session'), true)]).toEqual(['note', 'task'])
+      expect(forPersonOf(m('task', 'send_to_session', { handedOver: true }), true)).toBeUndefined()
+      expect(forPersonOf(m('message', 'send_to_session'), false)).toBeUndefined()
+      expect(forPersonOf(m('task', 'agent_session'), true)).toBeUndefined()
+      expect(forPersonOf(m('message', 'mail'), true)).toBeUndefined()
+      expect(forPersonOf(m('notice', 'send_to_session'), true)).toBeUndefined()
+    })
+
+    it("carries the Assistant's send_to_session note, which acts for the person (#2258); never to the Assistant", () => {
+      expect(f({ forPerson: true })).toBe(true)
+      expect(f({ forPerson: true, toAssistant: true })).toBe(false)
     })
 
     it('carries a watch’s notice to the session that set it (§18.5); every other Centralu notice is pulled', () => {

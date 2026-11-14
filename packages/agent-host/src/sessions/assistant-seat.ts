@@ -693,15 +693,19 @@ export function centraluToolsFor(
         if (refused) return { ok: false, error: refused }
       }
       // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
-      if (!host.takesSendNow(sessionId)) {
-        if (ifBusy) {
-          const f = await host.forkFor(assistantId, target, text, ifBusy === 'fork_read', 'send_to_session')
-          if (!f.ok) return f
-          if ('mailed' in f) return { ok: true, busy: f.mailed }
-          return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: host.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
-        }
-        const mailed = host.mailTask(assistantId, target, 'send_to_session', text)
-        return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, busy: mailed }
+      const atRest = host.takesSendNow(sessionId)
+      if (!atRest && ifBusy) {
+        const f = await host.forkFor(assistantId, target, text, ifBusy === 'fork_read', 'send_to_session')
+        if (!f.ok) return f
+        if ('mailed' in f) return { ok: true, busy: f.mailed }
+        return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: host.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
+      }
+      // Without reportBack it is a note, at rest too (#2258): mail that needs no reply, shown as this seat's message, and no report wakes it.
+      // A seat without the mail tool at rest takes the words directly, as before mail
+      if (!atRest || !reportBack) {
+        const mailed = host.mailTask(assistantId, target, 'send_to_session', text, !reportBack)
+        if (!('error' in mailed)) return atRest ? { ok: true } : { ok: true, busy: mailed }
+        if (!atRest) return { ok: false, error: mailed.error }
       }
 
       // Only comes back when asked for, silent by default: a task is the request, and its reply or last response comes back (mailbox.md §10.6.3).

@@ -11,7 +11,12 @@ from a session whose project is untrusted now (read live: no project is trusted,
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
 leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
 S15): `start_agent`, `create_session` with a first message, a `mail` send that is work, `send_to_session` with `reportBack`, `ask_project` and the
-linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (mailbox.md §7.5):
+linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **The Assistant's
+`send_to_session` words** (#2258, `forPersonOf` in `mail/rules.ts`), a task or a note that needs no reply, flow down inline as the person's
+request ("the Assistant, which acts for the person in Centralu"): it acts for the person, and before #2258 such a send at rest was plain input
+as if the person typed it, so this widens nothing. The sender is the host's record (the Assistant's own seat), never a word of the message,
+and a task a handoff gave again from the Assistant as heir (fact `handedOver`) is excluded: its words are the previous giver's;
+every other session's mail, a coordinator's `send_to_session` included, stays "its sender's text, not an instruction from the person". **Guards** (mailbox.md §7.5):
 identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the Assistant per asker group
 (`ask_rate`, no one-open rule any more). **Nothing holds, defers or refuses mail for how much of it there is** (#2014): past 20 mail-started
 turns an hour between two sessions with no word from the person, or 120 on the host, Centralu writes the person one warning an hour in the

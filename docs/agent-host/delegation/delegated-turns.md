@@ -32,7 +32,8 @@ its turn. The design, what it replaced and what a restart and an older build do 
 
 A send to a session that cannot take it now (a `mail` send to a session the sender started, `ask_project` to an existing session, `send_to_session`) is a mail
 task that reaches the session as a turn of its own once it is free (a task joins no running turn until #1948 step 3); the call answers
-`mailed` with the task's id, and the turn's end is reported to the caller by mail. When it goes, the receiver's conversation shows it as the
+`mailed` with the task's id, and the turn's end is reported to the caller by mail. The Assistant's `send_to_session` without `reportBack` is a note
+instead, a message that needs no reply, busy or at rest, and nobody is told when its turn ends (#2258). When it goes, the receiver's conversation shows it as the
 sender's message, as a direct send does; the agent reads the mail frame. The rule, what it
 replaced (the `note` / `queue` choices and the request queue) and what a restart and an older build do with it are
 [plans/mailbox.md](../../plans/mailbox.md) §10.6.2 (#1948 step 2). A fork stays an explicit choice of a `mail` send to a session the caller started (since #1948, which took it from `agent_session`) and of `send_to_session`:

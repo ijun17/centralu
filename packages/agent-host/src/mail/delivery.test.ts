@@ -140,6 +140,35 @@ describe('a delivery that fails', () => {
     expect(w.to('b')).toHaveLength(tries)
   })
 
+  it("a send tool's note held failed tells its sender quietly, since no report comes for it (#2258)", async () => {
+    const w = started()
+    w.behaviour.fail = new Error('the tool said no')
+    const note = w.mail.task(A, B, { text: 'check the build', origin: 'send_to_session', delivered: false, note: true })
+    for (let i = 0; i < 9; i++) await w.advance(15 * 60_000)
+    expect(w.rowOf(note.id, B)).toMatchObject({ held: 'failed' })
+    const told = w.store.mailbox.feedOf(A, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.noteFailed !== undefined)
+    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ quiet: true, noteFailed: { message: note.id, to: B } }) })])
+    expect(told[0]!.body).toContain('the tool said no')
+  })
+
+  it("a failure notice that throws is logged and leaves the hold and the other notes' notices in place (#2258)", async () => {
+    const w = started()
+    w.behaviour.fail = new Error('the tool said no')
+    const first = w.mail.task(A, B, { text: 'check the build', origin: 'send_to_session', delivered: false, note: true })
+    const second = w.mail.task(C, B, { text: 'check the docs', origin: 'send_to_session', delivered: false, note: true })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const notice = w.mail.notice.bind(w.mail)
+    vi.spyOn(w.mail, 'notice').mockImplementationOnce(() => {
+      throw new Error('the store is busy')
+    }).mockImplementation(notice)
+    for (let i = 0; i < 9; i++) await w.advance(15 * 60_000)
+    expect([first.id, second.id].map((id) => w.rowOf(id, B).held)).toEqual(['failed', 'failed'])
+    expect(logged.mock.calls.flat().join(' ')).toContain(`note ${first.id} failed (the store is busy)`)
+    const told = w.store.mailbox.feedOf(C, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.noteFailed !== undefined)
+    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ noteFailed: { message: second.id, to: B } }) })])
+    vi.restoreAllMocks()
+  })
+
   it('a receiver that left rest while being woken is no failed try: the attempt is taken back and the mail goes at the next rest', async () => {
     const w = started()
     w.behaviour.fail = new MailNotAtRest()
@@ -236,6 +265,19 @@ describe('a host that was off a long while', () => {
     expect(w.to('c')).toHaveLength(1)
     expect(w.to('c')[0]!.input.text).toContain(question.message.id)
     expect(w.to('c')[0]!.input.text).not.toContain(fyi.message.id)
+  })
+
+  it("a send tool's note wakes a sleeping session as a task does: it is the sender's instruction, though no answer is owed (#2258)", async () => {
+    const w = deliveryWorld({ heartbeat: NOW - 3 * 60 * MIN })
+    w.states.set('b', { kind: 'ready', live: false, quiet: false })
+    const note = w.mail.task(A, B, { text: 'check the build', origin: 'send_to_session', delivered: false, note: true })
+    expect(note).toMatchObject({ kind: 'message', needsReply: false })
+    w.clock.t += 5_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1)
+    expect(w.to('b')).toHaveLength(1)
+    expect(w.to('b')[0]!.input.text).toContain(note.id)
   })
 
   // #1951: the person opens the sleeping session, its process resumes; that is not a turn, and old news does not start one

@@ -85,7 +85,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
       const { parent, child } = await childInTurn()
       const [first] = read.tasks(addr(parent), child)
       const orc = await w.mgr.assistant()
-      await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build' })
+      await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build', reportBack: true })
       await deliverDue(child)
       const r = await sendWork(w.mgr, parent, child, 'and the docs')
       const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
@@ -170,15 +170,60 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
     expect(read.tasks(addr(caller), there)).toEqual([expect.objectContaining({ body: 'what does parse() return?', origin: 'ask_project' })])
   })
 
-  it("the Assistant's send_to_session to a session the person is working in answers sent as mail, with no choice", async () => {
+  it("the Assistant's send_to_session to a session the person is working in answers sent as mail, with no choice; a report only when asked (#2258)", async () => {
     const orc = await w.mgr.assistant()
     const there = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     await w.mgr.inputs.send(there, 'the person works here')
     await w.until(() => w.mgr.sessionInfo(there)?.state === 'working')
-    const r = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: there, text: 'check the build' })
+    handleOf(there).acceptsAtOnce = true
+    const r = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: there, text: 'check the build', reportBack: true })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('is busy, so this went to it as mail')
+    expect(r.text).toContain('you are told by mail when that turn ends')
     expect(read.tasks(addr(orc.id), there)).toEqual([expect.objectContaining({ body: 'check the build', origin: 'send_to_session' })])
+    // Without reportBack it is a note: a message that needs no reply, and nobody is told when its turn ends
+    const note = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: there, text: 'and the lint' })
+    expect(note.text).toContain('is busy, so this went to it as mail')
+    expect(note.text).not.toContain('you are told')
+    expect(read.tasks(addr(orc.id), there)).toHaveLength(1)
+    expect(read.between(addr(orc.id), addr(there), 'message')).toEqual([expect.objectContaining({ body: 'and the lint', origin: 'send_to_session', needsReply: false })])
+    // Both reach the model as words, under the header that says the Assistant acts for the person
+    handleOf(there).answer('Done.')
+    await w.until(() => w.mgr.sessionInfo(there)?.state !== 'working')
+    await deliverDue(there)
+    // One wake: the task, and the note with it, which is no one's work
+    const given = handleOf(there).sent.at(-1)
+    expect(given).toContain("carry it out as the person's request. Report back when done:\n> check the build")
+    expect(given).toContain("carry it out as the person's request. No answer is owed:\n> and the lint")
+  })
+
+  it("the Assistant's send_to_session without reportBack to a session at rest is a note: it goes in at once as the Assistant's message, and its turn's end tells nobody (#2258)", async () => {
+    const orc = await w.mgr.assistant()
+    const there = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+    await w.mgr.inputs.send(there, 'the person was here')
+    handleOf(there).acceptsAtOnce = true
+    handleOf(there).answer('Hello.')
+    await w.until(() => w.mgr.sessionInfo(there)?.state !== 'working')
+    const shown = (since: number) => w.store.messages.loadMessagesFrom(there, since, 50).filter((row) => row.role === 'user').map((row) => row.payload)
+    const note = async (text: string) => {
+      const since = w.store.messages.nextSeq(there) - 1
+      expect(await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: there, text })).toEqual({ text: `Sent: ${there}`, isError: false })
+      const [written] = read.between(addr(orc.id), addr(there), 'message').filter((n) => n.body === text)
+      expect(written).toMatchObject({ origin: 'send_to_session', needsReply: false })
+      // Less than the 30 s between two wakes: a send tool's words go in when the last turn is over, as its direct send did
+      await deliverDue(there)
+      expect(handleOf(there).sent.at(-1)).toContain(written!.id)
+      // The model reads the words themselves, as the person's request the Assistant sent
+      expect(handleOf(there).sent.at(-1)).toContain(`> ${text}`)
+      expect(handleOf(there).sent.at(-1)).toContain("from the Assistant, which acts for the person in Centralu: carry it out as the person's request. No answer is owed:")
+      expect(shown(since)).toEqual([expect.objectContaining({ text, from: { sessionId: orc.id, name: w.mgr.sessionInfo(orc.id)!.name } })])
+      handleOf(there).answer('Done.')
+      await w.until(() => w.mgr.sessionInfo(there)?.state !== 'working')
+    }
+    await note('check the build')
+    await note('and the lint')
+    expect(read.tasks(addr(orc.id), there)).toEqual([])
+    expect(read.to(addr(orc.id)).filter((x) => x.message.kind === 'report')).toEqual([])
   })
 
   it('agent_session stop withdraws a mailed task that was not delivered yet', async () => {

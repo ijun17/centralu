@@ -56,8 +56,8 @@ export type DelegationHost = {
   builderRefOf: (m: Pick<SessionInfo, "id" | "appId" | "projectId">) => AppRef | null
   /** Whether a send reaches the session as a turn it starts now; otherwise it goes as mail (`MailSessionsView.takesSendNow`) */
   takesSendNow: (sessionId: string) => boolean
-  /** A send to a session that cannot take it now, as a mail task (`MailSessionsView.mailTask`) */
-  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
+  /** A send to a session that cannot take it now, as a mail task, or a note that needs no reply (`MailSessionsView.mailTask`) */
+  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note?: boolean) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
   /** How to leave a busy session across the link to `machineId` work (`MailSessionsView.wayAcross`, #1186) */
   wayAcross: (sessionId: string, machineId: string, machine: string) => WayAcross
   /** The caller's tasks to the session not delivered yet, withdrawn (`MailSessionsView.withdrawTasks`); how many */

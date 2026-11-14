@@ -84,14 +84,15 @@ export function progressText(p: TurnProgress | undefined): string {
 }
 
 /**
- * A send that went as mail to a session that could not take it now (docs/plans/mailbox.md §10.6.2): it waits until the session is free
- * and starts a turn of its own, whose end is reported by mail. `tool`: the call that sent it, which names the fork a caller may want instead
+ * A send that went as mail to a session that could not take it now (docs/plans/mailbox.md §10.6.2): it joins the session's turn when its tool
+ * takes it, else waits for the turn's end, and that turn's end is reported by mail, unless it is a note (#2258). `tool`: the call that sent it,
+ * which names the fork a caller may want instead
  */
-export function mailedText(m: { sessionName: string; sessionId: string; messageId: string; lowMemory?: string }, tool: 'mail' | 'ask_project' | 'send_to_session'): string {
+export function mailedText(m: { sessionName: string; sessionId: string; messageId: string; lowMemory?: string; note?: true }, tool: 'mail' | 'ask_project' | 'send_to_session'): string {
   // A fork turned into mail (#686): said first, so the caller does not wait for a fork that never came
   const instead = m.lowMemory ? `Not forked: memory is low (${m.lowMemory}), so it was sent as mail instead, which starts no new process. ` : ''
   const fork = tool === 'ask_project' ? '' : ' ifBusy "fork" starts a copy of it on work that cannot wait.'
-  return `${instead}"${m.sessionName}" [${m.sessionId}] is busy, so this went to it as mail ${m.messageId}: it waits until the session is free and starts a turn of its own, and you are told by mail when that turn ends.${fork}`
+  return `${instead}"${m.sessionName}" [${m.sessionId}] is busy, so this went to it as mail ${m.messageId}: it reaches the session in its current turn, or as soon as it can take it${m.note ? '' : '; you are told by mail when that turn ends'}.${fork}`
 }
 
 /** A note held for a child on a linked machine until it is at rest (#1682): mail does not cross links yet */

@@ -407,11 +407,11 @@ depends on a turn owner:
 | `user_message.intent` | transcript payload | P3 (the host ignores it) | P3 | never: old rows keep it, harmless |
 | `mail_turns.started_by` | table | stays (§4.3) | stays | — |
 
-**Why the writes outlive the reads.** A previous build may serve during a swap or after a rollback. Its
-`takeOverFromEarlierBuild` (`mail/adoption.ts:24`, gone since store step 74) settles, at its `ready`, every open session-to-session task its old
-paths no longer owe (step 2, `oldOwes`). If this design stopped writing `report_marks` at once, that build would settle
-this build's open tasks with no report: a lost answer (mailbox N1). So `report_marks` keeps being written both ways for
-one release, exactly as mailbox M8 plans. `report_paused` likewise, or the older build reports a paused child as
+**Why the writes outlived the reads (until store step 74, #2258).** A previous build may serve during a swap or after a rollback. Its
+`takeOverFromEarlierBuild` (`mail/adoption.ts:24`, gone since store step 74) settled, at its `ready`, every open session-to-session task its old
+paths no longer owed (step 2, `oldOwes`). Had this design stopped writing `report_marks` at once, that build would have settled
+this build's open tasks with no report: a lost answer (mailbox N1). So `report_marks` was written both ways until step 74 kept those builds
+out, exactly as mailbox M8 planned. `report_paused` likewise, or the older build reports a paused child as
 finished; as built in #1948 step 3 it went at once instead (nothing is sent while a session's own work runs) and every `ready` deletes it, so the
 one mark this build leaves for a session in a turn is not read as paused (mailbox.md §10.6.3). `report_turn` and `turn_inputs` can stop at once: an older build that misses them reads the next turn as the
 CLI's own and reports it to the caller, which is what this design does anyway; named in P7's Not exercised.

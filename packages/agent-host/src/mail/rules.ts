@@ -111,10 +111,27 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
 
 /**
  * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, a task, a report, a
- * message that needs a reply and an app's post the receiver must see. The rest waits for the session's next turn
+ * message that needs a reply, a send tool's note (an instruction that owes no answer, #2258) and an app's post the receiver must see.
+ * The rest waits for the session's next turn
  */
-export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts'>): boolean {
-  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
+export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts' | 'origin'>): boolean {
+  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || isSendNote(m) || m.facts.needsOwner === true
+}
+
+/** A send tool's note (#2258): `send_to_session`'s words without `reportBack`, a message that owes no answer. Only that tool writes one */
+export function isSendNote(m: Pick<MailRow, 'kind' | 'origin'>): boolean {
+  return m.kind === 'message' && m.origin === 'send_to_session'
+}
+
+/**
+ * The Assistant's `send_to_session` words, a task or a note (#2258 review): the Assistant acts for the person, so they flow down inline and read as
+ * the person's request. Before #2258 such a send at rest was plain input, as if the person typed it. Every other session's mail stays its sender's
+ * text, not an instruction. A task a handoff gave again (`MessageService.handOver`, fact `handedOver`) has the heir as its sender and someone
+ * else's words, so it never reads as the person's, even when the heir is the Assistant
+ */
+export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin' | 'facts'>, fromAssistant: boolean): 'task' | 'note' | undefined {
+  if (!fromAssistant || m.origin !== 'send_to_session' || m.facts.handedOver === true) return undefined
+  return m.kind === 'task' ? 'task' : isSendNote(m) ? 'note' : undefined
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
@@ -298,13 +315,13 @@ export function pickWork(candidates: readonly WorkPick[], now: number): string |
 /**
  * Whether a body is inline in the wake (§8.2 step 4), after the frame and quoted: the person's words; a `task` from a session to a session that is
  * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant; a watch's notice to the session that
- * set it (§18.5: Centralu's words and the session's own note). Everything else is pulled with `mail read`: a session's words to the Assistant never
- * flow down, whatever their kind
+ * set it (§18.5: Centralu's words and the session's own note); the Assistant's `send_to_session` note (`forPersonOf`, #2258). Everything else is pulled
+ * with `mail read`: a session's words to the Assistant never flow down, whatever their kind
  */
-export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean }): boolean {
+export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean; forPerson?: boolean }): boolean {
   if (f.fromPerson || f.watch) return true
   if (!f.fromSession || f.toAssistant) return false
-  return f.kind === 'task' || (f.kind === 'message' && f.fromParent)
+  return f.kind === 'task' || f.forPerson === true || (f.kind === 'message' && f.fromParent)
 }
 
 /** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */
