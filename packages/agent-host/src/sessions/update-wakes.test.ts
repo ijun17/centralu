@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
+import { recordUpdateCut, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
@@ -307,6 +307,29 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     expect(answered).toEqual(new Set(goOn))
     await eventually(() => folder.files.size === 0)
     expect(c.adapter.handles.get(stopped!)?.sent ?? []).toEqual([])
+  })
+
+  it('does not continue a woken entry the person stopped while it was queued, though its list still names others (#2264 re-check)', async () => {
+    const { store, folder, all } = await updated(UPDATE_WAKES_AT_ONCE + 2, 0)
+    // As a second update's stop left them: every turn woken before it and caught at rest before its first answer, listed `woken`
+    folder.files.clear()
+    for (const s of store.sessions.listSessions()) store.sessions.upsertSession({ ...s, state: 'waiting_input' })
+    recordUpdateCut(folder, all.map((id) => ({ id, seq: store.messages.nextSeq(id) - 1, woken: true as const })))
+    const c = host(store, folder)
+    await eventually(() => waking(c, new Set()).length === UPDATE_WAKES_AT_ONCE)
+    const [stopped, other] = all.filter((id) => !c.adapter.handles.get(id)?.sent.length)
+    expect(c.session(stopped!).state).toBe('working')
+    await c.rpc('agents.interrupt', { sessionId: stopped })
+    // The other queued one is not dealt with, so its list stands: without the stopped one's entry
+    expect(folder.turns()!.map((t) => t.id)).not.toContain(stopped)
+    expect(folder.turns()!.map((t) => t.id)).toContain(other)
+    // A plain quit now, before anything answered; the start after it
+    await c.mgr.tenure.disposeAll()
+    hosts.splice(hosts.indexOf(c.mgr), 1)
+    const d = host(store, folder)
+    await eventually(() => d.adapter.handles.get(other!)?.sent.length === 1)
+    expect(d.adapter.handles.get(stopped!)?.sent ?? []).toEqual([])
+    expect(d.session(stopped!).state).not.toBe('working')
   })
 
   it('leaves the ones still queued to the host after a second update, which wakes them once', async () => {

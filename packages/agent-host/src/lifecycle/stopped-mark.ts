@@ -84,7 +84,11 @@ export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
         throw err
       }
     },
-    add: (text) => writeFileSync(join(dataDir, `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`), text, { flag: 'wx' }),
+    add: (text) => {
+      const name = `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`
+      writeFileSync(join(dataDir, name), text, { flag: 'wx' })
+      return name
+    },
     remove: (name) => realOs().files.rmSync(join(dataDir, name), { force: true }),
   }
 }

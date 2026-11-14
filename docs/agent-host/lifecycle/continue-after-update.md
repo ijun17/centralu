@@ -29,9 +29,12 @@ the person's Continue would.
   told as a quit's. A list the start cannot read because it is held (`EBUSY`, a virus scanner that opened the file just
   written) is read again by the one policy for held files (os/held.ts: 1.6 s in all), each failure in the log; one still held stays where it is for a
   later start, and the turns of sessions this start finds cut are marked stopped like a quit's (the host cannot tell which
-  the list names), with the log saying why. A list goes once each
-  turn it names is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, or the start did
-  not find it cut. One that cannot be removed is said in the log, stays harmless, and goes at a later start; one a host
+  the list names), with the log saying why. Each turn leaves its list
+  once it is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, the person's Stop dropped it, or
+  the start did not find it cut. The list is written again without it (a new file, then the old one goes; a host killed in between
+  leaves both, naming the same turns still to deal with), and goes once it names nothing (#2264 re-check: a Stop writes no row, so
+  a mark alone did not keep a dealt `woken` entry from matching). One that cannot be written or removed is said in the log, and
+  goes at a later start; one a host
   killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
   the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
@@ -120,7 +123,9 @@ the person's Continue would.
   listed turn that reads at rest was stopped by the person, which a mark cannot tell since a Stop writes no row. That is also why a Stop
   on a queued cut turn deals with its entry at once. An older build reads `id` and `seq` alone and does not continue a `woken` one. A wake
   silent for `UPDATE_SLOT_MS` has given its slot up and is no longer "not answered yet": a stop after that does not list it again, and its
-  note is not sent again (accepted: a request that hung that long). There is no setting and no wait in the header: Centralu cut these turns, the person
+  note is not sent again (accepted: a request that hung that long). Nor is a session in `error`. Accepted too: the person's Stop on a woken
+  turn that reads at rest (between the process's own turn end and its first answer) ends nothing where the tool says nothing at rest, so
+  that wake stays unanswered and a stop then lists it `woken` again. There is no setting and no wait in the header: Centralu cut these turns, the person
   did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and

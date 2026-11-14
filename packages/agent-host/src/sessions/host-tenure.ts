@@ -303,7 +303,7 @@ export class HostTenure {
        * mark below (`turnLostInSwap` for one that cannot be continued)
        */
       // One that reads at rest only by a `woken` entry (`cutTurns`): a woken turn a second update stopped before its first answer
-      const goesOn = !!lists?.cut(s.id, s.lastSeq, !cut)
+      const goesOn = s.state !== 'error' && !!lists?.cut(s.id, s.lastSeq, !cut)
       const stale = cut && !goesOn
       /*
        * Where the last host recorded the system ending (#1397): a turn it lost is the system's, unless the session has rows from

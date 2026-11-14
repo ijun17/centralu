@@ -36,8 +36,8 @@ import { readStopped, type Stopped } from './update-stopped.js'
  *
  * **Each stop writes its own list** under a name no other has (`add`), never replacing another's: no rename over a file
  * another process may hold, and no list one stop wrote that a second one could take away. The next host reads all of
- * them (`UpdateResumeLists`) and removes each once every turn it names was dealt with (continued, reported as lost, or
- * not found cut). One it could not remove stays harmless and goes at a later start. A list a host killed mid-write left
+ * them (`UpdateResumeLists`), and each entry leaves its list once it is dealt with (`done`: the list is written again without it,
+ * and goes once it names nothing). One it could not remove goes at a later start. A list a host killed mid-write left
  * is not JSON and goes at the next start; one of another format (a newer host's) is left to it. Nothing expires.
  */
 export const UPDATE_RESUME_PREFIX = 'update-resume.'
@@ -59,8 +59,8 @@ export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended; /
 export type UpdateResumeFolder = {
   names(): string[]
   read(name: string): string | null
-  /** Writes a new list under a name no other list has */
-  add(text: string): void
+  /** Writes a new list under a name no other list has, and says the name */
+  add(text: string): string
   remove(name: string): void
 }
 
@@ -96,11 +96,14 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
   const stopped = ended.filter((x) => ID.test(x.id)).slice(0, MAX_TURNS)
   if (!turns.length && !stopped.length) return
   try {
-    folder.add(`${JSON.stringify({ v: 1, turns, stopped })}\n`)
+    folder.add(listText(turns, stopped))
   } catch (err) {
     console.error(`[agent-host] the turns this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
   }
 }
+
+/** A list of turns and what else a stop ended, as written */
+const listText = (turns: readonly CutTurn[], stopped: readonly Stopped[]): string => `${JSON.stringify({ v: 1, turns, stopped })}\n`
 
 /**
  * Writes the terminals and Run commands this stop ends, as a list of its own (#1902). Never fatal, as `recordUpdateCut` is: they
@@ -206,17 +209,28 @@ export class UpdateResumeLists {
   }
 
   /**
-   * One listed session dealt with: continued, reported as lost, or not found cut. Each list all of whose sessions are
-   * dealt with goes. One that cannot be removed is said in the log and stays harmless: the turn it names is over, so
-   * its mark no longer matches, and a later start removes it
+   * One listed session dealt with: continued, reported as lost, dropped (the person's Stop, gone) or not found cut. It leaves every list that
+   * names it now, on disk too (#2264 re-check): the list is written again without it, a new file first and then the old one goes, and a list
+   * that names nothing more just goes. A mark alone does not keep a dealt entry harmless: the person's Stop writes no row, so a `woken` entry
+   * would still match a session at rest. A host killed between the two steps leaves both files, naming the same entries still to deal with,
+   * which a start reads as one. One that cannot be written or removed is said in the log, and the entry stays there for a later start
    */
   done(id: string): void {
     this.dealt.add(id)
-    for (const [name, l] of this.lists) {
-      const named = [...l.turns, ...l.stopped]
-      if (!named.some((t) => t.id === id) || !named.every((t) => this.dealt.has(t.id))) continue
+    for (const [name, l] of [...this.lists]) {
+      if (![...l.turns, ...l.stopped].some((t) => t.id === id)) continue
+      const turns = l.turns.filter((t) => !this.dealt.has(t.id))
+      const stopped = l.stopped.filter((t) => !this.dealt.has(t.id))
+      if (turns.length || stopped.length) {
+        try {
+          this.lists.set(this.folder.add(listText(turns, stopped)), { ...l, turns, stopped })
+        } catch (err) {
+          console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it stays listed there`)
+          continue
+        }
+      }
       this.lists.delete(name)
-      this.removeList(name, 'the turns it names are over, and a later start removes it')
+      this.removeList(name, `a later start reads it, and ${id.slice(0, 8)} with it`)
     }
   }
 

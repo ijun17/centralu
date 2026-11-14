@@ -13,7 +13,7 @@ import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 afterEach(() => vi.restoreAllMocks())
 
 describe('the turns an update cut, in the data folder', () => {
-  it('a stop writes the turns it ends; the next start reads them without taking them, and a list goes once all it names are dealt with', () => {
+  it('a stop writes the turns it ends; the next start reads them without taking them, and each leaves the list on disk once dealt with', () => {
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 9 }])
     const lists = new UpdateResumeLists(f)
@@ -21,9 +21,34 @@ describe('the turns an update cut, in the data folder', () => {
     // Read again (a start that failed its check, before anything was sent): still all there
     expect([...new UpdateResumeLists(f).ids()]).toEqual(['s1', 's2'])
     lists.done('s1')
-    expect(f.ids()).toEqual(['s1', 's2'])
+    expect(f.ids()).toEqual(['s2'])
+    // A start killed now: the next reads what is still to deal with, and only that
+    expect([...new UpdateResumeLists(f).ids()]).toEqual(['s2'])
     lists.done('s2')
     expect(f.ids()).toBeNull()
+  })
+
+  it('takes a dealt woken entry off the disk though its list still names others: a Stop writes no row, so its mark would still match (#2264 re-check)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 'a', seq: 7, woken: true }, { id: 'b', seq: 3 }], [{ id: 'c', seq: 2, tasks: [], approvals: true, questions: [] }])
+    new UpdateResumeLists(f).done('a')
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('a', 7, true)).toBe(false)
+    expect(next.cut('b', 3)).toBe(true)
+    expect(next.stoppedOf('c', 2)).toMatchObject({ approvals: true })
+    expect(f.files.size).toBe(1)
+  })
+
+  it('keeps what is still to deal with when the old list cannot be removed after it was written again, and says so', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 9 }])
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const held: UpdateResumeFolder = { names: f.names, read: f.read, add: f.add, remove: () => { throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }) } }
+    new UpdateResumeLists(held).done('s1')
+    // Both files stand, as after a host killed between the two steps: s2 is still listed
+    expect(f.files.size).toBe(2)
+    expect(new UpdateResumeLists(f).cut('s2', 9)).toBe(true)
+    expect(said.mock.calls.some((c) => String(c[0]).includes('could not be removed'))).toBe(true)
   })
 
   it('a listed session is the turn that stop cut only while its conversation still ends where it did then (#1626 review)', () => {
