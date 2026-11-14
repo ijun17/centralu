@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
@@ -7,7 +7,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { UPDATE_WAKES_AT_ONCE } from './turn-continue.js'
+import { TurnContinue, UPDATE_WAKES_AT_ONCE } from './turn-continue.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -149,13 +149,36 @@ describe('the sessions an update stopped wake a few at a time (#1913)', () => {
     await eventually(() => folder.files.size === 0)
   })
 
-  it('frees a slot when a woken turn ends without an answer (the person stops it, or it fails)', async () => {
+  it('frees a slot when the person stops a woken turn before it answered', async () => {
     const { store, folder, all } = await updated(0, UPDATE_WAKES_AT_ONCE + 1)
     const b = host(store, folder)
     await eventually(() => waking(b, new Set()).length === UPDATE_WAKES_AT_ONCE)
-    const first = waking(b, new Set())[0]!
-    first.finish()
+    await b.rpc('agents.interrupt', { sessionId: waking(b, new Set())[0]!.sessionId })
     await eventually(() => all.every((id) => (b.adapter.handles.get(id)?.sent.length ?? 0) === 1))
+  })
+
+  it("keeps the slot over a resumed process's own turn end with no request: the burst is the note's request (engine)", async () => {
+    const meta = new Map<string, SessionInfo>()
+    const sent: string[] = []
+    const steps: string[] = []
+    const engine = new TurnContinue({
+      meta, leaving: () => false, compactTurn: () => false, running: () => true, settings: () => ({ network: true, limit: true }), reachable: async () => true,
+      note: () => {}, changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
+      send: async (id, _note, gate) => {
+        sent.push(id)
+        if (gate.live()) gate.handed()
+      },
+    })
+    const ids = Array.from({ length: UPDATE_WAKES_AT_ONCE + 1 }, (_, i) => `s${i}`)
+    for (const id of ids) meta.set(id, { id, state: 'idle' } as SessionInfo)
+    engine.wakeAfterUpdate(ids.map((sessionId) => ({ sessionId, turn: false, stopped: null })))
+    await eventually(() => sent.length === UPDATE_WAKES_AT_ONCE && steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
+    // Claude Code ends a turn of its own right after a resume, before the note's request (measured): not the wake's answer
+    engine.observe({ type: 'turn_complete', sessionId: 's0' })
+    expect(sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
+    // Its first answer is
+    engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
+    expect(sent).toEqual(ids)
   })
 
   it("sends a queued session's note at once when the person writes to it, outside the queue", async () => {

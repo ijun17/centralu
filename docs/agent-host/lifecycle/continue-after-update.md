@@ -101,8 +101,10 @@ the person's Continue would.
   ended, above, lists its own background tasks, not these).
 - **A few at a time** (#1913, owner 2026-11-12 and 11-14). The wakes go `UPDATE_WAKES_AT_ONCE` (3) at a time, cut turns first and then
   the sessions at rest woken for their tasks, until every one is woken. A slot is held from the send until the woken session's first
-  answer (any output of its first model request), or any other end of that wake (its turn ends or errs, the person stops it, it is
-  deleted, the note could not be sent or no longer stood). The burst is the first request: after a restart each one re-reads the whole
+  answer (any output of its first model request), or any other end of that wake (an error or a limit, a state other than working such
+  as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). A bare turn end is not one: measured
+  with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the note goes
+  in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
   its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes);

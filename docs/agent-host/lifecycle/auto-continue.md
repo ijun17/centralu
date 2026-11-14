@@ -68,5 +68,5 @@ header's words, and its Continue reads **Continue now** then. When the continue 
 
 `sessions/auto-continue.test.ts` (fake timers and a stubbed `fetch`: the probe, a wake, another turn releasing the wait, the
 cap, every cancel, the settings, a restart, a limit's reset, credits, staggering), `sessions/turn-continue.test.ts` (the
-overload cases, unchanged), `sessions/update-wakes.test.ts` (the update cause: at most three waiting for a first answer, cut turns first, a slot freed by a turn's end, the person's message and Stop, a second update before the queue drains), `mail/stop-notices.test.ts` (who is told), `sessions/interruptions.test.ts` (which ends are limit
+overload cases, unchanged), `sessions/update-wakes.test.ts` (the update cause: at most three waiting for a first answer, cut turns first, a resumed process's own turn end holds the slot, the person's message and Stop, a second update before the queue drains), `mail/stop-notices.test.ts` (who is told), `sessions/interruptions.test.ts` (which ends are limit
 stops), `features/inbox/inboxLabel.test.ts` (the row's words), `e2e/fixtures/interrupted-sessions.ts` (the header's wait, its buttons, the line and the inbox row).

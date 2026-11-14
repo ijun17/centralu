@@ -89,8 +89,13 @@ type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?
  */
 export type UpdateStep = 'going' | 'sent' | 'dropped' | 'failed' | 'left'
 
-/** The events that say a woken session's first request was answered, or that its wake ended some other way */
-const ANSWERED = new Set<NormalizedEvent['type']>(['message_delta', 'reasoning_delta', 'tool_call', 'usage_update', 'approval_request', 'question_request', 'turn_complete', 'error', 'limit_reached', 'session_deleted'])
+/**
+ * The events that say a woken session's first request was answered, or that its wake ended some other way. Not `turn_complete`: measured with
+ * Claude Code 2.1.296, a resumed process ends a turn of its own with no model request (about 2 s after the note went in), then runs the note's
+ * turn; that end freed the slot before the burst it stands for. A process that goes away (`session_live` false) or a state other than working ends it
+ */
+const ANSWERED = new Set<NormalizedEvent['type']>(['message_delta', 'reasoning_delta', 'tool_call', 'usage_update', 'approval_request', 'question_request', 'error', 'limit_reached', 'session_deleted'])
+const wakeEnded = (e: NormalizedEvent): boolean => ANSWERED.has(e.type) || (e.type === 'state_change' && e.state !== 'working') || (e.type === 'session_live' && !e.live)
 
 /** After a usage limit's reset, before the continue: the provider's clock and ours differ by seconds */
 export const RESET_MARGIN_MS = 60_000
@@ -245,7 +250,7 @@ export class TurnContinue {
     if (!id) return
     const u = this.updates.get(id)
     // A woken session answered, or its wake ended: the next one wakes. One deleted before its wake goes with it
-    if (u?.phase === 'waking' && (ANSWERED.has(e.type) || (e.type === 'state_change' && e.state !== 'working'))) this.endUpdate(id, u, null)
+    if (u?.phase === 'waking' && wakeEnded(e)) this.endUpdate(id, u, null)
     else if (u && e.type === 'session_deleted') this.endUpdate(id, u, 'dropped')
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancelHeld(id)
     if (e.type === 'session_deleted') this.dropStop(id, false)
