@@ -1,9 +1,11 @@
-import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
+import type { ReactNode } from 'react'
+import type { MailHeldRow, MailParty, MailThreadRow } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { Button } from '../../components/Button.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { AskCard } from './AskCard.js'
+import { PartyName } from './PartyName.js'
 import { crowdText, heldLabel, heldResume, threadStateLabel } from './mailLabels.js'
 
 /**
@@ -27,33 +29,78 @@ export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: Ma
   const open = useStore((s) => s.openMailThread)
   if (t.ask) return <AskCard thread={t} ask={t.ask} active={active} leaving={leaving} />
   return (
+    <ListRow active={active} dim={dim} onClick={() => void open(t.id)} testId={`mail-thread-${t.id}`}>
+      <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
+        ●
+      </span>
+      <RowSubject loud={t.unread > 0} testId={`mail-subject-${t.id}`}>
+        {t.subject}
+      </RowSubject>
+      <People owner={t.owner} assignee={t.assignee} testId={`mail-people-${t.id}`} />
+      {/*
+       * The preview takes only the width left over (no width of its own, up to max-w-56), so on a crowded row it is gone before the subject or the
+       * names and the dot beside them lose any (#2258)
+       */}
+      <span className="min-w-0 max-w-56 flex-1 basis-0 truncate text-xs text-ink-faint" data-testid={`mail-preview-${t.id}`}>
+        {t.last?.preview}
+      </span>
+      <RowEnd state={threadStateLabel(t)} at={t.updatedAt} testId={`mail-state-${t.id}`} />
+    </ListRow>
+  )
+}
+
+/** A row of the Inbox's lists, a thread on Waiting or a task on Tasks (#1577): one look for both, the row the keys are on filled */
+export function ListRow({ active, dim, onClick, testId, children }: { active?: boolean | undefined; dim?: boolean | undefined; onClick: () => void; testId: string; children: ReactNode }) {
+  return (
     <li data-cursor={active || undefined} className={`rounded-field transition-colors ${active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'} ${dim ? 'opacity-80' : ''}`}>
-      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
-        <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
-          ●
-        </span>
-        <span className={`truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
-        <span className="truncate text-xs text-ink-faint">{peopleOf(t)}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2.5">
-          {t.last && <span className="max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
-          <span className="text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
-            {threadStateLabel(t)}
-          </span>
-          <span className="readout w-12 text-right text-xs text-ink-faint">
-            <RelativeAge when={t.updatedAt} />
-          </span>
-        </span>
+      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={onClick} data-testid={testId}>
+        {children}
       </button>
     </li>
   )
 }
 
-/** Who the thread is between, from the person's side: the one who gave the work, and the one who has it */
-function peopleOf(t: MailThreadRow): string {
-  const owner = t.owner.kind === 'person' ? null : partyName(t.owner)
-  const assignee = t.assignee ? partyName(t.assignee) : null
-  if (owner && assignee) return `${owner} → ${assignee}`
-  return owner ?? (assignee ? `→ ${assignee}` : '')
+/** A row's subject: `ink` while it asks to be read, else `ink-muted` (themes.md, the urgency order) */
+export function RowSubject({ loud, testId, children }: { loud: boolean; testId?: string; children: ReactNode }) {
+  return (
+    <span className={`min-w-0 truncate text-md ${loud ? 'text-ink' : 'text-ink-muted'}`} data-testid={testId}>
+      {children}
+    </span>
+  )
+}
+
+/** A row's end: its state word, then how long ago it last moved */
+export function RowEnd({ state, at, testId }: { state: string; at: number; testId: string }) {
+  return (
+    <>
+      <span className="ml-auto shrink-0 text-xs text-ink-faint" data-testid={testId}>
+        {state}
+      </span>
+      <span className="readout w-12 shrink-0 text-right text-xs text-ink-faint">
+        <RelativeAge when={at} />
+      </span>
+    </>
+  )
+}
+
+/**
+ * Who the work is between, from the person's side: the one who gave it, and the one who has it with its live dot (#2258 option A: the assignee's state,
+ * not the giver's). The person, as the giver, goes unsaid
+ */
+export function People({ owner, assignee, testId }: { owner: MailParty; assignee: MailParty | null; testId?: string }) {
+  const from = owner.kind === 'person' ? null : owner
+  if (!from && !assignee) return null
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-xs text-ink-faint" data-testid={testId}>
+      {from && <span className="shrink-0">{partyName(from)}</span>}
+      {assignee && (
+        <>
+          <span aria-hidden>→</span>
+          <PartyName party={assignee} />
+        </>
+      )}
+    </span>
+  )
 }
 
 /** "12 sessions have mail from while Centralu was off": the host does not wake a crowd by itself, and asks once (§7.9) */

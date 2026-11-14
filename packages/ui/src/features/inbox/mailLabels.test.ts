@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MailParty } from '@cc/protocol'
-import { answeringTarget, closeStopsWork, crowdText, heldLabel, heldResume, replyKind, threadStateLabel } from './mailLabels.js'
+import { answeringTarget, closeStopsWork, crowdText, heldLabel, heldResume, replyKind, taskStateLabel, threadStateLabel } from './mailLabels.js'
 
 const party = (over: Partial<MailParty>): MailParty => ({ address: 'x', kind: 'session', sessionId: null, name: null, state: null, ...over })
 
@@ -95,5 +95,28 @@ describe('the question the reply box answers (#2191, #2233)', () => {
   it('a question the person named stays the target, though it is answered elsewhere meanwhile: the words go to it and the host refuses them, they do not move to another unseen', () => {
     expect(answeringTarget(view(['m1', 'm2'], 'm1', 'm2'), 'm1').target?.id).toBe('m1')
     expect(answeringTarget(view(['m2'], 'm1', 'm2'), 'm1').target?.id).toBe('m1')
+  })
+})
+
+describe('a task’s state', () => {
+  const session = party({ kind: 'session', name: 'worker' })
+  const person = party({ kind: 'person', address: 'person' })
+  it('words each state the host names, a question to the person as waiting on them, and a word a newer host wrote as it wrote it', () => {
+    expect(taskStateLabel({ state: 'open', outcome: null, assignee: session })).toBe('Open')
+    expect(taskStateLabel({ state: 'open', outcome: null, assignee: person })).toBe('Waiting on you')
+    expect(taskStateLabel({ state: 'running', outcome: null, assignee: session })).toBe('Running')
+    expect(taskStateLabel({ state: 'review', outcome: null, assignee: session })).toBe('In review')
+    expect(taskStateLabel({ state: 'held', outcome: null, assignee: session })).toBe('Held')
+    // One word table for a thread and a task: the same state says the same word in both lists
+    for (const state of ['open', 'running', 'held', 'review', 'released', 'queued']) {
+      expect(threadStateLabel({ state, outcome: null, ask: null })).toBe(taskStateLabel({ state, outcome: null, assignee: session }))
+    }
+    expect(taskStateLabel({ state: 'released', outcome: null, assignee: session })).toBe('Released')
+    expect(taskStateLabel({ state: 'queued', outcome: null, assignee: session })).toBe('queued')
+  })
+
+  it('says Done when the work ended as work ends, and how it ended otherwise', () => {
+    for (const outcome of ['answered', 'reported', 'done', null]) expect(taskStateLabel({ state: 'done', outcome, assignee: session })).toBe('Done')
+    expect(taskStateLabel({ state: 'done', outcome: 'withdrawn', assignee: session })).toBe('Done (withdrawn)')
   })
 })

@@ -285,6 +285,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     toolSetups: {},
     mail: null,
     mailThread: null,
+    mailTasks: null,
     watches: {},
     sleepPolicy: null,
     machines: {} as Record<string, MachineInfo>,

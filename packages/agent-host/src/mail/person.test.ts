@@ -5,6 +5,7 @@
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
+import { HIDDEN_HOLDS } from '../dev-services/store/mailbox.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
 import { refusedFor, refusedForAsync } from './messages.test-helpers.js'
@@ -343,6 +344,25 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     expect(r.person.thread(tid(22), { tail: 100 }).thread.id).toBe(mid(25))
     r.person.close(tid(22))
     expect([w.row(mid(24), PERSON)?.settled, w.row(mid(25), PERSON)?.settled]).toEqual(['done', 'done'])
+  })
+
+  it('an old thread’s id naming a chain of the person’s and one of the sessions’ alone: each is decided for itself, and close leaves the sessions’ one be', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(23), owner: A, at: t }, [
+      { id: mid(26), sender: A, kind: 'question', body: 'to the person', receipts: [{ recipient: PERSON }] },
+      { id: mid(27), sender: A, kind: 'question', body: 'between sessions', receipts: [{ recipient: B }] },
+    ])
+    const r = ready(w)
+    // The newest chain is the sessions' own: the person looks in on it
+    expect(r.person.thread(tid(23), { tail: 100 })).toMatchObject({ lookIn: true, canReply: false, thread: { id: mid(27) } })
+    const sessions = () => ({ row: w.row(mid(27), B), facts: w.store.mailbox.message(mid(27))?.facts })
+    const before = sessions()
+    // The row it answers is the chain it closed, not the sessions' one the id names first
+    expect(r.person.close(tid(23))).toMatchObject({ id: mid(26) })
+    expect(w.row(mid(26), PERSON)?.settled).toBe('done')
+    expect(sessions()).toEqual(before)
+    expect(w.store.mailbox.message(mid(27))?.facts.closed).toBeUndefined()
   })
 
   it('Dismiss of a held answer opens its question again (D8)', () => {
@@ -988,5 +1008,290 @@ describe("a send's subject names its chain (#2229)", () => {
     w.mail.send(A, { to: [PERSON], text: '**Which** branch?', needsReply: true })
     const row = w.person.list().threads.find((t) => t.ask !== null)!
     expect(row.subject).toBe('Which branch?')
+  })
+})
+
+describe("the Inbox's Tasks: every request on the host, one row for each recipient (#1577)", () => {
+  const C = at('c')
+  const rowsFor = (w: ReturnType<typeof ready>, id: string) => w.person.tasks().tasks.filter((t) => t.id === id)
+  const stateOf = (w: ReturnType<typeof ready>, id: string, assignee: string) => rowsFor(w, id).find((t) => t.assignee.address === assignee)
+
+  it('lists a request between sessions once for each recipient, with who gave it and who has it; a note, and a row kept from the person, are not listed', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [B, C], text: 'Which branch?', needsReply: true }).message
+    const note = w.mail.send(A, { to: [B], text: 'For your information', needsReply: false }).message
+    const kept = w.mail.send(A, { to: [PERSON], text: 'Shall I?', needsReply: true }).message
+    dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'withdrawn' WHERE message_id = ?`).run(kept.id)
+    expect(rowsFor(w, q.id)).toMatchObject([
+      { root: q.id, subject: 'Which branch?', kind: 'question', owner: { address: A }, assignee: { address: B, name: 'b' }, state: 'open', outcome: null, createdAt: q.createdAt, updatedAt: q.createdAt },
+      { owner: { address: A }, assignee: { address: C }, state: 'open' },
+    ])
+    expect(rowsFor(w, note.id)).toEqual([])
+    expect(rowsFor(w, kept.id)).toEqual([])
+  })
+
+  it('a task is running while its assignee has it, in review once it reports to the person, and done with how once settled', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'create_session', delivered: true })
+    // Given and not settled or released: running between turns too, the same word the person's own row of the chain says (one rule, `hasTask`)
+    expect(stateOf(w, task.id, B)).toMatchObject({ kind: 'assign', owner: { kind: 'person' }, state: 'running' })
+    expect(w.person.list().threads.find((t) => t.id === task.id)?.state).toBe('running')
+    w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller' })
+    expect(stateOf(w, task.id, B)?.state).toBe('running')
+    w.endTurn('b')
+    w.hooks.lastResponse?.('b', { body: () => 'It ended its turn.', relay: () => {}, answer: 'parsed', released: true })
+    expect(stateOf(w, task.id, B)).toMatchObject({ state: 'review', outcome: null })
+    // The person closes it: the report stands as how it was settled
+    w.person.close(task.id)
+    expect(stateOf(w, task.id, B)).toMatchObject({ state: 'done', outcome: 'reported', updatedAt: w.row(task.id, B)?.settledAt })
+    // A question between sessions is done once answered
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [B], text: 'Which branch?', needsReply: true }).message
+    w.clock.t += 10
+    w.mail.send(B, { to: [A], text: 'main', replyTo: q.id })
+    expect(stateOf(w, q.id, B)).toMatchObject({ state: 'done', outcome: 'answered', updatedAt: w.clock.t })
+  })
+
+  it('released: a stop let the task go, or its session is gone; nobody is on it', () => {
+    const w = ready(hostWorld({ extra: { gone: { name: 'gone', projectId: 'p1' } } }))
+    w.clock.t += 10
+    const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'create_session', delivered: true })
+    w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller' })
+    const seq = w.turns.current('b')!.turnSeq
+    w.endTurn('b')
+    w.mail.stops.sessionStopped(B, 'interrupted', { turnSeq: seq })
+    expect(stateOf(w, task.id, B)).toMatchObject({ state: 'released', outcome: null })
+    // Trashed since: the mailbox has not settled its row, and the person's side no longer keeps the session
+    const orphan = w.mail.task(A, at('gone'), { text: 'Tidy the branch', origin: 'mail', delivered: true })
+    expect(w.row(orphan.id, at('gone'))?.settled).toBeNull()
+    expect(stateOf(w, orphan.id, at('gone'))?.state).toBe('released')
+  })
+
+  it('a question to the person an older build settled without an answer is still open; any other row it settled is done', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON, B], text: 'Which branch?', needsReply: true }).message
+    dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'legacy', settled_at = ? WHERE message_id = ?`).run(w.clock.t, q.id)
+    expect(stateOf(w, q.id, PERSON)).toMatchObject({ state: 'open', outcome: null })
+    expect(stateOf(w, q.id, B)).toMatchObject({ state: 'done', outcome: 'done' })
+  })
+
+  it('reads every open request however old, and the newest 200 of the rest, newest first', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const old = w.mail.task(PERSON, B, { text: 'Still open', origin: 'person', delivered: true }).id
+    const settled = Array.from({ length: 201 }, (_, i) => {
+      w.clock.t += 10
+      const id = w.mail.task(PERSON, B, { text: `Task ${i}`, origin: 'person', delivered: true }).id
+      w.store.mailbox.settle(id, B, 'withdrawn', w.clock.t)
+      return id
+    })
+    // The open one is not pushed out by 201 newer ones that are done; the oldest of those is
+    expect(w.person.tasks()).toEqual({ tasks: expect.any(Array), capped: null })
+    expect(w.person.tasks().tasks.map((t) => t.id)).toEqual([...settled.slice(1).reverse(), old])
+  })
+
+  it('the cap on open work counts rows, as the list does: a message to two is two, listed whole or not at all', () => {
+    const w = ready(hostWorld())
+    const ask = (text: string, to: string[]) => {
+      w.clock.t += 10
+      return w.mail.send(PERSON, { to, text, needsReply: true }).message.id
+    }
+    const oldest = ask('Oldest', [B])
+    const pair = ask('To two', [B, X])
+    const done = ask('Answered', [X])
+    w.store.mailbox.settle(done, X, 'answered', w.clock.t)
+    const newest = ask('Newest', [B])
+    const open = (cap: number) => w.store.mailbox.newestWork(0, cap).map((m) => m.id)
+    // Four open rows in all, newest first: 1 (Newest), 3 (To two), 4 (Oldest); the settled one is no open row
+    expect(w.store.mailbox.openWorkRows(10)).toEqual({ listed: 4, total: 4 })
+    expect(open(10)).toEqual([newest, pair, oldest])
+    // A cap of 2 does not split the message to two: it lists Newest alone, and says one open row is listed
+    expect(w.store.mailbox.openWorkRows(2)).toEqual({ listed: 1, total: 4 })
+    expect(open(2)).toEqual([newest])
+    expect(w.store.mailbox.openWorkRows(3)).toEqual({ listed: 3, total: 4 })
+    expect(open(3)).toEqual([newest, pair])
+    // The person's tasks() counts the rows it lists as open the same way the window counts them (`openTaskCount`): none past it, so no cap
+    const notDone = w.person.tasks().tasks.filter((t) => t.state !== 'done')
+    expect(notDone).toHaveLength(4)
+    expect(w.person.tasks().capped).toBeNull()
+  })
+
+  it('OPEN_ROW (the store) and taskState (tasks()) agree on what is not done, row by row, across every branch of either', () => {
+    const w = ready(hostWorld())
+    const set = (id: string, to: string, columns: string, ...values: unknown[]) =>
+      dbOf(w).prepare(`UPDATE mail_recipients SET ${columns} WHERE message_id = ? AND recipient = ?`).run(...values, id, to)
+    const ask = (from: string, to: string) => {
+      w.clock.t += 10
+      return w.mail.send(from, { to: [to], text: `Ask ${w.clock.t}`, needsReply: true }).message.id
+    }
+    const task = (from: string, to: string) => {
+      w.clock.t += 10
+      return w.mail.task(from, to, { text: `Task ${w.clock.t}`, origin: from === PERSON ? 'person' : 'mail', delivered: true }).id
+    }
+    // One message with one row each: `name` -> [message, recipient]
+    const rows = new Map<string, [string, string]>()
+    rows.set('unsettled, a session asks the person', [ask(A, PERSON), PERSON])
+    // A chain the person is not in: they look in on it, and its rows count all the same
+    rows.set('a session asks a session (look-in chain)', [ask(A, B), B])
+    rows.set('a session tasks a session (look-in chain)', [task(A, B), B])
+    const answered = ask(A, B)
+    w.store.mailbox.settle(answered, B, 'answered', w.clock.t)
+    rows.set('settled answered', [answered, B])
+    const legacy = ask(A, PERSON)
+    set(legacy, PERSON, `settled = 'legacy'`)
+    rows.set('legacy question to the person, unanswered', [legacy, PERSON])
+    const legacyAnswered = ask(A, PERSON)
+    set(legacyAnswered, PERSON, `settled = 'legacy', answer_id = ?`, mid(90))
+    rows.set('legacy question to the person, answered', [legacyAnswered, PERSON])
+    const legacySession = ask(A, B)
+    set(legacySession, B, `settled = 'legacy'`)
+    rows.set('legacy question to a session', [legacySession, B])
+    const reported = task(PERSON, B)
+    set(reported, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    rows.set("the person's task reported, chain open", [reported, B])
+    const reportedClosed = task(PERSON, B)
+    set(reportedClosed, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    w.store.mailbox.markClosed(reportedClosed, 'finished', w.clock.t)
+    rows.set("the person's task reported, chain closed", [reportedClosed, B])
+    const reportedOther = task(A, B)
+    set(reportedOther, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    rows.set("a session's task reported", [reportedOther, B])
+    const dismissed = ask(A, B)
+    set(dismissed, B, `held = 'dismissed'`)
+    rows.set('dismissed', [dismissed, B])
+    for (const why of HIDDEN_HOLDS) {
+      const hidden = ask(A, PERSON)
+      set(hidden, PERSON, 'held = ?', why)
+      rows.set(`to the person, held ${why} (hidden)`, [hidden, PERSON])
+      const toSession = ask(A, B)
+      set(toSession, B, 'held = ?', why)
+      rows.set(`to a session, held ${why}`, [toSession, B])
+    }
+    const uncertain = ask(A, PERSON)
+    set(uncertain, PERSON, `held = 'uncertain'`)
+    rows.set('to the person, held uncertain (shown)', [uncertain, PERSON])
+    const released = task(A, B)
+    set(released, B, 'released_at = ?', w.clock.t)
+    rows.set('released by a stop', [released, B])
+
+    const listed = w.person.tasks().tasks
+    const open = new Set(w.store.mailbox.newestWork(0, 1_000).map((m) => m.id))
+    const sides = [...rows].map(([name, [id, to]]) => {
+      const row = listed.find((t) => t.id === id && t.assignee.address === to)
+      return { name, taskState: row !== undefined && row.state !== 'done', openRow: open.has(id) }
+    })
+    expect(sides.filter((s) => s.taskState !== s.openRow)).toEqual([])
+    // Both sides are swept, not one: some rows are not done, some are, and the totals agree
+    expect(sides.filter((s) => s.openRow).length).toBeGreaterThan(5)
+    expect(sides.filter((s) => !s.openRow).length).toBeGreaterThan(5)
+    expect(w.store.mailbox.openWorkRows(1_000).total).toBe(sides.filter((s) => s.openRow).length)
+  })
+
+  it('held: a request waiting for the person to say what happens to it; one the person dismissed is not listed', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [B], text: 'Which branch?', needsReply: true }).message
+    for (const why of ['policy', 'loop', 'uncertain', 'failed']) {
+      dbOf(w).prepare(`UPDATE mail_recipients SET held = ? WHERE message_id = ?`).run(why, q.id)
+      expect(stateOf(w, q.id, B)).toMatchObject({ state: 'held', outcome: null })
+    }
+    dbOf(w).prepare(`UPDATE mail_recipients SET held = 'dismissed' WHERE message_id = ?`).run(q.id)
+    expect(rowsFor(w, q.id)).toEqual([])
+  })
+})
+
+describe('the person looks in on a chain they are not in (#1577, owner 2026-11-14)', () => {
+  const C = at('c')
+  /** A task between two sessions and a question back: the person is in none of it */
+  function between() {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const task = w.mail.task(A, B, { text: 'Write the parser', origin: 'mail', delivered: true })
+    w.clock.t += 10
+    const q = w.mail.send(B, { to: [A], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
+    const stored = () => ({
+      rows: dbOf(w).prepare(`SELECT * FROM mail_recipients WHERE message_id IN (?, ?) ORDER BY message_id, recipient`).all(task.id, q.id),
+      facts: dbOf(w).prepare(`SELECT id, facts FROM mail WHERE root_id = ? ORDER BY id`).all(task.id),
+    })
+    return { w, task, q, stored }
+  }
+
+  it('shows every message, offers no reply, and reads, receipts and settles nothing for anyone', async () => {
+    const { w, task, q, stored } = between()
+    const before = stored()
+    const announce = vi.spyOn(w.service, 'announce')
+    const view = w.person.thread(task.id)
+    expect(view.messages.map((m) => m.id)).toEqual([task.id, q.id])
+    expect(view).toMatchObject({ lookIn: true, canReply: false })
+    // B has the task A gave it: running, by the rule the person's own rows follow
+    expect(view.thread).toMatchObject({ owner: { address: A }, assignee: { address: B }, state: 'running', unread: 0, ask: null, held: 0 })
+    expect(stored()).toEqual(before)
+    expect(announce).not.toHaveBeenCalled()
+    expect(await refusedForAsync(() => w.person.reply(task.id, 'Use the fast one.'))).toBe('unknown_message')
+    expect(stored()).toEqual(before)
+    // Not in the person's own list either: looking in does not make it theirs
+    expect(w.person.list().threads.map((t) => t.id)).not.toContain(task.id)
+  })
+
+  it('the header is running while a session’s turn is on it, and done once every request in it is settled', () => {
+    const { w, task, q } = between()
+    w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller', ownerId: 'a' })
+    expect(w.person.thread(task.id).thread).toMatchObject({ state: 'running', working: true })
+    w.endTurn('b')
+    w.store.mailbox.settle(task.id, B, 'reported', w.clock.t)
+    w.store.mailbox.settle(q.id, A, 'answered', w.clock.t)
+    expect(w.person.thread(task.id).thread).toMatchObject({ state: 'done', working: false })
+  })
+
+  it('refuses to close it, and changes nothing', () => {
+    const { w, task, stored } = between()
+    w.live.add('b')
+    const before = stored()
+    expect(refusedFor(() => w.person.close(task.id, 'dropped'))).toBe('not_yours')
+    expect(() => w.person.close(task.id)).toThrow('You are not in this mail: you can read it, not close it.')
+    expect(stored()).toEqual(before)
+    expect(w.told).toEqual([])
+  })
+
+  it('a chain the person is in is no look in: the sessions’ messages in it show too, only the person’s are read, and it is theirs to close', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?', needsReply: true }).message
+    w.clock.t += 10
+    const aside = w.mail.send(A, { to: [B], text: 'I asked the person', replyTo: q.id }).message
+    const view = w.person.thread(q.id)
+    expect(view.messages.map((m) => m.id)).toEqual([q.id, aside.id])
+    expect(view).toMatchObject({ lookIn: false, canReply: true, thread: { owner: { address: A }, state: 'open' } })
+    expect(w.row(q.id, PERSON)?.readAt).not.toBeNull()
+    expect(w.row(aside.id, B)?.readAt).toBeNull()
+    expect(w.person.close(q.id)).toMatchObject({ state: 'done' })
+  })
+
+  it('a question to the person its sender withdrew stays out of sight; with nothing of theirs left to read, the chain is a look in, not theirs to close', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const task = w.mail.task(A, B, { text: 'Write the parser', origin: 'mail', delivered: true })
+    w.clock.t += 10
+    const q = w.mail.send(B, { to: [A, PERSON], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
+    dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'withdrawn' WHERE message_id = ? AND recipient = ?`).run(q.id, PERSON)
+    const before = dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()
+    const facts = dbOf(w).prepare(`SELECT facts FROM mail WHERE id = ?`).get(task.id)
+    const view = w.person.thread(task.id)
+    expect(view.messages.map((m) => m.id)).toEqual([task.id])
+    expect(view).toMatchObject({ lookIn: true, canReply: false })
+    // Closing it would tell the sessions working on it to stop work the person cannot see
+    expect(refusedFor(() => w.person.close(task.id))).toBe('not_yours')
+    expect(dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()).toEqual(before)
+    expect(dbOf(w).prepare(`SELECT facts FROM mail WHERE id = ?`).get(task.id)).toEqual(facts)
+  })
+
+  it('a session reads no more than before: a chain it is not in stays closed to its own mail tool', () => {
+    const { w, task, q } = between()
+    w.person.thread(task.id)
+    expect(refusedFor(() => w.mail.read(C, { id: task.id }))).toBe('unknown_message')
+    expect(refusedFor(() => w.mail.read(C, { id: q.id }))).toBe('unknown_message')
   })
 })

@@ -828,6 +828,17 @@ message is one line: its id, its sender's relation word, and "its words are not 
 
 The orchestrator's request words are read only in the request's own turn, as today (§7.6).
 
+**The person looks in** (owner 2026-11-14, #1577). The person, through the window's credential alone (`mail.thread` and
+`mail.tasks` are `window` class), may read any chain on their host, read-only. A chain they are not in (no message of it
+sent by them, sent to them, or held for them) opens whole, every message shown, with `lookIn: true`; nothing in it is
+marked read, delivered, settled or held for anyone, and neither a reply nor a close is taken (`mail.close` refuses it
+`not_yours`). In a chain they are in, the sessions' messages to each other show too, read-only: what is read for the
+person is their own rows alone. A message to them kept from their sight (withdrawn, gone, held out, dismissed) stays out of
+it either way; where nothing of theirs is left to read, the chain is read-only for them too (`lookIn`), and not theirs to
+close: a close would tell the sessions on it to stop work the person cannot see. The person owns every session on their host and reads its
+conversation already, so this widens nothing for an agent. A session's reach is unchanged: the rule above is its `mail` tool's, and no session's path goes through the
+person's side (`MailPerson`).
+
 ## 6. Store
 
 ### 6.1 Tables (step M1, `breaksOlderReaders: false`)

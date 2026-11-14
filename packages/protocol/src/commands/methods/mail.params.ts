@@ -4,6 +4,8 @@ import { z } from 'zod'
 export const mailParams = {
   /** The threads the person is in, unread first, the mail held for them, and how many sleeping sessions wait for their word */
   'mail.list': z.object({}),
+  /** The open and recently settled work on this host (#1577): the newest 200 messages that wait for a reply, one row per recipient, for the Inbox's Tasks. An older host answers `unknown_method`, and Tasks lists nothing */
+  'mail.tasks': z.object({}),
   /** One thread with its messages after `after` (from where the person last read by default), marked read for the person */
   'mail.thread': z.object({
     threadId: z.string(),

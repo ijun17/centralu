@@ -1,4 +1,4 @@
-import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView, type WatchView } from '@cc/protocol/client'
+import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailTaskRow, type MailThreadRow, type MailThreadView, type WatchView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -18,6 +18,8 @@ type Thread = {
   read: number
   /** Whether the person has something here to answer (the host's `canReply`) */
   canReply: boolean
+  /** Mail between sessions the person is not in: opened from Tasks to look in, never listed with their own (`MailThreadView.lookIn`) */
+  lookIn?: boolean
 }
 
 /**
@@ -36,6 +38,12 @@ export class MailMock {
   private readonly watchRows = new Map<string, WatchView[]>()
   /** False stands in for an older host: both watch methods are unknown to it */
   knowsWatches = true
+  /** The host's open work, as `mail.tasks` lists it (#1577); a test or the demo seeds it */
+  private taskRows: MailTaskRow[] = []
+  /** A host with more open work than it lists says how many it listed (#1577); a test sets it */
+  tasksCapped: number | null = null
+  /** False stands in for a host older than Tasks: `mail.tasks` is unknown to it */
+  knowsTasks = true
 
   constructor(
     private readonly clock: MockClock,
@@ -100,6 +108,28 @@ export class MailMock {
     this.touch(t)
   }
 
+  /**
+   * Puts a piece of work on the host's task list, with the chain it opens: the person's own when they gave it or are asked, else one between
+   * sessions they look into. `state` and `outcome` are the host's words (`MailTaskRow`)
+   */
+  seedTask(spec: { subject: string; owner: MailParty; assignee: MailParty; body?: string; kind?: 'assign' | 'question'; state?: string; outcome?: string; held?: string }): string {
+    const kind = spec.kind ?? 'assign'
+    const asksPerson = spec.assignee.kind === 'person'
+    const held = spec.held === undefined ? {} : { held: { reason: spec.held, recipient: spec.assignee } }
+    const root = this.seed({ subject: spec.subject, from: spec.owner, body: spec.body ?? spec.subject, kind, assignee: spec.assignee, onlyHeld: !asksPerson, ...held })
+    const t = this.must(root)
+    // Held for the person, it is theirs to act on: no look in
+    if (spec.owner.kind !== 'person' && !asksPerson && spec.held === undefined) {
+      t.lookIn = true
+      t.row.unread = 0
+      t.row.ask = null
+    }
+    const now = this.clock.now()
+    this.taskRows.push({ id: t.messages[0]?.id ?? root, root, subject: spec.subject, kind, owner: spec.owner, assignee: spec.assignee, state: spec.state ?? (spec.held === undefined ? 'open' : 'held'), outcome: spec.outcome ?? null, createdAt: now, updatedAt: now })
+    this.emit({ type: 'mail_changed', threadId: root, toPerson: false })
+    return root
+  }
+
   /** Puts a watch on a session, as its `mail` tool would: the header lists it */
   seedWatch(sessionId: string, spec: Omit<WatchView, 'id' | 'createdAt'>): string {
     const id = `mock.w_${this.clock.next()}`
@@ -130,7 +160,8 @@ export class MailMock {
       more: false,
       older,
       follows: [],
-      canReply: t.canReply,
+      canReply: t.canReply && !t.lookIn,
+      lookIn: t.lookIn === true,
     }
   }
 
@@ -150,11 +181,16 @@ export class MailMock {
   readonly mail: MailPort = {
     list: async () => ({
       threads: [...this.threads.values()]
+        .filter((t) => !t.lookIn)
         .map((t) => ({ ...t.row }))
         .sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || b.updatedAt - a.updatedAt),
       held: this.heldRows.map((h) => ({ ...h })),
       waiting: this.waiting,
     }),
+    tasks: async () => {
+      if (!this.knowsTasks) throw mockError('Unknown method: mail.tasks. This Centralu host does not have it; the window may be from another build.')
+      return { tasks: this.taskRows.map((t) => ({ ...t })), capped: this.tasksCapped }
+    },
     thread: async (threadId, opts) => {
       const t = this.must(threadId)
       if (opts?.tail !== undefined) {
@@ -193,6 +229,7 @@ export class MailMock {
     },
     close: async (threadId, outcome) => {
       const t = this.must(threadId)
+      if (t.lookIn) throw mockError('You are not in this mail: you can read it, not close it.', 'refused')
       // As the host does (C12): the session whose turn is on the thread is told in Centralu's words without a wake, and its turn goes on
       const helper = t.row.working ? t.row.assignee?.sessionId : null
       if (helper) this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it the person closed its work' })

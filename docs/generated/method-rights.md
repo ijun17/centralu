@@ -226,6 +226,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `mail.list`
 - `mail.reply`
 - `mail.resume`
+- `mail.tasks`
 - `mail.thread`
 - `mail.wake`
 - `requests.answer`

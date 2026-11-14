@@ -519,3 +519,175 @@ test('Inbox: a wait arriving above the cursor, then the cursor row done: the cur
   await page.keyboard.press('d')
   await cursorOn(oldest)
 })
+
+// #2258 item 3 (owner 2026-11-14, option A): the assignee's live state before its name, only when it says something
+test('Mail: a row and an ask card show the dot of a session that is working, has an error or waits on an approval, and none for one that is idle', async ({ page }) => {
+  await setup(page)
+  const YOU = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
+  const working = await seed(page, { subject: 'Port the docs', from: YOU, body: 'Translate the guide', kind: 'assign', assignee: { ...PARSER, state: 'working' } })
+  const idle = await seed(page, { subject: 'Rename the tokens', from: YOU, body: 'Rename them', kind: 'assign', assignee: { ...PARSER, sessionId: 's2', name: 'Styles', state: 'idle' } })
+  const asked = await seed(page, { subject: 'Which branch?', from: { ...PARSER, sessionId: 's3', name: 'Tests', state: 'error' }, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId(`mail-people-${working}`).getByTestId('dot-working')).toBeVisible()
+  await expect(page.getByTestId(`mail-people-${idle}`)).toContainText('Styles')
+  await expect(page.getByTestId(`mail-people-${idle}`).locator('[data-testid^="dot-"]')).toHaveCount(0)
+  await expect(page.getByTestId(`mail-ask-from-${asked}`).getByTestId('dot-error')).toBeVisible()
+  // The giver's state draws nothing: the dot is the assignee's
+  await expect(page.getByTestId(`mail-people-${working}`).locator('[data-testid^="dot-"]')).toHaveCount(1)
+})
+
+// #2258: on a crowded row the preview gives up its width before the subject and the names do
+test('Mail: a crowded row cuts the preview, not the subject or the names', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const row = await seed(page, {
+    subject: 'Mac signing',
+    kind: 'assign',
+    from: { ...PARSER, sessionId: 's5', name: 'release', state: 'waiting_approval' },
+    assignee: { ...PARSER, sessionId: 's6', name: 'mac-builder', state: 'working' },
+    body: 'Sign the Mac build with the new certificate, then tell the release session which identity it used and where the notarized build is.',
+  })
+  await page.getByTestId('counter').click()
+  const cut = (id: string) => page.getByTestId(id).evaluate((el) => el.scrollWidth > el.clientWidth)
+  await expect(page.getByTestId(`mail-preview-${row}`)).toBeVisible()
+  expect(await cut(`mail-preview-${row}`)).toBe(true)
+  expect(await cut(`mail-subject-${row}`)).toBe(false)
+  expect(await cut(`mail-people-${row}`)).toBe(false)
+  await expect(page.getByTestId(`mail-people-${row}`)).toContainText('mac-builder')
+})
+
+// A line longer than the panel is cut in both lists, never a wider row: the two lists share one grid cell for the switch's fade, whose column is the panel's
+// width (an `auto` one grew to the widest line, and a long command on an approval row then measured as fitting, #683)
+test('Mail and Tasks: a subject longer than the panel is cut, and neither list grows wider than the panel', async ({ page }) => {
+  await setup(page)
+  const LONG = 'Move the release signing, the notarization and the upload of every platform build to the new pipeline, and say which identity each used'
+  const row = await seed(page, { subject: LONG, kind: 'assign', from: PARSER, assignee: { ...PARSER, sessionId: 's6', name: 'Builder' }, body: 'Move it' })
+  await page.evaluate(
+    (s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s),
+    { subject: LONG, owner: { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }, assignee: PARSER, state: 'running' },
+  )
+  await page.getByTestId('counter').click()
+  const cut = (el: HTMLElement) => el.scrollWidth > el.clientWidth
+  const widerThanPanel = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => el.getBoundingClientRect().width > (document.querySelector('[data-testid="inbox"]')?.clientWidth ?? 0) + 1)
+  await expect(page.getByTestId(`mail-subject-${row}`)).toBeVisible()
+  expect(await page.getByTestId(`mail-subject-${row}`).evaluate(cut)).toBe(true)
+  expect(await widerThanPanel('inbox-list')).toBe(false)
+  await page.getByTestId('inbox-tab-tasks').click()
+  const subject = page.getByTestId('inbox-tasks').locator('[data-testid^="task-subject-"]')
+  await expect(subject).toBeVisible()
+  expect(await subject.evaluate(cut)).toBe(true)
+  expect(await widerThanPanel('inbox-tasks')).toBe(false)
+})
+
+// #1577 (owner 2026-11-14, option C): Waiting | Tasks inside the Inbox, the host's work grouped by who acts next
+test('Tasks: the switch lists the host’s work by who acts next, opens a chain between sessions read-only, and folds Done', async ({ page }) => {
+  await setup(page)
+  const YOU = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
+  const LEAD = { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }
+  const seedTask = (spec: Record<string, unknown>) =>
+    page.evaluate((s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s), spec)
+  await seedTask({ subject: 'Which branch?', owner: PARSER, assignee: YOU, kind: 'question' })
+  const between = await seedTask({ subject: 'Port the docs', owner: LEAD, assignee: PARSER, state: 'running', body: 'Translate the guide' })
+  await seedTask({ subject: 'Fix the sidebar fold', owner: LEAD, assignee: PARSER, state: 'released' })
+  await seedTask({ subject: 'Cache headers', owner: YOU, assignee: PARSER, state: 'done', outcome: 'reported' })
+
+  // A host with more open work than it lists says so (`capped`)
+  await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { tasksCapped: number | null } } }).__mock.mockMail.tasksCapped = 2000))
+  // The host's first answer is held back: the switch shows no count before it, as the list draws nothing then
+  await page.evaluate(() => {
+    type Held = { __mock: { mail: { tasks: () => Promise<unknown> } }; __answerTasks?: () => void }
+    const w = window as unknown as Held
+    const real = w.__mock.mail.tasks
+    w.__mock.mail.tasks = () =>
+      new Promise((resolve) => {
+        w.__answerTasks = () => {
+          w.__mock.mail.tasks = real
+          resolve(real())
+        }
+      })
+  })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-tab-tasks')).toHaveText('Tasks')
+  await expect(page.getByTestId('inbox-tasks-count')).toHaveCount(0)
+  await page.waitForFunction(() => typeof (window as unknown as { __answerTasks?: unknown }).__answerTasks === 'function')
+  await page.evaluate(() => (window as unknown as { __answerTasks: () => void }).__answerTasks())
+  await expect(page.getByTestId('inbox-tasks-count')).toHaveText('3')
+  await page.getByTestId('inbox-tab-tasks').click()
+  await expect(page.getByTestId('tasks-needs-you')).toContainText('Which branch?')
+  await expect(page.getByTestId('tasks-waiting-on-others')).toContainText('Port the docs')
+  await expect(page.getByTestId('tasks-unassigned')).toContainText('Fix the sidebar fold')
+  // Done is folded until pressed
+  await expect(page.getByTestId('tasks-done-toggle')).toContainText('Done1')
+  await expect(page.getByText('Cache headers')).toHaveCount(0)
+
+  // The keys walk the rows: the cursor starts on Needs you, ↓ goes to the work between sessions, ↵ opens it to read and nothing more
+  await expect(page.locator('[data-cursor]')).toContainText('Which branch?')
+  await page.keyboard.press('ArrowDown')
+  await expect(page.locator('[data-cursor]')).toContainText('Port the docs')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await expect(page.getByTestId('mail-message-1')).toContainText('Translate the guide')
+  await expect(page.getByTestId('mail-reply')).toHaveCount(0)
+  await expect(page.getByTestId('mail-finish')).toHaveCount(0)
+  // Back on the list, Done unfolds when pressed (↵ on a focused button presses the button, as on Waiting)
+  await page.getByTestId('mail-back').click()
+  await page.getByTestId('tasks-done-toggle').click()
+  await expect(page.getByTestId('tasks-done')).toContainText('Cache headers')
+  // A done task reads like read mail (ink-muted), and the list says where it stops
+  await expect(page.getByTestId('tasks-done').locator('[data-testid^="task-subject-"]')).toHaveClass(/text-ink-muted/)
+  await expect(page.getByTestId('tasks-capped')).toHaveText('Showing the newest 2,000 open tasks.')
+  // The switch back: Tasks fades out in place while Waiting comes in (design-system §9), then goes
+  const leaving = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        document.querySelector<HTMLElement>('[data-testid="inbox-tab-waiting"]')?.click()
+        requestAnimationFrame(() => resolve(document.querySelector('[data-testid="inbox-tasks"]')?.closest('.cc-fade-out') != null))
+      }),
+  )
+  expect(leaving).toBe(true)
+  await expect(page.getByTestId('inbox-tasks')).toHaveCount(0)
+  // Mail between sessions is not the person's own: it never lists under Waiting
+  await expect(page.getByTestId(`mail-thread-${between}`)).toHaveCount(0)
+  // The Inbox opens on Waiting again
+  await page.keyboard.press('Escape')
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+})
+
+test('Tasks: a held request needs the person, and its row leads to Waiting’s held row; the arrow keys stay on the switch', async ({ page }) => {
+  await setup(page)
+  const LEAD = { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }
+  await page.evaluate(
+    (s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s),
+    { subject: 'Deploy the site', owner: LEAD, assignee: PARSER, held: 'policy' },
+  )
+  await page.getByTestId('counter').click()
+  // The arrows move along the switch and stay on it, both ways (a radio group's keys)
+  await page.getByTestId('inbox-tab-waiting').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('inbox-tab-tasks')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('inbox-tab-tasks')).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('inbox-tab-tasks').click()
+  const row = page.getByTestId('tasks-needs-you').locator('button[data-testid^="task-"]', { hasText: 'Deploy the site' })
+  await expect(row).toContainText('Held')
+  await row.click()
+  // Where the person can act on it: Waiting, its held row and the button that frees it
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+  const held = page.locator('[data-testid^="mail-held-"]', { hasText: 'Deploy the site' })
+  await expect(held).toBeInViewport()
+  await expect(held.locator('[data-testid^="mail-release-"]')).toBeVisible()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+})
+
+test('Tasks: a host older than Tasks lists none, and Waiting works as before', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { knowsTasks: boolean } } }).__mock.mockMail.knowsTasks = false))
+  await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-count')).toHaveText('1')
+  await page.getByTestId('inbox-tab-tasks').click()
+  await expect(page.getByTestId('inbox-tasks-empty')).toHaveText('No tasks')
+})

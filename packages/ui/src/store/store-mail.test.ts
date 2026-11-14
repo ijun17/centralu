@@ -63,6 +63,36 @@ describe('the list', () => {
     expect(useStore.getState().toast).toBeNull()
   })
 
+  it('Tasks (#1577): nothing until the host answers; a link that fails the first read leaves it unread; a host older than Tasks lists none; a later failed read keeps the list; coming back to a host clears it', async () => {
+    const platform = new MockPlatform()
+    await useStore.getState().attach(platform)
+    expect(useStore.getState().mailTasks).toBeNull()
+    const real = platform.mail.tasks
+    // The link drops before the answer (the web client's `connection_lost`): no answer, so not "No tasks"
+    platform.mail.tasks = async () => {
+      throw Object.assign(new Error('Connection lost before an answer came'), { code: 'connection_lost' })
+    }
+    await useStore.getState().loadTasks()
+    expect(useStore.getState().mailTasks).toBeNull()
+    platform.mail.tasks = real
+    platform.mockMail.knowsTasks = false
+    await useStore.getState().loadTasks()
+    expect(useStore.getState().mailTasks).toEqual({ tasks: [], capped: null })
+    platform.mockMail.knowsTasks = true
+    platform.seedTask({ subject: 'Port the docs', owner: worker, assignee: mockSessionParty('s2', 'Docs') })
+    await useStore.getState().loadTasks()
+    expect(useStore.getState().mailTasks?.tasks.map((t) => t.subject)).toEqual(['Port the docs'])
+    platform.mail.tasks = async () => {
+      throw new Error('link down')
+    }
+    await useStore.getState().loadTasks()
+    expect(useStore.getState().mailTasks?.tasks).toHaveLength(1)
+    // What it listed may be another host's: a reconnect starts it over
+    platform.setConnectionState('disconnected')
+    platform.setConnectionState('connected')
+    expect(useStore.getState().mailTasks).toBeNull()
+  })
+
   it('a news that comes while it is being read asks for one more read, not one each', async () => {
     const platform = new MockPlatform()
     let reads = 0

@@ -75,6 +75,34 @@ export const MailThreadRow = z.object({
 })
 export type MailThreadRow = z.infer<typeof MailThreadRow>
 
+/**
+ * One piece of open work on the host as the Inbox's Tasks lists it (#1577, owner 2026-11-14): a message that waits for a reply (a task, or a message that
+ * needs one), one row per recipient, whoever sent it. The host words its state; the window groups the rows (`groupTasks`) and decides nothing else.
+ * `state`: `open` (not answered), `running` (the assignee's turn is on it), `held` (it waits for the person to say what happens to it, as a held mail row
+ * of `mail.list` says why), `review` (the person's task, reported, not closed by them), `released` (a stop
+ * released it, or its assignee is gone: nobody is on it), `done` (settled, with `outcome` the host's word: `answered`, `reported`, `done`, `withdrawn`,
+ * `gone`). A word this build does not know is drawn as written (docs/protocol.md §4)
+ */
+export const MailTaskRow = z.object({
+  /** The message */
+  id: z.string(),
+  /** The chain it is in: what `mail.thread` opens */
+  root: z.string(),
+  subject: z.string(),
+  /** `assign` for a task, `question` for a message that needs a reply (the window's message words) */
+  kind: z.string(),
+  /** Who gave it: its sender */
+  owner: MailParty,
+  /** Who has it: the recipient of this row */
+  assignee: MailParty,
+  state: z.string(),
+  outcome: z.string().nullable().default(null),
+  createdAt: z.number(),
+  /** When it was settled, else when it was sent */
+  updatedAt: z.number(),
+})
+export type MailTaskRow = z.infer<typeof MailTaskRow>
+
 /** Mail waiting for the person to say what happens to it: held, with why (§7.6, §7.7, §7.9) */
 export const MailHeldRow = z.object({
   messageId: z.string(),
@@ -141,6 +169,11 @@ export const MailThreadView = z.object({
    * Absent from a host of an older build, which the window reads as true
    */
   canReply: z.boolean().optional(),
+  /**
+   * The person is not in this chain and looks in (#1577, a task between sessions opened from Tasks): every message is shown, nothing in it is read or
+   * changed for anyone, and the window offers neither a reply nor a close. Absent from a host of an older build, which shows only the person's own chains
+   */
+  lookIn: z.boolean().default(false),
 })
 export type MailThreadView = z.infer<typeof MailThreadView>
 

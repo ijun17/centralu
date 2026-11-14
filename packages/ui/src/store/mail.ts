@@ -1,9 +1,16 @@
-import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
+import { errorMessage, notifyPolicyOf, ProtocolErrorCode } from '@cc/protocol/client'
 import type { MailThreadRow, MailThreadView, NormalizedEvent, WatchView } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
+import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
 import { coalescedRead } from './single-flight.js'
+
+/** What Tasks lists when the host answered its first read with an error: an older host ("Unknown method"), or one that refused it */
+const NO_TASKS = { tasks: [], capped: null }
+
+/** Whether a failed call is the host's answer (an error with the protocol's code), not a link that dropped, timed out or never sent it */
+const hostAnswered = (e: unknown): boolean => e instanceof Error && 'code' in e && ProtocolErrorCode.safeParse(e.code).success
 
 /**
  * The person's mailbox (#1347, docs/plans/mailbox.md §10.1): its list, a thread, and the acts that are the person's. The host
@@ -13,7 +20,7 @@ import { coalescedRead } from './single-flight.js'
 
 type MailActions = Pick<
   AppState,
-  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
+  'loadMail' | 'loadTasks' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
 >
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
@@ -51,6 +58,22 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
     // Another `mail_changed` while the list is read asks for one more read after it, not one each, and waits for that one
     loadMail() {
       return coalescedRead('mail', get, (platform) => platform.mail.list(), (mail) => void set({ mail }))
+    },
+
+    loadTasks() {
+      /*
+       * A first read the host answers with an error (a host older than Tasks answers "Unknown method") lists none. One the link failed stays unread,
+       * blank and with no count, for the read after the reconnect; a later one that fails keeps the list it had
+       */
+      const read = async (platform: Platform) => {
+        try {
+          return await platform.mail.tasks()
+        } catch (e) {
+          if (get().mailTasks === null && hostAnswered(e)) return NO_TASKS
+          throw e instanceof Error ? e : new Error(errorMessage(e))
+        }
+      }
+      return coalescedRead('mailTasks', get, read, (mailTasks) => void set({ mailTasks }))
     },
 
     async openMailThread(threadId) {
@@ -208,6 +231,8 @@ export function mailEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
   const notice = e.arrived ? mailNotification(e.arrived, { appFocused: get().appFocused, policy: notifyPolicyOf(get().prefs) }) : null
   if (notice && e.arrived) alertPerson(notice, `mail:${e.arrived.messageId}`, set, get)
   void get().loadMail()
+  // Tasks are read only while someone can see them: the whole host's work, not the person's mailbox
+  if (get().inboxOpen) void get().loadTasks()
   if (get().mailThread?.thread.id === e.threadId) void refreshThread(get, set, e.threadId)
   return true
 }

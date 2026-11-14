@@ -34,6 +34,15 @@ word for how it stands to the reader. The `mail.*` methods are the window's: the
 the `mail` tool is the ordinary session's and the Assistant's alone ([tool-matrix.md](tool-matrix.md)), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
 
+**The person looks in (#1577, owner 2026-11-14; [plans/mailbox.md](../plans/mailbox.md) §5.5).** Through the window alone, the person reads any chain on
+their host: `mail.tasks` lists every task and question on it with who has it, and `mail.thread` opens a chain they are not in read-only
+(`lookIn`): nothing in it is marked read, delivered, settled or held for anyone, and a reply or a close is refused. In a chain they are in,
+the sessions' messages to each other show beside theirs, also read-only; a message to the person kept from their sight stays hidden. Both methods are `window`
+class, so the limited credential cannot call them ([credentials.md](credentials.md)), and the Assistant's window-call list has no `mail.*`. Why this
+widens nothing: the person owns every session on their host and reads each one's conversation, where this mail already is. A session's reach
+is unchanged: its `mail` tool reads what it sent and what it was sent and is not held (mailbox.md §5.5), and no session's path reaches the
+person's side (`MailPerson`).
+
 **A session asking the Assistant (#1447, #1739, [plans/cited-requests.md](../plans/cited-requests.md), [plans/mailbox.md](../plans/mailbox.md) §7.6).** Any session of this host may send the Assistant a request
 (`mail send` with `to: "assistant"`: a message from a session that answers no question or task of the Assistant's, mailbox.md §7.6). The request is a session's text, so it
 is not the person's word. The request path's safety is the Assistant's judgement, one floor in code, and a record the person reads afterwards (owner, 2026-11-03:

@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { MailMessage } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
 import { composingKey } from '../../app/keys.js'
+import { bubbleLook } from '../../components/bubble.js'
 import { Button } from '../../components/Button.js'
+import { IconButton } from '../../components/IconButton.js'
+import { StepIcon } from '../../components/icons.js'
 import { ChoiceList } from '../../components/ChoiceList.js'
 import { Fold } from '../../components/Fold.js'
 import { Pill } from '../../components/Pill.js'
@@ -41,11 +44,13 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const parties = [thread.owner, ...(thread.assignee ? [thread.assignee] : []), ...view.parties.map((p) => p.party)]
   const unique = [...new Map(parties.filter((p) => p.sessionId !== null).map((p) => [p.address, p])).values()]
   return (
-    <div className="flex min-h-0 flex-col" data-testid="mail-thread">
+    // The session panel's colours (owner, 2026-11-14): its floor behind, its bubbles for who said what (`bubbleLook`)
+    <div className="flex min-h-0 flex-col bg-surface-floor" data-testid="mail-thread">
       <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-        <button className="shrink-0 rounded-full px-2 py-0.5 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink" onClick={back} aria-label="Back to the list" data-testid="mail-back">
-          ←
-        </button>
+        {/* The window's own back chevron (App `NavButtons`): one shape for "back" */}
+        <IconButton label="Back to the list" onClick={back} testId="mail-back">
+          <StepIcon dir={-1} />
+        </IconButton>
         <h2 className="min-w-0 truncate text-sm font-medium text-ink" title={thread.subject}>
           {thread.subject}
         </h2>
@@ -88,7 +93,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
           This is done. Open a follow-up from a session to go on.
         </p>
       </Fold>
-      <Fold open={!done}>
+      {/* Mail between sessions the person looks into from Tasks is theirs to read, not to answer or close (`lookIn`) */}
+      <Fold open={!done && !view.lookIn}>
         {/* Only where there is something of the person's to answer: a chain of mail between sessions held for them has no one for a reply to go to (a host of an older build does not say, and has the box) */}
         <Fold open={view.canReply !== false}>
           <Reply blocked={picking.length > 0} />
@@ -148,8 +154,8 @@ function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
         {fromScript !== undefined ? `script ${fromScript}` : partyName(m.sender)} · {m.kind}
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
-      {/* The person's own words stay as they typed them, as in the session view's `ChatRow`; others' are Markdown (#2228), on the session panel's surface (#2242) so a message reads as a card on the Inbox's panel */}
-      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'whitespace-pre-wrap border-line-strong bg-surface-hover/40' : 'border-line bg-surface-floor'}`}>
+      {/* The person's own words stay as they typed them, as in the session view's `ChatRow`; others' are Markdown (#2228). Each in the session's bubble for its side */}
+      <div className={`max-w-[85%] break-words rounded-field border px-3 py-2 text-md ${mine ? 'whitespace-pre-wrap' : ''} ${bubbleLook(mine ? 'mine' : 'theirs')}`}>
         {mine ? m.body : <Markdown text={m.body} projectRoot={null} />}
       </div>
       {m.choices && <Choices m={m} open={open} answer={answer} onPicking={onPicking} />}

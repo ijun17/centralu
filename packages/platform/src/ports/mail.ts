@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '@cc/protocol/client'
+import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, WatchView } from '@cc/protocol/client'
 
 /**
  * The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1): what the Inbox lists and shows, the person's words in a
@@ -11,6 +11,11 @@ import type { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '@cc/
 export interface MailPort {
   /** The threads the person is in (unread first), the mail held for them, and how many sleeping sessions wait for their word */
   list(): Promise<{ threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number }>
+  /**
+   * The open and recently settled work on the host (#1577), one row per recipient, for the Inbox's Tasks; `capped` is how many open rows are listed when
+   * more are open (rows, as the list counts them). An older host has no such method and the call rejects
+   */
+  tasks(): Promise<{ tasks: MailTaskRow[]; capped: number | null }>
   /**
    * One thread from where the person last read (or `after`, or from the start with `all`), read for them. With `tail`, its last that many
    * messages (at most 100), read to the end; with `before` as well, the earlier page of them, whose `older` says whether there is more

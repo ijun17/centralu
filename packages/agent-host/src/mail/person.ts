@@ -1,4 +1,4 @@
-import { errorMessage, mailAsk, plainLine, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, mailAsk, plainLine, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailTaskRow, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
@@ -53,6 +53,10 @@ const LIST_CHAINS = 100
 const LIST_SCAN = 1_000
 /** A chain is read whole for the window up to this many messages: its newest ones */
 const CHAIN_CAP = 1_000
+/** How many of the newest messages that wait for a reply the Inbox's Tasks reads: one row for each of their recipients */
+const TASK_SCAN = 200
+/** Open rows Tasks lists at most, whatever their age (a message's rows all or none): a ceiling far above real use, so one listing stays bounded */
+const TASK_OPEN = 2000
 const PREVIEW_CHARS = 140
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'policy'] as const
@@ -116,19 +120,62 @@ export class MailPerson {
     return { threads, held, waiting: this.delivery.crowdWaiting() }
   }
 
-  /** A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it */
+  /**
+   * The work on this host as the Inbox's Tasks lists it (#1577): every message still waiting for a reply and the newest of the rest, whoever sent
+   * them, one row for each recipient. A row to the person that is kept from them is left out, as the rest of their window leaves it out, and so is one
+   * the person dismissed: it goes nowhere
+   */
+  tasks(): { tasks: MailTaskRow[]; capped: number | null } {
+    const tasks = this.records.newestWork(TASK_SCAN, TASK_OPEN).flatMap((m) => {
+      const closed = this.records.message(m.rootId)?.facts.closed !== undefined
+      return this.records.recipients(m.id).flatMap((r) => {
+        if ((r.recipient === PERSON && hiddenFromPerson(r)) || r.held === 'dismissed') return []
+        const party = parseAddress(r.recipient)
+        const working = party?.kind === 'session' && this.host.turnOn(party.sessionId)?.work === m.id
+        const { state, outcome } = taskState(m, r, { closed, here: this.here(r.recipient), working })
+        return [
+          {
+            id: m.id,
+            root: m.rootId,
+            subject: subjectLine(m),
+            kind: windowKind(m),
+            owner: this.party(m.sender),
+            assignee: this.party(r.recipient),
+            state,
+            outcome,
+            createdAt: m.createdAt,
+            updatedAt: r.settledAt ?? m.createdAt,
+          },
+        ]
+      })
+    })
+    // More open rows than are listed: the window says how many open ones it shows, counted as it counts its rows
+    const open = this.records.openWorkRows(TASK_OPEN)
+    return { tasks, capped: open.total > open.listed ? open.listed : null }
+  }
+
+  /**
+   * A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it. The
+   * sessions' messages to each other in it are shown too, read-only (#1577, owner 2026-11-14); a message to the person kept from them stays out of
+   * sight. Where nothing of theirs is left to read (a chain they are not in, or one whose only message to them was withdrawn) they look in on it:
+   * nothing is read, answered, closed or changed for anyone (§5.5)
+   */
   thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
     // An old thread's id opens the newest chain moved from it
     const root = this.rootsOf(threadId)[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
-    const all = this.shown(root)
+    const all = this.records
+      .numbered(root, CHAIN_CAP)
+      .map(({ m, n }) => ({ m, seq: n }))
+      .filter((s) => this.readable(s.m) || !this.involves(s.m))
+    const lookIn = !all.some((s) => this.readable(s.m))
     let page: Shown[]
     if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
     else if (opts.tail !== undefined || !opts.all) {
       const upTo = opts.before === undefined ? all : all.filter((s) => s.seq < (opts.before ?? 0))
       page = upTo.slice(-Math.min(opts.tail ?? THREAD_PAGE, THREAD_PAGE))
     } else page = all
-    // Read for the person: every window's list hears it
+    // Read for the person: every window's list hears it. Only their own rows are read: nothing of a look in, and nobody else's message in the chain
     this.readFor(page)
     const first = page[0]?.seq
     const last = page.at(-1)?.seq
@@ -136,7 +183,7 @@ export class MailPerson {
     const fromStart = first === undefined || first === all[0]?.seq
     const messages = [...(fromStart ? legacy : []).map((m, i) => legacyMessage(m, i - legacy.length + 1, (a) => this.party(a))), ...page.map((s) => this.message(s))]
     return {
-      thread: this.row(root, this.heldIn(root)) ?? this.emptyRow(root),
+      thread: this.row(root, this.heldIn(root)) ?? this.lookInRow(root),
       parties: this.partiesOf(all.map((s) => s.m)),
       blockers: [],
       messages,
@@ -144,6 +191,7 @@ export class MailPerson {
       older: first !== undefined && all.some((s) => s.seq < first),
       follows: [],
       canReply: this.replyTarget([root]) !== undefined,
+      lookIn,
     }
   }
 
@@ -234,13 +282,19 @@ export class MailPerson {
     const roots = this.rootsOf(threadId)
     const root = roots[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
+    /*
+     * Only the chains the person has something to read in: one they only look in on is the sessions' own work (#1577), and closing it would withdraw
+     * what they asked of each other and tell them to stop. An old thread's id may name both kinds; each is decided for itself, as `thread` decides it
+     */
+    const mine = roots.filter((r) => this.shown(r).length > 0)
+    if (mine.length === 0) throw refuse('not_yours', 'You are not in this mail: you can read it, not close it.')
     const now = Date.now()
     /** The sessions to tell, once each across every chain the id names, with the person's requests withdrawn that they had and where each chain ended */
     const tell = new Map<string, { address: string; root: string; ids: string[]; ends: string[] }>()
     // One unit of work, so a failure part-way leaves no chain half closed (requests withdrawn, the chain not marked); the sessions are told after it commits
     this.records.transaction(() => {
-      // Every chain an id names: the window showed them as one thread
-      for (const r of roots) {
+      // Every chain of theirs an id names: the window showed them as one thread
+      for (const r of mine) {
         const chain = this.chainOf(r)
         // What the person asked in it that is open, by the session that has it
         const asked: { id: string; recipient: string; seen: boolean }[] = []
@@ -279,9 +333,11 @@ export class MailPerson {
       }
     })
     // The windows that have the chain open read it again
-    for (const r of roots) this.service.announce(r)
+    for (const r of mine) this.service.announce(r)
     for (const [sessionId, t] of tell) this.tellClosed(outcome, sessionId, t)
-    return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
+    // The row of a chain it closed: an old id's first chain may be the sessions' own, which it left as it was
+    const closed = mine[0] ?? root
+    return this.row(closed, this.heldIn(closed)) ?? this.lookInRow(closed)
   }
 
   /**
@@ -409,6 +465,12 @@ export class MailPerson {
     return this.records.recipients(m.id).some((r) => (r.recipient === PERSON && !hiddenFromPerson(r)) || isPersonHold(r.held))
   }
 
+  /** Whether the person is in the message at all: sent by them, sent to them (kept from their sight or not), or held for them (§5.5 "The person looks in") */
+  private involves(m: MailRow): boolean {
+    if (m.sender === PERSON) return true
+    return this.records.recipients(m.id).some((r) => r.recipient === PERSON || isPersonHold(r.held))
+  }
+
   /** An old thread's messages before the first one moved from it: the chain's history, read-only (§6.3) */
   private legacyOf(first: MailRow | undefined): MessageRow[] {
     if (!first?.legacyThread) return []
@@ -442,16 +504,18 @@ export class MailPerson {
     const last = all.at(-1)
     if (!first || !last) return null
     const toPerson = all.flatMap((m) => this.records.recipient(m.id, PERSON) ?? [])
-    const tasks = all.filter((m) => m.sender === PERSON && m.kind === 'task').flatMap((m) => this.records.recipients(m.id).filter((r) => parseAddress(r.recipient)?.kind === 'session'))
+    const tasks = all
+      .filter((m) => m.sender === PERSON && m.kind === 'task')
+      .flatMap((m) => this.records.recipients(m.id).flatMap((r) => (parseAddress(r.recipient)?.kind === 'session' ? [{ m, r }] : [])))
     const waits =
       toPerson.some((r) => r.settled === null) ||
       all.some((m) => m.sender === PERSON && (m.needsReply || m.kind === 'task') && this.records.recipients(m.id).some((r) => r.settled === null))
     // Closed by the person: a row to them or a task of theirs settled `done`, or the close recorded on the root (a task to a session gone since)
     const closedAs = this.records.message(root)?.facts.closed?.outcome
-    const done = (closedAs !== undefined || toPerson.some((r) => r.settled === 'done') || tasks.some((r) => r.settled === 'done')) && !waits
+    const done = (closedAs !== undefined || toPerson.some((r) => r.settled === 'done') || tasks.some(({ r }) => r.settled === 'done')) && !waits
     const working = done ? [] : this.workers(this.chainOf(root))
     // A task a stop released is not being worked on: the session can no longer answer it until the person sends it a message (§10.6.1)
-    const state = done ? 'done' : working.length > 0 || tasks.some((r) => r.settled === null && r.releasedAt === null) ? 'running' : tasks.some((r) => r.settled === 'reported') ? 'review' : 'open'
+    const state = done ? 'done' : working.length > 0 || tasks.some(({ m, r }) => hasTask(m, r)) ? 'running' : tasks.some(({ r }) => r.settled === 'reported') ? 'review' : 'open'
     const asking = done ? [] : this.asking(all)
     const asked = asking.at(-1)
     const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
@@ -495,11 +559,37 @@ export class MailPerson {
     })
   }
 
-  /** A chain whose every message the person may not read (held for them, then let go): a row with nothing in it */
-  private emptyRow(root: string): MailThreadRow {
-    const m = this.records.message(root)
-    const at = m?.createdAt ?? 0
-    return { id: root, subject: m ? subjectLine(m) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, ask: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
+  /**
+   * A chain the person is not in, as they look in on it (#1577): its first message's sender gave it to the first one it went to. Done once every row of
+   * every request in it is settled, else running while a session's turn is on it or a session has a task of it (`hasTask`), else open. Nothing in it
+   * is theirs: nothing unread, asked or held
+   */
+  private lookInRow(root: string): MailThreadRow {
+    const chain = this.chainOf(root)
+    const first = chain[0] ?? this.records.message(root)
+    const last = chain.at(-1)
+    const at = first?.createdAt ?? 0
+    const done = chain.every((m) => !(m.kind === 'task' || (m.kind === 'message' && m.needsReply)) || this.records.recipients(m.id).every((r) => r.settled !== null))
+    const working = done ? [] : this.workers(chain)
+    const assignee = first && this.records.recipients(first.id)[0]?.recipient
+    return {
+      id: root,
+      subject: first ? subjectLine(first) : root,
+      state: done ? 'done' : working.length > 0 || chain.some((m) => this.records.recipients(m.id).some((r) => hasTask(m, r))) ? 'running' : 'open',
+      outcome: null,
+      next: null,
+      projectId: first?.senderProject ?? null,
+      owner: this.party(first?.sender ?? PERSON),
+      assignee: assignee === undefined ? null : this.party(assignee),
+      ask: null,
+      unread: 0,
+      held: 0,
+      blocked: 0,
+      working: working.length > 0,
+      createdAt: at,
+      updatedAt: last?.createdAt ?? at,
+      last: last ? { sender: this.party(last.sender), kind: windowKind(last), preview: plainLine(last.body, PREVIEW_CHARS), at: last.createdAt } : null,
+    }
   }
 
   // ── Shapes ──
@@ -571,6 +661,33 @@ function windowKind(m: MailRow): string {
   if (m.kind === 'task') return 'assign'
   if (m.kind === 'message') return m.needsReply ? 'question' : m.replyTo === null ? 'note' : 'answer'
   return m.kind
+}
+
+/**
+ * One recipient's part in a message that waits for a reply, as the Inbox's Tasks words it (#1577), the host's one rule for it. In review: the person's task,
+ * reported, in a chain the person has not closed (as the list's row says, a report the person has not looked at wins over its being settled). Done: settled,
+ * with how; a row to the person an older build settled without an answer is still a question to them (`asking`), and any other such row is done. Held:
+ * it waits for the person to say what happens to it (Waiting's held row). Released: nobody is on it, as a stop let it go or its session is gone. Running:
+ * the recipient's turn is on this message, or the session has the task (`hasTask`, the list's row's rule too). Open: the rest. What is not done here
+ * is what the store's `OPEN_ROW` counts for the cap (mailbox.ts): change one with the other, as the parity test in person.test.ts checks
+ */
+function taskState(m: MailRow, r: RecipientRow, on: { closed: boolean; here: boolean; working: boolean }): { state: string; outcome: string | null } {
+  if (m.sender === PERSON && m.kind === 'task' && r.settled === 'reported' && !on.closed) return { state: 'review', outcome: null }
+  const asksPerson = r.recipient === PERSON && r.settled === 'legacy' && r.answerId === null
+  // `legacy` is no word of the window's: an older build settled the row, which is done
+  if (r.settled !== null && !asksPerson) return { state: 'done', outcome: r.settled === 'legacy' ? 'done' : r.settled }
+  if (isPersonHold(r.held)) return { state: 'held', outcome: null }
+  if (on.working) return { state: 'running', outcome: null }
+  if (r.releasedAt !== null || !on.here) return { state: 'released', outcome: null }
+  return { state: hasTask(m, r) ? 'running' : 'open', outcome: null }
+}
+
+/**
+ * A session has a task while it is given and neither settled nor released (a stop releases it, §10.6.1): it is working on it between turns too. The one
+ * rule for "running" by a task, read by the list's row, a look in's header and Tasks
+ */
+function hasTask(m: MailRow, r: RecipientRow): boolean {
+  return m.kind === 'task' && parseAddress(r.recipient)?.kind === 'session' && r.settled === null && r.releasedAt === null
 }
 
 /** An old thread's message, numbered before the chain's first (0, -1, …): history the window shows above it */
