@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { MessageKind } from '../dev-services/store/mail-types.js'
+import { SEND_ORIGINS, type MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { isPerson, senderKind } from './address.js'
 
@@ -111,10 +111,11 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
 
 /**
  * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, a task, a report, a
- * message that needs a reply and an app's post the receiver must see. The rest waits for the session's next turn
+ * message that needs a reply, a send tool's note (an instruction that owes no answer, #2258) and an app's post the receiver must see.
+ * The rest waits for the session's next turn
  */
-export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts'>): boolean {
-  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
+export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts' | 'origin'>): boolean {
+  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || SEND_ORIGINS.has(m.origin ?? '') || m.facts.needsOwner === true
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */

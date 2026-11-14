@@ -1771,7 +1771,7 @@ or a join, and the turn ended) sends nothing and is planned again (`MailNotAtRes
 **A send to a busy session.** `MailSessionsView.takesSendNow(session)` is the one definition: the session takes a turn now (at rest, no
 card, no limit, the host not leaving; asleep, it is woken), no delegation run is going there (`agentRuns`: the caller's own
 included, so a follow-up while the turn it gave runs is mail, and goes when that turn ends), and no mail that wakes it is waiting (that goes first). Then
-`agent_session send`, `ask_project` and the Assistant's `send_to_session` deliver directly as before: the delegation, its bounded wait, the relayed row, the task written delivered (B1). Otherwise the words are written as a task
+`agent_session send`, `ask_project` and the Assistant's `send_to_session` with `reportBack` deliver directly as before: the delegation, its bounded wait, the relayed row, the task written delivered (B1). Otherwise the words are written as a task
 from the caller to the session, not delivered (`mailTask`, the mailbox's `sendTask`), and the call answers `mailed` with the task's id
 at once. The mailbox gives it once that turn ends, with no 30 s wake gap (§7.9; its direct send has none either), as a turn of its own (a
 task joins no turn until step 3), whose end is reported by
@@ -1784,9 +1784,10 @@ choose: what a busy target means for these three calls is that the request is ma
 - **`start_agent`** starts a new session, which is never busy: unchanged.
 - **`send_to_session`** with `reportBack` writes a task: its end is reported once, by mail, as any task's. Without it, busy or at rest,
   it writes a note (#2258): a message from the Assistant that needs no reply, origin `send_to_session`, given and shown as the task
-  would be (the Assistant's message in the receiver's conversation; at rest at once, busy once the turn ends, with no 30 s wake gap).
-  No report and no last response answers it, so nothing wakes the Assistant for it. A session at rest without the mail tool still
-  takes the words directly.
+  would be (the Assistant's message in the receiver's conversation; after the 2 s debounce at rest, once the turn ends when busy, with
+  no 30 s wake gap; a host back from a long stop wakes a sleeping session for it, `needsReceiver`). No report and no last response
+  answers it, so nothing wakes the Assistant for it. A session at rest without the mail tool still takes the words directly. A fork
+  mailed for want of memory stays a task, reported as the fork would have been.
 - **A session without the mail tool** (a legacy seat) cannot take a mailed send: refused, "`<name>` is busy and takes no mail: send to it
   once it is at rest."
 
@@ -1827,9 +1828,9 @@ handoff leaves a mailed task's sender as it was: the original that stays still g
 it (a gone sender's mail does not go), as its queue was dropped; step 5 re-points sent tasks.
 
 **What the person sees (owner, option B, recorded on #1948).** A task from a delegation tool (`agent_session` send, `ask_project`, the
-Assistant's `send_to_session`) that the mailbox gives shows in the receiver's conversation as its sender's message, "from <sender>" with
+Assistant's `send_to_session`, and that tool's note, #2258) that the mailbox gives shows in the receiver's conversation as its sender's message, "from <sender>" with
 the words, as its direct send does; other mail keeps the one line ("✉ 1 message, from …"). One function decides it,
-`SessionEvents.deliverMail`, from `MailInput.task` (the wake's work message when it is such a task; a wake carries one, D17). The agent
+`SessionEvents.deliverMail`, from `MailInput.task` (the wake's work message when it is such a task, a wake carries one, D17; else a note it carries). The agent
 reads only the mail frame (the words inline under Centralu's header, with the message id): the row is written for the screen and never
 sent. A wake that carries other mail with the task writes the line too. A sender no longer here to be named leaves the line alone. The
 row is the user row a direct send writes (`from`, the sender's words) with `mail: true` and no input id, so the held-message record skips

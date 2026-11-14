@@ -238,6 +238,19 @@ describe('a host that was off a long while', () => {
     expect(w.to('c')[0]!.input.text).not.toContain(fyi.message.id)
   })
 
+  it("a send tool's note wakes a sleeping session as a task does: it is the sender's instruction, though no answer is owed (#2258)", async () => {
+    const w = deliveryWorld({ heartbeat: NOW - 3 * 60 * MIN })
+    w.states.set('b', { kind: 'ready', live: false, quiet: false })
+    const note = w.mail.task(A, B, { text: 'check the build', origin: 'send_to_session', delivered: false, note: true })
+    expect(note).toMatchObject({ kind: 'message', needsReply: false })
+    w.clock.t += 5_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1)
+    expect(w.to('b')).toHaveLength(1)
+    expect(w.to('b')[0]!.input.text).toContain(note.id)
+  })
+
   // #1951: the person opens the sleeping session, its process resumes; that is not a turn, and old news does not start one
   it('plain news held back for the stop does not start a turn when the session only resumes; it goes with the next mail that wakes it', async () => {
     const w = deliveryWorld({ heartbeat: NOW - 3 * 60 * MIN })
