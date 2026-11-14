@@ -36,8 +36,8 @@ import { readStopped, type Stopped } from './update-stopped.js'
  *
  * **Each stop writes its own list** under a name no other has (`add`), never replacing another's: no rename over a file
  * another process may hold, and no list one stop wrote that a second one could take away. The next host reads all of
- * them (`UpdateResumeLists`) and removes each once every turn it names was dealt with (continued, reported as lost, or
- * not found cut). One it could not remove stays harmless and goes at a later start. A list a host killed mid-write left
+ * them (`UpdateResumeLists`), and each entry leaves its list once it is dealt with (`done`: the list is written again without it under
+ * its own name, through a temporary file renamed over it, and goes once it names nothing). A list a host killed mid-write left
  * is not JSON and goes at the next start; one of another format (a newer host's) is left to it. Nothing expires.
  */
 export const UPDATE_RESUME_PREFIX = 'update-resume.'
@@ -46,8 +46,11 @@ export const UPDATE_RESUME_PREFIX = 'update-resume.'
 const MAX_TURNS = 1000
 const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
-/** A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done */
-export type CutTurn = { id: string; seq: number }
+/**
+ * A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done. `woken`: a turn an update's
+ * start continued that had not answered yet, which may read at rest (`cutTurns`); an older build reads `id` and `seq` alone, and so does not continue it
+ */
+export type CutTurn = { id: string; seq: number; woken?: true }
 
 /** What one stop lists: the turns it cut, and what else it ended in sessions (#1902) */
 export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended; /** When the stop wrote it (ms), 0 when the list does not say */ at: number }
@@ -58,6 +61,8 @@ export type UpdateResumeFolder = {
   read(name: string): string | null
   /** Writes a new list under a name no other list has */
   add(text: string): void
+  /** Writes a list again under its own name in one step: a host killed meanwhile leaves the old text or the new, never neither. Throws when it could not, the old text left */
+  replace(name: string, text: string): void
   remove(name: string): void
 }
 
@@ -74,7 +79,9 @@ export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
   const listed: unknown[] = o.turns
   for (const t of listed) {
     if (typeof t !== 'object' || t === null || !('id' in t) || !('seq' in t)) continue
-    if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) turns.push({ id: t.id, seq: t.seq })
+    if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) {
+      turns.push({ id: t.id, seq: t.seq, ...('woken' in t && t.woken === true ? { woken: true as const } : {}) })
+    }
   }
   const listedStopped: unknown[] = 'stopped' in o && Array.isArray(o.stopped) ? o.stopped : []
   const stopped = listedStopped.map(readStopped).filter((x): x is Stopped => x !== null && ID.test(x.id))
@@ -91,11 +98,14 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
   const stopped = ended.filter((x) => ID.test(x.id)).slice(0, MAX_TURNS)
   if (!turns.length && !stopped.length) return
   try {
-    folder.add(`${JSON.stringify({ v: 1, turns, stopped })}\n`)
+    folder.add(listText(turns, stopped))
   } catch (err) {
     console.error(`[agent-host] the turns this update ends could not be listed for the next start (${errorMessage(err)}); they end as a stop's do`)
   }
 }
+
+/** A list of turns and what else a stop ended, as written */
+const listText = (turns: readonly CutTurn[], stopped: readonly Stopped[]): string => `${JSON.stringify({ v: 1, turns, stopped })}\n`
 
 /**
  * Writes the terminals and Run commands this stop ends, as a list of its own (#1902). Never fatal, as `recordUpdateCut` is: they
@@ -152,6 +162,8 @@ export class UpdateResumeLists {
       const turns = parseUpdateResume(text)
       if (turns === 'other') continue
       if (turns === 'torn') this.removeList(name, 'it is not read, and a later start removes it')
+      // One written empty because it could not be removed (`done`) goes now
+      else if (!turns.turns.length && !turns.stopped.length && !turns.ended.terminals.length && !turns.ended.runs.length) this.removeList(name, 'it names nothing, and a later start removes it')
       else this.lists.set(name, turns)
     }
   }
@@ -161,9 +173,12 @@ export class UpdateResumeLists {
     return new Set([...this.lists.values()].flatMap((l) => [...l.turns, ...l.stopped]).map((t) => t.id))
   }
 
-  /** Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then */
-  cut(id: string, lastSeq: number): boolean {
-    return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq))
+  /**
+   * Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then. A session that reads at rest
+   * (`atRest`) only by a `woken` entry: any other was stopped by the person after that stop listed it (a Stop writes no row)
+   */
+  cut(id: string, lastSeq: number, atRest = false): boolean {
+    return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq && (!atRest || t.woken === true)))
   }
 
   /**
@@ -198,17 +213,36 @@ export class UpdateResumeLists {
   }
 
   /**
-   * One listed session dealt with: continued, reported as lost, or not found cut. Each list all of whose sessions are
-   * dealt with goes. One that cannot be removed is said in the log and stays harmless: the turn it names is over, so
-   * its mark no longer matches, and a later start removes it
+   * One listed session dealt with: continued, reported as lost, dropped (the person's Stop, gone) or not found cut. It leaves every list that
+   * names it now, on disk too (#2264 re-check): a mark alone does not keep a dealt entry harmless, since the person's Stop writes no row and a
+   * `woken` entry would still match a session at rest. The list is written again without it in one step (`replace`), and one that names
+   * nothing more goes; if it cannot be removed it is written empty instead, which the next start removes. A host killed before that step is
+   * like a Stop still on its way when the host stops: not taken. A list that cannot be written again keeps its old text, said in the log,
+   * unless the entry is `strict` (it no longer stands: the person's Stop, the session gone): then the whole list goes, its other entries
+   * ending as a quit's do (their Continue stays the person's), since a Stop already taken must not be undone by the next start
    */
-  done(id: string): void {
+  done(id: string, strict = false): void {
     this.dealt.add(id)
-    for (const [name, l] of this.lists) {
-      const named = [...l.turns, ...l.stopped]
-      if (!named.some((t) => t.id === id) || !named.every((t) => this.dealt.has(t.id))) continue
-      this.lists.delete(name)
-      this.removeList(name, 'the turns it names are over, and a later start removes it')
+    for (const [name, l] of [...this.lists]) {
+      if (![...l.turns, ...l.stopped].some((t) => t.id === id)) continue
+      const turns = l.turns.filter((t) => !this.dealt.has(t.id))
+      const stopped = l.stopped.filter((t) => !this.dealt.has(t.id))
+      if (!turns.length && !stopped.length && this.removeList(name, 'it is written empty instead')) {
+        this.lists.delete(name)
+        continue
+      }
+      try {
+        this.folder.replace(name, listText(turns, stopped))
+        this.lists.set(name, { ...l, turns, stopped })
+      } catch (err) {
+        if (!strict) {
+          console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it still names it, for a later start`)
+          continue
+        }
+        console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it goes whole, and the turns it names end as a quit's do`)
+        this.lists.delete(name)
+        this.removeList(name, `a later start may continue ${id.slice(0, 8)}, which was stopped`)
+      }
     }
   }
 

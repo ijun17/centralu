@@ -20,6 +20,9 @@ export function memoryUpdateFolder(): UpdateResumeFolder & {
     add: (text) => {
       files.set(`update-resume.${String(++made).padStart(8, '0')}.json`, text)
     },
+    replace: (name, text) => {
+      files.set(name, text)
+    },
     remove: (name) => {
       files.delete(name)
     },

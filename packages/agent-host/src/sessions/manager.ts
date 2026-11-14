@@ -11,7 +11,7 @@ import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
-import { CONTINUE_NOTES, TurnContinue } from './turn-continue.js'
+import { TurnContinue } from './turn-continue.js'
 import { apiAnswers } from './api-answers.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
@@ -267,7 +267,7 @@ export class SessionManager {
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
-       * (`continueCutTurns`). This host writes it in turn when a linked hub stops it for an update (`stopForUpdate`)
+       * (`TurnContinue.wakeAfterUpdate`). This host writes it in turn when a linked hub stops it for an update (`stopForUpdate`)
        */
       updateResume?: UpdateResumeFolder
       /**
@@ -392,16 +392,17 @@ export class SessionManager {
         this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption ?? null })
       },
       waitEnded: (id, cause, end) => this.mail.mailWaitEnded(id, cause, this.meta.get(id)?.askedBy ?? null, end),
-      // Through Centralu's channel, as an update's continue: sent only while the wait still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
-      send: (id, cause, gate) => {
-        const note = CONTINUE_NOTES[cause]
+      updateStep: (cut, step, err) => this.tenure.updateStep(cut, step, err),
+      // Through Centralu's channel: sent only while the wait still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
+      send: (id, note, gate) => {
+        const skipLine = () => !note.line || (note.cause === 'update' && this.tenure.leavingForUpdate())
         return this.events
-          .deliverMail(id, { text: note.text, quiet: false, line: note.line, label: note.label, skipLine: () => !note.line }, {
+          .deliverMail(id, { text: note.text, quiet: false, line: note.line, label: note.label, skipLine }, {
             leaving: () => this.tenure.disposing,
             // The last check before the tool is given the note (deliverMail asks it once, right before): passed, the turn is the tool's
             atRest: () => {
-              // A held retry continues a turn that is still running; a stop's continue starts one at rest
-              const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle') === (cause === 'overloaded')
+              // A held retry continues a turn that is still running; a stop's continue starts one at rest; an update's gate says both itself
+              const stands = gate.live() && (note.cause === 'update' || inTurn(this.meta.get(id)?.state ?? 'idle') === (note.cause === 'overloaded'))
               if (stands) gate.handed()
               return stands
             },

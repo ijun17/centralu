@@ -188,12 +188,14 @@ export class TurnInputs {
   }
 
   interrupt(sessionId: string): void {
-    // A stop waiting to be continued (#1415) is at rest: the Stop ends the wait, and there is no turn to stop
-    if (this.host.turnContinue.stopContinue(sessionId) && !inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) return
+    const hadWait = this.host.turnContinue.stopContinue(sessionId)
     // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop.
     // Once the retry's note is with the tool it runs a turn, which the Stop stops like any
     const took = this.host.turnContinue.cancel(sessionId)
     const waiting = took === 'waiting' || took === 'sending'
+    // At rest there is no turn to stop: a stop waiting to be continued (#1415), whose wait the Stop ended, or no process at all (an update's note still queued for it)
+    const m = this.host.meta.get(sessionId)
+    if (!waiting && !inTurn(m?.state ?? 'idle') && (hadWait || (m && !this.host.handles.has(sessionId)))) return
     const handle = waiting ? this.host.handles.get(sessionId) : this.host.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)

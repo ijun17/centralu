@@ -13,7 +13,7 @@ import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 afterEach(() => vi.restoreAllMocks())
 
 describe('the turns an update cut, in the data folder', () => {
-  it('a stop writes the turns it ends; the next start reads them without taking them, and a list goes once all it names are dealt with', () => {
+  it('a stop writes the turns it ends; the next start reads them without taking them, and each leaves the list on disk once dealt with', () => {
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 9 }])
     const lists = new UpdateResumeLists(f)
@@ -21,9 +21,66 @@ describe('the turns an update cut, in the data folder', () => {
     // Read again (a start that failed its check, before anything was sent): still all there
     expect([...new UpdateResumeLists(f).ids()]).toEqual(['s1', 's2'])
     lists.done('s1')
-    expect(f.ids()).toEqual(['s1', 's2'])
+    expect(f.ids()).toEqual(['s2'])
+    // A start killed now: the next reads what is still to deal with, and only that
+    expect([...new UpdateResumeLists(f).ids()]).toEqual(['s2'])
     lists.done('s2')
     expect(f.ids()).toBeNull()
+  })
+
+  it('takes a dealt woken entry off the disk though its list still names others: a Stop writes no row, so its mark would still match (#2264 re-check)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 'a', seq: 7, woken: true }, { id: 'b', seq: 3 }], [{ id: 'c', seq: 2, tasks: [], approvals: true, questions: [] }])
+    new UpdateResumeLists(f).done('a')
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('a', 7, true)).toBe(false)
+    expect(next.cut('b', 3)).toBe(true)
+    expect(next.stoppedOf('c', 2)).toMatchObject({ approvals: true })
+    expect(f.files.size).toBe(1)
+  })
+
+  it('writes a list again in one step: after it, a stopped woken entry is gone; before it or when it fails, the old list stands whole and is said', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Killed before the rename, or the rename still failing after its tries: nothing changed on disk, as a Stop still on its way is not taken
+    const failing: UpdateResumeFolder = { ...f, replace: () => { throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }) } }
+    new UpdateResumeLists(failing).done('s1')
+    expect(f.turns()).toEqual([{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
+    expect(f.files.size).toBe(1)
+    expect(said.mock.calls.some((c) => String(c[0]).includes('could not be written again') && String(c[0]).includes('EPERM'))).toBe(true)
+    // After the rename (whether the host lived on or was killed then): one list, s1 gone from it, s2 still to deal with
+    new UpdateResumeLists(f).done('s1')
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('s1', 4, true)).toBe(false)
+    expect(next.cut('s2', 9)).toBe(true)
+    expect(f.files.size).toBe(1)
+  })
+
+  it('removes the whole list when it cannot be written again without an entry that no longer stands: a Stop already taken is not undone (#2264 re-check)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failing: UpdateResumeFolder = { ...f, replace: () => { throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }) } }
+    new UpdateResumeLists(failing).done('s1', true)
+    // The next start continues neither: s2 ends as a quit's does, with its Continue
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('s1', 4, true)).toBe(false)
+    expect(next.cut('s2', 9)).toBe(false)
+    expect(f.files.size).toBe(0)
+    expect(said.mock.calls.some((c) => String(c[0]).includes('it goes whole'))).toBe(true)
+  })
+
+  it('writes a list that names nothing more empty when it cannot be removed, so a dealt woken entry is gone all the same, and the next start removes it', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const held: UpdateResumeFolder = { ...f, remove: () => { throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }) } }
+    new UpdateResumeLists(held).done('s1')
+    expect(f.files.size).toBe(1)
+    expect(new UpdateResumeLists(held).cut('s1', 4, true)).toBe(false)
+    new UpdateResumeLists(f)
+    expect(f.files.size).toBe(0)
   })
 
   it('a listed session is the turn that stop cut only while its conversation still ends where it did then (#1626 review)', () => {
@@ -34,6 +91,16 @@ describe('the turns an update cut, in the data folder', () => {
     // A turn begun since, under any version, recorded its input first
     expect(lists.cut('s1', 5)).toBe(false)
     expect(lists.cut('s2', 4)).toBe(false)
+  })
+
+  it('takes a session that reads at rest only by a woken entry: any other was stopped by the person, and a Stop writes no row (#2264 review)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 7, woken: true }])
+    const lists = new UpdateResumeLists(f)
+    expect(lists.cut('s1', 4, true)).toBe(false)
+    expect(lists.cut('s1', 4)).toBe(true)
+    expect(lists.cut('s2', 7, true)).toBe(true)
+    expect(f.turns()).toEqual([{ id: 's1', seq: 4 }, { id: 's2', seq: 7, woken: true }])
   })
 
   it('a second stop writes its own list beside the first, never replacing it: none is continued zero times (#1618 review D2)', () => {
@@ -180,6 +247,9 @@ describe('the turns an update cut, in the data folder', () => {
         throw new Error('EACCES')
       },
       add: () => {
+        throw new Error('ENOSPC: no space left on device')
+      },
+      replace: () => {
         throw new Error('ENOSPC: no space left on device')
       },
       remove: () => {

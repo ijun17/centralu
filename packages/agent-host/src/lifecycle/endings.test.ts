@@ -258,6 +258,27 @@ describe('updateResumeFolder', () => {
     }
   })
 
+  it('writes a list again in place, whole, leaves no temporary file behind, and never reads one a killed host left (#2264 re-check)', async () => {
+    const dir = tempRoot('cc-update-resume-')
+    try {
+      const f = updateResumeFolder(dir)
+      recordUpdateCut(f, [{ id: 's1', seq: 3, woken: true }, { id: 's2', seq: 5 }])
+      const name = readdirSync(dir)[0]!
+      // A host killed after writing the temporary file (writeFileWhole's name), before the rename: the old list stands, and that file is no list
+      const stray = `${name}.4242-0a1b2c3d.tmp`
+      writeFileSync(join(dir, stray), '{"v":1,"turns":[]}')
+      expect(f.names()).toEqual([name])
+      new UpdateResumeLists(f).done('s1')
+      expect(readdirSync(dir).sort()).toEqual([name, stray].sort())
+      const next = new UpdateResumeLists(updateResumeFolder(dir))
+      expect(next.cut('s1', 3, true)).toBe(false)
+      expect(next.cut('s2', 5)).toBe(true)
+      expect(readFileSync(join(dir, name), 'utf8')).not.toContain('"s1"')
+    } finally {
+      await removeTree(dir)
+    }
+  })
+
   it('a list a host killed mid-write left goes at the next start', async () => {
     const dir = tempRoot('cc-update-resume-')
     try {

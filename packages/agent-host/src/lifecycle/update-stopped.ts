@@ -26,7 +26,12 @@ const clip = (text: string, max: number): string => (text.length > max ? `${text
  * with neither is not listed. The mark (`seq`) is not known yet: it is the end of the conversation once the processes are down,
  * the same instant the turns are marked at, and the caller puts it on.
  */
-export function stoppedAtUpdate(sessions: readonly SessionInfo[], inputOf: (sessionId: string, callId: string) => unknown): Omit<Stopped, 'seq'>[] {
+export function stoppedAtUpdate(
+  sessions: readonly SessionInfo[],
+  inputOf: (sessionId: string, callId: string) => unknown,
+  /** What an earlier update's stop ended in sessions woken since that have not answered yet (`TurnContinue.unanswered`): kept, unless this stop lists the session itself */
+  woken: readonly Omit<Stopped, 'seq'>[] = [],
+): Omit<Stopped, 'seq'>[] {
   const out: Omit<Stopped, 'seq'>[] = []
   for (const s of sessions) {
     if (!s.live) continue
@@ -39,7 +44,7 @@ export function stoppedAtUpdate(sessions: readonly SessionInfo[], inputOf: (sess
     const approvals = !!s.pendingApproval
     if (tasks.length || questions.length || approvals) out.push({ id: s.id, tasks, approvals, questions })
   }
-  return out
+  return [...out, ...woken.filter((w) => !out.some((x) => x.id === w.id))]
 }
 
 /** One entry as a list holds it, or null when it is not one this build can read (another build's shape is left to it) */

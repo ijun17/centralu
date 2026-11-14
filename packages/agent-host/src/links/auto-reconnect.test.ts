@@ -1173,8 +1173,8 @@ describe("an agent's call that needs a machine whose link is down makes it conne
     await pause(100)
     expect(r.tunnel.opens).toBe(opens)
     // The host's own call, for an agent, connects it first
-    // It reached the machine, which does not run that session: the answer is the machine's, not a refusal for reachability
-    await expect(r.hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' })).rejects.toThrow('Session not found')
+    // It reached the machine, where that session is at rest with no process: the answer is the machine's (a Stop with nothing to stop), not a refusal for reachability
+    await expect(r.hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' })).resolves.toEqual({ ok: true })
     expect(r.tunnel.opens).toBe(opens + 1)
   })
 })
