@@ -110,10 +110,13 @@ the person's Continue would.
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
   its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;
-  a session at rest keeps its queued note);
+  a session at rest keeps its queued note, and a Stop on it while it has no process does nothing);
   a message of the person's sends the note at once, outside the queue, since the message does not say what the stop ended. A host that
   leaves before the queue drains leaves the rest listed, and the host after it wakes them (a session woken meanwhile and in its wake turn
-  is a turn that stop cuts, and is continued as one). There is no setting and no wait in the header: Centralu cut these turns, the person
+  is a turn that stop cuts, and is continued as one). A woken session that has not answered yet is listed again by that stop, as it was
+  woken (`TurnContinue.unanswered`, #2264 review): its entry left the list when its note went in, and between the resumed process's own
+  turn end and its first answer it reads at rest, so the stop would not list it and its note would be lost. The next start takes a
+  listed turn by its mark even when it reads at rest. There is no setting and no wait in the header: Centralu cut these turns, the person
   did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and

@@ -194,6 +194,9 @@ export class TurnInputs {
     // Once the retry's note is with the tool it runs a turn, which the Stop stops like any
     const took = this.host.turnContinue.cancel(sessionId)
     const waiting = took === 'waiting' || took === 'sending'
+    // At rest with no process (an update's note still queued for it): nothing runs to stop
+    const m = this.host.meta.get(sessionId)
+    if (!waiting && m && !inTurn(m.state) && !this.host.handles.has(sessionId)) return
     const handle = waiting ? this.host.handles.get(sessionId) : this.host.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)

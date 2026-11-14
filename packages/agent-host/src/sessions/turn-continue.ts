@@ -64,7 +64,7 @@ export const MAX_TRIES: Record<Exclude<ContinueCause, 'update'>, number> = { ove
  * What each continue hands the agent through Centralu's channel (`text`, input-receipts.ts), and the line the conversation shows where it
  * went in. An overloaded turn's retry has its notice already, so no line
  */
-export const CONTINUE_NOTES: Record<Exclude<ContinueCause, 'update'>, Omit<ContinueNote, 'cause'>> = {
+const CONTINUE_NOTES: Record<Exclude<ContinueCause, 'update'>, Omit<ContinueNote, 'cause'>> = {
   overloaded: { text: RETRY_NOTE, line: '', label: 'retry' },
   network: { text: NETWORK_NOTE, line: 'The network is back, so Centralu continued this turn.', label: 'continue' },
   limit: { text: LIMIT_NOTE, line: 'The usage limit reset, so Centralu continued this turn.', label: 'continue' },
@@ -282,11 +282,9 @@ export class TurnContinue {
    */
   cancel(sessionId: string): RetryPhase | null {
     this.stopContinue(sessionId)
-    // A cut turn waiting for its update's wake has nothing running either: the Stop ends the wait, and the turn
+    // A cut turn waiting for its update's wake has nothing running either: the Stop ends the turn, and so the wait (`fireUpdate` and its gate drop a turn that is over)
     const u = this.updates.get(sessionId)
-    const cut = !!u && u.phase !== 'waking' && u.turn
-    if (cut) this.endUpdate(sessionId, u, 'dropped')
-    return this.cancelHeld(sessionId) ?? (cut ? 'waiting' : null)
+    return this.cancelHeld(sessionId) ?? (u && u.phase !== 'waking' && u.turn ? 'waiting' : null)
   }
 
   /**
@@ -522,6 +520,14 @@ export class TurnContinue {
   wakeAfterUpdate(cuts: readonly UpdateCut[]): void {
     for (const c of [...cuts.filter((c) => c.turn), ...cuts.filter((c) => !c.turn)]) if (!this.updates.has(c.sessionId)) this.updates.set(c.sessionId, { ...c, phase: 'queued' })
     if (this.updates.size) setTimeout(() => this.pump(), 0)
+  }
+
+  /**
+   * The wakes whose note went in and that have not answered yet (#2264 review): a stop for an update now lists them again. Their entry left the
+   * list at the send, and the resumed process reads at rest until its request streams (its own turn end comes first)
+   */
+  unanswered(): UpdateCut[] {
+    return [...this.updates.values()].filter((w) => w.phase === 'waking').map(({ sessionId, turn, stopped }) => ({ sessionId, turn, stopped }))
   }
 
   /** Wakes the next queued sessions while fewer than `UPDATE_WAKES_AT_ONCE` wait for their first answer */

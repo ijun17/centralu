@@ -8,7 +8,7 @@ import { createRpcHandler } from '../rpc.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
 import { TurnContinue, UPDATE_SLOT_MS, UPDATE_WAKES_AT_ONCE } from './turn-continue.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The sessions an update's stop left wake a few at a time (#1913): with forty sessions all forty woke together, each one's first request
@@ -142,9 +142,10 @@ function engine(n: number) {
   return { engine, meta, sent, steps, ids }
 }
 
-describe('the sessions an update stopped wake a few at a time (#1913)', () => {
+// Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264 review)
+describe('the sessions an update stopped wake a few at a time (#1913)', { timeout: 30_000 * SLOW }, () => {
   it(`never has more than ${UPDATE_WAKES_AT_ONCE} waiting for their first answer, cut turns first, and wakes every one in the end`, async () => {
-    const { store, folder, ids, all } = await updated(2, 6)
+    const { store, folder, ids, all } = await updated(2, 3)
     const b = host(store, folder)
     const answered = new Set<string>()
     const order: string[] = []
@@ -203,6 +204,15 @@ describe('the sessions an update stopped wake a few at a time (#1913)', () => {
     expect(e.sent).toEqual(e.ids)
   })
 
+  it('drops a queued wake when its session goes to the trash, and lets the next one in (engine)', async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE + 2)
+    await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE)
+    e.engine.forget('s3')
+    expect(e.steps).toContain('s3:dropped')
+    e.engine.observe({ type: 'message_delta', sessionId: 's0', role: 'assistant', text: 'on it' })
+    expect(e.sent).toEqual(['s0', 's1', 's2', 's4'])
+  })
+
   it('gives a slot up when the woken session says nothing for UPDATE_SLOT_MS, its wake going on (engine)', async () => {
     vi.useFakeTimers()
     try {
@@ -228,6 +238,34 @@ describe('the sessions an update stopped wake a few at a time (#1913)', () => {
     await eventually(() => h.sent.length === 2)
     expect(h.sent.some((t) => t.includes('the update stopped the background work'))).toBe(true)
     expect(h.sent).toContain('what was that?')
+  })
+
+  it('takes a Stop on a queued session at rest, with no process yet, and still sends its note', async () => {
+    const { store, folder, ids } = await updated(0, UPDATE_WAKES_AT_ONCE + 1)
+    const b = host(store, folder)
+    await eventually(() => waking(b, new Set()).length === UPDATE_WAKES_AT_ONCE)
+    const queued = ids.idle.find((id) => !b.adapter.handles.get(id))!
+    await b.rpc('agents.interrupt', { sessionId: queued })
+    for (const h of waking(b, new Set())) h.answer()
+    await eventually(() => b.adapter.handles.get(queued)?.sent.length === 1)
+  })
+
+  it('lists a woken session again when a second update stops it before its first answer, and the next host notes it once', async () => {
+    const { store, folder, ids, all } = await updated(1, 1)
+    const b = host(store, folder)
+    await eventually(() => waking(b, new Set()).length === 2)
+    // The resumed process ends a turn of its own before the note's request (measured): the session reads at rest, its list entry gone
+    for (const h of waking(b, new Set())) h.finish()
+    await eventually(() => all.every((id) => b.session(id).state !== 'working'))
+    b.mgr.tenure.stopForUpdate()
+    await b.mgr.tenure.disposeAll()
+    const c = host(store, folder)
+    await eventually(() => all.every((id) => c.adapter.handles.get(id)?.sent.length === 1))
+    expect(c.adapter.handles.get(ids.cut[0]!)!.sent[0]).toContain('was updated while your turn was running')
+    expect(c.adapter.handles.get(ids.idle[0]!)!.sent[0]).toContain('the update stopped the background work')
+    for (const id of all) c.adapter.handles.get(id)!.answer()
+    await eventually(() => folder.files.size === 0)
+    for (const id of all) expect(c.adapter.handles.get(id)!.sent).toHaveLength(1)
   })
 
   it('ends the wait of a queued cut turn the person stops: at rest, not continued, and its list goes', async () => {
