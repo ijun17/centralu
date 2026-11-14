@@ -542,3 +542,12 @@ draws") cut the same 3 minutes to 2.3 GB, and the footprint the table shows with
 real window's ~57 MB/h in either engine, and the churn fix is not that cure: it cuts what every event costs, not what
 is kept. What the step still lacks from real use: an app's view (the project board) in the window, opening many
 sessions one after another over hours (the `switched` step alone added 90 MB for 10 sessions), images, reconnects.
+
+**Opening sessions over time is flat too** (`--steps blank,long,revisit`, #2277). The long session stays open; every
+30 s the next of the 23 other sessions is opened, every other one read back a history page, for five rounds (57.5 min),
+with 4 sessions streaming out of view. WebKit (Mac, main): WebContent 120 MB at the start, 163 after the first round,
+then 156, 157, 157 and 156, and 156 settled. The window pays about 43 MB once for opening every session and nothing per
+re-open. Chromium (Windows, private bytes after GC) creeps about 9 MB a round, on main (184 → 220) and with this change
+(147 → 217) alike. That creep is not held by anything the page can reach: the JS heap stays at 25–37 MB, the heap
+diff from round 1 to the end has nothing over 0.6 MB, listeners and DOM nodes return to their start, and main's
+working set settles at its start (199 MB). It reads as allocator commit, not a leak. Next in line is the app's view.
