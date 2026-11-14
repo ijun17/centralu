@@ -263,7 +263,7 @@ describe('updateResumeFolder', () => {
     try {
       const f = updateResumeFolder(dir)
       recordUpdateCut(f, [{ id: 's1', seq: 3, woken: true }, { id: 's2', seq: 5 }])
-      const [name] = readdirSync(dir)
+      const name = readdirSync(dir)[0]!
       // A host killed after writing the temporary file, before the rename: the old list stands, and the temporary one is no list
       writeFileSync(join(dir, `${name}.tmp`), '{"v":1,"turns":[]}')
       expect(f.names()).toEqual([name])
@@ -276,7 +276,7 @@ describe('updateResumeFolder', () => {
       await removeTree(join(dir, `${name}.tmp`))
       mkdirSync(join(dir, `${name}.tmp`))
       const before = readFileSync(join(dir, name), 'utf8')
-      expect(() => f.replace(name!, '{"v":1,"turns":[]}\n')).toThrow()
+      expect(() => f.replace(name, '{"v":1,"turns":[]}\n')).toThrow()
       expect(readFileSync(join(dir, name), 'utf8')).toBe(before)
     } finally {
       await removeTree(dir)
