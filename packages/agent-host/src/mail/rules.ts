@@ -5,7 +5,7 @@ import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
 import type { MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
-import { PERSON, isPerson, parseAddress, senderKind } from './address.js'
+import { isPerson, senderKind } from './address.js'
 
 /**
  * The rules of the mailbox that need no store (docs/plans/mailbox.md §3.2, §3.3, §9.4): who may send which kind, who may

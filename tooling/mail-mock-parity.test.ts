@@ -65,8 +65,8 @@ function hostDriver(): Driver {
     },
     async answer(text, which) {
       const id = target(person.list().threads[0]!, which)
-      if (id === undefined) person.reply(root, text)
-      else person.reply(root, text, 'answer', id)
+      if (id === undefined) await person.reply(root, text)
+      else await person.reply(root, text, 'answer', id)
     },
     async close() {
       person.close(root)
