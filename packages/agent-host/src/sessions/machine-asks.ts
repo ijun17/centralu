@@ -88,7 +88,8 @@ export class MachineAsks {
       return s ? [{ taskId: a.taskId, session: s }] : []
     })
     const wantedSession = p.session?.trim()
-    if (!p.task && !wantedSession && mine.length === 1) return this.answer(mine[0]!.taskId, mine[0]!.session, target.name, signal)
+    const [only] = mine
+    if (!p.task && !wantedSession && only && mine.length === 1) return this.answer(only.taskId, only.session, target.name, signal)
     const picked = pickAskedSession(sessions, wantedSession, label, (s) => lastActiveOf(this.host.store.messages, s.id))
     if ('error' in picked) return { ok: false, error: picked.error }
     const chosen = picked.chosen

@@ -221,7 +221,8 @@ export class MailSessionsView {
         try {
           await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, late)
         } catch (e) {
-          if (input.depth) before === null ? settings.deleteAppSetting(hubAskDepthKey(id)) : settings.setAppSetting(hubAskDepthKey(id), before)
+          if (input.depth && before === null) settings.deleteAppSetting(hubAskDepthKey(id))
+          else if (input.depth && before !== null) settings.setAppSetting(hubAskDepthKey(id), before)
           throw e
         }
       },

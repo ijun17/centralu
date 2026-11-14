@@ -287,7 +287,8 @@ export class AskProjectFlow {
     if (target.away) {
       // A task already given there: the machine is down, and what became of it is the answer, not a refusal to ask
       const there = given.filter((g) => reader.describe(g.sessionId)?.project === target.name && (!wanted || g.sessionId === wanted))
-      if (!opts.task && there.length === 1) return this.awaitAsk(callerId, of(there[0]!, reader.describe(there[0]!.sessionId)?.name ?? there[0]!.sessionId), reader, signal)
+      const [only] = there
+      if (!opts.task && only && there.length === 1) return this.awaitAsk(callerId, of(only, reader.describe(only.sessionId)?.name ?? only.sessionId), reader, signal)
       return { ok: false, error: awayRefusal(target.machine, target.away, `${label} cannot be asked`) }
     }
     const listed = await reader.projectSessions(target)
@@ -363,8 +364,8 @@ export class AskProjectFlow {
     const prefix = `${target.hubId}.`
     const session = opts.session?.trim()
     const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(prefix) && (!session || a.sessionId === session || a.sessionId === `${prefix}${session}`))
-    if (kept.length === 1) {
-      const k = kept[0]!
+    const [k] = kept
+    if (k && kept.length === 1) {
       return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: sessionAddress(target.hubId, k.sessionId.slice(prefix.length)), sessionName: k.name, project }, null, signal)
     }
     const r = await hubs.ask(
