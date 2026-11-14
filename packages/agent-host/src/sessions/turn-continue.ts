@@ -78,11 +78,16 @@ export type ContinueNote = { cause: ContinueCause; text: string; line: string; l
  * restart, so forty at once were forty such requests in one burst. Three keeps a usual update (a few sessions) as quick as before
  */
 export const UPDATE_WAKES_AT_ONCE = 3
+/**
+ * A woken session that has said nothing this long after its note went in gives its slot up, its wake going on: a request that hangs must not
+ * keep the sessions after it from waking. Far past the first answers measured (2 to 4 s after the note, Claude Code 2.1.296 on haiku)
+ */
+export const UPDATE_SLOT_MS = 120_000
 
 /** A session an update's stop left (#1618, #1902): a cut turn (`turn`), or one at rest whose background work it ended; `stopped`: what else it ended there */
 export type UpdateCut = { sessionId: string; turn: boolean; stopped: Stopped | null }
 /** Where an update's wake is: waiting for a slot, being sent, or handed and waiting for the session's first answer */
-type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?: boolean }
+type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?: boolean; slot?: ReturnType<typeof setTimeout> }
 /**
  * How an update's wake went, for its owner (`HostTenure.updateStep`): `going` right before it is sent, `sent` once the tool took it, `dropped` when
  * it no longer stood (gone, stopped, its turn over), `failed` when it could not be sent, `left` when it failed as this host was leaving
@@ -280,7 +285,7 @@ export class TurnContinue {
     // A cut turn waiting for its update's wake has nothing running either: the Stop ends the wait, and the turn
     const u = this.updates.get(sessionId)
     const cut = !!u && u.phase !== 'waking' && u.turn
-    if (u && u.phase !== 'waking') this.endUpdate(sessionId, u, 'dropped')
+    if (cut) this.endUpdate(sessionId, u, 'dropped')
     return this.cancelHeld(sessionId) ?? (cut ? 'waiting' : null)
   }
 
@@ -368,6 +373,7 @@ export class TurnContinue {
     }
     this.stops.clear()
     // An update's wake not settled yet stays in its list, for the host after this one
+    for (const w of this.updates.values()) if (w.slot) clearTimeout(w.slot)
     this.updates.clear()
     this.idle()
   }
@@ -514,18 +520,17 @@ export class TurnContinue {
 
   /** The sessions an update's stop left, once this host's start is done (`HostTenure.restoreAtStart`): cut turns first, then the ones at rest */
   wakeAfterUpdate(cuts: readonly UpdateCut[]): void {
-    for (const c of [...cuts.filter((c) => c.turn), ...cuts.filter((c) => !c.turn)]) this.updates.set(c.sessionId, { ...c, phase: 'queued' })
+    for (const c of [...cuts.filter((c) => c.turn), ...cuts.filter((c) => !c.turn)]) if (!this.updates.has(c.sessionId)) this.updates.set(c.sessionId, { ...c, phase: 'queued' })
     if (this.updates.size) setTimeout(() => this.pump(), 0)
   }
 
   /** Wakes the next queued sessions while fewer than `UPDATE_WAKES_AT_ONCE` wait for their first answer */
   private pump(): void {
     if (this.host.leaving()) return
-    let out = [...this.updates.values()].filter((w) => w.phase !== 'queued').length
     for (const [id, w] of [...this.updates]) {
-      if (out >= UPDATE_WAKES_AT_ONCE) return
-      if (w.phase !== 'queued') continue
-      out++
+      if (w.phase !== 'queued' || this.updates.get(id) !== w) continue
+      // Counted each time: a wake that ends at once (a session gone) pumps from inside this loop
+      if ([...this.updates.values()].filter((x) => x.phase !== 'queued').length >= UPDATE_WAKES_AT_ONCE) return
       void this.fireUpdate(id, w)
     }
   }
@@ -533,6 +538,7 @@ export class TurnContinue {
   /** An update's wake is over (answered, or `step`): its slot goes to the next */
   private endUpdate(id: string, w: UpdateWait, step: UpdateStep | null, err?: unknown): void {
     if (this.updates.get(id) === w) this.updates.delete(id)
+    if (w.slot) clearTimeout(w.slot)
     if (step) this.settle(w, step, err)
     this.pump()
   }
@@ -554,12 +560,15 @@ export class TurnContinue {
         handed: () => {
           handed = true
           w.phase = 'waking'
+          w.slot = setTimeout(() => this.endUpdate(id, w, null), UPDATE_SLOT_MS)
+          w.slot.unref?.()
         },
       })
     } catch (err) {
       // Leaving: its stop lists it again and the host after this one sends it
       if (this.host.leaving()) return this.host.updateStep(w, 'left')
-      if (!w.settled) this.endUpdate(id, w, 'failed', err)
+      // The session was replaced meanwhile (deleted and made again): this note was not its
+      if (!w.settled) this.endUpdate(id, w, this.host.meta.get(id) === m ? 'failed' : 'dropped', err)
       return
     }
     // In while this host is leaving (a second update's stop): that stop lists it again, and nothing is settled from here

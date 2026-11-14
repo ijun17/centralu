@@ -104,10 +104,13 @@ the person's Continue would.
   answer (any output of its first model request), or any other end of that wake (an error or a limit, a state other than working such
   as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). A bare turn end is not one: measured
   with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the note goes
-  in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. The burst is the first request: after a restart each one re-reads the whole
+  in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. A woken session that has said
+  nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its wake going on, so a
+  request that hangs does not keep the rest from waking. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
-  its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes);
+  its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;
+  a session at rest keeps its queued note);
   a message of the person's sends the note at once, outside the queue, since the message does not say what the stop ended. A host that
   leaves before the queue drains leaves the rest listed, and the host after it wakes them (a session woken meanwhile and in its wake turn
   is a turn that stop cuts, and is continued as one). There is no setting and no wait in the header: Centralu cut these turns, the person

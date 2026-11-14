@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -7,7 +7,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { createRpcHandler } from '../rpc.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { TurnContinue, UPDATE_WAKES_AT_ONCE } from './turn-continue.js'
+import { TurnContinue, UPDATE_SLOT_MS, UPDATE_WAKES_AT_ONCE } from './turn-continue.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -123,6 +123,25 @@ async function updated(cut: number, idle: number) {
 /** The sessions of host `b` whose note went in and that have not answered yet */
 const waking = (b: ReturnType<typeof host>, answered: Set<string>) => [...b.adapter.handles.values()].filter((h) => h.sent.length > 0 && !answered.has(h.sessionId))
 
+/** The engine alone, on a host of plain maps: `n` sessions at rest that an update's stop left, each send handed at once */
+function engine(n: number) {
+  const meta = new Map<string, SessionInfo>()
+  const sent: string[] = []
+  const steps: string[] = []
+  const engine = new TurnContinue({
+    meta, leaving: () => false, compactTurn: () => false, running: () => true, settings: () => ({ network: true, limit: true }), reachable: async () => true,
+    note: () => {}, changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
+    send: async (id, _note, gate) => {
+      sent.push(id)
+      if (gate.live()) gate.handed()
+    },
+  })
+  const ids = Array.from({ length: n }, (_, i) => `s${i}`)
+  for (const id of ids) meta.set(id, { id, state: 'idle' } as SessionInfo)
+  engine.wakeAfterUpdate(ids.map((sessionId) => ({ sessionId, turn: false, stopped: null })))
+  return { engine, meta, sent, steps, ids }
+}
+
 describe('the sessions an update stopped wake a few at a time (#1913)', () => {
   it(`never has more than ${UPDATE_WAKES_AT_ONCE} waiting for their first answer, cut turns first, and wakes every one in the end`, async () => {
     const { store, folder, ids, all } = await updated(2, 6)
@@ -158,27 +177,45 @@ describe('the sessions an update stopped wake a few at a time (#1913)', () => {
   })
 
   it("keeps the slot over a resumed process's own turn end with no request: the burst is the note's request (engine)", async () => {
-    const meta = new Map<string, SessionInfo>()
-    const sent: string[] = []
-    const steps: string[] = []
-    const engine = new TurnContinue({
-      meta, leaving: () => false, compactTurn: () => false, running: () => true, settings: () => ({ network: true, limit: true }), reachable: async () => true,
-      note: () => {}, changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
-      send: async (id, _note, gate) => {
-        sent.push(id)
-        if (gate.live()) gate.handed()
-      },
-    })
-    const ids = Array.from({ length: UPDATE_WAKES_AT_ONCE + 1 }, (_, i) => `s${i}`)
-    for (const id of ids) meta.set(id, { id, state: 'idle' } as SessionInfo)
-    engine.wakeAfterUpdate(ids.map((sessionId) => ({ sessionId, turn: false, stopped: null })))
-    await eventually(() => sent.length === UPDATE_WAKES_AT_ONCE && steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
+    const e = engine(UPDATE_WAKES_AT_ONCE + 1)
+    await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
     // Claude Code ends a turn of its own right after a resume, before the note's request (measured): not the wake's answer
-    engine.observe({ type: 'turn_complete', sessionId: 's0' })
-    expect(sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
+    e.engine.observe({ type: 'turn_complete', sessionId: 's0' })
+    expect(e.sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
     // Its first answer is
-    engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
-    expect(sent).toEqual(ids)
+    e.engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
+    expect(e.sent).toEqual(e.ids)
+  })
+
+  it('counts the slots again when a wake ends at once inside the pump: a session gone first does not let a fourth in (engine)', async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE + 2)
+    e.meta.delete('s0')
+    await eventually(() => e.steps.includes('s0:dropped') && e.sent.length === UPDATE_WAKES_AT_ONCE)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(e.sent).toEqual(['s1', 's2', 's3'])
+  })
+
+  it("leaves a session at rest its note when the person presses Stop on it: only a cut turn's wait is ended (engine)", async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE + 1)
+    await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE)
+    expect(e.engine.cancel('s3')).toBe(null)
+    e.engine.observe({ type: 'message_delta', sessionId: 's0', role: 'assistant', text: 'on it' })
+    expect(e.sent).toEqual(e.ids)
+  })
+
+  it('gives a slot up when the woken session says nothing for UPDATE_SLOT_MS, its wake going on (engine)', async () => {
+    vi.useFakeTimers()
+    try {
+      const e = engine(UPDATE_WAKES_AT_ONCE + 1)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(e.sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
+      await vi.advanceTimersByTimeAsync(UPDATE_SLOT_MS - 1)
+      expect(e.sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(e.sent).toEqual(e.ids)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("sends a queued session's note at once when the person writes to it, outside the queue", async () => {

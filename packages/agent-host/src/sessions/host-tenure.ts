@@ -120,7 +120,8 @@ export class HostTenure {
       if (turn) this.host.children.noteContinuedCut(sessionId)
       return
     }
-    if (step === 'left' || step === 'failed') this.host.children.dropContinuedCut(sessionId)
+    // Not continued after all (or by the next host): the turn's end is no continued one's
+    if (step !== 'sent') this.host.children.dropContinuedCut(sessionId)
     // Left: still listed, for the host that starts next
     if (step === 'left') return
     this.host.restartPolicy.continuingTurns.delete(sessionId)
