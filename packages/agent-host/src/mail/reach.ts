@@ -29,7 +29,7 @@ export type ReachHost = {
    * from a session that is alive elsewhere; mail to it is the link's to carry, never written here. Undefined: not reached
    */
   foreign?(address: string): { name: string } | undefined
-  /** Whether `hostId` is a hub that links this host and offers mail (`MailAcross.isHub`): only its person writes as the person from there (#1987) */
+  /** Whether `hostId` is a hub that links this host, reachable now or not (`MailAcross.isHub`): only its person writes as the person from there (#1987) */
   hubPerson?(hostId: string): boolean
 }
 

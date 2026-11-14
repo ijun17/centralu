@@ -161,7 +161,7 @@ export class MailAcross {
     return { kind: 'hub', hubId: p.host }
   }
 
-  /** Whether `hostId` is a hub that links this host and offers mail, reachable now or not (`MailAcross` peers) */
+  /** Whether `hostId` is a hub that links this host, reachable now or not: one that offered here on this run, or one kept from an earlier run that took mail (`LinkedHubs.peer`) */
   isHub(hostId: string): boolean {
     return this.peers?.hub?.(hostId) !== undefined
   }

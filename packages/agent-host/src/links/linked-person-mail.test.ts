@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
@@ -7,6 +7,8 @@ import { PERSON, PERSON_ID, sessionAddress } from '../mail/address.js'
 import { MailAcross } from '../mail/across.js'
 import { LinkedHubs, MAIL_HUBS_KEY } from './linked-hubs.js'
 import { mailPeers } from './mail-peers.js'
+import { appsPeers } from './apps-across.js'
+import { LinkedApps } from './linked-apps.js'
 import { MailPerson, personSessions } from '../mail/person.js'
 import { refusedForAsync } from '../mail/messages.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -237,5 +239,47 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     expect(hubs(settings(JSON.stringify([{ id: 'hub-b', name: 'Old', you: 'm1', at: old }]))).mailHubs()).toEqual([])
     expect(hubs(settings('not json')).mailHubs()).toEqual([])
     expect(hubs(settings('[{"id":1}]')).mailHubs()).toEqual([])
+  })
+
+  it('30 days count from when the link was last up, not the offer, and a hub down that long is forgotten while running too', () => {
+    vi.useFakeTimers()
+    try {
+      const day = 24 * 60 * 60_000
+      const s = settings(null)
+      const h = hubs(s)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+      vi.advanceTimersByTime(20 * day)
+      h.gone(1)
+      vi.advanceTimersByTime(20 * day)
+      // Up until 20 days ago: still known, here and at the next start
+      expect(h.mailHubs().map((x) => x.id)).toEqual(['hub-a'])
+      expect(hubs(s).mailHubs().map((x) => x.id)).toEqual(['hub-a'])
+      vi.advanceTimersByTime(11 * day)
+      expect(h.mailHubs()).toEqual([])
+      expect(h.peer('hub-a')).toBeUndefined()
+      expect(hubs(s).mailHubs()).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a kept hub that has not offered on this run says nothing of apps: a session it started keeps its record, and its app copies here do not run (#1938)', () => {
+    const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
+    s.setAppSetting(startedByHubKey('s1'), JSON.stringify({ id: 'hub-a', name: 'Desk', apps: true }))
+    const h = hubs(s)
+    expect(appsPeers({ hubs: h, settings: s }).startedBy('s1')).toEqual({ hub: { id: 'hub-a', name: 'Desk', apps: true }, link: undefined })
+    const apps = new LinkedApps()
+    apps.usePeers(appsPeers({ hubs: h, settings: s }))
+    expect(apps.givingHub('s1')).toMatchObject({ id: 'hub-a', reachable: false, answers: true })
+  })
+
+  it('two hubs, one away and one up, and no record of which started the session: the mail stays here, with the several-hubs answer', () => {
+    const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
+    const h = hubs(s)
+    h.offer(2, { hub: { id: 'hub-b', name: 'Laptop' }, on: false, mail: true, you: 'm1' })
+    const a = new MailAcross({ hostId: 'hub-m', service: {} as never, records: { acrossRows: () => [] } as never, reach: {} as never, ownEntries: () => [] })
+    a.usePeers({ selfName: () => 'Remote box', hubs: () => h.mailHubs(), hub: (id) => h.peer(id), startingHub: () => null })
+    expect(h.mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false], ['hub-b', true]])
+    expect(a.personTarget('s', false)).toEqual({ several: true })
   })
 })

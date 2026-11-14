@@ -24,7 +24,9 @@ import type { StartingHub } from '../sessions/hub-preset.js'
  */
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null; offeredAt: number }
+type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null; upAt: number; offered: boolean }
+// `upAt`: the last time its link was known up (an offer, or the end of the connection it offered on). `offered`: it offered on
+// this run; a hub kept from an earlier run (`MAIL_HUBS_KEY`) has not, and stands only for mail to the person until it does
 
 /** How long a message to a hub may take before the send is refused as not known to have arrived */
 const MAIL_MS = 30_000
@@ -52,7 +54,11 @@ export type LinkedHubsDeps = {
  */
 export const MAIL_HUBS_KEY = 'mail_hubs'
 const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.string().max(200), you: z.string().max(200).nullable(), at: z.number() })).max(50)
-/** How long a hub that offered mail is known after its last offer: one removed while away is not refused under for good */
+/**
+ * How long a hub that takes mail is known after its link was last up. This host cannot learn that a hub was removed while
+ * away, so mail to the person names it as away meanwhile, which is the right answer for one that is only off. 30 days
+ * outlasts a hub computer left off over a holiday or a long trip, and stops naming one that is gone within a month
+ */
 const KEPT_MAIL_HUB_MS = 30 * 24 * 60 * 60_000
 
 /** The words a call that failed for an older hub says (it has no such method) */
@@ -68,20 +74,27 @@ export class LinkedHubs {
 
   constructor(private readonly deps: LinkedHubsDeps) {
     const raw = deps.settings?.appSetting(MAIL_HUBS_KEY) ?? null
-    let kept: z.infer<typeof KeptMailHubs> = []
+    let kept: unknown = []
     try {
-      kept = KeptMailHubs.catch([]).parse(raw === null ? [] : JSON.parse(raw))
+      kept = raw === null ? [] : JSON.parse(raw)
     } catch {
-      kept = []
+      // Not JSON: no hub is kept, as for any value that does not read
     }
-    for (const h of kept) {
-      if (Date.now() - h.at < KEPT_MAIL_HUB_MS) this.hubs.set(h.id, { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, offeredAt: h.at })
+    const read = KeptMailHubs.safeParse(kept)
+    for (const h of read.success ? read.data : []) {
+      const hub: Hub = { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false }
+      if (!this.expired(hub)) this.hubs.set(h.id, hub)
     }
+  }
+
+  /** A hub that takes mail whose link has been down longer than `KEPT_MAIL_HUB_MS`: no longer known for mail */
+  private expired(h: Hub): boolean {
+    return h.client === null && Date.now() - h.upAt >= KEPT_MAIL_HUB_MS
   }
 
   /** The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`) */
   private keepMailHubs(): void {
-    const list = [...this.hubs.values()].filter((h) => h.mail).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.offeredAt }))
+    const list = [...this.hubs.values()].filter((h) => h.mail && !this.expired(h)).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.upAt }))
     this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
   }
 
@@ -101,7 +114,7 @@ export class LinkedHubs {
     const prev = this.hubs.get(o.hub.id)
     const projects = o.on ? (prev?.projects ?? null) : null
     const name = oneLineText(o.hub.name, 120) || o.hub.id
-    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, offeredAt: Date.now() })
+    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, upAt: Date.now(), offered: true })
     if (mail || prev?.mail) this.keepMailHubs()
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
@@ -117,7 +130,14 @@ export class LinkedHubs {
   /** A connection ended: a hub it carried is not reachable until it offers again */
   gone(client: number): void {
     this.waiting.delete(client)
-    for (const h of this.hubs.values()) if (h.client === client) h.client = null
+    let mail = false
+    for (const h of this.hubs.values()) {
+      if (h.client !== client) continue
+      h.client = null
+      h.upAt = Date.now()
+      mail ||= h.mail
+    }
+    if (mail) this.keepMailHubs()
   }
 
   /** Whether any hub offered its projects (a session's project list says nothing of hubs otherwise) */
@@ -182,8 +202,9 @@ export class LinkedHubs {
    * before it leaves a call from a machine unanswered
    */
   appsPeer(hubId: string): AppsPeer | undefined {
+    // A hub kept from an earlier run that has not offered on this one says nothing of apps: the session's record of it decides (`givingHub`)
     const h = this.hubs.get(hubId)
-    if (!h) return undefined
+    if (!h?.offered) return undefined
     return {
       id: h.id,
       name: h.name,
@@ -218,6 +239,14 @@ export class LinkedHubs {
     // A hub that offered asks and not mail is from before it: called all the same, it answers "Unknown method", which names the cause
     const h = this.hubs.get(hubId)
     if (!h) return undefined
+    if (this.expired(h) && h.mail) {
+      // Down past `KEPT_MAIL_HUB_MS`: forgotten for mail, and altogether when mail was all it offered
+      h.mail = false
+      const forgotten = !h.asks && !h.apps
+      if (forgotten) this.hubs.delete(h.id)
+      this.keepMailHubs()
+      if (forgotten) return undefined
+    }
     return {
       id: h.id,
       name: h.name,
@@ -235,7 +264,7 @@ export class LinkedHubs {
   mailHubs(): NonNullable<ReturnType<LinkedHubs['peer']>>[] {
     return [...this.hubs.values()].flatMap((h) => {
       const p = h.mail ? this.peer(h.id) : undefined
-      return p ? [p] : []
+      return p && h.mail ? [p] : []
     })
   }
 
