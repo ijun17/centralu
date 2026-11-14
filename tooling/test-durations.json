@@ -1,5 +1,5 @@
 {
-  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05; 4 files of #2239 timed on a local Windows run, 2026-11-13; 1 file of #1987 timed on a local Windows run, 2026-11-14",
+  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05; 4 files of #2239 timed on a local Windows run, 2026-11-13; 1 file of #1987 timed on a local Windows run, 2026-11-14; 2 files of #2270 timed: store-owed-work-step.test.ts by the Windows shards of run 43607850102, mail.params.test.ts on a local Windows run, 2026-11-15",
   "files": {
     "packages/agent-host/src/adapters/acp/adapter.test.ts": 0,
     "packages/agent-host/src/adapters/acp/normalize.test.ts": 0,
@@ -210,6 +210,7 @@
     "packages/agent-host/src/dev-services/store-migrations.test.ts": 2.5,
     "packages/agent-host/src/dev-services/store-min-reader.test.ts": 10.6,
     "packages/agent-host/src/dev-services/store-older-builds.test.ts": 3.9,
+    "packages/agent-host/src/dev-services/store-owed-work-step.test.ts": 3.2,
     "packages/agent-host/src/dev-services/store-purge-settings.test.ts": 0.1,
     "packages/agent-host/src/dev-services/store-subagent-trash.test.ts": 1.1,
     "packages/agent-host/src/dev-services/store-subagent.test.ts": 0.9,
@@ -518,6 +519,7 @@
     "packages/protocol/src/app-key.test.ts": 0,
     "packages/protocol/src/app-link.test.ts": 0,
     "packages/protocol/src/client.test.ts": 0.2,
+    "packages/protocol/src/commands/methods/mail.params.test.ts": 0,
     "packages/protocol/src/context-share.test.ts": 0,
     "packages/protocol/src/error-message.test.ts": 0,
     "packages/protocol/src/launch-refusal.test.ts": 0,
