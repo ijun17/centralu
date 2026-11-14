@@ -76,6 +76,11 @@ export class LinkedHubs {
 
   /** Run each time a hub offers mail on a connection (`onMailOffer`) */
   private readonly mailOffered = new Set<(hubId: string) => void>()
+  /**
+   * While a hub that takes mail is connected, the list is written again each `STAMP_MS` (`stampWhileUp`). No stop step:
+   * it is unref'd, and a host that stops closes its connections first, whose `gone` stops it
+   */
+  private stamp: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly deps: LinkedHubsDeps) {
     const raw = deps.settings?.appSetting(MAIL_HUBS_KEY) ?? null
@@ -92,16 +97,24 @@ export class LinkedHubs {
     }
   }
 
-  /** While a hub that takes mail is connected, it is written again each `STAMP_MS`; with none, nothing runs */
-  private stamp: ReturnType<typeof setInterval> | null = null
+  /** The daily write runs while a hub that takes mail is connected, and not otherwise (`keepMailHubs` keeps it so) */
   private stampWhileUp(): void {
     const up = [...this.hubs.values()].some((h) => h.mail && h.client !== null)
     if (up && !this.stamp) {
-      this.stamp = setInterval(() => this.keepMailHubs(), STAMP_MS)
+      this.stamp = setInterval(() => this.stampSafely(), STAMP_MS)
       this.stamp.unref?.()
     } else if (!up && this.stamp) {
       clearInterval(this.stamp)
       this.stamp = null
+    }
+  }
+
+  /** The daily write, from a timer: a write that throws (a locked or closed store, a full disk) is logged, not a crash of the host */
+  private stampSafely(): void {
+    try {
+      this.keepMailHubs()
+    } catch (err) {
+      console.error(`[agent-host] could not write down the hubs that take mail: ${errorMessage(err)}`)
     }
   }
 
@@ -110,8 +123,12 @@ export class LinkedHubs {
     return h.client === null && Date.now() - h.upAt >= KEPT_MAIL_HUB_MS
   }
 
-  /** The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`) */
+  /**
+   * The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`). Every change in whether one is connected comes
+   * through here, so the daily write is started or stopped here too
+   */
   private keepMailHubs(): void {
+    this.stampWhileUp()
     // A hub connected now is up now
     const now = Date.now()
     for (const h of this.hubs.values()) if (h.client !== null) h.upAt = now
@@ -130,7 +147,6 @@ export class LinkedHubs {
     const apps = o.apps === true
     if (!o.on && !mail && !apps) {
       if (this.hubs.delete(o.hub.id)) this.keepMailHubs()
-      this.stampWhileUp()
       return
     }
     const prev = this.hubs.get(o.hub.id)
@@ -138,7 +154,6 @@ export class LinkedHubs {
     const name = oneLineText(o.hub.name, 120) || o.hub.id
     this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, upAt: Date.now(), offered: true })
     if (mail || prev?.mail) this.keepMailHubs()
-    this.stampWhileUp()
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
     for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name, apps })
@@ -161,7 +176,6 @@ export class LinkedHubs {
       mail ||= h.mail
     }
     if (mail) this.keepMailHubs()
-    this.stampWhileUp()
   }
 
   /** Whether any hub offered its projects (a session's project list says nothing of hubs otherwise) */
