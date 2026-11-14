@@ -20,8 +20,7 @@ import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, t
 import { credentialCheck, usedEvent, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { switchStatusCommand } from './update.js'
-import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
-import { sessionAddress } from '../mail/address.js'
+import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { activityCounts } from '../idle.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
@@ -2554,8 +2553,8 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await remote.mgr.inputs.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
     expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
   })
-  it('sends nothing when the person started a turn in the session while the question stood, and names the mail it can take (#1186)', async () => {
-    const { remote, hub, name, ask, answer, card } = await rig()
+  it('sends nothing when the person started a turn in the session while the question stood', async () => {
+    const { remote, name, ask, answer, card } = await rig()
     const call = ask({ project: name, task: 'say hello' })
     await eventually(() => !!card())
     // The person works in that session there while the card is up: a turn that waits on them
@@ -2563,9 +2562,9 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
     await answer('allow')
     const r = await call
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
-    // Mail crosses (#2067): the refusal names the send to the session's address, in this hub's naming
-    expect(r).toMatchObject({ error: expect.stringContaining(`mail(action="send", to="${sessionAddress(hubSelfId(hub.store), 'm1.w1')}")`) })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood') })
+    // This hub has no mailbox, so no mail is named (#1186; reverse-asks.test.ts names it where both take mail)
+    expect(r).toMatchObject({ error: expect.stringContaining('nothing was sent. Name another session, or ask again later.') })
     // The task did not join their turn: it is nowhere in the conversation there
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)

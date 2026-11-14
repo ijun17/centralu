@@ -295,6 +295,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     return s !== undefined && (s.pendingQuestions.some((q) => q.requestId === requestId) || s.pendingApproval?.requestId === requestId)
   }
   const hooks: MailHooks = {
+    address: addressOf,
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => {
       service.stops.partyGone(addressOf(id))

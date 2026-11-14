@@ -2,9 +2,6 @@ import { frameField, oneLineText } from '@cc/protocol'
 import { realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
-import type { Store } from '../dev-services/store.js'
-import { hubSelfId } from '../links/stored.js'
-import { sessionAddress } from '../mail/address.js'
 import type { MessageReader } from './transcript-view.js'
 import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
 
@@ -132,13 +129,31 @@ export const NO_WORDS = '(its turn ended without saying anything: read_session s
 export const MACHINE_UNREACHABLE = '(not read: its machine could not be reached)'
 export const IN_PAUSE_REPORT = '(in the paused report before this one)'
 
+/** What made a session asked across a link busy: a turn not the caller's (its state), another session's task, or either while the person's card stood */
+export type BusyAcross = { turn: string } | 'task' | 'during_card'
+
 /**
- * The way on from a busy session on the other side of a link, for an ask either way (#1186 item 10): the ask is refused, but mail crosses (#2067) and
- * the session's own host gives it the mail as its own mail goes in: into a turn whose tool takes input, else once it is at rest (docs/plans/mailbox.md
- * §10.6.2). The address is the session's in this hub's naming, which a linked machine reads as it is
+ * How a caller may still leave a busy session across a link work (`MailSessionsView.wayAcross`): mail to its address, which crosses (#2067) and goes in
+ * as soon as the session can take it (into a turn whose tool takes input, else at rest, docs/plans/mailbox.md §10.6.2); none when the machine
+ * of the link takes no mail (`older`, its name), or this host has no mailbox (null)
  */
-export function mailInstead(hub: Store, sessionId: string): string {
-  return `To leave it work, mail it: mail(action="send", to="${sessionAddress(hubSelfId(hub), sessionId)}"); it gets the mail as soon as it can take it. Or name another session.`
+export type WayAcross = { mail: string } | { older: string } | null
+
+/**
+ * Every refusal of an ask across a link, either way, whose session is busy (#1186 item 10): one wording for the hub's ask of a machine
+ * (`askLinkedProject`) and a machine's ask of the hub (`MachineAsks`), before and after the person's card. A task does not cross yet (#1948 step 6)
+ */
+export function busyAcross(session: { name: string; label: string }, why: BusyAcross, way: WayAcross): string {
+  const what = `The session "${session.name}" in ${session.label}`
+  const busy =
+    why === 'task' ? `${what} is busy with another session's task.`
+    : why === 'during_card' ? `${what} became busy while the question to the person stood; nothing was sent.`
+    : `${what} is busy with a turn that is not yours (${why.turn}).`
+  const on =
+    way && 'mail' in way ? `To leave it work, mail it: mail(action="send", to="${way.mail}"); it gets the mail as soon as it can take it. Or name another session.`
+    : way ? `${way.older} runs a Centralu that takes no mail from another computer: update Centralu there, or name another session.`
+    : 'Name another session, or ask again later.'
+  return `${busy} ${on}`
 }
 
 /**

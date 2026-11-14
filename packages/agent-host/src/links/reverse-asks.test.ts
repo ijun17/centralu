@@ -318,4 +318,43 @@ describe('a busy session across the link is left work by mail (#1186)', () => {
     free()
     await deliveredTo(machine, there, id)
   })
+
+  it("a hub session that became busy while a machine's ask stood at the person's card is refused with the same mail line", async () => {
+    const { machine, hub } = await mailRig()
+    const call = machine.ask({ project: hub.projectName, task: 'review the branch' })
+    await eventually(() => !!hub.card())
+    const pair = hub.card()!
+    // The person works in the asked session while the card is up: a turn that waits on them
+    await busy(hub.mgr, 'h1')
+    hub.mgr.inputs.respondApproval('h1', pair.requestId, 'allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood; nothing was sent.') })
+    expect(mailTo(r)).toBe(sessionAddress(hub.id, 'h1'))
+  })
+
+  it("a machine session that became busy while the hub's ask stood at the person's card is refused with the same mail line", async () => {
+    const { machine, hub } = await mailRig()
+    const project = (await machine.mgr.projectRegistry.listProjects())[0]!.name
+    const call = hub.mgr.askProject('h1', { project, session: 'w1', task: 'review the branch' })
+    await eventually(() => !!hub.card())
+    const consent = hub.card()!
+    await busy(machine.mgr, 'w1')
+    hub.mgr.inputs.respondApproval('h1', consent.requestId, 'allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood; nothing was sent.') })
+    expect(mailTo(r)).toBe(sessionAddress(hub.id, 'm1.w1'))
+  })
+
+  it('a machine that takes no mail is told to update, not to mail', async () => {
+    // The hub takes mail; the machine runs a build that does not
+    const machine = await machineHost()
+    const hub = await hubHost(machine.port, { mail: true })
+    await eventually(() => hub.machine().status === 'connected')
+    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
+    await eventually(() => machine.hubs.any)
+    await busy(hub.mgr, 'h1')
+    const r = await machine.ask({ project: hub.projectName, task: 'review the branch' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box runs a Centralu that takes no mail from another computer: update Centralu there') })
+    expect(mailTo(r)).toBeUndefined()
+  })
 })

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { ANSWER_GROUNDS, ASK_WAIT_MS, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
+import { ANSWER_GROUNDS, ASK_WAIT_MS, askFrame, busyAcross, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
@@ -77,6 +77,25 @@ describe('the refusal that lists the sessions an ask could name', () => {
     expect(picked).toEqual({
       error: expect.stringContaining('Sessions (name, state, last active):\n{"id":"s1","name":"One","state":"idle","lastActive":"2026-01-02 03:04"}\n{"id":"s2","name":"Two","state":"working","lastActive":null}'),
     })
+  })
+})
+
+/* #1186: every refusal of an ask across a link whose session is busy, either way, is this one wording */
+describe('the refusal of a busy session across a link', () => {
+  const s = { name: 'w1', label: 'app on Remote box' }
+  const mail = { mail: 'session:hub-1a2b3c4d/m1.w1' }
+  it('says what made it busy, then how to leave it work', () => {
+    expect(busyAcross(s, { turn: 'working' }, mail)).toBe(
+      'The session "w1" in app on Remote box is busy with a turn that is not yours (working). To leave it work, mail it: mail(action="send", to="session:hub-1a2b3c4d/m1.w1"); it gets the mail as soon as it can take it. Or name another session.',
+    )
+    expect(busyAcross(s, 'task', mail)).toMatch(/^The session "w1" in app on Remote box is busy with another session's task\. To leave it work, mail it: /)
+    expect(busyAcross(s, 'during_card', mail)).toMatch(/^The session "w1" in app on Remote box became busy while the question to the person stood; nothing was sent\. To leave it work, mail it: /)
+  })
+  it('names the machine to update when it takes no mail, and only the choices left with no mailbox', () => {
+    expect(busyAcross(s, 'task', { older: 'Remote box' })).toBe(
+      "The session \"w1\" in app on Remote box is busy with another session's task. Remote box runs a Centralu that takes no mail from another computer: update Centralu there, or name another session.",
+    )
+    expect(busyAcross(s, 'task', null)).toBe("The session \"w1\" in app on Remote box is busy with another session's task. Name another session, or ask again later.")
   })
 })
 

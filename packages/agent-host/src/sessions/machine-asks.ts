@@ -2,7 +2,7 @@ import type { HubAskParams, HubAskResult, HubProject, SessionState } from '@cc/p
 import { oneLineText } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, mailInstead, pickAskedSession, taskLine } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, busyAcross, clipAnswer, pickAskedSession, taskLine } from './ask-project.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { MACHINE_ASKER } from './hub-sender.js'
@@ -15,7 +15,7 @@ import { isOrdinary } from './tool-profiles.js'
  * What a linked machine's ask reaches of the session manager (#550), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
  */
-export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'deliver' | 'emit' | 'meta' | 'store'>
+export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'deliver' | 'emit' | 'meta' | 'store' | 'wayAcross'>
 
 /** The machine a call came from, as the link it came in on names it: never what the call says */
 export type AskingMachine = { id: string; name: string }
@@ -47,7 +47,7 @@ const UNREAD_KEPT_MS = 60 * 60_000
  *     passes with no card. Deny is not remembered.
  *   - The target is an existing ordinary session, as for an ask here (#614): never created, never an app's or a
  *     builder's. A session busy with a turn gets nothing: the refusal names the mail it gets as soon as it can take it
- *     (`mailInstead`, #1186), as for step 3's asks the other way (§12.6).
+ *     (`busyAcross`, #1186), as for step 3's asks the other way (§12.6).
  *   - The task arrives framed as from that session on that machine (`MACHINE_ASKER`, never the person and never an
  *     assistant), and the session works on it one level deeper than the asker (#867), so it cannot ask on.
  *   - The answer goes back cut to size. Paths in it are this computer's: the machine lists them and opens none.
@@ -119,12 +119,12 @@ export class MachineAsks {
         error:
           other === pending
             ? `${label} is still working on your last task in the session "${chosen.name}". Call ask_project again with that session and no task to wait for it.`
-            : `The session "${chosen.name}" in ${label} is busy with another session's task. Name another session, or ask again later.`,
+            : busyAcross({ name: chosen.name, label }, 'task', this.host.wayAcross(chosen.id, machine.id, machine.name)),
       }
     }
     if (!p.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
     if (this.busy(chosen.id)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} is busy with a turn that is not yours (${chosen.state}). ${mailInstead(this.host.store, chosen.id)}` }
+      return { ok: false, error: busyAcross({ name: chosen.name, label }, { turn: chosen.state }, this.host.wayAcross(chosen.id, machine.id, machine.name)) }
     }
 
     // The pair's card (owner decision 2026-10-18): asked once, then remembered until withdrawn
@@ -177,7 +177,7 @@ export class MachineAsks {
     const now = this.ordinary(target.id).find((s) => s.id === chosen.id)
     if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
     if (this.busy(chosen.id) || [...this.given.values()].some((g) => g.sessionId === chosen.id && !g.wait.finished)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} started a turn while the question to the person stood; nothing was sent. ${mailInstead(this.host.store, chosen.id)}` }
+      return { ok: false, error: busyAcross({ name: chosen.name, label }, 'during_card', this.host.wayAcross(chosen.id, machine.id, machine.name)) }
     }
     return this.give(machine, p, p.task, target, chosen, key, signal)
   }

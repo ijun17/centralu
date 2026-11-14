@@ -15,6 +15,7 @@ import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { ChildReports, SessionLastResponse } from './child-reports.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
+import type { WayAcross } from './ask-project.js'
 import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
@@ -25,6 +26,8 @@ import { agentRunText } from './tool-answers.js'
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /** A session's mail address, as this host's mailbox writes it (`addressOf`) */
+  address?(sessionId: string): string
   /** A session stopped without answering (docs/plans/mailbox.md "The stop notice"): the senders of the questions it left unanswered are told once */
   stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
   /** The wait of a stop Centralu continues by itself ended, continued or not (#1415): who the stop's notice was held from hears it once */
@@ -121,6 +124,19 @@ export class MailSessionsView {
 
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   hooks: MailHooks | null = null
+
+  /** Whether a linked machine takes mail from this hub (#2067 item 2), as the manager is told it (`useMachineMail`) */
+  machineMail: ((machineId: string) => boolean) | null = null
+
+  /**
+   * How to leave a busy session across the link to `machineId` work, for an ask's refusal (`busyAcross`, #1186): mail to its address, unless that machine
+   * takes no mail (an older build: told to update) or this host has no mailbox
+   */
+  wayAcross(sessionId: string, machineId: string, machine: string): WayAcross {
+    const address = this.hooks?.address?.(sessionId)
+    if (!address) return null
+    return this.machineMail?.(machineId) === false ? { older: machine } : { mail: address }
+  }
 
   /** A child this host started on a linked machine, by its name there (#2067): mail refuses it as elsewhere, not as gone */
   onLinkedMachine(sessionId: string): { name: string } | undefined {
