@@ -32,7 +32,7 @@ export type LaterTurn = {
 /**
  * Whether a later turn of paused work is an update its caller hears at once (#1540): one that said something of its own, in the work's own turn.
  * A turn with no words (a Monitor's look), Centralu's compaction, a turn others wrote into, and every turn once the person wrote to the session tell
- * nothing; the final report still comes when the work ends. A linked machine's children's rule, until mail crosses links (#1948 step 6); this host's
+ * nothing; the final report still comes when the work ends. A linked machine's children's rule, until their tasks go as mail (#1948 step 6); this host's
  * children answer with their last response (docs/plans/mailbox.md §10.6.3)
  */
 export function isPauseUpdate(turn: LaterTurn, words: string): boolean {
@@ -129,7 +129,7 @@ export type LinkedEvent = {
  * the work a session there ends its turn with (#723).
  *
  * The end of a turn the Assistant waits on is its report, once, as this host's own sessions' reports were before #1948
- * step 3 (this host's are now the mailbox's, docs/plans/mailbox.md §10.6.3; this path stays until mail crosses links). A turn that **completes** while the session's own background work still runs there (the machine's
+ * step 3 (this host's are now the mailbox's, docs/plans/mailbox.md §10.6.3; this path stays until their tasks go as mail, #1948 step 6). A turn that **completes** while the session's own background work still runs there (the machine's
  * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the Assistant is told once that
  * the work paused, and the report stays owed until a turn ends with none of that work left. If the work ends and no turn
  * follows within `OWN_WORK_SETTLE_MS`, the report goes out with how each task ended; if the machine's link drops

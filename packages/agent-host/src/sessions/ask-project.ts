@@ -2,6 +2,9 @@ import { frameField, oneLineText } from '@cc/protocol'
 import { realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
+import type { Store } from '../dev-services/store.js'
+import { hubSelfId } from '../links/stored.js'
+import { sessionAddress } from '../mail/address.js'
 import type { MessageReader } from './transcript-view.js'
 import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
 
@@ -128,6 +131,15 @@ export const NO_WORDS = '(its turn ended without saying anything: read_session s
  */
 export const MACHINE_UNREACHABLE = '(not read: its machine could not be reached)'
 export const IN_PAUSE_REPORT = '(in the paused report before this one)'
+
+/**
+ * The way on from a busy session on the other side of a link, for an ask either way (#1186 item 10): the ask is refused, but mail crosses (#2067) and
+ * the session's own host gives it the mail as its own mail goes in: into a turn whose tool takes input, else once it is at rest (docs/plans/mailbox.md
+ * §10.6.2). The address is the session's in this hub's naming, which a linked machine reads as it is
+ */
+export function mailInstead(hub: Store, sessionId: string): string {
+  return `To leave it work, mail it: mail(action="send", to="${sessionAddress(hubSelfId(hub), sessionId)}"); it gets the mail as soon as it can take it. Or name another session.`
+}
 
 /**
  * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it

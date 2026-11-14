@@ -2,7 +2,7 @@ import type { HubAskParams, HubAskResult, HubProject, SessionState } from '@cc/p
 import { oneLineText } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, pickAskedSession, taskLine } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, mailInstead, pickAskedSession, taskLine } from './ask-project.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { MACHINE_ASKER } from './hub-sender.js'
@@ -46,8 +46,8 @@ const UNREAD_KEPT_MS = 60 * 60_000
  *     session, this project) until withdrawn in Settings → Machines, or until the switch goes off; a remembered pair
  *     passes with no card. Deny is not remembered.
  *   - The target is an existing ordinary session, as for an ask here (#614): never created, never an app's or a
- *     builder's. A session busy with a turn gets nothing: a note or a queue from another machine is not offered, as for
- *     step 3's asks the other way (§12.6).
+ *     builder's. A session busy with a turn gets nothing: the refusal names the mail it gets as soon as it can take it
+ *     (`mailInstead`, #1186), as for step 3's asks the other way (§12.6).
  *   - The task arrives framed as from that session on that machine (`MACHINE_ASKER`, never the person and never an
  *     assistant), and the session works on it one level deeper than the asker (#867), so it cannot ask on.
  *   - The answer goes back cut to size. Paths in it are this computer's: the machine lists them and opens none.
@@ -124,7 +124,7 @@ export class MachineAsks {
     }
     if (!p.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
     if (this.busy(chosen.id)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} is busy with a turn that is not yours (${chosen.state}). A note or a queue from another machine is not available: name another session, or ask again once it is idle.` }
+      return { ok: false, error: `The session "${chosen.name}" in ${label} is busy with a turn that is not yours (${chosen.state}). ${mailInstead(this.host.store, chosen.id)}` }
     }
 
     // The pair's card (owner decision 2026-10-18): asked once, then remembered until withdrawn
@@ -177,7 +177,7 @@ export class MachineAsks {
     const now = this.ordinary(target.id).find((s) => s.id === chosen.id)
     if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
     if (this.busy(chosen.id) || [...this.given.values()].some((g) => g.sessionId === chosen.id && !g.wait.finished)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} started a turn while the question to the person stood; nothing was sent. Ask again once it is idle, or name another session.` }
+      return { ok: false, error: `The session "${chosen.name}" in ${label} started a turn while the question to the person stood; nothing was sent. ${mailInstead(this.host.store, chosen.id)}` }
     }
     return this.give(machine, p, p.task, target, chosen, key, signal)
   }
