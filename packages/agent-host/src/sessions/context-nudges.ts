@@ -43,6 +43,8 @@ const freshCycle = (): Cycle => ({ told: new Set(), waiting: null, size: 0, send
 
 export class ContextNudges {
   private readonly cycles = new Map<string, Cycle>()
+  /** Each session's stored reading (`context.used`) as it was when this host first heard of it: what the host before it left (#1913) */
+  private readonly firstReading = new Map<string, number | null>()
   private stopped = false
 
   constructor(private readonly host: ContextNudgesHost) {}
@@ -51,9 +53,11 @@ export class ContextNudges {
   observe(e: NormalizedEvent): void {
     const id = e.sessionId
     if (!id || this.stopped) return
+    if (!this.firstReading.has(id)) this.firstReading.set(id, this.host.session(id)?.context?.used ?? null)
     switch (e.type) {
       case 'session_deleted':
         this.cycles.delete(id)
+        this.firstReading.delete(id)
         return
       case 'conversation_reset':
         this.cycles.set(id, freshCycle())
@@ -71,15 +75,16 @@ export class ContextNudges {
   }
 
   /**
-   * The session's cycle. The first this host makes for a session it has not seen (#1913) counts the shares its stored reading
-   * (`context.used`, the size at its last turn's end) is already past as told: the host before this one told them, and a woken
-   * session must not be told again in its wake. A cycle a compaction or a reset started in this host is never seeded
+   * The session's cycle. The first this host makes for a session (#1913) counts the shares the session's stored reading was past when this
+   * host first heard of it (`firstReading`: the size at the last turn's end under the host before) as told: that host told them, and a woken
+   * session must not be told again in its wake. A reading taken in this host seeds nothing (its requests were seen here), and a cycle a
+   * compaction or a reset started here is never seeded
    */
   private cycle(id: string, m: SessionInfo, window: number, setting: AutoCompact): Cycle {
     let c = this.cycles.get(id)
     if (c) return c
     this.cycles.set(id, (c = freshCycle()))
-    const stored = m.context?.used
+    const stored = this.firstReading.get(id)
     if (stored) for (const k of this.crossed(c, stored / window, m, window, setting).keys) c.told.add(k)
     return c
   }
@@ -168,5 +173,6 @@ export class ContextNudges {
   stop(): void {
     this.stopped = true
     this.cycles.clear()
+    this.firstReading.clear()
   }
 }

@@ -296,6 +296,14 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     w.request(520_000)
     expect(w.told).toHaveLength(1)
     expect(w.told[0]).toMatch(/in the middle of work at 60%/)
+    // A reading taken under this host seeds nothing: its requests were seen here (notices turned on late are told the share)
+    const late = world()
+    late.state.setting = { ...late.state.setting, nudge: false }
+    late.request(400_000)
+    late.session.context = { ...late.session.context!, used: 400_000 }
+    late.state.setting = { ...late.state.setting, nudge: true }
+    late.request(410_000)
+    expect(late.told).toHaveLength(1)
   })
 
   it('tells the first share again after a compaction the starting host hears of: the stored reading is from before it (#1913)', () => {
