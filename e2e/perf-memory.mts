@@ -49,7 +49,7 @@
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
- * over CDP, also after a forced collection. On Windows (Chromium only) the footprint is each process's private bytes and
+ * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heap). On Windows (Chromium only) the footprint is each process's private bytes and
  * RSS its working set, read from `Win32_Process`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
  * the last background sample (revisit: the first, after the first round and the last), writes them to that folder and
  * prints what grew between them by constructor.
@@ -179,7 +179,7 @@ type Sample = {
   /** Conversation rows the page received over its socket so far (history pages and injected events) */
   rowsReceived: number
   wsBytesIn: number
-  /** Chromium only: the same after a forced collection, which tells what is held from what is merely not yet collected */
+  /** The same after a forced collection (the heap: Chromium only), which tells what is held from what is merely not yet collected */
   afterGc: { contentFootprintMB: number; heapUsedMB: number | null } | null
   /** The last injected text is in the page */
   painted: boolean | null
@@ -918,9 +918,12 @@ async function measureEngine(
       const pick = reps.find((s) => s.totalFootprintMB === median(reps.map((x) => x.totalFootprintMB)))!
       const h = await heap(cdp)
       pick.jsEventListeners = h.jsEventListeners
-      if (cdp) {
-        await cdp.send('HeapProfiler.collectGarbage')
-        await sleep(1_000)
+      {
+        // WebKit has no CDP: Playwright's requestGC is the inspector's Heap.gc, a full collection of the page's VM. Its
+        // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
+        if (cdp) await cdp.send('HeapProfiler.collectGarbage')
+        else await page.requestGC()
+        await sleep(cdp ? 1_000 : 5_000)
         const { procs } = engineProcs(engine, before, host!.pid!)
         const after = await heap(cdp)
         pick.afterGc = {
