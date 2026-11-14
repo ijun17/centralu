@@ -3,7 +3,7 @@
  *
  *   pnpm perf:memory [--profile small|owner|stress] [--engines webkit,chromium] [--stream-minutes 5]
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
- *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background] [--dpr 2]
+ *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background,revisit] [--dpr 2]
  *                    [--background-minutes 30] [--background-sessions 8] [--heap-snapshots <dir>]
  *                    [--revisit-rounds 5] [--revisit-streaming 4]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
@@ -36,8 +36,12 @@
  *   revisit-*   the long session open while every other session is opened in turn, one every 30 s, scrolled back a
  *               history page every other time, and left for the long one again, for `--revisit-rounds` rounds;
  *               `--revisit-streaming` of them stream out of view meanwhile. Sampled after each round, then after it
- *               settles (not in the default steps): memory that rises in the first round only is a cost per session,
- *               memory that keeps rising after it is held per open
+ *               settles (not in the default steps). With 23 others the page read back alternates between rounds, so
+ *               by the end of round 2 every session has been opened and read back once: memory that rises only up to
+ *               then is a cost per session, memory that keeps rising after it is held per open, or by the streaming
+ *               sessions (`--revisit-streaming 0` takes them out). A first open of a streaming session may read its
+ *               newest page instead of an older one. Run it without background, whose streams use the same event
+ *               numbers.
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
@@ -1100,8 +1104,8 @@ async function measureEngine(
     /*
      * revisit: the long session open, as in background, while the person works through the other sessions over the hour,
      * opening each in turn, reading back a page in every other one, and coming back to the long one. A few of them stream
-     * out of view meanwhile. The first round opens every session once; the later rounds open them again, so growth after
-     * the first round is something an open leaves behind.
+     * out of view meanwhile. Rounds 1 and 2 open every session once and read each back once; the later rounds repeat
+     * them, so growth after round 2 is something an open leaves behind (or the streaming).
      */
     if (steps.has('revisit')) {
       const others = seed.sessions.filter((s) => s.id !== seed.longSessionId)
