@@ -536,5 +536,9 @@ donuts, and the closed palette. Chromium hands that memory back after a collecti
 forced collection) is where it shows. The fix (docs/state-management.md §3, "What is always on screen reads only what it
 draws") cut the same 3 minutes to 2.3 GB, and the footprint the table shows with it.
 
-WebKit (`pnpm perf:memory --engines webkit --profile owner --steps blank,long,background --background-minutes 60`) is
-measured on a Mac; whether JSC gives the churn back as Chromium does is what tells whether this was the 57 MB/h.
+**WebKit is flat too** (Mac, main e734c200a, `--steps blank,long,background --background-minutes 60
+--background-sessions 8`): WebContent 108 MB with the long session open, 132 MB at 5 minutes, then 132, 133, 134 and
+135 MB at 10, 30, 50 and 60 minutes and after settling, over about 12,500 events. So this step does not reproduce the
+real window's ~57 MB/h in either engine, and the churn fix is not that cure: it cuts what every event costs, not what
+is kept. What the step still lacks from real use: an app's view (the project board) in the window, opening many
+sessions one after another over hours (the `switched` step alone added 90 MB for 10 sessions), images, reconnects.
