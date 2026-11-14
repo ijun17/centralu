@@ -476,14 +476,15 @@ export class MailDelivery {
     if (due === null) return
     this.timers.get(recipient)?.()
     this.timers.delete(recipient)
-    const wait = due - now
-    this.timers.set(
-      recipient,
-      this.schedule(wait, () => {
-        this.timers.delete(recipient)
-        void this.process(recipient)
-      }),
-    )
+    const fire = (): void => {
+      this.timers.delete(recipient)
+      // A timer may run a moment before the clock reaches its time (Node's do): the mail is not due yet, and a look now would find nothing and leave
+      // it to the sweep, a minute on
+      const early = due - this.now()
+      if (early > 0) this.timers.set(recipient, this.schedule(early, fire))
+      else void this.process(recipient)
+    }
+    this.timers.set(recipient, this.schedule(due - now, fire))
   }
 
   /** Delivers to one mailbox what is due, once, if the receiver can take it now */
