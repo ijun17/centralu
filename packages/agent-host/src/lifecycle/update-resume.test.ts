@@ -57,6 +57,20 @@ describe('the turns an update cut, in the data folder', () => {
     expect(f.files.size).toBe(1)
   })
 
+  it('removes the whole list when it cannot be written again without an entry that no longer stands: a Stop already taken is not undone (#2264 re-check)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failing: UpdateResumeFolder = { ...f, replace: () => { throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }) } }
+    new UpdateResumeLists(failing).done('s1', true)
+    // The next start continues neither: s2 ends as a quit's does, with its Continue
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('s1', 4, true)).toBe(false)
+    expect(next.cut('s2', 9)).toBe(false)
+    expect(f.files.size).toBe(0)
+    expect(said.mock.calls.some((c) => String(c[0]).includes('it goes whole'))).toBe(true)
+  })
+
   it('writes a list that names nothing more empty when it cannot be removed, so a dealt woken entry is gone all the same, and the next start removes it', () => {
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }])

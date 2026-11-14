@@ -217,9 +217,11 @@ export class UpdateResumeLists {
    * names it now, on disk too (#2264 re-check): a mark alone does not keep a dealt entry harmless, since the person's Stop writes no row and a
    * `woken` entry would still match a session at rest. The list is written again without it in one step (`replace`), and one that names
    * nothing more goes; if it cannot be removed it is written empty instead, which the next start removes. A host killed before that step is
-   * like a Stop still on its way when the host stops: not taken. A list that cannot be written again keeps its old text, said in the log
+   * like a Stop still on its way when the host stops: not taken. A list that cannot be written again keeps its old text, said in the log,
+   * unless the entry is `strict` (it no longer stands: the person's Stop, the session gone): then the whole list goes, its other entries
+   * ending as a quit's do (their Continue stays the person's), since a Stop already taken must not be undone by the next start
    */
-  done(id: string): void {
+  done(id: string, strict = false): void {
     this.dealt.add(id)
     for (const [name, l] of [...this.lists]) {
       if (![...l.turns, ...l.stopped].some((t) => t.id === id)) continue
@@ -233,7 +235,13 @@ export class UpdateResumeLists {
         this.folder.replace(name, listText(turns, stopped))
         this.lists.set(name, { ...l, turns, stopped })
       } catch (err) {
-        console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it still names it, for a later start`)
+        if (!strict) {
+          console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it still names it, for a later start`)
+          continue
+        }
+        console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it goes whole, and the turns it names end as a quit's do`)
+        this.lists.delete(name)
+        this.removeList(name, `a later start may continue ${id.slice(0, 8)}, which was stopped`)
       }
     }
   }

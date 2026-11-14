@@ -133,7 +133,8 @@ export class HostTenure {
     }
     if (step === 'dropped' || (step === 'failed' && turn)) this.notContinued(sessionId)
     // Sent or dealt with: a host that starts after this one does not send it again
-    this.updateLists?.done(sessionId)
+    // One that no longer stands (the person's Stop writes no row) must not be read again, whatever it costs the list it is in
+    this.updateLists?.done(sessionId, step === 'dropped')
   }
 
   /** A host leaving for an update writes no line for a note the tool took meanwhile: the host after it writes the one (#1626 review) */

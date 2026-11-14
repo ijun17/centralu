@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { SYSTEM_END_FILE, parseSystemEnd, systemEndText, type SystemEnd } from './system-end.js'
 import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
 import { realOs } from '../os/real.js'
+import { writeFileWhole } from '../os/write-file-whole.js'
 
 /**
  * The person's stop, kept in the data folder (#1143). A linked hub that finds no host running here starts one
@@ -69,9 +70,10 @@ export function takeSystemEnd(dataDir: string): SystemEnd | null {
  * The data folder's lists of the turns an update cut (#1618, update-resume.ts): each written by a host an update stops,
  * read by the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next.
  * Each list is written under a new name of its own (`wx`), and a host killed while it wrote leaves text that is not JSON, which the
- * next start removes. One is written again without an entry dealt with (`replace`, #2264 re-check) by a temporary file renamed over
- * it: the rename is one step, retried while a scanner holds the file (os/held.ts), and one that still fails leaves the old list as it was.
- * The temporary name (`.tmp`) is no list's, so `names` never reads one a killed host left
+ * next start removes. One is written again without an entry dealt with (`replace`, #2264 re-check) whole (`writeFileWhole`): a temporary
+ * file renamed over it, retried while a scanner holds the file, and one that still fails leaves the old list as it was. The temporary name
+ * (`<list>.<pid>-<hex>.tmp`) is no list's, so `names` never reads one a killed host left. Not synced before the rename: a power cut can leave
+ * the list empty, which reads as torn and goes, so its turns end as a quit's do (never continued twice)
  */
 export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
   // `update-resume.<uuid>.json`, the names `add` gives (UPDATE_RESUME_PREFIX)
@@ -87,21 +89,7 @@ export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
       }
     },
     add: (text) => writeFileSync(join(dataDir, `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`), text, { flag: 'wx' }),
-    replace: (name, text) => {
-      const files = realOs().files
-      const tmp = join(dataDir, `${name}.tmp`)
-      try {
-        files.writeFileSync(tmp, text)
-        files.renameSync(tmp, join(dataDir, name))
-      } catch (err) {
-        try {
-          files.rmSync(tmp, { force: true })
-        } catch {
-          // a temporary file left behind is no list's
-        }
-        throw err
-      }
-    },
+    replace: (name, text) => void writeFileWhole(realOs().files, join(dataDir, name), text),
     remove: (name) => realOs().files.rmSync(join(dataDir, name), { force: true }),
   }
 }

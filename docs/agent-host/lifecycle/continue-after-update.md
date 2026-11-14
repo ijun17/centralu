@@ -34,7 +34,10 @@ the person's Continue would.
   the start did not find it cut. The list is written again without it under its own name, in one step (a temporary file renamed over
   it), and goes once it names nothing (#2264 re-check: a Stop writes no row, so a mark alone did not keep a dealt `woken` entry from
   matching). A host killed before that step is like a Stop still on its way when the host stops: not taken. A rename that still fails
-  after the tries for a held file leaves the old list as it was, said in the log, so that entry is read again by a later start; a list
+  after the tries for a held file leaves the old list as it was, said in the log, so that entry is read again by a later start, except
+  one that no longer stands (the person's Stop, the session gone): then the whole list goes, its other turns ending as a quit's do with
+  their Continue, since a Stop already taken must not be undone (if even that removal fails, the log says the next start may continue
+  it). The rewrite is not synced before its rename: a power cut can leave a list empty, read as torn, so its turns end as a quit's do. A list
   that names nothing and cannot be removed is written empty, and the next start removes it. One a host
   killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
