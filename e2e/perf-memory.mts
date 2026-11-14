@@ -5,6 +5,7 @@
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
  *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background] [--dpr 2]
  *                    [--background-minutes 30] [--background-sessions 8] [--heap-snapshots <dir>]
+ *                    [--revisit-rounds 5] [--revisit-streaming 4]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
  *                    [--reduced-motion] [--freeze-animations] [--css <file>] [--layers] [--blur]
  *
@@ -32,12 +33,18 @@
  *   background-* the long session open while `--background-sessions` others stream the same turn loop out of view, as
  *               workers and linked children do, for `--background-minutes`: a few of them visited now and then, mail
  *               arriving every minute; sampled every five minutes, then after it settles (not in the default steps)
+ *   revisit-*   the long session open while every other session is opened in turn, one every 30 s, scrolled back a
+ *               history page every other time, and left for the long one again, for `--revisit-rounds` rounds;
+ *               `--revisit-streaming` of them stream out of view meanwhile. Sampled after each round, then after it
+ *               settles (not in the default steps): memory that rises in the first round only is a cost per session,
+ *               memory that keeps rising after it is held per open
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
  * over CDP, also after a forced collection. On Windows (Chromium only) the footprint is each process's private bytes and
  * RSS its working set, read from `Win32_Process`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
- * the last background sample, writes both to that folder and prints what grew between them by constructor.
+ * the last background sample (revisit: the first, after the first round and the last), writes them to that folder and
+ * prints what grew between them by constructor.
  *
  * The streaming is not a model: the page's socket to the host is routed through Playwright (`routeWebSocket`) and
  * the events are injected there, in the host's own envelope, with the host's later event numbers shifted past
@@ -84,7 +91,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 /** What the synthetic stream is made of; leaving parts out tells which of them the memory goes to */
 const STREAM_PARTS = ['working', 'text', 'reasoning', 'tools', 'subagent', 'images', 'background'] as const
 type StreamPart = (typeof STREAM_PARTS)[number]
-const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background'] as const
+const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit'] as const
 type Step = (typeof STEPS)[number]
 
 const { values } = parseArgs({
@@ -108,6 +115,8 @@ const { values } = parseArgs({
     'background-minutes': { type: 'string', default: '30' },
     'background-sessions': { type: 'string', default: '8' },
     'heap-snapshots': { type: 'string' },
+    'revisit-rounds': { type: 'string', default: '5' },
+    'revisit-streaming': { type: 'string', default: '4' },
   },
 })
 const profile = values.profile as StoreProfile
@@ -115,7 +124,11 @@ const engines = values.engines.split(',') as Engine[]
 const streamMs = Number(values['stream-minutes']) * 60_000
 const backgroundMs = Number(values['background-minutes']) * 60_000
 const BACKGROUND_SESSIONS = Number(values['background-sessions'])
+const REVISIT_ROUNDS = Number(values['revisit-rounds'])
+const REVISIT_STREAMING = Number(values['revisit-streaming'])
 const quick = values.quick
+/** How often the revisit step opens the next session: in the owner profile each of the 23 others comes round every ~12 min */
+const REVISIT_EVERY_MS = quick ? 5_000 : 30_000
 const steps = new Set(values.steps.split(',') as Step[])
 const parts = new Set(values['stream-parts'].split(',') as StreamPart[])
 for (const x of steps) if (!STEPS.includes(x)) throw new Error(`unknown step ${x}`)
@@ -806,7 +819,7 @@ async function measureEngine(
   seed: Omit<SeedSummary, 'sessions' | 'projects'>
   samples: Sample[]
   layers: Layer[] | null
-  heapGrowth: ReturnType<typeof heapGrowth> | null
+  heapGrowth: { span: string; rows: ReturnType<typeof heapGrowth> }[]
 }> {
   const work = mkdtempSync(join(tmpdir(), 'centralu-perf-memory-'))
   const dataDir = join(work, 'data')
@@ -814,7 +827,6 @@ async function measureEngine(
   mkdirSync(home)
   const samples: Sample[] = []
   let layers: Layer[] | null = null
-  let grown: ReturnType<typeof heapGrowth> | null = null
   let host: ChildProcess | null = null
   let server: Server | null = null
   let browser: Browser | null = null
@@ -843,6 +855,11 @@ async function measureEngine(
     const page = await context.newPage()
     const cdp = engine === 'chromium' ? await context.newCDPSession(page) : null
     const t0 = Date.now()
+    const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
+    if (snapshots) mkdirSync(snapshots, { recursive: true })
+    /** The JS heap by constructor now, its snapshot written into the --heap-snapshots folder; null without one */
+    const snapshot = (name: string) => (snapshots ? heapClasses(cdp!, join(snapshots, `${engine}-${name}.heapsnapshot`)) : null)
+    const grown: { span: string; rows: ReturnType<typeof heapGrowth> }[] = []
 
     const sample = async (step: string) => {
       const reps: Sample[] = []
@@ -932,6 +949,29 @@ async function measureEngine(
     // Any other CSS, to tell what one property costs by taking it away (how the grid's layers were attributed)
     if (values.css) await page.addStyleTag({ path: resolve(values.css) })
     const row = (id: string) => page.getByTestId(`session-row-${id}`)
+    /** Opens a session from its sidebar row and waits for its conversation */
+    const open = async (id: string) => {
+      await row(id).click()
+      await page
+        .locator('[data-testid="chat-stream"] [data-index]')
+        .first()
+        .waitFor({ timeout: 30_000 })
+        .catch(() => {})
+    }
+    /** Scrolls the open conversation back until one more history page has arrived, or eight seconds pass */
+    const pageBack = async () => {
+      await page.getByTestId('chat-stream').hover()
+      const pages = wire.historyPages
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="chat-stream"]')
+        if (el) el.scrollTop = 0
+      })
+      const t = Date.now()
+      while (wire.historyPages === pages && Date.now() - t < 8_000) {
+        await page.mouse.wheel(0, -2_000)
+        await sleep(150)
+      }
+    }
     await row(seed.longSessionId).waitFor({ timeout: 60_000 })
     if (steps.has('shell')) {
       await sleep(SETTLE_MS)
@@ -948,18 +988,8 @@ async function measureEngine(
 
     // scrolled: 20 history pages back
     if (steps.has('scrolled')) {
-      await page.getByTestId('chat-stream').hover()
       for (let i = 0; i < 20; i++) {
-        const pages = wire.historyPages
-        await page.evaluate(() => {
-          const el = document.querySelector('[data-testid="chat-stream"]')
-          if (el) el.scrollTop = 0
-        })
-        const t = Date.now()
-        while (wire.historyPages === pages && Date.now() - t < 8_000) {
-          await page.mouse.wheel(0, -2_000)
-          await sleep(150)
-        }
+        await pageBack()
         await sleep(300)
       }
       await sleep(SETTLE_MS)
@@ -981,12 +1011,7 @@ async function measureEngine(
     if (steps.has('switched')) {
       const others = seed.sessions.slice(1, 11)
       for (const s of others) {
-        await row(s.id).click()
-        await page
-          .locator('[data-testid="chat-stream"] [data-index]')
-          .first()
-          .waitFor({ timeout: 30_000 })
-          .catch(() => {})
+        await open(s.id)
         await sleep(quick ? 300 : 1_500)
       }
       await row(seed.longSessionId).click()
@@ -1023,9 +1048,7 @@ async function measureEngine(
       await row(seed.longSessionId).click()
       await sleep(SETTLE_MS)
       await sample('background-0s')
-      const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
-      if (snapshots) mkdirSync(snapshots, { recursive: true })
-      const first = snapshots ? await heapClasses(cdp!, join(snapshots, `${engine}-background-0s.heapsnapshot`)) : null
+      const first = await snapshot('background-0s')
       const start = Date.now()
       const over = () => Date.now() - start >= backgroundMs
       const visits = async () => {
@@ -1070,8 +1093,45 @@ async function measureEngine(
       await sample(`background-${Math.round(backgroundMs / 60_000)}m`)
       await sleep(quick ? 2_000 : 30_000)
       await sample('background-settled')
-      if (first && snapshots)
-        grown = heapGrowth(first, await heapClasses(cdp!, join(snapshots, `${engine}-background-end.heapsnapshot`)))
+      const end = await snapshot('background-end')
+      if (first && end) grown.push({ span: 'background-0s → background-end', rows: heapGrowth(first, end) })
+    }
+
+    /*
+     * revisit: the long session open, as in background, while the person works through the other sessions over the hour,
+     * opening each in turn, reading back a page in every other one, and coming back to the long one. A few of them stream
+     * out of view meanwhile. The first round opens every session once; the later rounds open them again, so growth after
+     * the first round is something an open leaves behind.
+     */
+    if (steps.has('revisit')) {
+      const others = seed.sessions.filter((s) => s.id !== seed.longSessionId)
+      const ms = REVISIT_ROUNDS * others.length * REVISIT_EVERY_MS
+      await open(seed.longSessionId)
+      await sleep(SETTLE_MS)
+      await sample('revisit-0s')
+      const first = await snapshot('revisit-0s')
+      let afterFirst: HeapClasses | null = null
+      const start = Date.now()
+      const opens = async () => {
+        for (let round = 1; round <= REVISIT_ROUNDS; round++) {
+          for (const [i, s] of others.entries()) {
+            const n = (round - 1) * others.length + i
+            await sleep(start + n * REVISIT_EVERY_MS - Date.now())
+            await open(s.id)
+            if (n % 2) await pageBack()
+            await sleep(quick ? 1_000 : 5_000)
+            await open(seed.longSessionId)
+          }
+          await sample(`revisit-round-${round}`)
+          if (round === 1) afterFirst = await snapshot('revisit-round-1')
+        }
+      }
+      await Promise.all([...others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms)), opens()])
+      await sleep(quick ? 2_000 : 30_000)
+      await sample('revisit-settled')
+      const end = await snapshot('revisit-end')
+      if (first && afterFirst) grown.push({ span: 'revisit-0s → revisit-round-1', rows: heapGrowth(first, afterFirst) })
+      if (afterFirst && end) grown.push({ span: 'revisit-round-1 → revisit-end', rows: heapGrowth(afterFirst, end) })
     }
 
     const { sessions: _s, projects: _p, ...rest } = seed
@@ -1116,11 +1176,11 @@ for (const r of results) {
         `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
     )
   }
-  if (r.heapGrowth) {
-    console.log('\n### What the JS heap gained over the background step, by constructor\n')
+  for (const { span, rows } of r.heapGrowth) {
+    console.log(`\n### What the JS heap gained from ${span}, by constructor\n`)
     console.log('| constructor | MB | count |')
     console.log('|---|---:|---:|')
-    for (const g of r.heapGrowth) console.log(`| \`${g.name.replace(/\|/g, '\\|')}\` | ${g.mb} | ${g.count} |`)
+    for (const g of rows) console.log(`| \`${g.name.replace(/\|/g, '\\|')}\` | ${g.mb} | ${g.count} |`)
   }
   if (r.layers) {
     const drawn = r.layers.filter((l) => l.drawsContent)
