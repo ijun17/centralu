@@ -136,9 +136,11 @@
     **Once per share per compaction cycle:** a share is told the first time a request is over it (a request over both says it once); a compaction of
     any kind that succeeded (the agent's, Centralu's, the tool's own, the person's `/compact`) or a fresh conversation (`/clear`) starts the cycle again, so
     the shares are told again when the context grows back; a compaction that failed does not. The counters are in memory; a host counts the shares a session's
-    stored reading was past when it first heard of the session (its size at the last turn's end under the host before) as told, so a
-    session an update wakes is not told again in its wake (#1913). A reading taken under this host seeds nothing, nor does a cycle a
-    compaction or `/clear` starts here. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
+    stored reading was past when it first heard of the session (the size of its last request the host before stored), with the notices on
+    then, as told, so a session an update wakes is not told again in its wake (#1913). The second share is judged against the setting's
+    share until the woken process says its own point. A reading taken under this host seeds nothing, nor does a cycle a compaction or
+    `/clear` starts here. Accepted limits: a share whose note was still waiting when the host before stopped counts as told; a Codex
+    compaction reports no size after it, so a stop between it and its next request seeds from the reading before it. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
     context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
     line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`

@@ -16,7 +16,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
  *  - **Once per share per compaction cycle.** A share is told when a request is first over it; a compaction of any kind (the agent's,
  *    Centralu's, the tool's own, the person's `/compact`) or a fresh conversation starts the cycle again, so the shares are told
  *    again when the context grows back. A request that crosses both shares at once says it once. The counters are in memory; a host
- *    that starts counts the shares a session's stored reading is past as told (#1913), so a session an update woke is not told again.
+ *    counts the shares a session's stored reading was past when it first heard of it as told (#1913), so a woken session is not told again.
  *  - **Only where it can be acted on.** A session that has `compact_self` (an ordinary session and the Assistant), with Centralu's
  *    control on (`autoCompact.controlled`) and the notices on, over the compaction floor (a smaller context would be refused), and
  *    under the tool's own share (a share at or above it is never told). A note the tool does not take now (Codex between turns, or
@@ -43,7 +43,10 @@ const freshCycle = (): Cycle => ({ told: new Set(), waiting: null, size: 0, send
 
 export class ContextNudges {
   private readonly cycles = new Map<string, Cycle>()
-  /** Each session's stored reading (`context.used`) as it was when this host first heard of it: what the host before it left (#1913) */
+  /**
+   * Each session's stored reading (`context.used`, its size at its last request the host before stored) as it was when this host first heard of
+   * it, while the notices were on then (#1913): what that host left. Null: nothing to seed
+   */
   private readonly firstReading = new Map<string, number | null>()
   private stopped = false
 
@@ -53,7 +56,7 @@ export class ContextNudges {
   observe(e: NormalizedEvent): void {
     const id = e.sessionId
     if (!id || this.stopped) return
-    if (!this.firstReading.has(id)) this.firstReading.set(id, this.host.session(id)?.context?.used ?? null)
+    if (e.type !== 'session_deleted' && !this.firstReading.has(id)) this.firstSight(id)
     switch (e.type) {
       case 'session_deleted':
         this.cycles.delete(id)
@@ -74,23 +77,34 @@ export class ContextNudges {
     }
   }
 
+  /** A session this host has not heard of before: its stored reading, kept while the notices are on (with them off, the host before told nothing) */
+  private firstSight(id: string): void {
+    const m = this.host.session(id)
+    if (!m) return
+    const { controlled, nudge } = this.host.setting()
+    this.firstReading.set(id, controlled && nudge ? m.context?.used ?? null : null)
+  }
+
   /**
-   * The session's cycle. The first this host makes for a session (#1913) counts the shares the session's stored reading was past when this
-   * host first heard of it (`firstReading`: the size at the last turn's end under the host before) as told: that host told them, and a woken
-   * session must not be told again in its wake. A reading taken in this host seeds nothing (its requests were seen here), and a cycle a
-   * compaction or a reset started here is never seeded
+   * The session's cycle. The first this host makes for a session (#1913) counts the shares its stored reading was past when this host first
+   * heard of it (`firstReading`) as told: the host before told them, and a woken session must not be told again in its wake. A reading taken in
+   * this host seeds nothing (its requests were seen here), and a cycle a compaction or a reset started here is never seeded. The second share
+   * is judged against the setting's share when the process has said no point yet (a woken process says it only with its first reading)
    */
   private cycle(id: string, m: SessionInfo, window: number, setting: AutoCompact): Cycle {
     let c = this.cycles.get(id)
     if (c) return c
     this.cycles.set(id, (c = freshCycle()))
     const stored = this.firstReading.get(id)
-    if (stored) for (const k of this.crossed(c, stored / window, m, window, setting).keys) c.told.add(k)
+    if (stored) for (const k of this.crossed(c, stored / window, m, window, setting, setting.share).keys) c.told.add(k)
     return c
   }
 
-  /** The shares not yet told that `share` is past, and the point the tool compacts at as a share (null while it has said none) */
-  private crossed(c: Cycle, share: number, m: SessionInfo, window: number, setting: AutoCompact): { keys: ('first' | 'second')[]; point: number | null } {
+  /**
+   * The shares not yet told that `share` is past, and the point the tool compacts at as a share (null while it has said none). `assumed`: the
+   * point to judge the second share against while none is known (seeding only)
+   */
+  private crossed(c: Cycle, share: number, m: SessionInfo, window: number, setting: AutoCompact, assumed: number | null = null): { keys: ('first' | 'second')[]; point: number | null } {
     // Where the session's running process compacts, as the tool said it (`context.compactAt`), not what the setting says now: the setting reaches a process at its next start
     const point = m.context?.compactAt !== undefined && m.context.compactAt < window ? m.context.compactAt / window : null
     const { first, second } = nudgeShares({ ...setting, share: point ?? setting.share })
@@ -99,7 +113,8 @@ export class ContextNudges {
       ['first', first],
       ['second', second],
     ] as const
-    const keys = shares.filter(([k, at]) => !c.told.has(k) && (k === 'first' ? at < (point ?? setting.share) : point !== null && at < point) && at <= share).map(([k]) => k)
+    const below = point ?? assumed
+    const keys = shares.filter(([k, at]) => !c.told.has(k) && (k === 'first' ? at < (point ?? setting.share) : below !== null && at < below) && at <= share).map(([k]) => k)
     return { keys, point }
   }
 

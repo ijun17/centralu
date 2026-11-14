@@ -432,4 +432,26 @@ describe('on the session manager (#1492)', () => {
       await next.tenure.disposeAll()
     }
   })
+
+  it('does not tell the second share again after a restart past it, though the woken process says its point only later (#1913)', async () => {
+    const { id, h } = await session()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    request(h, id, 550_000)
+    expect(h.nudges).toHaveLength(1)
+    h.emitContext(550_000, 1_000_000, undefined, 600_000)
+    h.finishTurn()
+    await world.mgr.tenure.disposeAll()
+    const next = new SessionManager(world.store, new Map<ToolName, AgentAdapter>([['claude', world.adapter]]), () => {})
+    try {
+      await next.inputs.send(id, 'go on')
+      const woken = world.adapter.last!
+      // The stored reading keeps no point; the new process says it with its first reading
+      request(woken, id, 560_000)
+      woken.emitContext(560_000, 1_000_000, undefined, 600_000)
+      request(woken, id, 570_000)
+      expect(woken.nudges).toEqual([])
+    } finally {
+      await next.tenure.disposeAll()
+    }
+  })
 })
