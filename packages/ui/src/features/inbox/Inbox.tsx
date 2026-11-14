@@ -238,39 +238,45 @@ export function Inbox() {
               on it, as a radio group's do
             */}
             <div className="contents" onClick={() => panelRef.current?.focus()}>
-            <Segmented
-              label="Inbox"
-              size="sm"
-              value={tab}
-              onChange={setTab}
-              testId="inbox-tabs"
-              options={[
-                {
-                  value: 'waiting',
-                  testId: 'inbox-tab-waiting',
-                  label: (
-                    <>
-                      Waiting{' '}
-                      <span className="readout" data-testid="inbox-count">
-                        {items.length + mailAttention(mail)}
-                      </span>
-                    </>
-                  ),
-                },
-                {
-                  value: 'tasks',
-                  testId: 'inbox-tab-tasks',
-                  label: (
-                    <>
-                      Tasks{' '}
-                      <span className="readout" data-testid="inbox-tasks-count">
-                        {openTaskCount(tasks)}
-                      </span>
-                    </>
-                  ),
-                },
-              ]}
-            />
+              <Segmented
+                label="Inbox"
+                size="sm"
+                value={tab}
+                onChange={setTab}
+                testId="inbox-tabs"
+                options={[
+                  {
+                    value: 'waiting',
+                    testId: 'inbox-tab-waiting',
+                    label: (
+                      <>
+                        Waiting{' '}
+                        <span className="readout" data-testid="inbox-count">
+                          {items.length + mailAttention(mail)}
+                        </span>
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'tasks',
+                    testId: 'inbox-tab-tasks',
+                    label: (
+                      <>
+                        Tasks
+                        {/* No count before the host answers, as the list draws nothing then */}
+                        {mailTasks !== null && (
+                          <>
+                            {' '}
+                            <span className="readout" data-testid="inbox-tasks-count">
+                              {openTaskCount(tasks)}
+                            </span>
+                          </>
+                        )}
+                      </>
+                    ),
+                  },
+                ]}
+              />
             </div>
             <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
               <Kbd>↑</Kbd>

@@ -357,7 +357,8 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     expect(r.person.thread(tid(23), { tail: 100 })).toMatchObject({ lookIn: true, canReply: false, thread: { id: mid(27) } })
     const sessions = () => ({ row: w.row(mid(27), B), facts: w.store.mailbox.message(mid(27))?.facts })
     const before = sessions()
-    r.person.close(tid(23))
+    // The row it answers is the chain it closed, not the sessions' one the id names first
+    expect(r.person.close(tid(23))).toMatchObject({ id: mid(26) })
     expect(w.row(mid(26), PERSON)?.settled).toBe('done')
     expect(sessions()).toEqual(before)
     expect(w.store.mailbox.message(mid(27))?.facts.closed).toBeUndefined()
@@ -1089,9 +1090,32 @@ describe("the Inbox's Tasks: every request on the host, one row for each recipie
     // The open one is not pushed out by 201 newer ones that are done; the oldest of those is
     expect(w.person.tasks()).toEqual({ tasks: expect.any(Array), capped: null })
     expect(w.person.tasks().tasks.map((t) => t.id)).toEqual([...settled.slice(1).reverse(), old])
-    // Past 2,000 open ones the oldest are left out, and the window is told how many are listed
-    vi.spyOn(w.store.mailbox, 'openWorkCount').mockReturnValue(2001)
-    expect(w.person.tasks().capped).toBe(2000)
+  })
+
+  it('the cap on open work counts rows, as the list does: a message to two is two, listed whole or not at all', () => {
+    const w = ready(hostWorld())
+    const ask = (text: string, to: string[]) => {
+      w.clock.t += 10
+      return w.mail.send(PERSON, { to, text, needsReply: true }).message.id
+    }
+    const oldest = ask('Oldest', [B])
+    const pair = ask('To two', [B, X])
+    const done = ask('Answered', [X])
+    w.store.mailbox.settle(done, X, 'answered', w.clock.t)
+    const newest = ask('Newest', [B])
+    const open = (cap: number) => w.store.mailbox.newestWork(0, cap).map((m) => m.id)
+    // Four open rows in all, newest first: 1 (Newest), 3 (To two), 4 (Oldest); the settled one is no open row
+    expect(w.store.mailbox.openWorkRows(10)).toEqual({ listed: 4, total: 4 })
+    expect(open(10)).toEqual([newest, pair, oldest])
+    // A cap of 2 does not split the message to two: it lists Newest alone, and says one open row is listed
+    expect(w.store.mailbox.openWorkRows(2)).toEqual({ listed: 1, total: 4 })
+    expect(open(2)).toEqual([newest])
+    expect(w.store.mailbox.openWorkRows(3)).toEqual({ listed: 3, total: 4 })
+    expect(open(3)).toEqual([newest, pair])
+    // The person's tasks() counts the rows it lists as open the same way the window counts them (`openTaskCount`): none past it, so no cap
+    const notDone = w.person.tasks().tasks.filter((t) => t.state !== 'done')
+    expect(notDone).toHaveLength(4)
+    expect(w.person.tasks().capped).toBeNull()
   })
 
   it('held: a request waiting for the person to say what happens to it; one the person dismissed is not listed', () => {

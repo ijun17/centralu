@@ -12,8 +12,8 @@ export interface MailPort {
   /** The threads the person is in (unread first), the mail held for them, and how many sleeping sessions wait for their word */
   list(): Promise<{ threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number }>
   /**
-   * The open and recently settled work on the host (#1577), one row per recipient, for the Inbox's Tasks; `capped` is how many open ones are listed when
-   * more are open. An older host has no such method and the call rejects
+   * The open and recently settled work on the host (#1577), one row per recipient, for the Inbox's Tasks; `capped` is how many open rows are listed when
+   * more are open (rows, as the list counts them). An older host has no such method and the call rejects
    */
   tasks(): Promise<{ tasks: MailTaskRow[]; capped: number | null }>
   /**

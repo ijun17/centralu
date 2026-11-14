@@ -570,7 +570,24 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
 
   // A host with more open work than it lists says so (`capped`)
   await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { tasksCapped: number | null } } }).__mock.mockMail.tasksCapped = 2000))
+  // The host's first answer is held back: the switch shows no count before it, as the list draws nothing then
+  await page.evaluate(() => {
+    type Held = { __mock: { mail: { tasks: () => Promise<unknown> } }; __answerTasks?: () => void }
+    const w = window as unknown as Held
+    const real = w.__mock.mail.tasks
+    w.__mock.mail.tasks = () =>
+      new Promise((resolve) => {
+        w.__answerTasks = () => {
+          w.__mock.mail.tasks = real
+          resolve(real())
+        }
+      })
+  })
   await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-tab-tasks')).toHaveText('Tasks')
+  await expect(page.getByTestId('inbox-tasks-count')).toHaveCount(0)
+  await page.waitForFunction(() => typeof (window as unknown as { __answerTasks?: unknown }).__answerTasks === 'function')
+  await page.evaluate(() => (window as unknown as { __answerTasks: () => void }).__answerTasks())
   await expect(page.getByTestId('inbox-tasks-count')).toHaveText('3')
   await page.getByTestId('inbox-tab-tasks').click()
   await expect(page.getByTestId('tasks-needs-you')).toContainText('Which branch?')

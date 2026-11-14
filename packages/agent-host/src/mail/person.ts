@@ -55,7 +55,7 @@ const LIST_SCAN = 1_000
 const CHAIN_CAP = 1_000
 /** How many of the newest messages that wait for a reply the Inbox's Tasks reads: one row for each of their recipients */
 const TASK_SCAN = 200
-/** Open requests Tasks lists at most, whatever their age: a ceiling far above real use, so one listing stays bounded */
+/** Open rows Tasks lists at most, whatever their age (a message's rows all or none): a ceiling far above real use, so one listing stays bounded */
 const TASK_OPEN = 2000
 const PREVIEW_CHARS = 140
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
@@ -149,8 +149,9 @@ export class MailPerson {
         ]
       })
     })
-    // More open than are listed: the window says the list stops there
-    return { tasks, capped: this.records.openWorkCount() > TASK_OPEN ? TASK_OPEN : null }
+    // More open rows than are listed: the window says how many open ones it shows, counted as it counts its rows
+    const open = this.records.openWorkRows(TASK_OPEN)
+    return { tasks, capped: open.total > open.listed ? open.listed : null }
   }
 
   /**
@@ -334,7 +335,9 @@ export class MailPerson {
     // The windows that have the chain open read it again
     for (const r of mine) this.service.announce(r)
     for (const [sessionId, t] of tell) this.tellClosed(outcome, sessionId, t)
-    return this.row(root, this.heldIn(root)) ?? this.lookInRow(root)
+    // The row of a chain it closed: an old id's first chain may be the sessions' own, which it left as it was
+    const closed = mine[0] ?? root
+    return this.row(closed, this.heldIn(closed)) ?? this.lookInRow(closed)
   }
 
   /**

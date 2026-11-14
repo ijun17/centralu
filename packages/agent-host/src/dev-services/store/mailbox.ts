@@ -175,10 +175,6 @@ const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') A
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /** A message that waits for a reply: a task, or a message that needs one (the Inbox's Tasks, #1577) */
 const WORK = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
-/** One still open: a row not settled and not dismissed, or the person's task reported back and waiting for their review */
-const OPEN_WORK = `${WORK} AND EXISTS (
-  SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND ((r.settled IS NULL AND COALESCE(r.held, '') <> 'dismissed') OR (m.sender = 'person' AND r.settled = 'reported'))
-)`
 /**
  * The `via` of a recipient row sent to the Assistant's role rather than to one session (§7.7): `ROLE_VIA` since #2133 step 4, `'orchestrator'`
  * before. A row keeps the word it was written with and stays on this machine, and every build that can open the store (v68 on) reads both
@@ -198,6 +194,22 @@ export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).joi
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
 export const HIDDEN_HOLDS = ['policy', 'loop'] as const
 const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
+
+/**
+ * A recipient row `r` of work `m` that Tasks lists as not done (one row of the list each, `taskState` in mail/person.ts words it): not settled, a
+ * question to the person an older build settled `legacy` and nobody answered, or the person's task reported back in a chain not closed (their review).
+ * Not one dismissed, nor one to the person kept from them, which Tasks leaves out
+ */
+const OPEN_ROW = `(COALESCE(r.held, '') <> 'dismissed' AND NOT (r.recipient = 'person' AND COALESCE(r.held, '') IN (${HIDDEN_SQL})) AND (
+  r.settled IS NULL
+  OR (r.recipient = 'person' AND r.settled = 'legacy' AND r.answer_id IS NULL)
+  OR (m.sender = 'person' AND m.kind = 'task' AND r.settled = 'reported'
+      AND NOT EXISTS (SELECT 1 FROM mail c WHERE c.id = m.root_id AND json_valid(c.facts) AND json_extract(c.facts, '$.closed') IS NOT NULL))
+))`
+/** Open work, newest first, with the running total of its open rows (`upto`): the newest messages up to a total are the ones a cap on rows lists */
+const OPEN_RUN = `SELECT id, SUM(n) OVER (ORDER BY created_at DESC, id DESC ROWS UNBOUNDED PRECEDING) AS upto FROM (
+  SELECT m.id, m.created_at, (SELECT COUNT(*) FROM mail_recipients r WHERE r.message_id = m.id AND ${OPEN_ROW}) AS n FROM mail m WHERE ${WORK}
+) WHERE n > 0`
 
 /** The ids as one JSON parameter, read with `json_each` */
 const idList = (ids: readonly string[]): string => JSON.stringify(ids)
@@ -400,15 +412,15 @@ export class MailboxRecords {
   }
 
   /**
-   * The messages that wait for a reply (tasks, and messages that need one: the Inbox's Tasks, #1577), newest first: every one still open (a row not
-   * settled and not dismissed, or the person's task reported back and waiting for their review), up to `open`, and the newest `limit` of all. So open work is never
-   * pushed out by what is done. A scan of the table, which no index serves: measured at 0.17 ms on a store of 164 messages
+   * The messages that wait for a reply (tasks, and messages that need one: the Inbox's Tasks, #1577), newest first: the newest of those still open
+   * whose open rows (`OPEN_ROW`, one row of the list each) come to at most `open`, and the newest `limit` of all. So open work is never pushed out by
+   * what is done, and a message's rows are listed all or none. A scan of the table, which no index serves: measured at 0.17 ms on a store of 164 messages
    */
   newestWork(limit: number, open: number): MailRow[] {
     const newest = 'ORDER BY m.created_at DESC, m.id DESC'
     return this.messages(
       `${WORK} AND (
-         m.id IN (SELECT m.id FROM mail m WHERE ${OPEN_WORK} ${newest} LIMIT ?)
+         m.id IN (SELECT id FROM (${OPEN_RUN}) WHERE upto <= ?)
          OR m.id IN (SELECT m.id FROM mail m WHERE ${WORK} ${newest} LIMIT ?)
        ) ${newest}`,
       open,
@@ -416,9 +428,14 @@ export class MailboxRecords {
     )
   }
 
-  /** How many messages `newestWork` counts as open: past its `open`, the oldest of them are not listed (the Inbox's Tasks says so) */
-  openWorkCount(): number {
-    return this.db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM mail m WHERE ${OPEN_WORK}`).get()?.n ?? 0
+  /** How many open rows `newestWork(_, open)` lists, and how many there are in all: past `listed`, the oldest are not listed (the Inbox's Tasks says so) */
+  openWorkRows(open: number): { listed: number; total: number } {
+    const n = this.db
+      .prepare<[number], { listed: number; total: number }>(
+        `SELECT COALESCE(MAX(CASE WHEN upto <= ? THEN upto END), 0) AS listed, COALESCE(MAX(upto), 0) AS total FROM (${OPEN_RUN})`,
+      )
+      .get(open)
+    return { listed: n?.listed ?? 0, total: n?.total ?? 0 }
   }
 
   // ── Delivery ──

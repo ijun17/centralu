@@ -31,8 +31,8 @@ export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: Ma
   return (
     <ListRow active={active} dim={dim} onClick={() => void open(t.id)} testId={`mail-thread-${t.id}`}>
       <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
-          ●
-        </span>
+        ●
+      </span>
       <RowSubject loud={t.unread > 0} testId={`mail-subject-${t.id}`}>
         {t.subject}
       </RowSubject>

@@ -1,4 +1,4 @@
-import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
+import { errorMessage, notifyPolicyOf, ProtocolErrorCode } from '@cc/protocol/client'
 import type { MailThreadRow, MailThreadView, NormalizedEvent, WatchView } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
@@ -6,8 +6,11 @@ import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
 import { coalescedRead } from './single-flight.js'
 
-/** What Tasks lists when the host has nothing to say: an older host, or one that failed the first read */
+/** What Tasks lists when the host answered its first read with an error: an older host ("Unknown method"), or one that refused it */
 const NO_TASKS = { tasks: [], capped: null }
+
+/** Whether a failed call is the host's answer (an error with the protocol's code), not a link that dropped, timed out or never sent it */
+const hostAnswered = (e: unknown): boolean => e instanceof Error && 'code' in e && ProtocolErrorCode.safeParse(e.code).success
 
 /**
  * The person's mailbox (#1347, docs/plans/mailbox.md §10.1): its list, a thread, and the acts that are the person's. The host
@@ -58,12 +61,15 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
     },
 
     loadTasks() {
-      // A first read that fails (a host older than Tasks answers "Unknown method") lists none; a later one that fails keeps the list it had
+      /*
+       * A first read the host answers with an error (a host older than Tasks answers "Unknown method") lists none. One the link failed stays unread,
+       * blank and with no count, for the read after the reconnect; a later one that fails keeps the list it had
+       */
       const read = async (platform: Platform) => {
         try {
           return await platform.mail.tasks()
         } catch (e) {
-          if (get().mailTasks === null) return NO_TASKS
+          if (get().mailTasks === null && hostAnswered(e)) return NO_TASKS
           throw e instanceof Error ? e : new Error(errorMessage(e))
         }
       }
