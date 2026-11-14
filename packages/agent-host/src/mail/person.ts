@@ -153,16 +153,19 @@ export class MailPerson {
 
   /**
    * A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it. The
-   * sessions' messages to each other in it are shown too, read-only (#1577, owner 2026-11-14); a chain the person is not in at all they look in on:
-   * nothing is read, answered or changed for anyone (§5.5). A message to them kept from them stays out of sight either way
+   * sessions' messages to each other in it are shown too, read-only (#1577, owner 2026-11-14); a message to the person kept from them stays out of
+   * sight. Where nothing of theirs is left to read (a chain they are not in, or one whose only message to them was withdrawn) they look in on it:
+   * nothing is read, answered, closed or changed for anyone (§5.5)
    */
   thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
     // An old thread's id opens the newest chain moved from it
     const root = this.rootsOf(threadId)[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
-    const chain = this.records.numbered(root, CHAIN_CAP).map(({ m, n }) => ({ m, seq: n }))
-    const lookIn = !chain.some((s) => this.involves(s.m))
-    const all = chain.filter((s) => this.readable(s.m) || !this.involves(s.m))
+    const all = this.records
+      .numbered(root, CHAIN_CAP)
+      .map(({ m, n }) => ({ m, seq: n }))
+      .filter((s) => this.readable(s.m) || !this.involves(s.m))
+    const lookIn = !all.some((s) => this.readable(s.m))
     let page: Shown[]
     if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
     else if (opts.tail !== undefined || !opts.all) {
@@ -277,7 +280,7 @@ export class MailPerson {
     const root = roots[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
     // A chain the person only looks in on is the sessions' own work (#1577): closing it would withdraw what they asked of each other
-    if (roots.every((r) => !this.chainOf(r).some((m) => this.involves(m)))) throw refuse('not_yours', 'You are not in this mail: you can read it, not close it.')
+    if (roots.every((r) => this.shown(r).length === 0)) throw refuse('not_yours', 'You are not in this mail: you can read it, not close it.')
     const now = Date.now()
     /** The sessions to tell, once each across every chain the id names, with the person's requests withdrawn that they had and where each chain ended */
     const tell = new Map<string, { address: string; root: string; ids: string[]; ends: string[] }>()

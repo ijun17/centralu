@@ -834,7 +834,8 @@ sent by them, sent to them, or held for them) opens whole, every message shown, 
 marked read, delivered, settled or held for anyone, and neither a reply nor a close is taken (`mail.close` refuses it
 `not_yours`). In a chain they are in, the sessions' messages to each other show too, read-only: what is read for the
 person is their own rows alone. A message to them kept from their sight (withdrawn, gone, held out, dismissed) stays out of
-it either way, and still makes the chain one they are in. The person owns every session on their host and reads its
+it either way; where nothing of theirs is left to read, the chain is read-only for them too (`lookIn`), and not theirs to
+close: a close would tell the sessions on it to stop work the person cannot see. The person owns every session on their host and reads its
 conversation already, so this widens nothing for an agent. A session's reach is unchanged: the rule above is its `mail` tool's, and no session's path goes through the
 person's side (`MailPerson`).
 

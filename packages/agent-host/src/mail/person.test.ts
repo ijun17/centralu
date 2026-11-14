@@ -1149,7 +1149,7 @@ describe('the person looks in on a chain they are not in (#1577, owner 2026-11-1
     expect(w.person.close(q.id)).toMatchObject({ state: 'done' })
   })
 
-  it('a question to the person its sender withdrew stays out of sight, and makes the chain no look in (§5.5: sent to them)', () => {
+  it('a question to the person its sender withdrew stays out of sight; with nothing of theirs left to read, the chain is a look in, not theirs to close', () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const task = w.mail.task(A, B, { text: 'Write the parser', origin: 'mail', delivered: true })
@@ -1157,10 +1157,14 @@ describe('the person looks in on a chain they are not in (#1577, owner 2026-11-1
     const q = w.mail.send(B, { to: [A, PERSON], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
     dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'withdrawn' WHERE message_id = ? AND recipient = ?`).run(q.id, PERSON)
     const before = dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()
+    const facts = dbOf(w).prepare(`SELECT facts FROM mail WHERE id = ?`).get(task.id)
     const view = w.person.thread(task.id)
     expect(view.messages.map((m) => m.id)).toEqual([task.id])
-    expect(view).toMatchObject({ lookIn: false, canReply: false })
+    expect(view).toMatchObject({ lookIn: true, canReply: false })
+    // Closing it would tell the sessions working on it to stop work the person cannot see
+    expect(refusedFor(() => w.person.close(task.id))).toBe('not_yours')
     expect(dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()).toEqual(before)
+    expect(dbOf(w).prepare(`SELECT facts FROM mail WHERE id = ?`).get(task.id)).toEqual(facts)
   })
 
   it('a session reads no more than before: a chain it is not in stays closed to its own mail tool', () => {
