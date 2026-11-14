@@ -29,17 +29,17 @@ export type PersonHost = {
 
 /**
  * `PersonHost.session` over this host's sessions (`local`), and a linked machine's session that wrote to the person (#1987): by the name it was
- * last heard by, with no live state, which this host does not keep
+ * last heard by, with its state as this hub's mirror of that machine last had it (none when the mirror has no row for it)
  */
 export function personSessions(
   local: (sessionId: string) => { name: string; state: string } | undefined,
-  mail: { service: Pick<MessageService, 'sessionAddress'>; reach: Pick<MailReach, 'elsewhere' | 'labelOf'> },
+  mail: { service: Pick<MessageService, 'sessionAddress'>; reach: Pick<MailReach, 'elsewhere' | 'labelOf'>; across: Pick<MailAcross, 'foreignState'> },
 ): PersonHost['session'] {
   return (id) => {
     const here = local(id)
     if (here) return here
     const address = mail.service.sessionAddress(id)
-    return mail.reach.elsewhere(address) ? { name: mail.reach.labelOf(address), state: null } : undefined
+    return mail.reach.elsewhere(address) ? { name: mail.reach.labelOf(address), state: mail.across.foreignState(address) ?? null } : undefined
   }
 }
 

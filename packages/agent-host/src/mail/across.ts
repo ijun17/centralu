@@ -1,7 +1,7 @@
 import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type MailRowState } from '@cc/protocol'
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
-import { CENTRALU, PERSON, PERSON_ID, parseAddress, sessionAddress } from './address.js'
+import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
@@ -55,6 +55,8 @@ export type AcrossPeers = {
   machine?(id: string): (AcrossPeer & { id: string }) | undefined
   /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
   machineSession?(machineId: string, sessionId: string): string | undefined
+  /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */
+  machineState?(machineId: string, sessionId: string): string | undefined
   /** The linked machines' sessions as this hub's mirror last had them, and the machines that are not reachable */
   machineDirectory?(): { entries: FoundEntry[]; away: { name: string; why: string }[] }
   /** The session here that started a machine's child, by the child's qualified id (`<machine>.<id>`), for that child's `parent` */
@@ -159,6 +161,11 @@ export class MailAcross {
     return { kind: 'hub', hubId: p.host }
   }
 
+  /** Whether `hostId` is a hub that links this host and offers mail, reachable now or not (`MailAcross` peers) */
+  isHub(hostId: string): boolean {
+    return this.peers?.hub?.(hostId) !== undefined
+  }
+
   /** Whether an address is a session on another host: this host never delivers to it, and never writes to it but a copy */
   foreign(address: string): boolean {
     const r = this.route(address)
@@ -173,6 +180,12 @@ export class MailAcross {
     if (heard) return { name: heard }
     const computer = this.computerOf(r)
     return { name: computer ? `a session on ${computer}` : address }
+  }
+
+  /** A linked machine's session's state as this hub's mirror last had it, for the person's Inbox; undefined for any other address */
+  foreignState(address: string): string | undefined {
+    const r = this.route(address)
+    return r?.kind === 'machine' ? this.peers?.machineState?.(r.machineId, r.sessionId) : undefined
   }
 
   private computerOf(r: Route): string | null {
@@ -469,8 +482,10 @@ export class MailAcross {
       // A reply to a message this side never kept: one that arrived there while the link failed during its send
       const lost = why === 'unknown_message' && p.replyTo !== undefined && !this.d.records.message(p.replyTo)
       const text = why === 'gone'
-        ? // The service names the session by this host's address, which the sender never used
-          `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
+        ? // The service names the session by this host's address, which the sender never used; the person reads it by its name
+          isPerson(from)
+          ? `${this.label(to)} on ${this.selfName()} is in the session archive there or was deleted, so your answer was not sent.`
+          : `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
         : lost
         ? `${this.selfName()} has no record of ${oneLineText(p.replyTo ?? '', 200)}: it most likely reached you while the link failed during its sending, so ${this.selfName()} never kept its copy, and nothing was written. Send your answer again as a new message (without replying to that one), saying what it answers.`
         : why

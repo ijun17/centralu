@@ -439,7 +439,8 @@ export class MailTool {
     const m = i.message
     if (i.phantom === 'gone') return '[an earlier message that is no longer kept]'
     if (i.phantom) return `[${m.id}] a message from ${i.relation} that you were not sent; its words are not shown.`
-    const from = m.sender === me ? 'you' : `${i.relation} ${this.name(m.sender)} (${m.sender})`
+    // The person under either name is "the person": no name and no address of theirs to add
+    const from = m.sender === me ? 'you' : isPerson(m.sender) ? 'the person' : `${i.relation} ${this.name(m.sender)} (${m.sender})`
     const others = this.records.recipients(m.id).filter((r) => r.recipient !== me).length
     const to = m.sender === me ? '' : `, to ${others === 0 ? 'you' : `you and ${others} other${others === 1 ? '' : 's'}`}`
     const head = `[${m.id}] ${m.kind}${m.urgent ? ' (urgent)' : ''} from ${from}, ${this.age(m.createdAt)} ago${to}.`

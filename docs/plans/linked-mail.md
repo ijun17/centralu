@@ -244,22 +244,33 @@ may not open (decided 2026-11-14 on #1987):
   `Several computers link this one as hubs and none of them started this session, so it stays in this computer's own
   Inbox: the person sees it in this computer's window.` No hub at all: this computer's Inbox, as before. A session a
   hub started whose record names no hub (an earlier build) is refused `elsewhere`, and one whose hub is not linked now
-  `link_down` (`MailAcross.personTarget`).
+  `link_down` (`MailAcross.personTarget`). The hubs that offer mail are kept in the app setting `mail_hubs` (`LinkedHubs`,
+  with when each last offered), so a host that starts again while its hub is away knows that hub before it offers, and
+  the send is refused `link_down` naming it, not kept here unseen. A hub that has not offered for 30 days is forgotten,
+  so one removed while away is not refused under for good.
 - **The address.** The hub names its person `person`, as always. A machine names the hub's person
   `session:<hub id>/person` (`PERSON_ID`): a foreign address, so the copy, the receipts, a link that is down and a send
   again whose answer was lost work as for any session over there (§6). No session id reads `person`. The wire carries
   the hub's naming: `hub.mail { to: "person", subject?, choices? }` and `host.mail { from: "person" }` (additions).
 - **The person's word.** The person answers in the hub's Inbox; the hub calls `host.mail` from `person`, keeps the copy,
   and the machine writes the answer from `session:<hub id>/person`, which its rules read as the person (`isPerson`,
-  `senderKind`): it wakes as the person's word does and is framed "The person wrote it". A hub already speaks for the
-  person on its machines (their input to a session there goes through it), so this gives it no right it did not have.
+  `senderKind`): it wakes as the person's word does and is framed "message from the person … The person wrote it". A hub
+  already speaks for the person on its machines (their input to a session there goes through it), so this gives it no
+  right it did not have. Only a hub that links this host and offers mail writes from that address (`MailReach.mayWrite`
+  refuses it from any other host, `not_allowed`), so a stored sender of that form is always such a hub's person.
+  An answer to a session that is gone there is refused in the person's words: `<name> on <machine> is in the session
+  archive there or was deleted, so your answer was not sent.`
 - **Mark done** is the person's own state on the hub (`MailPerson.close`): it waits for no call to the machine, and the
   row leaves the Inbox at once, link or no link (#2226). The hub's row settles `done`, and the machine's copy learns it
   with the receipts at the next change or connect (§6, `mail.acrossToldAt`). A question of the person's that the close
   withdraws goes the same way; the closed notice to the session that had it is passed on as any notice (§6, Notices),
   so while the link is down it is dropped and logged, and the withdrawal still arrives.
 - **Notices about the person's mail** that the machine writes (the "no longer watched" notice when its session goes
-  without answering the person) are passed to the hub's person (`passOn`, named `person` on the wire).
+  without answering the person) follow the person's rules (`tellUnanswered` reads the sender by `senderKind`): plain
+  words with no ids, and nothing about their own Stop or deleting the session. They are passed to the hub's person
+  (`passOn`, named `person` on the wire).
+- **The Inbox** names a machine's session `<name> on <machine>`, with its state as the hub's mirror of that machine last
+  had it (`personSessions`).
 - **Refusals**, each at once with nothing written: the link down (`link_down`, naming the hub); a hub from before this,
   which reads `person` as no address (`older`: `<hub> runs an older Centralu, which takes no mail to the person from
   here. Update it there.`); a machine from before this, which refuses `host.mail` from `person` (`older`: `<machine>

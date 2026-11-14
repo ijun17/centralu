@@ -972,7 +972,7 @@ export class MessageService {
   /** The answer `answer` to `question` is held for the person: the question stays open (it keeps the answer's id) and its asker is told once, quietly (S14) */
   private answerHeld(question: MailRow, answer: MailRow): void {
     this.records.answerHeld(question.id, answer.sender, answer.id)
-    if (parseAddress(question.sender)?.kind !== 'session') return
+    if (senderKind(question.sender) !== 'session') return
     const reason = `${this.reach.projectLabel(answer.senderProject ?? '')} is not trusted`
     this.centralu(question.sender, {
       kind: 'notice',

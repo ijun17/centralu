@@ -728,6 +728,7 @@ const hubs = new LinkedHubs({
   call: (client, method, params, opts) => server.call(client, method, params, opts),
   // A session a hub created here before it offered: recorded under it once it does (#2067)
   record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+  settings: store.settings,
 })
 // Mail across linked machines (#2067 items 2 and 3): the machines this host links, and the hubs that link it
 hostMailbox.across.usePeers(

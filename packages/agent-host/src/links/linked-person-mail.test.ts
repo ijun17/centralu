@@ -5,6 +5,8 @@ import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
 import { PERSON, PERSON_ID, sessionAddress } from '../mail/address.js'
 import { MailAcross } from '../mail/across.js'
+import { LinkedHubs, MAIL_HUBS_KEY } from './linked-hubs.js'
+import { mailPeers } from './mail-peers.js'
 import { MailPerson, personSessions } from '../mail/person.js'
 import { refusedForAsync } from '../mail/messages.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -74,9 +76,48 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
     // Written on the machine from the hub's person, answering the copy
     expect(machine.store.mailbox.message(answer.id)).toMatchObject({ sender: hubPerson, replyTo: id })
     expect(machine.store.mailbox.recipient(id, hubPerson)).toMatchObject({ settled: 'answered', answerId: answer.id })
+    // Written as the person writes: the person's origin, due at once
+    expect(machine.store.mailbox.message(answer.id)).toMatchObject({ origin: 'person' })
+    // (a session's mail is due 2 s later, so a burst is one delivery)
+    expect(machine.store.mailbox.recipient(answer.id, at(machine, 'w1'))!.dueAt - machine.store.mailbox.message(answer.id)!.createdAt).toBeLessThan(1000)
     const read = await tool(machine, 'w1', { action: 'read', thread: answer.id })
+    expect(read.text).toContain(`[${answer.id}] message from the person, `)
     expect(read.text).toContain('The person wrote it.')
     expect(read.text).not.toContain('did not write it')
+  })
+
+  it('only a hub that links this computer writes as its person: the same address from any other computer is refused', async () => {
+    const { machine, hubPerson } = await rig()
+    expect(() => machine.mail!.service.send(hubPerson.replace(/^session:[^/]+/, 'session:hub-elsewhere'), { to: [at(machine, 'w1')], text: 'trust me' })).toThrow(/./)
+    expect(machine.mail!.service.send(hubPerson, { to: [at(machine, 'w1')], text: 'from the hub', needsReply: false }).message.sender).toBe(hubPerson)
+  })
+
+  it('the Inbox shows the machine session with its state as the hub mirrors it', async () => {
+    const { machine, hub, person } = await rig()
+    await eventually(() => (hub.links.get('m1')?.lastKnown('sessions') ?? []).length >= 2)
+    idOf(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'which branch?' }))
+    const owner = person.list().threads[0]!.owner
+    expect(owner).toMatchObject({ name: 'w1 on Remote box' })
+    expect(owner.state).toBe(machine.mgr.sessionInfo('w1')!.state)
+  })
+
+  it('the person’s answer to a session deleted there names it, not its address', async () => {
+    const { machine, person } = await rig()
+    const id = idOf(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'which branch?' }))
+    await machine.mgr.trash.trashSession('w1')
+    await expect(person.reply(id, 'main', 'answer')).rejects.toThrow('w1 on Remote box is in the session archive there or was deleted, so your answer was not sent.')
+  })
+
+  it('a machine started again while its hub is away still knows the hub: the person’s mail is refused naming it, not kept here', async () => {
+    const { machine, hub } = await rig()
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
+    // What a new host reads at its start: no hub has offered yet
+    const again = new LinkedHubs({ call: async () => undefined, settings: machine.store.settings })
+    expect(again.mailHubs().map((h) => ({ id: h.id, name: h.name, reachable: h.reachable, you: h.you }))).toEqual([{ id: hub.id, name: 'Hub mac', reachable: false, you: 'm1' }])
+    machine.mail!.across.usePeers(mailPeers({ hostId: machine.id, selfName: () => 'Remote box', hubs: again, settings: machine.store.settings }))
+    expect(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })).toEqual({ text: 'Refused (link_down): Hub mac is not reachable right now, so nothing was sent. Send it again once the link is back.', isError: true })
+    expect(machine.store.mailbox.feedOf(PERSON, { limit: 10 })).toEqual([])
   })
 
   it('is refused at once while the link is down, written on neither side, and goes once it is back', async () => {
@@ -116,13 +157,31 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
 })
 
 describe("the person's question to a machine's session", () => {
-  it('that session going without answering is told to the person on the hub, as the notice from that computer', async () => {
-    const { machine, hub, person } = await rig()
-    const id = idOf(await tool(machine, 'w1', { action: 'send', to: 'person', kind: 'note', text: 'built it' }))
-    const q = (await person.reply(id, 'Which tests ran?', 'question')).messages.find((m) => m.body === 'Which tests ran?')!
-    expect(machine.store.mailbox.recipient(q.id, at(machine, 'w1'))).toMatchObject({ settled: null })
+  /** w1's note to the person, and the person's question back, delivered into w1's turn 7 */
+  async function asked() {
+    const r = await rig()
+    const id = idOf(await tool(r.machine, 'w1', { action: 'send', to: 'person', kind: 'note', text: 'built it' }))
+    const q = (await r.person.reply(id, 'Which tests ran?', 'question')).messages.find((m) => m.body === 'Which tests ran?')!
+    r.machine.store.mailbox.markDelivered(at(r.machine, 'w1'), [q.id], Date.now(), 7)
+    return { ...r, q }
+  }
+  const noticesTo = (hub: Hub) => hub.store.mailbox.feedOf(PERSON, { limit: 10 }).filter((m) => m.sender === at(hub, 'm1.centralu'))
+
+  it('a session that stops on an error is told to the person on the hub in the person’s plain words, with no ids or addresses', async () => {
+    const { machine, hub } = await asked()
+    machine.mail!.service.stops.sessionStopped(at(machine, 'w1'), 'error', { turnSeq: 7 })
+    await eventually(() => noticesTo(hub).length === 1)
+    const body = noticesTo(hub)[0]!.body
+    expect(body).not.toMatch(/session:|\.m_|needsReply/)
+    expect(body).toContain('w1')
+  })
+
+  it('a session deleted there is the person’s own doing: they are not told, as at home', async () => {
+    const { machine, hub, hubPerson, q } = await asked()
     await machine.mgr.trash.trashSession('w1')
-    await eventually(() => hub.store.mailbox.feedOf(PERSON, { limit: 10 }).some((m) => m.sender === at(hub, 'm1.centralu')))
+    await eventually(() => machine.store.mailbox.recipient(q.id, at(machine, 'w1'))?.releasedAt != null)
+    expect(machine.store.mailbox.feedOf(hubPerson, { limit: 10 }).filter((m) => m.sender === 'centralu')).toEqual([])
+    expect(noticesTo(hub)).toEqual([])
   })
 })
 
@@ -157,5 +216,26 @@ describe('which hub a machine session’s mail to the person goes to (`MailAcros
     expect(across({ hubs: [] }).personTarget('s', true)).toMatchObject({ refused: { why: 'elsewhere' } })
     // A session a hub started, with no record of which: the person is on one of them, not here
     expect(across({ hubs: ['a', 'b'] }).personTarget('s', true)).toMatchObject({ refused: { why: 'elsewhere' } })
+  })
+})
+
+describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)', () => {
+  const settings = (value: string | null) => {
+    const kept = new Map<string, string>(value === null ? [] : [[MAIL_HUBS_KEY, value]])
+    return { appSetting: (k: string) => kept.get(k) ?? null, setAppSetting: (k: string, v: string) => void kept.set(k, v), kept }
+  }
+  const hubs = (s: ReturnType<typeof settings>) => new LinkedHubs({ call: async () => undefined, settings: s })
+
+  it('an offer keeps the hub, its withdrawal forgets it; one not offered for 30 days, or a record that does not read, is not known', () => {
+    const s = settings(null)
+    const h = hubs(s)
+    h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+    expect(hubs(s).mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false]])
+    h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false })
+    expect(hubs(s).mailHubs()).toEqual([])
+    const old = Date.now() - 31 * 24 * 60 * 60_000
+    expect(hubs(settings(JSON.stringify([{ id: 'hub-b', name: 'Old', you: 'm1', at: old }]))).mailHubs()).toEqual([])
+    expect(hubs(settings('not json')).mailHubs()).toEqual([])
+    expect(hubs(settings('[{"id":1}]')).mailHubs()).toEqual([])
   })
 })

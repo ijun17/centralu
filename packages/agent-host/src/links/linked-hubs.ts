@@ -1,4 +1,6 @@
 import { HubAskResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
+import { z } from 'zod'
+import type { SettingAccess } from '../dev-services/store/settings.js'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { LOOKUP_MS } from './machine-reach.js'
 import type { AppsPeer } from './linked-apps.js'
@@ -22,7 +24,7 @@ import type { StartingHub } from '../sessions/hub-preset.js'
  */
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null }
+type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null; offeredAt: number }
 
 /** How long a message to a hub may take before the send is refused as not known to have arrived */
 const MAIL_MS = 30_000
@@ -40,7 +42,18 @@ export type LinkedHubsDeps = {
   mailTimeoutMs?: number
   /** Records the hub that started a session here (`recordStartingHub`), for one created before that hub offered (`awaitOffer`) */
   record?: (sessionId: string, hub: StartingHub) => void
+  /** Where the hubs that offer mail here are kept (`MAIL_HUBS_KEY`), so a host that starts while they are away still knows them (#1987) */
+  settings?: SettingAccess
 }
+
+/**
+ * The hubs that offered mail here, as last offered: a host that starts again knows them before they offer, as away, so mail to the person
+ * written while a hub is away is refused naming it rather than kept here unseen (#1987). An app setting, no store step: an older build never reads it
+ */
+export const MAIL_HUBS_KEY = 'mail_hubs'
+const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.string().max(200), you: z.string().max(200).nullable(), at: z.number() })).max(50)
+/** How long a hub that offered mail is known after its last offer: one removed while away is not refused under for good */
+const KEPT_MAIL_HUB_MS = 30 * 24 * 60 * 60_000
 
 /** The words a call that failed for an older hub says (it has no such method) */
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
@@ -53,7 +66,24 @@ export class LinkedHubs {
   /** Run each time a hub offers mail on a connection (`onMailOffer`) */
   private readonly mailOffered = new Set<(hubId: string) => void>()
 
-  constructor(private readonly deps: LinkedHubsDeps) {}
+  constructor(private readonly deps: LinkedHubsDeps) {
+    const raw = deps.settings?.appSetting(MAIL_HUBS_KEY) ?? null
+    let kept: z.infer<typeof KeptMailHubs> = []
+    try {
+      kept = KeptMailHubs.catch([]).parse(raw === null ? [] : JSON.parse(raw))
+    } catch {
+      kept = []
+    }
+    for (const h of kept) {
+      if (Date.now() - h.at < KEPT_MAIL_HUB_MS) this.hubs.set(h.id, { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, offeredAt: h.at })
+    }
+  }
+
+  /** The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`) */
+  private keepMailHubs(): void {
+    const list = [...this.hubs.values()].filter((h) => h.mail).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.offeredAt }))
+    this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
+  }
 
   /** `fn` runs each time a hub offers mail here, at each connect: what crossed while it was away is told then (#2067 review) */
   onMailOffer(fn: (hubId: string) => void): void {
@@ -65,13 +95,14 @@ export class LinkedHubs {
     const mail = o.mail === true
     const apps = o.apps === true
     if (!o.on && !mail && !apps) {
-      this.hubs.delete(o.hub.id)
+      if (this.hubs.delete(o.hub.id)) this.keepMailHubs()
       return
     }
     const prev = this.hubs.get(o.hub.id)
     const projects = o.on ? (prev?.projects ?? null) : null
     const name = oneLineText(o.hub.name, 120) || o.hub.id
-    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null })
+    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, offeredAt: Date.now() })
+    if (mail || prev?.mail) this.keepMailHubs()
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
     for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name, apps })

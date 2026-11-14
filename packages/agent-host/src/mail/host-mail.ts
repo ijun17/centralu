@@ -141,6 +141,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     // A session of a hub this host is linked to (#2067 item 2), by the name it was last heard by
     foreign: (address) => far.across?.foreignName(address),
+    hubPerson: (hostId) => far.across?.isHub(hostId) === true,
     assistantId: () => sessions.assistantId(),
     assistantAsks: () => sessions.assistantAsks() === null,
     // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session

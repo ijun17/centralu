@@ -1,5 +1,5 @@
 import type { MailRow } from '../dev-services/store/mailbox.js'
-import { parseAddress, sessionAddress } from './address.js'
+import { isPerson, parseAddress, sessionAddress } from './address.js'
 import { HOLD_UNTRUSTED_OUT, type MailRefusal } from './rules.js'
 
 /*
@@ -29,6 +29,8 @@ export type ReachHost = {
    * from a session that is alive elsewhere; mail to it is the link's to carry, never written here. Undefined: not reached
    */
   foreign?(address: string): { name: string } | undefined
+  /** Whether `hostId` is a hub that links this host and offers mail (`MailAcross.isHub`): only its person writes as the person from there (#1987) */
+  hubPerson?(hostId: string): boolean
 }
 
 /** Where a delegation goes, as far as the hold goes: a session, a project (to create one in, or `ask_project`), the Assistant or a linked machine */
@@ -93,6 +95,8 @@ export function mailReach(host: ReachHost): MailReach {
       const f = parseAddress(from)
       const t = parseAddress(to)
       if (!f || !t) return 'bad_address'
+      // The person of another host writes here only from a hub that links this one: what reads that address as the person relies on it
+      if (f.kind === 'session' && isPerson(from) && host.hubPerson?.(f.host) !== true) return 'not_allowed'
       // Nobody writes to Centralu, and apps take no mail yet
       if (t.kind === 'centralu' || t.kind === 'app') return 'not_allowed'
       if (t.kind === 'session' && t.host !== host.hostId) return 'elsewhere'

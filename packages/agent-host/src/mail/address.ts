@@ -33,7 +33,8 @@ export type Party =
 /**
  * The person of a hub, as a machine it links names them (#1987): the person works in the hub's window, so a machine's session that
  * writes to the person while a hub links it writes to the hub's person, under this address. No session's id is `person` (a host makes its
- * sessions' ids, never that word, and a linked machine's have a dot), so the address names no session. A reply from there is the person's own word
+ * sessions' ids, never that word, and a linked machine's have a dot), so the address names no session. A reply from there is the person's own word,
+ * and only a hub that links this host and offers mail writes from it (`MailReach.mayWrite`), so a stored sender of this form is always one
  */
 export const PERSON_ID = 'person'
 

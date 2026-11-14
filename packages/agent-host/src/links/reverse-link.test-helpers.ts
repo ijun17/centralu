@@ -68,6 +68,7 @@ export async function machineHost(
     call: (client, method, params, opts) => server.call(client, method, params, opts),
     lookupMs: 2000,
     record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+    settings: store.settings,
     ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}),
     ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}),
   })
