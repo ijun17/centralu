@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwind from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 import { aliases } from '../../tooling/aliases.js'
-import { PURE_CALLS } from '../../tooling/pure-calls.js'
+import { PURE_CALLS } from '../../tooling/pure-calls.mjs'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 

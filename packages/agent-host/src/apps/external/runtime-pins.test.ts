@@ -20,6 +20,8 @@ import { linkDir } from '../../link.test-helpers.js'
  */
 
 const SCRIPT = fileURLToPath(new URL('../../../scripts/build-app-runtime.mjs', import.meta.url))
+/** The one file of the repository the script imports */
+const PURE_CALLS = fileURLToPath(new URL('../../../../../tooling/pure-calls.mjs', import.meta.url))
 /** The real esbuild — the copy of the script inside the fake install also imports this one */
 const ESBUILD = realpathSync(fileURLToPath(new URL('../../../node_modules/esbuild', import.meta.url)))
 
@@ -89,6 +91,8 @@ describe('the version check reads from the install side, not the hoisted side', 
     const host = join(root, 'packages', 'agent-host')
     mkdirSync(join(host, 'scripts'), { recursive: true })
     copyFileSync(SCRIPT, join(host, 'scripts', 'build-app-runtime.mjs'))
+    mkdirSync(join(root, 'tooling'), { recursive: true })
+    copyFileSync(PURE_CALLS, join(root, 'tooling', 'pure-calls.mjs'))
     writeFileSync(
       join(host, 'package.json'),
       JSON.stringify({ name: '@cc/agent-host', dependencies: { [PINNED.server]: '^2.1.0', [PINNED.client]: '^2.1.0', zod: '^4.4.3' }, devDependencies: { [PINNED.ext]: '2.0.0', esbuild: '^0.28.2' } }),
