@@ -1,4 +1,4 @@
-import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useLayoutEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { treeRows, type ProjectAppSessions } from '../tree.js'
 import { childrenGroupKey } from '../../../store/foldGroups.js'
@@ -34,7 +34,9 @@ export function ProjectSessionList({
    * and a row whose session did not change is not drawn again (SessionListRow).
    */
   const latest = useRef({ sessions, byApp: groupedSessions.byApp })
-  latest.current = { sessions, byApp: groupedSessions.byApp }
+  useLayoutEffect(() => {
+    latest.current = { sessions, byApp: groupedSessions.byApp }
+  })
   const onReorder = useCallback(
     (rowId: string, draggedId: string, before: boolean) => {
       const { sessions: listed, byApp } = latest.current
