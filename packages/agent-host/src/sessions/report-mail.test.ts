@@ -85,7 +85,6 @@ describe('a turn ends, the owner reads mail', () => {
     // For the mailbox to deliver: undelivered, unread
     expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: null, readAt: null })
     expect(oldReports(parent, child)).toEqual([])
-    expect(w.store.children.listReportMarks()).toEqual([])
     // And the wake, once it is due, carries Centralu’s facts alone
     const wake = later().drain(addr(parent), {})
     expect(wake.messageIds).toContain(report!.id)

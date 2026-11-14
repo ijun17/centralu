@@ -152,8 +152,8 @@ Inbox report, which skipped the person's turn, went when the person's task came 
   running turn (Codex, no `turnInputs`), one given after the turn began. A tool that cannot tell (`null`) notes none.
 - **Kept nowhere.** Whose the running turn is lives in memory (`ChildOwnership.starters`) until its end. A host that takes a session over
   mid-turn reads that turn as the work's unless its end names its inputs, as a host did with no record before #1377 was persisted. The
-  app settings `turn_inputs:<session>`, `report_turn:<session>` and `input_origins:<session>` are neither read nor written; every start
-  deletes them for every session (`takeOverFromEarlierBuild`), so an earlier build (beta.57) after a rollback reads no stale value.
+  app settings `turn_inputs:<session>`, `report_turn:<session>` and `input_origins:<session>` are neither read nor written; store step 74
+  deleted them for every session and keeps out the builds that read them (beta.57 and before, #2258).
 - **What it costs.** A turn the tool names by only the last of several messages it ran as one is read by that one (§2 item 4 took every
   held message up to it). A message held for more turns than `turn_span` keeps is no longer found by its id. A Stop or a new process no
   longer spends what was given before: a message the tool dropped is never named again, so nothing reads it.

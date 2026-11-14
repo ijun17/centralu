@@ -74,17 +74,13 @@ describe('the mock mailbox', () => {
     expect(events).toHaveLength(1)
   })
 
-  it('a pause lifted sends what it held: a thread’s turns, or a session’s budget', async () => {
+  it('a pause lifted sends what it held: a thread’s turns', async () => {
     const p = createMockPlatform()
     const boss = mockSessionParty('s0', 'Boss')
-    p.seedMail({ subject: 'a', from: boss, body: 'x', held: { reason: 'budget', recipient: worker } })
+    const other = p.seedMail({ subject: 'a', from: boss, body: 'x', held: { reason: 'loop', recipient: worker } })
     const looped = p.seedMail({ subject: 'b', from: boss, body: 'y', held: { reason: 'loop', recipient: worker } })
     await p.mail.resume({ threadId: looped })
-    expect((await p.mail.list()).held.map((h) => h.reason)).toEqual(['budget'])
-    await p.mail.resume({ sessionId: 's9' })
-    expect((await p.mail.list()).held).toHaveLength(1)
-    await p.mail.resume({ sessionId: 's1' })
-    expect((await p.mail.list()).held).toEqual([])
+    expect((await p.mail.list()).held.map((h) => h.threadId)).toEqual([other])
   })
 
   it('remembers what the person pressed, and the crowd waits no more once answered', async () => {
@@ -92,9 +88,8 @@ describe('the mock mailbox', () => {
     p.mockMail.waiting = 12
     expect((await p.mail.list()).waiting).toBe(12)
     await p.mail.wake(true)
-    await p.mail.resume({ sessionId: 's1' })
     await p.mail.resume({ threadId: 't' })
     expect((await p.mail.list()).waiting).toBe(0)
-    expect(p.mockMail.calls).toEqual(['wake:true', 'resume:session:s1', 'resume:thread:t'])
+    expect(p.mockMail.calls).toEqual(['wake:true', 'resume:thread:t'])
   })
 })

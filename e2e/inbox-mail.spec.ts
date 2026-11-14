@@ -316,7 +316,7 @@ test('Mail: Drop and Mark done close at once while the helper is working, tell i
 test('Mail: a chain of mail between sessions that is only held for the person has no reply box, and keeps Mark done and Drop', async ({ page }) => {
   await setup(page)
   const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
-  const id = await seed(page, { subject: 'Look at the branch', from: boss, body: 'please', kind: 'assign', onlyHeld: true, held: { reason: 'budget', recipient: PARSER } })
+  const id = await seed(page, { subject: 'Look at the branch', from: boss, body: 'please', kind: 'assign', onlyHeld: true, held: { reason: 'failed', recipient: PARSER } })
   await page.getByTestId('counter').click()
   await page.getByTestId(`mail-thread-${id}`).click()
   await expect(page.getByTestId('mail-thread')).toBeVisible()

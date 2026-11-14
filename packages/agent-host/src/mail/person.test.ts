@@ -98,21 +98,21 @@ describe('mail held for the person, moved still held, released or dismissed from
       { id: mid(3), sender: X, kind: 'note', body: 'untold policy', receipts: [{ recipient: B }] },
       { id: mid(4), sender: X, kind: 'question', body: 'told policy', receipts: [{ recipient: B, deliveredAt: t }] },
     ])
-    oldThread(w.store, { id: tid(3), owner: A, projectId: 'p1', at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'budget held', receipts: [{ recipient: B }] }])
+    oldThread(w.store, { id: tid(3), owner: A, projectId: 'p1', at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'failed held', receipts: [{ recipient: B }] }])
     const r = ready(w)
     r.store.mailbox.hold(B, [mid(3), mid(4)], 'policy')
-    r.store.mailbox.hold(B, [mid(5)], 'budget')
+    r.store.mailbox.hold(B, [mid(5)], 'failed')
     return r
   }
 
-  it("lists each with why and its chain; Release sends the budget's now, says the project's waits for its trust, and Dismiss keeps one from ever going", async () => {
+  it("lists each with why and its chain; Release sends a failed one now, says the project's waits for its trust, and Dismiss keeps one from ever going", async () => {
     const w = heldWorld()
     const held = w.person.list().held
     expect(held.map((h) => [h.messageId, h.threadId, h.reason, h.recipient.address])).toEqual(
       expect.arrayContaining([
         [mid(3), mid(3), 'policy', B],
         [mid(4), mid(4), 'policy', B],
-        [mid(5), mid(5), 'budget', B],
+        [mid(5), mid(5), 'failed', B],
       ]),
     )
     expect(w.person.held('release', B, [mid(5)])).toEqual({ changed: 1 })
@@ -122,7 +122,7 @@ describe('mail held for the person, moved still held, released or dismissed from
     await w.advance(2_000)
     expect(bodies(w, 'b')).toContain(mid(5))
     expect(bodies(w, 'b')).not.toContain(mid(3))
-    expect(w.row(mid(5), B)?.held).toBe('released')
+    expect(w.row(mid(5), B)?.held).toBeNull()
     // The project's untold one still waits for its trust; the dismissed one is out of the list for good, and stays out once the project is trusted
     expect(w.person.list().held.map((h) => h.messageId)).toEqual([mid(3)])
     w.store.projects.setProjectTrusted('px', true)
@@ -132,11 +132,12 @@ describe('mail held for the person, moved still held, released or dismissed from
     expect(bodies(w, 'b')).not.toContain(mid(4))
   })
 
-  it("trusting the project lets its held mail go, told of or not, in order; Resume on the session lets its budget's go", async () => {
+  it("trusting the project lets its held mail go, told of or not, in order; an older window's Resume on the session (#2247) lets nothing go", async () => {
     const w = heldWorld()
     w.store.projects.setProjectTrusted('px', true)
     w.person.trusted('px')
     w.person.resume({ sessionId: 'b' })
+    expect(w.row(mid(5), B)).toMatchObject({ held: 'failed', deliveredAt: null })
     await w.advance(2_000)
     // One wake at a time, 30 s apart: what the first did not carry goes once its turn ends
     w.endTurn('b')
@@ -144,9 +145,7 @@ describe('mail held for the person, moved still held, released or dismissed from
     const text = bodies(w, 'b')
     expect(text).toContain(mid(3))
     expect(text).toContain(mid(4))
-    expect(text).toContain(mid(5))
     expect(text.indexOf(mid(3))).toBeLessThan(text.indexOf(mid(4)))
-    expect(w.person.list().held).toEqual([])
   })
 })
 
@@ -360,13 +359,13 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
   it('Release over rows of a trusted and an untrusted project is refused whole, before any goes', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'budget', receipts: [{ recipient: B }] }])
+    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'failed', receipts: [{ recipient: B }] }])
     oldThread(w.store, { id: tid(24), owner: X, projectId: 'px', at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', receipts: [{ recipient: B }] }])
     const r = ready(w)
-    r.store.mailbox.hold(B, [mid(26)], 'budget')
+    r.store.mailbox.hold(B, [mid(26)], 'failed')
     r.store.mailbox.hold(B, [mid(27)], 'policy')
     expect(refusedFor(() => r.person.held('release', B, [mid(26), mid(27)]))).toBe('untrusted_project')
-    expect(w.row(mid(26), B)?.held).toBe('budget')
+    expect(w.row(mid(26), B)?.held).toBe('failed')
   })
 })
 
@@ -666,7 +665,7 @@ describe('whether the window offers the person a reply box (canReply)', () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const m = w.mail.send(A, { to: [B], text: 'Beta, please look at the branch' }).message
-    w.store.mailbox.hold(B, [m.id], 'budget')
+    w.store.mailbox.hold(B, [m.id], 'failed')
     const view = w.person.thread(m.id)
     expect(view.messages.map((x) => x.id)).toEqual([m.id])
     expect(view.canReply).toBe(false)
@@ -690,9 +689,9 @@ describe('the window’s numbers and the purge', () => {
     w.clock.t += 10
     const q = w.mail.send(A, { to: [PERSON], text: 'first' }).message
     w.clock.t += 10
-    // Held for its recipient's budget: the person reads it, to let it go
+    // Held for the person (it could not be delivered): the person reads it, to let it go
     const held = w.mail.send(A, { to: [B], text: 'held for beta', replyTo: q.id }).message
-    w.store.mailbox.hold(B, [held.id], 'budget')
+    w.store.mailbox.hold(B, [held.id], 'failed')
     const seen = w.person.thread(q.id, { tail: 100 }).messages
     expect(seen.map((m) => m.id)).toEqual([q.id, held.id])
     // Beta purged: the held message goes, and the next message is stored where it was

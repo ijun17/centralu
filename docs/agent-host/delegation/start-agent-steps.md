@@ -123,8 +123,7 @@ below retained for `safe` and `normal`:
    once that session takes a message again (`deliverHeld`); it used to be dropped without a word. A call waiting at that moment takes the answer instead, so it does not arrive twice. The open
    task is the record of what is owed: it is a row of the mailbox, so a restart or an update's stop (#1618) keeps it, and the
    next host answers it with the session's last response once the session is at rest. The report marks that recorded it
-   before #1948 step 3 (`report_marks`, store v49, #646) are read once at the start and cleared (`takeOverFromEarlierBuild`),
-   and written again only for an earlier build that may take over (`leaveForEarlierBuild`). Paths the
+   before #1948 step 3 (`report_marks`, store v49, #646) became tasks in store step 74, which keeps those builds out (#2258). Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
    Each answer that promises the notice (`working` with the task written, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that

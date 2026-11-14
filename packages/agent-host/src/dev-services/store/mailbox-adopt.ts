@@ -12,7 +12,11 @@ import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKin
 /** v61 mail older than this is not moved: retention would not have kept it waiting (§6.4) */
 const MOVE_WITHIN_MS = 180 * 24 * 60 * 60 * 1000
 
-/** v61 holds carried by a move: every recipient hold, and the person's `released` (sent as it is, never held again). What an earlier build held that today's gate would not hold is written `dismissed` as the row is moved (#2243) */
+/**
+ * v61 holds carried by a move: every recipient hold, and the person's `released` (sent as it is, never held again). What an earlier build held that
+ * today's gate would not hold is written `dismissed` as the row is moved (#2243): a `policy` hold the gate would not set now, and `budget`, a v61 word
+ * for the token guard no build has (#2247), which no build reads as a hold any more
+ */
 const CARRIED_HOLDS = new Set<string>([...RECIPIENT_HOLD_WORDS, 'released'])
 
 type PendingSql = MessageSql & {
@@ -128,12 +132,12 @@ export function movePendingThreadMail(
         const via = p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? ROLE_VIA : null
         const carried = p.r_held !== null && CARRIED_HOLDS.has(p.r_held) ? p.r_held : null
         /*
-         * A hold an earlier build set stays only if today's gate would hold the mail now (#2243): the token guard (`budget`) is never set by today's code, and
+         * A hold an earlier build set stays only if today's gate would hold the mail now (#2243): the token guard's `budget` is no hold of this build's, and
          * a `policy` hold is asked of `holdsNow`, the gate the delivery uses, so an untrusted asker's request is held while its project is untrusted and the
          * first-contact hold of an earlier build is not. What does not stay is written `dismissed`, as the person's Dismiss writes it (not held, never delivered).
          * Only rows inserted here are judged: a row moved at an earlier start may be held `policy` by the delivery's own judgement, which is not this move's to undo
          */
-        const ended = carried === 'budget' || (carried === 'policy' && !holdsNow({ kind, senderProject }, p.r_recipient))
+        const ended = p.r_held === 'budget' || (carried === 'policy' && !holdsNow({ kind, senderProject }, p.r_recipient))
         recipients += insertRow.run({
           messageId: m.id,
           recipient: p.r_recipient,

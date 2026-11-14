@@ -85,7 +85,7 @@ export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OP
 export const ASSERTIONS: Readonly<Record<string, number>> = {
   'apps/desktop': 3,
   'apps/web': 6,
-  'packages/agent-host': 454,
+  'packages/agent-host': 446,
   'packages/core': 1,
   'packages/platform': 3,
   'packages/protocol': 0,

@@ -329,20 +329,11 @@ describe('a task is answered by its reply or by the last response at rest (§10.
 })
 
 describe("an earlier build's rows (§10.6.3)", () => {
-  it('a report mark with no task becomes a delivered task at the start, and every mark goes', async () => {
+  it('the report marks a build of v70 to v73 left as it went are deleted at the start, and make no task', async () => {
     const { parent, child, task } = await childInTurn()
-    const other = await w.callerSession()
-    w.store.children.setReportMark(child, other)
-    w.store.children.setReportMark(parent, parent)
+    const drop = vi.spyOn(w.store.children, 'dropReportMarks')
     m.afterReady()
-    expect(read.tasks(addr(other), child)).toEqual([expect.objectContaining({ origin: 'send_to_session' })])
+    expect(drop).toHaveBeenCalledOnce()
     expect(read.tasks(addr(parent), child).map((t) => t.id)).toEqual([task])
-    expect(w.store.children.listReportMarks()).toEqual([])
-  })
-
-  it('a session in a turn as this host leaves gets the mark an earlier build reads, of the task its turn is the work of', async () => {
-    const { parent, child } = await childInTurn()
-    m.hooks.leaving?.([child])
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
   })
 })

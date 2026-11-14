@@ -22,8 +22,8 @@ export interface MailPort {
   close(threadId: string, outcome?: 'finished' | 'failed' | 'stopped' | 'dropped'): Promise<MailThreadRow>
   /** Sends held mail now (`release`: Release, Resend, Retry) or lets it go undelivered (`dismiss`) */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): Promise<{ changed: number }>
-  /** Lifts a pause: a session whose mail stopped for its budget, or a thread whose mail stopped for its turns (§7.9) */
-  resume(target: { sessionId: string } | { threadId: string }): Promise<void>
+  /** Lifts a pause: a thread whose mail stopped for its turns (§7.9) */
+  resume(target: { threadId: string }): Promise<void>
   /** Answers "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn (§7.9) */
   wake(wake: boolean): Promise<void>
   /**

@@ -652,12 +652,12 @@ export class MessageService {
   }
 
   /**
-   * The person says send it: mail held `uncertain` or `failed` goes now, and from the person's window a row an earlier build held for a session's
-   * budget. Mail held for the project's trust has its own way out, and so does a row an earlier build held `loop` (`resumeHeld`)
+   * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust has its own way out, and so does a
+   * row an earlier build held `loop` (`resumeHeld`)
    */
-  resendHeld(recipient: string, ids: readonly string[], why: readonly ('uncertain' | 'failed' | 'budget')[] = ['uncertain', 'failed']): number {
+  resendHeld(recipient: string, ids: readonly string[]): number {
     return this.run(() => {
-      const released = this.heldBy(recipient, ids, why)
+      const released = this.heldBy(recipient, ids, ['uncertain', 'failed'])
       const n = this.records.release(recipient, released, this.now())
       // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
       for (const id of released) {

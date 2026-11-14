@@ -516,7 +516,7 @@ describe.each([
     expect(await h.platform.mail.list()).toEqual({ threads: [], held: [], waiting: 0 })
     await expect(h.platform.mail.thread('hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV')).rejects.toMatchObject({ code: 'refused' })
     await expect(h.platform.mail.reply('hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'hello')).rejects.toMatchObject({ code: 'refused' })
-    await h.platform.mail.resume({ sessionId: 'nobody' })
+    await h.platform.mail.resume({ threadId: 'hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV' })
     await h.platform.mail.wake(false)
   })
 

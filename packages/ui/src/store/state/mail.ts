@@ -32,7 +32,7 @@ export type MailSlice = {
   /** Sends held mail now, or lets it go */
   heldMail: (action: 'release' | 'dismiss', row: Pick<MailHeldRow, 'recipient' | 'messageId'>) => Promise<boolean>
   /** Lifts a pause for a session's budget, or a thread's turns */
-  resumeMail: (target: { sessionId: string } | { threadId: string }) => Promise<boolean>
+  resumeMail: (target: { threadId: string }) => Promise<boolean>
   /** The answer to "N sessions have mail from while Centralu was off" */
   wakeMail: (wake: boolean) => Promise<boolean>
   /**

@@ -61,7 +61,7 @@ once in `mail/host-mail.ts` (`hostMail`, used by `main.ts` and by the tests): th
 whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, and a task only with `kind: "answer"`, plans/mailbox.md §10.6.3; `handled` is `done`,
 `read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). After the ready line, before
 delivery starts, `afterReady` moves the thread mail an older build left pending (once, in one transaction, `Store.movePendingThreadMail`), then
-brings the task rows in step with the old report paths (`takeOverFromEarlierBuild`, mailbox.md §9.5). The person's window still reads the thread tables
+deletes the report marks a build of v70 to v73 left as it went (`dropReportMarks`; store step 74 turned the older builds' marks and held requests into tasks, #2258). The person's window still reads the thread tables
 until the person's host methods move to the service (M3a-person, in the same release).
 
 **Delegations write tasks** (mailbox.md §9, D18). Each place a session gives another work calls
@@ -75,7 +75,7 @@ carrying its last response, one report per open task (`MessageService.lastRespon
 told that answer, and a stop (`StopNotices.relayToMailless`), as the relayed report it always had (`SessionLastResponse.relay`, `ChildReports.relayStop`); report marks, a caller's paused reports and `reportRecorder` are
 gone, and a linked machine's report (`LinkedReports`) keeps its own path until mail crosses links. The end of the Assistant's turn on a
 session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer marks that report read
-(`answerRecorder`). At each ready an earlier build's report mark with no task gets one, and every mark is deleted (`takeOverFromEarlierBuild`).
+(`answerRecorder`).
 
 **Turns** (mailbox.md §8.2). The delivery begins a turn with its work message (a task, or for the Assistant one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and

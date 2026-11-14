@@ -24,15 +24,13 @@ export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'a
 }
 
 /**
- * Why mail waits for the person and what the button that frees it says. A pause (`loop`, `budget`) is lifted with Resume on the
- * thread or the session; the rest is sent now with `release`.
+ * Why mail waits for the person and what the button that frees it says. A pause (`loop`) is lifted with Resume on the thread; the rest
+ * is sent now with `release`.
  */
-export function heldLabel(reason: string): { why: string; action: string; kind: 'resume-thread' | 'resume-session' | 'release' } {
+export function heldLabel(reason: string): { why: string; action: string; kind: 'resume-thread' | 'release' } {
   switch (reason) {
     case 'loop':
       return { why: 'Paused: these messages started many turns without a word from you', action: 'Resume', kind: 'resume-thread' }
-    case 'budget':
-      return { why: 'Paused: this session has used its share of turns started by mail', action: 'Resume', kind: 'resume-session' }
     case 'policy':
       return { why: 'Held: this session runs without asking, and this is from a session or an app it has no work with', action: 'Release', kind: 'release' }
     case 'uncertain':
@@ -45,11 +43,8 @@ export function heldLabel(reason: string): { why: string; action: string; kind: 
 }
 
 /** What the held mail row does when its main button is pressed, as the store's call */
-export function heldResume(row: Pick<MailHeldRow, 'reason' | 'threadId' | 'recipient'>): { sessionId: string } | { threadId: string } | null {
-  const kind = heldLabel(row.reason).kind
-  if (kind === 'resume-thread') return { threadId: row.threadId }
-  if (kind === 'resume-session') return row.recipient.sessionId ? { sessionId: row.recipient.sessionId } : null
-  return null
+export function heldResume(row: Pick<MailHeldRow, 'reason' | 'threadId'>): { threadId: string } | null {
+  return heldLabel(row.reason).kind === 'resume-thread' ? { threadId: row.threadId } : null
 }
 
 /** "2 sessions have mail from while Centralu was off" */

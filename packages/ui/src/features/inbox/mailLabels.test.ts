@@ -24,9 +24,10 @@ describe('the thread’s state', () => {
 })
 
 describe('held mail', () => {
-  it('says why, and frees a pause with Resume on the thread or the session, the rest by sending it', () => {
+  it('says why, and frees a pause with Resume on the thread, the rest by sending it', () => {
     expect(heldLabel('loop')).toMatchObject({ action: 'Resume', kind: 'resume-thread' })
-    expect(heldLabel('budget')).toMatchObject({ action: 'Resume', kind: 'resume-session' })
+    // `budget`, which no build sets now (#2247), reads as any word this window does not know
+    expect(heldLabel('budget')).toEqual({ why: 'budget', action: 'Send now', kind: 'release' })
     expect(heldLabel('policy')).toMatchObject({ action: 'Release', kind: 'release' })
     expect(heldLabel('uncertain').action).toBe('Send again')
     // A restart’s hold and a wake the tool failed late: the session may already have run it
@@ -35,12 +36,10 @@ describe('held mail', () => {
     expect(heldLabel('newer')).toEqual({ why: 'newer', action: 'Send now', kind: 'release' })
   })
 
-  it('resumes a thread by its id and a session by the receiver’s; mail that is only sent again resumes nothing', () => {
-    const recipient = party({ sessionId: 's1' })
-    expect(heldResume({ reason: 'loop', threadId: 't1', recipient })).toEqual({ threadId: 't1' })
-    expect(heldResume({ reason: 'budget', threadId: 't1', recipient })).toEqual({ sessionId: 's1' })
-    expect(heldResume({ reason: 'budget', threadId: 't1', recipient: party({}) })).toBeNull()
-    expect(heldResume({ reason: 'failed', threadId: 't1', recipient })).toBeNull()
+  it('resumes a thread by its id; mail that is only sent again resumes nothing', () => {
+    expect(heldResume({ reason: 'loop', threadId: 't1' })).toEqual({ threadId: 't1' })
+    expect(heldResume({ reason: 'budget', threadId: 't1' })).toBeNull()
+    expect(heldResume({ reason: 'failed', threadId: 't1' })).toBeNull()
   })
 })
 

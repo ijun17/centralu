@@ -202,12 +202,10 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM commit_sessions WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`UPDATE app_runs SET session_id = NULL WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`UPDATE app_runs SET caller_session_id = NULL WHERE caller_session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       /*
        * The mail it was a party to (#1347): its receipts and rows, its place in old threads and its turns go with the
-       * session, as its marks do. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay while another
+       * session. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay while another
        * party has a row. What waited on it was settled when it went to the trash (`StopNotices.partyGone`)
        */
       const host = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value

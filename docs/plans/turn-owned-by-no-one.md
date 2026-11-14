@@ -425,6 +425,13 @@ reads no held entries, and once C2 is gone nothing reads them anyway. So A5 goes
 **The contract step** (drop the three tables, delete the four key families, `breaksOlderReaders: true`) lands one release
 after the last of P4, P5, P8 shipped, together with mailbox M7, so `min_reader_version` rises once.
 
+**As built (#2258, store step 74), in two steps.** Every release up to beta.68 still reads `report_marks` and
+`queued_requests` at its start, so the tables cannot go yet. Step 74 instead raises the floor to 70, the first build
+(beta.58) with #1948 steps 2 to 4: the builds it keeps out are the only ones that write held requests, delegated turns
+or the key families, or need a mark to report. It turns what they left into mail tasks with its own statements and
+deletes it; this build reads none of the four and deletes at each start the marks a build of v70 to v73 still leaves
+as it goes. Dropping the three tables waits for a later step, once the floor is at or above 74.
+
 ## 7. The audit, item by item
 
 | Item | Becomes | PR |

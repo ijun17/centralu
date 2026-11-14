@@ -1,6 +1,11 @@
+import { randomBytes } from 'node:crypto'
+import type Database from 'better-sqlite3'
+import { sessionAddress } from '../../../mail/address.js'
+import { messageIdOf, UlidMaker } from '../../../mail/ids.js'
+import { HUB_SELF_KEY } from '../store-keys.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v72. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v74. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -293,12 +298,109 @@ export class StepsV65 extends MigrationRange {
           `)
         },
       },
+      {
+        to: 74,
+        breaksOlderReaders: true,
+        minReader: 70,
+        /**
+         * One record of an owed answer (#2258 item 1, docs/plans/mailbox.md M7, M8): the task row. The builds before #1948 steps 2 to 4 (beta.57
+         * and before, whose newest step is 69) kept a second one: a request held for a busy session (`queued_requests`), a report owed
+         * (`report_marks`, which they also read to settle every task no mark owes), the turn another session gave (`delegated_turns`) and whose a
+         * turn is (`RETIRED_SESSION_KEYS`). The build of v70 (beta.58) is the first that writes none of them but the marks it leaves for those
+         * builds, so the floor goes to 70: those builds no longer open the store, and this build neither reads nor leaves them anything.
+         *
+         * What such a build left is turned into mail once, here, as the start of the builds from v70 to v73 did at every `ready`: a held request
+         * becomes a task from its requester, not delivered, which the delivery gives its session; a mark whose caller has no unsettled task to
+         * its session becomes one, delivered (the work was), `start_agent` when the caller started the session, else `send_to_session`. A row
+         * whose sessions are not both kept (`deleted_at` NULL) goes with no task. Then every row of the four goes.
+         *
+         * **A frozen copy of `MessageService.task` and of the old adoption, on purpose**: a step runs once on every store and must not call code
+         * that may change. Only the id and address shapes are imported (mail/ids.ts, mail/address.ts), as the stored shapes they are.
+         *
+         * The tables stay: the builds from v70 to v73 read them at every start. They go in a later step, once the floor is at or above 74.
+         */
+        run: () => this.oneRecordOfOwedWork(),
+      },
     ]
+  }
+
+  /** Step 74: what the builds before v70 kept beside the task rows, turned into tasks and deleted */
+  private oneRecordOfOwedWork(): void {
+    const has = (table: string) => this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table) !== undefined
+    if (has('app_settings')) this.db.prepare(`DELETE FROM app_settings WHERE substr(key, 1, instr(key, ':') - 1) IN (SELECT value FROM json_each(?))`).run(JSON.stringify(RETIRED_SESSION_KEYS))
+    if (has('delegated_turns')) this.db.exec(`DELETE FROM delegated_turns`)
+    if (!has('mail') || !has('mail_recipients') || !has('sessions')) return
+    const queued = has('queued_requests')
+      ? this.db.prepare<[], { session: string; caller: string; via: string; text: string }>(`SELECT session_id AS session, caller_session_id AS caller, via, text FROM queued_requests ORDER BY queued_at, rowid`).all()
+      : []
+    const marks = has('report_marks') ? this.db.prepare<[], { session: string; caller: string }>(`SELECT session_id AS session, caller_session_id AS caller FROM report_marks ORDER BY marked_at`).all() : []
+    const tasks = new OldWorkTasks(this.db, () => this.hostId())
+    for (const q of queued) if (OLD_SEND_ORIGINS.includes(q.via) && q.text.trim() !== '') tasks.write(q.caller, q.session, { body: q.text, origin: () => q.via, delivered: false })
+    for (const m of marks) {
+      tasks.write(m.caller, m.session, { body: ADOPTED_TASK, origin: (session) => (session.askedBy === m.caller ? 'start_agent' : 'send_to_session'), delivered: true })
+    }
+    if (queued.length > 0) this.db.exec(`DELETE FROM queued_requests`)
+    if (marks.length > 0) this.db.exec(`DELETE FROM report_marks`)
+  }
+
+  /** This host's id in mail addresses (`hubSelfId`, links/stored.ts): the one kept, else one made and kept, as `hubSelfId` makes it */
+  private hostId(): string {
+    const stored = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value
+    if (stored && /^hub-[0-9a-f]{8}$/.test(stored)) return stored
+    const made = `hub-${randomBytes(4).toString('hex')}`
+    this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(HUB_SELF_KEY, made)
+    return made
   }
 
   /** Adds a column the table lacks. A table that does not exist (a test's partial schema) is left alone */
   private addColumn(table: string, column: string, type: string): void {
     const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(${table})`).all()
     if (cols.length > 0 && !cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
+}
+
+/** The tools an earlier build queued a request for (`SEND_ORIGINS` then) */
+const OLD_SEND_ORIGINS = ['agent_session', 'ask_project', 'send_to_session']
+
+/** What an earlier build kept per session of whose a turn is and of a paused report (`<name>:<sessionId>` in `app_settings`) */
+const RETIRED_SESSION_KEYS = ['turn_inputs', 'report_turn', 'input_origins', 'report_paused', 'person_report_paused']
+
+/** The words of a task step 74 writes for a report mark: the work was given before mail recorded it */
+const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
+
+type KeptSession = { project: string | null; askedBy: string | null }
+
+/** Step 74's tasks, as `MessageService.task` wrote them then: from a kept session to another, a delivered one only when the pair has no open task */
+class OldWorkTasks {
+  private readonly ulids = new UlidMaker()
+  private readonly now = Date.now()
+  private host: string | null = null
+  private readonly kept: Database.Statement<[string], KeptSession>
+  private readonly open: Database.Statement<[string, string], unknown>
+  private readonly mail: Database.Statement
+  private readonly row: Database.Statement
+
+  constructor(db: Database.Database, private readonly hostId: () => string) {
+    this.kept = db.prepare(`SELECT project_id AS project, asked_by_session_id AS askedBy FROM sessions WHERE id = ? AND deleted_at IS NULL`)
+    this.open = db.prepare(`SELECT 1 FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.sender = ? AND m.kind = 'task' AND r.recipient = ? AND r.settled IS NULL`)
+    this.mail = db.prepare(
+      `INSERT INTO mail (id, sender, sender_project, kind, needs_reply, reply_to, root_id, cause_id, depth, urgent, body, facts, origin, created_at)
+       VALUES (@id, @sender, @senderProject, 'task', 0, NULL, @id, NULL, 0, 0, @body, '{}', @origin, @now)`,
+    )
+    this.row = db.prepare(`INSERT INTO mail_recipients (message_id, recipient, recipient_project, due_at, delivered_at, read_at) VALUES (@id, @recipient, @project, @dueAt, @delivered, @delivered)`)
+  }
+
+  write(callerId: string, sessionId: string, t: { body: string; origin: (session: KeptSession) => string; delivered: boolean }): void {
+    const caller = this.kept.get(callerId)
+    const session = this.kept.get(sessionId)
+    if (!caller || !session || callerId === sessionId) return
+    this.host ??= this.hostId()
+    const sender = sessionAddress(this.host, callerId)
+    const recipient = sessionAddress(this.host, sessionId)
+    if (t.delivered && this.open.get(sender, recipient) !== undefined) return
+    const id = messageIdOf(this.host, this.ulids.next(this.now))
+    this.mail.run({ id, sender, senderProject: caller.project, body: t.body, origin: t.origin(session), now: this.now })
+    // Not delivered: due after the delivery's 2 s gap, as a session's task was (`dueAt`)
+    this.row.run({ id, recipient, project: session.project, dueAt: t.delivered ? this.now : this.now + 2_000, delivered: t.delivered ? this.now : null })
   }
 }

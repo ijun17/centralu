@@ -219,9 +219,9 @@ export class MailMock {
       return { changed: gone.length }
     },
     resume: async (target) => {
-      this.calls.push('sessionId' in target ? `resume:session:${target.sessionId}` : `resume:thread:${target.threadId}`)
-      // A pause lifted sends what it held: a thread's turns (`loop`), or a session's budget (`budget`)
-      const freed = this.heldRows.filter((h) => ('sessionId' in target ? h.reason === 'budget' && h.recipient.sessionId === target.sessionId : h.reason === 'loop' && h.threadId === target.threadId))
+      this.calls.push(`resume:thread:${target.threadId}`)
+      // A pause lifted sends what it held: a thread's turns (`loop`)
+      const freed = this.heldRows.filter((h) => h.reason === 'loop' && h.threadId === target.threadId)
       this.heldRows = this.heldRows.filter((h) => !freed.includes(h))
       for (const h of freed) {
         const t = this.threads.get(h.threadId)

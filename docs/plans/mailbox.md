@@ -235,10 +235,13 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     The guards run before the send's transaction, so the refusal does not take the line back.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
-  - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
+  - **Rows an earlier build held `loop`** still show in the Inbox with their Resume (`mail.resume`), which
     lets them go as the mail they are and marks them `released`, so a previous build still serving during a host swap
     does not hold them again. They are not let go on their own at upgrade: an older build may still be serving, and
-    the person sees what waited.
+    the person sees what waited. **The `budget` Resume is ended (#2247):** store step 72 (#2243) ended every row held
+    `budget`, no build the store's floor admits sets it, and the word is no hold of this build's: the window has no
+    Resume for a session, and `mail.resume {sessionId}` from an older window is accepted and resumes nothing. A v61
+    receipt held `budget` that the move of §6.3 still meets is written `dismissed`.
   - **Loops are left to the agents' judgement:** answer only when there is something to say; when work is not yours,
     tell the sender instead of passing it on; ask back at most once, then ask the person. The quiet answer (D3) still
     ends a courtesy ping-pong without a turn.
@@ -276,6 +279,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     to neither settles M8's open tasks as reported (N1) nor reports a settled one again. M7 stops that write, and its
     store step turns any mark left without a task into one (M7), so a store last served by a build before M8 loses no
     owed report.
+  - **As built (#2258, store step 74).** #1948 steps 2 to 4 did M8's work; the marks went on being written only as a
+    host left, for a rollback to a build before them. Step 74 raises the floor to 70 (beta.58, the first build with
+    those steps), turns what the builds before it left (held requests, marks with no task) into tasks with its own
+    statements, and deletes it with `delegated_turns` and the old per-session keys. This build neither reads nor
+    writes marks; it deletes at each start those a build of v70 to v73 leaves as it goes. Dropping the tables waits
+    for a step with the floor at or above 74.
   - *Not taken:* two records with no stated truth (round 1). A report the old build sent by `report_marks` would leave
     the task row open for good, and every later report would say `waiting`.
   - *Not taken:* "later" with no slice. The report paths are where most of this month's bugs came from (#1386, #1523,
@@ -962,9 +971,10 @@ tables, so nothing in them is pending a second time, and what is not pending sta
   `cause_id` null, `depth` 0.
 
 For the receipt: `attempt_at`, `delivered_at`, `read_at` as the receipt has them (`read_at = COALESCE(r.read_at,
-r.handled_at)`); `held` as it is for every recipient hold (`uncertain`, `failed`, `loop`, `budget` and `policy`, told
+r.handled_at)`); `held` as it is for every recipient hold (`uncertain`, `failed`, `loop` and `policy`, told
 of or not: the move releases nothing held), and the person's `released` (their Resend of a `policy` or `budget`
-hold: sent as it is, never held again).
+hold: sent as it is, never held again). Since #2243 a `budget` hold, and a `policy` hold today's gate would not set, is
+written `dismissed`.
 
 **One transaction, not chunked.** The move blocks the host once, after its ready line: measured at 0.74 s for 20,000
 pending receipts and 3.8 s for 100,000. It runs on the first start of the switch build only (a second finds nothing),
@@ -2341,7 +2351,7 @@ checked strictly (`orchestrator-tools.ts:619-626`).
 - `mail.held` keeps Resend / Dismiss for `uncertain` and `failed`; `mail.resume` and `mail.wake` keep their meaning.
 - `mail.resume {threadId}` resolves `threadId` as a root id and lets every row an earlier build held `loop` in that
   chain go (Q-M3a-24; D32: nothing holds `loop` now, so there is no pair count to reset); `mail.resume {sessionId}`
-  lets a session's rows held `budget` go. Both mark the rows `released`.
+  let a session's rows held `budget` go; since #2247 it is accepted and resumes nothing. The thread's Resume marks the rows `released`.
 
 ### 12.2 Host methods (M3a, D29) and older windows
 

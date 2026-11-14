@@ -241,8 +241,6 @@ export class HostTenure {
     this.host.turnContinue.stopAll()
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
-    // An earlier build that takes over after this one (a rollback) reads what the sessions in a turn owe from report marks (mailbox.md §10.6.3)
-    this.host.mail.mailLeaving(this.host.listSessions().filter((s) => inTurn(s.state)).map((s) => s.id))
     /*
      * A linked hub's update stops this host (#1618): the turns it ends are the ones in a turn now, read in the same step as
      * the processes are let go of below, with no new turn taken since `leaveHost`. Listed once the processes are down and
@@ -395,8 +393,6 @@ export class HostTenure {
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()
-    // An earlier build's delegated turns (#676) are no one's now: cards go to the givers of open work (docs/plans/mailbox.md §10.6.4)
-    store.children.dropDelegatedTurns()
     this.keptAtStart = goingOn
     // The stops the last host left waiting for the network or a usage limit's reset (stored with each session, #1415) are waited for again
     this.host.turnContinue.restore(this.host.meta.values())
