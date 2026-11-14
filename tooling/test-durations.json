@@ -285,7 +285,6 @@
     "packages/agent-host/src/links/versions.test.ts": 0,
     "packages/agent-host/src/links/windows-remote.test-helpers.test.ts": 0,
     "packages/agent-host/src/log-file.test.ts": 0,
-    "packages/agent-host/src/mail/adoption.test.ts": 0.5,
     "packages/agent-host/src/mail/assistant-ask.test.ts": 0.5,
     "packages/agent-host/src/mail/delegation.test.ts": 0.8,
     "packages/agent-host/src/mail/delivery-late.test.ts": 0.2,

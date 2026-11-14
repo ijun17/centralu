@@ -59,7 +59,7 @@ export const MailThreadRow = z.object({
   unread: z.number().default(0),
   /** What the thread waits on the person to answer; null when nothing does. Absent from a host of an older build */
   ask: MailAsk.nullable().default(null),
-  /** Mail in the thread held for the person to act on (a loop, a spent budget, a policy, a delivery that failed), for any receiver */
+  /** Mail in the thread held for the person to act on (a loop, a policy, a delivery that failed), for any receiver */
   held: z.number().default(0),
   /** Standing blockers: none since blockers went with threads (§12.2); kept for a window of an older build, which reads it */
   blocked: z.number().default(0),
@@ -84,7 +84,7 @@ export const MailHeldRow = z.object({
   /** The receiver it waits to be sent to */
   recipient: MailParty,
   kind: z.string(),
-  /** `uncertain` | `failed` | `loop` | `budget` | `policy` | …: why it waits, as the host states it */
+  /** `uncertain` | `failed` | `loop` | `policy` | …: why it waits, as the host states it */
   reason: z.string(),
   preview: z.string(),
   since: z.number(),

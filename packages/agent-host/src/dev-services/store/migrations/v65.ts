@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { sessionAddress } from '../../../mail/address.js'
 import { messageIdOf, UlidMaker } from '../../../mail/ids.js'
+import { cutTask } from '../../../mail/rules.js'
 import { HUB_SELF_KEY } from '../store-keys.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
@@ -395,12 +396,23 @@ class OldWorkTasks {
     const session = this.kept.get(sessionId)
     if (!caller || !session || callerId === sessionId) return
     this.host ??= this.hostId()
-    const sender = sessionAddress(this.host, callerId)
-    const recipient = sessionAddress(this.host, sessionId)
+    const pair = addresses(this.host, callerId, sessionId)
+    if (!pair) return
+    const [sender, recipient] = pair
     if (t.delivered && this.open.get(sender, recipient) !== undefined) return
     const id = messageIdOf(this.host, this.ulids.next(this.now))
-    this.mail.run({ id, sender, senderProject: caller.project, body: t.body, origin: t.origin(session), now: this.now })
+    // Trimmed and cut at a session's limit (`bodyLimit`), as `MessageService.task` wrote the task an earlier build's start made of it
+    this.mail.run({ id, sender, senderProject: caller.project, body: cutTask(t.body, 16_000), origin: t.origin(session), now: this.now })
     // Not delivered: due after the delivery's 2 s gap, as a session's task was (`dueAt`)
     this.row.run({ id, recipient, project: session.project, dueAt: t.delivered ? this.now : this.now + 2_000, delivered: t.delivered ? this.now : null })
+  }
+}
+
+/** The addresses of a caller and its session, or null when an id is one no address carries (`checked`): it makes no task, as the start's adoption skipped it */
+function addresses(host: string, callerId: string, sessionId: string): [string, string] | null {
+  try {
+    return [sessionAddress(host, callerId), sessionAddress(host, sessionId)]
+  } catch {
+    return null
   }
 }

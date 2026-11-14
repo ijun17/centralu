@@ -1709,8 +1709,8 @@ was never its work). The person's Stop releases only the tasks of the turn it st
 session can still answer the others, so their givers are not told (owner, 2026-11-11). A stop that leaves it unable to answer (an error, a
 usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. The person's own tasks are released and told the same way
 (§10.6.3 "The person's own work"). The rows stay open, so a
-reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
-released task as reported.
+reply after the person continues the session still answers them, and the start's adoption of older report marks (store step 74 since #2258)
+does not settle a released task as reported.
 
 **Who is told, woken, or left to read.** The owner's rule, as the tables give it:
 
@@ -1811,7 +1811,8 @@ delivery half done at a crash is held `uncertain` for the person, §7.6.5, never
 swap (`delivering_at`) is turned into a task too; the older build delivered such a row again itself, so at most one duplicate, as
 before. An older build (beta.57) after a rollback finds no queued rows; the tasks this build left undelivered are mail it delivers
 itself (its drain takes a task as a turn's work), and its adoption leaves an undelivered task open (`pendingFor` from the sender). Mail
-that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65).
+that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65). **Since store step 74 (#2258):** the step
+turns the rows once and deletes them, the store's floor is 70 (beta.57 is refused), and no start reads `queued_requests`.
 
 **Linked machines (#2067).** Mail does not cross links. A busy child on a linked machine keeps the hub's note hold (`RemoteAgents.hold`,
 `RemoteAgent.queued`), now held without `ifBusy: "queue"`, which the tool no longer has. That is a second definition of "a send to a
@@ -1960,7 +1961,9 @@ the running turn is the work of (its `mail_turns` row), as that build's own mark
 turn's end goes to the one it was for; when the turn is no session's task (the person's, the CLI's own), the sender of the newest open task, the last
 instruction the turn took in. The other senders' tasks are settled by that build with no report. A session at rest at a rollback has its open tasks
 settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (#1948, 2026-11-11): beta.57's shape
-cannot change, and a rollback is rare.
+cannot change, and a rollback is rare. **Since store step 74 (#2258):** the step deletes the five keys and turns the marks once, the store's floor
+is 70 (beta.57 is refused), no start reads a mark, and none is written as this build leaves; every start deletes unread the marks a build of v70 to
+v73 still leaves as it goes (`dropReportMarks`), since those builds read them back at their own start and a mark this build did not write is stale.
 
 **Open points, accepted.** A seat that cannot read mail hears of a session deleted (`gone`) or of a turn lost at a restart (`lost`) only by the
 mailbox's notice, which it never reads, as on main. The cut line kept for the answer after a session's own background work (`cutsUntold`) is memory
@@ -2040,7 +2043,7 @@ turn owner was:
 | Removed | What replaces it |
 |---|---|
 | `ChildOwnership.turnOwners`, `TurnOwner`, `ownTurn`, `releaseTurn`, `adoptTurn`, `markTurnTold`, `restoreTurns` | the open tasks (`openTaskParties`) |
-| `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; every start deletes the rows (`dropDelegatedTurns`) |
+| `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; store step 74 deletes the rows (#2258) |
 | The relayed notice to the owner (`tellCardRaised`) and `told_cards` | the mail notice and its dedupe key; the relay only for a seat that cannot read mail |
 | `answersApproval` as the whole answer rule | the gate above (`cardGivers`' `answerer`, then `refusal`) |
 

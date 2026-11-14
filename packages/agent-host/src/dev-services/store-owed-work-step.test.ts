@@ -57,8 +57,8 @@ const count = (db: Database.Database, table: string) => (db.prepare(`SELECT coun
 const setting = (db: Database.Database, key: string) => (db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as { value: string } | undefined)?.value ?? null
 
 /**
- * A store the build of v69 (beta.57) left: sessions a (the caller), w (a's child), b, and t (in the trash); a's task to w given by mail;
- * requests it held for b and w; marks owed to a by w (which has that task open), by t and by a itself, and to w by b (which has none)
+ * A store the build of v69 (beta.57) left: sessions a (the caller), w (a's child), b, t (in the trash) and one whose id no address carries;
+ * a's task to w given by mail; requests it held for b and w, one of them longer than a task; marks owed to a by w (which has that task open), by t and by a itself, and to w by b (which has none)
  */
 function v69Store(): string {
   const d = tempRoot('cc-owed-work-')
@@ -72,6 +72,7 @@ function v69Store(): string {
     session('w', 'a')
     session('b', null)
     session('t', null, true)
+    session('x/y', null)
     db.prepare(`INSERT INTO app_settings (key, value) VALUES ('hub.selfId', ?)`).run(HOST)
     db.prepare(`INSERT INTO mail (id, sender, kind, root_id, body, origin, created_at) VALUES ('${HOST}.m_01', ?, 'task', '${HOST}.m_01', 'land #12', 'start_agent', 1)`).run(at('a'))
     db.prepare(`INSERT INTO mail_recipients (message_id, recipient, due_at, delivered_at) VALUES ('${HOST}.m_01', ?, 1, 1)`).run(at('w'))
@@ -80,6 +81,8 @@ function v69Store(): string {
     queue.run('q2', 'w', 'a', 'ask_project', 'what does parse() return?', 2)
     queue.run('q3', 'b', 't', 'send_to_session', 'from the trash', 3)
     queue.run('q4', 'b', 'a', 'some_future_tool', 'unknown', 4)
+    queue.run('q5', 'w', 'b', 'send_to_session', `  ${'x'.repeat(20_000)}`, 5)
+    queue.run('q6', 'b', 'x/y', 'send_to_session', 'from an id no address carries', 6)
     const mark = db.prepare(`INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)`)
     mark.run('w', 'a', 1)
     mark.run('b', 'w', 2)
@@ -106,9 +109,12 @@ describe('step 74: one record of owed work (#2258)', () => {
         // Held requests: not delivered, for the delivery to give; one from the trash and one through a tool no build knows make none
         { sender: at('a'), recipient: at('b'), body: 'run the linter too', origin: 'agent_session', project: 'p1', delivered: null, readAt: null },
         { sender: at('a'), recipient: at('w'), body: 'what does parse() return?', origin: 'ask_project', project: 'p1', delivered: null, readAt: null },
+        // Trimmed and cut as a task is; the one from an id no address carries makes none and stops nothing
+        { sender: at('b'), recipient: at('w'), body: expect.stringMatching(/^x{15000}x*\n\[Centralu: cut here/), origin: 'send_to_session', project: 'p1', delivered: null, readAt: null },
         // The mark of b to w, which had no open task: delivered and read, `send_to_session` since w did not start b. a's to w had one, t is trashed, a is itself
         { sender: at('w'), recipient: at('b'), body: ADOPTED, origin: 'send_to_session', project: 'p1', delivered: expect.any(Number), readAt: expect.any(Number) },
       ])
+      expect((tasks[3] as { body: string }).body).toHaveLength(16_000)
       expect(['queued_requests', 'report_marks', 'delegated_turns'].map((t) => count(s.raw, t))).toEqual([0, 0, 0])
       const keys = (s.raw.prepare(`SELECT key FROM app_settings WHERE key LIKE '%:%' OR key = 'report_paused' ORDER BY key`).all() as { key: string }[]).map((r) => r.key)
       expect(keys).toEqual(['report_paused', 'turn_span:w'])
@@ -154,10 +160,10 @@ describe('step 74: one record of owed work (#2258)', () => {
     as(LATEST, file, (db) => expect([db.pragma('user_version', { simple: true }), setting(db, 'min_reader_version')]).toEqual([LATEST, '70']))
   })
 
-  it('forward and back with a build of v70 to v73: the mark it leaves as it goes is deleted at the next start, and makes no task', () => {
+  it('forward and back with a build of v70 to v73: the table it still writes its marks to stays, and the marks are deleted unread', () => {
     const file = v69Store()
     new Store(file).close()
-    // The v72 build (beta.66 to 68) serves the store and leaves a mark for w, in a turn as it goes
+    // The v72 build (beta.66 to 68) serves the store and leaves a mark for w, in a turn as it goes: the table it writes is still there
     as(72, file, (db) => db.prepare(`INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES ('w', 'a', 9)`).run())
     const s = open(LATEST, file)
     try {

@@ -450,7 +450,7 @@ export class MailboxRecords {
     this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
   }
 
-  /** Sets why mail waits for the person (`policy`, `loop`, `budget`, `failed`, `uncertain`), or clears it with null */
+  /** Sets why mail waits for the person (`policy`, `loop`, `failed`, `uncertain`), or clears it with null */
   hold(recipient: string, ids: readonly string[], why: string | null): void {
     this.update('held = ?', [why], recipient, ids)
   }
