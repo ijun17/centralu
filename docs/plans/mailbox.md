@@ -1782,8 +1782,11 @@ choose: what a busy target means for these three calls is that the request is ma
   gates as before. Short of memory, the fork is mailed instead (it was queued).
 - **`ask_project`** has no `ifBusy`. Its gates (trust, depth, the pair's consent card) are read before the task is written, as before.
 - **`start_agent`** starts a new session, which is never busy: unchanged.
-- **`send_to_session`** writes a task whatever `reportBack` says: its end is reported once, by mail, as any task's. `reportBack`
-  still decides a send at rest.
+- **`send_to_session`** with `reportBack` writes a task: its end is reported once, by mail, as any task's. Without it, busy or at rest,
+  it writes a note (#2258): a message from the Assistant that needs no reply, origin `send_to_session`, given and shown as the task
+  would be (the Assistant's message in the receiver's conversation; at rest at once, busy once the turn ends, with no 30 s wake gap).
+  No report and no last response answers it, so nothing wakes the Assistant for it. A session at rest without the mail tool still
+  takes the words directly.
 - **A session without the mail tool** (a legacy seat) cannot take a mailed send: refused, "`<name>` is busy and takes no mail: send to it
   once it is at rest."
 

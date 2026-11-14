@@ -608,7 +608,8 @@ const HANDLERS: ToolHandlers = {
     // A busy session: sent as mail, or the fork asked for
     if (r.ok && r.busy) {
       const b = r.busy
-      if (b.state === 'mailed') return { text: mailedText(b, 'send_to_session') }
+      // A note is reported to nobody (#2258); a fork mailed for want of memory is a task, reported as the fork would have been
+      if (b.state === 'mailed') return { text: mailedText(b, 'send_to_session', reportBack || b.lowMemory !== undefined) }
       return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
     }
     /*

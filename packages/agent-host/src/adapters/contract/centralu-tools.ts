@@ -581,9 +581,9 @@ export type CentraluTools = {
    * default, because waking it up on every turn end would create a loop where they wake each
    * other, and would also double the turn cost.
    *
-   * A session that cannot take it now (in a turn, on a card, at a limit) is sent it as a mail task (`busy.state` `mailed`,
-   * docs/plans/mailbox.md §10.6.2), whose end is reported as any task's, whatever `reportBack` says. A new instruction to a session at rest without
-   * `reportBack` still replaces this Assistant's earlier request (#166).
+   * A session that cannot take it now (in a turn, on a card, at a limit) is sent it as mail (`busy.state` `mailed`,
+   * docs/plans/mailbox.md §10.6.2): a task with `reportBack`, reported as any task's; without it a note that needs no reply, at rest too (#2258).
+   * On a linked machine, a new instruction without `reportBack` still replaces this Assistant's earlier request (#166).
    */
   sendToSession(
     sessionId: string,

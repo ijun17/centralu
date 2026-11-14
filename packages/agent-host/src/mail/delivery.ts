@@ -609,12 +609,15 @@ export class MailDelivery {
     return new Set((this.queued.get(recipient) ?? []).flatMap((q) => q.ids))
   }
 
-  /** The work a wake starts when a delegation tool sent it (`MailInput.task`) */
-  private delegatedTask(drained: Pick<DrainResult, 'workMessage'>): { senderId: string; text: string } | undefined {
-    const m = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
-    const from = m && parseAddress(m.sender)
-    if (m?.kind !== 'task' || from?.kind !== 'session' || !SEND_ORIGINS.has(m.origin ?? '')) return undefined
-    return { senderId: from.sessionId, text: m.body }
+  /** The work a wake starts when a delegation tool sent it (`MailInput.task`): its task, else a send tool's note, which is no one's work (#2258) */
+  private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): { senderId: string; text: string } | undefined {
+    const sent = (id: string) => {
+      const m = this.records.message(id)
+      const from = m && parseAddress(m.sender)
+      const kind = id === drained.workMessage ? 'task' : 'message'
+      return m?.kind === kind && from?.kind === 'session' && SEND_ORIGINS.has(m.origin ?? '') ? { senderId: from.sessionId, text: m.body } : undefined
+    }
+    return drained.workMessage !== null ? sent(drained.workMessage) : drained.messageIds.map(sent).find((t) => t !== undefined)
   }
 
   /** What the receiver's conversation shows as a session's message (`MailInput.shown`): the delegated task, else a card's notice, from its session */

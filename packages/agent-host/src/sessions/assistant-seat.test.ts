@@ -401,11 +401,19 @@ describe('what a send leaves', () => {
     expect(withdraw).toHaveBeenCalledOnce()
   })
 
-  it('an instruction without a report is silent: it writes no task, so nothing comes back for it', async () => {
+  it('an instruction without a report is a note through the mailbox, at rest too: no task, so nothing comes back for it (#2258)', async () => {
     const delegated = vi.spyOn(children, 'delegated')
+    host.mailTask = vi.fn(() => ({ state: 'mailed' as const, sessionId: 'a', sessionName: 'A', messageId: 'm1' }))
+    expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'again')).toEqual({ ok: true })
+    expect(host.mailTask).toHaveBeenCalledWith('orch', expect.objectContaining({ id: 'a' }), 'send_to_session', 'again', true)
+    expect(host.send).not.toHaveBeenCalled()
+    expect(delegated).not.toHaveBeenCalled()
+  })
+
+  it('a session at rest whose seat takes no mail is given the instruction without a report directly, as before mail', async () => {
+    host.mailTask = vi.fn(() => ({ error: '"A" is busy and takes no mail: send to it once it is at rest.' }))
     expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'again')).toEqual({ ok: true })
     expect(host.send).toHaveBeenCalledWith('a', 'again', undefined, { sessionId: 'orch', name: 'Assistant' })
-    expect(delegated).not.toHaveBeenCalled()
   })
 
   it("a linked machine's session keeps the earlier report request when the send there fails", async () => {

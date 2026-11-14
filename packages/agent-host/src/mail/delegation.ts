@@ -34,10 +34,11 @@ export function linkedGoneRecorder(mail: MessageService, records: MailboxRecords
 
 /**
  * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): a task from the caller to the session, not delivered yet, which the
- * delivery gives it as a turn of its own once it is free. Returns the task's id
+ * delivery gives it as a turn of its own once it is free; a `note` (#2258) at rest too. Returns the message's id
  */
-export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => string {
-  return (callerId, childId, origin, task) => mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false }).id
+export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean) => string {
+  return (callerId, childId, origin, task, note) =>
+    mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false, ...(note ? { note } : {}) }).id
 }
 
 /**

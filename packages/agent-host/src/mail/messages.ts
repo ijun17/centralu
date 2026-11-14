@@ -108,7 +108,8 @@ export type SendResult = {
 export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string } }
+/** `note`: a send that asks for nothing back (`send_to_session` without `reportBack`, #2258): a message that needs no reply, given as the task would be */
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -362,7 +363,10 @@ export class MessageService {
     return { seq: said.seq, at: said.ts }
   }
 
-  /** Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words */
+  /**
+   * Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words.
+   * A `note` is a message that needs no reply: no report and no last response answers it
+   */
   task(sender: string, recipient: string, input: TaskInput): MailRow {
     const from = parseAddress(sender)
     if (!from || from.kind === 'centralu') throw refuse('not_allowed', 'Centralu sends with notice and report')
@@ -372,7 +376,7 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       return this.put(
-        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
+        { sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })

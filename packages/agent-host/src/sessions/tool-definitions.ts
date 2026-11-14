@@ -1065,8 +1065,8 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'Use send_to_session to assign work — the target session\'s approval settings apply as they are,',
   'so a risky action will make that session ask the person for approval.',
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
-  // #1233: work handed out is heard of when it ends; a send to a busy session is work of its own (docs/plans/mailbox.md §10.6.2)
-  "create_session's firstMessage reports back the same way unless reportBack is false; a send to a busy session waits, and is reported on its own.",
+  // #1233: work handed out is heard of when it ends; a send to a busy session waits as mail, reported only with reportBack (#2258, docs/plans/mailbox.md §10.6.2)
+  "create_session's firstMessage reports back the same way unless reportBack is false; a send to a busy session waits until it is free.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
   // #853: the Assistant's light work outside any project went to its CLI's own subagent, which Centralu never shows

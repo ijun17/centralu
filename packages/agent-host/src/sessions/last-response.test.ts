@@ -109,7 +109,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
   it('H1: two senders whose tasks are in one turn each get their own answer', async () => {
     const { parent, child, task } = await childInTurn()
     const orc = await w.mgr.assistant()
-    const sent = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build' })
+    const sent = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build', reportBack: true })
     expect(sent.isError).toBeFalsy()
     const [asked] = read.tasks(addr(orc.id), child)
     await deliverDue(child)
