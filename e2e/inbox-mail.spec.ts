@@ -555,8 +555,6 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
   // Done is folded until pressed
   await expect(page.getByTestId('tasks-done-toggle')).toContainText('Done1')
   await expect(page.getByText('Cache headers')).toHaveCount(0)
-  await page.getByTestId('tasks-done-toggle').click()
-  await expect(page.getByTestId('tasks-done')).toContainText('Cache headers')
 
   // The keys walk the rows: the cursor starts on Needs you, ↓ goes to the work between sessions, ↵ opens it to read and nothing more
   await expect(page.locator('[data-cursor]')).toContainText('Which branch?')
@@ -567,8 +565,11 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
   await expect(page.getByTestId('mail-message-1')).toContainText('Translate the guide')
   await expect(page.getByTestId('mail-reply')).toHaveCount(0)
   await expect(page.getByTestId('mail-finish')).toHaveCount(0)
-  // Mail between sessions is not the person's own: it never lists under Waiting
+  // Back on the list, Done unfolds when pressed (↵ on a focused button presses the button, as on Waiting)
   await page.getByTestId('mail-back').click()
+  await page.getByTestId('tasks-done-toggle').click()
+  await expect(page.getByTestId('tasks-done')).toContainText('Cache headers')
+  // Mail between sessions is not the person's own: it never lists under Waiting
   await page.getByTestId('inbox-tab-waiting').click()
   await expect(page.getByTestId(`mail-thread-${between}`)).toHaveCount(0)
   // The Inbox opens on Waiting again

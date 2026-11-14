@@ -207,7 +207,7 @@ uxTask({
     await expect(page.getByTestId('tasks-waiting-on-others')).toContainText(WHOM)
     await expect(page.getByTestId('tasks-waiting-on-others')).toContainText(APPROVING)
   },
-  budget: { operators: 9, M: 2, H: 1, seconds: 6.0 },
+  budget: { operators: 9, M: 2, H: 1, seconds: 5.8 },
 })
 
 // ---------------------------------------------------------------------------------------------
