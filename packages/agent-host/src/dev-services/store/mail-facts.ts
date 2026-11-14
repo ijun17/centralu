@@ -52,6 +52,7 @@ export const MailFacts = z.looseObject({
   asker: z.string().optional(),
   /** On Centralu's notice to a giver of a session's open work (docs/plans/mailbox.md §10.6.4): the card the session raised, never its text */
   card: z.object({ session: z.string(), requestId: z.string(), handle: z.string(), kind: z.enum(['question', 'approval']) }).optional(),
+  /** On Centralu's notice of moved mail; on a task a handoff gave again from the heir (`MessageService.handOver`): its words are the previous giver's */
   handedOver: z.boolean().optional(),
   legacyKind: z.string().optional(),
   /** The recipients an older build's person released a moved message to: never held again for them (§6.3) */

@@ -403,17 +403,22 @@ export class MailDelivery {
 
   /**
    * A note that could not be delivered tells its sender, quietly (#2258 review): no report comes for a note, so this is how the Assistant learns of it
-   * and can tell the person at its next turn. A task's sender waits for its report, and the person's Inbox holds both
+   * and can tell the person at its next turn. A task's sender waits for its report, and the person's Inbox holds both. Best effort: the hold is
+   * committed already, and a notice that fails is logged, never the hold's failure
    */
   private tellNoteFailed(recipient: string, messageIds: readonly string[], error: string): void {
     for (const id of messageIds) {
-      const m = this.records.message(id)
-      if (!m || !isSendNote(m) || parseAddress(m.sender)?.kind !== 'session') continue
-      this.service.notice(m.sender, {
-        body: `Your note ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
-        facts: { quiet: true, noteFailed: { message: id, to: recipient } },
-        dedupeKey: `notefailed:${id}:${recipient}`,
-      })
+      try {
+        const m = this.records.message(id)
+        if (!m || !isSendNote(m) || parseAddress(m.sender)?.kind !== 'session') continue
+        this.service.notice(m.sender, {
+          body: `Your note ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
+          facts: { quiet: true, noteFailed: { message: id, to: recipient } },
+          dedupeKey: `notefailed:${id}:${recipient}`,
+        })
+      } catch (e) {
+        console.error(`[mail] ${recipient}: its sender could not be told that note ${id} failed (${errorMessage(e)})`)
+      }
     }
   }
 

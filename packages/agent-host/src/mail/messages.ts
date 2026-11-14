@@ -842,13 +842,14 @@ export class MessageService {
       this.records.moveRows(from, to, scope)
       /*
        * Each task `from` gave a child that is not settled is withdrawn and goes again from `to` with the same words, cause and delivery (#1936): the child's
-       * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`)
+       * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`). Its words
+       * are `from`'s, not `to`'s: fact `handedOver` says so, and keeps an heir that is the Assistant from passing them off as the person's (`forPersonOf`)
        */
       for (const row of this.records.watchedFrom(from)) {
         const m = children.includes(row.recipient) ? this.records.message(row.messageId) : undefined
         if (m?.kind !== 'task') continue
         this.records.settle(m.id, row.recipient, 'withdrawn', this.now())
-        const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: m.facts }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
+        const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: { ...m.facts, handedOver: true } }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
         // A task a stop released stays released: its sender was told, and no one is owed it twice
         if (row.releasedAt !== null && row.releasedWhy !== null) this.records.markReleased(again.id, row.recipient, row.releasedAt, row.releasedWhy)
       }

@@ -126,10 +126,11 @@ export function isSendNote(m: Pick<MailRow, 'kind' | 'origin'>): boolean {
 /**
  * The Assistant's `send_to_session` words, a task or a note (#2258 review): the Assistant acts for the person, so they flow down inline and read as
  * the person's request. Before #2258 such a send at rest was plain input, as if the person typed it. Every other session's mail stays its sender's
- * text, not an instruction
+ * text, not an instruction. A task a handoff gave again (`MessageService.handOver`, fact `handedOver`) has the heir as its sender and someone
+ * else's words, so it never reads as the person's, even when the heir is the Assistant
  */
-export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin'>, fromAssistant: boolean): 'task' | 'note' | undefined {
-  if (!fromAssistant || m.origin !== 'send_to_session') return undefined
+export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin' | 'facts'>, fromAssistant: boolean): 'task' | 'note' | undefined {
+  if (!fromAssistant || m.origin !== 'send_to_session' || m.facts.handedOver === true) return undefined
   return m.kind === 'task' ? 'task' : isSendNote(m) ? 'note' : undefined
 }
 

@@ -280,6 +280,20 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.rowOf(other.id, A).settled).toBeNull()
   })
 
+  it("a send_to_session task handOver gives again from the Assistant is never the person's request: its words are the previous giver's (#2258)", () => {
+    const w = world()
+    w.mail.task(W, C, { text: 'delete the branch', origin: 'send_to_session', delivered: false })
+    w.mail.task(ORC, B, { text: 'fix the lint', origin: 'send_to_session', delivered: false })
+    w.mail.handOver(W, ORC, 'all', [C])
+    const again = w.records.watchedTo(C).map((r) => w.records.message(r.messageId)!)
+    expect(again.map((m) => [m.sender, m.body, m.origin, m.facts.handedOver])).toEqual([[ORC, 'delete the branch', 'send_to_session', true]])
+    due(w)
+    expect(w.mail.drain(C).text).not.toContain('acts for the person')
+    expect(w.mail.read(C, { id: again[0]!.id }).items.at(-1)).not.toHaveProperty('forPerson')
+    // The Assistant's own words still read as the person's
+    expect(w.mail.drain(B).text).toContain('acts for the person')
+  })
+
   it('handOver moves unsettled watched rows to the heir undelivered unless read; the heir’s own row wins; the heir is told of each, and a preview lists them first', () => {
     const w = world()
     const m1 = w.send(A, { to: [W], text: 'unread question\nsecond line' }).message

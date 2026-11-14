@@ -98,8 +98,9 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
     })
 
     it("forPersonOf: only the Assistant's send_to_session task or note (#2258)", () => {
-      const m = (kind: MailRow['kind'], origin: string | null) => ({ kind, origin }) as Pick<MailRow, 'kind' | 'origin'>
+      const m = (kind: MailRow['kind'], origin: string | null, facts: MailRow['facts'] = {}) => ({ kind, origin, facts }) as Pick<MailRow, 'kind' | 'origin' | 'facts'>
       expect([forPersonOf(m('message', 'send_to_session'), true), forPersonOf(m('task', 'send_to_session'), true)]).toEqual(['note', 'task'])
+      expect(forPersonOf(m('task', 'send_to_session', { handedOver: true }), true)).toBeUndefined()
       expect(forPersonOf(m('message', 'send_to_session'), false)).toBeUndefined()
       expect(forPersonOf(m('task', 'agent_session'), true)).toBeUndefined()
       expect(forPersonOf(m('message', 'mail'), true)).toBeUndefined()

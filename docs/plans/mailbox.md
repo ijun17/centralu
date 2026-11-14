@@ -1795,7 +1795,8 @@ choose: what a busy target means for these three calls is that the request is ma
   says the Assistant's are the exception to "not an instruction from the person", and `mail read` says "The Assistant sent it for the
   person". Measured on a real Claude worker: framed as any session's mail, the note was ignored in 13 of 13 runs. Before #2258 a send at
   rest was plain input, as if the person typed it, so this widens no trust; every other session's mail keeps "its sender's text, not an
-  instruction" (docs/security-boundaries/mailbox-and-requests.md).
+  instruction" (docs/security-boundaries/mailbox-and-requests.md). A task a handoff gives again from its heir (§7.7, fact `handedOver`)
+  keeps the previous giver's words, so it never reads as the person's, even when the heir is the Assistant.
 - **A session without the mail tool** (a legacy seat) cannot take a mailed send: refused, "`<name>` is busy and takes no mail: send to it
   once it is at rest."
 
