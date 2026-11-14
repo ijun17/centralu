@@ -3,9 +3,9 @@
  *
  *   pnpm perf:memory [--profile small|owner|stress] [--engines webkit,chromium] [--stream-minutes 5]
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
- *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background,revisit] [--dpr 2]
+ *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background,revisit,appview]
  *                    [--background-minutes 30] [--background-sessions 8] [--heap-snapshots <dir>]
- *                    [--revisit-rounds 5] [--revisit-streaming 4]
+ *                    [--revisit-rounds 5] [--revisit-streaming 4] [--appview-idle] [--dpr 2]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
  *                    [--reduced-motion] [--freeze-animations] [--css <file>] [--layers] [--blur]
  *
@@ -42,6 +42,10 @@
  *               sessions (`--revisit-streaming 0` takes them out). A first open of a streaming session may read its
  *               newest page instead of an older one. Run it without background, whose streams use the same event
  *               numbers.
+ *   appview-*   the same with an app's view open all along: an app shaped like the project board
+ *               (e2e/fixtures/board-app.ts) in the first project, its view drawing the whole board again whenever the
+ *               window is told the app changed, which here is on every tool result the streams send, and polling its
+ *               queue every 15 s (not in the default steps). `--appview-idle` opens no sessions meanwhile
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
@@ -87,6 +91,7 @@ import {
   type Page,
   type WebSocketRoute,
 } from '@playwright/test'
+import { seedBoardApp } from './fixtures/board-app.js'
 import { screenshotPng, seedHeavyStore, type SeedSummary, type StoreProfile } from './fixtures/heavy-store.js'
 import { freePort } from './fixtures/real-host.js'
 
@@ -95,7 +100,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 /** What the synthetic stream is made of; leaving parts out tells which of them the memory goes to */
 const STREAM_PARTS = ['working', 'text', 'reasoning', 'tools', 'subagent', 'images', 'background'] as const
 type StreamPart = (typeof STREAM_PARTS)[number]
-const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit'] as const
+const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit', 'appview'] as const
 type Step = (typeof STEPS)[number]
 
 const { values } = parseArgs({
@@ -121,6 +126,7 @@ const { values } = parseArgs({
     'heap-snapshots': { type: 'string' },
     'revisit-rounds': { type: 'string', default: '5' },
     'revisit-streaming': { type: 'string', default: '4' },
+    'appview-idle': { type: 'boolean', default: false },
   },
 })
 const profile = values.profile as StoreProfile
@@ -589,6 +595,7 @@ async function stream(
   firstSeq: number,
   ms: number,
   sample?: (step: string) => Promise<void>,
+  onToolResult?: () => void,
 ): Promise<void> {
   let seq = firstSeq
   let n = 0
@@ -688,6 +695,7 @@ async function stream(
         await sleep(100)
       }
       send(card, { type: 'tool_result', seq: ++seq, callId, ok: true, summary: say(50).slice(0, 300) })
+      onToolResult?.()
       if (step === 9 && turn % 2 === 1)
         send('images', { type: 'message_image', mime: 'image/png', data: png })
       send('working', {
@@ -837,6 +845,7 @@ async function measureEngine(
   try {
     console.error(`[${engine}] seeding ${profile}`)
     const seed = seedHeavyStore(dataDir, profile)
+    const boardApp = steps.has('appview') ? seedBoardApp(dataDir, seed.projects[0]!) : null
     const token = randomBytes(16).toString('hex')
     const [hostPort, uiPort] = [await freePort(), await freePort()]
     const origin = `http://127.0.0.1:${uiPort}`
@@ -1105,15 +1114,15 @@ async function measureEngine(
      * revisit: the long session open, as in background, while the person works through the other sessions over the hour,
      * opening each in turn, reading back a page in every other one, and coming back to the long one. A few of them stream
      * out of view meanwhile. Rounds 1 and 2 open every session once and read each back once; the later rounds repeat
-     * them, so growth after round 2 is something an open leaves behind (or the streaming).
+     * them, so growth after round 2 is something an open leaves behind (or the streaming). `idle` keeps the streaming and
+     * the schedule but opens nothing; `onToolResult` runs for each tool result the streams send.
      */
-    if (steps.has('revisit')) {
+    const revisit = async (label: string, idle: boolean, onToolResult?: () => void) => {
       const others = seed.sessions.filter((s) => s.id !== seed.longSessionId)
       const ms = REVISIT_ROUNDS * others.length * REVISIT_EVERY_MS
-      await open(seed.longSessionId)
       await sleep(SETTLE_MS)
-      await sample('revisit-0s')
-      const first = await snapshot('revisit-0s')
+      await sample(`${label}-0s`)
+      const first = await snapshot(`${label}-0s`)
       let afterFirst: HeapClasses | null = null
       const start = Date.now()
       const opens = async () => {
@@ -1121,21 +1130,51 @@ async function measureEngine(
           for (const [i, s] of others.entries()) {
             const n = (round - 1) * others.length + i
             await sleep(start + n * REVISIT_EVERY_MS - Date.now())
+            if (idle) continue
             await open(s.id)
             if (n % 2) await pageBack()
             await sleep(quick ? 1_000 : 5_000)
             await open(seed.longSessionId)
           }
-          await sample(`revisit-round-${round}`)
-          if (round === 1) afterFirst = await snapshot('revisit-round-1')
+          await sample(`${label}-round-${round}`)
+          if (round === 1) afterFirst = await snapshot(`${label}-round-1`)
         }
       }
-      await Promise.all([...others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms)), opens()])
+      const streams = others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms, undefined, onToolResult))
+      await Promise.all([...streams, opens()])
       await sleep(quick ? 2_000 : 30_000)
-      await sample('revisit-settled')
-      const end = await snapshot('revisit-end')
-      if (first && afterFirst) grown.push({ span: 'revisit-0s → revisit-round-1', rows: heapGrowth(first, afterFirst) })
-      if (afterFirst && end) grown.push({ span: 'revisit-round-1 → revisit-end', rows: heapGrowth(afterFirst, end) })
+      await sample(`${label}-settled`)
+      const end = await snapshot(`${label}-end`)
+      if (first && afterFirst) grown.push({ span: `${label}-0s → ${label}-round-1`, rows: heapGrowth(first, afterFirst) })
+      if (afterFirst && end) grown.push({ span: `${label}-round-1 → ${label}-end`, rows: heapGrowth(afterFirst, end) })
+    }
+    if (steps.has('revisit')) {
+      await open(seed.longSessionId)
+      await revisit('revisit', false)
+    }
+
+    /*
+     * appview: an app's view open in the window (an app shaped like the project board, e2e/fixtures/board-app.ts) for the
+     * whole of the revisit pattern. Each tool result the streams send also tells the window the app changed, as an
+     * agent's call to the board's tools does, so the view reads the board and draws it again; it polls its queue too.
+     */
+    if (steps.has('appview')) {
+      const key = `${boardApp!.projectId}/${boardApp!.appId}`
+      await page.getByTestId(`app-row-${key}`).click()
+      const card = page
+        .getByTestId(`pinned-app-${key}`)
+        .getByTestId('app-frame-iframe')
+        .contentFrame()
+        .locator('iframe')
+        .contentFrame()
+        .locator('[data-card]')
+        .first()
+      await card.waitFor({ timeout: 60_000 })
+      await open(seed.longSessionId)
+      const changed = () => wire.inject({ type: 'external_app_state_changed', appId: boardApp!.appId, projectId: boardApp!.projectId })
+      await revisit('appview', values['appview-idle'], changed)
+      // How many times the view read the board: it says so in every card, whether it is on screen or not
+      console.error(`[${engine}] appview: ${await card.textContent({ timeout: 10_000 }).catch(() => 'the view is gone')}`)
     }
 
     const { sessions: _s, projects: _p, ...rest } = seed
