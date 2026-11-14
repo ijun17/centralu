@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
+import { SessionManager } from './manager.js'
 import { DEFAULT_AUTO_COMPACT, nudgeShares } from '@cc/protocol'
 import { managerWorld, projectDirs } from './manager.test-helpers.js'
 import { ContextNudges, type ContextNudgesHost } from './context-nudges.js'
@@ -281,6 +283,50 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     w.request(530_000)
     expect(w.told).toHaveLength(2)
   })
+
+  /*
+   * A host that starts after an update (#1913): the counters are in memory, so the session's stored reading (its size at its last
+   * turn's end) is what says which shares the host before told. Woken, it is not told them again
+   */
+  it('does not tell again a share the stored reading is past when the host starts, and tells the next one once (#1913)', () => {
+    const w = world()
+    w.session.context = { ...w.session.context!, used: 400_000 }
+    w.request(410_000)
+    expect(w.told).toEqual([])
+    w.request(520_000)
+    expect(w.told).toHaveLength(1)
+    expect(w.told[0]).toMatch(/in the middle of work at 60%/)
+    // A reading taken under this host seeds nothing: its requests were seen here (notices turned on late are told the share)
+    const late = world()
+    late.state.setting = { ...late.state.setting, nudge: false }
+    late.request(400_000)
+    late.session.context = { ...late.session.context!, used: 400_000 }
+    late.state.setting = { ...late.state.setting, nudge: true }
+    late.request(410_000)
+    expect(late.told).toHaveLength(1)
+  })
+
+  it('tells the first share again after a compaction the starting host hears of: the stored reading is from before it (#1913)', () => {
+    const w = world()
+    w.session.context = { ...w.session.context!, used: 400_000 }
+    w.request(410_000)
+    expect(w.told).toEqual([])
+    w.emit({ type: 'compaction', sessionId: 's1', failed: false })
+    w.request(330_000)
+    expect(w.told).toHaveLength(1)
+    expect(w.told[0]).toMatch(/about 33% full/)
+  })
+
+  it('with no stored reading, tells the first share as before; with one past it, does not (#1913)', () => {
+    const none = world()
+    none.session.context = null
+    none.request(330_000)
+    expect(none.told).toHaveLength(1)
+    const past = world()
+    past.session.context = { ...past.session.context!, used: 330_000 }
+    past.request(330_000)
+    expect(past.told).toEqual([])
+  })
 })
 
 describe('on the session manager (#1492)', () => {
@@ -360,5 +406,52 @@ describe('on the session manager (#1492)', () => {
     expect(h.nudges).toEqual([])
     request(h, id, 510_000)
     expect(h.nudges).toHaveLength(1)
+  })
+
+  it('a host that starts over the same store does not tell a woken session a share it was told by the host before (#1913)', async () => {
+    const { id, h } = await session()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    request(h, id, 400_000)
+    expect(h.nudges).toHaveLength(1)
+    h.emitContext(400_000, 1_000_000, undefined, 600_000)
+    h.finishTurn()
+    await world.mgr.tenure.disposeAll()
+    // The next host reads the session as the last one stored it, and the session is woken
+    const next = new SessionManager(world.store, new Map<ToolName, AgentAdapter>([['claude', world.adapter]]), () => {})
+    try {
+      await next.inputs.send(id, 'go on')
+      const woken = world.adapter.last!
+      expect(woken).not.toBe(h)
+      request(woken, id, 410_000)
+      expect(woken.nudges).toEqual([])
+      woken.emitContext(410_000, 1_000_000, undefined, 600_000)
+      request(woken, id, 520_000)
+      expect(woken.nudges).toHaveLength(1)
+      expect(woken.nudges[0]).toMatch(/at 60%/)
+    } finally {
+      await next.tenure.disposeAll()
+    }
+  })
+
+  it('does not tell the second share again after a restart past it, though the woken process says its point only later (#1913)', async () => {
+    const { id, h } = await session()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    request(h, id, 550_000)
+    expect(h.nudges).toHaveLength(1)
+    h.emitContext(550_000, 1_000_000, undefined, 600_000)
+    h.finishTurn()
+    await world.mgr.tenure.disposeAll()
+    const next = new SessionManager(world.store, new Map<ToolName, AgentAdapter>([['claude', world.adapter]]), () => {})
+    try {
+      await next.inputs.send(id, 'go on')
+      const woken = world.adapter.last!
+      // The stored reading keeps no point; the new process says it with its first reading
+      request(woken, id, 560_000)
+      woken.emitContext(560_000, 1_000_000, undefined, 600_000)
+      request(woken, id, 570_000)
+      expect(woken.nudges).toEqual([])
+    } finally {
+      await next.tenure.disposeAll()
+    }
   })
 })

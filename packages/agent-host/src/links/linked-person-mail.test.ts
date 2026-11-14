@@ -263,6 +263,79 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     }
   })
 
+  it('a hub that stays connected is up now: a host that ends without its connections ending still knows it after 40 days', () => {
+    vi.useFakeTimers()
+    try {
+      const s = settings(null)
+      const h = hubs(s)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+      vi.advanceTimersByTime(40 * 24 * 60 * 60_000)
+      // No `gone`: the host crashed, or the power went
+      expect(hubs(s).mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false]])
+      // Its link ending stops the writing
+      h.gone(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the daily write runs once while any hub that takes mail is connected, and stops when none is', () => {
+    vi.useFakeTimers()
+    try {
+      const h = hubs(settings(null))
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+      h.offer(2, { hub: { id: 'hub-b', name: 'Laptop' }, on: false, mail: true, you: 'm1' })
+      expect(vi.getTimerCount()).toBe(1)
+      // Withdrawn: one is still connected
+      h.offer(2, { hub: { id: 'hub-b', name: 'Laptop' }, on: false })
+      expect(vi.getTimerCount()).toBe(1)
+      // A re-offer without mail: none takes mail now
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: true })
+      expect(vi.getTimerCount()).toBe(0)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: true, mail: true, you: 'm1' })
+      expect(vi.getTimerCount()).toBe(1)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the daily write stamps the connected hubs only: a kept hub that is away keeps when it was last up', () => {
+    vi.useFakeTimers()
+    try {
+      const day = 24 * 60 * 60_000
+      const keptAt = Date.now() - 10 * day
+      const s = settings(JSON.stringify([{ id: 'hub-k', name: 'Old desk', you: 'm1', at: keptAt }]))
+      const h = hubs(s)
+      h.offer(1, { hub: { id: 'hub-b', name: 'Laptop' }, on: false, mail: true, you: 'm1' })
+      vi.advanceTimersByTime(day)
+      const written = JSON.parse(s.kept.get(MAIL_HUBS_KEY)!) as { id: string; at: number }[]
+      expect(written.map((x) => [x.id, x.at])).toEqual([['hub-k', keptAt], ['hub-b', Date.now()]])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a daily write that throws (a locked or closed store) is logged, not thrown out of the timer', () => {
+    vi.useFakeTimers()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const s = settings(null)
+      const h = hubs(s)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+      s.setAppSetting = () => {
+        throw new Error('database is locked')
+      }
+      expect(() => vi.advanceTimersByTime(24 * 60 * 60_000)).not.toThrow()
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('database is locked'))
+    } finally {
+      logged.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('a kept hub that has not offered on this run says nothing of apps: a session it started keeps its record, and its app copies here do not run (#1938)', () => {
     const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
     s.setAppSetting(startedByHubKey('s1'), JSON.stringify({ id: 'hub-a', name: 'Desk', apps: true }))

@@ -60,6 +60,11 @@ const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.
  * outlasts a hub computer left off over a holiday or a long trip, and stops naming one that is gone within a month
  */
 const KEPT_MAIL_HUB_MS = 30 * 24 * 60 * 60_000
+/**
+ * How often the hubs that take mail are written again while one is connected: a host that ends without its connections
+ * ending (a crash, a power cut) then finds them up within a day of its end, not as of their last offer
+ */
+const STAMP_MS = 24 * 60 * 60_000
 
 /** The words a call that failed for an older hub says (it has no such method) */
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
@@ -71,6 +76,11 @@ export class LinkedHubs {
 
   /** Run each time a hub offers mail on a connection (`onMailOffer`) */
   private readonly mailOffered = new Set<(hubId: string) => void>()
+  /**
+   * While a hub that takes mail is connected, the list is written again each `STAMP_MS` (`stampWhileUp`). No stop step:
+   * it is unref'd, and a host that stops closes its connections first, whose `gone` stops it
+   */
+  private stamp: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly deps: LinkedHubsDeps) {
     const raw = deps.settings?.appSetting(MAIL_HUBS_KEY) ?? null
@@ -81,9 +91,30 @@ export class LinkedHubs {
       // Not JSON: no hub is kept, as for any value that does not read
     }
     const read = KeptMailHubs.safeParse(kept)
+    // One down past `KEPT_MAIL_HUB_MS` is forgotten at its first use (`peer`)
     for (const h of read.success ? read.data : []) {
-      const hub: Hub = { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false }
-      if (!this.expired(hub)) this.hubs.set(h.id, hub)
+      this.hubs.set(h.id, { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false })
+    }
+  }
+
+  /** The daily write runs while a hub that takes mail is connected, and not otherwise (`keepMailHubs` keeps it so) */
+  private stampWhileUp(): void {
+    const up = [...this.hubs.values()].some((h) => h.mail && h.client !== null)
+    if (up && !this.stamp) {
+      this.stamp = setInterval(() => this.stampSafely(), STAMP_MS)
+      this.stamp.unref?.()
+    } else if (!up && this.stamp) {
+      clearInterval(this.stamp)
+      this.stamp = null
+    }
+  }
+
+  /** The daily write, from a timer: a write that throws (a locked or closed store, a full disk) is logged, not a crash of the host */
+  private stampSafely(): void {
+    try {
+      this.keepMailHubs()
+    } catch (err) {
+      console.error(`[agent-host] could not write down the hubs that take mail: ${errorMessage(err)}`)
     }
   }
 
@@ -92,8 +123,15 @@ export class LinkedHubs {
     return h.client === null && Date.now() - h.upAt >= KEPT_MAIL_HUB_MS
   }
 
-  /** The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`) */
+  /**
+   * The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`). Every change in whether one is connected comes
+   * through here, so the daily write is started or stopped here too
+   */
   private keepMailHubs(): void {
+    this.stampWhileUp()
+    // A hub connected now is up now
+    const now = Date.now()
+    for (const h of this.hubs.values()) if (h.client !== null) h.upAt = now
     const list = [...this.hubs.values()].filter((h) => h.mail && !this.expired(h)).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.upAt }))
     this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
   }
