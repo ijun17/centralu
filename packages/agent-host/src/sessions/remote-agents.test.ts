@@ -324,6 +324,15 @@ describe('a record an older build kept', () => {
     expect(told).toHaveLength(1)
   })
 
+  it('tells a caller of two such children once, in one notice', () => {
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...legacy, owed: {} }, { ...legacy, sessionId: 'm1.c2', name: 'Other', owed: {} }]))
+    agents()
+    expect(told).toEqual([
+      `[Centralu] Centralu was updated while "Child" on Box was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="${CHILD}") reads where it stands.\n` +
+        '[Centralu] Centralu was updated while "Other" on Box was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="m1.c2") reads where it stands.',
+    ])
+  })
+
   it('tells the caller of messages it held for a busy child, owed nothing else, that they were not sent', () => {
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...legacy, queued: [{ id: 'q1', text: 'x' }, { id: 'q2', text: 'y' }] }]))
     agents()

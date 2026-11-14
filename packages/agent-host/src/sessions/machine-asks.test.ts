@@ -45,6 +45,21 @@ describe("a machine's ask (#550)", () => {
     expect(await asking).toMatchObject({ ok: false, error: expect.stringContaining('did not finish: its task there ended with no report (withdrawn)') })
   })
 
+  it('answers with a report that came in as the wait reached its bound, and passes it to the machine no more', async () => {
+    const tasks = w.mgr.mail.linkedTasks!
+    const from = addressOf(`m1.${caller.sessionId}`)
+    // The bound is reached just as the session's turn ends: its report is written, and the wait says `bound`
+    tasks.settled = async (taskId) => {
+      mail.service.report(taskId, { body: 'Centralu: the session finished.', outcome: 'finished', answer: 'the sprites are exported' })
+      return 'bound'
+    }
+    const r = await w.mgr.machineAsks.ask(machine, { caller, project: w.target.name, task: 'export the sprites', depth: 2 })
+    expect(r).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('the sprites are exported') })
+    const task = w.store.mailbox.feedOf(addressOf(target), { limit: 5 }).find((m) => m.kind === 'task' && m.sender === from)!
+    const [report] = w.store.mailbox.reportsOn(task.id)
+    expect(w.store.mailbox.recipient(report!.id, from)).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
+  })
+
   it('answers a later call with the report on its task, not with words the session said since in other work', async () => {
     // A machine from before #1948 step 6: it takes no report by mail, and reads it by asking again
     mail.across.usePeers({ selfName: () => 'This computer', machine: (id) => (id === machine.id ? { id, name: machine.name, reachable: true, tasks: false, call: () => Promise.reject(new Error('older')) } : undefined) })

@@ -176,7 +176,8 @@ export class MachineAsks {
     try {
       const r = await tasks.settled(taskId, ASK_WAIT_MS, { signal })
       const s = tasks.standing(taskId)
-      if (r !== 'settled' || s.state === 'open') return { ok: true, state: 'working', ...base }
+      // A report in at the bound is answered with, not passed after the answer: it would reach the machine before its copy of the task
+      if (r === 'aborted' || s.state === 'open') return { ok: true, state: 'working', ...base }
       told = true
       const failed = unfinished(s)
       if (failed !== null) return { ok: false, error: `${project}'s session "${session.name}" on ${this.selfName()} did not finish: ${failed}. Tell the person, or ask again with a clearer task.` }

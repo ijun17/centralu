@@ -52,8 +52,9 @@ sleeper, CLI replacement and deferred settings/instructions restart cannot disca
 restart markers remain set while input is held. Since adapters complete receipts after emitting `turn_complete`,
 the last receipt re-checks the restart when the session is not mid-turn. New input waits for disposal and resume,
 so the next task uses the updated settings, app set and launch policy. The person's
-Stop is marked before calling the adapter, including adapters that reject receipts synchronously. A follow-up is framed as a **note about ongoing work**
-(`agentNoteFrame`), without the initial task/answer frame, and stored and shown with `from`.
+Stop is marked before calling the adapter, including adapters that reject receipts synchronously. A follow-up is a task by mail from the caller
+(origin `agent_session`), which the child's mail delivery gives it, held while it is busy, and stored and shown with `from`; on a linked machine it
+crosses the link as one (#1948 step 6, [plans/linked-mail.md](../../plans/linked-mail.md) §10).
 A `send` after the child finishes starts a new delegation and uses the task/return-answer frame (`agentFrame`).
 It is refused on an adapter without this capability, while the child works on something else
 (the person may be using it), or when the person has since raised its preset above the caller's (`presetWithin`).

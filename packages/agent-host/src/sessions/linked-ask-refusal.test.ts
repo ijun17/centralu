@@ -51,7 +51,6 @@ async function hub(away?: string) {
     describe: () => ({ name: 'Worker', project: 'api on Box' }),
     lastWords: async () => ({ ok: true as const, text: 'done', length: 4, seq: 1 }),
     machineLinked: () => true,
-    machineWaitsForPerson: () => false,
     backgroundTasks: async () => [],
   } as unknown as LinkedSessions
   mgr.useLinkedReader(reader)

@@ -109,11 +109,12 @@ export class RemoteAgents {
 
   /**
    * At startup: a record a build before #1948 step 6 kept owed its caller the end of the child's turn by the relayed report, which is gone. Its
-   * caller is told once where to read it, and the old fields are dropped, so no later start tells it again
+   * caller is told once, in one notice for all its children, where to read it, and the old fields are dropped, so no later start tells it again
    */
   restore(): void {
     const stored = this.records()
     if (!stored.some((r) => LEGACY.some((k) => k in r))) return
+    const notices = new Map<string, { lines: string[]; about: { sessionId: string; name: string } }>()
     for (const r of stored) {
       // What the old build held for the child while it was busy is not sent by this one: said, never dropped without a word
       const held = Array.isArray(r.queued) ? r.queued.length : 0
@@ -121,9 +122,12 @@ export class RemoteAgents {
       const text = [
         r.owed === undefined ? '' : `[Centralu] Centralu was updated while "${r.name}" on ${r.machine} was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="${r.sessionId}") reads where it stands.`,
         held ? `[Centralu] Centralu was updated while ${held === 1 ? 'a message' : `${held} messages`} from this session waited for "${r.name}" on ${r.machine} to be free. ${held === 1 ? 'It was' : 'They were'} not sent; send again what still matters.` : '',
-      ].filter(Boolean).join('\n')
-      void this.host.tellSession(r.callerId, text, { sessionId: r.sessionId, name: r.name }, true)
+      ].filter(Boolean)
+      const notice = notices.get(r.callerId)
+      if (notice) notice.lines.push(...text)
+      else notices.set(r.callerId, { lines: text, about: { sessionId: r.sessionId, name: r.name } })
     }
+    for (const [callerId, n] of notices) void this.host.tellSession(callerId, n.lines.join('\n'), n.about, true)
     this.save(stored.map(({ owed: _o, whose: _w, given: _g, queued: _q, sent: _s, turn: _t, ...r }) => r))
   }
 

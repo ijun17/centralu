@@ -41,6 +41,14 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
   })
 
+  it('reads a machine that does not know the offer as an older one, not as still connecting', async () => {
+    const machine = await machineHost({ sessions: ['w1'], mail: true, without: ['host.hubOffer'] })
+    const hub = await hubHost(machine.port, { mail: true })
+    await eventually(() => hub.machine().status === 'connected')
+    await eventually(() => hub.links.get('m1')?.takesTasks === false)
+    expect(await hub.mail!.across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })).toMatchObject({ ok: false, why: 'older' })
+  })
+
   it("comes back as the hub's report on its copy, answering it, from the machine it went to; another machine naming it is refused and nothing is written", async () => {
     const { machine, hub, across } = await rig()
     const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
@@ -60,6 +68,17 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.settled).toBe('reported')
     // Passed on once: the machine's row of it is delivered
     await eventually(() => machine.store.mailbox.recipients(machine.store.mailbox.reportsOn(id)[0]!.id)[0]?.deliveredAt !== null)
+  })
+
+  it('crosses a report whose words are longer than a report across takes as what it says, cut', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    machine.mail!.service.report(id, { outcome: 'failed', body: '[Centralu] The session failed.', error: 'e'.repeat(300), answer: 'a'.repeat(3_000) })
+    await eventually(() => hub.store.mailbox.reportsOn(id).length === 1)
+    const facts = hub.store.mailbox.reportsOn(id)[0]!.facts
+    expect(facts).toMatchObject({ outcome: 'failed', error: `${'e'.repeat(199)}…` })
+    expect(String(facts.answer)).toHaveLength(2_000)
   })
 
   it("acts for the person on the machine only when the hub says its Assistant's send_to_session gave it", async () => {
@@ -112,13 +131,17 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     const w = world()
     const answers: ((r: unknown) => void)[] = []
     const sent: Record<string, unknown>[] = []
+    const moves: unknown[] = []
     const machine = {
       id: 'm1', name: 'Remote box', reachable: true, ...('tasks' in o ? { tasks: o.tasks } : {}),
-      call: (method: string, params: unknown) => (method === 'host.mail' ? (sent.push(params as Record<string, unknown>), new Promise((resolve) => answers.push(resolve))) : Promise.resolve({ ok: true })),
+      call: (method: string, params: unknown) => {
+        if (method === 'host.mailMove') moves.push(params)
+        return method === 'host.mail' ? (sent.push(params as Record<string, unknown>), new Promise((resolve) => answers.push(resolve))) : Promise.resolve({ ok: true })
+      },
     }
     const across = new MailAcross({ hostId: HOST, service: w.mail, records: w.records, reach: w.reach, ownEntries: () => [], soon: (fn) => fn() })
     across.usePeers({ selfName: () => 'Hub box', machine: (id) => (id === 'm1' ? machine : undefined) })
-    return { w, across, answers, sent, child: addr('m1.w1') }
+    return { w, across, answers, sent, moves, machine, child: addr('m1.w1') }
   }
   const finished = (id: string) => ({ sessionId: 'centralu', text: '[Centralu] The session ended its turn.', replyTo: id, report: { outcome: 'finished' as const, answer: 'done' } })
 
@@ -154,6 +177,29 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     answers[0]!({ ok: true, messageId: id, to: 'w1' })
     answers[1]!({ ok: true, messageId: second, to: 'w1' })
     await Promise.all([sending, other])
+  })
+
+  it("tells the machine a handoff it could not be told then, at the next round, and takes the machine's receipts on the task meanwhile", async () => {
+    const { w, across, answers, sent, moves, machine, child } = hubWorld()
+    const sending = across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    const id = String(sent[0]!.id)
+    answers[0]!({ ok: true, messageId: id, to: 'w1' })
+    await sending
+    // The handoff happens while the machine is away: it cannot be told
+    machine.reachable = false
+    w.mail.handOver(addr('orc'), addr('h2'), 'all', [child])
+    await across.movedAcross(w.mail.takeMoves())
+    expect(moves).toEqual([])
+    // Back: the move is told at the next round
+    machine.reachable = true
+    across.changed()
+    await vi.waitFor(() => expect(moves).toEqual([{ from: addr('orc'), to: addr('h2'), ids: [id] }]))
+    // A receipt that still names the old sender (the move lost, or this hub restarted before telling it): the session there is gone, which the copy
+    // here takes, and the machine is told the move again
+    await across.rows([{ messageId: id, recipient: child, sender: addr('orc'), deliveredAt: 1, readAt: 1, settled: null, settledAt: null, answerId: null, releasedAt: 3, releasedWhy: 'gone' }], { machine: 'm1' })
+    expect(w.records.recipient(id, child)).toMatchObject({ releasedAt: 3, releasedWhy: 'gone' })
+    await vi.waitFor(() => expect(moves).toHaveLength(2))
   })
 
   it('is not sent while the machine has not said yet whether it takes tasks: still connecting, not an older Centralu', async () => {

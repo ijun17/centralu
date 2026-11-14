@@ -99,6 +99,8 @@ type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; sessionId:
 
 /** The words a call failed with for an older build (it has no such method) */
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
+/** The most ids one `host.mailMove` takes (`MailMoveParams`) */
+const MOVE_IDS_PER_CALL = 500
 
 /** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
 type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[] }
@@ -141,6 +143,8 @@ export class MailAcross {
   private again = false
   /** Reports being passed on now (`passOn`): a change and a connect at once send one once */
   private readonly passing = new Set<string>()
+  /** On a hub: handoff moves a machine has not been told yet (`movedAcross`), by machine id, told again at each round of receipts */
+  private readonly untoldMoves = new Map<string, MailMoveParams[]>()
   /** Tasks whose reports wait for the answer of the call that asked (`holdReports`) */
   private readonly held = new Set<string>()
   private readonly now: () => number
@@ -324,12 +328,24 @@ export class MailAcross {
           if (r?.kind === 'machine') byMachine.set(r.machineId, [...(byMachine.get(r.machineId) ?? []), id])
         }
       }
-      for (const [machineId, ids] of byMachine) {
-        const m = this.peers?.machine?.(machineId)
-        const params: MailMoveParams = { from: move.from, to: move.to, ids }
-        const r = m?.reachable ? await m.call('host.mailMove', params).then(() => null, (e: unknown) => errorMessage(e)) : 'not reachable'
-        if (r) this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${ids.length} task(s) went from ${move.from} to ${move.to} in a handoff: ${r}`)
-      }
+      for (const [machineId, ids] of byMachine) await this.tellMove(machineId, { from: move.from, to: move.to, ids })
+    }
+  }
+
+  /**
+   * Tells a machine a handoff moved tasks (`host.mailMove`). One that cannot be told now is kept and told again at the next round of receipts
+   * (`syncOnce`): until it is, the machine's copy names the old sender, and its withdrawals and the heir's do not match
+   */
+  private async tellMove(machineId: string, params: MailMoveParams): Promise<void> {
+    const m = this.peers?.machine?.(machineId)
+    // The ids go in chunks the call takes
+    for (let i = 0; i < params.ids.length; i += MOVE_IDS_PER_CALL) {
+      const part = { ...params, ids: params.ids.slice(i, i + MOVE_IDS_PER_CALL) }
+      const r = m?.reachable ? await m.call('host.mailMove', part).then(() => null, (e: unknown) => errorMessage(e)) : 'not reachable'
+      if (!r) continue
+      this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${part.ids.length} task(s) went from ${params.from} to ${params.to} in a handoff: ${r}; told again later`)
+      // A machine from before `host.mailMove` never takes it
+      if (!older(r)) this.untoldMoves.set(machineId, [...(this.untoldMoves.get(machineId) ?? []), part])
     }
   }
 
@@ -698,7 +714,8 @@ export class MailAcross {
       this.again = true
       return
     }
-    ;(this.d.soon ?? ((fn) => setImmediate(fn)))(() => void this.sync())
+    // A round that fails (the store closing under it) is said, never an unhandled rejection: the next change runs it again
+    ;(this.d.soon ?? ((fn) => setImmediate(fn)))(() => void this.sync().catch((e: unknown) => this.d.log?.(`[mail] receipts across could not be compared: ${errorMessage(e)}`)))
   }
 
   /** Tells the other side of each crossing row what changed since it was last told; a row that could not be told is tried again on the next change */
@@ -716,6 +733,11 @@ export class MailAcross {
   }
 
   private async syncOnce(): Promise<void> {
+    for (const [machineId, moves] of [...this.untoldMoves]) {
+      if (!this.peers?.machine?.(machineId)?.reachable) continue
+      this.untoldMoves.delete(machineId)
+      for (const move of moves) await this.tellMove(machineId, move)
+    }
     this.retryReports()
     const out = new Map<string, { peer: { kind: 'hub'; id: string } | { kind: 'machine'; id: string }; rows: (MailRowState & { sender: string })[]; keys: [string, string][] }>()
     // Read before the rows: a row that changes after is newer, and its change runs this again
@@ -781,8 +803,14 @@ export class MailAcross {
         const message = this.d.records.message(row.messageId)
         const stored = message?.sender
         if (!this.tells(from, side === 'copy' ? recipient : stored)) continue
-        // A row a hub passes on from another machine names the sender that machine told; it must be the one stored here
-        if (sender !== undefined && sender !== stored) continue
+        // A row a hub passes on from another machine names the sender that machine told; it must be the one stored here. On a hub, a machine's
+        // receipt on a task a handoff moved names the old sender while the machine was not told of the move: the receipt is the machine's to tell,
+        // so it is merged, and the machine is told the move again (`tellMove`)
+        if (sender !== undefined && sender !== stored) {
+          if (!('machine' in from) || side !== 'copy' || message?.kind !== 'task' || stored === undefined) continue
+          this.untoldMoves.set(from.machine, [...(this.untoldMoves.get(from.machine) ?? []), { from: sender, to: stored, ids: [row.messageId] }])
+          this.changed()
+        }
         // A task's copy is settled by its report, which carries the answer (#1948 step 6): a row that says so first would make the report a stale one
         const merge = side === 'copy' && message?.kind === 'task' && row.settled === 'reported' ? { ...row, settled: null, settledAt: null } : row
         if (this.d.records.mergeAcross(merge, side)) {
@@ -872,7 +900,7 @@ export class MailAcross {
           continue
         }
         if (!peer.reachable || (hub && !hub.you) || (machine && machine.tasks !== true)) continue
-        const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, k === 'answer' ? clip(m.facts[k]) : m.facts[k]]]))))
+        const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
         const report = facts.success ? facts.data : { outcome: 'finished' as const }
         const replyTo = m.replyTo ? { replyTo: m.replyTo } : {}
         const sent = r.kind === 'hub'
@@ -1016,7 +1044,8 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
 /** The facts of a report that cross with it (`TaskReport`) */
 const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after'] as const
 
-const clip = (v: unknown): unknown => (typeof v === 'string' && v.length > 2_000 ? `${v.slice(0, 2_000)}…` : v)
+/** A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says */
+const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : v)
 
 /** What a send whose answer was lost says to do */
 const AGAIN = 'Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.'

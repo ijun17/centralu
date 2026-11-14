@@ -373,7 +373,8 @@ words into the machine's session (`host.send`) and followed its turns over the l
   reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
   settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
   first does not make the report a stale one. A report on a task whose send to that machine has not answered yet keeps the
-  copy first (the machine has it, as a receipt would say).
+  copy first (the machine has it, as a receipt would say). The answer, error and reason are cut to what a report across
+  takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
 - **A report is owed, not dropped.** Unlike a notice (§6, Notices), a report the hub cannot take now (its link is down,
   or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second
   one as the first. Kept reports are swept with other mail. A hub that no longer links the machine at all will never take
@@ -388,17 +389,23 @@ words into the machine's session (`host.send`) and followed its turns over the l
   from the asker's address there (`<machine>.<id>`); the hub answers with the report's words, or `working` with the task's
   id (`taskId`, an addition). Then the machine keeps a copy (sent across, origin `ask_project`), and the hub's report comes
   as `host.mail` with `report` (an addition, `replyTo` the task), taken only from the hub the copy went to, owed as the
-  machine's are; a report the answer to the call carried is not sent again. A machine with no copy (an older build) asks
+  machine's are; a report the answer to the call carried is not sent again, and one in as the call's wait reaches its bound
+  is answered with, not sent behind the answer, where it could reach the machine before its copy. A machine with no copy (an older build) asks
   again and is answered from the report the hub kept; a hub that gives no `taskId` (an older build) is asked again. The
-  machine's switch going off withdraws its tasks not given yet.
+  machine's switch going off withdraws its tasks not given yet. A later call with no task, once the report is in, reads the
+  session's words only while they are still that turn's; once it has said more since, the report's words.
 - **A handoff** on the hub keeps such a task under its one id (the child's turn there is that task's): the hub re-points its
   copy to the heir at once, so the report that comes back is the heir's, and tells the machine (`host.mailMove`, an
   addition), which re-points its own and marks it handed over. Only a hub's own sessions, and only tasks they gave there;
-  a machine that cannot be told now keeps the old sender's name on its copy, and the report still reaches the heir.
+  a machine that cannot be told now is told again at the next round of receipts (in memory: a hub that restarts first
+  forgets it). Until then its copy names the old sender: the report still reaches the heir, and the machine's receipts on
+  the task, which name that sender, are still taken by the hub (they are the machine's to tell) and make the hub tell
+  the move again.
 - **Older builds.** A machine that does not answer the offer with `tasks: true` gets no work from the hub: `start_agent`
   and a send to it are refused, naming the machine to update. Until a connection's offer is answered that is not known,
-  and a start or send then is refused as still connecting, never as an older machine. A newer machine linked by an older hub takes `host.send`
+  and a start or send then is refused as still connecting, never as an older machine; a machine that does not know the
+  offer at all ("Unknown method") is an older one. A newer machine linked by an older hub takes `host.send`
   as before (`sendFromHub`); that path goes with the release floor.
 - **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
-  caller is told once that the report no longer comes, and how to read where the child stands. Notes the old hub held for
+  caller is told once, in one notice for all its children, that the report no longer comes, and how to read where the child stands. Notes the old hub held for
   a busy child (`queued`) are not sent by the new one; their caller is told once too.

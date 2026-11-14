@@ -74,7 +74,6 @@ function linkMachine(): void {
     },
     describe: () => ({ name: 'Worker', project: 'api on Box' }),
     machineLinked: () => true,
-    machineWaitsForPerson: () => false,
     backgroundTasks: async () => [],
   } as unknown as LinkedSessions)
 }

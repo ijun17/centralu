@@ -741,7 +741,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
-      if (this.client === client) this.tasksBack = undefined
+      // A machine from before the offer takes no tasks; any other failure leaves it unknown until the next connect tells it
+      if (this.client === client) this.tasksBack = /Unknown method/i.test(errorMessage(err)) ? false : undefined
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
