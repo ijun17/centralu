@@ -715,7 +715,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     }
     const b = host({ updateResume: f })
     await eventually(() => sentTo(b, child).length === 1)
-    expect(f.ids()).toEqual([child])
+    // Written empty instead (#2264 re-check): the entry dealt with is gone from the disk all the same
+    expect(f.ids()).toEqual([])
     b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
     await eventually(() => info(b, child).state !== 'working')
     // Later the person gives it a new turn, and their own stop (a quit, `serve --stop`) cuts it
@@ -729,7 +730,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(c.claude.handles.has(child)).toBe(false)
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
-    // And the list that names the turn long over goes now
+    // And the list written empty goes now
     expect(f.ids()).toBeNull()
   })
 
