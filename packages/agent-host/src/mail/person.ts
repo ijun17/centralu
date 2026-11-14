@@ -162,14 +162,11 @@ export class MailPerson {
     let sentId: string
     if (across && far.length > 0) {
       // A session on another computer wrote to them (#1987): that computer writes the answer, and this one keeps its copy. Nothing is written when it is refused
-      if (far.length < to.length) throw refuse('recipients', 'an answer goes either to sessions on this computer or to one on another computer, not both.')
-      let id = ''
-      for (const address of far) {
-        const r = await across.sendFrom(PERSON, { to: address, text, needsReply: kind === 'question', replyTo: target.id })
-        if (!r.ok) throw refuseAcross(r.why, r.text)
-        id = r.messageId
-      }
-      sentId = id
+      const [address] = far
+      if (!address || to.length > 1) throw refuse('recipients', 'an answer to a session on another computer goes to that session alone.')
+      const r = await across.sendFrom(PERSON, { to: address, text, needsReply: kind === 'question', replyTo: target.id })
+      if (!r.ok) throw refuseAcross(r.why, r.text)
+      sentId = r.messageId
     } else {
       // A pick is one of the question's own choices; any other words to a question the window names are the person's own answer to it (#2191)
       sentId = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers !== undefined && target.choices?.includes(text) ? { picked: true } : {}) }).message.id

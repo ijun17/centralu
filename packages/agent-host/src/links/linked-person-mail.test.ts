@@ -115,6 +115,17 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
   })
 })
 
+describe("the person's question to a machine's session", () => {
+  it('that session going without answering is told to the person on the hub, as the notice from that computer', async () => {
+    const { machine, hub, person } = await rig()
+    const id = idOf(await tool(machine, 'w1', { action: 'send', to: 'person', kind: 'note', text: 'built it' }))
+    const q = (await person.reply(id, 'Which tests ran?', 'question')).messages.find((m) => m.body === 'Which tests ran?')!
+    expect(machine.store.mailbox.recipient(q.id, at(machine, 'w1'))).toMatchObject({ settled: null })
+    await machine.mgr.trash.trashSession('w1')
+    await eventually(() => hub.store.mailbox.feedOf(PERSON, { limit: 10 }).some((m) => m.sender === at(hub, 'm1.centralu')))
+  })
+})
+
 describe('the person marks done a thread with a machine that is not connected (#2226)', () => {
   it('leaves the Inbox at once, and the machine learns it when the link is back', async () => {
     const { machine, hub, person, hubPerson } = await rig()
@@ -144,5 +155,7 @@ describe('which hub a machine session’s mail to the person goes to (`MailAcros
     expect(across({ hubs: [] }).personTarget('s', false)).toBeNull()
     expect(across({ hubs: [], started: { id: 'b', name: 'Desk' }, linked: [] }).personTarget('s', true)).toMatchObject({ refused: { why: 'link_down' } })
     expect(across({ hubs: [] }).personTarget('s', true)).toMatchObject({ refused: { why: 'elsewhere' } })
+    // A session a hub started, with no record of which: the person is on one of them, not here
+    expect(across({ hubs: ['a', 'b'] }).personTarget('s', true)).toMatchObject({ refused: { why: 'elsewhere' } })
   })
 })

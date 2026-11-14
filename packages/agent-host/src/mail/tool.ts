@@ -176,7 +176,7 @@ export class MailTool {
     if (a.action === 'reply') {
       const id = this.target(me.address, this.need(a.thread, 'thread'))
       const m = this.records.message(id)
-      return m && across.foreign(m.sender) && this.records.recipient(id, me.address) ? { address: m.sender, replyTo: id } : null
+      return m && across.foreign(m.sender) && this.records.recipient(id, me.address) ? { address: m.sender, replyTo: id, ...(isPerson(m.sender) ? { person: true as const } : {}) } : null
     }
     if (a.action !== 'send') return null
     const t = this.need(a.to, 'to')
@@ -188,7 +188,7 @@ export class MailTool {
     }
     if (lower === 'assistant') return null
     const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
-    if (parseAddress(t)) return across.foreign(t) ? { address: t } : null
+    if (parseAddress(t)) return across.foreign(t) ? { address: t, ...(isPerson(t) ? { person: true as const } : {}) } : null
     if (parseAddress(own + t) && across.foreign(own + t)) return { address: own + t }
     const here = this.host.sessions()
     if (here.some((s) => s.id === t)) return null

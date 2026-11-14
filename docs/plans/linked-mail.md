@@ -239,7 +239,8 @@ session that writes `to: "person"` writes to **the hub's person**, never to its 
 may not open (decided 2026-11-14 on #1987):
 
 - **Which hub.** The hub that started the session (its `started_from_hub_by:` record, §3); else the one hub that offers
-  mail here. With several and no record the message stays in this computer's own Inbox, and the answer ends with
+  mail here. With several and no record the message stays in this computer's own Inbox (a session a hub started is
+  refused, below, since the person is on one of them), and the answer ends with
   `Several computers link this one as hubs and none of them started this session, so it stays in this computer's own
   Inbox: the person sees it in this computer's window.` No hub at all: this computer's Inbox, as before. A session a
   hub started whose record names no hub (an earlier build) is refused `elsewhere`, and one whose hub is not linked now
@@ -252,14 +253,19 @@ may not open (decided 2026-11-14 on #1987):
   and the machine writes the answer from `session:<hub id>/person`, which its rules read as the person (`isPerson`,
   `senderKind`): it wakes as the person's word does and is framed "The person wrote it". A hub already speaks for the
   person on its machines (their input to a session there goes through it), so this gives it no right it did not have.
-- **Mark done** is the person's own state on the hub (`MailPerson.close`, no call to the machine): the row leaves the
-  Inbox at once, link or no link (#2226). The hub's row settles `done`, and the machine's copy learns it with the
-  receipts at the next change or connect (§6, `mail.acrossToldAt`).
+- **Mark done** is the person's own state on the hub (`MailPerson.close`): it waits for no call to the machine, and the
+  row leaves the Inbox at once, link or no link (#2226). The hub's row settles `done`, and the machine's copy learns it
+  with the receipts at the next change or connect (§6, `mail.acrossToldAt`). A question of the person's that the close
+  withdraws goes the same way; the closed notice to the session that had it is passed on as any notice (§6, Notices),
+  so while the link is down it is dropped and logged, and the withdrawal still arrives.
+- **Notices about the person's mail** that the machine writes (the "no longer watched" notice when its session goes
+  without answering the person) are passed to the hub's person (`passOn`, named `person` on the wire).
 - **Refusals**, each at once with nothing written: the link down (`link_down`, naming the hub); a hub from before this,
   which reads `person` as no address (`older`: `<hub> runs an older Centralu, which takes no mail to the person from
   here. Update it there.`); a machine from before this, which refuses `host.mail` from `person` (`older`: `<machine>
   runs an older Centralu, which takes no answer from the person here. Update it there.`, shown in the Inbox); an answer
-  that would go both to sessions here and to one on another computer (`recipients`).
+  that would go to more than one session when one is on another computer (`recipients`: `an answer to a session on
+another computer goes to that session alone.`).
 
 The refusal it replaces, `the person works on the computer that started this session, and mail to the person written
 here is not seen there, so nothing was sent. Write to "parent" instead: that reaches your parent there.`, is gone; a

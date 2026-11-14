@@ -225,12 +225,11 @@ export class MailAcross {
     const hubs = this.peers?.hubs?.() ?? []
     const [only] = hubs
     if (only && hubs.length === 1) return { address: sessionAddress(only.id, PERSON_ID) }
-    if (hubs.length > 1) return { several: true }
     // Started by a hub before this computer recorded which: mail to the person written here is never seen there
     if (fromHub) {
       return { refused: { ok: false, why: 'elsewhere', text: 'the person works on the computer that started this session, which this computer did not record, and mail to the person written here is not seen there, so nothing was sent. End your turn with the answer: that is how your parent hears from you.' } }
     }
-    return null
+    return hubs.length > 1 ? { several: true } : null
   }
 
   /** `send` from any sender here: a session, or on a hub the person, whose answer in the Inbox goes to a machine's session that wrote to them (#1987) */
@@ -645,7 +644,7 @@ export class MailAcross {
       } else if (r?.kind === 'hub') {
         const peer = this.peers?.hub?.(r.hubId)
         // `hub.mail` names a session of the machine as its sender; a notice has none, and the hub writes it as its own
-        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: row.recipient, text: m.body, notice: true } satisfies HubMailParams)
+        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: this.asHubNames(r.hubId, row.recipient), text: m.body, notice: true } satisfies HubMailParams)
       }
       if (!sent.ok) this.d.log?.(`[mail] a notice to ${row.recipient} could not be passed on, and was dropped: ${sent.text ?? ''}`)
     }

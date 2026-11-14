@@ -947,7 +947,7 @@ export class MessageService {
    */
   private isRequest(m: Pick<MailRow, 'sender' | 'kind' | 'replyTo' | 'facts'>, recipient: string): boolean {
     if ((m.kind !== 'message' && m.kind !== 'task') || m.sender === recipient || !this.reach.isAssistant(recipient)) return false
-    if (parseAddress(m.sender)?.kind !== 'session' || typeof m.facts.clarifies === 'string') return false
+    if (senderKind(m.sender) !== 'session' || typeof m.facts.clarifies === 'string') return false
     const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
     return !(target && target.sender === recipient && (target.needsReply || target.kind === 'task'))
   }
