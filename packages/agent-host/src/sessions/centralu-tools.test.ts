@@ -152,6 +152,11 @@ describe('Centralu update tool', () => {
     // #2279: a check after a failed install says it failed, not that the release is available
     const checkedAfterFailure = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'check' })
     expect(checkedAfterFailure.text).toBe('Centralu update failed: EACCES')
+    // #2279 review: a check during the install, npm's wait included, says it is installing, not that the release is available
+    for (const phase of ['updating', 'waiting_for_npm'] as const) {
+      const checkedDuringInstall = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase }) }), 'update_centralu', { action: 'check' })
+      expect(checkedDuringInstall.text, phase).toBe('Installing Centralu 0.1.1. The person applies the installed build from Centralu; their automatic-update setting was not changed.')
+    }
     // #2130: a check while the installed release waits for a restart does not offer it again
     const waiting = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'restart_required' }) }), 'update_centralu', { action: 'check' })
     expect(waiting.text).toBe('Centralu 0.1.1 is installed and waits for a restart. The person applies the installed build from Centralu; their automatic-update setting was not changed.')

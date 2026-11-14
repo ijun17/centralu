@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 
 /** The release this build is in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than all */
@@ -614,8 +614,7 @@ describe('UpdateService', () => {
     await settle()
     expect(elapsed).toBe(10 * 60 * 1000)
     expect(h.calls).toHaveLength(21)
-    expect(h.svc.current().phase).toBe('failed')
-    expect(h.svc.current().error).toContain('ETARGET')
+    expect(h.svc.current()).toMatchObject({ phase: 'failed', error: 'npm did not serve 9999.0.0 within 10 minutes: npm error code ETARGET' })
   })
 
   /**
@@ -657,8 +656,10 @@ describe('UpdateService', () => {
     expect(h.svc.current().phase).toBe('restart_required')
   })
 
-  it('ends a tarball 404 at ten minutes with the line npm says it in', async () => {
+  it('ends a tarball 404 at ten minutes, saying the wait ran out and the line npm says it in', async () => {
     let elapsed = 0
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    onTestFinished(() => logged.mockRestore())
     const h = make({
       registry: '9999.0.0',
       run: async () => { throw npm404(TARBALL) },
@@ -669,7 +670,8 @@ describe('UpdateService', () => {
     void h.svc.apply()
     await settle()
     expect(elapsed).toBe(10 * 60 * 1000)
-    expect(h.svc.current()).toMatchObject({ phase: 'failed', error: `npm error 404  'centralu@${TARBALL}' is not in this registry.` })
+    expect(h.svc.current()).toMatchObject({ phase: 'failed', error: `npm did not serve 9999.0.0 within 10 minutes: npm error 404  'centralu@${TARBALL}' is not in this registry.` })
+    expect(logged.mock.calls.filter(([line]) => String(line).startsWith('[updates] install failed'))).toEqual([['[updates] install failed: exit 1: npm error code E404']])
   })
 
   it.each([
@@ -696,6 +698,22 @@ describe('UpdateService', () => {
     } finally {
       logged.mockRestore()
     }
+  })
+
+  it('fails at once when only a warning before the error names ETARGET', async () => {
+    const waits: number[] = []
+    const stderr = ['npm warn notarget No matching version found for an-optional-dependency@^2.0.0.', 'npm error code EACCES', "npm error EACCES: permission denied, mkdir '/usr/lib/node_modules/centralu'"].join('\n')
+    const h = make({
+      registry: '9999.0.0',
+      run: async () => { throw Object.assign(new Error(failureDetail('npm', stderr) ?? ''), { exitCode: 1, stderr }) },
+      now: () => waits.reduce((a, b) => a + b, 0),
+      wait: async (ms) => { waits.push(ms) },
+    })
+    await h.svc.check(true)
+    void h.svc.apply()
+    await settle()
+    expect(waits).toEqual([])
+    expect(h.svc.current().phase).toBe('failed')
   })
 
   it('fails non-propagation errors immediately without waiting or retrying', async () => {

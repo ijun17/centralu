@@ -69,7 +69,9 @@ npm's narrow `ETARGET`/`notarget` response, or an E404 on `centralu`'s own tarba
 `--prefer-online` for up to ten minutes, reporting `waiting_for_npm` and “Waiting for npm to serve <version>” between
 attempts. The platform package's tarball is not matched: npm skips an optional dependency it cannot fetch and exits 0
 (npm 11, against a registry answering 404 for it). Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
-error.
+error. ETARGET counts only on npm's last line, since a warning above an unrelated error may name it; the
+tarball's 404 is read anywhere in npm's output, since the last line under it never names the URL. A wait that reaches
+the cap fails as “npm did not serve <version> within 10 minutes: <npm's line>”, so the person sees that a wait ran out.
 
 **Agent updates (#581).** `update_centralu(action: "check" | "install")` reaches the same `UpdateService`
 methods as the window. In the commands tier it is discovered and run through `centralu_commands`, `centralu_help`

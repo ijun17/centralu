@@ -852,7 +852,9 @@ export class UpdateService {
         return
       } catch (err) {
         if (this.stopped) return
-        if (!npmHasNotServedVersion(err, version) || this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw err
+        if (!npmHasNotServedVersion(err, version)) throw err
+        // npm's own line, which `failureLine` still reads (stderr, exit code), after what ran out
+        if (this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw Object.assign(new Error(`npm did not serve ${version} within ${NPM_RETRY_WINDOW_MS / 60_000} minutes: ${errorMessage(err)}`), err)
         this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
         this.emit()
         await this.deps.wait(NPM_RETRY_DELAY_MS)
@@ -885,10 +887,13 @@ export class UpdateService {
   }
 }
 
+/**
+ * ETARGET by npm's last line only, as a warning above an unrelated error may name it; the tarball's 404 anywhere in
+ * stderr, as npm's last line under it never names the URL
+ */
 function npmHasNotServedVersion(err: unknown, version: string): boolean {
-  const said = `${errorMessage(err)}\n${stderrOf(err)}`
   const tarball = `/${APP_SLUG}/-/${APP_SLUG}-${version}.tgz`.replace(/[.+]/g, '\\$&')
-  return /\bETARGET\b|\bnotarget\b/i.test(said) || new RegExp(`\\b404 Not Found - GET \\S+${tarball}(?!\\S)`, 'i').test(said)
+  return /\bETARGET\b|\bnotarget\b/i.test(errorMessage(err)) || new RegExp(`\\b404 Not Found - GET \\S+${tarball}(?!\\S)`, 'i').test(stderrOf(err))
 }
 
 /** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
