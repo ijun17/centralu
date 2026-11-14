@@ -13,7 +13,7 @@ the person's Continue would.
   put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
   (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
   the processes are down and their last output written, the host writes those turns as a list of its own,
-  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq }], stopped: [...] }`, lifecycle/update-resume.ts), each with the last
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq, woken? }], stopped: [...] }`, lifecycle/update-resume.ts), each with the last
   row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
   nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
   folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
@@ -115,8 +115,12 @@ the person's Continue would.
   leaves before the queue drains leaves the rest listed, and the host after it wakes them (a session woken meanwhile and in its wake turn
   is a turn that stop cuts, and is continued as one). A woken session that has not answered yet is listed again by that stop, as it was
   woken (`TurnContinue.unanswered`, #2264 review): its entry left the list when its note went in, and between the resumed process's own
-  turn end and its first answer it reads at rest, so the stop would not list it and its note would be lost. The next start takes a
-  listed turn by its mark even when it reads at rest. There is no setting and no wait in the header: Centralu cut these turns, the person
+  turn end and its first answer it reads at rest, so the stop would not list it and its note would be lost. A woken cut turn is listed
+  `woken: true` (`cutTurns`, idle.ts), and that is the one entry the next start takes up while the session reads at rest: any other
+  listed turn that reads at rest was stopped by the person, which a mark cannot tell since a Stop writes no row. That is also why a Stop
+  on a queued cut turn deals with its entry at once. An older build reads `id` and `seq` alone and does not continue a `woken` one. A wake
+  silent for `UPDATE_SLOT_MS` has given its slot up and is no longer "not answered yet": a stop after that does not list it again, and its
+  note is not sent again (accepted: a request that hung that long). There is no setting and no wait in the header: Centralu cut these turns, the person
   did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and

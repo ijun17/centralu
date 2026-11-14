@@ -36,6 +36,16 @@ describe('the turns an update cut, in the data folder', () => {
     expect(lists.cut('s2', 4)).toBe(false)
   })
 
+  it('takes a session that reads at rest only by a woken entry: any other was stopped by the person, and a Stop writes no row (#2264 review)', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 7, woken: true }])
+    const lists = new UpdateResumeLists(f)
+    expect(lists.cut('s1', 4, true)).toBe(false)
+    expect(lists.cut('s1', 4)).toBe(true)
+    expect(lists.cut('s2', 7, true)).toBe(true)
+    expect(f.turns()).toEqual([{ id: 's1', seq: 4 }, { id: 's2', seq: 7, woken: true }])
+  })
+
   it('a second stop writes its own list beside the first, never replacing it: none is continued zero times (#1618 review D2)', () => {
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 9 }])

@@ -46,8 +46,11 @@ export const UPDATE_RESUME_PREFIX = 'update-resume.'
 const MAX_TURNS = 1000
 const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
-/** A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done */
-export type CutTurn = { id: string; seq: number }
+/**
+ * A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done. `woken`: a turn an update's
+ * start continued that had not answered yet, which may read at rest (`cutTurns`); an older build reads `id` and `seq` alone, and so does not continue it
+ */
+export type CutTurn = { id: string; seq: number; woken?: true }
 
 /** What one stop lists: the turns it cut, and what else it ended in sessions (#1902) */
 export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended; /** When the stop wrote it (ms), 0 when the list does not say */ at: number }
@@ -74,7 +77,9 @@ export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
   const listed: unknown[] = o.turns
   for (const t of listed) {
     if (typeof t !== 'object' || t === null || !('id' in t) || !('seq' in t)) continue
-    if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) turns.push({ id: t.id, seq: t.seq })
+    if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) {
+      turns.push({ id: t.id, seq: t.seq, ...('woken' in t && t.woken === true ? { woken: true as const } : {}) })
+    }
   }
   const listedStopped: unknown[] = 'stopped' in o && Array.isArray(o.stopped) ? o.stopped : []
   const stopped = listedStopped.map(readStopped).filter((x): x is Stopped => x !== null && ID.test(x.id))
@@ -161,9 +166,12 @@ export class UpdateResumeLists {
     return new Set([...this.lists.values()].flatMap((l) => [...l.turns, ...l.stopped]).map((t) => t.id))
   }
 
-  /** Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then */
-  cut(id: string, lastSeq: number): boolean {
-    return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq))
+  /**
+   * Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then. A session that reads at rest
+   * (`atRest`) only by a `woken` entry: any other was stopped by the person after that stop listed it (a Stop writes no row)
+   */
+  cut(id: string, lastSeq: number, atRest = false): boolean {
+    return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq && (!atRest || t.woken === true)))
   }
 
   /**

@@ -282,9 +282,12 @@ export class TurnContinue {
    */
   cancel(sessionId: string): RetryPhase | null {
     this.stopContinue(sessionId)
-    // A cut turn waiting for its update's wake has nothing running either: the Stop ends the turn, and so the wait (`fireUpdate` and its gate drop a turn that is over)
+    // A cut turn waiting for its update's wake has nothing running either: the Stop ends the wait, and the turn. Dropped now, its list entry with
+    // it: a stop before its slot came must not find it listed
     const u = this.updates.get(sessionId)
-    return this.cancelHeld(sessionId) ?? (u && u.phase !== 'waking' && u.turn ? 'waiting' : null)
+    const cut = !!u && u.phase !== 'waking' && u.turn
+    if (cut) this.endUpdate(sessionId, u, 'dropped')
+    return this.cancelHeld(sessionId) ?? (cut ? 'waiting' : null)
   }
 
   /**
@@ -523,8 +526,9 @@ export class TurnContinue {
   }
 
   /**
-   * The wakes whose note went in and that have not answered yet (#2264 review): a stop for an update now lists them again. Their entry left the
-   * list at the send, and the resumed process reads at rest until its request streams (its own turn end comes first)
+   * The wakes whose note went in and that have not answered yet (#2264 review): a stop for an update now lists them again (`cutTurns`). Their entry
+   * left the list at the send, and the resumed process reads at rest until its request streams (its own turn end comes first). One silent for
+   * `UPDATE_SLOT_MS` gave its slot up and is not among them: a stop after that does not list it again (accepted, as a request that hangs that long)
    */
   unanswered(): UpdateCut[] {
     return [...this.updates.values()].filter((w) => w.phase === 'waking').map(({ sessionId, turn, stopped }) => ({ sessionId, turn, stopped }))

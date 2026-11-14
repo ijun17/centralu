@@ -207,15 +207,14 @@ export class HostTenure {
      * continues it by. A list of its own, beside any an earlier stop left (turns this host had not continued yet)
      */
     const sessions = this.stoppingForUpdate && this.host.keeperOpts.updateResume ? this.host.listSessions() : []
-    const cut = [...new Set([...cutTurns({ sessions, terminals: 0, commandRuns: 0 }), ...woken.filter((w) => w.turn).map((w) => w.sessionId)])]
+    const cut = cutTurns({ sessions, terminals: 0, commandRuns: 0 }, woken.filter((w) => w.turn).map((w) => w.sessionId))
     /*
      * And what else the stop ends in them (#1902): the background tasks their processes hold, with the command of the call that
      * started each, and the cards that wait for the person. Read here, before the processes go: the tool reports each task gone
      * as its process ends, and the store's record of them is emptied at the next start. Idle sessions count: a dev server
      * outlives the turn that started it.
      */
-    const stopped = stoppedAtUpdate(sessions, (id, callId) => this.host.store.messages.toolCallInput(id, callId))
-    for (const w of woken) if (w.stopped && !stopped.some((x) => x.id === w.sessionId)) stopped.push(w.stopped)
+    const stopped = stoppedAtUpdate(sessions, (id, callId) => this.host.store.messages.toolCallInput(id, callId), woken.flatMap((w) => (w.stopped ? [w.stopped] : [])))
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
     for (const [id, run] of this.host.record.streams) this.host.record.flushStream(id, run)
@@ -231,7 +230,7 @@ export class HostTenure {
     if ((cut.length || stopped.length) && this.host.keeperOpts.updateResume) {
       // One mark for both, read now: the processes are down and their last rows written, which the next start's reading must find
       const mark = (id: string) => this.host.store.messages.nextSeq(id) - 1
-      recordUpdateCut(this.host.keeperOpts.updateResume, cut.map((id) => ({ id, seq: mark(id) })), stopped.map((x) => ({ ...x, seq: mark(x.id) })))
+      recordUpdateCut(this.host.keeperOpts.updateResume, cut.map((t) => ({ ...t, seq: mark(t.id) })), stopped.map((x) => ({ ...x, seq: mark(x.id) })))
     }
     // Stamped after dispose finishes (see the comment on stampExternalSynced). Never stamped on a
     // crash — stamping the current time when the actual moment of death is unknown could swallow
@@ -303,8 +302,8 @@ export class HostTenure {
        * holds because every listed session leaves this start with a row past the mark: the Continue's line, or the stopped
        * mark below (`turnLostInSwap` for one that cannot be continued)
        */
-      // Listed by its mark alone: a woken turn a second update stopped before its first answer reads at rest (`TurnContinue.unanswered`)
-      const goesOn = !!lists?.cut(s.id, s.lastSeq) && (cut || s.state !== 'error')
+      // One that reads at rest only by a `woken` entry (`cutTurns`): a woken turn a second update stopped before its first answer
+      const goesOn = !!lists?.cut(s.id, s.lastSeq, !cut)
       const stale = cut && !goesOn
       /*
        * Where the last host recorded the system ending (#1397): a turn it lost is the system's, unless the session has rows from

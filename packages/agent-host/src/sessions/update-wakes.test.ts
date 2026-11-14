@@ -281,6 +281,34 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     expect(b.adapter.handles.get(queued)?.sent ?? []).toEqual([])
   })
 
+  it('does not continue a queued cut turn the person stopped when a second update stops the host before its slot came (#2264 review)', async () => {
+    const { store, folder, ids } = await updated(UPDATE_WAKES_AT_ONCE + 2, 0)
+    const b = host(store, folder)
+    await eventually(() => waking(b, new Set()).length === UPDATE_WAKES_AT_ONCE)
+    const [stopped, queued] = ids.cut.filter((id) => !b.adapter.handles.get(id)?.sent.length)
+    await b.rpc('agents.interrupt', { sessionId: stopped })
+    // Dropped at once, not when a slot frees: the hello stops naming it, and its list entry is dealt with
+    expect(b.mgr.tenure.updateContinued().map((c) => c.sessionId)).not.toContain(stopped)
+    // The first update's list still stands (the other queued turn is not dealt with) and names the stopped one at its mark: a Stop writes no row
+    b.mgr.tenure.stopForUpdate()
+    await b.mgr.tenure.disposeAll()
+    const c = host(store, folder)
+    const goOn = ids.cut.filter((id) => id !== stopped)
+    expect(goOn).toContain(queued)
+    expect(c.session(stopped!).state).not.toBe('working')
+    const answered = new Set<string>()
+    while (answered.size < goOn.length) {
+      await eventually(() => waking(c, answered).length > 0)
+      for (const h of waking(c, answered)) {
+        answered.add(h.sessionId)
+        h.answer()
+      }
+    }
+    expect(answered).toEqual(new Set(goOn))
+    await eventually(() => folder.files.size === 0)
+    expect(c.adapter.handles.get(stopped!)?.sent ?? []).toEqual([])
+  })
+
   it('leaves the ones still queued to the host after a second update, which wakes them once', async () => {
     const { store, folder, ids } = await updated(0, UPDATE_WAKES_AT_ONCE + 2)
     const b = host(store, folder)
