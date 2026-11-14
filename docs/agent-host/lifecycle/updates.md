@@ -59,14 +59,16 @@ Both commands run without a shell. `npm` goes through `tool-launch.ts` (`command
 batch file, which `execFile` cannot start by name (ENOENT) or by path (EINVAL), so it is read for the `.js` it starts and
 that runs under the host's Node. `install` is the launcher npm just installed, found by `npm root -g` and run by the host's
 Node (`installCopy`), never `centralu` from PATH, which on a machine a hub manages may be the hub's shim (#1736). The installed app it refreshes is `installedCopyPath()`, the
-launcher's `installedPaths()[0]` per platform (a test holds the two together). A failure says which half failed: npm's
-own last line (not its pointer to the log), or, when npm worked and only the copy did not, the launcher's first line,
+launcher's `installedPaths()[0]` per platform (a test holds the two together). Every failure is one `[updates] install failed:` line in the host log (#2279). A failure says which half failed: npm's
+own last line (not its pointer to the log, nor the advice under an E404), or, when npm worked and only the copy did not, the launcher's first line,
 the copy's path and `centralu install` to finish by hand.
 
 **A release arriving at npm.** The `latest` tag can reach this host before the package version has reached the npm
-edge it installs from. On npm's narrow `ETARGET`/`notarget` response only, the host retries the exact install with
+edge it installs from, and the edge can serve the packument that lists a version before that version's tarball (#2279). On
+npm's narrow `ETARGET`/`notarget` response, or an E404 on `centralu`'s own tarball at the target version, only, the host retries the exact install with
 `--prefer-online` for up to ten minutes, reporting `waiting_for_npm` and “Waiting for npm to serve <version>” between
-attempts. Other failures still fail at once; a bounded propagation wait must not hide a credential, disk or package
+attempts. The platform package's tarball is not matched: npm skips an optional dependency it cannot fetch and exits 0
+(npm 11, against a registry answering 404 for it). Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
 error.
 
 **Agent updates (#581).** `update_centralu(action: "check" | "install")` reaches the same `UpdateService`

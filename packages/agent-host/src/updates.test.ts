@@ -680,6 +680,7 @@ describe('UpdateService', () => {
       const h = make({
         registry: '9999.0.0',
         run: async () => { throw npm404(url) },
+        now: () => waits.reduce((a, b) => a + b, 0),
         wait: async (ms) => { waits.push(ms) },
       })
       await h.svc.check(true)

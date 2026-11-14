@@ -266,12 +266,15 @@ export function commandFor(
   return { file: launch.command, args: [...launch.args, ...args] }
 }
 
+/** npm's advice under every E404 ("you can also install from a tarball…"), with its blank 404 lines */
+const NPM_404_NOTE = /^npm (?:error|ERR!) 404(?:\s+Note that you can also install from a|\s+tarball, folder, http url, or git (?:url|repo)\.)?$/i
+
 /**
  * The line of a failed command's stderr that says why, which is worth more than "command
  * failed": EACCES on a system Node and "no such command" are different errands.
  *
  * npm puts its cause last, then ends every failure with where its log went, which says nothing
- * about why, so that line is passed over. The launcher (`centralu install`) puts its cause first
+ * about why, so that line is passed over, as is the advice it puts under an E404 (`NPM_404_NOTE`). The launcher (`centralu install`) puts its cause first
  * and what to do after it ("Windows would not replace … — Centralu is probably still running",
  * then "Quit it, then run the command again", which reads wrong inside the app).
  */
@@ -279,8 +282,13 @@ export function failureDetail(file: string, stderr: string): string | null {
   const lines = stderr
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l && !/complete log of this run/i.test(l))
+    .filter((l) => l && !/complete log of this run/i.test(l) && !NPM_404_NOTE.test(l))
   return (file === 'npm' ? lines.at(-1) : lines[0]) ?? null
+}
+
+/** What a failed command wrote to stderr, which `runCommand` keeps on its error */
+function stderrOf(e: unknown): string {
+  return e instanceof Error && 'stderr' in e && typeof e.stderr === 'string' ? e.stderr : ''
 }
 
 /**
@@ -288,7 +296,7 @@ export function failureDetail(file: string, stderr: string): string | null {
  * code ENOTFOUND`), which says why, where `failureDetail` keeps npm's last line for the update line.
  */
 export function failureLine(e: unknown): string {
-  const stderr = e instanceof Error && 'stderr' in e && typeof e.stderr === 'string' ? e.stderr : ''
+  const stderr = stderrOf(e)
   const code = e instanceof Error && 'exitCode' in e && (typeof e.exitCode === 'number' || typeof e.exitCode === 'string') ? `exit ${e.exitCode}: ` : ''
   const line = stderr.split(/\r?\n/).map((l) => l.trim()).find((l) => /\berr(?:or)?\b|ERR!/i.test(l) && !/complete log of this run/i.test(l))
   return `${code}${line ?? errorMessage(e)}`
@@ -756,6 +764,7 @@ export class UpdateService {
        * that is the outcome most worth naming, with the one command that finishes it.
        */
       if (this.stopped) return
+      console.error(`[updates] install failed: ${failureLine(e)}`)
       const reason = errorMessage(e)
       const error = packageInstalled
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
@@ -828,7 +837,8 @@ export class UpdateService {
 
   /**
    * A just-published release can be visible from `latest` before its package is on the npm edge
-   * this machine reaches. `notarget`/ETARGET are that narrow condition; credentials, disk and
+   * this machine reaches: `notarget`/ETARGET while the packument lacks it, or E404 on its own tarball while the packument
+   * already lists it (#2279, the registry edge serves the two apart). That narrow condition only; credentials, disk and
    * package errors still fail immediately. The ten minute cap makes this a wait with an end, not
    * a hidden retry loop. `--prefer-online` makes npm revalidate instead of trusting its stale cache.
    */
@@ -842,7 +852,7 @@ export class UpdateService {
         return
       } catch (err) {
         if (this.stopped) return
-        if (!npmHasNotServedVersion(err) || this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw err
+        if (!npmHasNotServedVersion(err, version) || this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw err
         this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
         this.emit()
         await this.deps.wait(NPM_RETRY_DELAY_MS)
@@ -875,8 +885,10 @@ export class UpdateService {
   }
 }
 
-function npmHasNotServedVersion(err: unknown): boolean {
-  return /(?:\bETARGET\b|\bnotarget\b)/i.test(err instanceof Error ? err.message : String(err))
+function npmHasNotServedVersion(err: unknown, version: string): boolean {
+  const said = `${errorMessage(err)}\n${stderrOf(err)}`
+  const tarball = `/${APP_SLUG}/-/${APP_SLUG}-${version}.tgz`.replace(/[.+]/g, '\\$&')
+  return /\bETARGET\b|\bnotarget\b/i.test(said) || new RegExp(`\\b404 Not Found - GET \\S+${tarball} `).test(said)
 }
 
 /** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
