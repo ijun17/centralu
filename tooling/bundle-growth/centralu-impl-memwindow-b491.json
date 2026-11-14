@@ -1,0 +1,4 @@
+{
+  "bytes": 1100,
+  "reason": "An event draws its own sidebar row, not every row (the window's memory churn while sessions stream out of view): zustand's useShallow (its shallow compare, a few hundred bytes, already a dependency), the session row's memo comparator, and the palette reading sessions only while shown. Measured +1,051 B on the same tree (1,948,663 B against main's 1,947,612 B), all in the app's chunks; main sat 88 B under the ceiling."
+}
