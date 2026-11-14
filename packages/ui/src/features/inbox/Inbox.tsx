@@ -1,5 +1,5 @@
 import { usePresence } from '../../components/presence.js'
-import { isInTurn, type InboxItem } from '@cc/core'
+import { groupTasks, isInTurn, openTaskCount, shownTasks, taskKey, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -12,7 +12,7 @@ import { appCanLines } from '../../store/uses-lines.js'
 import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
-import { CONTINUE_WORDS } from '@cc/protocol/client'
+import { CONTINUE_WORDS, type MailTaskRow } from '@cc/protocol/client'
 import {
   Kbd,
   StateDot,
@@ -25,8 +25,9 @@ import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 import { MailPinned, MailThreadItem } from './MailRows.jsx'
 import { arrangeInbox, CURSOR_START, rowKeyOf, settleCursor, type InboxCursor } from './inboxList.js'
-import { Fold } from '../../components/Fold.jsx'
-import { ChevronIcon } from '../../components/icons.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { FoldedGroup } from './FoldedGroup.jsx'
+import { TaskList } from './TaskList.jsx'
 import { mailAttention } from '../../store/mail.js'
 import { useLeavingCards } from './useLeavingCards.js'
 import { MailThread } from './MailThread.jsx'
@@ -62,6 +63,13 @@ export function Inbox() {
   // Nothing to act on: what is read is folded under Earlier, which is no reason for the list to look as if something waited
   const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
   const [earlierOpen, setEarlierOpen] = useState(false)
+  // Waiting or Tasks (#1577, owner 2026-11-14): what waits on the person, or the host's work by who acts next
+  const [tab, setTab] = useState<'waiting' | 'tasks'>('waiting')
+  const loadTasks = useStore((s) => s.loadTasks)
+  const mailTasks = useStore((s) => s.mailTasks)
+  const tasks = useMemo(() => groupTasks(mailTasks ?? []), [mailTasks])
+  const [doneOpen, setDoneOpen] = useState(false)
+  const taskRows = useMemo(() => shownTasks(tasks, doneOpen), [tasks, doneOpen])
   /*
     The cursor is on a row, not on a row number: a wait that arrives goes in at the top, and the row the cursor is on
     must not slide away from under the key they press. It takes the top row when the list opens and follows that row
@@ -70,14 +78,18 @@ export function Inbox() {
     at its place.
   */
   const [at, setAt] = useState<InboxCursor>(CURSOR_START)
-  const placed = settleCursor(list.waiting, at, open)
+  const placed = settleCursor(list.waiting.map(rowKeyOf), at, open)
   if (placed !== at) setAt(placed)
   const cursor = placed.row
+  // Tasks keeps a cursor of its own, by the same rule: switching back finds each list where it was left
+  const [taskAt, setTaskAt] = useState<InboxCursor>(CURSOR_START)
+  const taskPlaced = settleCursor(taskRows.map(taskKey), taskAt, open)
+  if (taskPlaced !== taskAt) setTaskAt(taskPlaced)
   // The choices of the card the keyboard is on, for the hint: the number keys pick on that card only, never on the one under the pointer
   const onRow = list.waiting[cursor]
   const choices = onRow?.kind === 'mail' ? (onRow.thread.ask?.choices?.length ?? 0) : 0
   const panelRef = useRef<HTMLDivElement>(null)
-  useKeepInView(panelRef, cursor)
+  useKeepInView(panelRef, tab === 'waiting' ? cursor : taskPlaced.row)
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
   useFocusReturn(open, panelRef)
   // No row answers an approval while the list is still moving (#543): the order is part of what moves it
@@ -88,8 +100,10 @@ export function Inbox() {
     if (!open) {
       closeMailThread()
       setEarlierOpen(false)
-    }
-  }, [open, closeMailThread])
+      setTab('waiting')
+      setDoneOpen(false)
+    } else void loadTasks()
+  }, [open, closeMailThread, loadTasks])
 
   useEffect(() => {
     if (!open) return
@@ -115,6 +129,16 @@ export function Inbox() {
           closeMailThread()
           e.preventDefault()
         }
+        return
+      }
+      if (tab === 'tasks') {
+        onTaskKey(action, taskRows, taskPlaced.row, {
+          move: (to) => setTaskAt({ key: taskRows[to] ? taskKey(taskRows[to]) : null, row: to }),
+          open: (root) => void openMailThread(root),
+          done: (root) => void closeMail('finished', root),
+          close: () => toggle(false),
+        })
+        e.preventDefault()
         return
       }
       const row = list.waiting[cursor]
@@ -153,7 +177,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread, tab, taskRows, taskPlaced.row])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -191,15 +215,48 @@ export function Inbox() {
         */}
         {!mailThread && (
           <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
-            <h2 className="text-sm font-medium text-ink">Waiting</h2>
-            <span className="readout text-xs text-ink-faint" data-testid="inbox-count">
-              {items.length + mailAttention(mail)}
-            </span>
+            <Segmented
+              label="Inbox"
+              size="sm"
+              value={tab}
+              // The list's keys are this screen's heart: after a switch, ↑ ↓ walk the list, not the switch's options
+              onChange={(t) => {
+                setTab(t)
+                panelRef.current?.focus()
+              }}
+              testId="inbox-tabs"
+              options={[
+                {
+                  value: 'waiting',
+                  testId: 'inbox-tab-waiting',
+                  label: (
+                    <>
+                      Waiting{' '}
+                      <span className="readout" data-testid="inbox-count">
+                        {items.length + mailAttention(mail)}
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  value: 'tasks',
+                  testId: 'inbox-tab-tasks',
+                  label: (
+                    <>
+                      Tasks{' '}
+                      <span className="readout" data-testid="inbox-tasks-count">
+                        {openTaskCount(tasks)}
+                      </span>
+                    </>
+                  ),
+                },
+              ]}
+            />
             <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
               <Kbd>↵</Kbd> Open
-              {choices > 0 && (
+              {tab === 'waiting' && choices > 0 && (
                 <>
                   <Kbd>1-{choices}</Kbd> Choose
                 </>
@@ -217,11 +274,16 @@ export function Inbox() {
               toggle(false)
             }}
           />
+        ) : tab === 'tasks' ? (
+          // The switch fades the other list in (design-system §9)
+          <div key="tasks" className="cc-fade flex min-h-0 flex-col">
+            <TaskList groups={tasks} cursor={taskPlaced.key} doneOpen={doneOpen} onToggleDone={() => setDoneOpen((o) => !o)} />
+          </div>
         ) : nothingWaiting && list.earlier.length === 0 ? (
           <Nothing />
         ) : (
           // However much there is, the list keeps to the panel and scrolls inside it (#1772); the header stays put
-          <div className="flex min-h-0 flex-col overflow-y-auto" data-testid="inbox-list">
+          <div key="waiting" className="cc-fade flex min-h-0 flex-col overflow-y-auto" data-testid="inbox-list">
             <MailPinned held={list.held} waiting={mail?.waiting ?? 0} />
             {nothingWaiting && <Nothing />}
             {list.waiting.length > 0 && (
@@ -246,32 +308,35 @@ export function Inbox() {
               </ul>
             )}
             {list.earlier.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 px-4 py-2 text-left text-xs text-ink-faint transition-colors hover:text-ink-muted"
-                  aria-expanded={earlierOpen}
-                  onClick={() => setEarlierOpen((o) => !o)}
-                  data-testid="inbox-earlier-toggle"
-                >
-                  <ChevronIcon open={earlierOpen} />
-                  Earlier
-                  <span className="readout">{list.earlier.length}</span>
-                </button>
-                <Fold open={earlierOpen} testId="inbox-earlier">
-                  <ul className="flex flex-col gap-0.5 p-1">
-                    {list.earlier.map((t) => (
-                      <MailThreadItem key={t.id} thread={t} dim />
-                    ))}
-                  </ul>
-                </Fold>
-              </>
+              <FoldedGroup label="Earlier" count={list.earlier.length} open={earlierOpen} onToggle={() => setEarlierOpen((o) => !o)} testId="inbox-earlier">
+                {list.earlier.map((t) => (
+                  <MailThreadItem key={t.id} thread={t} dim />
+                ))}
+              </FoldedGroup>
             )}
           </div>
         )}
       </div>
     </>
   )
+}
+
+/**
+ * The list's keys on Tasks: up and down walk the rows, Enter opens the row's chain, D marks done the person's task that came back reported (the one
+ * act such a row waits for) and opens any other, Esc closes. The number keys and Allow / Deny are Waiting's: a task row has no card
+ */
+function onTaskKey(
+  action: NonNullable<ReturnType<typeof inboxKeyAction>>,
+  rows: readonly MailTaskRow[],
+  at: number,
+  act: { move: (to: number) => void; open: (root: string) => void; done: (root: string) => void; close: () => void },
+): void {
+  const row = rows[at]
+  if (action === 'down') act.move(Math.min(at + 1, rows.length - 1))
+  else if (action === 'up') act.move(Math.max(at - 1, 0))
+  else if (action === 'open' && row) act.open(row.root)
+  else if (action === 'done' && row) (row.state === 'review' ? act.done : act.open)(row.root)
+  else if (action === 'close') act.close()
 }
 
 /** What the list says when nothing waits */

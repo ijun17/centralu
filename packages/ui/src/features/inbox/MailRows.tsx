@@ -1,9 +1,10 @@
-import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
+import type { MailHeldRow, MailParty, MailThreadRow } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { Button } from '../../components/Button.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { AskCard } from './AskCard.js'
+import { PartyName } from './PartyName.js'
 import { crowdText, heldLabel, heldResume, threadStateLabel } from './mailLabels.js'
 
 /**
@@ -32,14 +33,15 @@ export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: Ma
         <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
           ●
         </span>
-        <span className={`truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
-        <span className="truncate text-xs text-ink-faint">{peopleOf(t)}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2.5">
-          {t.last && <span className="max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
-          <span className="text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
+        <span className={`min-w-0 truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
+        <People owner={t.owner} assignee={t.assignee} testId={`mail-people-${t.id}`} />
+        {/* The preview gives up its width first, so the names and the dots beside them stay whole on a crowded row (#2258) */}
+        <span className="ml-auto flex min-w-0 shrink-[100] items-center gap-2.5">
+          {t.last && <span className="min-w-0 max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
+          <span className="shrink-0 text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
             {threadStateLabel(t)}
           </span>
-          <span className="readout w-12 text-right text-xs text-ink-faint">
+          <span className="readout w-12 shrink-0 text-right text-xs text-ink-faint">
             <RelativeAge when={t.updatedAt} />
           </span>
         </span>
@@ -48,12 +50,21 @@ export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: Ma
   )
 }
 
-/** Who the thread is between, from the person's side: the one who gave the work, and the one who has it */
-function peopleOf(t: MailThreadRow): string {
-  const owner = t.owner.kind === 'person' ? null : partyName(t.owner)
-  const assignee = t.assignee ? partyName(t.assignee) : null
-  if (owner && assignee) return `${owner} → ${assignee}`
-  return owner ?? (assignee ? `→ ${assignee}` : '')
+/** Who the work is between, from the person's side: the one who gave it, and the one who has it, with its live dot (#2258). The person, as the giver, goes unsaid */
+export function People({ owner, assignee, testId }: { owner: MailParty; assignee: MailParty | null; testId?: string }) {
+  const from = owner.kind === 'person' ? null : owner
+  if (!from && !assignee) return null
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-xs text-ink-faint" data-testid={testId}>
+      {from && <PartyName party={from} />}
+      {assignee && (
+        <>
+          <span aria-hidden>→</span>
+          <PartyName party={assignee} />
+        </>
+      )}
+    </span>
+  )
 }
 
 /** "12 sessions have mail from while Centralu was off": the host does not wake a crowd by itself, and asks once (§7.9) */

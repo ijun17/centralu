@@ -23,18 +23,18 @@ export type InboxCursor = { key: string | null; row: number }
 export const CURSOR_START: InboxCursor = { key: null, row: 0 }
 
 /**
- * Where the cursor is after `rows` changed, given where it was (the same object when nothing moved, so a caller sets state
+ * Where the cursor is after the rows changed (named by `keys`, in order: Waiting's `rowKeyOf`, Tasks' `taskKey`), given where it was (the same object when nothing moved, so a caller sets state
  * only on a change). It is on the row it names, and its place follows that row as rows arrive above it. When the row has
  * left (Done, answered) it falls to the row now at the place it had in the list it was last settled on, the last row when
  * that was the last, and it names that row from then on: the row that left does not pull it back when it returns. No row
  * named (the list just opened) takes the top row; a list with no rows takes none, and a closed one resets it.
  */
-export function settleCursor(rows: readonly WaitingRow[], at: InboxCursor, open: boolean): InboxCursor {
-  const first = rows[0]
-  if (!open || !first) return at.key === null && at.row === 0 ? at : CURSOR_START
-  const found = at.key === null ? -1 : rows.findIndex((r) => rowKeyOf(r) === at.key)
-  const row = found >= 0 ? found : Math.min(at.row, rows.length - 1)
-  const key = rowKeyOf(rows[row] ?? first)
+export function settleCursor(keys: readonly string[], at: InboxCursor, open: boolean): InboxCursor {
+  const first = keys[0]
+  if (!open || first === undefined) return at.key === null && at.row === 0 ? at : CURSOR_START
+  const found = at.key === null ? -1 : keys.indexOf(at.key)
+  const row = found >= 0 ? found : Math.min(at.row, keys.length - 1)
+  const key = keys[row] ?? first
   return key === at.key && row === at.row ? at : { key, row }
 }
 

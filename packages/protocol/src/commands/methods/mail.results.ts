@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { MailHeldRow, MailThreadRow, MailThreadView, WatchView } from '../../entities/mail.js'
+import { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, WatchView } from '../../entities/mail.js'
 
 /** The results of the `mail` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./mail.params.ts */
 export const mailResults = {
@@ -9,6 +9,7 @@ export const mailResults = {
     /** Sleeping sessions with mail from while Centralu was off that wait for "Wake them" or "Leave them" (§7.9) */
     waiting: z.number().default(0),
   }),
+  'mail.tasks': z.object({ tasks: z.array(MailTaskRow).default([]) }),
   'mail.thread': MailThreadView,
   'mail.reply': MailThreadView,
   'mail.close': MailThreadRow,

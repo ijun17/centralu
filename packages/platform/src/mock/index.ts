@@ -381,6 +381,9 @@ export class MockPlatform implements Platform {
   seedMail(...a: Parameters<MailMock['seed']>): ReturnType<MailMock['seed']> {
     return this.mailMock.seed(...a)
   }
+  seedTask(...a: Parameters<MailMock['seedTask']>): ReturnType<MailMock['seedTask']> {
+    return this.mailMock.seedTask(...a)
+  }
   seedMailMessage(...a: Parameters<MailMock['say']>): void {
     this.mailMock.say(...a)
   }

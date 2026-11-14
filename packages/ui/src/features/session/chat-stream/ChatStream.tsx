@@ -4,6 +4,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import type { SessionSummary } from '@cc/core'
 import { inlineFrameShown, useStore, type ChatItem } from '../../../store/store.js'
 import { ChatSkeleton } from '../../../components/Skeleton.jsx'
+import { bubbleLook } from '../../../components/bubble.js'
 import { OverlayScrollbar } from '../../../components/OverlayScrollbar.jsx'
 import { ApprovalCard } from '../../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../../approval/QuestionCard.jsx'
@@ -505,7 +506,7 @@ function AnswerBubble({ part, at, children }: { part: BubblePart | null; at?: nu
   return (
     <>
       {/* flow-root: a first child's top margin (a heading's) stays inside the piece instead of opening a hole above it (#1706) */}
-      <div className={`flow-root min-w-0 border-line bg-surface-raised px-4 ${BUBBLE_EDGE[part]}`} data-bubble={part}>
+      <div className={`flow-root min-w-0 px-4 ${bubbleLook('theirs')} ${BUBBLE_EDGE[part]}`} data-bubble={part}>
         {children}
       </div>
       {/* When the answer was said, under its last bubble only (`answerEnds`), as a chat app writes it */}

@@ -15,6 +15,7 @@ vi.mock('../../store/store.js', async (importOriginal) => {
 })
 
 const { MailThread } = await import('./MailThread.jsx')
+const { bubbleLook } = await import('../../components/bubble.js')
 
 const you: MailParty = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
 const parser: MailParty = { address: 'session:h/s1', kind: 'session', sessionId: 's1', name: 'Parser', state: 'idle' }
@@ -28,6 +29,7 @@ function view(over: Partial<MailThreadView> = {}): MailThreadView {
     messages: [],
     more: false,
     older: false,
+    lookIn: false,
     follows: [],
     ...over,
   }
@@ -106,7 +108,7 @@ describe('the thread in the inbox', () => {
     expect(mineHtml).toContain('whitespace-pre-wrap')
   })
 
-  it('draws others’ messages on the session panel’s surface, so they read as cards on the Inbox panel, and the person’s own on none (#2242)', () => {
+  it('is drawn in the session panel’s colours: its floor behind, the session’s bubble for others and the person’s own bubble for theirs (owner, 2026-11-14)', () => {
     const at = 1_800_000_000_000
     const { html } = render(
       view({
@@ -116,9 +118,27 @@ describe('the thread in the inbox', () => {
         ],
       }),
     )
+    expect(/<div[^>]*class="[^"]*bg-surface-floor[^"]*"[^>]*data-testid="mail-thread"/.test(html)).toBe(true)
     const theirs = html.slice(html.indexOf('data-testid="mail-message-1"'), html.indexOf('data-testid="mail-message-2"'))
-    expect(theirs).toContain('bg-surface-floor')
-    expect(html.slice(html.indexOf('data-testid="mail-message-2"'))).not.toContain('bg-surface-floor')
+    const from = html.indexOf('data-testid="mail-message-2"')
+    const mine = html.slice(from, html.indexOf('</li>', from))
+    for (const c of bubbleLook('theirs').split(' ')) expect(theirs).toContain(c)
+    for (const c of bubbleLook('mine').split(' ')) expect(mine).toContain(c)
+    expect(mine).not.toContain('bg-surface-raised')
+  })
+
+  it('goes back with the window’s own back chevron, named for what it does', () => {
+    const { html } = render(view())
+    expect(html).toMatch(/<button[^>]*aria-label="Back to the list"[^>]*data-testid="mail-back"/)
+    expect(html).not.toContain('←')
+  })
+
+  it('offers neither a reply nor a close on mail between sessions the person looks into (#1577)', () => {
+    const looking = render(view({ lookIn: true, canReply: false }))
+    expect(looking.html).not.toContain('data-testid="mail-finish"')
+    expect(looking.html).not.toContain('data-testid="mail-drop"')
+    expect(looking.html).not.toContain('placeholder="Reply"')
+    expect(render(view({ canReply: false })).html).toContain('data-testid="mail-finish"')
   })
 
   it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {

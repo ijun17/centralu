@@ -13,7 +13,7 @@ import { coalescedRead } from './single-flight.js'
 
 type MailActions = Pick<
   AppState,
-  'loadMail' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
+  'loadMail' | 'loadTasks' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
 >
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
@@ -51,6 +51,10 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
     // Another `mail_changed` while the list is read asks for one more read after it, not one each, and waits for that one
     loadMail() {
       return coalescedRead('mail', get, (platform) => platform.mail.list(), (mail) => void set({ mail }))
+    },
+
+    loadTasks() {
+      return coalescedRead('mailTasks', get, (platform) => platform.mail.tasks(), (mailTasks) => void set({ mailTasks }))
     },
 
     async openMailThread(threadId) {
@@ -208,6 +212,8 @@ export function mailEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
   const notice = e.arrived ? mailNotification(e.arrived, { appFocused: get().appFocused, policy: notifyPolicyOf(get().prefs) }) : null
   if (notice && e.arrived) alertPerson(notice, `mail:${e.arrived.messageId}`, set, get)
   void get().loadMail()
+  // Tasks are read only while someone can see them: the whole host's work, not the person's mailbox
+  if (get().inboxOpen) void get().loadTasks()
   if (get().mailThread?.thread.id === e.threadId) void refreshThread(get, set, e.threadId)
   return true
 }

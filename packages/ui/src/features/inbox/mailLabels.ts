@@ -1,6 +1,6 @@
 import { partyName } from '@cc/core'
 import { plainLine } from '@cc/protocol/client'
-import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import type { MailHeldRow, MailMessage, MailParty, MailTaskRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
  * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;
@@ -18,6 +18,24 @@ export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'a
       return 'Running'
     case 'review':
       return 'In review'
+    default:
+      return t.state
+  }
+}
+
+/** A task's state as a word (#1577), in the thread's words: how it ended when it is done, unless it simply ended as work ends (answered, reported, marked done) */
+export function taskStateLabel(t: Pick<MailTaskRow, 'state' | 'outcome' | 'assignee'>): string {
+  if (t.state === 'done') return t.outcome && !['answered', 'reported', 'done'].includes(t.outcome) ? `Done (${t.outcome})` : 'Done'
+  if (t.state === 'open' && t.assignee.kind === 'person') return 'Waiting on you'
+  switch (t.state) {
+    case 'open':
+      return 'Open'
+    case 'running':
+      return 'Running'
+    case 'review':
+      return 'In review'
+    case 'released':
+      return 'Released'
     default:
       return t.state
   }

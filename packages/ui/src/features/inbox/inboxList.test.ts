@@ -27,16 +27,16 @@ describe('the inbox list (#2213)', () => {
   it('the cursor opens on the top row, steps over mail rows, and a closed list resets it', () => {
     const rows = arrangeInbox([session('a', 900), session('b', 100)], { threads: [thread('m', 500, 1)], held: [] }).waiting
     expect(rows.map(rowKeyOf)).toEqual(['a', 'mail:m', 'b'])
-    expect(settleCursor(rows, CURSOR_START, true)).toEqual({ key: 'a', row: 0 })
+    expect(settleCursor(rows.map(rowKeyOf), CURSOR_START, true)).toEqual({ key: 'a', row: 0 })
     const onMail = { key: 'mail:m', row: 1 }
-    expect(settleCursor(rows, onMail, true)).toBe(onMail)
-    expect(settleCursor(rows, onMail, false)).toBe(CURSOR_START)
+    expect(settleCursor(rows.map(rowKeyOf), onMail, true)).toBe(onMail)
+    expect(settleCursor(rows.map(rowKeyOf), onMail, false)).toBe(CURSOR_START)
     expect(settleCursor([], onMail, true)).toBe(CURSOR_START)
   })
 
   // The stale row number the review found: a row arrives above the cursor, then the cursor's own row is done
   it('the cursor follows its row as rows arrive above it, and a row that is done hands it to the row now at its place', () => {
-    const at = (rows: ReturnType<typeof arrangeInbox>['waiting'], cursor: { key: string | null; row: number }) => settleCursor(rows, cursor, true)
+    const at = (rows: ReturnType<typeof arrangeInbox>['waiting'], cursor: { key: string | null; row: number }) => settleCursor(rows.map(rowKeyOf), cursor, true)
     const list = (...ids: [string, number][]) => arrangeInbox(ids.map(([id, t]) => session(id, t)), null).waiting
     let cursor = at(list(['k', 500], ['y', 100]), CURSOR_START)
     expect(cursor).toEqual({ key: 'k', row: 0 })

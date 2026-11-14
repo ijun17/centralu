@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import type { MailThreadRow } from '@cc/protocol/client'
-import { partyName } from '@cc/core'
 import { Button } from '../../components/Button.js'
 import { ChoiceList } from '../../components/ChoiceList.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { choicesLabel, threadStateLabel } from './mailLabels.js'
+import { PartyName } from './PartyName.js'
 
 /**
  * A thread that waits on the person's answer, drawn as a card like the mail held for them (#2229, owner 2026-11-12): its subject in `ink`, who asks, the
@@ -47,7 +47,9 @@ export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThrea
           </span>
         </span>
       </div>
-      <span className="text-xs text-ink-muted">{partyName(ask.sender)} asks you</span>
+      <span className="text-xs text-ink-muted" data-testid={`mail-ask-from-${t.id}`}>
+        <PartyName party={ask.sender} /> asks you
+      </span>
       <p className="line-clamp-4 whitespace-pre-line text-sm text-ink-muted" data-testid={`mail-ask-text-${t.id}`}>
         {ask.text}
       </p>

@@ -178,6 +178,39 @@ uxTask({
 })
 
 // ---------------------------------------------------------------------------------------------
+// See what waits on whom (#1577): the host's work by who acts next, one switch away inside the waiting list
+
+const WHOM = 'Port the docs'
+
+/** The demo with work between two of its sessions, which the person is not in */
+async function demoWithTasks(page: Page): Promise<void> {
+  await demo(page)
+  const party = async (name: string) => ({ address: `session:mock/${await sessionId(page, name)}`, kind: 'session', sessionId: await sessionId(page, name), name, state: 'idle' })
+  const owner = await party(OPEN)
+  const assignee = await party(APPROVING)
+  await page.evaluate(({ owner, assignee, subject }) => (window as any).__mock.seedTask({ subject, owner, assignee, state: 'running' }), { owner, assignee, subject: WHOM })
+}
+
+uxTask({
+  id: 'tasks.waiting-on-whom',
+  task: 'See what waits on whom',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The waiting list (the top-bar count), then its Tasks switch: the work grouped Needs you, Waiting on others, Unassigned, Done'],
+  start: demoWithTasks,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('counter'))
+    await u.until('the waiting list', () => expect(page.getByTestId('inbox')).toBeVisible())
+    await u.click(page.getByTestId('inbox-tab-tasks'), { label: 'the Tasks switch' })
+  },
+  goal: async (page) => {
+    await expect(page.getByTestId('tasks-waiting-on-others')).toContainText(WHOM)
+    await expect(page.getByTestId('tasks-waiting-on-others')).toContainText(APPROVING)
+  },
+  budget: { operators: 9, M: 2, H: 1, seconds: 6.0 },
+})
+
+// ---------------------------------------------------------------------------------------------
 // Answer an approval while typing in its session's composer
 
 const DRAFT = 'Then rerun the tests and'

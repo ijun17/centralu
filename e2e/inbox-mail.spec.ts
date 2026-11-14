@@ -519,3 +519,70 @@ test('Inbox: a wait arriving above the cursor, then the cursor row done: the cur
   await page.keyboard.press('d')
   await cursorOn(oldest)
 })
+
+// #2258 item 3 (owner 2026-11-14, option A): the assignee's live state before its name, only when it says something
+test('Mail: a row and an ask card show the dot of a session that is working, has an error or waits on an approval, and none for one that is idle', async ({ page }) => {
+  await setup(page)
+  const YOU = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
+  const working = await seed(page, { subject: 'Port the docs', from: YOU, body: 'Translate the guide', kind: 'assign', assignee: { ...PARSER, state: 'working' } })
+  const idle = await seed(page, { subject: 'Rename the tokens', from: YOU, body: 'Rename them', kind: 'assign', assignee: { ...PARSER, sessionId: 's2', name: 'Styles', state: 'idle' } })
+  const asked = await seed(page, { subject: 'Which branch?', from: { ...PARSER, sessionId: 's3', name: 'Tests', state: 'error' }, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId(`mail-people-${working}`).getByTestId('dot-working')).toBeVisible()
+  await expect(page.getByTestId(`mail-people-${idle}`)).toContainText('Styles')
+  await expect(page.getByTestId(`mail-people-${idle}`).locator('[data-testid^="dot-"]')).toHaveCount(0)
+  await expect(page.getByTestId(`mail-ask-from-${asked}`).getByTestId('dot-error')).toBeVisible()
+})
+
+// #1577 (owner 2026-11-14, option C): Waiting | Tasks inside the Inbox, the host's work grouped by who acts next
+test('Tasks: the switch lists the host’s work by who acts next, opens a chain between sessions read-only, and folds Done', async ({ page }) => {
+  await setup(page)
+  const YOU = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
+  const LEAD = { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }
+  const seedTask = (spec: Record<string, unknown>) =>
+    page.evaluate((s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s), spec)
+  await seedTask({ subject: 'Which branch?', owner: PARSER, assignee: YOU, kind: 'question' })
+  const between = await seedTask({ subject: 'Port the docs', owner: LEAD, assignee: PARSER, state: 'running', body: 'Translate the guide' })
+  await seedTask({ subject: 'Fix the sidebar fold', owner: LEAD, assignee: PARSER, state: 'released' })
+  await seedTask({ subject: 'Cache headers', owner: YOU, assignee: PARSER, state: 'done', outcome: 'reported' })
+
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-tasks-count')).toHaveText('3')
+  await page.getByTestId('inbox-tab-tasks').click()
+  await expect(page.getByTestId('tasks-needs-you')).toContainText('Which branch?')
+  await expect(page.getByTestId('tasks-waiting-on-others')).toContainText('Port the docs')
+  await expect(page.getByTestId('tasks-unassigned')).toContainText('Fix the sidebar fold')
+  // Done is folded until pressed
+  await expect(page.getByTestId('tasks-done-toggle')).toContainText('Done1')
+  await expect(page.getByText('Cache headers')).toHaveCount(0)
+  await page.getByTestId('tasks-done-toggle').click()
+  await expect(page.getByTestId('tasks-done')).toContainText('Cache headers')
+
+  // The keys walk the rows: the cursor starts on Needs you, ↓ goes to the work between sessions, ↵ opens it to read and nothing more
+  await expect(page.locator('[data-cursor]')).toContainText('Which branch?')
+  await page.keyboard.press('ArrowDown')
+  await expect(page.locator('[data-cursor]')).toContainText('Port the docs')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await expect(page.getByTestId('mail-message-1')).toContainText('Translate the guide')
+  await expect(page.getByTestId('mail-reply')).toHaveCount(0)
+  await expect(page.getByTestId('mail-finish')).toHaveCount(0)
+  // Mail between sessions is not the person's own: it never lists under Waiting
+  await page.getByTestId('mail-back').click()
+  await page.getByTestId('inbox-tab-waiting').click()
+  await expect(page.getByTestId(`mail-thread-${between}`)).toHaveCount(0)
+  // The Inbox opens on Waiting again
+  await page.keyboard.press('Escape')
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+})
+
+test('Tasks: a host older than Tasks lists none, and Waiting works as before', async ({ page }) => {
+  await setup(page)
+  await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { knowsTasks: boolean } } }).__mock.mockMail.knowsTasks = false))
+  await seed(page, { subject: 'Which branch?', from: PARSER, body: 'main or release?' })
+  await page.getByTestId('counter').click()
+  await expect(page.getByTestId('inbox-count')).toHaveText('1')
+  await page.getByTestId('inbox-tab-tasks').click()
+  await expect(page.getByTestId('inbox-tasks-empty')).toHaveText('No tasks')
+})

@@ -1,0 +1,4 @@
+{
+  "bytes": 6500,
+  "reason": "The Inbox's Tasks and the party dots (#1577, #2258): the Waiting | Tasks switch, TaskList with its groups and the shared FoldedGroup, PartyName with its live dot, groupTasks and partyLive in core, the MailTaskRow schema and mail.tasks in the protocol (the client bundle carries the zod shapes), the store's loadTasks and the web and mock ports, and one bubbleLook for the conversation's and the mail thread's colours. Plain components and store code with no dependency. Measured on this machine with the same production build: 1,953,829 B against main's 1,947,612 B at 0e9daca3b, +6,217 B."
+}

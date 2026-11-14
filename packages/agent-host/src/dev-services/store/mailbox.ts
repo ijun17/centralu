@@ -393,6 +393,14 @@ export class MailboxRecords {
     )[0]
   }
 
+  /**
+   * The newest `limit` messages that wait for a reply, newest first: tasks, and messages that need one (the Inbox's Tasks, #1577). A scan of the
+   * table, which no index serves: retention keeps it to a few hundred rows, which read in well under a millisecond
+   */
+  newestWork(limit: number): MailRow[] {
+    return this.messages(`(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1)) ORDER BY m.created_at DESC, m.id DESC LIMIT ?`, limit)
+  }
+
   // ── Delivery ──
 
   /**

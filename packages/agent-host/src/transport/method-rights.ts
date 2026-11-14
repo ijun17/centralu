@@ -351,6 +351,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   // The person's side of the mailbox (#1347): what the person writes and decides is theirs by who is asking, so only a
   // window holding the token speaks as them. An agent's mail goes through its own tool channel (the bridge's), never here
   'mail.list': 'window',
+  // Every session's tasks, mail the caller may not be in: the person's window alone reads them (owner, 2026-11-14)
+  'mail.tasks': 'window',
   'mail.thread': 'window',
   'mail.reply': 'window',
   'mail.close': 'window',

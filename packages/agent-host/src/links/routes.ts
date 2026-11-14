@@ -324,6 +324,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'workspace.load': HUB,
   // The mailbox is the hub's: a linked machine's mail reaches it there (slice 4 of #1347)
   'mail.list': HUB,
+  // This host's tasks only: a linked machine's are not listed yet, and its chains do not open from the hub (mail.thread is the hub's)
+  'mail.tasks': HUB,
   'mail.thread': HUB,
   'mail.reply': HUB,
   'mail.close': HUB,
