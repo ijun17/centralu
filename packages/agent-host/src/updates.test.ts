@@ -620,12 +620,13 @@ describe('UpdateService', () => {
 
   /**
    * npm 11's own stderr, recorded against a registry whose packument lists the version while its tarball answers 404 (#2279),
-   * failing the way `runCommand` throws it
+   * failing the way `runCommand` throws it. npm adds " - <error>" after the URL only when the 404's body has an `error`
+   * field, as registry.npmjs.org's does and a mirror's may not
    */
-  const npm404 = (url: string) => {
+  const npm404 = (url: string, said = ' - Not found') => {
     const stderr = [
       'npm error code E404',
-      `npm error 404 Not Found - GET ${url} - Not found`,
+      `npm error 404 Not Found - GET ${url}${said}`,
       'npm error 404',
       `npm error 404  'centralu@${url}' is not in this registry.`,
       'npm error 404',
@@ -637,12 +638,15 @@ describe('UpdateService', () => {
   }
   const TARBALL = 'https://registry.npmjs.org/centralu/-/centralu-9999.0.0.tgz'
 
-  it('waits out a 404 on the tarball of the version it installs, which npm serves after the packument', async () => {
+  it.each([
+    ['registry.npmjs.org', ' - Not found'],
+    ['a registry whose 404 has no error field', ''],
+  ])('waits out a 404 on the tarball of the version it installs, which npm serves after the packument (%s)', async (_, said) => {
     let tries = 0
     const h = make({
       registry: '9999.0.0',
       run: async (file) => {
-        if (file === 'npm' && ++tries === 1) throw npm404(TARBALL)
+        if (file === 'npm' && ++tries === 1) throw npm404(TARBALL, said)
       },
       wait: async () => {},
     })

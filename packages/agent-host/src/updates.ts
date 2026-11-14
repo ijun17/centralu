@@ -888,7 +888,7 @@ export class UpdateService {
 function npmHasNotServedVersion(err: unknown, version: string): boolean {
   const said = `${errorMessage(err)}\n${stderrOf(err)}`
   const tarball = `/${APP_SLUG}/-/${APP_SLUG}-${version}.tgz`.replace(/[.+]/g, '\\$&')
-  return /\bETARGET\b|\bnotarget\b/i.test(said) || new RegExp(`\\b404 Not Found - GET \\S+${tarball} `).test(said)
+  return /\bETARGET\b|\bnotarget\b/i.test(said) || new RegExp(`\\b404 Not Found - GET \\S+${tarball}(?!\\S)`, 'i').test(said)
 }
 
 /** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
