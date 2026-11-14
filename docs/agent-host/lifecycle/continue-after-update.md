@@ -41,6 +41,7 @@ the person's Continue would.
   on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
 - **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
   notice), its owed report and its delegated turn kept, and once the start is done it is woken
+  (by the one continue engine, `TurnContinue.wakeAfterUpdate`, [auto-continue.md](auto-continue.md): a few at a time, below)
   and given Centralu's note through Centralu's channel (`deliverMail`, no message of the person's): "Centralu on this
   machine was updated while your turn was running, which stopped the turn before it finished. Continue where you stopped.
   Check what already happened before repeating a step." Until the note is in, a wake from elsewhere (a window that sees
@@ -98,13 +99,29 @@ the person's Continue would.
   again (`reloadCommandRuns`, also on the resync of the connection to this computer's host), so the Run panel shows the run that is
   running now. A Run command a session started is started again too, and that session is not told (the note of the tasks the stop
   ended, above, lists its own background tasks, not these).
+- **A few at a time** (#1913, owner 2026-11-12 and 11-14). The wakes go `UPDATE_WAKES_AT_ONCE` (3) at a time, cut turns first and then
+  the sessions at rest woken for their tasks, until every one is woken. A slot is held from the send until the woken session's first
+  answer (any output of its first model request), or any other end of that wake (an error or a limit, a state other than working such
+  as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). A bare turn end is not one: measured
+  with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the note goes
+  in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. A woken session that has said
+  nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its wake going on, so a
+  request that hangs does not keep the rest from waking. The burst is the first request: after a restart each one re-reads the whole
+  conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
+  at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
+  its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;
+  a session at rest keeps its queued note);
+  a message of the person's sends the note at once, outside the queue, since the message does not say what the stop ended. A host that
+  leaves before the queue drains leaves the rest listed, and the host after it wakes them (a session woken meanwhile and in its wake turn
+  is a turn that stop cuts, and is continued as one). There is no setting and no wait in the header: Centralu cut these turns, the person
+  did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that
   work with its process and is not continued as a turn, but its agent is told (above). One whose tool cannot take it up again
   ends as a crash's does (`turnLostInSwap`): `quit`, and its report or its requester told it stopped.
 - **A swap's cut was continued the same way** (#1966). Between #1895 step 4 PR 1 and PR 5 a swap's drain was a stop for
-  an update, so the turns it cut were listed and continued as above, through the same door (`HostTenure.sendUpdateNote`),
+  an update, so the turns it cut were listed and continued as above, through the same door (`TurnContinue.wakeAfterUpdate`),
   the state kept `working` while the new process comes up (`continuingTurns`). No host is drained for a swap since PR 5
   ([front-door.md](front-door.md)). A turn cut by the person's own quit (`markQuit`, no list) is not continued, as before (#1947).
 - **Its caller hears nothing of the cut** (#1966). The update used to send one notice per cut child, each waking the parent's turn
