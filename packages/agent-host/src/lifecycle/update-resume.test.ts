@@ -39,16 +39,34 @@ describe('the turns an update cut, in the data folder', () => {
     expect(f.files.size).toBe(1)
   })
 
-  it('keeps what is still to deal with when the old list cannot be removed after it was written again, and says so', () => {
+  it('writes a list again in one step: after it, a stopped woken entry is gone; before it or when it fails, the old list stands whole and is said', () => {
     const f = memoryUpdateFolder()
-    recordUpdateCut(f, [{ id: 's1', seq: 4 }, { id: 's2', seq: 9 }])
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const held: UpdateResumeFolder = { names: f.names, read: f.read, add: f.add, remove: () => { throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }) } }
+    // Killed before the rename, or the rename still failing after its tries: nothing changed on disk, as a Stop still on its way is not taken
+    const failing: UpdateResumeFolder = { ...f, replace: () => { throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }) } }
+    new UpdateResumeLists(failing).done('s1')
+    expect(f.turns()).toEqual([{ id: 's1', seq: 4, woken: true }, { id: 's2', seq: 9 }])
+    expect(f.files.size).toBe(1)
+    expect(said.mock.calls.some((c) => String(c[0]).includes('could not be written again') && String(c[0]).includes('EPERM'))).toBe(true)
+    // After the rename (whether the host lived on or was killed then): one list, s1 gone from it, s2 still to deal with
+    new UpdateResumeLists(f).done('s1')
+    const next = new UpdateResumeLists(f)
+    expect(next.cut('s1', 4, true)).toBe(false)
+    expect(next.cut('s2', 9)).toBe(true)
+    expect(f.files.size).toBe(1)
+  })
+
+  it('writes a list that names nothing more empty when it cannot be removed, so a dealt woken entry is gone all the same, and the next start removes it', () => {
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4, woken: true }])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const held: UpdateResumeFolder = { ...f, remove: () => { throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }) } }
     new UpdateResumeLists(held).done('s1')
-    // Both files stand, as after a host killed between the two steps: s2 is still listed
-    expect(f.files.size).toBe(2)
-    expect(new UpdateResumeLists(f).cut('s2', 9)).toBe(true)
-    expect(said.mock.calls.some((c) => String(c[0]).includes('could not be removed'))).toBe(true)
+    expect(f.files.size).toBe(1)
+    expect(new UpdateResumeLists(held).cut('s1', 4, true)).toBe(false)
+    new UpdateResumeLists(f)
+    expect(f.files.size).toBe(0)
   })
 
   it('a listed session is the turn that stop cut only while its conversation still ends where it did then (#1626 review)', () => {
@@ -215,6 +233,9 @@ describe('the turns an update cut, in the data folder', () => {
         throw new Error('EACCES')
       },
       add: () => {
+        throw new Error('ENOSPC: no space left on device')
+      },
+      replace: () => {
         throw new Error('ENOSPC: no space left on device')
       },
       remove: () => {

@@ -332,6 +332,20 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     expect(d.session(stopped!).state).not.toBe('working')
   })
 
+  it('does not continue a session in error from a woken entry, and deals with the entry (#2264 re-check)', async () => {
+    const { store, folder, all } = await updated(2, 0)
+    const [failed, fine] = all
+    folder.files.clear()
+    for (const s of store.sessions.listSessions()) store.sessions.upsertSession({ ...s, state: s.id === failed ? 'error' : 'waiting_input' })
+    recordUpdateCut(folder, all.map((id) => ({ id, seq: store.messages.nextSeq(id) - 1, woken: true as const })))
+    const c = host(store, folder)
+    await eventually(() => c.adapter.handles.get(fine!)?.sent.length === 1)
+    c.adapter.handles.get(fine!)!.answer()
+    await eventually(() => folder.files.size === 0)
+    expect(c.adapter.handles.get(failed!)?.sent ?? []).toEqual([])
+    expect(c.session(failed!).state).toBe('error')
+  })
+
   it('leaves the ones still queued to the host after a second update, which wakes them once', async () => {
     const { store, folder, ids } = await updated(0, UPDATE_WAKES_AT_ONCE + 2)
     const b = host(store, folder)

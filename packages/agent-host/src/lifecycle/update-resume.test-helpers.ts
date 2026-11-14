@@ -18,9 +18,10 @@ export function memoryUpdateFolder(): UpdateResumeFolder & {
     names: () => [...files.keys()],
     read: (name) => files.get(name) ?? null,
     add: (text) => {
-      const name = `update-resume.${String(++made).padStart(8, '0')}.json`
+      files.set(`update-resume.${String(++made).padStart(8, '0')}.json`, text)
+    },
+    replace: (name, text) => {
       files.set(name, text)
-      return name
     },
     remove: (name) => {
       files.delete(name)

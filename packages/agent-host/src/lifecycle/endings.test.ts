@@ -3,7 +3,7 @@
  * HO15), against a stand-in process the test sends signals and errors to.
  */
 import { EventEmitter } from 'node:events'
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -253,6 +253,31 @@ describe('updateResumeFolder', () => {
       lists.done('s1')
       lists.done('s2')
       expect(readdirSync(dir)).toEqual(['update-resume.json'])
+    } finally {
+      await removeTree(dir)
+    }
+  })
+
+  it('writes a list again in place through a temporary file, leaves none behind, and never reads one a killed host left (#2264 re-check)', async () => {
+    const dir = tempRoot('cc-update-resume-')
+    try {
+      const f = updateResumeFolder(dir)
+      recordUpdateCut(f, [{ id: 's1', seq: 3, woken: true }, { id: 's2', seq: 5 }])
+      const [name] = readdirSync(dir)
+      // A host killed after writing the temporary file, before the rename: the old list stands, and the temporary one is no list
+      writeFileSync(join(dir, `${name}.tmp`), '{"v":1,"turns":[]}')
+      expect(f.names()).toEqual([name])
+      new UpdateResumeLists(f).done('s1')
+      expect(readdirSync(dir).filter((n) => !n.endsWith('.tmp'))).toEqual([name])
+      const next = new UpdateResumeLists(updateResumeFolder(dir))
+      expect(next.cut('s1', 3, true)).toBe(false)
+      expect(next.cut('s2', 5)).toBe(true)
+      // One that cannot be written (its temporary name taken by a folder): it throws, the old list as it was, no file of its own left
+      await removeTree(join(dir, `${name}.tmp`))
+      mkdirSync(join(dir, `${name}.tmp`))
+      const before = readFileSync(join(dir, name), 'utf8')
+      expect(() => f.replace(name!, '{"v":1,"turns":[]}\n')).toThrow()
+      expect(readFileSync(join(dir, name), 'utf8')).toBe(before)
     } finally {
       await removeTree(dir)
     }

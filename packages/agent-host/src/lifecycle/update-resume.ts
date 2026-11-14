@@ -36,8 +36,8 @@ import { readStopped, type Stopped } from './update-stopped.js'
  *
  * **Each stop writes its own list** under a name no other has (`add`), never replacing another's: no rename over a file
  * another process may hold, and no list one stop wrote that a second one could take away. The next host reads all of
- * them (`UpdateResumeLists`), and each entry leaves its list once it is dealt with (`done`: the list is written again without it,
- * and goes once it names nothing). One it could not remove goes at a later start. A list a host killed mid-write left
+ * them (`UpdateResumeLists`), and each entry leaves its list once it is dealt with (`done`: the list is written again without it under
+ * its own name, through a temporary file renamed over it, and goes once it names nothing). A list a host killed mid-write left
  * is not JSON and goes at the next start; one of another format (a newer host's) is left to it. Nothing expires.
  */
 export const UPDATE_RESUME_PREFIX = 'update-resume.'
@@ -59,8 +59,10 @@ export type UpdateStop = { turns: CutTurn[]; stopped: Stopped[]; ended: Ended; /
 export type UpdateResumeFolder = {
   names(): string[]
   read(name: string): string | null
-  /** Writes a new list under a name no other list has, and says the name */
-  add(text: string): string
+  /** Writes a new list under a name no other list has */
+  add(text: string): void
+  /** Writes a list again under its own name in one step: a host killed meanwhile leaves the old text or the new, never neither. Throws when it could not, the old text left */
+  replace(name: string, text: string): void
   remove(name: string): void
 }
 
@@ -160,6 +162,8 @@ export class UpdateResumeLists {
       const turns = parseUpdateResume(text)
       if (turns === 'other') continue
       if (turns === 'torn') this.removeList(name, 'it is not read, and a later start removes it')
+      // One written empty because it could not be removed (`done`) goes now
+      else if (!turns.turns.length && !turns.stopped.length && !turns.ended.terminals.length && !turns.ended.runs.length) this.removeList(name, 'it names nothing, and a later start removes it')
       else this.lists.set(name, turns)
     }
   }
@@ -210,10 +214,10 @@ export class UpdateResumeLists {
 
   /**
    * One listed session dealt with: continued, reported as lost, dropped (the person's Stop, gone) or not found cut. It leaves every list that
-   * names it now, on disk too (#2264 re-check): the list is written again without it, a new file first and then the old one goes, and a list
-   * that names nothing more just goes. A mark alone does not keep a dealt entry harmless: the person's Stop writes no row, so a `woken` entry
-   * would still match a session at rest. A host killed between the two steps leaves both files, naming the same entries still to deal with,
-   * which a start reads as one. One that cannot be written or removed is said in the log, and the entry stays there for a later start
+   * names it now, on disk too (#2264 re-check): a mark alone does not keep a dealt entry harmless, since the person's Stop writes no row and a
+   * `woken` entry would still match a session at rest. The list is written again without it in one step (`replace`), and one that names
+   * nothing more goes; if it cannot be removed it is written empty instead, which the next start removes. A host killed before that step is
+   * like a Stop still on its way when the host stops: not taken. A list that cannot be written again keeps its old text, said in the log
    */
   done(id: string): void {
     this.dealt.add(id)
@@ -221,16 +225,16 @@ export class UpdateResumeLists {
       if (![...l.turns, ...l.stopped].some((t) => t.id === id)) continue
       const turns = l.turns.filter((t) => !this.dealt.has(t.id))
       const stopped = l.stopped.filter((t) => !this.dealt.has(t.id))
-      if (turns.length || stopped.length) {
-        try {
-          this.lists.set(this.folder.add(listText(turns, stopped)), { ...l, turns, stopped })
-        } catch (err) {
-          console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it stays listed there`)
-          continue
-        }
+      if (!turns.length && !stopped.length && this.removeList(name, 'it is written empty instead')) {
+        this.lists.delete(name)
+        continue
       }
-      this.lists.delete(name)
-      this.removeList(name, `a later start reads it, and ${id.slice(0, 8)} with it`)
+      try {
+        this.folder.replace(name, listText(turns, stopped))
+        this.lists.set(name, { ...l, turns, stopped })
+      } catch (err) {
+        console.error(`[agent-host] ${name} could not be written again without ${id.slice(0, 8)} (${errorMessage(err)}); it still names it, for a later start`)
+      }
     }
   }
 

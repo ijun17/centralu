@@ -31,10 +31,11 @@ the person's Continue would.
   later start, and the turns of sessions this start finds cut are marked stopped like a quit's (the host cannot tell which
   the list names), with the log saying why. Each turn leaves its list
   once it is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, the person's Stop dropped it, or
-  the start did not find it cut. The list is written again without it (a new file, then the old one goes; a host killed in between
-  leaves both, naming the same turns still to deal with), and goes once it names nothing (#2264 re-check: a Stop writes no row, so
-  a mark alone did not keep a dealt `woken` entry from matching). One that cannot be written or removed is said in the log, and
-  goes at a later start; one a host
+  the start did not find it cut. The list is written again without it under its own name, in one step (a temporary file renamed over
+  it), and goes once it names nothing (#2264 re-check: a Stop writes no row, so a mark alone did not keep a dealt `woken` entry from
+  matching). A host killed before that step is like a Stop still on its way when the host stops: not taken. A rename that still fails
+  after the tries for a held file leaves the old list as it was, said in the log, so that entry is read again by a later start; a list
+  that names nothing and cannot be removed is written empty, and the next start removes it. One a host
   killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
   the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving

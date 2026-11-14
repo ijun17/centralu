@@ -68,8 +68,10 @@ export function takeSystemEnd(dataDir: string): SystemEnd | null {
 /**
  * The data folder's lists of the turns an update cut (#1618, update-resume.ts): each written by a host an update stops,
  * read by the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next.
- * Each list is written once, under a new name of its own (`wx`): nothing is renamed over a file another process may hold,
- * and a host killed while it wrote leaves text that is not JSON, which the next start removes
+ * Each list is written under a new name of its own (`wx`), and a host killed while it wrote leaves text that is not JSON, which the
+ * next start removes. One is written again without an entry dealt with (`replace`, #2264 re-check) by a temporary file renamed over
+ * it: the rename is one step, retried while a scanner holds the file (os/held.ts), and one that still fails leaves the old list as it was.
+ * The temporary name (`.tmp`) is no list's, so `names` never reads one a killed host left
  */
 export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
   // `update-resume.<uuid>.json`, the names `add` gives (UPDATE_RESUME_PREFIX)
@@ -84,10 +86,21 @@ export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
         throw err
       }
     },
-    add: (text) => {
-      const name = `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`
-      writeFileSync(join(dataDir, name), text, { flag: 'wx' })
-      return name
+    add: (text) => writeFileSync(join(dataDir, `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`), text, { flag: 'wx' }),
+    replace: (name, text) => {
+      const files = realOs().files
+      const tmp = join(dataDir, `${name}.tmp`)
+      try {
+        files.writeFileSync(tmp, text)
+        files.renameSync(tmp, join(dataDir, name))
+      } catch (err) {
+        try {
+          files.rmSync(tmp, { force: true })
+        } catch {
+          // a temporary file left behind is no list's
+        }
+        throw err
+      }
     },
     remove: (name) => realOs().files.rmSync(join(dataDir, name), { force: true }),
   }
