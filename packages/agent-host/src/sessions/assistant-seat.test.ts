@@ -408,9 +408,7 @@ describe('what a send leaves', () => {
     expect(host.mailTask).toHaveBeenCalledWith('orch', expect.objectContaining({ id: 'a' }), 'send_to_session', 'again', true)
     expect(host.send).not.toHaveBeenCalled()
     expect(delegated).not.toHaveBeenCalled()
-  })
-
-  it('a session at rest whose seat takes no mail is given the instruction without a report directly, as before mail', async () => {
+    // A session at rest whose seat takes no mail is given the words directly, as before mail
     host.mailTask = vi.fn(() => ({ error: '"A" is busy and takes no mail: send to it once it is at rest.' }))
     expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'again')).toEqual({ ok: true })
     expect(host.send).toHaveBeenCalledWith('a', 'again', undefined, { sessionId: 'orch', name: 'Assistant' })
