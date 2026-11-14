@@ -209,6 +209,8 @@ async function buildInto(outDir) {
     format: 'iife',
     globalName: 'McpApp',
     minify: true,
+    // ext-apps' transport logs every app message with console.debug, which the console keeps (tooling/pure-calls.ts)
+    pure: ['console.debug'],
     legalComments: 'none',
     banner: { js: VIEW_HEADER },
     metafile: true,

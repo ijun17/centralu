@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwind from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 import { aliases } from '../../tooling/aliases.js'
+import { PURE_CALLS } from '../../tooling/pure-calls.js'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -13,7 +14,7 @@ export default defineConfig({
   resolve: {
     alias: aliases({ '@cc/platform/tauri': 'packages/platform/src/tauri/index.ts' }),
   },
-  build: { target: 'safari15', emptyOutDir: true },
+  build: { target: 'safari15', emptyOutDir: true, rolldownOptions: { treeshake: { manualPureFunctions: PURE_CALLS } } },
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
   clearScreen: false,
 })
