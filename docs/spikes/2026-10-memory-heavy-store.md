@@ -511,9 +511,9 @@ has to be parsed before the first frame.
 ## 11. Sessions working out of view (`--steps background`)
 
 The owner's window grew about 57 MB/h in real use (5–8 sessions working at once, most of them out of view) while the
-`stream` step, which streams into the open session, settles flat. The `background` step models that use: the long
-session open, 8 others streaming the same turn loop out of view for 30 minutes, three of them visited and left every
-3 minutes, mail arriving every minute. Chromium on Windows, owner profile, 6,632 rows received:
+`stream` step, which streams into the open session, settles flat. The `background` step (it lands with #2277) models
+that use: the long session open, 8 others streaming the same turn loop out of view for 30 minutes, three of them
+visited and left every 3 minutes, mail arriving every minute. Chromium on Windows, owner profile, 6,632 rows received:
 
 | | content MB, sampled | content after GC | JS heap MB | heap after GC |
 |---|---:|---:|---:|---:|

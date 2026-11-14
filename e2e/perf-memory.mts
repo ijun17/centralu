@@ -3,8 +3,7 @@
  *
  *   pnpm perf:memory [--profile small|owner|stress] [--engines webkit,chromium] [--stream-minutes 5]
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
- *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background] [--dpr 2]
- *                    [--background-minutes 30] [--background-sessions 8] [--heap-snapshots <dir>]
+ *                    [--steps blank,shell,long,scrolled,grid,switched,stream] [--dpr 2]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
  *                    [--reduced-motion] [--freeze-animations] [--css <file>] [--layers] [--blur]
  *
@@ -29,15 +28,10 @@
  *   switched    focus moved through 10 sessions, one after another
  *   stream-*    synthetic streaming into the long session (a turn loop: deltas, tool calls, output, a subagent, a
  *               background task, images), sampled along the way, then after it settles
- *   background-* the long session open while `--background-sessions` others stream the same turn loop out of view, as
- *               workers and linked children do, for `--background-minutes`: a few of them visited now and then, mail
- *               arriving every minute; sampled every five minutes, then after it settles (not in the default steps)
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
- * over CDP, also after a forced collection. On Windows (Chromium only) the footprint is each process's private bytes and
- * RSS its working set, read from `Win32_Process`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
- * the last background sample, writes both to that folder and prints what grew between them by constructor.
+ * over CDP, also after a forced collection.
  *
  * The streaming is not a model: the page's socket to the host is routed through Playwright (`routeWebSocket`) and
  * the events are injected there, in the host's own envelope, with the host's later event numbers shifted past
@@ -84,7 +78,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 /** What the synthetic stream is made of; leaving parts out tells which of them the memory goes to */
 const STREAM_PARTS = ['working', 'text', 'reasoning', 'tools', 'subagent', 'images', 'background'] as const
 type StreamPart = (typeof STREAM_PARTS)[number]
-const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background'] as const
+const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream'] as const
 type Step = (typeof STEPS)[number]
 
 const { values } = parseArgs({
@@ -105,16 +99,11 @@ const { values } = parseArgs({
     layers: { type: 'boolean', default: false },
     blur: { type: 'boolean', default: false },
     css: { type: 'string' },
-    'background-minutes': { type: 'string', default: '30' },
-    'background-sessions': { type: 'string', default: '8' },
-    'heap-snapshots': { type: 'string' },
   },
 })
 const profile = values.profile as StoreProfile
 const engines = values.engines.split(',') as Engine[]
 const streamMs = Number(values['stream-minutes']) * 60_000
-const backgroundMs = Number(values['background-minutes']) * 60_000
-const BACKGROUND_SESSIONS = Number(values['background-sessions'])
 const quick = values.quick
 const steps = new Set(values.steps.split(',') as Step[])
 const parts = new Set(values['stream-parts'].split(',') as StreamPart[])
@@ -164,10 +153,7 @@ type Sample = {
 
 // ── Processes ──────────────────────────────────────────────────────────────────────────────
 
-type ProcRow = { pid: number; ppid: number; rssKB: number; command: string; privateMB?: number }
-
-function psTable(): ProcRow[] {
-  if (process.platform === 'win32') return winTable()
+function psTable(): { pid: number; ppid: number; rssKB: number; command: string }[] {
   return execFileSync('ps', ['-Ao', 'pid=,ppid=,rss=,command='], { maxBuffer: 64 * 1024 * 1024 })
     .toString()
     .split('\n')
@@ -176,25 +162,8 @@ function psTable(): ProcRow[] {
     .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), rssKB: Number(m[3]), command: m[4]! }))
 }
 
-/** Windows has no `ps`: the same table from `Win32_Process`, with each process's private bytes as its footprint */
-function winTable(): ProcRow[] {
-  const query =
-    'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize,PrivatePageCount,CommandLine | ConvertTo-Json -Compress'
-  const rows = JSON.parse(
-    execFileSync('powershell.exe', ['-NoProfile', '-Command', query], { maxBuffer: 64 * 1024 * 1024 }).toString(),
-  ) as { ProcessId: number; ParentProcessId: number; WorkingSetSize: number; PrivatePageCount: number; CommandLine: string | null }[]
-  return rows.map((r) => ({
-    pid: r.ProcessId,
-    ppid: r.ParentProcessId,
-    rssKB: r.WorkingSetSize / 1024,
-    command: r.CommandLine ?? '',
-    privateMB: r.PrivatePageCount / 1048576,
-  }))
-}
-
 /** `top`'s MEM column is the physical footprint — what Activity Monitor calls Memory. Reading it asks for nothing */
-function footprints(table: ProcRow[]): Map<number, number> {
-  if (process.platform === 'win32') return new Map(table.map((p) => [p.pid, p.privateMB ?? 0]))
+function footprints(): Map<number, number> {
   const out = execFileSync('top', ['-l', '1', '-stats', 'pid,mem'], {
     maxBuffer: 64 * 1024 * 1024,
   }).toString()
@@ -231,7 +200,7 @@ function roleOf(engine: Engine, command: string): string | null {
     if (command.includes('Playwright.app/Contents/MacOS/Playwright')) return 'ui'
     return null
   }
-  if (!/chrome for testing|chromium/i.test(command)) return null
+  if (!command.includes('Chrome for Testing') && !command.includes('Chromium')) return null
   if (command.includes('--type=renderer')) return 'content'
   if (command.includes('--type=gpu-process')) return 'gpu'
   if (command.includes('--type=utility')) return command.includes('network') ? 'network' : 'other'
@@ -242,7 +211,7 @@ function roleOf(engine: Engine, command: string): string | null {
 /** WebKit's helpers belong to launchd, not to the browser: they are the WebKit processes that are new since launch */
 function engineProcs(engine: Engine, before: Set<number>, hostPid: number): { procs: Proc[]; host: number } {
   const table = psTable()
-  const fp = footprints(table)
+  const fp = footprints()
   const mine = descendants(table, process.pid)
   const procs: Proc[] = []
   for (const p of table) {
@@ -429,53 +398,6 @@ async function heap(cdp: CDPSession | null) {
   }
 }
 
-type HeapClasses = Map<string, { bytes: number; count: number }>
-
-/**
- * What the JS heap holds by constructor, after a forced collection: self bytes and count per object constructor, the rest
- * by node type (`(string)`, `(code)`…). The snapshot is written to `file` for a closer look in DevTools.
- */
-async function heapClasses(cdp: CDPSession, file: string): Promise<HeapClasses> {
-  const chunks: string[] = []
-  const onChunk = (e: { chunk: string }) => chunks.push(e.chunk)
-  cdp.on('HeapProfiler.addHeapSnapshotChunk', onChunk)
-  await cdp.send('HeapProfiler.collectGarbage')
-  await cdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false })
-  cdp.off('HeapProfiler.addHeapSnapshotChunk', onChunk)
-  const text = chunks.join('')
-  writeFileSync(file, text)
-  const snap = JSON.parse(text) as {
-    snapshot: { meta: { node_fields: string[]; node_types: [string[]] } }
-    nodes: number[]
-    strings: string[]
-  }
-  const fields = snap.snapshot.meta.node_fields
-  const types = snap.snapshot.meta.node_types[0]
-  const [type, name, self] = ['type', 'name', 'self_size'].map((k) => fields.indexOf(k)) as [number, number, number]
-  const out: HeapClasses = new Map()
-  for (let i = 0; i < snap.nodes.length; i += fields.length) {
-    const t = types[snap.nodes[i + type]!]!
-    const key = t === 'object' ? snap.strings[snap.nodes[i + name]!]!.replace(/ @\d+$/, '') : `(${t})`
-    const cur = out.get(key) ?? { bytes: 0, count: 0 }
-    cur.bytes += snap.nodes[i + self]!
-    cur.count++
-    out.set(key, cur)
-  }
-  return out
-}
-
-/** The constructors that grew most between two snapshots */
-function heapGrowth(from: HeapClasses, to: HeapClasses, top = 25): { name: string; mb: number; count: number }[] {
-  return [...to]
-    .map(([name, v]) => ({
-      name,
-      mb: round((v.bytes - (from.get(name)?.bytes ?? 0)) / 1048576),
-      count: v.count - (from.get(name)?.count ?? 0),
-    }))
-    .sort((a, b) => b.mb - a.mb)
-    .slice(0, top)
-}
-
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0
 const round = (n: number) => Math.round(n * 10) / 10
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -571,7 +493,7 @@ async function stream(
   sessionId: string,
   firstSeq: number,
   ms: number,
-  sample?: (step: string) => Promise<void>,
+  sample: (step: string) => Promise<void>,
 ): Promise<void> {
   let seq = firstSeq
   let n = 0
@@ -588,7 +510,7 @@ async function stream(
   // A live screenshot carries its bytes, as the host broadcasts it
   const png = screenshotPng(3, 1440, 900).toString('base64')
   const start = Date.now()
-  const marks = sample ? [60_000, 150_000, ms].filter((t) => t <= ms) : []
+  const marks = [60_000, 150_000, ms].filter((t) => t <= ms)
   const send = (part: StreamPart, e: Record<string, unknown>) => {
     if (parts.has(part)) wire.inject({ sessionId, ...e })
   }
@@ -685,7 +607,7 @@ async function stream(
       n++
       while (marks.length && Date.now() - start >= marks[0]!) {
         const t = marks.shift()!
-        if (t < ms) await sample!(`stream-${Math.round(t / 1000)}s`)
+        if (t < ms) await sample(`stream-${Math.round(t / 1000)}s`)
       }
     }
     send('background', {
@@ -748,11 +670,11 @@ async function startHost(
 }
 
 function buildUi(uiRoot: string, outDir: string, token: string, hostPort: number): void {
-  // Vite's own script under node rather than `pnpm exec`: Windows starts no `.cmd` without a shell
   const r = spawnSync(
-    process.execPath,
+    'pnpm',
     [
-      join(uiRoot, 'node_modules/vite/bin/vite.js'),
+      'exec',
+      'vite',
       'build',
       '--config',
       join(uiRoot, 'apps/web/vite.config.ts'),
@@ -806,7 +728,6 @@ async function measureEngine(
   seed: Omit<SeedSummary, 'sessions' | 'projects'>
   samples: Sample[]
   layers: Layer[] | null
-  heapGrowth: ReturnType<typeof heapGrowth> | null
 }> {
   const work = mkdtempSync(join(tmpdir(), 'centralu-perf-memory-'))
   const dataDir = join(work, 'data')
@@ -814,7 +735,6 @@ async function measureEngine(
   mkdirSync(home)
   const samples: Sample[] = []
   let layers: Layer[] | null = null
-  let grown: ReturnType<typeof heapGrowth> | null = null
   let host: ChildProcess | null = null
   let server: Server | null = null
   let browser: Browser | null = null
@@ -1013,69 +933,8 @@ async function measureEngine(
       await sample('stream-settled')
     }
 
-    /*
-     * background: the long session open, as the person keeps one conversation open, while others stream out of view as
-     * workers and linked children do. Every few minutes one of three of them is visited and left again; mail arrives
-     * every minute. The window keeps receiving all of it.
-     */
-    if (steps.has('background')) {
-      const streamers = seed.sessions.filter((s) => s.id !== seed.longSessionId).slice(0, BACKGROUND_SESSIONS)
-      await row(seed.longSessionId).click()
-      await sleep(SETTLE_MS)
-      await sample('background-0s')
-      const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
-      if (snapshots) mkdirSync(snapshots, { recursive: true })
-      const first = snapshots ? await heapClasses(cdp!, join(snapshots, `${engine}-background-0s.heapsnapshot`)) : null
-      const start = Date.now()
-      const over = () => Date.now() - start >= backgroundMs
-      const visits = async () => {
-        for (let i = 0; !over(); i++) {
-          await sleep(quick ? 20_000 : 180_000)
-          if (over()) break
-          await row(streamers[i % Math.min(3, streamers.length)]!.id).click()
-          await sleep(quick ? 3_000 : 15_000)
-          await row(seed.longSessionId).click()
-        }
-      }
-      const mail = async () => {
-        for (let i = 1; !over(); i++) {
-          await sleep(60_000)
-          if (over()) break
-          const from = streamers[i % streamers.length]!
-          wire.inject({
-            type: 'mail_changed',
-            threadId: `perf.t_${i}`,
-            toPerson: true,
-            arrived: {
-              messageId: `perf.m_${i}`,
-              from: { address: `session:perf/${from.id}`, kind: 'session', sessionId: from.id, name: null, state: 'working' },
-              kind: 'report',
-              preview: `Report ${i}: the window keeps what it was sent`,
-            },
-          })
-        }
-      }
-      const samples5m = async () => {
-        for (let m = 5; m * 60_000 < backgroundMs; m += 5) {
-          await sleep(start + m * 60_000 - Date.now())
-          await sample(`background-${m}m`)
-        }
-      }
-      await Promise.all([
-        ...streamers.map((s) => stream(wire, s.id, s.lastSeq, backgroundMs)),
-        visits(),
-        mail(),
-        samples5m(),
-      ])
-      await sample(`background-${Math.round(backgroundMs / 60_000)}m`)
-      await sleep(quick ? 2_000 : 30_000)
-      await sample('background-settled')
-      if (first && snapshots)
-        grown = heapGrowth(first, await heapClasses(cdp!, join(snapshots, `${engine}-background-end.heapsnapshot`)))
-    }
-
     const { sessions: _s, projects: _p, ...rest } = seed
-    return { engine, seed: rest, samples, layers, heapGrowth: grown }
+    return { engine, seed: rest, samples, layers }
   } finally {
     await browser?.close().catch(() => {})
     if (host && host.exitCode === null) {
@@ -1115,12 +974,6 @@ for (const r of results) {
       `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
         `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
     )
-  }
-  if (r.heapGrowth) {
-    console.log('\n### What the JS heap gained over the background step, by constructor\n')
-    console.log('| constructor | MB | count |')
-    console.log('|---|---:|---:|')
-    for (const g of r.heapGrowth) console.log(`| \`${g.name.replace(/\|/g, '\\|')}\` | ${g.mb} | ${g.count} |`)
   }
   if (r.layers) {
     const drawn = r.layers.filter((l) => l.drawsContent)
