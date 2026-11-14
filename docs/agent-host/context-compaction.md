@@ -135,8 +135,9 @@
     turn's first. A session at rest is the rest rule's job, not this.
     **Once per share per compaction cycle:** a share is told the first time a request is over it (a request over both says it once); a compaction of
     any kind that succeeded (the agent's, Centralu's, the tool's own, the person's `/compact`) or a fresh conversation (`/clear`) starts the cycle again, so
-    the shares are told again when the context grows back; a compaction that failed does not. The counters are in memory: a host that starts tells a session
-    already over a share again, once. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
+    the shares are told again when the context grows back; a compaction that failed does not. The counters are in memory; a host that starts counts the shares a
+    session's stored reading (its size at its last turn's end) is already past as told, so a session an update wakes is not told again in its wake
+    (#1913; a cycle a compaction or `/clear` starts in that host is not seeded: the reading is from before it). **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
     context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
     line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
