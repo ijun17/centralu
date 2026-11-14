@@ -267,6 +267,8 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
     s.setAppSetting(startedByHubKey('s1'), JSON.stringify({ id: 'hub-a', name: 'Desk', apps: true }))
     const h = hubs(s)
+    // It stands for mail to the person (away), and for nothing else
+    expect(h.mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false]])
     expect(appsPeers({ hubs: h, settings: s }).startedBy('s1')).toEqual({ hub: { id: 'hub-a', name: 'Desk', apps: true }, link: undefined })
     const apps = new LinkedApps()
     apps.usePeers(appsPeers({ hubs: h, settings: s }))
