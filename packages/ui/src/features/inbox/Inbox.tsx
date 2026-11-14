@@ -301,8 +301,12 @@ export function Inbox() {
             }}
           />
         ) : (
-          // The switch fades one list in as the other fades out in the same place (design-system §9)
-          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)]">
+          /*
+            The switch fades one list in as the other fades out in the same place (design-system §9). The one column is the panel's width and no more
+            (`minmax(0, …)`): an `auto` column grows to its widest unbroken line, so a long command or preview would widen the row instead of being cut
+            (the row's Allow measures whether its command fits, #683)
+          */
+          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
             {tasksPane.shown && (
               <Pane leaving={tasksPane.leaving}>
                 <TaskList
@@ -388,7 +392,7 @@ function onTaskKey(
 /** One of the Inbox's two lists while it is on screen: it fades in, and out in the same place when the other takes over, taking no presses or keys as it goes */
 function Pane({ leaving, children }: { leaving: boolean; children: ReactNode }) {
   return (
-    <div className={`flex min-h-0 flex-col [grid-area:1/1] ${leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'}`} inert={leaving}>
+    <div className={`flex min-h-0 min-w-0 flex-col [grid-area:1/1] ${leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'}`} inert={leaving}>
       {children}
     </div>
   )

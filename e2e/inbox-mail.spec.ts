@@ -556,6 +556,30 @@ test('Mail: a crowded row cuts the preview, not the subject or the names', async
   await expect(page.getByTestId(`mail-people-${row}`)).toContainText('mac-builder')
 })
 
+// A line longer than the panel is cut in both lists, never a wider row: the two lists share one grid cell for the switch's fade, whose column is the panel's
+// width (an `auto` one grew to the widest line, and a long command on an approval row then measured as fitting, #683)
+test('Mail and Tasks: a subject longer than the panel is cut, and neither list grows wider than the panel', async ({ page }) => {
+  await setup(page)
+  const LONG = 'Move the release signing, the notarization and the upload of every platform build to the new pipeline, and say which identity each used'
+  const row = await seed(page, { subject: LONG, kind: 'assign', from: PARSER, assignee: { ...PARSER, sessionId: 's6', name: 'Builder' }, body: 'Move it' })
+  await page.evaluate(
+    (s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s),
+    { subject: LONG, owner: { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }, assignee: PARSER, state: 'running' },
+  )
+  await page.getByTestId('counter').click()
+  const cut = (el: HTMLElement) => el.scrollWidth > el.clientWidth
+  const widerThanPanel = (testId: string) =>
+    page.getByTestId(testId).evaluate((el) => el.getBoundingClientRect().width > (document.querySelector('[data-testid="inbox"]')?.clientWidth ?? 0) + 1)
+  await expect(page.getByTestId(`mail-subject-${row}`)).toBeVisible()
+  expect(await page.getByTestId(`mail-subject-${row}`).evaluate(cut)).toBe(true)
+  expect(await widerThanPanel('inbox-list')).toBe(false)
+  await page.getByTestId('inbox-tab-tasks').click()
+  const subject = page.getByTestId('inbox-tasks').locator('[data-testid^="task-subject-"]')
+  await expect(subject).toBeVisible()
+  expect(await subject.evaluate(cut)).toBe(true)
+  expect(await widerThanPanel('inbox-tasks')).toBe(false)
+})
+
 // #1577 (owner 2026-11-14, option C): Waiting | Tasks inside the Inbox, the host's work grouped by who acts next
 test('Tasks: the switch lists the host’s work by who acts next, opens a chain between sessions read-only, and folds Done', async ({ page }) => {
   await setup(page)
