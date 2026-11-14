@@ -245,7 +245,8 @@ may not open (decided 2026-11-14 on #1987):
   Inbox: the person sees it in this computer's window.` No hub at all: this computer's Inbox, as before. A session a
   hub started whose record names no hub (an earlier build) is refused `elsewhere`, and one whose hub is not linked now
   `link_down` (`MailAcross.personTarget`). The hubs that offer mail are kept in the app setting `mail_hubs` (`LinkedHubs`,
-  with when its link was last up: an offer, or the end of its connection), so a host that starts again while its hub is
+  with when its link was last up: an offer, the end of its connection, or a daily write while it is connected, so a host
+  that crashes finds it up within a day), so a host that starts again while its hub is
   away knows that hub before it offers, and the send is refused `link_down` naming it, not kept here unseen. A kept hub
   stands only for mail until it offers: it says nothing of apps, so a session it started keeps its own record for
   those (remote-hub.md §13.5). A hub whose link has been down 30 days is forgotten for mail, at start and while running:

@@ -60,6 +60,11 @@ const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.
  * outlasts a hub computer left off over a holiday or a long trip, and stops naming one that is gone within a month
  */
 const KEPT_MAIL_HUB_MS = 30 * 24 * 60 * 60_000
+/**
+ * How often the hubs that take mail are written again while one is connected: a host that ends without its connections
+ * ending (a crash, a power cut) then finds them up within a day of its end, not as of their last offer
+ */
+const STAMP_MS = 24 * 60 * 60_000
 
 /** The words a call that failed for an older hub says (it has no such method) */
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
@@ -81,9 +86,22 @@ export class LinkedHubs {
       // Not JSON: no hub is kept, as for any value that does not read
     }
     const read = KeptMailHubs.safeParse(kept)
+    // One down past `KEPT_MAIL_HUB_MS` is forgotten at its first use (`peer`)
     for (const h of read.success ? read.data : []) {
-      const hub: Hub = { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false }
-      if (!this.expired(hub)) this.hubs.set(h.id, hub)
+      this.hubs.set(h.id, { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false })
+    }
+  }
+
+  /** While a hub that takes mail is connected, it is written again each `STAMP_MS`; with none, nothing runs */
+  private stamp: ReturnType<typeof setInterval> | null = null
+  private stampWhileUp(): void {
+    const up = [...this.hubs.values()].some((h) => h.mail && h.client !== null)
+    if (up && !this.stamp) {
+      this.stamp = setInterval(() => this.keepMailHubs(), STAMP_MS)
+      this.stamp.unref?.()
+    } else if (!up && this.stamp) {
+      clearInterval(this.stamp)
+      this.stamp = null
     }
   }
 
@@ -94,6 +112,9 @@ export class LinkedHubs {
 
   /** The hubs that take mail, kept for the next start (`MAIL_HUBS_KEY`) */
   private keepMailHubs(): void {
+    // A hub connected now is up now
+    const now = Date.now()
+    for (const h of this.hubs.values()) if (h.client !== null) h.upAt = now
     const list = [...this.hubs.values()].filter((h) => h.mail && !this.expired(h)).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.upAt }))
     this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
   }
@@ -109,6 +130,7 @@ export class LinkedHubs {
     const apps = o.apps === true
     if (!o.on && !mail && !apps) {
       if (this.hubs.delete(o.hub.id)) this.keepMailHubs()
+      this.stampWhileUp()
       return
     }
     const prev = this.hubs.get(o.hub.id)
@@ -116,6 +138,7 @@ export class LinkedHubs {
     const name = oneLineText(o.hub.name, 120) || o.hub.id
     this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, upAt: Date.now(), offered: true })
     if (mail || prev?.mail) this.keepMailHubs()
+    this.stampWhileUp()
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
     for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name, apps })
@@ -138,6 +161,7 @@ export class LinkedHubs {
       mail ||= h.mail
     }
     if (mail) this.keepMailHubs()
+    this.stampWhileUp()
   }
 
   /** Whether any hub offered its projects (a session's project list says nothing of hubs otherwise) */

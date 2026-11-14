@@ -263,6 +263,23 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     }
   })
 
+  it('a hub that stays connected is up now: a host that ends without its connections ending still knows it after 40 days', () => {
+    vi.useFakeTimers()
+    try {
+      const s = settings(null)
+      const h = hubs(s)
+      h.offer(1, { hub: { id: 'hub-a', name: 'Desk' }, on: false, mail: true, you: 'm1' })
+      vi.advanceTimersByTime(40 * 24 * 60 * 60_000)
+      // No `gone`: the host crashed, or the power went
+      expect(hubs(s).mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false]])
+      // Its link ending stops the writing
+      h.gone(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a kept hub that has not offered on this run says nothing of apps: a session it started keeps its record, and its app copies here do not run (#1938)', () => {
     const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
     s.setAppSetting(startedByHubKey('s1'), JSON.stringify({ id: 'hub-a', name: 'Desk', apps: true }))
