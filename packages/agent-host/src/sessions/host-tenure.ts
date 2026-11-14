@@ -5,7 +5,7 @@ import { cutTurns, inTurn, turnCut } from '../idle.js'
 import { crashedInSystemEnd, cutBySystemEnd, type SystemEnd } from '../lifecycle/system-end.js'
 import type { Ended } from '../lifecycle/update-ended.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
-import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
+import { stoppedAtUpdate, type Stopped } from '../lifecycle/update-stopped.js'
 import { rpcError } from '../rpc-error.js'
 import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-host.js'
@@ -13,7 +13,6 @@ import type { DelegationFlow } from './delegation-flow.js'
 import type { ExternalConversations } from './external-conversations.js'
 import type { HostCards } from './host-cards.js'
 import { withHubMark } from './hub-preset.js'
-import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import type { LinkedReports } from './linked-reports.js'
 import type { MailSessionsHost, MailSessionsView } from './mail-sessions.js'
 import type { MergeChecks } from './merge-checks.js'
@@ -23,6 +22,7 @@ import type { SessionAppWiring } from './session-app-wiring.js'
 import type { SessionEventsHost } from './session-events.js'
 import type { SessionProcesses } from './session-processes.js'
 import type { SessionRecord } from './session-record.js'
+import type { UpdateCut, UpdateStep } from './turn-continue.js'
 import type { TurnInputs } from './turn-inputs.js'
 import type { UsageRecorder } from './usage-recorder.js'
 
@@ -62,11 +62,6 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
 export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
 
-  /**
-   * Sessions an update's stop left, to tell once the start is done (#1618, `continueCutTurns`): a turn it cut is continued (`turn`; its end
-   * says so, #1966); a session at rest whose tasks it stopped is woken for the note alone (#1902). `stopped`: what else it ended there
-   */
-  private updateCuts: { sessionId: string; turn: boolean; stopped: Stopped | null }[] = []
   /**
    * The turns this host continues because an update cut them, and when its start took them up (#1618): said in every hello,
    * for a hub's callers. Taken at the start, before this host answers any hello, so a hub that connects while a Continue is
@@ -112,78 +107,37 @@ export class HostTenure {
   }
 
   /**
-   * Continues each turn a linked hub's update cut (#1618, owner 2026-10-26): the update no longer waits for the turns on a
-   * machine, so the host it starts takes them up again, once. The session was left `working` by the start; it is woken
-   * and given Centralu's note through Centralu's own channel (`deliverMail`: no message of the person's, so the turn stays
-   * whose it was and its report, if one is owed, is still that turn's end). Its requester is told nothing of the cut: the
-   * report of the continued turn's end says so (#1966). A session that cannot be continued (its tool cannot resume it, it is gone there) ends
-   * idle, marked stopped, its report or its requester told (`turnLostInSwap`). Each is taken once: the list is emptied first, and its id leaves the file once its Continue was sent
-   * or its loss reported (`UpdateResumeLists.done`), not before, so a host stopped in between leaves it for the next.
-   *
-   * The note also says what else the stop ended in the session: its background tasks and the cards that waited for the person
-   * (`updateNote`, #1902). A session at rest whose tasks it stopped is woken for the note alone: that is a continue of the
-   * update, not a turn a message or mail started (docs/plans/mailbox.md §8.2), so it goes in through `deliverMail` and not the
-   * mailbox's delivery, and a session the person woke first takes it into the turn they started.
+   * How a wake the start handed the engine went (#1618, #1902; `TurnContinue.wakeAfterUpdate`, which wakes them a few at a time, #1913). The
+   * session was left `working` by the start if its turn was cut; its note goes in through Centralu's own channel (`deliverMail`: no message of
+   * the person's, so the turn stays whose it was and its report, if one is owed, is still that turn's end). Its requester is told nothing of the
+   * cut: the report of the continued turn's end says so (#1966, marked here before the note goes in). One that cannot be continued ends idle,
+   * marked stopped, its report or its requester told (`turnLostInSwap`). Its id leaves the list once its note was sent, its loss reported or it
+   * no longer stood (`UpdateResumeLists.done`), not before, so a host stopped in between leaves it for the next. A session at rest whose tasks
+   * the stop ended is woken for the note alone: a continue of the update, not a turn a message or mail started (docs/plans/mailbox.md §8.2)
    */
-  private async continueCutTurns(): Promise<void> {
-    const cuts = this.updateCuts
-    this.updateCuts = []
-    await Promise.all(
-      cuts.map(async ({ sessionId, turn, stopped }) => {
-        const m = this.host.meta.get(sessionId)
-        // Leaving before it went in: still listed, for the host that starts next
-        if (this.disposing) return
-        if (!m || (turn && !inTurn(m.state))) {
-          // Gone, or stopped by the person before its Continue went in: nothing to continue
-          this.host.restartPolicy.continuingTurns.delete(sessionId)
-          this.notContinued(sessionId)
-          this.updateLists?.done(sessionId)
-          return
-        }
-        // Marked before it goes in: a turn that ends at once (a tool that refuses) is still the continued one's end
-        if (turn) this.host.children.noteContinuedCut(sessionId)
-        try {
-          await this.sendUpdateNote(sessionId, turn, stopped)
-        } catch (e) {
-          this.host.children.dropContinuedCut(sessionId)
-          if (this.disposing || this.host.meta.get(sessionId) !== m) return
-          this.host.restartPolicy.continuingTurns.delete(sessionId)
-          if (!turn) {
-            // Nothing was cut: the agent is not told which tasks the update stopped, and the log says so
-            console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(e)})`)
-            this.updateLists?.done(sessionId)
-            return
-          }
-          console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
-          this.turnLostInSwap(m)
-          this.notContinued(sessionId)
-          this.updateLists?.done(sessionId)
-          return
-        }
-        /*
-         * In, but this host is leaving meanwhile (a second update's stop, #1626 review): its stop lists the turn again, the
-         * note included, and the host after it continues it. Nothing is settled from here
-         */
-        if (this.disposing) return
-        this.host.restartPolicy.continuingTurns.delete(sessionId)
-        // Sent: a host that starts after this one does not send it again
-        this.updateLists?.done(sessionId)
-        // Its parent is told nothing now: the report of the continued turn's end says the turn was cut and continued (#1966)
-      }),
-    )
+  updateStep({ sessionId, turn }: UpdateCut, step: UpdateStep, err?: unknown): void {
+    if (step === 'going') {
+      if (turn) this.host.children.noteContinuedCut(sessionId)
+      return
+    }
+    if (step === 'left' || step === 'failed') this.host.children.dropContinuedCut(sessionId)
+    // Left: still listed, for the host that starts next
+    if (step === 'left') return
+    this.host.restartPolicy.continuingTurns.delete(sessionId)
+    if (step === 'failed' && !turn) console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(err)})`)
+    else if (step === 'failed') {
+      console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(err)})`)
+      const m = this.host.meta.get(sessionId)
+      if (m) this.turnLostInSwap(m)
+    }
+    if (step === 'dropped' || (step === 'failed' && turn)) this.notContinued(sessionId)
+    // Sent or dealt with: a host that starts after this one does not send it again
+    this.updateLists?.done(sessionId)
   }
 
-  /**
-   * Centralu's note to the agent after an update or a swap stopped it (#1618, #1966): the Continue of a cut turn, or the tasks the stop ended
-   * for a session at rest. Not sent once this host is leaving (a second
-   * update's stop while the session wakes): the host after it sends the one
-   */
-  private sendUpdateNote(sessionId: string, turn: boolean, stopped: Stopped | null): Promise<void> {
-    return this.host.events.deliverMail(
-      sessionId,
-      { text: updateNote(turn, stopped), quiet: false, line: turn ? UPDATE_CONTINUE_LINE : UPDATE_TASKS_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
-      { leaving: () => this.disposing, atRest: () => true },
-    )
+  /** A host leaving for an update writes no line for a note the tool took meanwhile: the host after it writes the one (#1626 review) */
+  leavingForUpdate(): boolean {
+    return this.disposing && this.stoppingForUpdate
   }
 
   /** A turn the start took up that is not continued after all: the hello stops naming it (#1618) */
@@ -328,9 +282,9 @@ export class HostTenure {
      * Which states those are is the one definition a stop lists the turns it ends by (`turnCut`, idle.ts, #1618): what a
      * stop cut and what this start finds cut are the same sessions.
      */
-    /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
+    /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `TurnContinue.wakeAfterUpdate`) */
     const cutByUpdate: SessionInfo[] = []
-    /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
+    /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`TurnContinue.wakeAfterUpdate`) */
     const stoppedBy = new Map<string, Stopped>()
     const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
     this.updateLists = lists
@@ -386,7 +340,7 @@ export class HostTenure {
     const goingOn = new Set(cutByUpdate.map((s) => s.id))
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
     const cutIds = new Set(cutByUpdate.map((s) => s.id))
-    this.updateCuts = [
+    const updateCuts: UpdateCut[] = [
       ...cutByUpdate.map((s) => ({ sessionId: s.id, turn: true, stopped: stoppedBy.get(s.id) ?? null })),
       ...[...stoppedBy].filter(([id]) => !cutIds.has(id)).map(([id, stopped]) => ({ sessionId: id, turn: false, stopped })),
     ]
@@ -400,6 +354,6 @@ export class HostTenure {
     this.keptAtStart = goingOn
     // The stops the last host left waiting for the network or a usage limit's reset (stored with each session, #1415) are waited for again
     this.host.turnContinue.restore(this.host.meta.values())
-    if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
+    this.host.turnContinue.wakeAfterUpdate(updateCuts)
   }
 }

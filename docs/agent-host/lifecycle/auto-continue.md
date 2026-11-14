@@ -1,7 +1,7 @@
-# Continuing a turn once its cause clears (#1415, #2238, #1693)
+# Continuing a turn once its cause clears (#1415, #2238, #1693, #1913)
 
-A turn the provider's capacity, the network or a usage limit stopped goes on by itself once that cause clears. One owner
-does it for all three: `sessions/turn-continue.ts` (`TurnContinue`). Each cause is a row; what differs is **when** the cause
+A turn the provider's capacity, the network, a usage limit or an update stopped goes on by itself once that cause clears. One owner
+does it for all four: `sessions/turn-continue.ts` (`TurnContinue`). Each cause is a row; what differs is **when** the cause
 has cleared, never **how** the turn goes on: always through Centralu's own channel (`deliverMail`, a note the history
 read-back knows as Centralu's, `isCentraluNote`), never a message of the person's. Nothing the person wrote is sent again.
 
@@ -16,6 +16,7 @@ by itself" for these two causes only); #1693 (2026-10-28) the overload retry sta
 |---|---|---|---|
 | `overloaded` (#1693) | Codex's `serverOverloaded` error is held: the turn stays `working`, a `retry` notice says when | after `DELAYS_MS` (30 s, 2, 5, 10 min), unchanged | 4 (the delays) |
 | `network` | a turn ends in an error the network caused (`interruption.reason: 'network'`, [turn-endings-and-mail.md](turn-endings-and-mail.md)) | the tool's API host answers a probe | 5 |
+| `update` (#1618, #1913) | an update's stop listed the turn it cut, or the background work it ended in a session at rest | at once, `UPDATE_WAKES_AT_ONCE` (3) at a time, each slot until the woken session's first answer | 1 (once per turn) |
 | `limit` | a turn ends on the account's usage limit: the tool's `limit_reached`, or an error in the tools' own limit words ("You've hit your … limit", "Claude AI usage limit reached", `isPlanLimit`; `interruption.reason: 'limit'`). A 429, a gateway's quota or a plan upgrade notice is not one: nothing says it resets for the account | the reset the tool said, plus `RESET_MARGIN_MS` (60 s): its data's first (`limit_reached.resumeAt`), else its words' (`planLimitResetAt`: Codex's 429 "… try again at 6:17 PM.", Claude's "resets 7:50pm", on the computer's clock); no reset said: 30 minutes after the stop | 3 |
 
 **Why those N.** Overloaded keeps its four delays (#1693). Network: an outage can flap, and each continue is made only after
@@ -51,7 +52,7 @@ credits notice after the wait is set takes the wait away); a compaction turn; a 
 | **Linked hosts**: a session continues on the host that runs it. A hub never sees a linked machine's session events in its own `SessionEvents` (they pass to its windows), so its engine has no wait for it; **Don't continue** and Stop on a linked session are routed to the machine that owns it (`links/routes.ts`) | No double continue: one engine per session, the owner's |
 | **Who is told**: a stop with a wait releases what it held but tells nobody yet (`StopTold.held`). When the wait ends (`StopNotices.stopWaitEnded`) the senders of what that stop released and nobody answered yet are told once: that the work continued, with the session that started it on the first continue; or, when it ends without one (Stop, a message, a turn the mailbox started, **Don't continue**, the trash, the setting off, the tries or the probe spent, a continue the tool refused after it was handed), the ordinary stop notice they would have had at the stop (#1948). When the work goes on in a turn of its own instead (the person's Continue: Continue now or the inbox's, the message `CONTINUE_WORDS`, told once it went in; or mail the mailbox delivered), they read "<name> lost the network, and its work has gone on.", not that Centralu continued it: one wording per way it went on. A Continue that does not go in is told as the stop. Any other message of the person's is them taking the work over: told as the stop. Woken only from a turn | The owner's "told once, when the work continues". A notice at the stop and another at the continue told twice, and the first said the work had stopped while it was about to go on (the #2239 review). The released questions stay open, so the continued turn's answer still answers them |
 | **The settings** are two booleans of the person's preferences (`continueAfterLimit`, `continueOnNetwork`; absent reads as on), rows under Settings › Background & updates › Agents, and `set_preferences` takes them | Per computer: a linked machine keeps its own (follow-up if one switch should reach both) |
-| **The update-cut continue** (#1618, [continue-after-update.md](continue-after-update.md)) keeps its own delivery and shares the words (`CONTINUE_WORDS`) and the note's recognition (`isCentraluNote`) | Its trigger is a list the leaving host writes and its delivery waits for the session's resume at start; moving it into this engine would change #1618's rules for no gain. One sentence, one recognition |
+| **The update-cut continue** (#1618, #1902, [continue-after-update.md](continue-after-update.md)) is this engine's fourth cause, `update` (#1913): the start hands it the sessions the leaving host listed (`wakeAfterUpdate`), and it wakes them `UPDATE_WAKES_AT_ONCE` (3) at a time, through the same send, gate and cancel path. Unlike the others it has no setting, no wait in the header, one try per turn, and its telling stays #1966's (`HostTenure.updateStep`, not `waitEnded`); a message of the person's sends its note at once instead of taking it away | One engine for every continue of a cut turn: one queue, one gate, one cancel path. The list file stays the stored record, since #1618 records the cut turns at the swap; the differences are the owner's decisions of 2026-11-14 (no person gate: Centralu cut the turn) and #1618's once per turn |
 
 ## Where it shows
 
@@ -67,5 +68,5 @@ header's words, and its Continue reads **Continue now** then. When the continue 
 
 `sessions/auto-continue.test.ts` (fake timers and a stubbed `fetch`: the probe, a wake, another turn releasing the wait, the
 cap, every cancel, the settings, a restart, a limit's reset, credits, staggering), `sessions/turn-continue.test.ts` (the
-overload cases, unchanged), `mail/stop-notices.test.ts` (who is told), `sessions/interruptions.test.ts` (which ends are limit
+overload cases, unchanged), `sessions/update-wakes.test.ts` (the update cause: at most three waiting for a first answer, cut turns first, a slot freed by a turn's end, the person's message and Stop, a second update before the queue drains), `mail/stop-notices.test.ts` (who is told), `sessions/interruptions.test.ts` (which ends are limit
 stops), `features/inbox/inboxLabel.test.ts` (the row's words), `e2e/fixtures/interrupted-sessions.ts` (the header's wait, its buttons, the line and the inbox row).

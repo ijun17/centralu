@@ -1269,7 +1269,7 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
      3. the rest.
    - At most one task per wake, and for the orchestrator one asker. The other work waits for the next turn.
    - **Not a wake of the mailbox:** the note an update's stop makes the next host send, to continue a cut turn or to tell a session
-     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host/lifecycle/continue-after-update.md), goes in through
+     at rest which background tasks the stop ended (`TurnContinue.wakeAfterUpdate`, docs/agent-host/lifecycle/continue-after-update.md), goes in through
      `deliverMail` and not through `drain`, so it is not mail-started: no `MailTurns.begin`, no `turn_seq` on any row, and the
      tool starts the turn it runs on its own, so it is recorded as the CLI's own turn (`turnStarted`, `cli: true`), not as a mail's (#1902).
      Everything else rides along.
