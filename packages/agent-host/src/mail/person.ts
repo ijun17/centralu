@@ -668,7 +668,8 @@ function windowKind(m: MailRow): string {
  * reported, in a chain the person has not closed (as the list's row says, a report the person has not looked at wins over its being settled). Done: settled,
  * with how; a row to the person an older build settled without an answer is still a question to them (`asking`), and any other such row is done. Held:
  * it waits for the person to say what happens to it (Waiting's held row). Released: nobody is on it, as a stop let it go or its session is gone. Running:
- * the recipient's turn is on this message, or the session has the task (`hasTask`, the list's row's rule too). Open: the rest
+ * the recipient's turn is on this message, or the session has the task (`hasTask`, the list's row's rule too). Open: the rest. What is not done here
+ * is what the store's `OPEN_ROW` counts for the cap (mailbox.ts): change one with the other, as the parity test in person.test.ts checks
  */
 function taskState(m: MailRow, r: RecipientRow, on: { closed: boolean; here: boolean; working: boolean }): { state: string; outcome: string | null } {
   if (m.sender === PERSON && m.kind === 'task' && r.settled === 'reported' && !on.closed) return { state: 'review', outcome: null }

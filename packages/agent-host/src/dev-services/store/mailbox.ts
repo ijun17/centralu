@@ -196,9 +196,10 @@ export const HIDDEN_HOLDS = ['policy', 'loop'] as const
 const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
 
 /**
- * A recipient row `r` of work `m` that Tasks lists as not done (one row of the list each, `taskState` in mail/person.ts words it): not settled, a
- * question to the person an older build settled `legacy` and nobody answered, or the person's task reported back in a chain not closed (their review).
- * Not one dismissed, nor one to the person kept from them, which Tasks leaves out
+ * A recipient row `r` of work `m` that Tasks lists as not done (one row of the list each): not settled, a question to the person an older build settled
+ * `legacy` and nobody answered, or the person's task reported back in a chain not closed (their review). Not one dismissed, nor one to the person kept
+ * from them, which Tasks leaves out. It mirrors `taskState` and `hiddenFromPerson` in mail/person.ts, in SQL so the cap is the store's; the test
+ * "OPEN_ROW (the store) and taskState (tasks()) agree on what is not done" in mail/person.test.ts sweeps every branch of both and keeps them equal
  */
 const OPEN_ROW = `(COALESCE(r.held, '') <> 'dismissed' AND NOT (r.recipient = 'person' AND COALESCE(r.held, '') IN (${HIDDEN_SQL})) AND (
   r.settled IS NULL

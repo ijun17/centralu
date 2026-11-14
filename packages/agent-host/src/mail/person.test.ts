@@ -5,6 +5,7 @@
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
+import { HIDDEN_HOLDS } from '../dev-services/store/mailbox.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
 import { refusedFor, refusedForAsync } from './messages.test-helpers.js'
@@ -1116,6 +1117,77 @@ describe("the Inbox's Tasks: every request on the host, one row for each recipie
     const notDone = w.person.tasks().tasks.filter((t) => t.state !== 'done')
     expect(notDone).toHaveLength(4)
     expect(w.person.tasks().capped).toBeNull()
+  })
+
+  it('OPEN_ROW (the store) and taskState (tasks()) agree on what is not done, row by row, across every branch of either', () => {
+    const w = ready(hostWorld())
+    const set = (id: string, to: string, columns: string, ...values: unknown[]) =>
+      dbOf(w).prepare(`UPDATE mail_recipients SET ${columns} WHERE message_id = ? AND recipient = ?`).run(...values, id, to)
+    const ask = (from: string, to: string) => {
+      w.clock.t += 10
+      return w.mail.send(from, { to: [to], text: `Ask ${w.clock.t}`, needsReply: true }).message.id
+    }
+    const task = (from: string, to: string) => {
+      w.clock.t += 10
+      return w.mail.task(from, to, { text: `Task ${w.clock.t}`, origin: from === PERSON ? 'person' : 'mail', delivered: true }).id
+    }
+    // One message with one row each: `name` -> [message, recipient]
+    const rows = new Map<string, [string, string]>()
+    rows.set('unsettled, a session asks the person', [ask(A, PERSON), PERSON])
+    // A chain the person is not in: they look in on it, and its rows count all the same
+    rows.set('a session asks a session (look-in chain)', [ask(A, B), B])
+    rows.set('a session tasks a session (look-in chain)', [task(A, B), B])
+    const answered = ask(A, B)
+    w.store.mailbox.settle(answered, B, 'answered', w.clock.t)
+    rows.set('settled answered', [answered, B])
+    const legacy = ask(A, PERSON)
+    set(legacy, PERSON, `settled = 'legacy'`)
+    rows.set('legacy question to the person, unanswered', [legacy, PERSON])
+    const legacyAnswered = ask(A, PERSON)
+    set(legacyAnswered, PERSON, `settled = 'legacy', answer_id = ?`, mid(90))
+    rows.set('legacy question to the person, answered', [legacyAnswered, PERSON])
+    const legacySession = ask(A, B)
+    set(legacySession, B, `settled = 'legacy'`)
+    rows.set('legacy question to a session', [legacySession, B])
+    const reported = task(PERSON, B)
+    set(reported, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    rows.set("the person's task reported, chain open", [reported, B])
+    const reportedClosed = task(PERSON, B)
+    set(reportedClosed, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    w.store.mailbox.markClosed(reportedClosed, 'finished', w.clock.t)
+    rows.set("the person's task reported, chain closed", [reportedClosed, B])
+    const reportedOther = task(A, B)
+    set(reportedOther, B, `settled = 'reported', settled_at = ?`, w.clock.t)
+    rows.set("a session's task reported", [reportedOther, B])
+    const dismissed = ask(A, B)
+    set(dismissed, B, `held = 'dismissed'`)
+    rows.set('dismissed', [dismissed, B])
+    for (const why of HIDDEN_HOLDS) {
+      const hidden = ask(A, PERSON)
+      set(hidden, PERSON, 'held = ?', why)
+      rows.set(`to the person, held ${why} (hidden)`, [hidden, PERSON])
+      const toSession = ask(A, B)
+      set(toSession, B, 'held = ?', why)
+      rows.set(`to a session, held ${why}`, [toSession, B])
+    }
+    const uncertain = ask(A, PERSON)
+    set(uncertain, PERSON, `held = 'uncertain'`)
+    rows.set('to the person, held uncertain (shown)', [uncertain, PERSON])
+    const released = task(A, B)
+    set(released, B, 'released_at = ?', w.clock.t)
+    rows.set('released by a stop', [released, B])
+
+    const listed = w.person.tasks().tasks
+    const open = new Set(w.store.mailbox.newestWork(0, 1_000).map((m) => m.id))
+    const sides = [...rows].map(([name, [id, to]]) => {
+      const row = listed.find((t) => t.id === id && t.assignee.address === to)
+      return { name, taskState: row !== undefined && row.state !== 'done', openRow: open.has(id) }
+    })
+    expect(sides.filter((s) => s.taskState !== s.openRow)).toEqual([])
+    // Both sides are swept, not one: some rows are not done, some are, and the totals agree
+    expect(sides.filter((s) => s.openRow).length).toBeGreaterThan(5)
+    expect(sides.filter((s) => !s.openRow).length).toBeGreaterThan(5)
+    expect(w.store.mailbox.openWorkRows(1_000).total).toBe(sides.filter((s) => s.openRow).length)
   })
 
   it('held: a request waiting for the person to say what happens to it; one the person dismissed is not listed', () => {
