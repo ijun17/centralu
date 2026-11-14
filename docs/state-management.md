@@ -61,6 +61,8 @@ The do-not-store list — the following **must not exist as fields** and must be
 
 Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering rules live in core, the unit tests run without React.
 
+**What is always on screen reads only what it draws.** The `sessions` map is a new object for every event of every session, each piece of a streamed reply included. A component that is mounted for the window's life and reads the map whole draws again for each of them, and so does everything under it. Before this rule, that was most of what the window allocated while sessions streamed out of view (`perf:memory --steps background`). So: a project's sidebar block reads its own sessions through `useShallow` (`useSessionsOf`), and a session row is memoized (`SessionListRow`): an event draws its own row and its project's block, nothing else. The callers hand rows functions that stay the same. The top bar reads the counts (`useCounts`), not the sessions behind them, and the palette reads the sessions only while it is shown. The guard is `SessionListRow-renders.test.tsx` and `CommandPalette-renders.test.tsx`: they count what an event draws again.
+
 ### Relative-time labels (#615)
 
 Time labels derive their text from stored timestamps and the current wall clock. `app/labelClock.ts`
