@@ -18,7 +18,7 @@ import { aboveCallerError, agentBranch, agentChoice, agentName, distinguishingTe
 import { autoNotice, bare, carriedPreset, remotePreset, remoteWorktreeLine, shownRemote, type AutoThere } from './remote-agent-words.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
-import { raceBound, raceTimeout } from '../timing.js'
+import { raceTimeout } from '../timing.js'
 
 /**
  * A child start_agent started on a linked machine (#1038), as the hub keeps it: the machine's session (its qualified
@@ -529,7 +529,7 @@ export class RemoteAgents {
     if (!tasks) return this.working(rec, true)
     let deleted = false
     let end!: () => void
-    const ended = new Promise<void>((resolve) => (end = resolve))
+    const gone = new Promise<void>((resolve) => (end = resolve))
     const onDeleted = () => {
       deleted = true
       end()
@@ -537,23 +537,17 @@ export class RemoteAgents {
     const ends = this.waits.get(rec.sessionId) ?? new Set<() => void>()
     ends.add(onDeleted)
     this.waits.set(rec.sessionId, ends)
-    const check = () => {
-      if (tasks.standing(taskId, rec.sessionId).state !== 'open') end()
-    }
-    const off = tasks.onChange(check)
-    check()
-    let r: void | 'bound' | 'aborted'
+    let r: 'settled' | 'bound' | 'aborted'
     try {
-      r = await raceBound(ended, boundMs, signal)
+      r = await tasks.settled(taskId, boundMs, { signal, until: gone })
     } finally {
-      off()
       ends.delete(onDeleted)
       if (!ends.size) this.waits.delete(rec.sessionId)
     }
     if (deleted) return { ok: false, error: `"${rec.name}" [${rec.sessionId}] was deleted on ${rec.machine} before it finished.` }
     if (r === 'aborted') return { ok: false, error: `The call was cancelled; "${rec.name}" was left running on ${rec.machine}.` }
     if (r === 'bound') return this.working(rec, true)
-    return this.reported(rec, callerId, taskId, tasks.standing(taskId, rec.sessionId))
+    return this.reported(rec, callerId, taskId, tasks.standing(taskId))
   }
 
   /**
@@ -573,7 +567,7 @@ export class RemoteAgents {
     if (s.outcome === 'failed' || s.outcome === 'stopped') {
       return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: ${s.error ?? s.reason ?? s.outcome}. Tell the person, or give it a clearer task.` }
     }
-    const words = await this.lastWords(rec, s.answer)
+    const words = await linkedWords(this.host.linkedReader, rec.sessionId, rec.name, s.answer)
     // The turn left the child's own background work running there (#721): the final report comes as mail when that work ends
     const paused = s.outcome === 'paused'
     return {
@@ -600,19 +594,6 @@ export class RemoteAgents {
 
   private working(rec: RemoteAgent, reported: boolean): Extract<ChildRunResult, { state: 'working' }> {
     return { ok: true, state: 'working', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, reported }
-  }
-
-  /**
-   * The child's last words, read there and cut as an answer is cut here, the cut naming the read that shows the rest
-   * (#1186); the answer its report kept when the machine cannot be read. A read that failed is said in the notice
-   */
-  private async lastWords(rec: RemoteAgent, kept: string | undefined): Promise<{ answer: string; notice: string }> {
-    const reader = this.host.linkedReader
-    const words = reader ? await reader.lastWords(rec.sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
-    if (!words.ok && kept !== undefined) return { answer: kept, notice: '' }
-    if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${rec.sessionId}") reads it once the machine answers.` }
-    if (words.text === '') return { answer: NO_WORDS, notice: '' }
-    return { answer: clipAnswer(words.text, rec.name, words.seq !== null ? { sessionId: rec.sessionId, seq: words.seq } : undefined), notice: '' }
   }
 
   /**
@@ -771,4 +752,16 @@ export class RemoteAgents {
     const listed = read.map(({ p, r }) => `"${p.name}" (${r.ok ? shownRemote(r.origin) : 'not read'})`).join(', ')
     return { error: `${machine.name} has no checkout of ${key}, so nothing was started there.${listed ? ` Its projects: ${listed}.` : ' It has no projects.'} The person can clone it there first.` }
   }
+}
+
+/**
+ * A linked machine's session's last words, read there and cut as an answer is cut here, the cut naming the read that shows the rest (#1186); the answer
+ * its report kept when the machine cannot be read. A read that failed is said in the notice. For start_agent's child and an ask_project task there alike
+ */
+export async function linkedWords(reader: LinkedSessions | null, sessionId: string, name: string, kept: string | undefined): Promise<{ answer: string; notice: string }> {
+  const words = reader ? await reader.lastWords(sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
+  if (!words.ok && kept !== undefined) return { answer: kept, notice: '' }
+  if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${sessionId}") reads it once the machine answers.` }
+  if (words.text === '') return { answer: NO_WORDS, notice: '' }
+  return { answer: clipAnswer(words.text, name, words.seq !== null ? { sessionId, seq: words.seq } : undefined), notice: '' }
 }

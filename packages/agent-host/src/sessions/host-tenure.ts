@@ -13,7 +13,6 @@ import type { DelegationFlow } from './delegation-flow.js'
 import type { ExternalConversations } from './external-conversations.js'
 import type { HostCards } from './host-cards.js'
 import { withHubMark } from './hub-preset.js'
-import type { LinkedReports } from './linked-reports.js'
 import type { MailSessionsHost, MailSessionsView } from './mail-sessions.js'
 import type { MergeChecks } from './merge-checks.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -42,7 +41,6 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
     readonly files: ProjectFiles
     readonly hostCards: HostCards
     readonly inputs: TurnInputs
-    readonly linkedReports: LinkedReports
     readonly mail: MailSessionsView
     readonly merges: MergeChecks
     readonly processes: SessionProcesses
@@ -247,7 +245,6 @@ export class HostTenure {
     this.host.interruptions.stopAll()
     // So do the waits for a session's own background work to settle (#721): the next start settles every session at rest again
     this.host.reports.stopSettling()
-    this.host.linkedReports.dispose()
     // So does a start waiting for memory (#686)
     this.host.memoryGate?.close()
     this.host.files.close()

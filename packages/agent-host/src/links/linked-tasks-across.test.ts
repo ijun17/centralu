@@ -215,7 +215,7 @@ describe('a report on a task across, while its hub is away (#1948 step 6)', () =
     expect(w.records.recipient(id, sender)?.deliveredAt).not.toBeNull()
     const told = w.records.unreadFor(PERSON).map((p) => p.message)
     expect(told).toHaveLength(1)
-    expect(told[0]!.body).toContain('no longer links this one, so the report cannot reach it there. Its last response is in')
+    expect(told[0]!.body).toContain('which is no longer linked to this one, so the report cannot reach it there. Its last response is in')
     expect(told[0]!.facts).toMatchObject({ uncrossed: { message: id } })
   })
 })

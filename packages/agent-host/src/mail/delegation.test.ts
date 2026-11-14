@@ -163,16 +163,16 @@ describe('work this hub gave a session on a linked machine, as its copies here r
     w.mail.sentAcross(A, { id, to: w.mail.sessionAddress('m1.r'), text, needsReply: false, task: { origin: 'agent_session' } })
     return id
   }
-  const tasksOf = (w: ReturnType<typeof turnWorld>) => linkedTasksOf(w.mail, w.store.mailbox, { sendTask: async () => ({ ok: false, why: 'x', text: 'x' }) }, () => () => {})
+  const tasksOf = (w: ReturnType<typeof turnWorld>) => linkedTasksOf(w.mail, w.store.mailbox, { sendTask: async () => ({ ok: false, why: 'x', text: 'x' }), taskRefusal: () => null, keepAsk: () => {}, holdReports: () => () => {} }, () => () => {})
 
   it('is open until its report comes back, which it reads with the answer kept and whom it went to', () => {
     const w = turnWorld()
     const tasks = tasksOf(w)
     const id = given(w, 'build it')
     expect(tasks.open('a', 'm1.r')).toBe(id)
-    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'open' })
+    expect(tasks.standing(id)).toEqual({ state: 'open' })
     w.mail.report(id, { outcome: 'finished', body: '[Centralu] The session ended its turn.', answer: 'built' })
-    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'reported', outcome: 'finished', answer: 'built', owner: A })
+    expect(tasks.standing(id)).toEqual({ state: 'reported', outcome: 'finished', answer: 'built', owner: A })
     expect(tasks.open('a', 'm1.r')).toBeUndefined()
     expect(tasks.lastAnswer('a', 'm1.r')).toBe('built')
   })
@@ -182,7 +182,7 @@ describe('work this hub gave a session on a linked machine, as its copies here r
     const tasks = tasksOf(w)
     const id = given(w, 'build it')
     expect(tasks.withdraw('a', 'm1.r')).toBe(1)
-    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'ended', why: 'withdrawn' })
+    expect(tasks.standing(id)).toEqual({ state: 'ended', why: 'withdrawn' })
   })
 
   it('is released gone with a child whose machine was removed: its sender is told once, in the stop notice', () => {
@@ -192,7 +192,7 @@ describe('work this hub gave a session on a linked machine, as its copies here r
     const id = given(w, 'build it')
     tasks.gone('m1.r')
     expect(w.rowOf(id, w.mail.sessionAddress('m1.r')).releasedWhy).toBe('gone')
-    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'ended', why: 'gone' })
+    expect(tasks.standing(id)).toEqual({ state: 'ended', why: 'gone' })
     const told = w.records.pendingFor(A, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
     expect(told).toHaveLength(1)
     expect(told[0]!.message.body).toContain('Child on Box')

@@ -57,6 +57,12 @@ export const HubAskResult = z.union([
     sessionName: z.string(),
     answer: z.string().optional(),
     notice: z.string().optional(),
+    /**
+     * The task the hub wrote for the asked session (#1948 step 6, additive): with `working`, its report comes to the machine later (`host.mail`
+     * with `report`), and the machine keeps a copy under this id; with `done`, the answer is the report, and none follows. A hub from before it
+     * delivers the words and says none
+     */
+    taskId: z.string().min(1).max(200).optional(),
   }),
 ])
 export type HubAskResult = z.infer<typeof HubAskResult>
@@ -146,7 +152,20 @@ export const HostMailParams = z.object({
    * tool that gave it, which the machine's own delivery gives the session and its own engine reports. `forPerson`: the hub says the work is its
    * Assistant's `send_to_session`, which acts for the person (#2258); a machine reads it only from the hub on whose link it came
    */
-  task: z.object({ origin: z.enum(['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project']), note: z.literal(true).optional(), forPerson: z.literal(true).optional() }).optional(),
+  task: z
+    .object({
+      origin: z.enum(['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project']),
+      note: z.literal(true).optional(),
+      forPerson: z.literal(true).optional(),
+      /** The agent depth the machine counts its session at while it works on the task: the hub's caller's, plus one (#867, #838; additive) */
+      depth: z.number().int().min(1).max(64).optional(),
+    })
+    .optional(),
+  /**
+   * Centralu's report on a task one of the machine's sessions gave the hub (its ask_project, #1948 step 6, additive): `from` is `centralu`,
+   * `replyTo` the task's id, `text` the report's words. The machine takes it only from the hub its copy of that task went to
+   */
+  report: TaskReport.optional(),
 })
 export type HostMailParams = z.infer<typeof HostMailParams>
 /**

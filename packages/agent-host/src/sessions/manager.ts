@@ -646,12 +646,8 @@ export class SessionManager {
     this.linkedReader = reader
   }
 
-  /**
-   * Whether a linked machine takes mail from this hub (#2067 item 2), and its tasks (#1948 step 6): work for a session there goes as a task across
-   * the link, and a machine that takes none is told to update
-   */
-  useMachineMail(takesMail: (machineId: string) => boolean, takesTasks: (machineId: string) => boolean | undefined): void {
-    this.mail.machineMail = takesMail
+  /** Whether a linked machine takes this hub's tasks (#1948 step 6): work for a session there goes as a task across the link, and a machine that takes none is told to update */
+  useMachineTasks(takesTasks: (machineId: string) => boolean | undefined): void {
     this.delegationFlow.remote.machineTasks = takesTasks
   }
 
@@ -925,7 +921,6 @@ export class SessionManager {
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
       takesSendNow: (...a) => self.mail.takesSendNow(...a),
       mailTask: (...a) => self.mail.mailTask(...a),
-      wayAcross: (...a) => self.mail.wayAcross(...a),
       withdrawTasks: (...a) => self.mail.withdrawTasks(...a),
       get linkedTasks() {
         return self.mail.linkedTasks
@@ -989,7 +984,6 @@ export class SessionManager {
         return self.delegationFlow
       },
       deliver: (...a) => self.events.deliver(...a),
-      deliverReport: (...a) => self.reports.deliverReport(...a),
       get disposing() {
         return self.tenure.disposing
       },
@@ -1083,12 +1077,8 @@ export class SessionManager {
       get handoffNotes() {
         return self.handoffNotes
       },
-      hasSession: (id) => self.meta.has(id),
       get hubAskTurns() {
         return self.linkedHost.hubAskTurns
-      },
-      get askProjectFlow() {
-        return self.askProjectFlow
       },
       get linkedReports() {
         return self.linkedReports

@@ -24,7 +24,6 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
-import type { WayAcross } from './ask-project.js'
 import type { LinkedTasks } from '../mail/delegation.js'
 import type { SelfCompaction } from './self-compaction.js'
 
@@ -58,9 +57,7 @@ export type DelegationHost = {
   /** Whether a send reaches the session as a turn it starts now; otherwise it goes as mail (`MailSessionsView.takesSendNow`) */
   takesSendNow: (sessionId: string) => boolean
   /** A send to a session that cannot take it now, as a mail task, or a note that needs no reply (`MailSessionsView.mailTask`) */
-  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note?: boolean) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
-  /** How to leave a busy session across the link to `machineId` work (`MailSessionsView.wayAcross`, #1186) */
-  wayAcross: (sessionId: string, machineId: string, machine: string) => WayAcross
+  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note?: boolean, depth?: number) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
   /** The caller's tasks to the session not delivered yet, withdrawn (`MailSessionsView.withdrawTasks`); how many */
   withdrawTasks: (callerId: string, sessionId: string) => number
   readonly children: ChildOwnership

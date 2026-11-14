@@ -813,6 +813,7 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
+| `agentDepth` | task | the agent depth a task from another computer's session gives the session here while it works on it (#838, #1948 step 6; [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)) |
 | `picked` | message | `true`: the person's answer to a session's question is one of the question's `choices`, pressed in the window (`mail.reply` with `answers`, D33, #1630); the host decides it, so `mail read` can say it to the asker |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 

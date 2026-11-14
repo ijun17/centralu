@@ -734,8 +734,8 @@ const hubs = new LinkedHubs({
 hostMailbox.across.usePeers(
   mailPeers({ hostId: hubSelfId(store), selfName: hubName, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), hubs, settings: store.settings }),
 )
-// A machine that takes mail from this hub is named to mail in a refusal (#2067 item 2); work for its sessions goes as tasks when it takes them (#1948 step 6)
-mgr.useMachineMail((id) => links.get(id)?.takesMail === true, (id) => links.get(id)?.takesTasks)
+// Work for a linked machine's sessions goes as tasks when it takes them (#1948 step 6)
+mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
 mgr.useLinkedHubs(hubs)
 // The hosts whose apps a session here uses (#1938): this hub's machines, and the hub that started a session here
 linkedApps.usePeers(appsPeers({ machines: links, hubs, settings: store.settings }))

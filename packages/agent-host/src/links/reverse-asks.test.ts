@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { LinkedHubs } from './linked-hubs.js'
-import { cleanups, runCleanups } from './links-world.test-helpers.js'
+import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost, rig } from './reverse-link.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { sessionAddress } from '../mail/address.js'
-import type { HostMail } from '../mail/host-mail.js'
-import type { Store } from '../dev-services/store.js'
 
 /**
  * The reverse direction (#550, docs/plans/remote-hub.md §12.7): a linked machine's session asks a project of the hub,
@@ -51,10 +49,11 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     })
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'done', project: `${hub.id}/${hub.projectName}`, sessionId: `${hub.id}.h1`, readable: [] })
-    expect(lastWords(r)).toContain('echo: [A session in the project "remote-project on Remote box" asks this project')
-    // On the hub it is recorded as that session on that machine, never as the person or an Assistant
-    const there = hub.store.messages.loadMessages('h1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
-    expect(there.payload).toMatchObject({ from: { sessionId: '_linked-machine-session', name: 'w1 on Remote box' } })
+    expect(lastWords(r)).toContain('[A session in the project "remote-project on Remote box" asks this project')
+    // On the hub it is a task from that session on that machine (#1948 step 6), never from the person or an Assistant
+    const task = hub.store.mailbox.feedOf(sessionAddress(hub.id, 'h1'), { limit: 5 }).find((m) => m.kind === 'task')!
+    expect(task).toMatchObject({ sender: sessionAddress(hub.id, 'm1.w1'), origin: 'ask_project', facts: { agentDepth: 1 } })
+    expect(task.body).toContain('say hello')
     expect(hub.store.machines.listMachineAskConsents()).toEqual([expect.objectContaining({ machineId: 'm1', sessionId: 'w1', projectId: 'p-hub' })])
     // The asked session worked one level below the asker, and the mark went with its turn (#867)
     await eventually(() => hub.store.settings.appSetting('hub_ask_depth:h1') === null)
@@ -109,8 +108,8 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
     await eventually(() => machine.hubs.any)
     const again = machine.ask({ project: hub.projectName, task: 'three' })
-    await hub.answer('allow')
-    expect(await again).toMatchObject({ ok: true, state: 'done' })
+    await hub.answer('deny')
+    expect(await again).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
   })
 
   it('refuses an approval that comes after the switch went off while the card stood, and sends nothing', async () => {
@@ -183,19 +182,12 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     await eventually(() => !machine.hubs.any)
     expect(await machine.ask({ project: `Hub mac/${hub.projectName}`, task: 'two' })).toMatchObject({ ok: false, error: expect.stringContaining('No project named') })
   })
-
-  it('refuses a session of the hub busy with a turn that is not the asker’s', async () => {
-    const { machine, hub } = await rig()
-    await hub.mgr.inputs.send('h1', 'please approve my command')
-    await eventually(() => hub.mgr.listSessions().find((s) => s.id === 'h1')?.state === 'waiting_approval')
-    expect(await machine.ask({ project: hub.projectName, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('busy with a turn that is not yours') })
-  })
 })
 
 describe('several hubs, and builds from before the reverse direction (#550)', () => {
   it('shows each hub by its own name, and one whose link is down as not reachable', async () => {
     const machine = await machineHost()
-    const a = await hubHost(machine.port, { name: 'Hub mac', project: 'alpha' })
+    const a = await hubHost(machine.port, { name: 'Hub mac', project: 'alpha', mail: 'delivered' })
     const b = await hubHost(machine.port, { name: 'Laptop', project: 'beta' })
     for (const h of [a, b]) {
       await eventually(() => h.machine().status === 'connected')
@@ -246,115 +238,5 @@ describe('several hubs, and builds from before the reverse direction (#550)', ()
       error: 'Old hub runs a Centralu from before this, so it cannot be asked. Update it there.',
     })
     expect((await hubs.projects()).away).toEqual([{ hubId: 'hub-00000001', hub: 'Old hub', why: 'it runs a Centralu from before this; update it there' }])
-  })
-})
-
-/*
- * #1186 item 10: an ask into a session busy on the other side of a link is refused, as no task crosses yet (#1948 step 6), but mail does (#2067)
- * and the session gets it as soon as it can take it: here, once the card that holds its turn is answered. The refusal names that mail by the address the caller can send to, either way, and it goes in
- */
-describe('a busy session across the link is left work by mail (#1186)', () => {
-  async function mailRig() {
-    const machine = await machineHost({ mail: true })
-    // A checkout, so the hub reads the machine's projects as main.ts wires it (useLinkedReader)
-    const hub = await hubHost(machine.port, { mail: true, origin: 'git@github.com:me/app.git' })
-    await hub.mgr.setProjectTrusted('p-hub', true)
-    await eventually(() => hub.machine().status === 'connected')
-    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
-    await eventually(() => machine.hubs.any && machine.hubs.mailHubs()[0]?.you === 'm1')
-    // Each host's delivery runs, as main.ts starts it
-    for (const host of [machine, hub]) {
-      host.mail!.delivery.start()
-      cleanups.push(() => host.mail!.delivery.stop())
-    }
-    return { machine, hub }
-  }
-  /** The address the refusal says to mail */
-  const mailTo = (r: { ok: boolean; error?: string }) => /mail\(action="send", to="([^"]+)"\)/.exec(r.ok ? '' : (r.error ?? ''))?.[1]
-  /** Waits until `mgr`'s session is busy on its approval card, and returns how to answer it */
-  async function busy(mgr: Awaited<ReturnType<typeof machineHost>>['mgr'], id: string) {
-    await mgr.inputs.send(id, 'please approve my command')
-    await eventually(() => mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
-    const requestId = mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId
-    return () => mgr.inputs.respondApproval(id, requestId, 'allow')
-  }
-  /** Delivers what is due to `address` on `host` until the message is in, or says it never went */
-  async function deliveredTo(host: { mail: HostMail | null; store: Store }, address: string, id: string) {
-    await eventually(async () => {
-      await host.mail!.delivery.process(address)
-      return host.store.mailbox.recipient(id, address)?.deliveredAt != null
-    })
-  }
-
-  it("a machine's session asking a busy hub session is told its address; the mail it sends there waits for the turn's end, then goes in", async () => {
-    const { machine, hub } = await mailRig()
-    const free = await busy(hub.mgr, 'h1')
-    const r = await machine.ask({ project: hub.projectName, task: 'review the branch' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('busy with a turn that is not yours') })
-    const to = mailTo(r)
-    expect(to).toBe(sessionAddress(hub.id, 'h1'))
-    const sent = await machine.mail!.hooks.tool!('w1', { action: 'send', to, text: 'review the branch when you are free' } as never)
-    const id = /^Sent (\S+) /.exec(sent.text)?.[1] ?? ''
-    const there = sessionAddress(hub.id, 'h1')
-    await hub.mail!.delivery.process(there)
-    expect(hub.store.mailbox.recipient(id, there)).toMatchObject({ deliveredAt: null })
-    free()
-    await deliveredTo(hub, there, id)
-  })
-
-  it('a hub session asking a busy session on the machine is told its address; the mail it sends there waits for the turn\'s end, then goes in', async () => {
-    const { machine, hub } = await mailRig()
-    const free = await busy(machine.mgr, 'w1')
-    const project = (await machine.mgr.projectRegistry.listProjects())[0]!.name
-    const r = await hub.mgr.askProject('h1', { project, session: 'w1', task: 'review the branch' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('busy with a turn that is not yours') })
-    const to = mailTo(r)
-    expect(to).toBe(sessionAddress(hub.id, 'm1.w1'))
-    const sent = await hub.mail!.hooks.tool!('h1', { action: 'send', to, text: 'review the branch when you are free' } as never)
-    const id = /^Sent (\S+) /.exec(sent.text)?.[1] ?? ''
-    const there = sessionAddress(machine.id, 'w1')
-    await machine.mail!.delivery.process(there)
-    expect(machine.store.mailbox.recipient(id, there)).toMatchObject({ deliveredAt: null })
-    free()
-    await deliveredTo(machine, there, id)
-  })
-
-  it("a hub session that became busy while a machine's ask stood at the person's card is refused with the same mail line", async () => {
-    const { machine, hub } = await mailRig()
-    const call = machine.ask({ project: hub.projectName, task: 'review the branch' })
-    await eventually(() => !!hub.card())
-    const pair = hub.card()!
-    // The person works in the asked session while the card is up: a turn that waits on them
-    await busy(hub.mgr, 'h1')
-    hub.mgr.inputs.respondApproval('h1', pair.requestId, 'allow')
-    const r = await call
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood; nothing was sent.') })
-    expect(mailTo(r)).toBe(sessionAddress(hub.id, 'h1'))
-  })
-
-  it("a machine session that became busy while the hub's ask stood at the person's card is refused with the same mail line", async () => {
-    const { machine, hub } = await mailRig()
-    const project = (await machine.mgr.projectRegistry.listProjects())[0]!.name
-    const call = hub.mgr.askProject('h1', { project, session: 'w1', task: 'review the branch' })
-    await eventually(() => !!hub.card())
-    const consent = hub.card()!
-    await busy(machine.mgr, 'w1')
-    hub.mgr.inputs.respondApproval('h1', consent.requestId, 'allow')
-    const r = await call
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood; nothing was sent.') })
-    expect(mailTo(r)).toBe(sessionAddress(hub.id, 'm1.w1'))
-  })
-
-  it('a machine that takes no mail is told to update, not to mail', async () => {
-    // The hub takes mail; the machine runs a build that does not
-    const machine = await machineHost()
-    const hub = await hubHost(machine.port, { mail: true })
-    await eventually(() => hub.machine().status === 'connected')
-    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
-    await eventually(() => machine.hubs.any)
-    await busy(hub.mgr, 'h1')
-    const r = await machine.ask({ project: hub.projectName, task: 'review the branch' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box runs a Centralu that takes no mail from another computer: update Centralu there') })
-    expect(mailTo(r)).toBeUndefined()
   })
 })

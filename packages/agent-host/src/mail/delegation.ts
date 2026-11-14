@@ -5,6 +5,7 @@ import type { DelegationOrigin, MessageService } from './messages.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
 import type { AcrossSent, MailAcross } from './across.js'
+import { raceBound } from '../timing.js'
 
 /**
  * What the mailbox does when a session gives another one work through a tool whose delivery the host already makes (`ChildOwnership.delegated`,
@@ -21,28 +22,47 @@ export function delegationRecorder(mail: MessageService, turns?: MailTurns): (ca
   }
 }
 
-/** How a task this hub gave a linked machine's session stands, as its copy here says (`LinkedTasks.standing`) */
+/** How a task given a session on another computer stands, as its copy here says (`LinkedTasks.standing`) */
 export type TaskStanding =
   | { state: 'open' }
-  /** Centralu's report on it came back from the machine: how its turn ended (`TurnReport`'s facts), and to whom it was written */
+  /** Centralu's report on it came back from the other side: how its turn ended (`TurnReport`'s facts), and to whom it was written */
   | { state: 'reported'; outcome: string; answer?: string; error?: string; reason?: string; owner: string }
-  /** It ended with no report: withdrawn here, or released there (a stop, the session gone), as the machine's receipts say */
+  /** It ended with no report: withdrawn here, or released there (a stop, the session gone), as the other side's receipts say */
   | { state: 'ended'; why: string }
 
+/** Why a task across did not finish, as its standing says (ended with no report, or a report that it failed or was stopped), or null */
+export function unfinished(s: TaskStanding): string | null {
+  if (s.state === 'ended') return `its task there ended with no report (${s.why})`
+  return s.state === 'reported' && (s.outcome === 'failed' || s.outcome === 'stopped') ? (s.error ?? s.reason ?? s.outcome) : null
+}
+
 /**
- * Work this hub gives a session on a linked machine (#1948 step 6, docs/plans/mailbox.md §10.6): a task across the link (`MailAcross.sendTask`), which
- * that machine's delivery gives the session and its engine reports; the report comes back as a local child's, answering the copy here. What start_agent,
- * agent_session and send_to_session on such a session read and do of it, by session id
+ * Work a session here gives a session on another computer (#1948 step 6, docs/plans/mailbox.md §10.6): a task across the link (`MailAcross.sendTask`), which
+ * that computer's delivery gives the session and its engine reports; the report comes back as a local child's, answering the copy here. What start_agent,
+ * agent_session, send_to_session and ask_project read and do of it, by session id (a hub's session, on a machine, by its address)
  */
 export type LinkedTasks = {
-  send(callerId: string, childId: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true }): Promise<AcrossSent>
+  send(callerId: string, childId: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent>
   /** The caller's newest task to the child that is not settled, by id */
   open(callerId: string, childId: string): string | undefined
-  standing(taskId: string, childId: string): TaskStanding
+  standing(taskId: string): TaskStanding
+  /** Waits up to `boundMs` for the task to stand otherwise than open, or for `until`: `bound` past it, `aborted` when `signal` ends the wait */
+  settled(taskId: string, boundMs: number, o?: { signal?: AbortSignal | undefined; until?: Promise<void> }): Promise<'settled' | 'bound' | 'aborted'>
+  /**
+   * The caller's ask_project tasks, newest first: open, or reported to a caller not given the report yet. The session each went to by its id as this host
+   * names it (a linked machine's `<machine>.<id>`, a hub's `<hub>.<id>`), and its name
+   */
+  asks(callerId: string): { taskId: string; sessionId: string; name: string }[]
+  /** Why work cannot go to a linked machine's session now (`MailAcross.taskRefusal`), or null */
+  refusal(childId: string): string | null
+  /** On a machine: the copy of the task a hub wrote for the caller's ask (`HubAskResult.taskId`) to its session `to`, so the report it sends answers it */
+  keep(callerId: string, to: string, taskId: string, text: string): void
+  /** As `MailAcross.holdReports` */
+  holdReports(taskId: string): (carried: boolean) => void
+  /** On a hub: the asks not given yet of the sessions whose ids start with `prefix` (a machine's, `<machine>.`) are withdrawn, as its switch goes off (#550). How many */
+  withdrawAsks(prefix: string): number
   /** The answer the newest report on the caller's tasks to the child kept, if one came back */
   lastAnswer(callerId: string, childId: string): string | undefined
-  /** Hears each change of the mail once it is written: a report that came back, a receipt from the machine */
-  onChange(listener: () => void): () => void
   /** The caller withdraws its open tasks to the child (`agent_session stop`); the withdrawal crosses by the receipts. How many */
   withdraw(callerId: string, childId: string): number
   /** The child is gone for good with its machine (removed from Centralu): its tasks are released `gone`, so the stop notice tells their senders */
@@ -52,42 +72,72 @@ export type LinkedTasks = {
 /** How many of the latest messages to or from a linked child `lastAnswer` reads for the caller's newest task */
 const LAST_ANSWER_SCAN = 50
 
-export function linkedTasksOf(mail: MessageService, records: MailboxRecords, across: Pick<MailAcross, 'sendTask'>, changes: (listener: () => void) => () => void): LinkedTasks {
+export function linkedTasksOf(mail: MessageService, records: MailboxRecords, across: Pick<MailAcross, 'sendTask' | 'taskRefusal' | 'keepAsk' | 'holdReports'>, changes: (listener: () => void) => () => void): LinkedTasks {
   const tasksTo = (caller: string, child: string) => records.watchedFrom(caller).filter((r) => r.recipient === child && records.message(r.messageId)?.kind === 'task')
+  const standing = (taskId: string): TaskStanding => {
+    const report = records.reportsOn(taskId).at(-1)
+    if (report) {
+      const f = report.facts
+      const [answer, error, reason] = [f.answer, f.error, f.reason]
+      return {
+        state: 'reported', outcome: typeof f.outcome === 'string' ? f.outcome : 'finished', owner: records.recipients(report.id)[0]?.recipient ?? '',
+        ...(typeof answer === 'string' ? { answer } : {}), ...(typeof error === 'string' ? { error } : {}), ...(typeof reason === 'string' ? { reason } : {}),
+      }
+    }
+    // A task across has one recipient, the session there
+    const row = records.recipients(taskId)[0]
+    if (!row || (row.settled === null && row.releasedAt === null)) return { state: 'open' }
+    return { state: 'ended', why: row.releasedWhy ?? row.settled ?? 'gone' }
+  }
   return {
     send: (callerId, childId, text, task) => across.sendTask(callerId, mail.sessionAddress(childId), text, task),
-    open: (callerId, childId) => records.newestTask(mail.sessionAddress(callerId), mail.sessionAddress(childId))?.id,
-    standing: (taskId, childId) => {
-      const report = records.reportsOn(taskId).at(-1)
-      if (report) {
-        const f = report.facts
-        const [answer, error, reason] = [f.answer, f.error, f.reason]
-        return {
-          state: 'reported', outcome: typeof f.outcome === 'string' ? f.outcome : 'finished', owner: records.recipients(report.id)[0]?.recipient ?? '',
-          ...(typeof answer === 'string' ? { answer } : {}), ...(typeof error === 'string' ? { error } : {}), ...(typeof reason === 'string' ? { reason } : {}),
-        }
+    open: (callerId, childId) => records.newestTask(mail.sessionAddress(callerId), childId.startsWith('session:') ? childId : mail.sessionAddress(childId))?.id,
+    standing,
+    settled: async (taskId, boundMs, o = {}) => {
+      let end!: () => void
+      const ended = new Promise<void>((resolve) => (end = resolve))
+      const check = () => {
+        if (standing(taskId).state !== 'open') end()
       }
-      const row = records.recipient(taskId, mail.sessionAddress(childId))
-      if (!row || (row.settled === null && row.releasedAt === null)) return { state: 'open' }
-      return { state: 'ended', why: row.releasedWhy ?? row.settled ?? 'gone' }
+      // Told inside the write that changed a row: read once it is done
+      const off = changes(() => queueMicrotask(check))
+      check()
+      try {
+        const r = await raceBound(o.until ? Promise.race([ended, o.until]) : ended, boundMs, o.signal)
+        return r === 'bound' || r === 'aborted' ? r : 'settled'
+      } finally {
+        off()
+      }
+    },
+    asks: (callerId) => {
+      const caller = mail.sessionAddress(callerId)
+      const here = parseAddress(caller)
+      const ask = (id: string | null) => {
+        const m = id === null ? undefined : records.message(id)
+        const to = m?.kind === 'task' && m.origin === 'ask_project' && m.sender === caller ? records.recipients(m.id)[0]?.recipient : undefined
+        const p = to ? parseAddress(to) : null
+        if (!m || !to || p?.kind !== 'session' || here?.kind !== 'session') return []
+        return [{ taskId: m.id, sessionId: p.host === here.host ? p.sessionId : `${p.host}.${p.sessionId}`, name: mail.labelOf(to), at: m.createdAt }]
+      }
+      const found = [
+        ...records.watchedFrom(caller).flatMap((r) => ask(r.messageId)),
+        ...records.pendingFor(caller, Number.MAX_SAFE_INTEGER).flatMap((p) => (p.message.kind === 'report' ? ask(p.message.replyTo) : [])),
+      ]
+      return found.filter((a, i) => found.findIndex((b) => b.taskId === a.taskId) === i).sort((a, b) => b.at - a.at).map(({ at: _at, ...a }) => a)
+    },
+    refusal: (childId) => across.taskRefusal(mail.sessionAddress(childId))?.text ?? null,
+    keep: (callerId, to, taskId, text) => across.keepAsk(mail.sessionAddress(callerId), to, taskId, text),
+    holdReports: (taskId) => across.holdReports(taskId),
+    withdrawAsks: (prefix) => {
+      const from = mail.sessionAddress(prefix)
+      const waiting = records.dueRecipients().flatMap((r) => records.pendingFor(r, Number.MAX_SAFE_INTEGER).map((p) => p.message))
+      return waiting.filter((m) => m.kind === 'task' && m.origin === 'ask_project' && m.sender.startsWith(from)).reduce((n, m) => n + mail.done(m.sender, m.id).settled, 0)
     },
     lastAnswer: (callerId, childId) => {
       const [caller, child] = [mail.sessionAddress(callerId), mail.sessionAddress(childId)]
       const task = records.feedOf(child, { limit: LAST_ANSWER_SCAN }).find((m) => m.kind === 'task' && m.sender === caller)
       const answer = task ? records.reportsOn(task.id).at(-1)?.facts.answer : undefined
       return typeof answer === 'string' ? answer : undefined
-    },
-    onChange: (listener) => {
-      // Told inside the write that changed a row: heard once it is done, once however many rows it changed
-      let due = false
-      return changes(() => {
-        if (due) return
-        due = true
-        queueMicrotask(() => {
-          due = false
-          listener()
-        })
-      })
     },
     withdraw: (callerId, childId) => {
       const caller = mail.sessionAddress(callerId)
@@ -102,9 +152,9 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
  * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): a task from the caller to the session, not delivered yet, which the
  * delivery gives it as a turn of its own once it is free; a `note` (#2258) at rest too. Returns the message's id
  */
-export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean) => string {
-  return (callerId, childId, origin, task, note) =>
-    mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false, ...(note ? { note } : {}) }).id
+export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean, depth?: number) => string {
+  return (callerId, childId, origin, task, note, depth) =>
+    mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false, ...(note ? { note } : {}), ...(depth ? { depth } : {}) }).id
 }
 
 /**
@@ -177,7 +227,8 @@ const ANSWER_KEPT = 600
 export function answerRecorder(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string, how?: AnswerGiven) => void {
   return (callerId, childId, how) => {
     const owner = mail.sessionAddress(callerId)
-    const child = mail.sessionAddress(childId)
+    // A hub's session a machine asked (`LinkedTasks.keep`), by its address
+    const child = childId.startsWith('session:') ? childId : mail.sessionAddress(childId)
     const now = Date.now()
     const reports = records.unreadFor(owner).filter((p) => p.message.kind === 'report' && reportOnTaskTo(records, p.message, owner, child)).map((p) => p.message.id)
     records.markDelivered(owner, reports, now, null)

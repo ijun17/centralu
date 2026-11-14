@@ -1,47 +1,17 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, busyAcross, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, NO_WORDS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { awayRefusal } from '../links/machine-reach.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
-import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
+import type { HubAskParams, HubAskResult } from '@cc/protocol'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
-import { inTurn } from '../idle.js'
-import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
-import type { LinkedReports } from './linked-reports.js'
-import { raceBound } from '../timing.js'
-import { frameField } from '@cc/protocol'
-import type { BackgroundTask } from '@cc/protocol'
+import { frameField, liveBackgroundTasks } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { isOrdinary } from './tool-profiles.js'
-
-
-/**
- * An ask_project call's task in a session of a linked machine, while its turn runs there (#700). The hub cannot see
- * that turn but through the machine's events, so the end of the turn is what `observeLinked` settles.
- */
-type LinkedAsk = {
-  callerId: string
-  /** The machine's session, qualified */
-  sessionId: string
-  sessionName: string
-  /** `<machine id>/<project name>`: how the caller names the project again, and how the answer names it */
-  project: string
-  /** Whether the turn was seen working, so a state the machine reports before it starts is not taken for its end */
-  busy: boolean
-  settled: boolean
-  /** What the session waits on, when it waits on the person there (an approval, a question) */
-  notice?: string
-  /**
-   * The session's own background work the turn ended with (#1457): the asker is owed the work's last turn end
-   * (`LinkedReports.oweAsker`), and the answer to this call says the work is paused
-   */
-  paused?: BackgroundTask[]
-  outcome: Promise<{ ok: true } | { ok: false; error: string }>
-  settle(r: { ok: true } | { ok: false; error: string }): void
-  /** The calls waiting on it, woken when the session stops on a card */
-  wake: Set<() => void>
-}
+import { sessionAddress } from '../mail/address.js'
+import { linkedWords } from './remote-agents.js'
+import { unfinished } from '../mail/delegation.js'
 
 /**
  * The hubs that let this host's sessions ask their projects (#550, the reverse direction; `LinkedHubs` in
@@ -60,12 +30,16 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'wayAcross' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'linkedTasks' | 'linkedReports' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'delegate'>
-    /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
-    readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
   }
+
+/**
+ * An ask_project task on another computer, as its call names it: the session there (qualified, `<machine or hub id>.<id>`), as `ChildOwnership.answered`
+ * takes it (`child`: a hub's, by its address), and the project
+ */
+type AskAcross = { taskId: string; sessionId: string; child: string; sessionName: string; project: string }
 
 /**
  * ask_project (#371 part B): a session asks another project, here or on a linked machine (#700), and waits for the
@@ -74,54 +48,8 @@ export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'r
 export class AskProjectFlow {
   constructor(private readonly host: AskProjectHost) {}
 
-  /** ask_project's tasks in a linked machine's sessions (#700), by the session's qualified id */
-  readonly linkedAsks = new Map<string, LinkedAsk>()
-
   /** The hubs linked to this host that let its sessions ask their projects (#550); none until main.ts gives them */
   hubs: HubsReader | null = null
-
-  /**
-   * A machine's link that is no longer connected ends the tasks asked of its sessions: their events stop reaching the
-   * hub, so the turn's end would never be seen and the call would answer "still working" for good. The turn may well
-   * go on there; the sentence says so, and where to look.
-   */
-  observeLinkLoss(machine: unknown): void {
-    const m = machine as { id?: unknown; name?: unknown; status?: unknown } | null
-    if (!m || typeof m.id !== 'string' || m.status === 'connected') return
-    const name = typeof m.name === 'string' && m.name ? m.name : m.id
-    for (const [sessionId, ask] of this.linkedAsks) {
-      if (ask.settled || !sessionId.startsWith(`${m.id}.`)) continue
-      ask.settle({ ok: false, error: `the link to ${name} dropped before the turn ended. The task was delivered and may still be running there; read the session once the link is back` })
-    }
-  }
-
-  /** A linked machine's event for a session an ask_project is waiting on: the turn ends as `linkedTurnEnd` reads it (#166, #428) */
-  observeLinkedAsk(ask: LinkedAsk, e: LinkedTurnEvent): void {
-    if (ask.settled) return
-    const step = linkedTurnEnd(ask.busy, e)
-    if (!step) return
-    if (step.step === 'busy') {
-      ask.busy = true
-      if (!step.waits) return
-      ask.notice = step.waits === 'approval' ? 'it waits on the person to answer an approval there' : 'it waits on the person to answer a question there'
-      for (const wake of [...ask.wake]) wake()
-      return
-    }
-    if (step.step === 'card_closed') ask.notice = undefined
-    else if (step.step === 'completed') {
-      /*
-       * A turn that completed with the session's own background work still running there is a pause, as a local child's
-       * is (#721): decided on this event, so the work's later turn is owed to the asker from now on, whether or not the
-       * call is still waiting. The report is kept before the call is told, and `LinkedReports.observe` reads the same
-       * event after this and finds it paused already
-       */
-      const paused = this.host.linkedReports.oweAsker(ask.sessionId, ask.callerId, e)
-      if (paused.length) ask.paused = paused
-      ask.settle({ ok: true })
-    }
-    else if (step.step === 'failed') ask.settle({ ok: false, error: step.error })
-    else ask.settle({ ok: false, error: 'the session was deleted there before its turn ended' })
-  }
 
   /**
    * What ask_project rests on in the caller, read before its card and again once the person answered it: a card can outlast
@@ -331,14 +259,14 @@ export class AskProjectFlow {
    * ask_project to a project on a linked machine (#700, docs/plans/remote-hub.md §12.2 step 3). The same call as for a
    * project here, run through the links: the existing ordinary session is chosen by name or id, the person's consent
    * is asked for this call (a card that names the machine; "always" is read as allow once, as `create_project`'s is,
-   * since a remembered consent is a row tied to two projects of this computer), the task is delivered as the hub's
-   * instruction (`host.send`), and the turn is waited on through the machine's events. The session runs on that
-   * machine, with its own logins and folder, under the preset it has. The answer comes back as everywhere else; the
-   * paths it names are that machine's files and are listed, none opened to the caller.
+   * since a remembered consent is a row tied to two projects of this computer), and the task goes as a task across the
+   * link (#1948 step 6): that machine's delivery gives it the session, held while it is busy as a busy session's task here
+   * is, at the depth this caller's work makes it, and its engine reports it. The call waits for that report as start_agent
+   * does for a child there; the answer is the session's words there, and the paths it names are that machine's files,
+   * listed and none opened to the caller. A call with no task waits again on the caller's task still open there.
    *
-   * Not here: a task into a busy session (refused, naming the mail it gets as soon as it can take it, `busyAcross`; a task across links is #1948 step 6),
-   * cards of the machine's session answered by the caller (the person answers them in the hub's window), and stopping the machine's turn when
-   * the call is cancelled.
+   * Not here: cards of the machine's session answered by the caller (the person answers them in the hub's window), and
+   * stopping the machine's turn when the call is cancelled.
    */
   private async askLinkedProject(
     callerId: string,
@@ -351,45 +279,40 @@ export class AskProjectFlow {
   ): Promise<AskProjectResult> {
     const label = `${target.name} on ${target.machine}`
     const project = `${target.machineId}/${target.name}`
+    const tasks = this.host.linkedTasks
+    // The caller's asks there not answered yet, by the session's qualified id
+    const given = (tasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(`${target.machineId}.`))
+    const wanted = opts.session?.trim()
+    const of = (g: { taskId: string; sessionId: string }, sessionName: string): AskAcross => ({ taskId: g.taskId, sessionId: g.sessionId, child: g.sessionId, sessionName, project })
     if (target.away) {
       // A task already given there: the machine is down, and what became of it is the answer, not a refusal to ask
-      const given = [...this.linkedAsks.values()].filter((a) => a.callerId === callerId && a.project === project && (!opts.session || a.sessionId === opts.session.trim()))
-      if (!opts.task && given.length === 1) return this.awaitLinkedAsk(given[0]!, reader, signal)
+      const there = given.filter((g) => reader.describe(g.sessionId)?.project === target.name && (!wanted || g.sessionId === wanted))
+      if (!opts.task && there.length === 1) return this.awaitAsk(callerId, of(there[0]!, reader.describe(there[0]!.sessionId)?.name ?? there[0]!.sessionId), reader, signal)
       return { ok: false, error: awayRefusal(target.machine, target.away, `${label} cannot be asked`) }
     }
     const listed = await reader.projectSessions(target)
     if (!listed.ok) return listed
     const sessions = listed.sessions
-    const wantedSession = opts.session?.trim()
-    // A turn that ended without its event reaching the hub (the link was down) is over once the machine says the session is out of its turn
-    for (const s of sessions) {
-      const stale = this.linkedAsks.get(s.id)
-      if (stale && !stale.settled && stale.busy && !inTurn(s.state as SessionState)) stale.settle({ ok: true })
-    }
-    const mine = sessions.filter((s) => {
-      const ask = this.linkedAsks.get(s.id)
-      return ask && ask.callerId === callerId
-    })
-    if (!opts.task && !wantedSession && mine.length === 1) return this.awaitLinkedAsk(this.linkedAsks.get(mine[0]!.id)!, reader, signal)
-    const picked = pickAskedSession(sessions, wantedSession, label)
+    const mine = sessions.flatMap((s) => given.filter((g) => g.sessionId === s.id).map((g) => of(g, s.name)))
+    if (!opts.task && !wanted && mine.length === 1) return this.awaitAsk(callerId, mine[0]!, reader, signal)
+    const picked = pickAskedSession(sessions, wanted, label)
     if ('error' in picked) {
       // The times are read only for the refusal that lists them: a successful ask never waits for them
       const moved = (await reader.sessionsMoved?.(target)) ?? {}
-      const listed = pickAskedSession(sessions, wantedSession, label, (s) => moved[s.id])
+      const listed = pickAskedSession(sessions, wanted, label, (s) => moved[s.id])
       return { ok: false, error: 'error' in listed ? listed.error : picked.error }
     }
     const chosen = picked.chosen
-    const pending = this.linkedAsks.get(chosen.id)
-    if (pending && pending.callerId === callerId && !opts.task) return this.awaitLinkedAsk(pending, reader, signal)
-    if (pending && !pending.settled) {
-      return { ok: false, error: pending.callerId === callerId
-        ? `${label} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${project}", session "${chosen.id}" and no task to wait for it.`
-        : busyAcross({ name: chosen.name, label }, 'task', this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
+    const pending = mine.find((g) => g.sessionId === chosen.id)
+    if (pending && !opts.task) return this.awaitAsk(callerId, pending, reader, signal)
+    if (pending && tasks?.open(callerId, chosen.id) === pending.taskId) {
+      return { ok: false, error: `${label} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${project}", session "${chosen.id}" and no task to wait for it.` }
     }
     if (!opts.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
-    if (inTurn(chosen.state as SessionState)) {
-      return { ok: false, error: busyAcross({ name: chosen.name, label }, { turn: chosen.state }, this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
-    }
+    if (!tasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
+    // A machine that takes no work from this computer, or not yet: said before the card, which would ask for nothing
+    const cannot = tasks.refusal(chosen.id)
+    if (cannot) return { ok: false, error: `Could not hand the task to ${label}: ${cannot}` }
 
     const decision = await this.host.hostCards.askHost(
       callerId,
@@ -409,58 +332,22 @@ export class AskProjectFlow {
     if (decision === 'deny') return { ok: false, error: `The person did not allow ${callerProject} to reach ${label} this way. Do not ask again unless they tell you to.` }
     if (decision === null) return { ok: false, error: `The question to the person was withdrawn before they answered, so ${label} was not reached.` }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
-    /*
-     * The card stood while the person could use the session there: ask the machine again before anything is sent. A
-     * task sent into a turn that is not the caller's would join it (and its end would settle this call), the very
-     * thing the busy refusal above keeps out, so this refuses as it does.
-     */
-    const again = await reader.projectSessions(target)
-    if (!again.ok) return { ok: false, error: `Could not hand the task to ${label}: ${again.error}` }
-    const now = again.sessions.find((s) => s.id === chosen.id)
-    if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
-    const taken = this.linkedAsks.get(chosen.id)
-    if (inTurn(now.state as SessionState) || (taken && !taken.settled)) {
-      return { ok: false, error: busyAcross({ name: chosen.name, label }, 'during_card', this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
-    }
-    // Asking the machine again took a moment: the caller's gates once more, with no wait from here to the send
-    const late = this.askGateError(callerId)
-    if (late) return { ok: false, error: late }
-
-    let settle!: LinkedAsk['settle']
-    const outcome = new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => (settle = resolve))
-    const ask: LinkedAsk = {
-      callerId, sessionId: chosen.id, sessionName: chosen.name, project, busy: false, settled: false, outcome, wake: new Set(),
-      settle: (r) => {
-        if (ask.settled) return
-        ask.settled = true
-        settle(r)
-      },
-    }
-    /*
-     * The earlier task's pause ends with this one (#721): this ask's own end is what the asker hears, so the report kept
-     * for the earlier work is not delivered a second time. Put back if the send fails, since that work still runs
-     */
-    const putBack = this.host.linkedReports.releaseAsker(chosen.id, callerId)
-    // Registered before the send: the machine's first events can reach the hub before its answer does
-    this.linkedAsks.set(chosen.id, ask)
     // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
     const asker = labelOf(this.host.store.messages, this.host.meta.get(callerId)!)
-    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task, { name: asker, sessionId: callerId, mailable: false }), asker, { depth: depthOf(this.host, callerId) + 1 })
-    if (!sent.ok) {
-      if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
-      putBack?.()
-      return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }
-    }
-    return this.awaitLinkedAsk(ask, reader, signal)
+    const frame = askFrame(callerProject, opts.task, { name: asker, sessionId: callerId, mailable: false })
+    const sent = await tasks.send(callerId, chosen.id, frame, { origin: 'ask_project', depth: depthOf(this.host, callerId) + 1 })
+    if (!sent.ok) return { ok: false, error: `Could not hand the task to ${label}: ${sent.text}` }
+    return this.awaitAsk(callerId, of({ taskId: sent.messageId, sessionId: chosen.id }, chosen.name), reader, signal)
   }
 
   /**
    * ask_project into a project of a hub linked to this host (#550, the reverse direction; docs/plans/remote-hub.md
    * §12.7). The hub does the rest, as an ask there would: its card for the pair (that hub's windows answer it; once
-   * approved, the pair passes until the person withdraws it), the existing ordinary session, the delivery and the wait.
+   * approved, the pair passes until the person withdraws it), the existing ordinary session, the task and the wait.
    * This side sends who asks and at which depth, and reads the answer: someone else's words, cut to size, and paths
    * that name the hub's files, listed and none opened. A call cancelled here is withdrawn there (`call.cancel`), which
-   * withdraws a card still standing.
+   * withdraws a card still standing. The hub's task still working past the call (#1948 step 6) is kept here as a copy,
+   * which its report answers when it comes; a call with no task waits on that report here
    */
   private async askHubProject(
     callerId: string,
@@ -475,6 +362,11 @@ export class AskProjectFlow {
     if (target.away) return { ok: false, error: awayRefusal(target.hub, target.away, `${label} cannot be asked`) }
     const prefix = `${target.hubId}.`
     const session = opts.session?.trim()
+    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(prefix) && (!session || a.sessionId === session || a.sessionId === `${prefix}${session}`))
+    if (kept.length === 1) {
+      const k = kept[0]!
+      return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: sessionAddress(target.hubId, k.sessionId.slice(prefix.length)), sessionName: k.name, project }, null, signal)
+    }
     const r = await hubs.ask(
       target.hubId,
       {
@@ -489,52 +381,44 @@ export class AskProjectFlow {
     )
     if (!r.ok) return { ok: false, error: r.error }
     const base = { project, sessionId: `${prefix}${r.sessionId}`, sessionName: r.sessionName }
-    if (r.state === 'working') return { ok: true, state: 'working', ...base, ...(r.notice ? { notice: r.notice } : {}) }
+    const there = sessionAddress(target.hubId, r.sessionId)
+    if (r.state === 'working') {
+      if (r.taskId && opts.task) this.host.linkedTasks?.keep(callerId, there, r.taskId, opts.task)
+      return { ok: true, state: 'working', ...base, ...(r.notice ? { notice: r.notice } : {}) }
+    }
     const answer = r.answer ?? ''
+    // The answer is the report on the task: a copy kept of it here is answered, so no report comes for it again
+    if (r.taskId) this.host.children.answered(callerId, there, { ok: true, text: answer })
     // Paths in the answer are the hub's files: listed, not opened to the caller
     return { ok: true, state: 'done', ...base, answer: clipAnswer(answer, r.sessionName), readable: [], outside: pathsIn(answer) }
   }
 
-  /** Waits for a linked machine's turn up to the bound, as `awaitDelegation` does, and reads its answer there */
-  private async awaitLinkedAsk(ask: LinkedAsk, reader: LinkedSessions, signal?: AbortSignal): Promise<AskProjectResult> {
-    const working = (): AskProjectResult => ({
-      ok: true, state: 'working', project: ask.project, sessionId: ask.sessionId, sessionName: ask.sessionName,
-      ...(ask.notice ? { notice: ask.notice } : {}),
-    })
-    if (!ask.settled && ask.notice) return working()
-    let wake: (() => void) | undefined
-    const asked = new Promise<'asked'>((resolve) => ask.wake.add((wake = () => resolve('asked'))))
-    try {
-      const r = await raceBound(ask.outcome, ASK_WAIT_MS, signal, asked)
-      if (r === 'asked' || r === 'bound') return working()
-      if (r === 'aborted') {
-        // The turn runs on the machine and this host cannot stop it from here: the call stops waiting and says so
-        return { ok: false, error: `The call was cancelled; ${ask.project}'s session "${ask.sessionName}" was left running.` }
-      }
-      if (this.linkedAsks.get(ask.sessionId) === ask) this.linkedAsks.delete(ask.sessionId)
-      if (!r.ok) return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.` }
-      // Its last words, read there: the whole text, cut here as an answer is cut everywhere
-      const words = await reader.lastWords(ask.sessionId, ANSWER_READ_MAX_CHARS).catch((e: Error) => ({ ok: false as const, error: e.message }))
-      // A read that failed is said, not handed back as an empty answer (#1186): the turn ended, and the task is done there
-      if (!words.ok) {
-        return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] ended its turn, but its answer could not be read there (${words.error}). Do not give the task again: read it with read_session(sessionId="${ask.sessionId}") once that machine answers.` }
-      }
-      const answer = words.text
-      return {
-        ok: true,
-        state: 'done',
-        project: ask.project,
-        sessionId: ask.sessionId,
-        sessionName: ask.sessionName,
-        answer: clipAnswer(answer, ask.sessionName, words.seq !== null ? { sessionId: ask.sessionId, seq: words.seq } : undefined),
-        // Paths in the answer are that machine's: listed, not opened to the caller
-        readable: [],
-        outside: pathsIn(answer),
-        // Still paused only while that report is owed: collected after the work's report went out, these are its final words
-        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.assistantId === ask.callerId ? { paused: pausedWords(ask.paused ?? [], ask.sessionId, ' there') } : {}),
-      }
-    } finally {
-      if (wake) ask.wake.delete(wake)
+  /**
+   * Waits up to the bound for the report on an ask's task on another computer (`LinkedTasks.settled`), as `awaitDelegation` waits for a turn here, and
+   * reads its answer: the session's words there when `reader` reads them (a linked machine's), else the report's
+   */
+  private async awaitAsk(callerId: string, ask: AskAcross, reader: LinkedSessions | null, signal?: AbortSignal): Promise<AskProjectResult> {
+    const tasks = this.host.linkedTasks!
+    const base = { project: ask.project, sessionId: ask.sessionId, sessionName: ask.sessionName }
+    const r = await tasks.settled(ask.taskId, ASK_WAIT_MS, { signal })
+    // The turn runs there and this host cannot stop it from here: the call stops waiting and says so
+    if (r === 'aborted') return { ok: false, error: `The call was cancelled; ${ask.project}'s session "${ask.sessionName}" was left running.` }
+    const s = tasks.standing(ask.taskId)
+    if (r === 'bound' || s.state === 'open') return { ok: true, state: 'working', ...base }
+    // The call gives the caller the report: it does not wake it again
+    this.host.children.answered(callerId, ask.child)
+    const failed = unfinished(s)
+    if (failed !== null || s.state !== 'reported') return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] did not finish: ${failed}. Tell the person, or ask again with a clearer task.` }
+    const words = reader ? await linkedWords(reader, ask.sessionId, ask.sessionName, s.answer) : { answer: clipAnswer(s.answer ?? NO_WORDS, ask.sessionName), notice: '' }
+    // A read that failed is said, not handed back as an empty answer (#1186): the turn ended, and the task is done there
+    if (!words.answer) return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] ended its turn.${words.notice} Do not give the task again.` }
+    // Its own background work still runs there (#721): its final report comes by mail when that work ends
+    const paused = s.outcome === 'paused' ? liveBackgroundTasks([...this.host.linkedReports.tasksOf(ask.sessionId)]).filter((t) => !t.timer) : null
+    return {
+      ok: true, state: 'done', ...base, answer: words.answer,
+      // Paths in the answer are that computer's: listed, not opened to the caller
+      readable: [], outside: pathsIn(words.answer),
+      ...(paused ? { paused: pausedWords(paused, ask.sessionId, ' there') } : {}),
     }
   }
 
@@ -583,11 +467,11 @@ export class AskProjectFlow {
 /**
  * What the caller reads of a turn that ended with the session's own background work still running (#721, #1457): the
  * words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which an ask_project target does not have.
- * The work may be a server that never ends, and the report comes only if it does
+ * The work may be a server that never ends, and the report comes only if it does. A hub's work is not listed on a machine (`tasks` empty)
  */
 function pausedWords(tasks: readonly { description: string }[], sessionId: string, there = ''): string {
   return (
-    `its turn ended while its own background work is still running${there} (${tasks.map((t) => frameField(t.description)).join(', ')}), so the answer is what it said so far. ` +
+    `its turn ended while its own background work is still running${there}${tasks.length ? ` (${tasks.map((t) => frameField(t.description)).join(', ')})` : ''}, so the answer is what it said so far. ` +
     'A final report follows when that work ends and a turn ends it. If that work is a server or watcher it leaves running, ' +
     `this answer may be its final one. Read the session with read_session(sessionId="${sessionId}").`
   )

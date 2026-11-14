@@ -210,7 +210,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     ...extra,
   })
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => 'Hub mac', machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
-  if (across) mgr.useMachineMail((id) => links.get(id)?.takesMail === true, (id) => links.get(id)?.takesTasks === true)
+  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks === true)
   mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
   mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
@@ -2409,18 +2409,18 @@ describe("the hub's Assistant reads the linked machines (#82 phase 4)", () => {
 })
 
 describe('ask_project reaches the projects of linked machines (#700)', () => {
-  /** A remote with one project and one worker; a hub with a trusted project and an ordinary session in it (the caller) */
+  /** A remote with one project and one worker; a hub with a trusted project and an ordinary session in it (the caller). Both deliver their mail: the task crosses as mail (#1948 step 6) */
   async function rig() {
     const { store: remoteStore } = seeded([['w1', 'worker', true]])
     // A conversation the agent can resume, so a task reaches it
     seedSession(remoteStore, 'p-remote', 'w1', 'worker', 'ext-w1')
-    const remote = await remoteHost(0, remoteStore)
+    const remote = await remoteHost(0, remoteStore, { mail: true })
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
-    const hub = await hubHost(() => lineFor(remote.port), hubStore)
+    const hub = await hubHost(() => lineFor(remote.port), hubStore, true, {}, { mail: true })
     hub.mgr.setProjectTrusted('p-hub', true)
-    await eventually(() => status(hub) === 'connected')
+    await eventually(() => status(hub) === 'connected' && hub.links.get('m1')?.takesTasks === true)
     const name = (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === 'p-remote')!.name
     const ask = (opts: { project: string; session?: string; task?: string }) => hub.mgr.askProject('h1', opts)
     const card = () => hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval
@@ -2432,7 +2432,11 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
       await eventually(() => card()?.requestId !== c.requestId)
       return c
     }
-    return { remote, hub, name, ask, card, answer }
+    /** Whether the task reached the machine's session at all: as mail, or in its conversation */
+    const reached = (text: string) =>
+      remote.store.mailbox.feedOf(sessionAddress(hubSelfId(remote.store), 'w1'), { limit: 20 }).some((m) => m.body.includes(text)) ||
+      remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes(text))
+    return { remote, hub, name, ask, card, answer, reached }
   }
 
   it('asks a session of a project on a linked machine: it runs there, and its answer comes back (unique bare name)', async () => {
@@ -2443,10 +2447,10 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(c.detail).toMatchObject({ kind: 'project_access', access: 'delegate', to: { id: 'm1.p-remote', name, machine: 'Remote box', trusted: false }, session: { id: 'm1.w1' } })
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'done', project: `m1/${name}`, sessionId: 'm1.w1' })
-    expect((r as { answer: string }).answer).toContain('echo: [A session in the project "hub-project" asks this project')
-    // It ran on the machine, as an instruction from the hub's session, and the answer is that machine's last words
-    const there = remote.store.messages.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
-    expect(there.payload).toMatchObject({ from: { name: expect.stringContaining('on Hub mac') } })
+    expect((r as { answer: string }).answer).toContain('[A session in the project "hub-project" asks this project')
+    // It ran on the machine as a task from the hub's session, and the answer is that machine's last words
+    const task = remote.store.mailbox.feedOf(sessionAddress(hubSelfId(remote.store), 'w1'), { limit: 5 }).find((m) => m.kind === 'task')!
+    expect(task).toMatchObject({ origin: 'ask_project', sender: sessionAddress(hubSelfId(hub.store), 'h1') })
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
   })
 
@@ -2457,12 +2461,13 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
    */
   it('cuts a long answer from a machine with the read that shows the rest there, and that read shows it (#1186)', async () => {
     const { name, ask, answer, hub } = await rig()
-    const middle = `MIDDLE-START${'m'.repeat(5000)}MIDDLE-END`
-    const call = ask({ project: name, task: `${'h'.repeat(4500)}${middle}${'t'.repeat(1500)}` })
+    // The mail frame comes before the task in the words the session echoes: the middle starts past the cut's head, and one read there shows it
+    const middle = `MIDDLE-START${'m'.repeat(1500)}MIDDLE-END`
+    const call = ask({ project: name, task: `${'h'.repeat(3900)}${middle}${'t'.repeat(1500)}` })
     await answer('allow')
     const r = await call
     if (!r.ok || r.state !== 'done') throw new Error(JSON.stringify(r))
-    expect(r.answer.startsWith('echo: [A session in the project "hub-project"')).toBe(true)
+    expect(r.answer.startsWith('echo: ')).toBe(true)
     expect(r.answer).not.toContain('MIDDLE-END')
     const read = /read_session\(sessionId="([^"]+)", around=(\d+), offset=(\d+)\)/.exec(r.answer)
     expect(read?.[1]).toBe('m1.w1')
@@ -2474,26 +2479,13 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(line.text).toContain('MIDDLE-END')
   })
 
-  it('says the answer could not be read there, rather than answering empty (#1186)', async () => {
+  it('answers with the words its report kept when they cannot be read there, rather than answering empty (#1186)', async () => {
     const { remote, name, ask, answer } = await rig()
     const real = remote.mgr.linkedHost.hostReader.bind(remote.mgr.linkedHost)
     vi.spyOn(remote.mgr.linkedHost, 'hostReader').mockImplementation(() => ({ ...real(), lastAnswer: async () => { throw new Error('the store is busy') } }))
     const call = ask({ project: name, task: 'say hello' })
     await answer('allow')
-    const r = await call
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('ended its turn, but its answer could not be read there (the store is busy)') })
-    expect((r as { error: string }).error).toContain('read_session(sessionId="m1.w1")')
-  })
-
-  // The machine counts its session one level below the hub's caller while it works on the task (#838 item 12)
-  it('tells the machine the depth its session works at, which ends with the turn', async () => {
-    const { remote, name, ask, answer } = await rig()
-    const sent = vi.spyOn(remote.mgr.linkedHost, 'sendFromHub')
-    const call = ask({ project: name, task: 'say hello' })
-    await answer('allow')
-    expect(await call).toMatchObject({ ok: true, state: 'done' })
-    expect(sent).toHaveBeenCalledWith('w1', expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
-    await eventually(() => remote.store.settings.appSetting('hub_ask_depth:w1') === null)
+    expect(await call).toMatchObject({ ok: true, state: 'done', answer: expect.stringMatching(/^echo: /) })
   })
 
   it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {
@@ -2553,71 +2545,36 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(never.error).toContain(', so "m1/never-seen" cannot be asked there')
   })
 
-  it('says the session is waiting on the person there, and waits again for the answer once it is given', async () => {
+  it('waits while the session there waits on the person, and tells the same caller asking again with a task to wait for it', async () => {
     const { remote, name, ask, answer } = await rig()
     const first = ask({ project: name, task: 'please approve the command' })
     await answer('allow')
-    expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: 'm1.w1', notice: expect.stringContaining('approval there') })
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
     // The same caller asking again with a task is told to wait, not to start a second one
     expect(await ask({ project: name, task: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('still working on your last task') })
-    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
     await remote.mgr.inputs.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
-    expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
-  })
-  it('sends nothing when the person started a turn in the session while the question stood', async () => {
-    const { remote, name, ask, answer, card } = await rig()
-    const call = ask({ project: name, task: 'say hello' })
-    await eventually(() => !!card())
-    // The person works in that session there while the card is up: a turn that waits on them
-    await remote.mgr.inputs.send('w1', 'please approve my command')
-    await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
-    await answer('allow')
-    const r = await call
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood') })
-    // This hub has no mailbox, so no mail is named (#1186; reverse-asks.test.ts names it where both take mail)
-    expect(r).toMatchObject({ error: expect.stringContaining('nothing was sent. Name another session, or ask again later.') })
-    // The task did not join their turn: it is nowhere in the conversation there
-    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
-    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
+    expect(await first).toMatchObject({ ok: true, state: 'done', sessionId: 'm1.w1', answer: 'approved' })
   })
 
   it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {
-    const { remote, hub, name, ask, card } = await rig()
+    const { hub, name, ask, card, reached } = await rig()
     const call = ask({ project: name, task: 'say hello' })
     await eventually(() => !!card())
     void hub.mgr.setProjectTrusted('p-hub', false)
     expect(card()).toBeFalsy()
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
-    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(reached('say hello')).toBe(false)
   })
 
   it('refuses an approval that comes after the trust it rested on is gone, and sends nothing to the machine', async () => {
-    const { remote, hub, name, ask, answer, card } = await rig()
+    const { hub, name, ask, answer, card, reached } = await rig()
     const call = ask({ project: name, task: 'say hello' })
     await eventually(() => !!card())
     // Taken away at the store, so only the read after the answer can see it
     hub.store.projects.setProjectTrusted('p-hub', false)
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
-    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
-  })
-
-  it('ends the wait with a sentence when the link drops after the task was sent, instead of "still working" for good', async () => {
-    const { remote, name, ask, answer } = await rig()
-    const first = ask({ project: name, task: 'please approve the command' })
-    await answer('allow')
-    expect(await first).toMatchObject({ ok: true, state: 'working', notice: expect.stringContaining('approval there') })
-    await remote.close()
-    // The next call is told what happened to the task, not that it still works
-    let last: Awaited<ReturnType<typeof ask>> | undefined
-    await eventually(async () => {
-      last = await ask({ project: name })
-      return !last.ok || last.state !== 'working'
-    })
-    expect(last).toMatchObject({
-      ok: false,
-      error: expect.stringMatching(/the link to Remote box dropped before the turn ended.*may still be running there/),
-    })
+    expect(reached('say hello')).toBe(false)
   })
 })
 

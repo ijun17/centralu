@@ -4,6 +4,7 @@ import type { ChildRunResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import type { LinkedTasks, TaskStanding } from '../mail/delegation.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { raceBound } from '../timing.js'
 import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
 import { ChildOwnership } from './child-ownership.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
@@ -81,10 +82,19 @@ class Tasks {
       open: () => [...this.standing].reverse().find(([, s]) => s.state === 'open')?.[0],
       standing: (id) => this.standing.get(id) ?? { state: 'open' },
       lastAnswer: () => [...this.standing.values()].reverse().flatMap((s) => (s.state === 'reported' && s.answer ? [s.answer] : []))[0],
-      onChange: (l) => {
-        this.listeners.add(l)
-        return () => void this.listeners.delete(l)
+      settled: (id, boundMs, { signal, until } = {}) => {
+        const reported = new Promise<'settled'>((resolve) => {
+          const check = () => (this.standing.get(id) ?? { state: 'open' }).state !== 'open' && resolve('settled')
+          this.listeners.add(check)
+          check()
+        })
+        return raceBound(until ? Promise.race([reported, until.then(() => 'settled' as const)]) : reported, boundMs, signal)
       },
+      asks: () => [],
+      refusal: () => this.refusal,
+      keep: () => {},
+      holdReports: () => () => {},
+      withdrawAsks: () => 0,
       withdraw: (callerId) => {
         let n = 0
         for (const [id, s] of this.standing) {

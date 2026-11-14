@@ -16,9 +16,3 @@ export function isHubSender(id: unknown): boolean {
   return id === HUB_SENDER || id === HUB_SENDER_RENAMED
 }
 
-/**
- * The sender a linked machine's session's ask_project task is recorded under on the hub (#550, `MachineAsks`): another
- * machine's session, never the person and never an Assistant. Not a session of this host, as `HUB_SENDER`; the
- * window shows the name it carries (`<session> on <machine>`)
- */
-export const MACHINE_ASKER = '_linked-machine-session'

@@ -19,11 +19,13 @@ and `normal` it has these controls ([agent-host/delegation/ask-project.md](../ag
   project. The task arrives framed as sent by another session, never as the person.
 - **The agent depth** (#867). A session handling an active cross-project task is one level deeper than its asker, so
   at the default depth of 1 it cannot ask a third project, and two projects that consented to each other cannot pass a
-  task back and forth without a person. No preset opens it. The same holds across machines (#838 item 12): a hub asking
-  a linked machine's session sends the depth that session works at (`host.send`'s `ask`, the caller's depth plus one),
-  and the machine counts it until that turn ends (`hubAskDepthKey`), so the session refuses start_agent and ask_project
-  as one asked on its own machine would. A machine or hub from before this change neither sends nor reads it: there,
-  a linked ask still counts the asked session as one the person started.
+  task back and forth without a person. No preset opens it. The same holds across machines (#838 item 12): the asking
+  side sends the depth the asked session works at, the caller's depth plus one, with the task (`host.mail`'s `task.depth`
+  from a hub, `hub.askProject`'s `depth` from a machine, #1948 step 6; `host.send`'s `ask` from a hub before it); the
+  task keeps it (`facts.agentDepth`, written by the receiving host), and the session counts it from the delivery that
+  gives it the task until that turn ends (`hubAskDepthKey`), so it refuses start_agent and ask_project as one asked on its
+  own machine would. A machine or hub from before #838 neither sends nor reads it: there, a linked ask still counts the
+  asked session as one the person started.
 - **Trust** (owner decision 2026-10-11, #382). A session in a project the person has not trusted cannot
   ask at all, the rule `attach_app` follows: text in that repository could be the one asking, and the
   card would then be the only thing between a planted instruction and another project. An untrusted
@@ -83,7 +85,9 @@ machine as the less trusted side: a compromised server must not reach the person
   there as the person's request, as the Assistant's own does here. A task handed over in a handoff never carries it, plain
   mail never does, and a machine has no way to send it to a hub. The Assistant is this host's own session only, never a
   session of another computer with the same id (#2274). A report comes back by `hub.mail` with `report`, taken only from
-  the machine the hub's copy of that task went to; another machine's is refused and logged, and nothing is written.
+  the machine the hub's copy of that task went to; another machine's is refused and logged, and nothing is written. The
+  other way, a hub's report on a machine's session's ask comes by `host.mail` with `report`, taken only from the hub
+  that machine's copy of the task went to, on that hub's link; another hub's is refused and nothing is written.
   `host.mailMove` moves only open tasks a hub's own session gave there, to another of that hub's sessions, and marks
   them handed over; anything else is refused and logged. **Residual:** a hub may say `forPerson` of any send of its
   own; a hub already writes the person's answers on its machines (`host.mail` from `person`), so this gives it no
@@ -94,8 +98,10 @@ machine as the less trusted side: a compromised server must not reach the person
   turning the switch off closes it. Approving it is remembered for the
   pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
 - **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
-  nothing; the task framed as from that session on that machine, never as the person or an Assistant (so a seat that
-  directs would get it as someone else's words); the agent depth counted across the link; once the pair is approved, the
+  the task as mail, held until it can take it (#1948 step 6), as one here does; the task from that session on that machine
+  (its address here, `<machine>.<id>`), never as the person or an Assistant (so a seat that directs would get it as
+  someone else's words); the agent depth counted across the link; the switch going off withdraws its tasks not given
+  yet; once the pair is approved, the
   target session works under its own preset, trust and approvals (its `auto`, if it has it, then applies to its tool
   calls, never to the pair's card); the answer cut to size; paths in it listed on the machine and none opened.
 - **Residual:** the machine names the asking session itself. A compromised machine can use any pair approved for any of

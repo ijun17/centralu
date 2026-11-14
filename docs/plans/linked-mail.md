@@ -355,11 +355,13 @@ characters, projects and machines of 80, 30 computers with long names and reason
 
 Since #1948 step 6, the work a hub session gives a session on a linked machine is mail too, as it is between two sessions
 of one host ([mailbox.md](mailbox.md) §10.6): `start_agent`'s task to the child it made there, `agent_session send` and a
-`mail` to that child, and the Assistant's `send_to_session` and `create_session` first message. Before, the hub sent the
+`mail` to that child, the Assistant's `send_to_session` and `create_session` first message, and `ask_project`'s task to
+a machine's session either way (below). Before, the hub sent the
 words into the machine's session (`host.send`) and followed its turns over the link to report them itself
 (`LinkedReports`, `RemoteAgents`); that copy of the machine's engine is gone.
 
-- **The task.** `host.mail` with `task: { origin, note?, forPerson? }` (an addition). The machine writes it as a task (a
+- **The task.** `host.mail` with `task: { origin, note?, forPerson?, depth? }` (an addition; `depth` is the agent depth the
+  session counts while it works on it, [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)). The machine writes it as a task (a
   note) from the hub's session, under the id the hub picked, undelivered, and its own delivery gives it: at once at rest,
   into a turn whose tool takes input, else held until the session is free, as a busy session's task here is (#2189). The
   hub's copy is a task too, written once the machine answered (§6), so receipts, a withdrawal and a reply go as for any
@@ -380,6 +382,15 @@ words into the machine's session (`host.send`) and followed its turns over the l
   link that is the hub's word, `forPerson`, which it says only for its own Assistant's `send_to_session` and which the
   machine reads only from the hub of the link it came on (fact `hubAssistant`). A handed-over task, plain mail, a session
   of another computer with the Assistant's id (#2274) and a machine's mail to a hub never get it.
+- **`ask_project` both ways.** A hub session's ask of a machine's session is such a task (origin `ask_project`), given
+  after the card; the call waits for its report up to its bound, and past it answers `working`, its next call with no task
+  waiting again. A machine session's ask of a hub (`hub.askProject`, kept for its gates and card) is a task the hub writes
+  from the asker's address there (`<machine>.<id>`); the hub answers with the report's words, or `working` with the task's
+  id (`taskId`, an addition). Then the machine keeps a copy (sent across, origin `ask_project`), and the hub's report comes
+  as `host.mail` with `report` (an addition, `replyTo` the task), taken only from the hub the copy went to, owed as the
+  machine's are; a report the answer to the call carried is not sent again. A machine with no copy (an older build) asks
+  again and is answered from the report the hub kept; a hub that gives no `taskId` (an older build) is asked again. The
+  machine's switch going off withdraws its tasks not given yet.
 - **A handoff** on the hub keeps such a task under its one id (the child's turn there is that task's): the hub re-points its
   copy to the heir at once, so the report that comes back is the heir's, and tells the machine (`host.mailMove`, an
   addition), which re-points its own and marks it handed over. Only a hub's own sessions, and only tasks they gave there;

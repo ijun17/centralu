@@ -112,9 +112,10 @@ export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_sessio
 /**
  * `note`: a send that asks for nothing back (`send_to_session` without `reportBack`, #2258): a message that needs no reply, given as the task would be.
  * `across`: work a hub gave over its link (#1948 step 6), written under the id the hub picked; `forPerson`, that hub said its Assistant gave it, so it acts for
- * the person here as the Assistant's own does (`forPersonOf`). Only a hub's `host.mail` on its own link sets it (`MailAcross.fromHub`)
+ * the person here as the Assistant's own does (`forPersonOf`). Only a hub's `host.mail` on its own link sets it (`MailAcross.fromHub`). `depth`: work from
+ * another computer's session, which the session here counts that agent depth for while it works on it (`MailInput.depth`, #838)
  */
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true; across?: { id: string; forPerson?: true } }
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true; across?: { id: string; forPerson?: true }; depth?: number }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -387,7 +388,7 @@ export class MessageService {
       return this.put(
         {
           sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin,
-          ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : input.across?.forPerson ? { facts: { hubAssistant: true } } : {}),
+          facts: { ...(input.fromScript ? { fromScript: input.fromScript } : input.across?.forPerson ? { hubAssistant: true } : {}), ...(input.depth ? { agentDepth: input.depth } : {}) },
           ...(input.across ? { id: input.across.id } : {}),
         },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
