@@ -2561,7 +2561,10 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await remote.mgr.inputs.send('w1', 'please approve my command')
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
     await answer('allow')
-    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
+    const r = await call
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('became busy while the question to the person stood') })
+    // This hub has no mailbox, so no mail is named (#1186; reverse-asks.test.ts names it where both take mail)
+    expect(r).toMatchObject({ error: expect.stringContaining('nothing was sent. Name another session, or ask again later.') })
     // The task did not join their turn: it is nowhere in the conversation there
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)

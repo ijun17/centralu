@@ -648,6 +648,7 @@ export class SessionManager {
   /** Whether a linked machine takes mail from this hub (#2067 item 2): the task of a child started there then says to mail its parent */
   useMachineMail(takesMail: (machineId: string) => boolean): void {
     this.delegationFlow.remote.machineMail = takesMail
+    this.mail.machineMail = takesMail
   }
 
   /** The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts) */
@@ -920,6 +921,7 @@ export class SessionManager {
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
       takesSendNow: (...a) => self.mail.takesSendNow(...a),
       mailTask: (...a) => self.mail.mailTask(...a),
+      wayAcross: (...a) => self.mail.wayAcross(...a),
       withdrawTasks: (...a) => self.mail.withdrawTasks(...a),
       get cacheLedger() {
         return self.cacheLedger

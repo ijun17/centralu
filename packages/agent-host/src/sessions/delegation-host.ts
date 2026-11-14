@@ -24,6 +24,7 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
+import type { WayAcross } from './ask-project.js'
 import type { SelfCompaction } from './self-compaction.js'
 
 /** The tool a send to another session came through, the task's origin when it goes as mail */
@@ -57,6 +58,8 @@ export type DelegationHost = {
   takesSendNow: (sessionId: string) => boolean
   /** A send to a session that cannot take it now, as a mail task (`MailSessionsView.mailTask`) */
   mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
+  /** How to leave a busy session across the link to `machineId` work (`MailSessionsView.wayAcross`, #1186) */
+  wayAcross: (sessionId: string, machineId: string, machine: string) => WayAcross
   /** The caller's tasks to the session not delivered yet, withdrawn (`MailSessionsView.withdrawTasks`); how many */
   withdrawTasks: (callerId: string, sessionId: string) => number
   readonly children: ChildOwnership

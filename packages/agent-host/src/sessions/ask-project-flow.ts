@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, busyAcross, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { awayRefusal } from '../links/machine-reach.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
@@ -60,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'wayAcross' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'delegate'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -336,8 +336,9 @@ export class AskProjectFlow {
    * machine, with its own logins and folder, under the preset it has. The answer comes back as everywhere else; the
    * paths it names are that machine's files and are listed, none opened to the caller.
    *
-   * Not here yet: a task into a busy session (mail does not cross links), cards of the machine's session answered by the
-   * caller (the person answers them in the hub's window), and stopping the machine's turn when the call is cancelled.
+   * Not here: a task into a busy session (refused, naming the mail it gets as soon as it can take it, `busyAcross`; a task across links is #1948 step 6),
+   * cards of the machine's session answered by the caller (the person answers them in the hub's window), and stopping the machine's turn when
+   * the call is cancelled.
    */
   private async askLinkedProject(
     callerId: string,
@@ -383,11 +384,11 @@ export class AskProjectFlow {
     if (pending && !pending.settled) {
       return { ok: false, error: pending.callerId === callerId
         ? `${label} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${project}", session "${chosen.id}" and no task to wait for it.`
-        : `The session "${chosen.name}" in ${label} is busy with another session's task. Name another session, or ask again later.` }
+        : busyAcross({ name: chosen.name, label }, 'task', this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
     }
     if (!opts.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
     if (inTurn(chosen.state as SessionState)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} is busy with a turn that is not yours (${chosen.state}). A note or a queue into a session on another machine is not available yet: name another session, or ask again once it is idle.` }
+      return { ok: false, error: busyAcross({ name: chosen.name, label }, { turn: chosen.state }, this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
     }
 
     const decision = await this.host.hostCards.askHost(
@@ -411,17 +412,16 @@ export class AskProjectFlow {
     /*
      * The card stood while the person could use the session there: ask the machine again before anything is sent. A
      * task sent into a turn that is not the caller's would join it (and its end would settle this call), the very
-     * thing the busy refusal above keeps out. A note or a queue is not available across machines, so this refuses.
+     * thing the busy refusal above keeps out, so this refuses as it does.
      */
     const again = await reader.projectSessions(target)
     if (!again.ok) return { ok: false, error: `Could not hand the task to ${label}: ${again.error}` }
     const now = again.sessions.find((s) => s.id === chosen.id)
     if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
-    if (inTurn(now.state as SessionState)) {
-      return { ok: false, error: `The session "${chosen.name}" in ${label} started a turn of its own while the question to the person stood (${now.state}); nothing was sent. Ask again once it is idle, or name another session.` }
-    }
     const taken = this.linkedAsks.get(chosen.id)
-    if (taken && !taken.settled) return { ok: false, error: `The session "${chosen.name}" in ${label} was given another task while the question stood; nothing was sent. Name another session, or ask again later.` }
+    if (inTurn(now.state as SessionState) || (taken && !taken.settled)) {
+      return { ok: false, error: busyAcross({ name: chosen.name, label }, 'during_card', this.host.wayAcross(chosen.id, target.machineId, target.machine)) }
+    }
     // Asking the machine again took a moment: the caller's gates once more, with no wait from here to the send
     const late = this.askGateError(callerId)
     if (late) return { ok: false, error: late }

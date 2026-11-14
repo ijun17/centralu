@@ -634,7 +634,7 @@ export class RemoteAgents {
            * nor a fork reaches another machine
            */
           const g = await this.gate(rec, reader)
-          // Another's turn there: held, and sent once it is at rest (#1682), as mail to a busy session here waits (mail does not cross links yet)
+          // Another's turn there: held, and sent once it is at rest (#1682), as mail to a busy session here waits (a task to a linked child goes as mail with #1948 step 6)
           if (!g.live) return this.hold(rec, text)
           const refused = this.gateError(callerId)
           if (refused) return { ok: false, error: refused }

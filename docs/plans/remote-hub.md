@@ -1381,7 +1381,7 @@ that existed on a linked machine and listed only this computer's.
 - **Races.** The machine's sessions are read again after the card is answered and nothing is sent into a turn the person
   started there meanwhile; a project list that takes over 4 s counts the machine as away for that call; a link that drops
   after the task was sent ends the wait with a sentence (`machine_status`), since the turn's end can no longer be seen.
-- **Not built**: `ifBusy` (a note or a queue into a busy session there), the caller answering the machine's cards
+- **Not built**: `ifBusy` (a note or a queue into a busy session there; the refusal names the mail to that session, which it gets as soon as it can take it, #1186), the caller answering the machine's cards
   (`asking`; they stand in the hub's window and the call reports the wait), and stopping the machine's turn when the
   call is cancelled.
 - **`find_apps` is unchanged.** It lists apps another project shares, and attaching one needs the app process and the
@@ -1430,7 +1430,7 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   or a deferred restart takes seconds).
 - **What runs** (`MachineAsks`, sessions/machine-asks.ts). An existing ordinary session of the project, chosen as an ask
   here chooses one (#614); never created, never an app's or a builder's; one busy with a turn gets nothing (no note or
-  queue from another machine, as §12.6 the other way). The task is framed as from that session on that machine
+  queue from another machine, as §12.6 the other way; the refusal names the mail to it, which it gets as soon as it can take it, #1186). The task is framed as from that session on that machine
   (`MACHINE_ASKER`, never the person and never an orchestrator), and the session works on it one level below the asker
   (the depth the machine sends, kept until the turn ends, #867), so it cannot ask on. The call waits up to
   `ASK_WAIT_MS` and then says "still working"; a call with no task waits again. The answer goes back cut to size; its
