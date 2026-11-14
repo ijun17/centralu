@@ -1,5 +1,5 @@
 {
-  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05; 4 files of #2239 timed on a local Windows run, 2026-11-13",
+  "source": "the Windows unit shards' vitest JSON reports, refreshed 2026-11-04; 92 files only the remote Node's Windows shards run are from their log of run 42082742277, 2026-11-05; 4 files of #2239 timed on a local Windows run, 2026-11-13; 1 file of #1987 timed on a local Windows run, 2026-11-14",
   "files": {
     "packages/agent-host/src/adapters/acp/adapter.test.ts": 0,
     "packages/agent-host/src/adapters/acp/normalize.test.ts": 0,
@@ -263,6 +263,7 @@
     "packages/agent-host/src/links/install-windows-update.test.ts": 23.2,
     "packages/agent-host/src/links/install.test.ts": 15.6,
     "packages/agent-host/src/links/link-backoff.test.ts": 0.1,
+    "packages/agent-host/src/links/linked-person-mail.test.ts": 0.7,
     "packages/agent-host/src/links/linked-sessions-refusals.test.ts": 0,
     "packages/agent-host/src/links/linked-sessions.test.ts": 11.4,
     "packages/agent-host/src/links/linked-views.test.ts": 0.1,

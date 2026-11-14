@@ -18,7 +18,7 @@ import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, parsePortBook, type PortBook } from './views/origin-ports.js'
 import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-adoption.js'
 import { SessionManager } from './sessions/manager.js'
-import { MailPerson } from './mail/person.js'
+import { MailPerson, personSessions } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
 import { mailPeers } from './links/mail-peers.js'
 import { recordStartingHub } from './sessions/hub-preset.js'
@@ -448,10 +448,10 @@ const mailDelivery = hostMailbox.delivery
 mgr.mail.useMail(hostMailbox.hooks)
 // The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
 const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
-  session: (id) => {
+  session: personSessions((id) => {
     const s = mgr.sessionInfo(id)
     return s ? { name: s.name, state: s.state } : undefined
-  },
+  }, hostMailbox),
   legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
   projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
   untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
@@ -463,6 +463,7 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   },
   tellsNow: (id) => mgr.mail.tellsMailNow(id),
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
+  across: hostMailbox.across,
 })
 hostMailbox.service.onChange((c) => events.push(mailPerson.changeEvent(c)))
 // A session's watches changed (#1324): its header lists them again
@@ -727,6 +728,7 @@ const hubs = new LinkedHubs({
   call: (client, method, params, opts) => server.call(client, method, params, opts),
   // A session a hub created here before it offered: recorded under it once it does (#2067)
   record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+  settings: store.settings,
 })
 // Mail across linked machines (#2067 items 2 and 3): the machines this host links, and the hubs that link it
 hostMailbox.across.usePeers(

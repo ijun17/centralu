@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
-import { refusedFor } from './messages.test-helpers.js'
+import { refusedFor, refusedForAsync } from './messages.test-helpers.js'
 import { oldThread } from './v61.test-helpers.js'
 
 const A = at('a')
@@ -77,7 +77,7 @@ describe("the person's old mail, moved at ready, in the window", () => {
     oldThread(w.store, { id: tid(1), owner: A, at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'question', body: 'Which branch?', receipts: [{ recipient: PERSON }] }])
     const { person } = ready(w)
     const oldRows = dbOf(w).prepare(`SELECT COUNT(*) AS n FROM mail_messages`).get() as { n: number }
-    const view = person.reply(mid(2), 'Use main.', 'answer')
+    const view = await person.reply(mid(2), 'Use main.', 'answer')
     expect(view.messages.at(-1)).toMatchObject({ body: 'Use main.', kind: 'answer', sender: { kind: 'person' } })
     await w.advance(2_000)
     expect(bodies(w, 'a')).toContain(view.messages.at(-1)?.id)
@@ -175,7 +175,7 @@ describe('the window reads and writes no thread table', () => {
     const q = w.mail.send(A, { to: [PERSON], text: 'Ship it?' }).message
     expect(w.person.list().threads.map((t) => [t.id, t.unread])).toEqual([[q.id, 1]])
     expect(w.person.thread(q.id, { tail: 100 }).messages.map((m) => m.body)).toEqual(['Ship it?'])
-    const mine = w.person.reply(q.id, 'Do you need a review first?', 'question').messages.at(-1)?.id ?? ''
+    const mine = (await w.person.reply(q.id, 'Do you need a review first?', 'question')).messages.at(-1)?.id ?? ''
     expect(w.person.close(q.id).state).toBe('done')
     w.person.resume({ threadId: q.id })
     expect(w.person.held('release', B, [q.id])).toEqual({ changed: 0 })
@@ -187,7 +187,7 @@ describe('the window reads and writes no thread table', () => {
 })
 
 describe('the window against chains that change while it is open', () => {
-  it('a message that leaves the chain keeps the numbers of the others, so the window reads the next one after its last', () => {
+  it('a message that leaves the chain keeps the numbers of the others, so the window reads the next one after its last', async () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const q = w.mail.send(A, { to: [PERSON, X], text: 'first' }).message
@@ -196,7 +196,7 @@ describe('the window against chains that change while it is open', () => {
     const held = w.mail.send(X, { to: [], text: 'held for Pex', replyTo: q.id }).message
     expect(w.person.thread(q.id, { tail: 100 }).messages.map((m) => m.id)).toEqual([q.id, held.id])
     w.clock.t += 10
-    const mine = w.person.reply(q.id, 'second', 'note').messages.at(-1)
+    const mine = (await w.person.reply(q.id, 'second', 'note')).messages.at(-1)
     // It leaves the chain (the project's held mail dismissed), then the next one comes
     w.service.dismissProject('px')
     w.clock.t += 10
@@ -267,28 +267,28 @@ describe('whom the person’s reply goes to (Q-M3a-25)', () => {
     return { message: w.store.mailbox.message(id), to: w.store.mailbox.recipients(id).map((r) => r.recipient) }
   }
 
-  it('answers the newest question that waits for the person, not a note sent after it', () => {
+  it('answers the newest question that waits for the person, not a note sent after it', async () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?' }).message
     w.clock.t += 10
     w.mail.send(A, { to: [PERSON], text: 'fyi, I am waiting', replyTo: q.id, needsReply: false })
-    const sent = sentOf(w, w.person.reply(q.id, 'main', 'answer'))
+    const sent = sentOf(w, await w.person.reply(q.id, 'main', 'answer'))
     expect(sent.message?.replyTo).toBe(q.id)
     expect(w.row(q.id, PERSON)?.settled).toBe('answered')
   })
 
-  it('a question to the person and another session: that session writing in the chain does not take the answer', () => {
+  it('a question to the person and another session: that session writing in the chain does not take the answer', async () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const q = w.mail.send(A, { to: [PERSON, B], text: 'Which branch?' }).message
     w.clock.t += 10
     w.mail.send(B, { to: [PERSON, A], text: 'I would say dev', replyTo: q.id, needsReply: false })
-    const sent = sentOf(w, w.person.reply(q.id, 'main', 'answer'))
+    const sent = sentOf(w, await w.person.reply(q.id, 'main', 'answer'))
     expect(sent.to).toEqual([A])
   })
 
-  it('passes over a sender that is gone and a message hidden from the person', () => {
+  it('passes over a sender that is gone and a message hidden from the person', async () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
     oldThread(w.store, { id: tid(20), owner: A, at: t }, [
@@ -300,8 +300,8 @@ describe('whom the person’s reply goes to (Q-M3a-25)', () => {
       { id: mid(23), sender: A, kind: 'note', body: 'held for its depth', replyTo: mid(22), receipts: [{ recipient: PERSON, held: 'loop' }] },
     ])
     const r = ready(w)
-    expect(sentOf(w, r.person.reply(mid(20), 'seen', 'note'))).toMatchObject({ message: { replyTo: mid(20) }, to: [A] })
-    expect(sentOf(w, r.person.reply(mid(22), 'seen', 'note'))).toMatchObject({ message: { replyTo: mid(22) }, to: [A] })
+    expect(sentOf(w, (await r.person.reply(mid(20), 'seen', 'note')))).toMatchObject({ message: { replyTo: mid(20) }, to: [A] })
+    expect(sentOf(w, (await r.person.reply(mid(22), 'seen', 'note')))).toMatchObject({ message: { replyTo: mid(22) }, to: [A] })
   })
 })
 
@@ -662,7 +662,7 @@ describe('closing a chain a session works on, and its state, as on main (owner d
 })
 
 describe('whether the window offers the person a reply box (canReply)', () => {
-  it('a chain of mail between sessions that is only held for the person has nothing to answer: no box, and a reply is refused as before', () => {
+  it('a chain of mail between sessions that is only held for the person has nothing to answer: no box, and a reply is refused as before', async () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const m = w.mail.send(A, { to: [B], text: 'Beta, please look at the branch' }).message
@@ -670,7 +670,7 @@ describe('whether the window offers the person a reply box (canReply)', () => {
     const view = w.person.thread(m.id)
     expect(view.messages.map((x) => x.id)).toEqual([m.id])
     expect(view.canReply).toBe(false)
-    expect(refusedFor(() => w.person.reply(m.id, 'hello', 'note'))).toBe('unknown_message')
+    expect(await refusedForAsync(() => w.person.reply(m.id, 'hello', 'note'))).toBe('unknown_message')
   })
 
   it('a message to the person from a session that is here, or the person’s own to one that is, has a box', () => {
@@ -727,7 +727,7 @@ describe('work a script started (§8.1, #1468)', () => {
 })
 
 describe('the thread row says what waits on the person’s answer (#2229)', () => {
-  it('names the newest unanswered question with its first lines as plain words and its choices, and counts them; an answer, a close or a sender that is gone clears it', () => {
+  it('names the newest unanswered question with its first lines as plain words and its choices, and counts them; an answer, a close or a sender that is gone clears it', async () => {
     const w = ready(hostWorld())
     const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
     expect(w.person.list().threads[0]?.ask).toBeNull()
@@ -738,7 +738,7 @@ describe('the thread row says what waits on the person’s answer (#2229)', () =
     expect(row().ask).toMatchObject({ text: 'And the tag?', open: [expect.any(String), expect.any(String)], sender: { address: A } })
     expect(row().ask?.choices).toBeUndefined()
     const first = w.person.thread(root.id).messages.find((m) => m.body.startsWith('**Which**'))!
-    w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
+    await w.person.reply(root.id, 'And the tag?', 'answer', w.person.thread(root.id).messages.find((m) => m.body === 'And the tag?')!.id)
     expect(row().ask).toMatchObject({ id: first.id, text: 'Which branch?\nline two\nline three\nline four', choices: ['main', 'release'], open: [first.id] })
     w.person.close(root.id)
     expect(row().ask).toBeNull()
@@ -763,21 +763,21 @@ describe('an answer reads what it answers (#2233)', () => {
     return { w, root, row, asked }
   }
 
-  it('the row of a question answered from the list is read and no longer asks: unread is 0 and it leaves the waiting list; a later question stays unread until its own answer', () => {
+  it('the row of a question answered from the list is read and no longer asks: unread is 0 and it leaves the waiting list; a later question stays unread until its own answer', async () => {
     const { w, root, row, asked } = askTwice()
     expect(row()).toMatchObject({ unread: 2, ask: { open: [asked('First?').id, asked('Second?').id] } })
     // The list's card answers without the thread ever being opened: `thread()` has not read anything
-    w.person.reply(root.id, 'x', 'answer', asked('First?').id)
+    await w.person.reply(root.id, 'x', 'answer', asked('First?').id)
     expect(row()).toMatchObject({ unread: 1, ask: { id: asked('Second?').id, open: [asked('Second?').id] } })
     expect(w.row(asked('First?').id, PERSON)?.readAt).not.toBeNull()
-    w.person.reply(root.id, 'my own words', 'answer', asked('Second?').id)
+    await w.person.reply(root.id, 'my own words', 'answer', asked('Second?').id)
     expect(row().unread).toBe(0)
     expect(row().ask).toBeNull()
   })
 
-  it('the reply box’s free reply reads what it answers too: the newest question and what came before it, and the older question still asks', () => {
+  it('the reply box’s free reply reads what it answers too: the newest question and what came before it, and the older question still asks', async () => {
     const { w, root, row, asked } = askTwice()
-    w.person.reply(root.id, 'for the newest')
+    await w.person.reply(root.id, 'for the newest')
     expect(row()).toMatchObject({ unread: 0, ask: { id: asked('First?').id, open: [asked('First?').id] } })
   })
 
@@ -788,7 +788,7 @@ describe('an answer reads what it answers (#2233)', () => {
     expect(row()).toMatchObject({ state: 'done', unread: 0, ask: null })
   })
 
-  it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', () => {
+  it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', async () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
     oldThread(w.store, { id: tid(30), owner: A, at: t }, [
@@ -801,7 +801,7 @@ describe('an answer reads what it answers (#2233)', () => {
     const view = r.person.thread(tid(30))
     expect(view.thread.ask?.open).toEqual([mid(33)])
     // The same question is the one a free reply answers
-    expect(r.person.reply(tid(30), 'this one').messages.find((m) => m.body === 'this one')).toMatchObject({ replyTo: mid(33) })
+    expect((await r.person.reply(tid(30), 'this one')).messages.find((m) => m.body === 'this one')).toMatchObject({ replyTo: mid(33) })
   })
 })
 
@@ -817,7 +817,7 @@ describe('Markdown in a one-line text (#2228)', () => {
 })
 
 describe('what the person is notified of (#1630)', () => {
-  it('each new message they can read, once and of any kind; not their own, and not a change to one stored', () => {
+  it('each new message they can read, once and of any kind; not their own, and not a change to one stored', async () => {
     const w = hostWorld()
     const { person } = ready(w)
     const arrived: string[] = []
@@ -829,7 +829,7 @@ describe('what the person is notified of (#1630)', () => {
     w.mail.send(A, { to: [PERSON], text: 'Done.', needsReply: false })
     w.service.notice(PERSON, { body: 'A warning from Centralu', facts: {}, dedupeKey: 'test:1' })
     // The person's own answer, and their reading of the question: no notification
-    person.reply(q.id, 'main', 'answer')
+    await person.reply(q.id, 'main', 'answer')
     person.thread(q.id)
     expect(arrived).toEqual([`question ${A}: Which branch?`, `note ${A}: Done.`, 'notice centralu: A warning from Centralu'])
   })
@@ -847,7 +847,7 @@ describe('a session asks the person by mail (#1630)', () => {
     expect(view.messages[0]?.facts).not.toHaveProperty('choices')
     // Not one of the choices: the person may always write their own answer
     w.clock.t += 10
-    w.person.reply(row!.id, 'Neither: open a new branch from main', 'answer')
+    await w.person.reply(row!.id, 'Neither: open a new branch from main', 'answer')
     await w.advance(31_000)
     expect(bodies(w, 'a')).toContain('Neither: open a new branch from main')
   })
@@ -858,7 +858,7 @@ describe('a session asks the person by mail (#1630)', () => {
     const [row] = w.person.list().threads
     expect(w.person.thread(row!.id).messages[0]?.choices).toContain('release/1.4')
     w.clock.t += 10
-    w.person.reply(row!.id, 'release/1.4', 'answer')
+    await w.person.reply(row!.id, 'release/1.4', 'answer')
     const messages = w.person.thread(row!.id).messages
     expect(messages.filter((m) => m.kind === 'answer').map((m) => m.body)).toEqual(['release/1.4'])
     await w.advance(31_000)
@@ -894,7 +894,7 @@ describe('a session asks the person by mail (#1630)', () => {
     it('answers that question, not the newest open one: a pick on the older of two questions in a chain reaches its asker alone', async () => {
       const { w, thread, qa, qb } = twoAsk()
       w.clock.t += 10
-      const view = w.person.reply(thread, 'main', 'answer', qa.id)
+      const view = await w.person.reply(thread, 'main', 'answer', qa.id)
       expect(view.messages.find((m) => m.body === 'main')).toMatchObject({ replyTo: qa.id, facts: { picked: true } })
       await w.advance(31_000)
       expect(bodies(w, 'a')).toContain('main')
@@ -904,40 +904,40 @@ describe('a session asks the person by mail (#1630)', () => {
       expect(after.some((m) => m.replyTo === qb.id)).toBe(false)
     })
 
-    it('the asking session reads its own choices back, and that the person’s answer is one of them', () => {
+    it('the asking session reads its own choices back, and that the person’s answer is one of them', async () => {
       const { w, thread, qa } = twoAsk()
       expect(w.tool.run('a', { action: 'read', thread: qa.id }).text).toContain('You offered: "main", "dev".')
-      const answer = w.person.reply(thread, 'dev', 'answer', qa.id).messages.find((m) => m.body === 'dev')!
+      const answer = (await w.person.reply(thread, 'dev', 'answer', qa.id)).messages.find((m) => m.body === 'dev')!
       expect(w.tool.run('a', { action: 'read', thread: answer.id }).text).toContain('The person wrote it, picking one of your choices.')
     })
 
-    it('one session asking twice: the first question can be picked after the second was asked, and each is answered once', () => {
+    it('one session asking twice: the first question can be picked after the second was asked, and each is answered once', async () => {
       const w = ready(hostWorld())
       const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
       w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'First?', choices: ['x', 'y'] })
       w.clock.t += 10
       w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'Second?', choices: ['p', 'q'] })
       const asked = (body: string) => w.person.thread(root.id).messages.find((m) => m.body === body)!
-      w.person.reply(root.id, 'x', 'answer', asked('First?').id)
+      await w.person.reply(root.id, 'x', 'answer', asked('First?').id)
       expect(w.person.thread(root.id).messages.filter((m) => m.replyTo !== undefined && m.sender.kind === 'person').map((m) => [m.body, m.replyTo])).toEqual([['x', asked('First?').id]])
-      w.person.reply(root.id, 'q', 'answer', asked('Second?').id)
+      await w.person.reply(root.id, 'q', 'answer', asked('Second?').id)
       expect(w.person.thread(root.id).messages.filter((m) => m.kind === 'answer').map((m) => m.body)).toEqual(['x', 'q'])
     })
 
-    it('a question is answered once: a second pick, from any window, is refused and writes nothing', () => {
+    it('a question is answered once: a second pick, from any window, is refused and writes nothing', async () => {
       const { w, thread, qa } = twoAsk()
-      w.person.reply(thread, 'main', 'answer', qa.id)
-      expect(refusedFor(() => w.person.reply(thread, 'dev', 'answer', qa.id))).toBe('answered')
-      expect(refusedFor(() => w.person.reply(thread, 'main', 'answer', qa.id))).toBe('answered')
+      await w.person.reply(thread, 'main', 'answer', qa.id)
+      expect(await refusedForAsync(() => w.person.reply(thread, 'dev', 'answer', qa.id))).toBe('answered')
+      expect(await refusedForAsync(() => w.person.reply(thread, 'main', 'answer', qa.id))).toBe('answered')
       expect(w.person.thread(thread).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === qa.id)).toHaveLength(1)
       const { w: w2, thread: t2, qa: other } = twoAsk()
       // Words that are none of its choices are the person's own answer to that question (#2191): it is answered once with them, and not as a pick
-      w2.person.reply(t2, 'neither', 'answer', other.id)
+      await w2.person.reply(t2, 'neither', 'answer', other.id)
       expect(w2.person.thread(t2).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === other.id).map((m) => [m.body, m.facts.picked])).toEqual([['neither', undefined]])
-      expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', other.id))).toBe('answered')
-      expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', 'hub-aaaaaaaa.m_missing'))).toBe('unknown_message')
+      expect(await refusedForAsync(() => w2.person.reply(t2, 'main', 'answer', other.id))).toBe('answered')
+      expect(await refusedForAsync(() => w2.person.reply(t2, 'main', 'answer', 'hub-aaaaaaaa.m_missing'))).toBe('unknown_message')
       // The free reply box stays free: it answers the newest open question, as before
-      w2.person.reply(t2, 'my own words')
+      await w2.person.reply(t2, 'my own words')
       expect(w2.person.thread(t2).messages.filter((m) => m.sender.kind === 'person' && m.body === 'my own words')).toHaveLength(1)
     })
   })
@@ -961,12 +961,12 @@ describe('a session asks the person by mail (#1630)', () => {
 
 // #2229: `subject` was taken and dropped; a chain was always named by its first message's words
 describe("a send's subject names its chain (#2229)", () => {
-  it("a session's question to the person with a subject shows that subject in the thread list; a reply, with one of its own, changes nothing", () => {
+  it("a session's question to the person with a subject shows that subject in the thread list; a reply, with one of its own, changes nothing", async () => {
     const w = ready(hostWorld())
     w.tool.run('a', { action: 'send', to: 'person', kind: 'question', subject: '  Release 2.4\nnow  ', text: 'Ship it tonight?\nThe tests pass.' })
     const row = w.person.list().threads.find((t) => t.subject === 'Release 2.4 now')!
     expect(w.person.thread(row.id).thread.subject).toBe('Release 2.4 now')
-    w.person.reply(row.id, 'Yes')
+    await w.person.reply(row.id, 'Yes')
     w.tool.run('a', { action: 'reply', thread: row.id, subject: 'Shipped', text: 'Done.' })
     expect(w.person.list().threads.find((t) => t.id === row.id)?.subject).toBe('Release 2.4 now')
     // Nor does a reply sent with one by another way in: only a chain's first message keeps a subject

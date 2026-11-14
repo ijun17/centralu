@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { errorMessage } from '@cc/protocol'
 import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { PERSON, parseAddress } from './address.js'
+import { PERSON, isPerson, parseAddress, senderKind } from './address.js'
 import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
@@ -357,7 +357,7 @@ export class MailDelivery {
 
   /** For a session in the crowd or left for its next turn: everything but the person's words written since the host came back */
   private readonly skipUnlessPersonSince = (message: MailRow, row: RecipientRow): boolean =>
-    message.sender !== PERSON || (this.cutoff !== null && row.dueAt <= this.cutoff)
+    !isPerson(message.sender) || (this.cutoff !== null && row.dueAt <= this.cutoff)
 
   /** What a host that was off a long while does not wake a sleeping session for (`cutoff`): what came due before and needs no one */
   private readonly skipOld = (message: MailRow, row: RecipientRow): boolean =>
@@ -635,7 +635,7 @@ export class MailDelivery {
    * toward no warning, §7.5), else its first item
    */
   private starterOf(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): string | null {
-    return drained.workMessage ?? drained.messageIds.find((id) => this.records.message(id)?.sender === PERSON) ?? drained.messageIds[0] ?? null
+    return drained.workMessage ?? drained.messageIds.find((id) => isPerson(this.records.message(id)?.sender ?? '')) ?? drained.messageIds[0] ?? null
   }
 
   /**
@@ -647,7 +647,7 @@ export class MailDelivery {
     if (!this.turns) return
     const senders = new Set(messageIds.flatMap((id) => {
       const sender = this.records.message(id)?.sender
-      return sender !== undefined && sender !== recipient && parseAddress(sender)?.kind === 'session' ? [sender] : []
+      return sender !== undefined && sender !== recipient && senderKind(sender) === 'session' ? [sender] : []
     }))
     for (const sender of senders) {
       const turns = this.turns.pairTurns(recipient, sender)

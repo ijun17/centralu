@@ -4,7 +4,7 @@
  */
 import { SHUTDOWN_WORDS } from '@cc/protocol'
 import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy } from '../dev-services/store/mailbox.js'
-import { parseAddress } from './address.js'
+import { parseAddress, senderKind } from './address.js'
 import { quoted } from './frame.js'
 import type { MailReach } from './reach.js'
 import { hash16 } from './rules.js'
@@ -252,7 +252,7 @@ export class StopNotices {
    * It wakes a session, unless a quit cut it (`wakes`)
    */
   private tellUnanswered(sender: string, since: number): void {
-    const kind = parseAddress(sender)?.kind
+    const kind = senderKind(sender)
     // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
     const rows = this.d.records
       .releasedUntold(sender)

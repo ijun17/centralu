@@ -5,7 +5,7 @@ import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
 import type { MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
-import { PERSON, parseAddress } from './address.js'
+import { isPerson, senderKind } from './address.js'
 
 /**
  * The rules of the mailbox that need no store (docs/plans/mailbox.md §3.2, §3.3, §9.4): who may send which kind, who may
@@ -63,6 +63,11 @@ export function refuse(reason: MailRefusal, message: string, more: Record<string
   return rpcError(message, 'refused', { retryable: false, data: { reason, ...more } })
 }
 
+/** A refusal another computer gave in its own word (`MailAcross`): that word when the mailbox has it, else `elsewhere`, with the other side's text */
+export function refuseAcross(why: string, text: string): RpcError {
+  return refuse(REFUSALS.find((r) => r === why) ?? 'elsewhere', text)
+}
+
 /** The words of a refusal: `err.data.reason`, or undefined for an error that is not one */
 export function refusalReason(err: unknown): MailRefusal | undefined {
   const reason = asObj(asObj(err).data).reason
@@ -109,7 +114,7 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
  * message that needs a reply and an app's post the receiver must see. The rest waits for the session's next turn
  */
 export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts'>): boolean {
-  return m.sender === PERSON || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
+  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || m.facts.needsOwner === true
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
@@ -249,7 +254,7 @@ export function quietAnswer(
 ): boolean {
   return (
     m.kind === 'message' && !m.needsReply && !m.urgent && !receiver.request && target.kind === 'message' && !target.needsReply &&
-    parseAddress(m.sender)?.kind === 'session' && m.sender !== receiver.parent && !receiver.owesTask
+    senderKind(m.sender) === 'session' && m.sender !== receiver.parent && !receiver.owesTask
   )
 }
 

@@ -98,3 +98,13 @@ export function refusedFor(fn: () => unknown): string {
   }
   return 'NOT REFUSED'
 }
+
+/** `refusedFor` of a call that answers later */
+export async function refusedForAsync(fn: () => Promise<unknown>): Promise<string> {
+  try {
+    await fn()
+  } catch (e) {
+    return refusalReason(e) ?? `not a refusal: ${String(e)}`
+  }
+  return 'NOT REFUSED'
+}

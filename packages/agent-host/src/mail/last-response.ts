@@ -1,5 +1,5 @@
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { parseAddress } from './address.js'
+import { senderKind } from './address.js'
 import type { TurnReport } from './turn-report.js'
 
 /**
@@ -52,7 +52,7 @@ export function answerAtRest(
   return tasksAtRest(records, recipient, last).map(({ row, sender }) => {
     const given = row.deliveredAt ?? 0
     // The person reads their own work's report: it is not told they wrote
-    const personSince = parseAddress(sender)?.kind === 'session' && personAt !== undefined && personAt > given
+    const personSince = senderKind(sender) === 'session' && personAt !== undefined && personAt > given
     const after = last.writtenAt !== undefined && last.writtenAt < given
     const lines = [last.body(sender), ...(personSince ? [PERSON_SINCE] : []), ...(after ? [AFTER] : [])]
     report(row.messageId, {

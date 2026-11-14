@@ -3,12 +3,14 @@ import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
+import type { MailReach } from './reach.js'
 import { SUBJECT_CHARS, type MailChange, type MessageService } from './messages.js'
-import { REFUSAL_TEXT, refuse } from './rules.js'
+import type { MailAcross } from './across.js'
+import { REFUSAL_TEXT, refuse, refuseAcross } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
 export type PersonHost = {
-  session(sessionId: string): { name: string; state: string } | undefined
+  session(sessionId: string): { name: string; state: string | null } | undefined
   /** The last messages of an old thread, read-only: the history of a message moved from it (§6.3, `Store.legacyChain`) */
   legacyChain(threadId: string): MessageRow[]
   /** A project's name as the person knows it (`MailReach.projectLabel`) */
@@ -21,6 +23,24 @@ export type PersonHost = {
   tellsNow(sessionId: string): boolean
   /** Puts the notice into that process (`tellsNow` said it takes it): the session reads it where it is, in its turn if it is in one. Nothing is stopped */
   tell(sessionId: string, text: string): Promise<void>
+  /** Mail across linked machines: the person's answer to a session on another computer that wrote to them goes there (#1987) */
+  across?: Pick<MailAcross, 'foreign' | 'sendFrom'>
+}
+
+/**
+ * `PersonHost.session` over this host's sessions (`local`), and a linked machine's session that wrote to the person (#1987): by the name it was
+ * last heard by, with its state as this hub's mirror of that machine last had it (none when the mirror has no row for it)
+ */
+export function personSessions(
+  local: (sessionId: string) => { name: string; state: string } | undefined,
+  mail: { service: Pick<MessageService, 'sessionAddress'>; reach: Pick<MailReach, 'elsewhere' | 'labelOf'>; across: Pick<MailAcross, 'foreignState'> },
+): PersonHost['session'] {
+  return (id) => {
+    const here = local(id)
+    if (here) return here
+    const address = mail.service.sessionAddress(id)
+    return mail.reach.elsewhere(address) ? { name: mail.reach.labelOf(address), state: mail.across.foreignState(address) ?? null } : undefined
+  }
 }
 
 /** How the person closes a chain: Mark done is `finished`, Drop is `dropped` */
@@ -132,18 +152,30 @@ export class MailPerson {
    * the newest message sent to them, to its sender; else a word more to the ones the person's own newest message went to. A sender that is gone, and a
    * message hidden from the person, are passed over. A question waits for an answer (D3); an answer or a note does not
    */
-  reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note', answers?: string): MailThreadView {
+  async reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note', answers?: string): Promise<MailThreadView> {
     const roots = this.rootsOf(threadId)
     const found = answers === undefined ? this.replyTarget(roots) : this.pickTarget(roots, answers)
     if (!found) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
     const { target, to } = found
-    // A pick is one of the question's own choices; any other words to a question the window names are the person's own answer to it (#2191)
-    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers !== undefined && target.choices?.includes(text) ? { picked: true } : {}) })
+    const across = this.host.across
+    const far = across ? to.filter((a) => across.foreign(a)) : []
+    let sentId: string
+    if (across && far.length > 0) {
+      // A session on another computer wrote to them (#1987): that computer writes the answer, and this one keeps its copy. Nothing is written when it is refused
+      const [address] = far
+      if (!address || to.length > 1) throw refuse('recipients', 'an answer to a session on another computer goes to that session alone.')
+      const r = await across.sendFrom(PERSON, { to: address, text, needsReply: kind === 'question', replyTo: target.id })
+      if (!r.ok) throw refuseAcross(r.why, r.text)
+      sentId = r.messageId
+    } else {
+      // A pick is one of the question's own choices; any other words to a question the window names are the person's own answer to it (#2191)
+      sentId = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers !== undefined && target.choices?.includes(text) ? { picked: true } : {}) }).message.id
+    }
     const shown = this.shown(target.rootId)
     // An answer is a read of what it answers, and of what came before it: the row leaves the list of what waits on the person (#2233)
     const answered = shown.find((s) => s.m.id === target.id)?.seq ?? 0
     this.readFor(shown.filter((s) => s.seq <= answered))
-    const at = shown.find((s) => s.m.id === sent.message.id)?.seq ?? 1
+    const at = shown.find((s) => s.m.id === sentId)?.seq ?? 1
     return this.thread(target.rootId, { after: at - 1 })
   }
 

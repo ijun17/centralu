@@ -36,6 +36,11 @@ export function mailPeers(o: {
   settings?: { appSetting(key: string): string | null }
 }): AcrossPeers {
   const { machines, hubs, settings } = o
+  /** A linked machine's session as this hub's mirror last had it */
+  const mirrored = (machineId: string, sessionId: string): Record<string, unknown> | undefined => {
+    const row = (machines?.get(machineId)?.lastKnown('sessions') ?? []).find((s) => isObj(s) && s.id === sessionId)
+    return isObj(row) ? row : undefined
+  }
   const projectNames = (m: Machine): Map<string, string> =>
     new Map((m.lastKnown('projects') ?? []).flatMap((p) => (isObj(p) && typeof p.id === 'string' && typeof p.name === 'string' ? [[p.id, p.name] as const] : [])))
   return {
@@ -52,8 +57,12 @@ export function mailPeers(o: {
           },
           machineSession: (machineId: string, sessionId: string) => {
             const m = machines.get(machineId)
-            const row = (m?.lastKnown('sessions') ?? []).find((s) => isObj(s) && s.id === sessionId)
-            return m && isObj(row) && typeof row.name === 'string' ? `${row.name} on ${m.name}` : undefined
+            const row = mirrored(machineId, sessionId)
+            return m && row && typeof row.name === 'string' ? `${row.name} on ${m.name}` : undefined
+          },
+          machineState: (machineId: string, sessionId: string) => {
+            const state = mirrored(machineId, sessionId)?.state
+            return typeof state === 'string' ? state : undefined
           },
           machineDirectory: () => {
             const entries: FoundEntry[] = []

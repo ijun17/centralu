@@ -3,7 +3,7 @@
  *
  *   session:<hostId>/<sessionId>          a session; the host id is the id of the host the session lives on
  *   app:<hostId>/<projectId>/<appId>      an app of a project
- *   person                                the person; one per host, and mail to them never crosses a link
+ *   person                                the person
  *   centralu                              Centralu itself: a sender only
  *
  * **Absolute from the first step.** The design (§2) writes `session:<id>` and `app:<projectId>/<appId>`, and §11.4 says
@@ -29,6 +29,26 @@ export type Party =
   | { kind: 'app'; host: string; projectId: string; appId: string }
   | { kind: 'person' }
   | { kind: 'centralu' }
+
+/**
+ * The person of a hub, as a machine it links names them (#1987): the person works in the hub's window, so a machine's session that
+ * writes to the person while a hub links it writes to the hub's person, under this address. No session's id is `person` (a host makes its
+ * sessions' ids, never that word, and a linked machine's have a dot), so the address names no session. A reply from there is the person's own word,
+ * and only a hub that links this host writes from it (`MailReach.mayWrite`), so a stored sender of this form is always one
+ */
+export const PERSON_ID = 'person'
+
+/** Whether `address` is the person: this host's, or a hub's as a machine names them (`PERSON_ID`) */
+export function isPerson(address: string): boolean {
+  if (address === PERSON) return true
+  const p = parseAddress(address)
+  return p?.kind === 'session' && p.sessionId === PERSON_ID
+}
+
+/** What kind of party writes from `address`, as the mail's rules read it: the person under either name (`isPerson`), else its address's kind */
+export function senderKind(address: string): Party['kind'] | undefined {
+  return isPerson(address) ? 'person' : parseAddress(address)?.kind
+}
 
 export function sessionAddress(host: string, sessionId: string): string {
   return checked(`session:${host}/${sessionId}`)

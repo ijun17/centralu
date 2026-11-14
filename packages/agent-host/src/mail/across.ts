@@ -1,7 +1,7 @@
 import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type MailRowState } from '@cc/protocol'
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
-import { CENTRALU, parseAddress, sessionAddress } from './address.js'
+import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
@@ -55,6 +55,8 @@ export type AcrossPeers = {
   machine?(id: string): (AcrossPeer & { id: string }) | undefined
   /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
   machineSession?(machineId: string, sessionId: string): string | undefined
+  /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */
+  machineState?(machineId: string, sessionId: string): string | undefined
   /** The linked machines' sessions as this hub's mirror last had them, and the machines that are not reachable */
   machineDirectory?(): { entries: FoundEntry[]; away: { name: string; why: string }[] }
   /** The session here that started a machine's child, by the child's qualified id (`<machine>.<id>`), for that child's `parent` */
@@ -97,6 +99,9 @@ type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; sessionId:
 
 /** The words a call failed with for an older build (it has no such method) */
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
+
+/** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
+type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[] }
 
 /** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
 type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }; computer: string; at: number }
@@ -156,6 +161,11 @@ export class MailAcross {
     return { kind: 'hub', hubId: p.host }
   }
 
+  /** Whether `hostId` is a hub that links this host, reachable now or not: one that offered here on this run, or one kept from an earlier run that took mail (`LinkedHubs.peer`) */
+  isHub(hostId: string): boolean {
+    return this.peers?.hub?.(hostId) !== undefined
+  }
+
   /** Whether an address is a session on another host: this host never delivers to it, and never writes to it but a copy */
   foreign(address: string): boolean {
     const r = this.route(address)
@@ -172,6 +182,12 @@ export class MailAcross {
     return { name: computer ? `a session on ${computer}` : address }
   }
 
+  /** A linked machine's session's state as this hub's mirror last had it, for the person's Inbox; undefined for any other address */
+  foreignState(address: string): string | undefined {
+    const r = this.route(address)
+    return r?.kind === 'machine' ? this.peers?.machineState?.(r.machineId, r.sessionId) : undefined
+  }
+
   private computerOf(r: Route): string | null {
     if (r.kind === 'machine') return this.peers?.machine?.(r.machineId)?.name ?? null
     if (r.kind === 'hub') return this.peers?.hub?.(r.hubId)?.name ?? null
@@ -180,6 +196,7 @@ export class MailAcross {
 
   /** On a machine, its own session as the hub `hubId` names it */
   private asHubNames(hubId: string, address: string): string {
+    if (address === sessionAddress(hubId, PERSON_ID)) return PERSON
     const you = this.peers?.hub?.(hubId)?.you
     const p = parseAddress(address)
     return you && p?.kind === 'session' && p.host === this.d.hostId && !p.sessionId.includes('.') ? sessionAddress(hubId, `${you}.${p.sessionId}`) : address
@@ -187,6 +204,7 @@ export class MailAcross {
 
   /** On a machine, an address as the hub `hubId` names it, as this host names it (its own sessions are its own again) */
   private fromHubNames(hubId: string, address: string): string {
+    if (address === PERSON) return sessionAddress(hubId, PERSON_ID)
     const you = this.peers?.hub?.(hubId)?.you
     const p = parseAddress(address)
     if (!you || p?.kind !== 'session' || p.host !== hubId || !p.sessionId.startsWith(`${you}.`)) return address
@@ -199,8 +217,36 @@ export class MailAcross {
    * A session's message to a session on another host (`to`: an address, or `parent` for a session a hub started here).
    * The other host writes it or refuses it; only then is the copy written here. Nothing is written when it is refused
    */
-  async send(sessionId: string, input: { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }): Promise<AcrossSent> {
-    const sender = this.d.service.sessionAddress(sessionId)
+  async send(sessionId: string, input: SendInput): Promise<AcrossSent> {
+    return this.sendFrom(this.d.service.sessionAddress(sessionId), input)
+  }
+
+  /**
+   * On a machine: where its session's mail to the person goes (#1987). The person works in the window of the hub that links this
+   * computer, so it goes to the hub's person: the hub that started the session, else the one hub that offers mail here. Null when it
+   * stays on this computer: no hub links it (or none has offered since this host started), or several do and none started the
+   * session (`several`), where a guess would put it before the person in a window they may not read. A session a hub started whose
+   * hub is not linked now is refused at once, as all mail across is (#2067)
+   */
+  personTarget(sessionId: string, fromHub: boolean): { address: string } | { several: true } | { refused: AcrossSent & { ok: false } } | null {
+    const started = this.peers?.startingHub?.(sessionId) ?? null
+    if (started) {
+      if (this.peers?.hub?.(started.id)) return { address: sessionAddress(started.id, PERSON_ID) }
+      const name = oneLineText(started.name, 120) || 'the computer that started this session'
+      return { refused: { ok: false, why: 'link_down', text: `the person works on ${name}, which started this session and is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.` } }
+    }
+    const hubs = this.peers?.hubs?.() ?? []
+    const [only] = hubs
+    if (only && hubs.length === 1) return { address: sessionAddress(only.id, PERSON_ID) }
+    // Started by a hub before this computer recorded which: mail to the person written here is never seen there
+    if (fromHub) {
+      return { refused: { ok: false, why: 'elsewhere', text: 'the person works on the computer that started this session, which this computer did not record, and mail to the person written here is not seen there, so nothing was sent. End your turn with the answer: that is how your parent hears from you.' } }
+    }
+    return hubs.length > 1 ? { several: true } : null
+  }
+
+  /** `send` from any sender here: a session, or on a hub the person, whose answer in the Inbox goes to a machine's session that wrote to them (#1987) */
+  async sendFrom(sender: string, input: SendInput): Promise<AcrossSent> {
     if (input.text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
     if (!input.text.trim()) return { ok: false, why: 'empty', text: 'a post says something' }
     if (input.to !== 'parent' && !mayReachAcross(sender, input.to)) return { ok: false, why: 'not_allowed', text: `this session may not mail ${input.to}.` }
@@ -211,7 +257,11 @@ export class MailAcross {
       return { ok: false, why: 'untrusted_project', text: `your project ${p} is not trusted, and mail out of it to another computer cannot wait for the person as it does here, so nothing was sent. Ask the person to trust ${p}, then send it again.` }
     }
     const fields = { text: input.text, needsReply: input.needsReply, ...(input.urgent ? { urgent: true } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}) }
-    if (input.to === 'parent') return this.toParent(sessionId, sender, fields)
+    // What only the recipient's side reads (the person's Inbox): the copy here keeps the message without them
+    const extra = { ...(input.subject ? { subject: input.subject } : {}), ...(input.choices ? { choices: input.choices } : {}) }
+    const party = parseAddress(sender)
+    const sessionId = party?.kind === 'session' ? party.sessionId : null
+    if (input.to === 'parent') return sessionId ? this.toParent(sessionId, sender, fields) : { ok: false, why: 'bad_address', text: 'only a session has a parent.' }
     const route = this.route(input.to)
     if (!route || route.kind === 'here') return { ok: false, why: 'bad_address', text: `${input.to} is not a session on another computer.` }
     if (route.kind === 'machine') {
@@ -219,15 +269,23 @@ export class MailAcross {
       if (!m) return { ok: false, why: 'link_down', text: `no machine ${route.machineId} is linked to this computer, so nothing was sent.` }
       const id = this.idFor(sender, input.to, fields, m.name)
       // The machine shows the sender as it reads here, with this computer's name
-      const params: HostMailParams = { from: sender, name: `${this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: route.sessionId, ...fields, id }
-      return this.wrote(sender, input.to, fields, m.name, this.settle(id, await this.ask(m, 'host.mail', params)))
+      const params: HostMailParams = { from: sender, name: `${sender === PERSON ? 'the person' : this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: route.sessionId, ...fields, id }
+      const r = this.settle(id, await this.ask(m, 'host.mail', params))
+      // A machine from before the person's mail crossed takes mail from the hub's sessions only
+      if (!r.ok && r.why === 'not_allowed' && sender === PERSON) return { ok: false, why: 'older', text: `${m.name} runs an older Centralu, which takes no answer from the person here. Update it there.` }
+      return this.wrote(sender, input.to, fields, m.name, r)
     }
+    if (!sessionId) return { ok: false, why: 'not_allowed', text: `only a session here writes to ${input.to}.` }
     const h = this.peers?.hub?.(route.hubId)
     if (!h) return { ok: false, why: 'link_down', text: `the computer ${route.hubId} is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.` }
     if (!h.you) return { ok: false, why: 'older', text: `${h.name} runs an older Centralu, which takes mail only for the session that started one of its children here. Update it there.` }
     const id = this.idFor(sender, input.to, fields, h.name)
-    const params: HubMailParams = { sessionId, to: input.to, name: this.d.reach.labelOf(sender), ...fields, id }
-    return this.wrote(sender, input.to, fields, h.name, this.settle(id, await this.ask(h, 'hub.mail', params)))
+    const toPerson = input.to === sessionAddress(route.hubId, PERSON_ID)
+    const params: HubMailParams = { sessionId, to: this.asHubNames(route.hubId, input.to), name: this.d.reach.labelOf(sender), ...fields, ...extra, id }
+    const r = this.settle(id, await this.ask(h, 'hub.mail', params))
+    // A hub from before the person's mail crossed reads `person` as no address
+    if (!r.ok && r.why === 'bad_address' && toPerson) return { ok: false, why: 'older', text: `${h.name} runs an older Centralu, which takes no mail to the person from here. Update it there.` }
+    return this.wrote(sender, input.to, fields, h.name, r)
   }
 
   /**
@@ -356,6 +414,8 @@ export class MailAcross {
       if (!parentId) return { ok: false, why: 'not_yours', text: `${this.selfName()} did not start this session.` }
       to = this.d.service.sessionAddress(parentId)
     } else to = p.to
+    // To the person, who works in this hub's window (#1987)
+    if (to === PERSON) return this.write(sender, PERSON, p)
     const route = this.route(to)
     if (!route) return { ok: false, why: 'bad_address', text: `Not a mail address: ${JSON.stringify(oneLineText(to, 200))}` }
     if (route.kind === 'hub') return { ok: false, why: 'elsewhere', text: `${oneLineText(to, 200)} is not on ${this.selfName()} or a machine it links.` }
@@ -393,7 +453,7 @@ export class MailAcross {
   private write(
     from: string,
     to: string,
-    p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined },
+    p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined; subject?: string | undefined; choices?: string[] | undefined },
     seen = to,
   ): HubMailResult & { address?: string } {
     if (p.id !== undefined) {
@@ -415,15 +475,17 @@ export class MailAcross {
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
         return { ok: false, why: 'not_allowed', text: `${oneLineText(this.foreignName(from)?.name ?? from, 200)} may send a notice only to a session that mailed it, and ${oneLineText(to, 200)} did not, so nothing was written.` }
       }
-      const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}) })
+      const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
       return { ok: true, messageId: sent.message.id, to: this.label(to), address: to }
     } catch (e) {
       const why = refusalReason(e)
       // A reply to a message this side never kept: one that arrived there while the link failed during its send
       const lost = why === 'unknown_message' && p.replyTo !== undefined && !this.d.records.message(p.replyTo)
       const text = why === 'gone'
-        ? // The service names the session by this host's address, which the sender never used
-          `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
+        ? // The service names the session by this host's address, which the sender never used; the person reads it by its name
+          isPerson(from)
+          ? `${this.label(to)} on ${this.selfName()} is in the session archive there or was deleted, so your answer was not sent.`
+          : `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
         : lost
         ? `${this.selfName()} has no record of ${oneLineText(p.replyTo ?? '', 200)}: it most likely reached you while the link failed during its sending, so ${this.selfName()} never kept its copy, and nothing was written. Send your answer again as a new message (without replying to that one), saying what it answers.`
         : why
@@ -435,6 +497,7 @@ export class MailAcross {
 
   /** A session here as the other side's answer names it; written whatever its label */
   private label(to: string): string {
+    if (to === PERSON) return 'the person'
     try {
       return oneLineText(this.d.reach.labelOf(to), 120)
     } catch {
@@ -596,7 +659,7 @@ export class MailAcross {
       } else if (r?.kind === 'hub') {
         const peer = this.peers?.hub?.(r.hubId)
         // `hub.mail` names a session of the machine as its sender; a notice has none, and the hub writes it as its own
-        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: row.recipient, text: m.body, notice: true } satisfies HubMailParams)
+        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: this.asHubNames(r.hubId, row.recipient), text: m.body, notice: true } satisfies HubMailParams)
       }
       if (!sent.ok) this.d.log?.(`[mail] a notice to ${row.recipient} could not be passed on, and was dropped: ${sent.text ?? ''}`)
     }
