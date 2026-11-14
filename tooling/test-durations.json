@@ -478,6 +478,7 @@
     "packages/agent-host/src/sessions/turn-origin.test.ts": 5.2,
     "packages/agent-host/src/sessions/ui-preferences.test.ts": 0.8,
     "packages/agent-host/src/sessions/unconfirmed-stop.test.ts": 0.7,
+    "packages/agent-host/src/sessions/update-wakes.test.ts": 1.6,
     "packages/agent-host/src/sessions/usage-history.test.ts": 0.2,
     "packages/agent-host/src/sessions/usage-recorder.test.ts": 0.5,
     "packages/agent-host/src/sessions/wake-order.test.ts": 0.7,
