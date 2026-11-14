@@ -532,6 +532,28 @@ test('Mail: a row and an ask card show the dot of a session that is working, has
   await expect(page.getByTestId(`mail-people-${idle}`)).toContainText('Styles')
   await expect(page.getByTestId(`mail-people-${idle}`).locator('[data-testid^="dot-"]')).toHaveCount(0)
   await expect(page.getByTestId(`mail-ask-from-${asked}`).getByTestId('dot-error')).toBeVisible()
+  // The giver's state draws nothing: the dot is the assignee's
+  await expect(page.getByTestId(`mail-people-${working}`).locator('[data-testid^="dot-"]')).toHaveCount(1)
+})
+
+// #2258: on a crowded row the preview gives up its width before the subject and the names do
+test('Mail: a crowded row cuts the preview, not the subject or the names', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const row = await seed(page, {
+    subject: 'Mac signing',
+    kind: 'assign',
+    from: { ...PARSER, sessionId: 's5', name: 'release', state: 'waiting_approval' },
+    assignee: { ...PARSER, sessionId: 's6', name: 'mac-builder', state: 'working' },
+    body: 'Sign the Mac build with the new certificate, then tell the release session which identity it used and where the notarized build is.',
+  })
+  await page.getByTestId('counter').click()
+  const cut = (id: string) => page.getByTestId(id).evaluate((el) => el.scrollWidth > el.clientWidth)
+  await expect(page.getByTestId(`mail-preview-${row}`)).toBeVisible()
+  expect(await cut(`mail-preview-${row}`)).toBe(true)
+  expect(await cut(`mail-subject-${row}`)).toBe(false)
+  expect(await cut(`mail-people-${row}`)).toBe(false)
+  await expect(page.getByTestId(`mail-people-${row}`)).toContainText('mac-builder')
 })
 
 // #1577 (owner 2026-11-14, option C): Waiting | Tasks inside the Inbox, the host's work grouped by who acts next

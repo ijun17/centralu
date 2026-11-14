@@ -33,30 +33,38 @@ export function MailThreadItem({ thread: t, dim, active, leaving }: { thread: Ma
         <span className={`w-2 shrink-0 text-center text-2xs ${t.unread > 0 ? 'text-ink-signal' : 'text-transparent'}`} aria-label={t.unread > 0 ? 'Unread' : undefined} title={t.unread > 0 ? `${t.unread} unread` : undefined}>
           ●
         </span>
-        <span className={`min-w-0 truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`}>{t.subject}</span>
+        <span className={`min-w-0 truncate text-md ${t.unread > 0 ? 'text-ink' : 'text-ink-muted'}`} data-testid={`mail-subject-${t.id}`}>
+          {t.subject}
+        </span>
         <People owner={t.owner} assignee={t.assignee} testId={`mail-people-${t.id}`} />
-        {/* The preview gives up its width first, so the names and the dots beside them stay whole on a crowded row (#2258) */}
-        <span className="ml-auto flex min-w-0 shrink-[100] items-center gap-2.5">
-          {t.last && <span className="min-w-0 max-w-56 truncate text-xs text-ink-faint">{t.last.preview}</span>}
-          <span className="shrink-0 text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
-            {threadStateLabel(t)}
-          </span>
-          <span className="readout w-12 shrink-0 text-right text-xs text-ink-faint">
-            <RelativeAge when={t.updatedAt} />
-          </span>
+        {/*
+         * The preview takes only the width left over (no width of its own, up to max-w-56), so on a crowded row it is gone before the subject or the
+         * names and the dot beside them lose any (#2258)
+         */}
+        <span className="min-w-0 max-w-56 flex-1 basis-0 truncate text-xs text-ink-faint" data-testid={`mail-preview-${t.id}`}>
+          {t.last?.preview}
+        </span>
+        <span className="ml-auto shrink-0 text-xs text-ink-faint" data-testid={`mail-state-${t.id}`}>
+          {threadStateLabel(t)}
+        </span>
+        <span className="readout w-12 shrink-0 text-right text-xs text-ink-faint">
+          <RelativeAge when={t.updatedAt} />
         </span>
       </button>
     </li>
   )
 }
 
-/** Who the work is between, from the person's side: the one who gave it, and the one who has it, with its live dot (#2258). The person, as the giver, goes unsaid */
+/**
+ * Who the work is between, from the person's side: the one who gave it, and the one who has it with its live dot (#2258 option A: the assignee's state,
+ * not the giver's). The person, as the giver, goes unsaid
+ */
 export function People({ owner, assignee, testId }: { owner: MailParty; assignee: MailParty | null; testId?: string }) {
   const from = owner.kind === 'person' ? null : owner
   if (!from && !assignee) return null
   return (
     <span className="flex shrink-0 items-center gap-1 text-xs text-ink-faint" data-testid={testId}>
-      {from && <PartyName party={from} />}
+      {from && <span className="shrink-0">{partyName(from)}</span>}
       {assignee && (
         <>
           <span aria-hidden>→</span>
