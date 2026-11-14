@@ -1,9 +1,8 @@
 import { taskKey, type TaskGroups } from '@cc/core'
 import type { MailTaskRow } from '@cc/protocol/client'
 import { Badge } from '../../components/Badge.jsx'
-import { RelativeAge } from '../../components/RelativeAge.js'
 import { FoldedGroup } from './FoldedGroup.jsx'
-import { People } from './MailRows.jsx'
+import { ListRow, People, RowEnd, RowSubject } from './MailRows.jsx'
 import { taskStateLabel } from './mailLabels.js'
 
 /**
@@ -13,12 +12,18 @@ import { taskStateLabel } from './mailLabels.js'
  */
 export function TaskList({
   groups: g,
+  loaded,
+  capped,
   cursor,
   doneOpen,
   onToggleDone,
   onOpen,
 }: {
   groups: TaskGroups
+  /** Whether the host has answered: until it has, nothing is drawn, not "No tasks" */
+  loaded: boolean
+  /** How many open tasks the host listed when more are open (`mail.tasks`), else null */
+  capped: number | null
   cursor: string | null
   doneOpen: boolean
   onToggleDone: () => void
@@ -30,6 +35,7 @@ export function TaskList({
     { title: 'Waiting on others', rows: g.waitingOnOthers, testId: 'waiting-on-others' },
     { title: 'Unassigned', rows: g.unassigned, testId: 'unassigned' },
   ].filter((p) => p.rows.length > 0)
+  if (!loaded) return null
   if (parts.length === 0 && g.done.length === 0) {
     return (
       <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-tasks-empty">
@@ -59,27 +65,25 @@ export function TaskList({
           ))}
         </FoldedGroup>
       )}
+      {capped !== null && (
+        <p className="px-4 py-2 text-xs text-ink-faint" data-testid="tasks-capped">
+          Showing the newest {capped.toLocaleString('en-US')} open tasks.
+        </p>
+      )}
     </div>
   )
 }
 
-/** One task: its subject, who gave it to whom with the live dot of the one who has it, its state and when it last moved */
+/** One task, in a mail row's look: its subject (muted once done), who gave it to whom with the live dot of the one who has it, its state and age */
 function TaskRow({ task: t, active, onOpen, dim }: { task: MailTaskRow; active: boolean; onOpen: (t: MailTaskRow) => void; dim?: boolean }) {
   const key = taskKey(t)
   return (
-    <li data-cursor={active || undefined} className={`rounded-field transition-colors ${active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'} ${dim ? 'opacity-80' : ''}`}>
-      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => onOpen(t)} data-testid={`task-${key}`}>
-        <span className="min-w-0 truncate text-md text-ink">{t.subject}</span>
-        <People owner={t.owner} assignee={t.assignee} />
-        <span className="ml-auto flex shrink-0 items-center gap-2.5">
-          <span className="text-xs text-ink-faint" data-testid={`task-state-${key}`}>
-            {taskStateLabel(t)}
-          </span>
-          <span className="readout w-12 text-right text-xs text-ink-faint">
-            <RelativeAge when={t.updatedAt} />
-          </span>
-        </span>
-      </button>
-    </li>
+    <ListRow active={active} dim={dim} onClick={() => onOpen(t)} testId={`task-${key}`}>
+      <RowSubject loud={t.state !== 'done'} testId={`task-subject-${key}`}>
+        {t.subject}
+      </RowSubject>
+      <People owner={t.owner} assignee={t.assignee} />
+      <RowEnd state={taskStateLabel(t)} at={t.updatedAt} testId={`task-state-${key}`} />
+    </ListRow>
   )
 }

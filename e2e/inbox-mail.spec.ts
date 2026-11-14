@@ -568,6 +568,8 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
   await seedTask({ subject: 'Fix the sidebar fold', owner: LEAD, assignee: PARSER, state: 'released' })
   await seedTask({ subject: 'Cache headers', owner: YOU, assignee: PARSER, state: 'done', outcome: 'reported' })
 
+  // A host with more open work than it lists says so (`capped`)
+  await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { tasksCapped: number | null } } }).__mock.mockMail.tasksCapped = 2000))
   await page.getByTestId('counter').click()
   await expect(page.getByTestId('inbox-tasks-count')).toHaveText('3')
   await page.getByTestId('inbox-tab-tasks').click()
@@ -591,8 +593,20 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
   await page.getByTestId('mail-back').click()
   await page.getByTestId('tasks-done-toggle').click()
   await expect(page.getByTestId('tasks-done')).toContainText('Cache headers')
+  // A done task reads like read mail (ink-muted), and the list says where it stops
+  await expect(page.getByTestId('tasks-done').locator('[data-testid^="task-subject-"]')).toHaveClass(/text-ink-muted/)
+  await expect(page.getByTestId('tasks-capped')).toHaveText('Showing the newest 2,000 open tasks.')
+  // The switch back: Tasks fades out in place while Waiting comes in (design-system §9), then goes
+  const leaving = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        document.querySelector<HTMLElement>('[data-testid="inbox-tab-waiting"]')?.click()
+        requestAnimationFrame(() => resolve(document.querySelector('[data-testid="inbox-tasks"]')?.closest('.cc-fade-out') != null))
+      }),
+  )
+  expect(leaving).toBe(true)
+  await expect(page.getByTestId('inbox-tasks')).toHaveCount(0)
   // Mail between sessions is not the person's own: it never lists under Waiting
-  await page.getByTestId('inbox-tab-waiting').click()
   await expect(page.getByTestId(`mail-thread-${between}`)).toHaveCount(0)
   // The Inbox opens on Waiting again
   await page.keyboard.press('Escape')
@@ -616,7 +630,7 @@ test('Tasks: a held request needs the person, and its row leads to Waiting’s h
   await page.keyboard.press('ArrowLeft')
   await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
   await page.getByTestId('inbox-tab-tasks').click()
-  const row = page.getByTestId('tasks-needs-you').locator('[data-testid^="task-"]', { hasText: 'Deploy the site' })
+  const row = page.getByTestId('tasks-needs-you').locator('button[data-testid^="task-"]', { hasText: 'Deploy the site' })
   await expect(row).toContainText('Held')
   await row.click()
   // Where the person can act on it: Waiting, its held row and the button that frees it

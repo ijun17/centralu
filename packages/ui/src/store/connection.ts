@@ -439,7 +439,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
           void get().checkAgentVersions(false)
           // Mail posted while the window was away sent its news to nobody, nor did a watch that was set, fired or ended
           void get().loadMail()
-          // And the Inbox's Tasks, when it is open: what moved while away came with no news either (#1577)
+          // And the Inbox's Tasks: what it listed may be another host's, and what moved while away came with no news either (#1577)
+          set({ mailTasks: null })
           if (get().inboxOpen) void get().loadTasks()
           for (const sessionId of Object.keys(get().watches)) void get().loadWatches(sessionId)
           // Revive sessions that were running; a resync's own recovery below does that and more

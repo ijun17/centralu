@@ -107,6 +107,10 @@ describe('a task’s state', () => {
     expect(taskStateLabel({ state: 'running', outcome: null, assignee: session })).toBe('Running')
     expect(taskStateLabel({ state: 'review', outcome: null, assignee: session })).toBe('In review')
     expect(taskStateLabel({ state: 'held', outcome: null, assignee: session })).toBe('Held')
+    // One word table for a thread and a task: the same state says the same word in both lists
+    for (const state of ['open', 'running', 'held', 'review', 'released', 'queued']) {
+      expect(threadStateLabel({ state, outcome: null, ask: null })).toBe(taskStateLabel({ state, outcome: null, assignee: session }))
+    }
     expect(taskStateLabel({ state: 'released', outcome: null, assignee: session })).toBe('Released')
     expect(taskStateLabel({ state: 'queued', outcome: null, assignee: session })).toBe('queued')
   })

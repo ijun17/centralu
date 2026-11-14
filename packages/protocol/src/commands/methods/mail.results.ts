@@ -9,7 +9,11 @@ export const mailResults = {
     /** Sleeping sessions with mail from while Centralu was off that wait for "Wake them" or "Leave them" (§7.9) */
     waiting: z.number().default(0),
   }),
-  'mail.tasks': z.object({ tasks: z.array(MailTaskRow).default([]) }),
+  'mail.tasks': z.object({
+    tasks: z.array(MailTaskRow).default([]),
+    /** How many open tasks are listed when more are open than the host lists (the oldest left out); null when every open one is. Absent from an older host */
+    capped: z.number().nullable().default(null),
+  }),
   'mail.thread': MailThreadView,
   'mail.reply': MailThreadView,
   'mail.close': MailThreadRow,

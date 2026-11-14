@@ -1,9 +1,13 @@
 import { errorMessage, notifyPolicyOf } from '@cc/protocol/client'
 import type { MailThreadRow, MailThreadView, NormalizedEvent, WatchView } from '@cc/protocol/client'
 import { mailNotification } from '@cc/core'
+import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
 import { coalescedRead } from './single-flight.js'
+
+/** What Tasks lists when the host has nothing to say: an older host, or one that failed the first read */
+const NO_TASKS = { tasks: [], capped: null }
 
 /**
  * The person's mailbox (#1347, docs/plans/mailbox.md §10.1): its list, a thread, and the acts that are the person's. The host
@@ -54,7 +58,9 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
     },
 
     loadTasks() {
-      return coalescedRead('mailTasks', get, (platform) => platform.mail.tasks(), (mailTasks) => void set({ mailTasks }))
+      // A first read that fails (a host older than Tasks answers "Unknown method") lists none; a later one that fails keeps the list it had
+      const read = (platform: Platform) => platform.mail.tasks().catch((e: unknown) => (get().mailTasks === null ? NO_TASKS : Promise.reject(e)))
+      return coalescedRead('mailTasks', get, read, (mailTasks) => void set({ mailTasks }))
     },
 
     async openMailThread(threadId) {

@@ -173,6 +173,12 @@ const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
 const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone')`
 /** Held for a reason the person acts on */
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
+/** A message that waits for a reply: a task, or a message that needs one (the Inbox's Tasks, #1577) */
+const WORK = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
+/** One still open: a row not settled and not dismissed, or the person's task reported back and waiting for their review */
+const OPEN_WORK = `${WORK} AND EXISTS (
+  SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND ((r.settled IS NULL AND COALESCE(r.held, '') <> 'dismissed') OR (m.sender = 'person' AND r.settled = 'reported'))
+)`
 /**
  * The `via` of a recipient row sent to the Assistant's role rather than to one session (§7.7): `ROLE_VIA` since #2133 step 4, `'orchestrator'`
  * before. A row keeps the word it was written with and stays on this machine, and every build that can open the store (v68 on) reads both
@@ -399,18 +405,20 @@ export class MailboxRecords {
    * pushed out by what is done. A scan of the table, which no index serves: measured at 0.17 ms on a store of 164 messages
    */
   newestWork(limit: number, open: number): MailRow[] {
-    const work = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
     const newest = 'ORDER BY m.created_at DESC, m.id DESC'
     return this.messages(
-      `${work} AND (
-         m.id IN (SELECT m.id FROM mail m WHERE ${work} AND EXISTS (
-           SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND ((r.settled IS NULL AND COALESCE(r.held, '') <> 'dismissed') OR (m.sender = 'person' AND r.settled = 'reported'))
-         ) ${newest} LIMIT ?)
-         OR m.id IN (SELECT m.id FROM mail m WHERE ${work} ${newest} LIMIT ?)
+      `${WORK} AND (
+         m.id IN (SELECT m.id FROM mail m WHERE ${OPEN_WORK} ${newest} LIMIT ?)
+         OR m.id IN (SELECT m.id FROM mail m WHERE ${WORK} ${newest} LIMIT ?)
        ) ${newest}`,
       open,
       limit,
     )
+  }
+
+  /** How many messages `newestWork` counts as open: past its `open`, the oldest of them are not listed (the Inbox's Tasks says so) */
+  openWorkCount(): number {
+    return this.db.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM mail m WHERE ${OPEN_WORK}`).get()?.n ?? 0
   }
 
   // ── Delivery ──

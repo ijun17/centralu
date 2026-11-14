@@ -2,7 +2,7 @@ import { usePresence } from '../../components/presence.js'
 import { groupTasks, isInTurn, openTaskCount, shownTasks, taskKey, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useKeepInView } from '../../app/useKeepInView.js'
 import { isTextEntry, pressesItself } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
@@ -67,7 +67,10 @@ export function Inbox() {
   const [tab, setTab] = useState<'waiting' | 'tasks'>('waiting')
   const loadTasks = useStore((s) => s.loadTasks)
   const mailTasks = useStore((s) => s.mailTasks)
-  const tasks = useMemo(() => groupTasks(mailTasks ?? []), [mailTasks])
+  const tasks = useMemo(() => groupTasks(mailTasks?.tasks ?? []), [mailTasks])
+  // Each list stays on screen for its exit when the other takes over
+  const waitingPane = usePresence(tab === 'waiting')
+  const tasksPane = usePresence(tab === 'tasks')
   const [doneOpen, setDoneOpen] = useState(false)
   const taskRows = useMemo(() => shownTasks(tasks, doneOpen), [tasks, doneOpen])
   /*
@@ -291,45 +294,62 @@ export function Inbox() {
               toggle(false)
             }}
           />
-        ) : tab === 'tasks' ? (
-          // The switch fades the other list in (design-system §9)
-          <div key="tasks" className="cc-fade flex min-h-0 flex-col">
-            <TaskList groups={tasks} cursor={taskPlaced.key} doneOpen={doneOpen} onToggleDone={() => setDoneOpen((o) => !o)} onOpen={openTask} />
-          </div>
-        ) : nothingWaiting && list.earlier.length === 0 ? (
-          <Nothing />
         ) : (
-          // However much there is, the list keeps to the panel and scrolls inside it (#1772); the header stays put
-          <div key="waiting" className="cc-fade flex min-h-0 flex-col overflow-y-auto" data-testid="inbox-list">
-            <MailPinned held={list.held} waiting={mail?.waiting ?? 0} />
-            {nothingWaiting && <Nothing />}
-            {list.waiting.length > 0 && (
-              <ul className="flex flex-col gap-0.5 p-1">
-                {shownRows.map(({ row, place }) =>
-                  row.kind === 'mail' ? (
-                    <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} leaving={place === null} />
-                  ) : (
-                    <SessionRow
-                      key={row.item.id}
-                      it={row.item}
-                      project={projectLabelOf(projects, row.item.projectId)}
-                      active={place === cursor}
-                      settled={settled}
-                      onOpen={() => {
-                        openWaiting(row.item.id, { preferGrid: true })
-                        toggle(false)
-                      }}
-                    />
-                  ),
-                )}
-              </ul>
+          // The switch fades one list in as the other fades out in the same place (design-system §9)
+          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)]">
+            {tasksPane.shown && (
+              <Pane leaving={tasksPane.leaving}>
+                <TaskList
+                  groups={tasks}
+                  loaded={mailTasks !== null}
+                  capped={mailTasks?.capped ?? null}
+                  cursor={taskPlaced.key}
+                  doneOpen={doneOpen}
+                  onToggleDone={() => setDoneOpen((o) => !o)}
+                  onOpen={openTask}
+                />
+              </Pane>
             )}
-            {list.earlier.length > 0 && (
-              <FoldedGroup label="Earlier" count={list.earlier.length} open={earlierOpen} onToggle={() => setEarlierOpen((o) => !o)} testId="inbox-earlier">
-                {list.earlier.map((t) => (
-                  <MailThreadItem key={t.id} thread={t} dim />
-                ))}
-              </FoldedGroup>
+            {waitingPane.shown && (
+              <Pane leaving={waitingPane.leaving}>
+                {nothingWaiting && list.earlier.length === 0 ? (
+                  <Nothing />
+                ) : (
+                  // However much there is, the list keeps to the panel and scrolls inside it (#1772); the header stays put
+                  <div className="flex min-h-0 flex-col overflow-y-auto" data-testid="inbox-list">
+                    <MailPinned held={list.held} waiting={mail?.waiting ?? 0} />
+                    {nothingWaiting && <Nothing />}
+                    {list.waiting.length > 0 && (
+                      <ul className="flex flex-col gap-0.5 p-1">
+                        {shownRows.map(({ row, place }) =>
+                          row.kind === 'mail' ? (
+                            <MailThreadItem key={`m:${row.thread.id}`} thread={row.thread} active={place === cursor} leaving={place === null} />
+                          ) : (
+                            <SessionRow
+                              key={row.item.id}
+                              it={row.item}
+                              project={projectLabelOf(projects, row.item.projectId)}
+                              active={place === cursor}
+                              settled={settled}
+                              onOpen={() => {
+                                openWaiting(row.item.id, { preferGrid: true })
+                                toggle(false)
+                              }}
+                            />
+                          ),
+                        )}
+                      </ul>
+                    )}
+                    {list.earlier.length > 0 && (
+                      <FoldedGroup label="Earlier" count={list.earlier.length} open={earlierOpen} onToggle={() => setEarlierOpen((o) => !o)} testId="inbox-earlier">
+                        {list.earlier.map((t) => (
+                          <MailThreadItem key={t.id} thread={t} dim />
+                        ))}
+                      </FoldedGroup>
+                    )}
+                  </div>
+                )}
+              </Pane>
             )}
           </div>
         )}
@@ -357,6 +377,15 @@ function onTaskKey(
     else act.open(row)
   }
   else if (action === 'close') act.close()
+}
+
+/** One of the Inbox's two lists while it is on screen: it fades in, and out in the same place when the other takes over, taking no presses or keys as it goes */
+function Pane({ leaving, children }: { leaving: boolean; children: ReactNode }) {
+  return (
+    <div className={`flex min-h-0 flex-col [grid-area:1/1] ${leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'}`} inert={leaving}>
+      {children}
+    </div>
+  )
 }
 
 /** What the list says when nothing waits */

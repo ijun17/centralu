@@ -345,6 +345,24 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     expect([w.row(mid(24), PERSON)?.settled, w.row(mid(25), PERSON)?.settled]).toEqual(['done', 'done'])
   })
 
+  it('an old thread’s id naming a chain of the person’s and one of the sessions’ alone: each is decided for itself, and close leaves the sessions’ one be', () => {
+    const w = hostWorld()
+    const t = w.clock.t - 1_000
+    oldThread(w.store, { id: tid(23), owner: A, at: t }, [
+      { id: mid(26), sender: A, kind: 'question', body: 'to the person', receipts: [{ recipient: PERSON }] },
+      { id: mid(27), sender: A, kind: 'question', body: 'between sessions', receipts: [{ recipient: B }] },
+    ])
+    const r = ready(w)
+    // The newest chain is the sessions' own: the person looks in on it
+    expect(r.person.thread(tid(23), { tail: 100 })).toMatchObject({ lookIn: true, canReply: false, thread: { id: mid(27) } })
+    const sessions = () => ({ row: w.row(mid(27), B), facts: w.store.mailbox.message(mid(27))?.facts })
+    const before = sessions()
+    r.person.close(tid(23))
+    expect(w.row(mid(26), PERSON)?.settled).toBe('done')
+    expect(sessions()).toEqual(before)
+    expect(w.store.mailbox.message(mid(27))?.facts.closed).toBeUndefined()
+  })
+
   it('Dismiss of a held answer opens its question again (D8)', () => {
     const w = ready(hostWorld())
     w.clock.t += 10
@@ -993,7 +1011,7 @@ describe("a send's subject names its chain (#2229)", () => {
 
 describe("the Inbox's Tasks: every request on the host, one row for each recipient (#1577)", () => {
   const C = at('c')
-  const rowsFor = (w: ReturnType<typeof ready>, id: string) => w.person.tasks().filter((t) => t.id === id)
+  const rowsFor = (w: ReturnType<typeof ready>, id: string) => w.person.tasks().tasks.filter((t) => t.id === id)
   const stateOf = (w: ReturnType<typeof ready>, id: string, assignee: string) => rowsFor(w, id).find((t) => t.assignee.address === assignee)
 
   it('lists a request between sessions once for each recipient, with who gave it and who has it; a note, and a row kept from the person, are not listed', () => {
@@ -1011,11 +1029,13 @@ describe("the Inbox's Tasks: every request on the host, one row for each recipie
     expect(rowsFor(w, kept.id)).toEqual([])
   })
 
-  it('a task is running while its assignee’s turn is on it, in review once it reports to the person, and done with how once settled', () => {
+  it('a task is running while its assignee has it, in review once it reports to the person, and done with how once settled', () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'create_session', delivered: true })
-    expect(stateOf(w, task.id, B)).toMatchObject({ kind: 'assign', owner: { kind: 'person' }, state: 'open' })
+    // Given and not settled or released: running between turns too, the same word the person's own row of the chain says (one rule, `hasTask`)
+    expect(stateOf(w, task.id, B)).toMatchObject({ kind: 'assign', owner: { kind: 'person' }, state: 'running' })
+    expect(w.person.list().threads.find((t) => t.id === task.id)?.state).toBe('running')
     w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller' })
     expect(stateOf(w, task.id, B)?.state).toBe('running')
     w.endTurn('b')
@@ -1067,7 +1087,11 @@ describe("the Inbox's Tasks: every request on the host, one row for each recipie
       return id
     })
     // The open one is not pushed out by 201 newer ones that are done; the oldest of those is
-    expect(w.person.tasks().map((t) => t.id)).toEqual([...settled.slice(1).reverse(), old])
+    expect(w.person.tasks()).toEqual({ tasks: expect.any(Array), capped: null })
+    expect(w.person.tasks().tasks.map((t) => t.id)).toEqual([...settled.slice(1).reverse(), old])
+    // Past 2,000 open ones the oldest are left out, and the window is told how many are listed
+    vi.spyOn(w.store.mailbox, 'openWorkCount').mockReturnValue(2001)
+    expect(w.person.tasks().capped).toBe(2000)
   })
 
   it('held: a request waiting for the person to say what happens to it; one the person dismissed is not listed', () => {
@@ -1106,7 +1130,8 @@ describe('the person looks in on a chain they are not in (#1577, owner 2026-11-1
     const view = w.person.thread(task.id)
     expect(view.messages.map((m) => m.id)).toEqual([task.id, q.id])
     expect(view).toMatchObject({ lookIn: true, canReply: false })
-    expect(view.thread).toMatchObject({ owner: { address: A }, assignee: { address: B }, state: 'open', unread: 0, ask: null, held: 0 })
+    // B has the task A gave it: running, by the rule the person's own rows follow
+    expect(view.thread).toMatchObject({ owner: { address: A }, assignee: { address: B }, state: 'running', unread: 0, ask: null, held: 0 })
     expect(stored()).toEqual(before)
     expect(announce).not.toHaveBeenCalled()
     expect(await refusedForAsync(() => w.person.reply(task.id, 'Use the fast one.'))).toBe('unknown_message')

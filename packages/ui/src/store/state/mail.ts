@@ -12,7 +12,8 @@ export type MailSlice = {
    * The host's open and recently settled work (#1577), as `mail.tasks` last listed it for the Inbox's Tasks: read when the Inbox opens and again on
    * `mail_changed` while it is open. Null until read, and for a host that has no such method
    */
-  mailTasks: MailTaskRow[] | null
+  /** The host's work as Tasks lists it (#1577); null until the first answer, and again when the window comes back to a host */
+  mailTasks: { tasks: MailTaskRow[]; capped: number | null } | null
   /** Reads the tasks again; keeps the last list on a failure */
   loadTasks: () => Promise<void>
   /** The thread open in the Inbox, with the messages read so far (`mail.thread`); null when the list shows */

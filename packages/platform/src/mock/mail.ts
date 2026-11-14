@@ -40,6 +40,8 @@ export class MailMock {
   knowsWatches = true
   /** The host's open work, as `mail.tasks` lists it (#1577); a test or the demo seeds it */
   private taskRows: MailTaskRow[] = []
+  /** A host with more open work than it lists says how many it listed (#1577); a test sets it */
+  tasksCapped: number | null = null
   /** False stands in for a host older than Tasks: `mail.tasks` is unknown to it */
   knowsTasks = true
 
@@ -187,7 +189,7 @@ export class MailMock {
     }),
     tasks: async () => {
       if (!this.knowsTasks) throw mockError('Unknown method: mail.tasks. This Centralu host does not have it; the window may be from another build.')
-      return this.taskRows.map((t) => ({ ...t }))
+      return { tasks: this.taskRows.map((t) => ({ ...t })), capped: this.tasksCapped }
     },
     thread: async (threadId, opts) => {
       const t = this.must(threadId)

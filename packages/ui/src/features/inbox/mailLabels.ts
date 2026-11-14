@@ -7,40 +7,32 @@ import type { MailHeldRow, MailMessage, MailParty, MailTaskRow, MailThreadRow, M
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 
-/** The thread's state as a word, with how it ended when it is done; a thread that waits on the person's answer says so (#2229) */
-export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'ask'>): string {
-  if (t.state === 'done') return t.outcome && t.outcome !== 'finished' ? `Done (${t.outcome})` : 'Done'
-  if (t.ask) return 'Waiting on you'
-  switch (t.state) {
-    case 'open':
-      return 'Open'
-    case 'running':
-      return 'Running'
-    case 'review':
-      return 'In review'
-    default:
-      return t.state
-  }
+/** The host's state words as the screen says them, for a thread and a task alike; a word this build does not know is shown as the host wrote it */
+const STATE_WORDS = new Map([
+  ['open', 'Open'],
+  ['running', 'Running'],
+  ['held', 'Held'],
+  ['review', 'In review'],
+  ['released', 'Released'],
+])
+/** How work ends as work ends: finished, answered, reported, marked done. Any other end is said beside Done */
+const PLAIN_ENDS = ['finished', 'answered', 'reported', 'done']
+
+/** A state as a word: Done with how it ended, Waiting on you when it waits on the person's answer, else the state's word */
+function stateWord(state: string, outcome: string | null, waitsOnYou: boolean): string {
+  if (state === 'done') return outcome && !PLAIN_ENDS.includes(outcome) ? `Done (${outcome})` : 'Done'
+  if (waitsOnYou) return 'Waiting on you'
+  return STATE_WORDS.get(state) ?? state
 }
 
-/** A task's state as a word (#1577), in the thread's words: how it ended when it is done, unless it simply ended as work ends (answered, reported, marked done) */
+/** The thread's state as a word, with how it ended when it is done; a thread that waits on the person's answer says so (#2229) */
+export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome' | 'ask'>): string {
+  return stateWord(t.state, t.outcome, t.ask !== null)
+}
+
+/** A task's state as a word (#1577), in the thread's words; a question to the person not answered yet waits on them */
 export function taskStateLabel(t: Pick<MailTaskRow, 'state' | 'outcome' | 'assignee'>): string {
-  if (t.state === 'done') return t.outcome && !['answered', 'reported', 'done'].includes(t.outcome) ? `Done (${t.outcome})` : 'Done'
-  if (t.state === 'open' && t.assignee.kind === 'person') return 'Waiting on you'
-  switch (t.state) {
-    case 'open':
-      return 'Open'
-    case 'running':
-      return 'Running'
-    case 'held':
-      return 'Held'
-    case 'review':
-      return 'In review'
-    case 'released':
-      return 'Released'
-    default:
-      return t.state
-  }
+  return stateWord(t.state, t.outcome, t.state === 'open' && t.assignee.kind === 'person')
 }
 
 /**

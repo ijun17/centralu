@@ -501,7 +501,7 @@ export function createRpcHandler(
       return mgr.searchMessages(query, limit)
     },
     'mail.list': async () => requireMail().list(),
-    'mail.tasks': async () => ({ tasks: requireMail().tasks() }),
+    'mail.tasks': async () => requireMail().tasks(),
     'mail.thread': async ({ threadId, after, all, tail, before }) => {
       return requireMail().thread(threadId, { after, all, tail, before })
     },
