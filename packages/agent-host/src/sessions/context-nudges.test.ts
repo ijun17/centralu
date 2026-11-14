@@ -309,7 +309,7 @@ describe('telling a growing session to call compact_self (#1492)', () => {
 
   it('with no stored reading, tells the first share as before (#1913)', () => {
     const w = world()
-    w.session.context = undefined
+    w.session.context = null
     w.request(330_000)
     expect(w.told).toHaveLength(1)
   })
