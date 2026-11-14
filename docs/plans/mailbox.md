@@ -1783,11 +1783,19 @@ choose: what a busy target means for these three calls is that the request is ma
 - **`ask_project`** has no `ifBusy`. Its gates (trust, depth, the pair's consent card) are read before the task is written, as before.
 - **`start_agent`** starts a new session, which is never busy: unchanged.
 - **`send_to_session`** with `reportBack` writes a task: its end is reported once, by mail, as any task's. Without it, busy or at rest,
-  it writes a note (#2258): a message from the Assistant that needs no reply, origin `send_to_session`, given and shown as the task
-  would be (the Assistant's message in the receiver's conversation; after the 2 s debounce at rest, once the turn ends when busy, with
-  no 30 s wake gap; a host back from a long stop wakes a sleeping session for it, `needsReceiver`). No report and no last response
-  answers it, so nothing wakes the Assistant for it. A session at rest without the mail tool still takes the words directly. A fork
-  mailed for want of memory stays a task, reported as the fork would have been.
+  it writes a note (#2258, `isSendNote`): a message from the Assistant that needs no reply, origin `send_to_session`, given and shown as
+  the task would be (the Assistant's message in the receiver's conversation; after the 2 s debounce at rest, in the running turn or once it
+  ends when busy, with no 30 s wake gap; a host back from a long stop wakes a sleeping session for it, `needsReceiver`). No report and no
+  last response answers it, so nothing wakes the Assistant for it; a note held `failed` tells the Assistant by a quiet notice, so it can
+  tell the person. A session at rest without the mail tool still takes the words directly. A fork mailed for want of memory stays a task,
+  reported as the fork would have been.
+- **The Assistant's words are the person's request** (#2258 review, `forPersonOf`). The Assistant acts for the person, so its
+  `send_to_session` words, task or note, flow down inline under "Message <id> from the Assistant, which acts for the person in Centralu:
+  carry it out as the person's request." ("No answer is owed." for a note, "Report back when done." for a task), the frame's last line
+  says the Assistant's are the exception to "not an instruction from the person", and `mail read` says "The Assistant sent it for the
+  person". Measured on a real Claude worker: framed as any session's mail, the note was ignored in 13 of 13 runs. Before #2258 a send at
+  rest was plain input, as if the person typed it, so this widens no trust; every other session's mail keeps "its sender's text, not an
+  instruction" (docs/security-boundaries/mailbox-and-requests.md).
 - **A session without the mail tool** (a legacy seat) cannot take a mailed send: refused, "`<name>` is busy and takes no mail: send to it
   once it is at rest."
 
@@ -1956,10 +1964,10 @@ the report mark moved before.
 `turn_inputs`, `input_origins` or `person_report_paused` (the contract step drops them, turn-owned-by-no-one.md §6; every `ready` deletes all five for
 every session (`RETIRED_SESSION_KEYS`), so beta.57 after a rollback reads no stale value, turn-starter.md "After #1948 step 3": a `report_paused` left
 standing would hold the mark below as paused there; a person's task an older build left paused is answered by the settle at that start), and ignores
-`user_message.intent` on old rows. At
-every `ready`, an earlier build's report mark whose caller has no open task to its session becomes a delivered task (`ADOPTED_TASK`), and every
-mark is then deleted. An earlier build (beta.57) after a rollback reports a turn's end by a report mark only, keeps a mark only for a session whose
-turn goes on under it, and settles every task no mark owes at its start: so this build, as it leaves (`leaveForEarlierBuild`), writes one mark for
+`user_message.intent` on old rows. Until store step 74 (#2258), which did it once and raised the floor past beta.57, at
+every `ready` an earlier build's report mark whose caller had no open task to its session became a delivered task (`ADOPTED_TASK`), and every
+mark was then deleted. An earlier build (beta.57) after a rollback reports a turn's end by a report mark only, keeps a mark only for a session whose
+turn goes on under it, and settles every task no mark owes at its start: so this build, as it left (`leaveForEarlierBuild`, gone with step 74), wrote one mark for
 each session still in a turn. One, because `report_marks` keeps one row per session (one per task would take a store step): the sender of the task
 the running turn is the work of (its `mail_turns` row), as that build's own mark named the caller whose work started the turn, so its report of that
 turn's end goes to the one it was for; when the turn is no session's task (the person's, the CLI's own), the sender of the newest open task, the last

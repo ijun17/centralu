@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, oneLineText } from '@cc/protocol'
 import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, isPerson, parseAddress, senderKind } from './address.js'
-import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
+import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, isSendNote, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
 import type { Watches } from './watches.js'
@@ -393,11 +393,28 @@ export class MailDelivery {
         this.records.failedTry(recipient, messageIds, error, this.now())
         this.service.hold(recipient, messageIds.map((messageId) => ({ messageId, reason: 'failed' })))
       })
+      this.tellNoteFailed(recipient, messageIds, error)
       return
     }
     const retryIn = Math.min(this.o.maxRetryMs, this.o.retryBaseMs * 2 ** Math.max(0, attempts - 1))
     this.records.transaction(() => this.records.failedTry(recipient, messageIds, error, this.now() + retryIn))
     this.look(recipient)
+  }
+
+  /**
+   * A note that could not be delivered tells its sender, quietly (#2258 review): no report comes for a note, so this is how the Assistant learns of it
+   * and can tell the person at its next turn. A task's sender waits for its report, and the person's Inbox holds both
+   */
+  private tellNoteFailed(recipient: string, messageIds: readonly string[], error: string): void {
+    for (const id of messageIds) {
+      const m = this.records.message(id)
+      if (!m || !isSendNote(m) || parseAddress(m.sender)?.kind !== 'session') continue
+      this.service.notice(m.sender, {
+        body: `Your note ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
+        facts: { quiet: true, noteFailed: { message: id, to: recipient } },
+        dedupeKey: `notefailed:${id}:${recipient}`,
+      })
+    }
   }
 
   /**
@@ -611,13 +628,10 @@ export class MailDelivery {
 
   /** The work a wake starts when a delegation tool sent it (`MailInput.task`): its task, else a send tool's note, which is no one's work (#2258) */
   private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): { senderId: string; text: string } | undefined {
-    const sent = (id: string) => {
-      const m = this.records.message(id)
-      const from = m && parseAddress(m.sender)
-      const kind = id === drained.workMessage ? 'task' : 'message'
-      return m?.kind === kind && from?.kind === 'session' && SEND_ORIGINS.has(m.origin ?? '') ? { senderId: from.sessionId, text: m.body } : undefined
-    }
-    return drained.workMessage !== null ? sent(drained.workMessage) : drained.messageIds.map(sent).find((t) => t !== undefined)
+    const work = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
+    const m = drained.workMessage === null ? drained.messageIds.map((id) => this.records.message(id)).find((n) => n !== undefined && isSendNote(n)) : work?.kind === 'task' && SEND_ORIGINS.has(work.origin ?? '') ? work : undefined
+    const from = m && parseAddress(m.sender)
+    return m && from?.kind === 'session' ? { senderId: from.sessionId, text: m.body } : undefined
   }
 
   /** What the receiver's conversation shows as a session's message (`MailInput.shown`): the delegated task, else a card's notice, from its session */

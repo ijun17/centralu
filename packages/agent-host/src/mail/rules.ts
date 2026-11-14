@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import { SEND_ORIGINS, type MessageKind } from '../dev-services/store/mail-types.js'
+import type { MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { isPerson, senderKind } from './address.js'
 
@@ -115,7 +115,22 @@ export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' |
  * The rest waits for the session's next turn
  */
 export function needsReceiver(m: Pick<MailRow, 'sender' | 'kind' | 'needsReply' | 'facts' | 'origin'>): boolean {
-  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || SEND_ORIGINS.has(m.origin ?? '') || m.facts.needsOwner === true
+  return isPerson(m.sender) || m.kind === 'task' || m.kind === 'report' || m.needsReply || isSendNote(m) || m.facts.needsOwner === true
+}
+
+/** A send tool's note (#2258): `send_to_session`'s words without `reportBack`, a message that owes no answer. Only that tool writes one */
+export function isSendNote(m: Pick<MailRow, 'kind' | 'origin'>): boolean {
+  return m.kind === 'message' && m.origin === 'send_to_session'
+}
+
+/**
+ * The Assistant's `send_to_session` words, a task or a note (#2258 review): the Assistant acts for the person, so they flow down inline and read as
+ * the person's request. Before #2258 such a send at rest was plain input, as if the person typed it. Every other session's mail stays its sender's
+ * text, not an instruction
+ */
+export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin'>, fromAssistant: boolean): 'task' | 'note' | undefined {
+  if (!fromAssistant || m.origin !== 'send_to_session') return undefined
+  return m.kind === 'task' ? 'task' : isSendNote(m) ? 'note' : undefined
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
@@ -299,13 +314,13 @@ export function pickWork(candidates: readonly WorkPick[], now: number): string |
 /**
  * Whether a body is inline in the wake (§8.2 step 4), after the frame and quoted: the person's words; a `task` from a session to a session that is
  * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant; a watch's notice to the session that
- * set it (§18.5: Centralu's words and the session's own note). Everything else is pulled with `mail read`: a session's words to the Assistant never
- * flow down, whatever their kind
+ * set it (§18.5: Centralu's words and the session's own note); the Assistant's `send_to_session` note (`forPersonOf`, #2258). Everything else is pulled
+ * with `mail read`: a session's words to the Assistant never flow down, whatever their kind
  */
-export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean }): boolean {
+export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean; forPerson?: boolean }): boolean {
   if (f.fromPerson || f.watch) return true
   if (!f.fromSession || f.toAssistant) return false
-  return f.kind === 'task' || (f.kind === 'message' && f.fromParent)
+  return f.kind === 'task' || f.forPerson === true || (f.kind === 'message' && f.fromParent)
 }
 
 /** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */

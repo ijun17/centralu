@@ -92,6 +92,9 @@ function v69Store(): string {
     queue.run('q5', 'w', 'b', 'send_to_session', `  ${'x'.repeat(20_000)}`, 5)
     queue.run('q6', 'b', 'x/y', 'send_to_session', 'from an id no address carries', 6)
     queue.run('q7', 'b', 'a', 'send_to_session', ' \n\t ', 7)
+    // The boundary of the cut: 16,000 characters stay whole, 16,001 are cut
+    queue.run('q8', 'w', 'b', 'send_to_session', 'y'.repeat(16_000), 8)
+    queue.run('q9', 'w', 'b', 'send_to_session', 'z'.repeat(16_001), 9)
     const mark = db.prepare(`INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)`)
     mark.run('w', 'a', 1)
     mark.run('b', 'w', 2)
@@ -124,13 +127,15 @@ describe('step 74: one record of owed work (#2258)', () => {
         { sender: at('a'), recipient: at('w'), body: 'what does parse() return?', origin: 'ask_project', project: 'p1', delivered: null, readAt: null, dueIn: 2_000 },
         // Trimmed and cut as a task is, saying the rest was not kept; the one from an id no address carries makes none and stops nothing
         { sender: at('b'), recipient: at('w'), body: expect.stringMatching(/^x{15000}x*\n\[Centralu: cut here\. The request was longer; the rest was not kept\.\]$/), origin: 'send_to_session', project: 'p1', delivered: null, readAt: null, dueIn: 2_000 },
+        { sender: at('b'), recipient: at('w'), body: 'y'.repeat(16_000), origin: 'send_to_session', project: 'p1', delivered: null, readAt: null, dueIn: 2_000 },
+        { sender: at('b'), recipient: at('w'), body: expect.stringMatching(/^z+\n\[Centralu: cut here\. The request was longer; the rest was not kept\.\]$/), origin: 'send_to_session', project: 'p1', delivered: null, readAt: null, dueIn: 2_000 },
         // The marks with no open task: delivered and read, `send_to_session` since none was started by its caller. a's to w had one open, t is trashed,
         // a is itself; c's task from a is settled and d's mail from a is no task, so they make one each
         adopted('w', 'b'),
         adopted('a', 'c'),
         adopted('a', 'd'),
       ])
-      expect((tasks[4] as { body: string }).body).toHaveLength(16_000)
+      expect([4, 6].map((i) => (tasks[i] as { body: string }).body.length)).toEqual([16_000, 16_000])
       expect(['queued_requests', 'report_marks', 'delegated_turns'].map((t) => count(s.raw, t))).toEqual([0, 0, 0])
       const keys = (s.raw.prepare(`SELECT key FROM app_settings WHERE key LIKE '%:%' OR key = 'report_paused' ORDER BY key`).all() as { key: string }[]).map((r) => r.key)
       expect(keys).toEqual(['report_paused', 'turn_span:w'])

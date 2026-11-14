@@ -307,7 +307,7 @@ export class MailSessionsView {
     const hooks = this.hooks
     if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
     try {
-      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note) }
+      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note), ...(note ? { note: true as const } : {}) }
     } catch (e) {
       return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
     }

@@ -385,7 +385,7 @@ export type RoutedCard = {
 export type { IfBusy }
 export type BusyAnswer =
   /** `lowMemory` (#686): mailed instead of the fork asked for, since memory was low; what was read */
-  | { state: 'mailed'; sessionId: string; sessionName: string; messageId: string; lowMemory?: string }
+  | { state: 'mailed'; sessionId: string; sessionName: string; messageId: string; lowMemory?: string; /** A note that owes no answer (#2258): nobody is told when its turn ends */ note?: true }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
 
 /**

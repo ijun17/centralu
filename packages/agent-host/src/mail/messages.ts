@@ -36,6 +36,7 @@ import {
   dueAt,
   firstLineOf,
   flowsDownTo,
+  forPersonOf,
   pickWork,
   quietAnswer,
   refuse,
@@ -117,7 +118,7 @@ export type { TurnNow }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
 /** `withheld`: a request to the Assistant whose words are shown only in the turn it starts (§7.6); the body is left out */
-export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true }
+export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true; forPerson?: 'task' | 'note' }
 export type ReadView = { items: ReadItem[]; older: string | null; marked: number }
 export type InboxView = {
   needReply: ReadItem[]
@@ -589,7 +590,7 @@ export class MessageService {
         row,
         message,
         request,
-        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined }),
+        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined, forPerson: this.forPerson(message) !== undefined }),
       })
     }
 
@@ -1057,7 +1058,13 @@ export class MessageService {
     const relation = this.relation(reader, m)
     if (m.sender !== reader && (!row || isHidden(row))) return { message: { ...m, body: '', facts: {} }, row: null, relation, phantom: row ? 'held' : 'not_sent' }
     if (this.isRequest(m, reader) && !this.inOpenTurn(m, row ?? undefined, turn)) return { message: { ...m, body: '' }, row, relation, withheld: true }
-    return { message: m, row, relation }
+    const forPerson = this.forPerson(m)
+    return { message: m, row, relation, ...(forPerson ? { forPerson } : {}) }
+  }
+
+  /** The Assistant's `send_to_session` words, which act for the person (`forPersonOf`) */
+  private forPerson(m: MailRow): 'task' | 'note' | undefined {
+    return forPersonOf(m, this.reach.isAssistant(m.sender))
   }
 
   /** The line for an earlier message that is no longer kept (S5) */
@@ -1085,6 +1092,7 @@ export class MessageService {
       ...(m.facts.paused !== undefined ? { paused: m.facts.paused } : {}),
       ...(m.facts.waitingOn !== undefined && m.facts.waitingOn > 0 ? { waitingOn: m.facts.waitingOn } : {}),
       ...(m.facts.personNote === true ? { personNote: true } : {}),
+      ...(this.forPerson(m) ? { forPerson: this.forPerson(m) } : {}),
       ...(maybeRepeated ? { maybeRepeated: true } : {}),
       ...(inline ? { inline: m.body } : {}),
     }
