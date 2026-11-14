@@ -707,7 +707,7 @@ These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, 
   and acts on its `ReportedAs` answer (`child-reports.ts:194-216`, `delegation.ts:224`). The old plan read the mail
   report as the record.
 - A start already reconciles what an earlier build reported while this one was away: `takeOverFromEarlierBuild`
-  (`adoption.ts:92-125`) adopts report marks and closes threads the marks no longer owe. §9.5 re-keys it to task rows.
+  (`adoption.ts:92-125` (gone since store step 74, #2258, which did it once)) adopts report marks and closes threads the marks no longer owe. §9.5 re-keys it to task rows.
 - There are two holds today, not one: `holdsInbound` for `auto` receivers (`policy.ts:22`) and the untrusted asker's
   request (`delivery.ts:518-520`, wired at `main.ts:441-444` from `askerFacts(...).trusted`).
 
@@ -1452,7 +1452,7 @@ Until M8 a task row the old paths no longer owe does not count, whatever its sta
 - for the owner `person`: `children.personOwes(childId)`, which from M3a reads the task row itself (`personWork.owes`
   is already mail-backed, `main.ts:482`).
 
-**At every `ready`** (`takeOverFromEarlierBuild`, `adoption.ts:92-125`, re-keyed, after §6.3 and before delivery):
+**At every `ready`** (`takeOverFromEarlierBuild`, `adoption.ts:92-125`, re-keyed, after §6.3 and before delivery; until store step 74 did it once and `mail/adoption.ts` went, #2258):
 
 1. **Marks with no task.** For each report mark (`listReportMarks`) with no unsettled task from its caller to its
    session, write one (`mail.task`, `delivered: true`, origin as `adoptOldMarks` chooses today, `facts.paused` when
@@ -1729,7 +1729,7 @@ own notice says it), nor when an older report path tells it or may (`told`, `hel
 owed the turn's report, the one that gave the turn, and the one that started it (since step 4 only the one that started it, `askedBy`,
 §10.6.4; the notice's key keeps a later start from telling it again). One owed the report is told whoever's turn it was ("Its report to you will not come.") and woken
 unless the same quit cut it: the start drops its report mark, so it would never hear otherwise. The stop notice runs before the start brings
-the report marks and tasks in step (`takeOverFromEarlierBuild`), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
+the report marks and tasks in step (`takeOverFromEarlierBuild` then; store step 74 did it once and it is gone, #2258), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
 turn through the report path (`quitNotices`, `tellAskerOfInterruption`), which woke a parent at rest that was owed nothing.
 
 **What it replaced.** `HostTenure.quitNotices`, `quitRequesters`, `quitTold`, `quitTellEnded` and the requester table at the start;
@@ -1804,7 +1804,7 @@ choose: what a busy target means for these three calls is that the request is ma
 text.
 
 **Restart, swap and older builds.** No store step (the next free is v70). This build writes no `queued_requests` row. At every
-`ready`, `takeOverFromEarlierBuild` turns each row an older build left into an undelivered task from its requester (its text, its
+`ready`, `takeOverFromEarlierBuild` turned (until store step 74, below) each row an older build left into an undelivered task from its requester (its text, its
 `via` as the origin) and deletes the row, in one transaction; a row whose requester or session is gone is deleted with no task, and a
 row through a tool this build does not know stays (#384). The task goes once and only to its session: a restart wakes no one else (a
 delivery half done at a crash is held `uncertain` for the person, §7.6.5, never sent twice). A row the older build was delivering at the
@@ -2973,7 +2973,7 @@ and passes on its own; the stack lands together.
   `machine-flow.ts`'s `rollback` case (`:268-273`, before `this.ask`) refuse with S17.
 - **`mail/delegation.ts`.** As §9.1 to §9.3 and §9.6. `closingRecorder`, the thread parts of `answerRecorder` and
   `finishRecorder` go. `reportRecorder` returns `ReportedAs` per §9.3's table.
-- **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5.
+- **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5 (deleted with store step 74, #2258).
 - **`mail/asked-by.ts`** reads the turn's message; `askerFacts.trusted` is `!reach.untrusted(projectId)` (§7.2).
 - **`mail/person.ts`** (M3a-person, as built: Q-M3a-20). The window's methods (`mail.list`, `mail.thread`,
   `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
@@ -3390,7 +3390,7 @@ step 2), nor finds a mark M8 already reported and reports it again (K1). M7 stop
   task row as the truth: `ReminderSessions.oldOwes` goes, and `covering` and `waitingOn` are called with
   `owes = () => true`.
 - `mail/adoption.ts`: `takeOverFromEarlierBuild` keeps only step 1 of §9.5 (marks a previous build wrote become
-  tasks) for one release, then goes with M7.
+  tasks) for one release, then goes with M7. Done: store step 74 does it once, and the file is gone (#2258).
 - `queued_requests` (a request waiting for the orchestrator's turn) becomes the undelivered request rows; its reads go
   to `MailboxRecords.pendingFor(orchestrator)`.
 - Linked work (`LinkedReports`, `endOwed`) is **not** in this slice: it waits for mail across links (§14).

@@ -2,8 +2,6 @@ import { randomBytes } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { sessionAddress } from '../../../mail/address.js'
 import { messageIdOf, UlidMaker } from '../../../mail/ids.js'
-import { cutTask } from '../../../mail/rules.js'
-import { HUB_SELF_KEY } from '../store-keys.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
 /** The migration steps v65 to v74. The rule it follows is written above `migrationSteps` in `index.ts` */
@@ -315,8 +313,8 @@ export class StepsV65 extends MigrationRange {
          * its session becomes one, delivered (the work was), `start_agent` when the caller started the session, else `send_to_session`. A row
          * whose sessions are not both kept (`deleted_at` NULL) goes with no task. Then every row of the four goes.
          *
-         * **A frozen copy of `MessageService.task` and of the old adoption, on purpose**: a step runs once on every store and must not call code
-         * that may change. Only the id and address shapes are imported (mail/ids.ts, mail/address.ts), as the stored shapes they are.
+         * **A frozen copy of `MessageService.task`, its cut and the old adoption, on purpose**: a step runs once on every store and must not call
+         * code that may change. Only the id and address shapes are imported (mail/ids.ts, mail/address.ts), as the stored shapes they are.
          *
          * The tables stay: the builds from v70 to v73 read them at every start. They go in a later step, once the floor is at or above 74.
          */
@@ -346,10 +344,10 @@ export class StepsV65 extends MigrationRange {
 
   /** This host's id in mail addresses (`hubSelfId`, links/stored.ts): the one kept, else one made and kept, as `hubSelfId` makes it */
   private hostId(): string {
-    const stored = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value
+    const stored = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HOST_ID_KEY)?.value
     if (stored && /^hub-[0-9a-f]{8}$/.test(stored)) return stored
     const made = `hub-${randomBytes(4).toString('hex')}`
-    this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(HUB_SELF_KEY, made)
+    this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(HOST_ID_KEY, made)
     return made
   }
 
@@ -358,6 +356,19 @@ export class StepsV65 extends MigrationRange {
     const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(${table})`).all()
     if (cols.length > 0 && !cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
   }
+}
+
+/** The settings key of this host's id (`HUB_SELF_KEY` when step 74 was written) */
+const HOST_ID_KEY = 'hub.selfId'
+
+/** A session's task limit and the line a cut task ends with (`bodyLimit`, `TASK_CUT` then). Only a held request can be that long, and it was never delivered */
+const TASK_LIMIT = 16_000
+const REQUEST_CUT = '\n[Centralu: cut here. The request was longer; the rest was not kept.]'
+
+/** A task's text as `cutTask` kept it then: trimmed, and cut at `TASK_LIMIT` */
+function cutTask(text: string): string {
+  const task = text.trim()
+  return task.length > TASK_LIMIT ? task.slice(0, TASK_LIMIT - REQUEST_CUT.length) + REQUEST_CUT : task
 }
 
 /** The tools an earlier build queued a request for (`SEND_ORIGINS` then) */
@@ -401,8 +412,8 @@ class OldWorkTasks {
     const [sender, recipient] = pair
     if (t.delivered && this.open.get(sender, recipient) !== undefined) return
     const id = messageIdOf(this.host, this.ulids.next(this.now))
-    // Trimmed and cut at a session's limit (`bodyLimit`), as `MessageService.task` wrote the task an earlier build's start made of it
-    this.mail.run({ id, sender, senderProject: caller.project, body: cutTask(t.body, 16_000), origin: t.origin(session), now: this.now })
+    // Trimmed and cut at a session's limit, as `MessageService.task` wrote the task an earlier build's start made of it
+    this.mail.run({ id, sender, senderProject: caller.project, body: cutTask(t.body), origin: t.origin(session), now: this.now })
     // Not delivered: due after the delivery's 2 s gap, as a session's task was (`dueAt`)
     this.row.run({ id, recipient, project: session.project, dueAt: t.delivered ? this.now : this.now + 2_000, delivered: t.delivered ? this.now : null })
   }

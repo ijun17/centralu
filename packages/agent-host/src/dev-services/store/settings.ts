@@ -4,7 +4,7 @@ import { parseJson } from './json.js'
 
 /**
  * The settings one session keeps, as a condition on `app_settings` with `@sessionId` bound: every key of the shape
- * `<name>:<sessionId>` (`agent_depth:`, `report_paused:`, `tool_prefix:`, …). A key built for one session takes that
+ * `<name>:<sessionId>` (`agent_depth:`, `tool_prefix:`, …). A key built for one session takes that
  * shape, and the trash's purge deletes them all by it (`TrashRecords.purgeSession`), so a key added later goes with
  * its session without the purge having to learn its name.
  *
