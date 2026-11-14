@@ -730,14 +730,18 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (!self) return
     const on = this.record.asks === true
     let note: string | null = null
+    // Not known on this connection until the machine answers (#1948 step 6): a start before it waits for the connect, never reads as an older machine
+    if (this.client === client) this.tasksBack = undefined
     try {
       const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
+      if (this.client === client) this.tasksBack = isObj(answer) && answer.tasks === true
       if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
+      if (this.client === client) this.tasksBack = undefined
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
@@ -775,6 +779,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /** Whether the machine said, at this connection's offer, that it takes mail from this hub (`host.mail`, #2067 item 2) */
   private mailBack = false
+  /** The machine takes this hub's tasks as mail and reports them back (#1948 step 6), as its answer to the offer said; undefined until it answers */
+  private tasksBack: boolean | undefined = undefined
+
+  get takesTasks(): boolean | undefined {
+    return this.tasksBack
+  }
 
   get takesMail(): boolean {
     return this.mailBack

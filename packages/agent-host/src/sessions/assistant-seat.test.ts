@@ -8,6 +8,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { ChildOwnership } from './child-ownership.js'
 import { centraluToolsFor, type AssistantSeatHost } from './assistant-seat.js'
+import type { LinkedTasks } from '../mail/delegation.js'
 
 /*
  * The Centralu tools over a host of fakes (#428): the scope each seat sees, and the ownership a send leaves. The
@@ -38,7 +39,7 @@ beforeEach(() => {
     children,
     proposals: { proposeMcpServer: vi.fn(), proposeSkill: vi.fn() },
     linkedReader: () => linked,
-    linkedReportRestored: vi.fn(),
+    linkedTasks: { send: vi.fn(async () => ({ ok: true as const, messageId: 'hub.m_1', to: 'x', address: 'x', computer: 'Far' })) } as unknown as LinkedTasks,
     emit: vi.fn(),
     updateCentraluAsked: vi.fn(),
     updateSettings: vi.fn(),
@@ -414,13 +415,17 @@ describe('what a send leaves', () => {
     expect(host.send).toHaveBeenCalledWith('a', 'again', undefined, { sessionId: 'orch', name: 'Assistant' })
   })
 
-  it("a linked machine's session keeps the earlier report request when the send there fails", async () => {
-    const send = vi.fn(async () => ({ ok: false as const, error: 'machine away' }))
-    linked = { machineOf: (id: string) => (id === 'm1/x' ? 'm1' : null), send } as unknown as LinkedSessions
-    children.setLinkedReport('m1/x', { assistantId: 'other', busy: true })
-    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: false, error: 'machine away' })
-    expect(send).toHaveBeenCalledWith('m1/x', 'hi', 'Assistant')
-    expect(children.linkedReports.get('m1/x')).toEqual({ assistantId: 'other', busy: true })
+  // #1948 step 6: a task across the link, said to be the Assistant's for the person; without reportBack a note
+  it("gives a linked machine's session a task across the link, a note without reportBack, and says the machine's refusal", async () => {
+    linked = { machineOf: (id: string) => (id === 'm1/x' ? 'm1' : null) } as unknown as LinkedSessions
+    const send = vi.mocked(host.linkedTasks!.send)
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: true })
+    expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'hi', { origin: 'send_to_session', forPerson: true })
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true })
+    expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'fyi', { origin: 'send_to_session', note: true, forPerson: true })
+    send.mockResolvedValueOnce({ ok: false, why: 'older', text: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: false, error: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
+    expect(host.send).not.toHaveBeenCalled()
     // A coordinator does not reach the machines: the same id is just not one of its sessions
     expect(await centraluToolsFor(host, 'orch', ['a']).sendToSession('m1/x', 'hi')).toEqual({ ok: false, error: 'Not a member of this coordinating session: m1/x' })
   })
@@ -460,60 +465,6 @@ describe('over the real manager', () => {
       await mgr.tenure.disposeAll()
       real.close()
     }
-  })
-})
-
-describe("two sends to a linked machine's session at once (#839)", () => {
-  /** A linked machine whose sends answer when the test says, in any order */
-  const machine = () => {
-    const answers: ((r: { ok: true } | { ok: false; error: string }) => void)[] = []
-    linked = {
-      machineOf: (id: string) => (id === 'far' ? { id: 'm1', name: 'Far' } : null),
-      send: () => new Promise((r) => answers.push(r)),
-    } as unknown as LinkedSessions
-    return answers
-  }
-
-  it("a send that fails puts back only what it replaced: the other call's report request stays", async () => {
-    const answers = machine()
-    const tools = centraluToolsFor(host, 'orch')
-    const first = tools.sendToSession('far', 'first', true)
-    const second = tools.sendToSession('far', 'second', true)
-    const asked = children.linkedReports.get('far')
-    // The second went out after the first; the first fails, the second goes in
-    answers[0]!({ ok: false, error: 'the link dropped' })
-    answers[1]!({ ok: true })
-    expect(await first).toMatchObject({ ok: false })
-    expect(await second).toEqual({ ok: true })
-    expect(children.linkedReports.get('far')).toBe(asked)
-    expect(host.linkedReportRestored).not.toHaveBeenCalled()
-  })
-
-  it('two sends that both fail, the first failing first, put back the request that was there before either', async () => {
-    const answers = machine()
-    const tools = centraluToolsFor(host, 'orch')
-    const original = { assistantId: 'orch', busy: false }
-    children.setLinkedReport('far', original)
-    const first = tools.sendToSession('far', 'first', true)
-    const second = tools.sendToSession('far', 'second', true)
-    answers[0]!({ ok: false, error: 'the link dropped' })
-    expect(await first).toMatchObject({ ok: false })
-    answers[1]!({ ok: false, error: 'the link dropped' })
-    expect(await second).toMatchObject({ ok: false })
-    expect(children.linkedReports.get('far')).toBe(original)
-  })
-
-  it('a send without a report drops only the request it found, not one another call set meanwhile', async () => {
-    const answers = machine()
-    const tools = centraluToolsFor(host, 'orch')
-    children.setLinkedReport('far', { assistantId: 'orch', busy: false })
-    const plain = tools.sendToSession('far', 'no report needed', false)
-    const reported = tools.sendToSession('far', 'tell me', true)
-    const asked = children.linkedReports.get('far')
-    answers[1]!({ ok: true })
-    answers[0]!({ ok: true })
-    await Promise.all([plain, reported])
-    expect(children.linkedReports.get('far')).toBe(asked)
   })
 })
 
@@ -574,12 +525,12 @@ describe('a session the Assistant creates', () => {
   it('on a linked machine, the same cap goes with the request', async () => {
     seatUnder('safe')
     const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
-    const send = vi.fn(async () => ({ ok: true as const }))
-    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: true }], away: [] }), createSession, send } as unknown as LinkedSessions
+    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x', trusted: true }], away: [] }), createSession } as unknown as LinkedSessions
     expect(await centraluToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true })
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'safe' }))
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.not.objectContaining({ callerPreset: expect.anything() }))
-    expect(send).toHaveBeenCalledWith('m1/s', 'go', 'Assistant')
+    // Its first message is a task across the link (#1948 step 6), not said to be for the person: that is send_to_session's alone
+    expect(host.linkedTasks!.send).toHaveBeenCalledWith('orch', 'm1/s', 'go', { origin: 'create_session' })
   })
 
   it("an auto seat's session on a trusted linked project carries auto for that machine's own switch to take, normal at most otherwise", async () => {

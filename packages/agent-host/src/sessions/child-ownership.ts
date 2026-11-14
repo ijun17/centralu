@@ -110,16 +110,13 @@ function startsOf(span: TurnSpan): readonly number[] {
   return span.starts ?? [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined)
 }
 /**
- * A linked machine's session an Assistant asked to hear about (#82 phase 4). `paused`: the session's own background
- * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left.
- * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
- * (#1082); until then nothing it relays is about that instruction's turn
+ * A linked machine's session whose ask_project turn ended on its own background work (#1457): its asker (`assistantId`) is owed the report.
+ * `paused`: that work (#723); the report stays owed until a turn ends with none of it left
  */
 export type LinkedReport = {
   assistantId: string
   busy: boolean
   paused?: BackgroundTask[]
-  instruction?: string
   /** Whose the turn running there is (#1377), and whose the next will be: from the message each started with. Memory only */
   turn?: TurnStarter
   next?: TurnStarter
@@ -181,17 +178,12 @@ export class ChildOwnership {
   private readonly given = new Map<string, { from: string; to: string }>()
   readonly handedOver: ReadonlyMap<string, { from: string; to: string }> = this.given
   /**
-   * A linked machine's sessions whose turn the Assistant asked to hear about (`reportBack`, #82 phase 4), by
-   * qualified id. `busy` is whether that turn was seen working yet, so a state the machine reports before the turn
+   * A linked machine's sessions whose paused ask_project turn their asker is owed the end of (`LinkedReports`, #1457), by
+   * qualified id. `busy` is whether a turn was seen working yet, so a state the machine reports before the turn
    * starts (the session waking) is not taken for its end.
    */
   private readonly linked = new Map<string, LinkedReport>()
   readonly linkedReports: ReadonlyMap<string, LinkedReport> = this.linked
-  /**
-   * Told of each change to a linked report (#1038): a child start_agent started on a linked machine keeps what it is
-   * owed in its stored record (`RemoteAgents`), so a restarted hub still reports its end
-   */
-  private linkedChanged: ((sessionId: string) => void) | undefined
 
   constructor(private readonly store: OwnershipStore) {}
 
@@ -504,16 +496,11 @@ export class ChildOwnership {
     for (const [id, h] of [...this.given]) if (id === sessionId || h.from === sessionId || h.to === sessionId) this.given.delete(id)
   }
 
-  /** Set again with the same report after changing it in place, so its listener reads the change */
   setLinkedReport(sessionId: string, wait: LinkedReport): void {
     this.linked.set(sessionId, wait)
-    this.linkedChanged?.(sessionId)
   }
   dropLinkedReport(sessionId: string): void {
-    if (this.linked.delete(sessionId)) this.linkedChanged?.(sessionId)
-  }
-  onLinkedReportChange(listener: (sessionId: string) => void): void {
-    this.linkedChanged = listener
+    this.linked.delete(sessionId)
   }
 
   /**
@@ -535,11 +522,7 @@ export class ChildOwnership {
       d.callerId = to
       this.runs.set(to + key.slice(from.length), d)
     }
-    for (const [id, wait] of this.linked) {
-      if (wait.assistantId !== from || !moving.has(id)) continue
-      wait.assistantId = to
-      this.linkedChanged?.(id)
-    }
+    for (const [id, wait] of this.linked) if (wait.assistantId === from && moving.has(id)) wait.assistantId = to
     // A start that already made its child: its handle follows the child
     for (const r of this.starts.values()) if (r.req.callerId === from && r.ended && 'childId' in r.ended && moving.has(r.ended.childId)) r.req.callerId = to
     moveCards()

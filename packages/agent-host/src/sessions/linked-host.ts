@@ -57,9 +57,8 @@ export class LinkedHost {
 
   /**
    * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, with a
-   * pause over the session's own background work (#723, `LinkedReports`): this host's own sessions are answered by the
-   * mailbox instead (docs/plans/mailbox.md §10.6.3), until mail crosses links.
+   * there ends as `observeLinkedAsk` judges it, and its pause over the session's own background work is reported (#723,
+   * `LinkedReports`). Other work given a session there is the mailbox's, reported by its machine (#1948 step 6).
    */
   observeLinked(e: LinkedEvent): void {
     if (e.type === 'machine_status') this.host.askProjectFlow.observeLinkLoss(e.machine)
@@ -67,7 +66,7 @@ export class LinkedHost {
       const ask = this.host.askProjectFlow.linkedAsks.get(e.sessionId)
       if (ask) this.host.askProjectFlow.observeLinkedAsk(ask, e)
     }
-    // A call waiting on a child there reads its turn's end; no report is armed while it waits, so nothing comes twice (#1038)
+    // A child start_agent started there that was deleted, or a machine whose link is back (#1038)
     this.host.delegationFlow.remote.observe(e)
     this.host.linkedReports.observe(e)
   }

@@ -120,8 +120,8 @@ Item 1's `parent` is now a case of the general rule: a hub that offers mail take
 machine, and only the resolution of the word `parent` (the hub's own record of whom it started) stays its own.
 
 One send is not mail since #1948 ([mailbox.md](mailbox.md) §10.6.6): a hub session's `send` to a child it started on a machine (by its
-`<machine>.<id>` or address) is more work for it, given through the link as `agent_session`'s send was (`RemoteAgents.send`), with the gates
-and the report that has. A send to any other session there is mail, as above.
+`<machine>.<id>` or address) is more work for it: a task across the link (§10), with the gates a send to a child has and its report. A send to any
+other session there is mail, as above.
 
 The hold for untrusted projects (mailbox.md §7.4) cannot hold across a link, since nothing is held there. A session of
 an untrusted project that mails a session on another computer is refused `untrusted_project` at once, with words that
@@ -350,3 +350,44 @@ characters, projects and machines of 80, 30 computers with long names and reason
 2. **Items 2 and 3, with the trust decision** (one change on `dev`): `mayReachAcross`, `host.mail` and the extended
    `hub.mail`, the sender's copy and receipts both ways, notices across, replies, `needsReply` honoured, the follow-ups
    of item 1's review, and `mail find` with names resolved across machines.
+
+## 10. Work across a link (#1948 step 6)
+
+Since #1948 step 6, the work a hub session gives a session on a linked machine is mail too, as it is between two sessions
+of one host ([mailbox.md](mailbox.md) §10.6): `start_agent`'s task to the child it made there, `agent_session send` and a
+`mail` to that child, and the Assistant's `send_to_session` and `create_session` first message. Before, the hub sent the
+words into the machine's session (`host.send`) and followed its turns over the link to report them itself
+(`LinkedReports`, `RemoteAgents`); that copy of the machine's engine is gone.
+
+- **The task.** `host.mail` with `task: { origin, note?, forPerson? }` (an addition). The machine writes it as a task (a
+  note) from the hub's session, under the id the hub picked, undelivered, and its own delivery gives it: at once at rest,
+  into a turn whose tool takes input, else held until the session is free, as a busy session's task here is (#2189). The
+  hub's copy is a task too, written once the machine answered (§6), so receipts, a withdrawal and a reply go as for any
+  message that crossed.
+- **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
+  included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
+  `hub.mail` with `report` (the outcome and its facts; the words name the child as the hub does, `<machine>.<id>`). The
+  hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
+  reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
+  settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
+  first does not make the report a stale one. A report on a task whose send to that machine has not answered yet keeps the
+  copy first (the machine has it, as a receipt would say).
+- **A report is owed, not dropped.** Unlike a notice (§6, Notices), a report the hub cannot take now (its link is down,
+  or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second
+  one as the first. Kept reports are swept with other mail. A hub that no longer links the machine at all will never take
+  it: the machine's person is told once, with where the session's answer is (`uncrossed`).
+- **For the person.** The Assistant's `send_to_session` words act for the person ([mailbox.md](mailbox.md), #2258). Across a
+  link that is the hub's word, `forPerson`, which it says only for its own Assistant's `send_to_session` and which the
+  machine reads only from the hub of the link it came on (fact `hubAssistant`). A handed-over task, plain mail, a session
+  of another computer with the Assistant's id (#2274) and a machine's mail to a hub never get it.
+- **A handoff** on the hub keeps such a task under its one id (the child's turn there is that task's): the hub re-points its
+  copy to the heir at once, so the report that comes back is the heir's, and tells the machine (`host.mailMove`, an
+  addition), which re-points its own and marks it handed over. Only a hub's own sessions, and only tasks they gave there;
+  a machine that cannot be told now keeps the old sender's name on its copy, and the report still reaches the heir.
+- **Older builds.** A machine that does not answer the offer with `tasks: true` gets no work from the hub: `start_agent`
+  and a send to it are refused, naming the machine to update. Until a connection's offer is answered that is not known,
+  and a start or send then is refused as still connecting, never as an older machine. A newer machine linked by an older hub takes `host.send`
+  as before (`sendFromHub`); that path goes with the release floor.
+- **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
+  caller is told once that the report no longer comes, and how to read where the child stands. Notes the old hub held for
+  a busy child (`queued`) are not sent by the new one; their caller is told once too.

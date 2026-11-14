@@ -189,7 +189,7 @@ export async function hubHost(
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ machines: links }))
   // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => name, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
-  if (across) mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
+  if (across) mgr.useMachineMail((id) => links.get(id)?.takesMail === true, (id) => links.get(id)?.takesTasks === true)
   // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
   if (o.origin) {
     mgr.layout.useLinkedSessions((id) => links.knowsSession(id))

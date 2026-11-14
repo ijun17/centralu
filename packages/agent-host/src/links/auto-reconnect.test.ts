@@ -414,124 +414,6 @@ describe('a call that needs a machine that is connecting (#1341)', () => {
   })
 })
 
-describe('a child working on a machine whose Auto reconnect is off (#1341)', () => {
-  /** A hub with the switch off whose child on Laptop keeps its turn open (it asks a question), so its report is owed */
-  async function busyChild(o: { autoReconnect?: boolean; deps?: Partial<LinkDeps> } = {}) {
-    const remoteStore = new Store()
-    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
-    const remote = await remoteHost(remoteStore)
-    const hubStore = new Store()
-    hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
-    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
-    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, autoReconnect: o.autoReconnect ?? false, ...(o.deps ? { deps: o.deps } : {}) })
-    await hub.mgr.setProjectTrusted('p-hub', true)
-    await eventually(() => hub.row().status === 'connected')
-    const call = hub.mgr.startAgent('h1', { task: 'question: proceed?', machine: 'Laptop' })
-    const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
-    await eventually(() => !!card())
-    await hub.mgr.inputs.respondApproval('h1', card()!.requestId, 'allow')
-    expect(await call).toMatchObject({ ok: true })
-    const owed = () => (hub.mgr as unknown as { children: { linkedReports: Map<string, unknown> } }).children.linkedReports.size
-    await eventually(() => owed() === 1)
-    const said = async () => (await hub.mgr.record.loadMessages('h1', 50)).map((m: any) => JSON.stringify(m.payload)).join(' ')
-    return { remote, hub, owed, said }
-  }
-
-  it('tells the caller when the link drops and nothing will reconnect it, once, and keeps its wait', async () => {
-    const { hub, owed, said } = await busyChild()
-    hub.tunnel().drop()
-    await eventually(async () => (await said()).includes('Auto reconnect is off'))
-    const text = await said()
-    expect(text).toContain('ask the person to connect it')
-    // One notice for one drop, and the wait stands for the report the notice promises
-    expect(text.split('dropped while').length - 1).toBe(1)
-    expect(owed()).toBe(1)
-  })
-
-  it("reports the end of the child's turn once the person has connected the machine, as the notice says", async () => {
-    const { remote, hub, owed, said } = await busyChild()
-    hub.tunnel().drop()
-    await eventually(async () => (await said()).includes('Auto reconnect is off'))
-    await hub.call('machines.reconnect', { machineId: 'm1' })
-    await eventually(() => hub.row().status === 'connected')
-    const child = remote.mgr.listSessions().find((s: any) => s.pendingQuestions?.length) as any
-    remote.mgr.inputs.answerQuestion(child.id, child.pendingQuestions[0].requestId, [{ answers: ['Yes'] } as any])
-    await eventually(async () => (await said()).includes('answered: Yes'))
-    await eventually(() => owed() === 0)
-  })
-
-  it('tells the caller again when the person turns Auto reconnect off while the machine is down and waiting to retry', async () => {
-    const { hub, said } = await busyChild({ autoReconnect: true, deps: { retryMs: [60_000, 60_000] } })
-    hub.tunnel().unreachable = true
-    hub.tunnel().drop()
-    // Told at the first sign, as before: the link is down and will be tried again
-    await eventually(async () => (await said()).includes('dropped while'))
-    expect(await said()).not.toContain('Auto reconnect is off')
-    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: false })
-    await eventually(async () => (await said()).includes('Auto reconnect is off'))
-    expect(await said()).toContain('ask the person to connect it')
-  })
-
-  it('says the person disconnected it, not that Auto reconnect is off, when the switch is on', async () => {
-    const { hub, said } = await busyChild()
-    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: true })
-    await hub.call('machines.disconnect', { machineId: 'm1' })
-    await eventually(async () => (await said()).includes('The person disconnected the machine'))
-    expect(await said()).not.toContain('Auto reconnect is off')
-  })
-
-  it('tells the caller once the quick redials have failed, not at the first sign of a drop', async () => {
-    const { remote, hub, owed, said } = await busyChild()
-    await remote.server.close()
-    await eventually(() => hub.row().status === 'unreachable')
-    // Redialling: nobody has been told yet
-    expect(await said()).not.toContain('Auto reconnect is off')
-    await eventually(async () => (await said()).includes('Auto reconnect is off'))
-    expect(owed()).toBe(1)
-  })
-
-  it('keeps the wait through a short drop that the quick redial recovers', async () => {
-    const { remote, hub, owed, said } = await busyChild()
-    const resyncs = () => hub.events.filter((e: any) => e.type === 'machine_resync').length
-    const before = resyncs()
-    await bounce(remote)
-    await eventually(() => resyncs() > before && hub.row().status === 'connected')
-    expect(hub.tunnel().opens).toBe(1)
-    expect(await said()).not.toContain('Auto reconnect is off')
-    expect(owed()).toBe(1)
-  })
-
-  it('keeps the wait while an install or update retries on the machine', async () => {
-    const { hub, owed, said } = await busyChild()
-    ;(hub.links.get('m1') as unknown as { busy: string }).busy = 'update'
-    hub.tunnel().unreachable = true
-    hub.tunnel().drop()
-    await eventually(() => hub.tunnel().opens >= 2)
-    expect(owed()).toBe(1)
-    expect(await said()).not.toContain('Auto reconnect is off')
-  })
-
-  it('says the machine waits for the person once a failed attempt is over, not while it is under way', async () => {
-    const remote = await remoteHost()
-    const hub = await hubHost(() => lineFor(remote.port), { autoReconnect: false })
-    await eventually(() => hub.row().status === 'connected')
-    hub.tunnel().unreachable = true
-    hub.tunnel().drop()
-    await eventually(() => hub.row().status === 'unreachable')
-    // The person's Connect fails: its status is set while the attempt is still under way
-    const machine = hub.links.get('m1')!
-    const waits: boolean[] = []
-    const broadcast = hub.deps.broadcast
-    hub.deps.broadcast = (e) => {
-      broadcast(e)
-      if (e.type === 'machine_status') waits.push(machine.waitsForPerson)
-    }
-    await hub.call('machines.reconnect', { machineId: 'm1' })
-    await eventually(() => waits.at(-1) === true)
-    expect(waits).toContain(false)
-  })
-})
-
 /*
  * A machine that does not answer at all (#1398): ssh's connect timed out, there is no route, or the name does not resolve. It is
  * asleep, off or off the network: the row says `away`, with when it was last connected and when the hub tries again, and ssh's
@@ -965,11 +847,11 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     const { hub } = await rig()
     await hub.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.row().status === 'connected')
-    const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })
-    const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
-    await eventually(() => !!card())
-    await hub.mgr.inputs.respondApproval('h1', card()!.requestId, 'allow')
-    expect(await call).toMatchObject({ ok: true })
+    // Past the machine's reach: this rig's machine takes no mail, so the start stops only where its work would go as mail (#1948 step 6)
+    expect(await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })).toEqual({
+      ok: false,
+      error: 'Laptop runs an older Centralu, which takes no work from this computer. Update Centralu on Laptop, or start the session here.',
+    })
   })
 })
 

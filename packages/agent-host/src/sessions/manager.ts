@@ -646,10 +646,13 @@ export class SessionManager {
     this.linkedReader = reader
   }
 
-  /** Whether a linked machine takes mail from this hub (#2067 item 2): the task of a child started there then says to mail its parent */
-  useMachineMail(takesMail: (machineId: string) => boolean): void {
-    this.delegationFlow.remote.machineMail = takesMail
+  /**
+   * Whether a linked machine takes mail from this hub (#2067 item 2), and its tasks (#1948 step 6): work for a session there goes as a task across
+   * the link, and a machine that takes none is told to update
+   */
+  useMachineMail(takesMail: (machineId: string) => boolean, takesTasks: (machineId: string) => boolean | undefined): void {
     this.mail.machineMail = takesMail
+    this.delegationFlow.remote.machineTasks = takesTasks
   }
 
   /** The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts) */
@@ -924,6 +927,9 @@ export class SessionManager {
       mailTask: (...a) => self.mail.mailTask(...a),
       wayAcross: (...a) => self.mail.wayAcross(...a),
       withdrawTasks: (...a) => self.mail.withdrawTasks(...a),
+      get linkedTasks() {
+        return self.mail.linkedTasks
+      },
       get cacheLedger() {
         return self.cacheLedger
       },
@@ -1177,10 +1183,6 @@ export class SessionManager {
       sessionOf: (...a) => self.sessionOf(...a),
       settingFilesFor: (...a) => self.launchInputs.settingFilesFor(...a),
       settleState: (...a) => self.events.settleState(...a),
-      settleLinkedTurn: (sessionId) => self.linkedReports.observe({ type: 'turn_complete', sessionId }),
-      // Whose a linked child's turn is decides whether its report goes (#1038 review)
-      reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
-      keepsOverLoss: (sessionId) => self.delegationFlow.remote.keepsOverLoss(sessionId),
       linkedChild: (sessionId) => self.delegationFlow.remote.named(sessionId),
       skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.processes.sleepSession(...a),
@@ -1192,7 +1194,6 @@ export class SessionManager {
       },
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
-      linkedChildGone: (...a) => self.mail.linkedChildGone(...a),
       toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
@@ -1250,7 +1251,6 @@ export class SessionManager {
         return self.assistantSlot.proposals
       },
       linkedReader: () => this.linkedReader,
-      linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
       listAgents: (...a) => this.delegationFlow.listAgents(...a),

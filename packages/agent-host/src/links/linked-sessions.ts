@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/centralu-tools.js'
 import { isOrdinary } from '../sessions/tool-profiles.js'
@@ -449,30 +449,6 @@ export function linkedSessions(
       })
     },
 
-    lastUserMessage(sessionId) {
-      return viaSession(sessionId, async (m) => {
-        // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
-        let beforeSeq: number | undefined
-        let message: { text: string; from: unknown; seq?: number } | null = null
-        for (let page = 0; page < 5 && !message; page++) {
-          const list = await route('messages.load', { sessionId, limit: 200, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
-          if (!Array.isArray(list) || list.length === 0) break
-          for (const raw of [...list].reverse()) {
-            if (!isObj(raw) || raw.role !== 'user' || raw.kind !== 'text' || !isObj(raw.payload)) continue
-            message = { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null, ...(typeof raw.seq === 'number' ? { seq: raw.seq } : {}) }
-            break
-          }
-          const first: unknown = list[0]
-          if (!isObj(first) || typeof first.seq !== 'number') break
-          beforeSeq = first.seq
-        }
-        // Whether it is in a turn now (#1604): no turn is still to open for a message before its last when it is not. Not told, not guessed
-        const row = await rowOf(m, m.q.strip(sessionId, 'The session')).catch(() => undefined)
-        const atRest = isObj(row) && typeof row.state === 'string' ? !isInTurn(row.state) : undefined
-        return { message, ...(atRest !== undefined ? { atRest } : {}) }
-      })
-    },
-
     cards(sessionId) {
       return viaSession(sessionId, async (m) => {
         const raw = await rowOf(m, m.q.strip(sessionId, 'The session'))
@@ -495,14 +471,6 @@ export function linkedSessions(
 
     machineLinked(machineId) {
       return !!machineById(machineId)
-    },
-
-    machineWaitsForPerson(machineId) {
-      return machineById(machineId)?.waitsForPerson === true
-    },
-
-    continuesCutTurns(machineId) {
-      return machineById(machineId)?.continuesCutTurns?.() === true
     },
 
     async backgroundTasks(machineId) {

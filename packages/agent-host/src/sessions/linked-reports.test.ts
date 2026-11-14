@@ -25,7 +25,6 @@ let mirror: Map<string, { name: string; project: string }>
 let listing: (machineId: string) => Promise<{ sessionId: string; tasks: BackgroundTask[] }[] | null>
 let closing: boolean
 /** What the host's report gate answers, for every session (`LinkedReportsHost.reportGate`) */
-let gateAnswer: 'deliver' | 'withhold' | 'defer'
 let reports: LinkedReports
 /** What the machine says the last turn said, and what the hub asked for of it (#1604) */
 let said: (id: string) => string
@@ -46,7 +45,6 @@ beforeEach(() => {
   ])
   listing = async () => []
   closing = false
-  gateAnswer = 'deliver'
   said = (id) => `last words of ${id}`
   wordsAsked = []
   readGate = Promise.resolve()
@@ -59,7 +57,6 @@ beforeEach(() => {
       return { ok: true as const, text: said(id), length: 0, seq: null }
     },
     machineLinked: (id: string) => linked.has(id),
-    machineWaitsForPerson: () => false,
     backgroundTasks: (id: string) => listing(id),
   } as unknown as LinkedSessions
   const host: LinkedReportsHost = {
@@ -69,7 +66,6 @@ beforeEach(() => {
     get closing() {
       return closing
     },
-    reportGate: () => gateAnswer,
     deliverReport: async (assistantId, sessionId, name, project, preview, ending, work, _seq, part) => {
       delivered.push({ assistantId, sessionId, name, project, preview, ending: ending.type, ...(ending.error?.message ? { error: ending.error.message } : {}), ...(work ? { work } : {}), ...(part ? { part } : {}) })
     },
@@ -125,36 +121,6 @@ describe('whom a turn end is reported to', () => {
     turn('m1.w1')
     await flush()
     expect(delivered[1]!.part).toBeUndefined()
-  })
-
-  // #2157: the cut turn's end came before the hub, back from the update, could tell whose it was; the end that settles it says nothing of the turn
-  it('keeps the cut of a turn whose end the gate held back for the end that settles it', async () => {
-    ask('m1.w1')
-    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
-    gateAnswer = 'defer'
-    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
-    await flush()
-    expect(delivered).toEqual([])
-    // Told now: the hub settles the held end as `RemoteAgents` does, with no turn on it
-    gateAnswer = 'deliver'
-    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
-    await flush()
-    expect(delivered.map((d) => d.part)).toEqual([{ cut: true }])
-  })
-
-  // #2157 review: the held end left the wait busy, so the next turn of a machine that does not say whose a turn is took the cut as its own
-  it('gives the cut of a held turn end to no later turn: the next turn starts afresh', async () => {
-    ask('m1.w1')
-    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
-    gateAnswer = 'defer'
-    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
-    await flush()
-    // Never settled: the machine runs another turn and ends it, saying nothing of whose it was (an older host)
-    gateAnswer = 'deliver'
-    turn('m1.w1')
-    await flush()
-    expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.part).toBeUndefined()
   })
 
   // #1604: the words of the turn that ended, not the child's last response; a turn with nothing to say says so
@@ -482,21 +448,6 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
 
 })
 
-describe("a wait set for the hub's instruction (#1082)", () => {
-  // A machine of a later release records the hub's sender under the Assistant's new name (#2133)
-  it.each([HUB_SENDER, '_hub-assistant'])('starts at the instruction the machine recorded from the hub (sender %s)', async (sender) => {
-    children.setLinkedReport('m1.w1', { assistantId: 'o1', busy: false, instruction: 'go' })
-    // A turn that ended before the machine recorded the instruction is an earlier one's
-    turn('m1.w1')
-    await flush()
-    expect(delivered).toHaveLength(0)
-    reports.observe({ type: 'user_message', sessionId: 'm1.w1', seq: 3, text: 'go', from: { sessionId: `m1.${sender}`, name: 'Assistant' } })
-    turn('m1.w1')
-    await flush()
-    expect(delivered).toHaveLength(1)
-  })
-})
-
 describe('a machine whose link drops or comes back', () => {
   it('a link that drops reports only its own machine\'s paused work, even when another machine\'s id starts with its', async () => {
     ask('m1.w1', 'o1')
@@ -735,15 +686,11 @@ describe('an ask_project turn that ended on the session\'s own background work (
     expect(children.linkedReports.size).toBe(0)
   })
 
-  it('does not take over a report another session is owed, nor one the gate does not let through', () => {
+  it('does not take over a report another session is owed', () => {
     reports.observe(tasks('m1.w1', [verify]))
     ask('m1.w1', 'o2')
     expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
     expect(children.linkedReports.get('m1.w1')?.assistantId).toBe('o2')
-    children.dropLinkedReport('m1.w1')
-    gateAnswer = 'withhold'
-    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
-    expect(children.linkedReports.size).toBe(0)
   })
 
   it('releases only the paused report the asker is owed, and the undo puts it back unless something else is owed by then', () => {

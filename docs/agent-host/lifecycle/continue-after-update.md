@@ -145,9 +145,8 @@ the person's Continue would.
   Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set before the Continue goes in and dropped if it fails, `ChildOwnership.noteContinuedCut`; the machine's host
   says it on the ending event, `TurnWho.cut`, so a hub carries it on that one turn's report whether or not its link caught the turn mid-way).
   Every session whose turn Centralu cut is continued, the person's own sessions too, not only children: Centralu cut it, the person did not stop it (owner, #1966). A turn that cannot be
-  continued ends as a stopped turn and is told as such (above): one report for that child, which the parent is owed anyway. A caller on the hub (a child start_agent made there) is not told that the link
-  dropped while the hub's own update or rollback holds the link, from its first step until the link is back
-  (`RemoteAgents.updateHolds`), when the machine's host is one that continues cut turns. The new host's `hello_ok`
+  continued ends as a stopped turn and is told as such (above): one report for that child, which the parent is owed anyway. A caller on the hub (a child start_agent made there) is not
+  told that the link dropped: its task is the machine's mail, reported by that machine when the continued turn ends (#1948 step 6). The new host's `hello_ok`
   names the turns it continues from its start on, before it answers any hello, whether or not the Continue is in yet
   (`updateContinued`, with when its start took each up, on its clock; one that turns out lost is no longer named), so
   the order of the Continue and the reconnect does not matter; once the link is back and the child is in

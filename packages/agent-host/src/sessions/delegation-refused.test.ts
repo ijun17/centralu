@@ -9,6 +9,7 @@ import type { LinkedSessions } from '../adapters/contract.js'
 import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { ASK_THE_PERSON } from './start-agent-terms.js'
+import type { LinkedTasks } from '../mail/delegation.js'
 
 const S15 = 'Refused (untrusted_project): your project consumer is not trusted, so work you give outside it (to the target) waits for the person to trust consumer. Nothing was started.'
 
@@ -31,6 +32,13 @@ beforeEach(async () => {
       asked.push({ callerId, target, call })
       return refusal
     },
+    // Work for a linked machine's session crosses as a task (#1948 step 6)
+    linkedTasks: {
+      send: async (_callerId: string, childId: string, text: string) => {
+        overLink.push(`send ${childId}: ${text}`)
+        return { ok: true as const, messageId: 'hub.m_1', to: 'Worker', address: childId, computer: 'Box' }
+      },
+    } as unknown as LinkedTasks,
   })
 })
 afterEach(async () => {

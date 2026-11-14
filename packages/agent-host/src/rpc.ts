@@ -123,7 +123,7 @@ export type RpcServices = {
    * Mail across linked machines (#2067 item 2, mail/across.ts): `host.mail` and `host.mailRows` from the hub that offered
    * on the connection they came in on, and from no other. Without it both are refused, as a build from before them
    */
-  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows'>
+  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows' | 'moveFromHub'>
   /**
    * This host's project apps used by the hub's sessions (#1938, docs/plans/remote-hub.md §13): `host.apps`, `host.appCall`
    * and `host.appCancel` from the hub that offered apps on the connection they came in on, and from no other; and a hub's
@@ -924,8 +924,8 @@ export function createRpcHandler(
     'host.hubOffer': async (p, ctx) => {
       const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
-      // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2)
-      return { ok: true as const, ...(mailAcross && hubs ? { mail: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
+      // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2); its tasks come as mail (#1948 step 6)
+      return { ok: true as const, ...(mailAcross && hubs ? { mail: true, tasks: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
     },
     'host.mail': async (p, ctx) => {
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined
@@ -937,6 +937,11 @@ export function createRpcHandler(
       if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection says what became of mail here')
       await mailAcross.rows(p.rows, { hub: hub.id })
       return { ok: true as const }
+    },
+    'host.mailMove': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection moves the work it gave here')
+      return mailAcross.moveFromHub(hub, p)
     },
     'host.apps': async (p, ctx) => {
       const { hub, calls } = appsHub(ctx)

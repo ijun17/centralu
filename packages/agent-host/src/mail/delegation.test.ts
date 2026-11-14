@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personWorkRecorder, requestTurnRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedTasksOf, personWorkRecorder, requestTurnRecorder, turnRecorder } from './delegation.js'
 import { A, B, ORC, W, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
@@ -156,19 +156,45 @@ describe('a call that returned the answer (§9.6)', () => {
   })
 })
 
-describe('notes the hub held for a child on a linked machine that is gone (#2114)', () => {
-  it('are the tasks they were, never delivered, released gone: the caller is told once, in the stop notice, naming each', () => {
+describe('work this hub gave a session on a linked machine, as its copies here read (#1948 step 6)', () => {
+  /** The copy of a task given across the link, as `MailAcross.sendTask` writes it once the machine took it */
+  const given = (w: ReturnType<typeof turnWorld>, text: string) => {
+    const id = w.mail.mintId()
+    w.mail.sentAcross(A, { id, to: w.mail.sessionAddress('m1.r'), text, needsReply: false, task: { origin: 'agent_session' } })
+    return id
+  }
+  const tasksOf = (w: ReturnType<typeof turnWorld>) => linkedTasksOf(w.mail, w.store.mailbox, { sendTask: async () => ({ ok: false, why: 'x', text: 'x' }) }, () => () => {})
+
+  it('is open until its report comes back, which it reads with the answer kept and whom it went to', () => {
     const w = turnWorld()
-    w.sessions.set('r', { projectId: null, name: 'Child on Box', canReadMail: false })
-    linkedGoneRecorder(w.mail, w.store.mailbox)('r', 'a', ['use staging', 'and the docs'])
-    const R = w.mail.sessionAddress('r')
+    const tasks = tasksOf(w)
+    const id = given(w, 'build it')
+    expect(tasks.open('a', 'm1.r')).toBe(id)
+    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'open' })
+    w.mail.report(id, { outcome: 'finished', body: '[Centralu] The session ended its turn.', answer: 'built' })
+    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'reported', outcome: 'finished', answer: 'built', owner: A })
+    expect(tasks.open('a', 'm1.r')).toBeUndefined()
+    expect(tasks.lastAnswer('a', 'm1.r')).toBe('built')
+  })
+
+  it("is withdrawn by its sender's stop, and then reads as ended with no report", () => {
+    const w = turnWorld()
+    const tasks = tasksOf(w)
+    const id = given(w, 'build it')
+    expect(tasks.withdraw('a', 'm1.r')).toBe(1)
+    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'ended', why: 'withdrawn' })
+  })
+
+  it('is released gone with a child whose machine was removed: its sender is told once, in the stop notice', () => {
+    const w = turnWorld()
+    w.sessions.set('m1.r', { projectId: null, name: 'Child on Box', canReadMail: false })
+    const tasks = tasksOf(w)
+    const id = given(w, 'build it')
+    tasks.gone('m1.r')
+    expect(w.rowOf(id, w.mail.sessionAddress('m1.r')).releasedWhy).toBe('gone')
+    expect(tasks.standing(id, 'm1.r')).toEqual({ state: 'ended', why: 'gone' })
     const told = w.records.pendingFor(A, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
     expect(told).toHaveLength(1)
-    const ids = (told[0]!.message.facts.unanswered ?? []).map((u) => u.id)
-    expect(ids.map((id) => [w.message(id).body, w.rowOf(id, R).deliveredAt, w.rowOf(id, R).releasedWhy])).toEqual([
-      ['use staging', null, 'gone'],
-      ['and the docs', null, 'gone'],
-    ])
     expect(told[0]!.message.body).toContain('Child on Box')
   })
 })

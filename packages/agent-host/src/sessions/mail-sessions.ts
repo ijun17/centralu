@@ -2,7 +2,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { BusyAnswer, IfBusy } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
-import type { AnswerGiven } from '../mail/delegation.js'
+import type { AnswerGiven, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
@@ -50,14 +50,14 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
-  /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
-  linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void
   /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); a `note` needs no reply (#2258). Returns its id */
   sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean): string
   /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
   withdrawTasks?(callerId: string, childId: string): number
+  /** Work given a session on a linked machine, as a task across the link (#1948 step 6) */
+  linkedTasks?: LinkedTasks
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1), a task answered as any task is */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
@@ -141,17 +141,9 @@ export class MailSessionsView {
     return this.host.linkedChild(sessionId)
   }
 
-  /**
-   * A child this host started on a linked machine is gone, with notes its caller had the hub hold for it (#2114): they were not given, and the
-   * stop notice tells the caller so, as of any task a gone session leaves. Never throws: the child is gone already
-   */
-  linkedChildGone(childId: string, callerId: string, notes: readonly string[]): void {
-    if (this.host.closing) return
-    try {
-      this.hooks?.linkedGone?.(childId, callerId, notes)
-    } catch (e) {
-      console.error(`[mail] ${childId.slice(0, 8)}: the notes held for it could not be told to ${callerId.slice(0, 8)} (${errorMessage(e)})`)
-    }
+  /** Work given a session on a linked machine, as a task across the link (#1948 step 6); null in a manager that has no mailbox */
+  get linkedTasks(): LinkedTasks | null {
+    return this.hooks?.linkedTasks ?? null
   }
 
   /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */

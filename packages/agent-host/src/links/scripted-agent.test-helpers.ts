@@ -11,7 +11,8 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
  *
- * and every turn ends with `turn_complete`, so the session goes back to idle the way a real one does.
+ * and every turn ends with `turn_complete`, so the session goes back to idle the way a real one does. Only the message's own words are read for
+ * these: the mailbox's frame around delivered mail (its `<system-reminder>`, which speaks of "a pending question") is not.
  *
  * `queueBehind`: a message sent while a turn is open is not taken into it but held, and runs as a turn of its own once
  * that one ends, as a tool whose running turn did not read the input does with it (#1604). Like Claude Code it names the
@@ -91,17 +92,18 @@ class ScriptedHandle implements SessionHandle {
   private turn(text: string): void {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
-    if (/approve/i.test(text)) {
+    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    if (/approve/i.test(said)) {
       this.approvals.add(id)
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })
       return
     }
     // A long job, or one continued after its host was stopped: the turn runs until it is ended (`finish`) or its process goes (#1618)
-    if (/\blong job\b/i.test(text) || text.includes('Continue where you stopped')) {
+    if (/\blong job\b/i.test(said) || said.includes('Continue where you stopped')) {
       this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: 'working on it…' })
       return
     }
-    if (/question/i.test(text)) {
+    if (/question/i.test(said)) {
       this.questions.add(id)
       this.emit({
         type: 'question_request',

@@ -60,6 +60,18 @@ export const HubAskResult = z.union([
   }),
 ])
 export type HubAskResult = z.infer<typeof HubAskResult>
+/** How the turn of a task that crossed ended, as the machine's report says it (`HubMailParams.report`, the mailbox's `TurnReport` without its words) */
+export const TaskReport = z.object({
+  outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']),
+  answer: z.string().max(2_000).optional(),
+  error: z.string().max(200).optional(),
+  reason: z.string().max(200).optional(),
+  paused: z.number().int().min(0).max(10_000).optional(),
+  waitingOn: z.number().int().min(0).max(10_000).optional(),
+  personSince: z.literal(true).optional(),
+  after: z.literal(true).optional(),
+})
+export type TaskReport = z.infer<typeof TaskReport>
 /**
  * A message from a session the hub started on the machine to the session that started it (#2067, `parent`;
  * docs/plans/linked-mail.md §3). `sessionId` is the sender as the machine names it; the hub qualifies it with the machine
@@ -94,6 +106,11 @@ export const HubMailParams = z.object({
    */
   subject: z.string().max(500).optional(),
   choices: z.array(z.string().max(500)).max(10).optional(),
+  /**
+   * Centralu's report on a task the hub gave one of the machine's sessions (#1948 step 6, additive): `sessionId` is `centralu`, `replyTo` the
+   * task's id, `text` the report's words. The hub takes it only from the machine its copy of that task went to
+   */
+  report: TaskReport.optional(),
 })
 export type HubMailParams = z.infer<typeof HubMailParams>
 /**
@@ -124,8 +141,21 @@ export const HostMailParams = z.object({
   notice: z.boolean().optional(),
   /** As `HubMailParams.id` */
   id: z.string().min(1).max(200).optional(),
+  /**
+   * Work a session of the hub gives the machine's session (#1948 step 6, additive): written there as a task (a note when `note`), from the
+   * tool that gave it, which the machine's own delivery gives the session and its own engine reports. `forPerson`: the hub says the work is its
+   * Assistant's `send_to_session`, which acts for the person (#2258); a machine reads it only from the hub on whose link it came
+   */
+  task: z.object({ origin: z.enum(['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project']), note: z.literal(true).optional(), forPerson: z.literal(true).optional() }).optional(),
 })
 export type HostMailParams = z.infer<typeof HostMailParams>
+/**
+ * A handoff on the hub moved the work of `from` to `to` (#1948 step 6, `host.mailMove`): the machine's open tasks from `from`, by id, are `to`'s
+ * now, with their delivery and their turn kept. Both are the hub's sessions, as the hub names them; the machine moves only tasks that hub's link
+ * brought, and refuses the rest
+ */
+export const MailMoveParams = z.object({ from: z.string().min(1).max(300), to: z.string().min(1).max(300), ids: z.array(z.string().min(1).max(200)).min(1).max(500) })
+export type MailMoveParams = z.infer<typeof MailMoveParams>
 /**
  * The state of one recipient row of a message that crossed a link (#2067 item 2, `hub.mailRows`, `host.mailRows`): the
  * recipient as the hub names it, and what the side that sends it knows. Merged forward only on the other side

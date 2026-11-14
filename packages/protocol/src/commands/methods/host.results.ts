@@ -86,13 +86,16 @@ export const hostResults = {
   'host.systemEnding': z.object({ ok: z.literal(true) }),
   // `mail`: this host takes mail from the hub's side (`host.mail`, #2067 item 2), so the hub's task for a child here says to mail
   // `apps`: this host answers `host.apps` and `host.appCall` from the hub (#1938)
-  'host.hubOffer': z.object({ ok: z.literal(true), mail: z.boolean().optional(), apps: z.boolean().optional() }),
+  // `tasks`: this host takes the hub's tasks as mail and reports them back (`host.mail` with `task`, #1948 step 6)
+  'host.hubOffer': z.object({ ok: z.literal(true), mail: z.boolean().optional(), apps: z.boolean().optional(), tasks: z.boolean().optional() }),
   // As `hub.mail` answers (machines-hub.ts `HubMailResult`, which the window's bundle leaves out, #1648)
   'host.mail': z.union([
     z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional() }),
     z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) }),
   ]),
   'host.mailRows': z.object({ ok: z.literal(true) }),
+  // The tasks moved; one this host does not have from that hub, or settled already, is left out
+  'host.mailMove': z.union([z.object({ ok: z.literal(true), moved: z.number().int().min(0) }), z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) })]),
   'host.apps': LinkedAppsResult,
   'host.appCall': LinkedAppCallResult,
   'host.appCancel': z.object({ ok: z.literal(true) }),

@@ -1,7 +1,6 @@
 import { stamped } from '../log-file.js'
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
-import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
 import { OWN_WORK_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE, NO_WORDS } from './ask-project.js'
@@ -32,7 +31,7 @@ export type LaterTurn = {
 /**
  * Whether a later turn of paused work is an update its caller hears at once (#1540): one that said something of its own, in the work's own turn.
  * A turn with no words (a Monitor's look), Centralu's compaction, a turn others wrote into, and every turn once the person wrote to the session tell
- * nothing; the final report still comes when the work ends. A linked machine's children's rule, until their tasks go as mail (#1948 step 6); this host's
+ * nothing; the final report still comes when the work ends. The rule of an ask_project task's pause on a linked machine, until that task goes as mail too; this host's
  * children answer with their last response (docs/plans/mailbox.md §10.6.3)
  */
 export function isPauseUpdate(turn: LaterTurn, words: string): boolean {
@@ -61,18 +60,6 @@ export type LinkedReportsHost = {
     answerSeq?: number,
     part?: ReportPart,
   ): Promise<unknown>
-  /**
-   * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine
-   * answers by whose its turn is (`RemoteAgents.reportGate`): its caller's goes, another's (the person's on that
-   * machine) is reported to nobody, and one the hub cannot tell yet stays owed until it can. Any other session's goes
-   */
-  reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
-  /**
-   * What a link lost over this session's paused report keeps (#1523): a child start_agent started keeps the report, as it follows its
-   * work across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then; `turn` keeps the
-   * turn running there too, the same turn, when an update that continues it there holds the link (#2164). Null: nothing is kept
-   */
-  keepsOverLoss?(sessionId: string): 'report' | 'turn' | null
 }
 
 /** What a report says of a turn besides its words (#1377, #1966): nothing, unless the person wrote into it, or an update cut it and it was continued (said by the machine's host) */
@@ -89,11 +76,6 @@ function saidTurn(raw: unknown): TurnStarter | undefined {
 /** Whether the machine's host said the turn was Centralu's own to compact the conversation (#1451), on the event that ended it */
 function compacted(raw: unknown): boolean {
   return typeof raw === 'object' && raw !== null && 'compaction' in raw && raw.compaction === true
-}
-
-/** Whether a relayed message was sent by this hub's Assistant: the machine records it as from `HUB_SENDER`, qualified */
-function fromHub(from: unknown): boolean {
-  return isQualifiedHubSender((from as { sessionId?: unknown } | null)?.sessionId)
 }
 
 /** A machine's event as the hub relays it to its windows (qualified, links.ts): only the fields read here */
@@ -113,10 +95,6 @@ export type LinkedEvent = {
   from?: unknown
   /** Whose the turn was, on the event that ends it (#1377) */
   turn?: unknown
-  /** The message a turn ran for, on the `state_change` that opens it, when the tool ran it after the turn it was sent into (#1604) */
-  origin?: unknown
-  /** What a turn that began with no message goes on with, on the `state_change` that opens it (#2164) */
-  continues?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown
@@ -125,15 +103,15 @@ export type LinkedEvent = {
 }
 
 /**
- * The Assistant's reports from a linked machine's sessions (#82 phase 4, `reportBack` on `send_to_session`), and
- * the work a session there ends its turn with (#723).
+ * The work a linked machine's session ends an ask_project turn with (#723, #1457), and each linked session's background
+ * work as its machine lists it. Work this hub gives a session there otherwise goes as mail, and is reported by that
+ * machine (#1948 step 6); an ask's pause is reported here until ask_project's task crosses as mail too.
  *
- * The end of a turn the Assistant waits on is its report, once, as this host's own sessions' reports were before #1948
- * step 3 (this host's are now the mailbox's, docs/plans/mailbox.md §10.6.3; this path stays until their tasks go as mail, #1948 step 6). A turn that **completes** while the session's own background work still runs there (the machine's
- * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the Assistant is told once that
- * the work paused, and the report stays owed until a turn ends with none of that work left. If the work ends and no turn
- * follows within `OWN_WORK_SETTLE_MS`, the report goes out with how each task ended; if the machine's link drops
- * or the machine is removed first, it goes out saying so, since the hub would not see the work's end.
+ * A turn that **completes** while the session's own background work still runs there (the machine's
+ * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the asker is owed the report until
+ * a turn ends with none of that work left. If the work ends and no turn follows within `OWN_WORK_SETTLE_MS`, the report
+ * goes out with how each task ended; if the machine's link drops or the machine is removed first, it goes out saying
+ * so, since the hub would not see the work's end.
  */
 export class LinkedReports {
   /**
@@ -184,25 +162,9 @@ export class LinkedReports {
      * Whose a turn there is (#1377), where the machine's host does not say it on the turn's end (`saidTurn`): the person's
      * message at rest makes the next turn theirs, and it is not reported; into the work's turn it is noted. It never closes the report.
      */
-    if (e.type === 'user_message' && wait.instruction === undefined) this.messageSeen(wait, e)
+    if (e.type === 'user_message') this.messageSeen(wait, e)
     if (e.type === 'background_tasks') {
       if (wait.paused) this.settleLater(sessionId, wait)
-      return
-    }
-    /*
-     * A wait set for an instruction starts at that instruction (#1082). It is set before the send goes out, and a turn
-     * end the machine sent before it recorded the instruction can still be on its way: a link relays one machine's
-     * events in order, so what comes before the instruction's own `user_message` happened there before it, and is the
-     * end of an earlier turn. From that message on, as before: a turn running there then takes the instruction as
-     * mid-turn input and its end is the report, as a local session's is. A record that never comes (lost before it was
-     * relayed) is not waited for past the send's answer (`sendToSession`, assistant-seat.ts).
-     */
-    if (wait.instruction !== undefined) {
-      if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) {
-        delete wait.instruction
-        // The turn that takes the instruction is the work's
-        wait.next = { by: 'work' }
-      }
       return
     }
     const step = linkedTurnEnd(wait.busy, e)
@@ -231,19 +193,6 @@ export class LinkedReports {
       if (wait.paused) this.settleLater(sessionId, wait)
       return
     }
-    // Whose turn ended (#1038 review): another's is reported to nobody; one the hub cannot tell yet stays owed
-    const gate = this.gate(sessionId)
-    /*
-     * Held until whose it is can be told: the settling end (`settleLinkedTurn`) says nothing of the turn, so what the machine
-     * said of it is kept for that end, and its report still says an update cut it (#2157). The turn has ended all the same: the next
-     * one to start sets whose it is afresh, so what this one carried (its cut) is never a later turn's
-     */
-    if (gate === 'defer') {
-      wait.turn = turn
-      wait.busy = false
-      return
-    }
-    if (gate === 'withhold') return this.drop(sessionId)
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = e.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
     // The turn whose answer the asking call took (`oweAsker`): its end is told, and is no update
@@ -271,14 +220,14 @@ export class LinkedReports {
    * this turn's words and says the work is paused, so this is the report kept for what follows, with no notice of its own
    * (`observe` finds it paused already and tells nobody). Returns the work it paused on, none when the turn is not one
    * to pause on (it did not complete, was the person's, the machine lists no such work, or an older machine does not list
-   * its background tasks at all), the report is another session's, or the gate does not let this one through.
+   * its background tasks at all), or the report is another session's.
    */
   oweAsker(sessionId: string, callerId: string, ending: Pick<LinkedEvent, 'type' | 'turn'>): BackgroundTask[] {
     if (ending.type !== 'turn_complete' || saidTurn(ending.turn)?.by === 'person') return []
     const running = this.ownTasksRunning(sessionId)
     if (!running.length) return []
     const held = this.host.children.linkedReports.get(sessionId)
-    if ((held && held.assistantId !== callerId) || this.gate(sessionId) !== 'deliver') return []
+    if (held && held.assistantId !== callerId) return []
     this.stopSettling(sessionId)
     this.remember(sessionId)
     const wait: LinkedReport = { assistantId: callerId, busy: false, paused: [...running] }
@@ -323,26 +272,16 @@ export class LinkedReports {
     }
   }
 
-  /**
-   * A report `send_to_session` put back after its send failed (assistant-seat.ts): the events of the send's moment
-   * went to the wait that send had set, so a paused report's settle wait starts again from what the hub knows now
-   */
-  restored(sessionId: string): void {
+  /** A paused report put back after the ask that took it down failed (`releaseAsker`): its settle wait starts again from what the hub knows now */
+  private restored(sessionId: string): void {
     const wait = this.host.children.linkedReports.get(sessionId)
     if (wait?.paused) this.settleLater(sessionId, wait)
   }
 
-  /**
-   * Every settle wait ends with the host. The next host settles only what a child start_agent started on a linked
-   * machine is still owed (`RemoteAgents.restore`, #1038); the Assistant's linked reports live in memory
-   */
+  /** Every settle wait ends with the host: the linked reports live in memory */
   dispose(): void {
     for (const timer of this.settling.values()) clearTimeout(timer)
     this.settling.clear()
-  }
-
-  private gate(sessionId: string): 'deliver' | 'withhold' | 'defer' {
-    return this.host.reportGate?.(sessionId) ?? 'deliver'
   }
 
   /** Each linked session's background work as its machine last listed it (`tasks`), for `pausedOnBackground` */
@@ -351,7 +290,7 @@ export class LinkedReports {
   }
 
   /** The session's own background work its machine lists as running; a timer the tool holds is not work (#721) */
-  ownTasksRunning(sessionId: string): BackgroundTask[] {
+  private ownTasksRunning(sessionId: string): BackgroundTask[] {
     return liveBackgroundTasks(this.tasks.get(sessionId) ?? []).filter((t) => !t.timer)
   }
 
@@ -382,10 +321,6 @@ export class LinkedReports {
 
   /** The paused work ended with no turn after it: the report goes out with how each task ended */
   private settle(sessionId: string, wait: LinkedReport): void {
-    // As a turn's end (#1038 review): another's work is reported to nobody; one the hub cannot tell yet waits again
-    const gate = this.gate(sessionId)
-    if (gate === 'defer') return this.settleLater(sessionId, wait)
-    if (gate === 'withhold') return this.drop(sessionId)
     const settled = this.pausedTasksNow(sessionId, wait)
     this.drop(sessionId)
     void this.report(sessionId, wait.assistantId, { type: 'turn_complete' }, { settled }, undefined, undefined, wait.lastBy === 'person')
@@ -431,14 +366,6 @@ export class LinkedReports {
       if (!sessionId.startsWith(prefix) || !wait.paused) continue
       if (this.settling.has(sessionId)) {
         this.settle(sessionId, wait)
-        continue
-      }
-      const keeps = this.host.keepsOverLoss?.(sessionId) ?? null
-      if (keeps) {
-        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for. One an update continues there stays the work's
-        if (keeps === 'turn') continue
-        wait.busy = false
-        delete wait.turn
         continue
       }
       this.drop(sessionId)
@@ -510,8 +437,6 @@ export class LinkedReports {
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
     // What its pause's report read stands in for the words that cannot be read now, marked as read then; a turn still running has said nothing yet
     const kept = unreachable && work && 'paused' in work && work.paused ? wait?.read : undefined
-    // Words of the turn go only through the gate (#1038 review); a report that the link or the machine went says no words
-    if (!unreachable && this.gate(sessionId) !== 'deliver') return
     /*
      * A read that failed says so (#1186): an empty preview read as a turn that said nothing. A machine that could not
      * be reached says that, or where its last words were

@@ -38,7 +38,6 @@ const CASES: [string, Call, string][] = [
   ['interrupt', (r) => r.interrupt('m2.s1'), NOT_SESSION],
   ['deleteSession', (r) => r.deleteSession('m2.s1'), NOT_SESSION],
   ['deleteAgentChild', (r) => r.deleteAgentChild!('m2.s1', 'feat/x'), NOT_SESSION],
-  ['lastUserMessage', (r) => r.lastUserMessage('m2.s1'), NOT_SESSION],
   ['cards', (r) => r.cards('m2.s1'), NOT_SESSION],
   ['answerQuestion', (r) => r.answerQuestion('m2.s1', 'q1', []), NOT_SESSION],
   ['lastWords', (r) => r.lastWords('m2.s1', 100), NOT_SESSION],

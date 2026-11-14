@@ -279,6 +279,11 @@ export class MailboxRecords {
     return this.message(id)
   }
 
+  /** A message's sender changed, its rows left as they are: a task across a link handed over on the hub, under its one id on both sides (#1948 step 6) */
+  repoint(id: string, sender: string, senderProject: string | null, facts: MailFacts): void {
+    this.db.prepare(`UPDATE mail SET sender = ?, sender_project = ?, facts = ? WHERE id = ?`).run(sender, senderProject, JSON.stringify(facts), id)
+  }
+
   /**
    * Whether a new message `id` answering `replyTo` would close a loop: `replyTo` is `id` itself, or its chain reaches
    * `id` (a message from another machine stored before the one it answers, §14). Walks only when something stored

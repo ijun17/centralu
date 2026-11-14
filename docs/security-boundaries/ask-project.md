@@ -76,6 +76,18 @@ machine as the less trusted side: a compromised server must not reach the person
   only for its session's own row, a withdrawal only of its session's own message. A hub's rows are checked the same way
   on the machine. On the machine, `host.mail` and `host.mailRows` are taken only on a connection a hub
   offered on, and only from that hub's addresses. Mail out of an untrusted project is refused across rather than held.
+- **Work across a link is mail too** (#1948 step 6, [plans/linked-mail.md](../plans/linked-mail.md) §10): a hub session's
+  task to a machine's session comes by `host.mail` with `task`, on a connection that hub offered on and from its own
+  addresses, and the machine gives it and reports it as its own mail. `forPerson`, the hub's word that its own Assistant's
+  `send_to_session` gave the work, is read only from the hub of that link and only with that origin: the task then reads
+  there as the person's request, as the Assistant's own does here. A task handed over in a handoff never carries it, plain
+  mail never does, and a machine has no way to send it to a hub. The Assistant is this host's own session only, never a
+  session of another computer with the same id (#2274). A report comes back by `hub.mail` with `report`, taken only from
+  the machine the hub's copy of that task went to; another machine's is refused and logged, and nothing is written.
+  `host.mailMove` moves only open tasks a hub's own session gave there, to another of that hub's sessions, and marks
+  them handed over; anything else is refused and logged. **Residual:** a hub may say `forPerson` of any send of its
+  own; a hub already writes the person's answers on its machines (`host.mail` from `person`), so this gives it no
+  right it did not have.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
   answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).
   It names the machine and the asking session there, quoted on one line;

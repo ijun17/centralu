@@ -151,8 +151,8 @@ export class HandoffChildren {
     const original = this.host.meta.get(from)
     const heir = this.host.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
-    // Its children on linked machines go to the heir too, their reports with them (#1038 review)
-    this.host.delegationFlow.remote.moveCaller(from, to)
+    // Its children on linked machines go to the heir too (#1038 review), and the tasks it gave them with its mail below (#1948 step 6)
+    const remote = this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
     /** The sessions with a task of the original's open: their report is the original's to hear, and the successor's once moved */
@@ -239,7 +239,8 @@ export class HandoffChildren {
      * successor. The rest stays with an original that stays: it is still there to read and answer it, and work it was given is its own
      * until it goes, when all of it moves (scope `removed`)
      */
-    const mailWhich = scope === 'kept' ? (sessions.length ? { senders: sessions } : null) : 'all'
+    const mailChildren = [...sessions, ...remote]
+    const mailWhich = scope === 'kept' ? (mailChildren.length ? { senders: mailChildren } : null) : 'all'
     // The original is told of a child that stays, also when nothing else moves
     const stayText = stays.length ? `Still with this session, since their reports finish a task it was given: ${stays.map((c) => `“${c.name}” [${c.handle}]`).join('; ')}.` : ''
     let threads: HandedOverMessage[] = []
@@ -253,7 +254,7 @@ export class HandoffChildren {
         },
         // The mail's one move (docs/plans/mailbox.md §10.6.5): what the original holds, and the work it gave the children that move
         () => {
-          if (mailWhich !== null) threads = this.host.mailHandOver(from, to, mailWhich, sessions)
+          if (mailWhich !== null) threads = this.host.mailHandOver(from, to, mailWhich, mailChildren)
         },
       )
     } catch (e) {
