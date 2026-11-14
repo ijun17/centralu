@@ -863,6 +863,12 @@ async function measureEngine(
       // The app's spinning markers stop under reduced motion (styles/index.css), which isolates what they cost
       reducedMotion: values['reduced-motion'] ? 'reduce' : 'no-preference',
     })
+    // Playwright holds a handle on every console argument in the page and does not release the ones it trims from its
+    // list (1.62), so a page that logs objects (ext-apps' message transport logs every app message) would grow here
+    // without end, and not in the app. Releasing them leaves the engine's own bounded console store.
+    context.on('console', (m) => {
+      for (const arg of m.args()) void arg.dispose().catch(() => {})
+    })
     const wire = new Wire()
     await wire.attach(context, hostPort)
     const page = await context.newPage()
