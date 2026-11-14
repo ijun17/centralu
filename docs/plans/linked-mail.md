@@ -232,6 +232,40 @@ offered, and records each under the hub that then offers on that connection.
 offer: a machine with item 2 answers `host.hubOffer` with `mail: true` (an addition), and the task then says to
 `mail` its parent; an older machine's task keeps "Mail does not reach it from here yet".
 
+## 7a. Mail to the person from a linked machine (#1987, #2226)
+
+The person works in the hub's window and sees all their machines there as one place (owner, 2026-11-09). A machine's
+session that writes `to: "person"` writes to **the hub's person**, never to its own computer's Inbox, which the person
+may not open (decided 2026-11-14 on #1987):
+
+- **Which hub.** The hub that started the session (its `started_from_hub_by:` record, §3); else the one hub that offers
+  mail here. With several and no record the message stays in this computer's own Inbox, and the answer ends with
+  `Several computers link this one as hubs and none of them started this session, so it stays in this computer's own
+  Inbox: the person sees it in this computer's window.` No hub at all: this computer's Inbox, as before. A session a
+  hub started whose record names no hub (an earlier build) is refused `elsewhere`, and one whose hub is not linked now
+  `link_down` (`MailAcross.personTarget`).
+- **The address.** The hub names its person `person`, as always. A machine names the hub's person
+  `session:<hub id>/person` (`PERSON_ID`): a foreign address, so the copy, the receipts, a link that is down and a send
+  again whose answer was lost work as for any session over there (§6). No session id reads `person`. The wire carries
+  the hub's naming: `hub.mail { to: "person", subject?, choices? }` and `host.mail { from: "person" }` (additions).
+- **The person's word.** The person answers in the hub's Inbox; the hub calls `host.mail` from `person`, keeps the copy,
+  and the machine writes the answer from `session:<hub id>/person`, which its rules read as the person (`isPerson`,
+  `senderKind`): it wakes as the person's word does and is framed "The person wrote it". A hub already speaks for the
+  person on its machines (their input to a session there goes through it), so this gives it no right it did not have.
+- **Mark done** is the person's own state on the hub (`MailPerson.close`, no call to the machine): the row leaves the
+  Inbox at once, link or no link (#2226). The hub's row settles `done`, and the machine's copy learns it with the
+  receipts at the next change or connect (§6, `mail.acrossToldAt`).
+- **Refusals**, each at once with nothing written: the link down (`link_down`, naming the hub); a hub from before this,
+  which reads `person` as no address (`older`: `<hub> runs an older Centralu, which takes no mail to the person from
+  here. Update it there.`); a machine from before this, which refuses `host.mail` from `person` (`older`: `<machine>
+  runs an older Centralu, which takes no answer from the person here. Update it there.`, shown in the Inbox); an answer
+  that would go both to sessions here and to one on another computer (`recipients`).
+
+The refusal it replaces, `the person works on the computer that started this session, and mail to the person written
+here is not seen there, so nothing was sent. Write to "parent" instead: that reaches your parent there.`, is gone; a
+host whose mail does not cross at all keeps `… and mail does not cross computers from this one, so nothing was sent.
+End your turn with the answer: that is how your parent hears from you.`
+
 ## 8. Item 3: finding the recipient across machines
 
 With every agent reachable, the candidates grow with every linked machine. A session finds one by a search, and the

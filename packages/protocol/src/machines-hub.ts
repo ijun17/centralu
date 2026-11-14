@@ -87,6 +87,13 @@ export const HubMailParams = z.object({
    * takes a second send of it as the one it has, so a send whose answer was lost can be sent again, or its copy kept later
    */
   id: z.string().min(1).max(200).optional(),
+  /**
+   * What only a message to the person reads (#1987, additive): `to` may be `person`, the person who works in the hub's window, and
+   * these are its subject and the answers a question offers, checked by the hub's send as for its own sessions. A hub from before
+   * it refuses `person` as no address (`bad_address`), which the machine reads as an older hub
+   */
+  subject: z.string().max(500).optional(),
+  choices: z.array(z.string().max(500)).max(10).optional(),
 })
 export type HubMailParams = z.infer<typeof HubMailParams>
 /**
@@ -102,7 +109,9 @@ export type HubMailResult = z.infer<typeof HubMailResult>
 /**
  * A message from the hub's side to a session of the machine (#2067 item 2, `host.mail`; docs/plans/linked-mail.md §6):
  * `from` is an address as the hub names it (one of its sessions, another machine's, or `centralu` for a notice), `to`
- * the machine's own session id. The machine takes it only on a connection a hub offered on, and only from that hub's ids
+ * the machine's own session id. The machine takes it only on a connection a hub offered on, and only from that hub's ids.
+ * `from` may be `person` (#1987): the person answers, in the hub's Inbox, a message a session here wrote to them, and the
+ * machine writes it from that hub's person. A machine from before it refuses it (`not_allowed`)
  */
 export const HostMailParams = z.object({
   from: z.string().min(1).max(300),

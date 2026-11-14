@@ -83,7 +83,8 @@ the Assistant's judgement. What it can pass back that the asker could not read i
 Assistant's, here and on the linked machines (#984, #1941), and under a bypass or `auto` preset reads files with its own shell: the Assistant's own
 conversation (not a brief, message or mail it sent another session: that is in the receiving session's conversation, read with it), and files the asker's stricter preset would ask about; for an asker in an untrusted project,
 anything outside its own project, though its requests are held until the person trusts the project. A hub's Assistant, which holds this host's token, could send
-text through the composer's call and so as the person; a request held for an untrusted project keeps its citation until the person trusts the project, since the
+text through the composer's call and so as the person, and a hub writes the person's answers to its machines' sessions as the person's word (`host.mail` from `person`, #1987,
+[plans/linked-mail.md](../plans/linked-mail.md) §7a), which gives it no right it did not have; a request held for an untrusted project keeps its citation until the person trusts the project, since the
 window is checked at send;
 a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn

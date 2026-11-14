@@ -15,7 +15,7 @@ import {
   type RecipientRow,
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
-import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
+import { CENTRALU, PERSON, isPerson, parseAddress, senderKind, sessionAddress } from './address.js'
 import { buildMessageFrame, deliveryLine, mailCalls, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
 import type { TurnReport } from './turn-report.js'
@@ -252,7 +252,8 @@ export class MessageService {
   send(sender: string, input: SendInput): SendResult {
     const from = parseAddress(sender)
     if (!from || from.kind === 'centralu') throw refuse('not_allowed', 'Centralu sends with notice and report')
-    const cls: SenderClass = from.kind
+    // A hub's person, as this machine names them, writes as the person (#1987)
+    const cls: SenderClass = isPerson(sender) ? 'person' : from.kind
     const text = this.checkText(cls, input.text)
     if (input.urgent === true && cls !== 'session' && cls !== 'person') throw refuse('field_not_allowed', 'only a session or the person marks mail urgent')
     const target = input.replyTo === undefined ? undefined : this.readable(sender, input.replyTo)
@@ -579,7 +580,7 @@ export class MessageService {
         heldBack.push({ messageId: message.id, reason: why })
         continue
       }
-      const sender = parseAddress(message.sender)?.kind
+      const sender = senderKind(message.sender)
       candidates.push({
         row,
         message,
@@ -595,7 +596,7 @@ export class MessageService {
     const picked = pickWork(
       candidates
         .filter((c) => wakesIt(c) && isWork(c))
-        .map((c) => ({ key: groupOf(c), decides: c.message.urgent || c.message.sender === PERSON, needsReply: toAssistant && c.message.needsReply, dueAt: c.row.dueAt })),
+        .map((c) => ({ key: groupOf(c), decides: c.message.urgent || isPerson(c.message.sender), needsReply: toAssistant && c.message.needsReply, dueAt: c.row.dueAt })),
       now,
     )
     const turnStarts = candidates.some(wakesIt)
@@ -611,7 +612,7 @@ export class MessageService {
     let needsReply = false
     for (const { row, message, down } of kept) {
       if (wakesMessage(message)) wake = true
-      if (message.urgent || message.sender === PERSON) immediate = true
+      if (message.urgent || isPerson(message.sender)) immediate = true
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
       relations.add(relation)
@@ -1032,7 +1033,7 @@ export class MessageService {
 
   /** Centralu's word for how the sender stands to the receiver (§8.3). Never a name another party wrote */
   private relation(recipient: string, m: MailRow): string {
-    const kind = parseAddress(m.sender)?.kind
+    const kind = senderKind(m.sender)
     if (kind === 'centralu') return 'Centralu'
     if (kind === 'person') return 'the person'
     if (kind === 'app') return 'an app you called'
@@ -1067,7 +1068,7 @@ export class MessageService {
     return {
       messageId: m.id,
       kind: m.kind,
-      from: m.sender,
+      from: isPerson(m.sender) ? PERSON : m.sender,
       relation,
       ...(m.kind === 'message' ? { needsReply: m.needsReply } : {}),
       ...(answered?.sender === recipient ? { answers: answered.id } : {}),

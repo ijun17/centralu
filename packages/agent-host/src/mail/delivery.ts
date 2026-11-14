@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { errorMessage } from '@cc/protocol'
 import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { PERSON, parseAddress } from './address.js'
+import { PERSON, isPerson, parseAddress } from './address.js'
 import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
@@ -635,7 +635,7 @@ export class MailDelivery {
    * toward no warning, §7.5), else its first item
    */
   private starterOf(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): string | null {
-    return drained.workMessage ?? drained.messageIds.find((id) => this.records.message(id)?.sender === PERSON) ?? drained.messageIds[0] ?? null
+    return drained.workMessage ?? drained.messageIds.find((id) => isPerson(this.records.message(id)?.sender ?? '')) ?? drained.messageIds[0] ?? null
   }
 
   /**

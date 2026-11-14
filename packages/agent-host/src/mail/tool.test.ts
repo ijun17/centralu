@@ -101,7 +101,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
   })
 
   // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer
-  it('"parent" of a session started from a linked computer says the parent is elsewhere and unreachable, and does not point at "person"', () => {
+  it('"parent" of a session started from a linked computer says the parent is elsewhere and unreachable, and does not point at "person"', async () => {
     const w = world()
     const r = w.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
     expect(r.text).not.toContain('another computer')
@@ -112,8 +112,9 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     expect(refused.text).toBe('Refused (unknown): your parent is a session on the computer that started this session, and mail does not cross computers from this one, so nothing was sent. End your turn with the answer: that is how your parent hears from you.')
     expect(refused.text).not.toContain('person')
     // Nor is its mail to the person written here, where the person does not work (#1987 item 2)
-    const person = hub.tool.run('b', { action: 'send', to: 'person', text: 'blocked' })
-    expect(person.text).toBe('Refused (elsewhere): the person works on the computer that started this session, and mail to the person written here is not seen there, so nothing was sent. Write to "parent" instead: that reaches your parent there.')
+    // (no hub links this one, and none was recorded for the session)
+    const person = await hub.tool.call('b', { action: 'send', to: 'person', text: 'blocked' })
+    expect(person.text).toBe('Refused (elsewhere): the person works on the computer that started this session, which this computer did not record, and mail to the person written here is not seen there, so nothing was sent. End your turn with the answer: that is how your parent hears from you.')
   })
 
   it('from an untrusted project to another project it is held, and the answer says so', () => {
