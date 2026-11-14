@@ -6,6 +6,7 @@ import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
 import type { AcrossSent, MailAcross } from './across.js'
 import { raceBound } from '../timing.js'
+import { reportWords } from './last-response.js'
 
 /**
  * What the mailbox does when a session gives another one work through a tool whose delivery the host already makes (`ChildOwnership.delegated`,
@@ -209,15 +210,6 @@ export function personWorkWithdrawer(mail: MessageService, records: MailboxRecor
   }
 }
 
-/**
- * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is for the session's own
- * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
- * words, and the report must not contradict them
- */
-export const TURN_ENDED = "[Centralu] The session ended its turn. Its last response says whether the work is done."
-/** The same line for the person, on their own work: one line, with nothing to call (§10.6.3) */
-export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its turn. Its last response says whether the work is done.'
-
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }
 
@@ -241,12 +233,10 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     const task = records.newestTask(owner, child)
     // Work the child handed on in it is still open (§9.4): the task stays open, and the turn that work's answer starts answers it (§10.6.3)
     if (!how || !task || (how.ok && records.handedOn(task.id).length > 0)) return
-    const read = `read_session(sessionId="${childId}")`
+    const outcome = how.ok ? ('finished' as const) : ('failed' as const)
     const written = mail.report(task.id, {
-      outcome: how.ok ? ('finished' as const) : ('failed' as const),
-      body: how.ok
-        ? `${TURN_ENDED}\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`
-        : `[Centralu] The assigned work did not finish.\nid: ${childId}\n\nIts tool's error, by kind: ${how.error}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
+      outcome,
+      body: reportWords(childId, { outcome, ...(how.ok ? {} : { kind: how.error }) }),
       ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
     })
     if ('message' in written) {

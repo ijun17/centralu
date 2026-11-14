@@ -7,7 +7,7 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
-import { PERSON_TURN_ENDED } from '../mail/delegation.js'
+import { PERSON_TURN_ENDED } from '../mail/last-response.js'
 import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
 import { MAIL_HOST, addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'

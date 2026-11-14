@@ -7,6 +7,7 @@ import type { DelegationOrigin, MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
+import { reportWords } from './last-response.js'
 
 /**
  * Mail across linked machines (#2067 items 2 and 3, docs/plans/linked-mail.md §5 to §8): every session reaches every
@@ -632,7 +633,12 @@ export class MailAcross {
       return { ok: false, why: 'not_allowed', text: `${this.selfName()} gave ${name} no such task, so nothing was written.` }
     }
     try {
-      const written = this.d.service.report(task.id, { body: p.text, ...report })
+      // Centralu's words are this host's own, from the report's facts: the other side's text is never written as Centralu's (#120). The session it is
+      // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
+      const party = row ? parseAddress(row.recipient) : null
+      const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
+      const body = reportWords(childId, { outcome: report.outcome, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
+      const written = this.d.service.report(task.id, { ...report, body })
       return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
     } catch (e) {
       return { ok: false, why: refusalReason(e) ?? 'failed', text: oneLineText(errorMessage(e), 4000) }
@@ -903,10 +909,10 @@ export class MailAcross {
         const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
         const report = facts.success ? facts.data : { outcome: 'finished' as const }
         const replyTo = m.replyTo ? { replyTo: m.replyTo } : {}
+        // The facts are what that side takes; it words the report itself (`reportFrom`), so `text` is this host's wording, which it does not keep
         const sent = r.kind === 'hub'
-          ? await this.ask(peer, 'hub.mail', { sessionId: CENTRALU, to: this.asHubNames(r.hubId, row.recipient), text: this.inWords(`${hub?.you}.`, m), ...replyTo, report } satisfies HubMailParams)
-          // The hub's session is `<hub id>.<id>` there, as its ask_project answer names it
-          : await this.ask(peer, 'host.mail', { from: CENTRALU, to: r.sessionId, text: this.inWords(`${this.d.hostId}.`, m), ...replyTo, report } satisfies HostMailParams)
+          ? await this.ask(peer, 'hub.mail', { sessionId: CENTRALU, to: this.asHubNames(r.hubId, row.recipient), text: m.body, ...replyTo, report } satisfies HubMailParams)
+          : await this.ask(peer, 'host.mail', { from: CENTRALU, to: r.sessionId, text: m.body, ...replyTo, report } satisfies HostMailParams)
         // Not known to have arrived: tried again at the next change or connect
         if (!sent.ok && (sent.maybe || sent.why === 'link_down')) continue
         if (!sent.ok) this.d.log?.(`[mail] ${peer.name} refused the report ${m.id}: ${sent.text}`)
@@ -941,16 +947,6 @@ export class MailAcross {
     const now = this.now()
     this.d.records.markDelivered(recipient, [m.id], now, null)
     this.d.records.markRead(recipient, [m.id], now)
-  }
-
-  /** A report's words as the other side reads them: the session here is `<prefix><id>` there (a hub's `<this machine's id>.`, a machine's `<this hub's id>.`) */
-  private inWords(prefix: string, m: MailRow): string {
-    const about = m.facts.about as { session?: unknown } | undefined
-    const party = typeof about?.session === 'string' ? parseAddress(about.session) : null
-    if (party?.kind !== 'session' || party.host !== this.d.hostId) return m.body
-    // The id as a word of its own, never a part of another
-    const id = party.sessionId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return m.body.replace(new RegExp(`(?<![\\w.-])${id}(?![\\w-])`, 'g'), `${prefix}${party.sessionId}`)
   }
 
   // ── Finding ──
