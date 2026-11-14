@@ -301,17 +301,23 @@ describe('telling a growing session to call compact_self (#1492)', () => {
   it('tells the first share again after a compaction the starting host hears of: the stored reading is from before it (#1913)', () => {
     const w = world()
     w.session.context = { ...w.session.context!, used: 400_000 }
+    w.request(410_000)
+    expect(w.told).toEqual([])
     w.emit({ type: 'compaction', sessionId: 's1', failed: false })
     w.request(330_000)
     expect(w.told).toHaveLength(1)
     expect(w.told[0]).toMatch(/about 33% full/)
   })
 
-  it('with no stored reading, tells the first share as before (#1913)', () => {
-    const w = world()
-    w.session.context = null
-    w.request(330_000)
-    expect(w.told).toHaveLength(1)
+  it('with no stored reading, tells the first share as before; with one past it, does not (#1913)', () => {
+    const none = world()
+    none.session.context = null
+    none.request(330_000)
+    expect(none.told).toHaveLength(1)
+    const past = world()
+    past.session.context = { ...past.session.context!, used: 330_000 }
+    past.request(330_000)
+    expect(past.told).toEqual([])
   })
 })
 
