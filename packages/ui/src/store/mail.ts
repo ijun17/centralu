@@ -59,7 +59,14 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
 
     loadTasks() {
       // A first read that fails (a host older than Tasks answers "Unknown method") lists none; a later one that fails keeps the list it had
-      const read = (platform: Platform) => platform.mail.tasks().catch((e: unknown) => (get().mailTasks === null ? NO_TASKS : Promise.reject(e)))
+      const read = async (platform: Platform) => {
+        try {
+          return await platform.mail.tasks()
+        } catch (e) {
+          if (get().mailTasks === null) return NO_TASKS
+          throw e instanceof Error ? e : new Error(errorMessage(e))
+        }
+      }
       return coalescedRead('mailTasks', get, read, (mailTasks) => void set({ mailTasks }))
     },
 
