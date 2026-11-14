@@ -78,7 +78,8 @@ export type MailThreadRow = z.infer<typeof MailThreadRow>
 /**
  * One piece of open work on the host as the Inbox's Tasks lists it (#1577, owner 2026-11-14): a message that waits for a reply (a task, or a message that
  * needs one), one row per recipient, whoever sent it. The host words its state; the window groups the rows (`groupTasks`) and decides nothing else.
- * `state`: `open` (not answered), `running` (the assignee's turn is on it), `review` (the person's task, reported, not closed by them), `released` (a stop
+ * `state`: `open` (not answered), `running` (the assignee's turn is on it), `held` (it waits for the person to say what happens to it, as a held mail row
+ * of `mail.list` says why), `review` (the person's task, reported, not closed by them), `released` (a stop
  * released it, or its assignee is gone: nobody is on it), `done` (settled, with `outcome` the host's word: `answered`, `reported`, `done`, `withdrawn`,
  * `gone`). A word this build does not know is drawn as written (docs/protocol.md §4)
  */

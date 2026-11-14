@@ -37,14 +37,16 @@ describe('grouping the tasks by who acts next', () => {
     expect(ids(g.done)).toEqual([answered.id])
   })
 
-  it('keeps each group newest first, with the questions before the reviews in Needs you however new a review is', () => {
+  it('keeps each group newest first, with the questions, then what is held, then the reviews in Needs you however new a review is', () => {
     const oldAsk = task({ assignee: PERSON, updatedAt: 1 })
     const newReview = task({ owner: PERSON, state: 'review', updatedAt: 50 })
     const newAsk = task({ assignee: PERSON, updatedAt: 40 })
+    // Held for the person between two sessions: nobody can act on it until the person does
+    const held = task({ state: 'held', updatedAt: 45 })
     const a = task({ updatedAt: 5 })
     const b = task({ updatedAt: 9 })
-    const g = groupTasks([oldAsk, newReview, a, newAsk, b])
-    expect(ids(g.needsYou)).toEqual([newAsk.id, oldAsk.id, newReview.id])
+    const g = groupTasks([oldAsk, newReview, a, held, newAsk, b])
+    expect(ids(g.needsYou)).toEqual([newAsk.id, oldAsk.id, held.id, newReview.id])
     expect(ids(g.waitingOnOthers)).toEqual([b.id, a.id])
   })
 

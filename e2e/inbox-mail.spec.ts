@@ -600,6 +600,33 @@ test('Tasks: the switch lists the host’s work by who acts next, opens a chain 
   await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
 })
 
+test('Tasks: a held request needs the person, and its row leads to Waiting’s held row; the arrow keys stay on the switch', async ({ page }) => {
+  await setup(page)
+  const LEAD = { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }
+  await page.evaluate(
+    (s) => (window as unknown as { __mock: { seedTask(s: Record<string, unknown>): string } }).__mock.seedTask(s),
+    { subject: 'Deploy the site', owner: LEAD, assignee: PARSER, held: 'policy' },
+  )
+  await page.getByTestId('counter').click()
+  // The arrows move along the switch and stay on it, both ways (a radio group's keys)
+  await page.getByTestId('inbox-tab-waiting').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('inbox-tab-tasks')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('inbox-tab-tasks')).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('inbox-tab-tasks').click()
+  const row = page.getByTestId('tasks-needs-you').locator('[data-testid^="task-"]', { hasText: 'Deploy the site' })
+  await expect(row).toContainText('Held')
+  await row.click()
+  // Where the person can act on it: Waiting, its held row and the button that frees it
+  await expect(page.getByTestId('inbox-tab-waiting')).toHaveAttribute('aria-checked', 'true')
+  const held = page.locator('[data-testid^="mail-held-"]', { hasText: 'Deploy the site' })
+  await expect(held).toBeInViewport()
+  await expect(held.locator('[data-testid^="mail-release-"]')).toBeVisible()
+  await expect(page.getByTestId('mail-thread')).toHaveCount(0)
+})
+
 test('Tasks: a host older than Tasks lists none, and Waiting works as before', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => ((window as unknown as { __mock: { mockMail: { knowsTasks: boolean } } }).__mock.mockMail.knowsTasks = false))

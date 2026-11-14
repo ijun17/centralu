@@ -110,18 +110,20 @@ export class MailMock {
    * Puts a piece of work on the host's task list, with the chain it opens: the person's own when they gave it or are asked, else one between
    * sessions they look into. `state` and `outcome` are the host's words (`MailTaskRow`)
    */
-  seedTask(spec: { subject: string; owner: MailParty; assignee: MailParty; body?: string; kind?: 'assign' | 'question'; state?: string; outcome?: string }): string {
+  seedTask(spec: { subject: string; owner: MailParty; assignee: MailParty; body?: string; kind?: 'assign' | 'question'; state?: string; outcome?: string; held?: string }): string {
     const kind = spec.kind ?? 'assign'
     const asksPerson = spec.assignee.kind === 'person'
-    const root = this.seed({ subject: spec.subject, from: spec.owner, body: spec.body ?? spec.subject, kind, assignee: spec.assignee, onlyHeld: !asksPerson })
+    const held = spec.held === undefined ? {} : { held: { reason: spec.held, recipient: spec.assignee } }
+    const root = this.seed({ subject: spec.subject, from: spec.owner, body: spec.body ?? spec.subject, kind, assignee: spec.assignee, onlyHeld: !asksPerson, ...held })
     const t = this.must(root)
-    if (spec.owner.kind !== 'person' && !asksPerson) {
+    // Held for the person, it is theirs to act on: no look in
+    if (spec.owner.kind !== 'person' && !asksPerson && spec.held === undefined) {
       t.lookIn = true
       t.row.unread = 0
       t.row.ask = null
     }
     const now = this.clock.now()
-    this.taskRows.push({ id: t.messages[0]?.id ?? root, root, subject: spec.subject, kind, owner: spec.owner, assignee: spec.assignee, state: spec.state ?? 'open', outcome: spec.outcome ?? null, createdAt: now, updatedAt: now })
+    this.taskRows.push({ id: t.messages[0]?.id ?? root, root, subject: spec.subject, kind, owner: spec.owner, assignee: spec.assignee, state: spec.state ?? (spec.held === undefined ? 'open' : 'held'), outcome: spec.outcome ?? null, createdAt: now, updatedAt: now })
     this.emit({ type: 'mail_changed', threadId: root, toPerson: false })
     return root
   }

@@ -1056,28 +1056,42 @@ describe("the Inbox's Tasks: every request on the host, one row for each recipie
     expect(stateOf(w, q.id, B)).toMatchObject({ state: 'done', outcome: 'done' })
   })
 
-  it('reads the newest 200 requests, newest first', () => {
+  it('reads every open request however old, and the newest 200 of the rest, newest first', () => {
     const w = ready(hostWorld())
-    const given = Array.from({ length: 201 }, (_, i) => {
+    w.clock.t += 10
+    const old = w.mail.task(PERSON, B, { text: 'Still open', origin: 'person', delivered: true }).id
+    const settled = Array.from({ length: 201 }, (_, i) => {
       w.clock.t += 10
-      return w.mail.task(PERSON, B, { text: `Task ${i}`, origin: 'person', delivered: true }).id
+      const id = w.mail.task(PERSON, B, { text: `Task ${i}`, origin: 'person', delivered: true }).id
+      w.store.mailbox.settle(id, B, 'withdrawn', w.clock.t)
+      return id
     })
-    const listed = w.person.tasks().map((t) => t.id)
-    expect(listed).toHaveLength(200)
-    expect(listed).toEqual(given.slice(1).reverse())
+    // The open one is not pushed out by 201 newer ones that are done; the oldest of those is
+    expect(w.person.tasks().map((t) => t.id)).toEqual([...settled.slice(1).reverse(), old])
+  })
+
+  it('held: a request waiting for the person to say what happens to it; one the person dismissed is not listed', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [B], text: 'Which branch?', needsReply: true }).message
+    for (const why of ['policy', 'loop', 'uncertain', 'failed']) {
+      dbOf(w).prepare(`UPDATE mail_recipients SET held = ? WHERE message_id = ?`).run(why, q.id)
+      expect(stateOf(w, q.id, B)).toMatchObject({ state: 'held', outcome: null })
+    }
+    dbOf(w).prepare(`UPDATE mail_recipients SET held = 'dismissed' WHERE message_id = ?`).run(q.id)
+    expect(rowsFor(w, q.id)).toEqual([])
   })
 })
 
 describe('the person looks in on a chain they are not in (#1577, owner 2026-11-14)', () => {
   const C = at('c')
-  /** A task between two sessions and a question back, with a row to the person that its sender withdrew: the person is in none of it */
+  /** A task between two sessions and a question back: the person is in none of it */
   function between() {
     const w = ready(hostWorld())
     w.clock.t += 10
     const task = w.mail.task(A, B, { text: 'Write the parser', origin: 'mail', delivered: true })
     w.clock.t += 10
-    const q = w.mail.send(B, { to: [A, PERSON], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
-    dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'withdrawn' WHERE message_id = ? AND recipient = ?`).run(q.id, PERSON)
+    const q = w.mail.send(B, { to: [A], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
     const stored = () => ({
       rows: dbOf(w).prepare(`SELECT * FROM mail_recipients WHERE message_id IN (?, ?) ORDER BY message_id, recipient`).all(task.id, q.id),
       facts: dbOf(w).prepare(`SELECT id, facts FROM mail WHERE root_id = ? ORDER BY id`).all(task.id),
@@ -1121,17 +1135,32 @@ describe('the person looks in on a chain they are not in (#1577, owner 2026-11-1
     expect(w.told).toEqual([])
   })
 
-  it('a chain the person is in is no look in: only what they may read, read for them, and theirs to close', () => {
+  it('a chain the person is in is no look in: the sessions’ messages in it show too, only the person’s are read, and it is theirs to close', () => {
     const w = ready(hostWorld())
     w.clock.t += 10
     const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?', needsReply: true }).message
     w.clock.t += 10
-    w.mail.send(A, { to: [B], text: 'I asked the person', replyTo: q.id })
+    const aside = w.mail.send(A, { to: [B], text: 'I asked the person', replyTo: q.id }).message
     const view = w.person.thread(q.id)
-    expect(view.messages.map((m) => m.id)).toEqual([q.id])
+    expect(view.messages.map((m) => m.id)).toEqual([q.id, aside.id])
     expect(view).toMatchObject({ lookIn: false, canReply: true, thread: { owner: { address: A }, state: 'open' } })
     expect(w.row(q.id, PERSON)?.readAt).not.toBeNull()
+    expect(w.row(aside.id, B)?.readAt).toBeNull()
     expect(w.person.close(q.id)).toMatchObject({ state: 'done' })
+  })
+
+  it('a question to the person its sender withdrew stays out of sight, and makes the chain no look in (§5.5: sent to them)', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const task = w.mail.task(A, B, { text: 'Write the parser', origin: 'mail', delivered: true })
+    w.clock.t += 10
+    const q = w.mail.send(B, { to: [A, PERSON], text: 'Which grammar?', needsReply: true, replyTo: task.id }).message
+    dbOf(w).prepare(`UPDATE mail_recipients SET settled = 'withdrawn' WHERE message_id = ? AND recipient = ?`).run(q.id, PERSON)
+    const before = dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()
+    const view = w.person.thread(task.id)
+    expect(view.messages.map((m) => m.id)).toEqual([task.id])
+    expect(view).toMatchObject({ lookIn: false, canReply: false })
+    expect(dbOf(w).prepare(`SELECT * FROM mail_recipients ORDER BY message_id, recipient`).all()).toEqual(before)
   })
 
   it('a session reads no more than before: a chain it is not in stays closed to its own mail tool', () => {

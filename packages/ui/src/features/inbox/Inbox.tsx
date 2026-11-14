@@ -85,6 +85,21 @@ export function Inbox() {
   const [taskAt, setTaskAt] = useState<InboxCursor>(CURSOR_START)
   const taskPlaced = settleCursor(taskRows.map(taskKey), taskAt, open)
   if (taskPlaced !== taskAt) setTaskAt(taskPlaced)
+  // A held task's act (Release, Resume, Dismiss) is on Waiting's held row: the row goes there and brings it into view, else it opens the chain
+  const [showHeld, setShowHeld] = useState<string | null>(null)
+  const openTask = useCallback(
+    (t: MailTaskRow) => {
+      if (t.state !== 'held' || !list.held.some((h) => h.messageId === t.id)) return void openMailThread(t.root)
+      setTab('waiting')
+      setShowHeld(t.id)
+    },
+    [list.held, openMailThread],
+  )
+  useEffect(() => {
+    if (showHeld === null || tab !== 'waiting') return
+    panelRef.current?.querySelector(`[data-testid="mail-held-${CSS.escape(showHeld)}"]`)?.scrollIntoView({ block: 'nearest' })
+    setShowHeld(null)
+  }, [showHeld, tab])
   // The choices of the card the keyboard is on, for the hint: the number keys pick on that card only, never on the one under the pointer
   const onRow = list.waiting[cursor]
   const choices = onRow?.kind === 'mail' ? (onRow.thread.ask?.choices?.length ?? 0) : 0
@@ -134,7 +149,7 @@ export function Inbox() {
       if (tab === 'tasks') {
         onTaskKey(action, taskRows, taskPlaced.row, {
           move: (to) => setTaskAt({ key: taskRows[to] ? taskKey(taskRows[to]) : null, row: to }),
-          open: (root) => void openMailThread(root),
+          open: openTask,
           done: (root) => void closeMail('finished', root),
           close: () => toggle(false),
         })
@@ -177,7 +192,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread, tab, taskRows, taskPlaced.row])
+  }, [open, list.waiting, cursor, openWaiting, openMailThread, toggle, markDone, closeMail, mailThread, closeMailThread, tab, taskRows, taskPlaced.row, openTask])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -203,7 +218,7 @@ export function Inbox() {
         data-no-drag
         tabIndex={-1}
         role="dialog"
-        aria-label="Waiting"
+        aria-label="Inbox"
         // Leaving, it takes no keys and no focus (focusReturn.ts)
         inert={leaving}
         className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 flex max-h-[calc(100vh/var(--text-zoom)-3.5rem)] w-[560px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
@@ -215,15 +230,16 @@ export function Inbox() {
         */}
         {!mailThread && (
           <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+            {/*
+              The list's keys are this screen's heart: a switch by pointer hands them back to the list, so ↑ ↓ walk it. The arrow keys on the switch stay
+              on it, as a radio group's do
+            */}
+            <div className="contents" onClick={() => panelRef.current?.focus()}>
             <Segmented
               label="Inbox"
               size="sm"
               value={tab}
-              // The list's keys are this screen's heart: after a switch, ↑ ↓ walk the list, not the switch's options
-              onChange={(t) => {
-                setTab(t)
-                panelRef.current?.focus()
-              }}
+              onChange={setTab}
               testId="inbox-tabs"
               options={[
                 {
@@ -252,6 +268,7 @@ export function Inbox() {
                 },
               ]}
             />
+            </div>
             <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
@@ -277,7 +294,7 @@ export function Inbox() {
         ) : tab === 'tasks' ? (
           // The switch fades the other list in (design-system §9)
           <div key="tasks" className="cc-fade flex min-h-0 flex-col">
-            <TaskList groups={tasks} cursor={taskPlaced.key} doneOpen={doneOpen} onToggleDone={() => setDoneOpen((o) => !o)} />
+            <TaskList groups={tasks} cursor={taskPlaced.key} doneOpen={doneOpen} onToggleDone={() => setDoneOpen((o) => !o)} onOpen={openTask} />
           </div>
         ) : nothingWaiting && list.earlier.length === 0 ? (
           <Nothing />
@@ -322,20 +339,23 @@ export function Inbox() {
 }
 
 /**
- * The list's keys on Tasks: up and down walk the rows, Enter opens the row's chain, D marks done the person's task that came back reported (the one
+ * The list's keys on Tasks: up and down walk the rows, Enter opens the row (`openTask`), D marks done the person's task that came back reported (the one
  * act such a row waits for) and opens any other, Esc closes. The number keys and Allow / Deny are Waiting's: a task row has no card
  */
 function onTaskKey(
   action: NonNullable<ReturnType<typeof inboxKeyAction>>,
   rows: readonly MailTaskRow[],
   at: number,
-  act: { move: (to: number) => void; open: (root: string) => void; done: (root: string) => void; close: () => void },
+  act: { move: (to: number) => void; open: (row: MailTaskRow) => void; done: (root: string) => void; close: () => void },
 ): void {
   const row = rows[at]
   if (action === 'down') act.move(Math.min(at + 1, rows.length - 1))
   else if (action === 'up') act.move(Math.max(at - 1, 0))
-  else if (action === 'open' && row) act.open(row.root)
-  else if (action === 'done' && row) (row.state === 'review' ? act.done : act.open)(row.root)
+  else if (action === 'open' && row) act.open(row)
+  else if (action === 'done' && row) {
+    if (row.state === 'review') act.done(row.root)
+    else act.open(row)
+  }
   else if (action === 'close') act.close()
 }
 

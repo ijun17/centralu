@@ -2,7 +2,6 @@ import { taskKey, type TaskGroups } from '@cc/core'
 import type { MailTaskRow } from '@cc/protocol/client'
 import { Badge } from '../../components/Badge.jsx'
 import { RelativeAge } from '../../components/RelativeAge.js'
-import { useStore } from '../../store/store.js'
 import { FoldedGroup } from './FoldedGroup.jsx'
 import { People } from './MailRows.jsx'
 import { taskStateLabel } from './mailLabels.js'
@@ -12,7 +11,20 @@ import { taskStateLabel } from './mailLabels.js'
  * folded. A row opens its chain in the Inbox's thread view; one between sessions opens read-only (`MailThreadView.lookIn`). The keys walk the rows
  * as they walk Waiting's (`Inbox`), so the row under the cursor is named by `cursor`.
  */
-export function TaskList({ groups: g, cursor, doneOpen, onToggleDone }: { groups: TaskGroups; cursor: string | null; doneOpen: boolean; onToggleDone: () => void }) {
+export function TaskList({
+  groups: g,
+  cursor,
+  doneOpen,
+  onToggleDone,
+  onOpen,
+}: {
+  groups: TaskGroups
+  cursor: string | null
+  doneOpen: boolean
+  onToggleDone: () => void
+  /** What a row does when pressed: its chain, or Waiting's held row for a held one (`Inbox`) */
+  onOpen: (t: MailTaskRow) => void
+}) {
   const parts = [
     { title: 'Needs you', rows: g.needsYou, testId: 'needs-you' },
     { title: 'Waiting on others', rows: g.waitingOnOthers, testId: 'waiting-on-others' },
@@ -35,7 +47,7 @@ export function TaskList({ groups: g, cursor, doneOpen, onToggleDone }: { groups
           </h3>
           <ul className="flex flex-col gap-0.5 p-1">
             {p.rows.map((t) => (
-              <TaskRow key={taskKey(t)} task={t} active={taskKey(t) === cursor} />
+              <TaskRow key={taskKey(t)} task={t} active={taskKey(t) === cursor} onOpen={onOpen} />
             ))}
           </ul>
         </section>
@@ -43,7 +55,7 @@ export function TaskList({ groups: g, cursor, doneOpen, onToggleDone }: { groups
       {g.done.length > 0 && (
         <FoldedGroup label="Done" count={g.done.length} open={doneOpen} onToggle={onToggleDone} testId="tasks-done">
           {g.done.map((t) => (
-            <TaskRow key={taskKey(t)} task={t} active={taskKey(t) === cursor} dim />
+            <TaskRow key={taskKey(t)} task={t} active={taskKey(t) === cursor} onOpen={onOpen} dim />
           ))}
         </FoldedGroup>
       )}
@@ -52,12 +64,11 @@ export function TaskList({ groups: g, cursor, doneOpen, onToggleDone }: { groups
 }
 
 /** One task: its subject, who gave it to whom with the live dot of the one who has it, its state and when it last moved */
-function TaskRow({ task: t, active, dim }: { task: MailTaskRow; active: boolean; dim?: boolean }) {
-  const open = useStore((s) => s.openMailThread)
+function TaskRow({ task: t, active, onOpen, dim }: { task: MailTaskRow; active: boolean; onOpen: (t: MailTaskRow) => void; dim?: boolean }) {
   const key = taskKey(t)
   return (
     <li data-cursor={active || undefined} className={`rounded-field transition-colors ${active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'} ${dim ? 'opacity-80' : ''}`}>
-      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => void open(t.root)} data-testid={`task-${key}`}>
+      <button className="flex w-full min-w-0 items-center gap-2.5 py-2 pl-3 pr-3 text-left" onClick={() => onOpen(t)} data-testid={`task-${key}`}>
         <span className="min-w-0 truncate text-md text-ink">{t.subject}</span>
         <People owner={t.owner} assignee={t.assignee} />
         <span className="ml-auto flex shrink-0 items-center gap-2.5">

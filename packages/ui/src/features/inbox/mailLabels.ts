@@ -32,6 +32,8 @@ export function taskStateLabel(t: Pick<MailTaskRow, 'state' | 'outcome' | 'assig
       return 'Open'
     case 'running':
       return 'Running'
+    case 'held':
+      return 'Held'
     case 'review':
       return 'In review'
     case 'released':

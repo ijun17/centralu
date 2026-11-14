@@ -55,6 +55,8 @@ const LIST_SCAN = 1_000
 const CHAIN_CAP = 1_000
 /** How many of the newest messages that wait for a reply the Inbox's Tasks reads: one row for each of their recipients */
 const TASK_SCAN = 200
+/** Open requests Tasks lists at most, whatever their age: a ceiling far above real use, so one listing stays bounded */
+const TASK_OPEN = 2000
 const PREVIEW_CHARS = 140
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
 const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'policy'] as const
@@ -119,14 +121,15 @@ export class MailPerson {
   }
 
   /**
-   * The work on this host as the Inbox's Tasks lists it (#1577): the newest messages that wait for a reply, whoever sent them, one row for each
-   * recipient. A row to the person that is kept from them is left out, as the rest of their window leaves it out
+   * The work on this host as the Inbox's Tasks lists it (#1577): every message still waiting for a reply and the newest of the rest, whoever sent
+   * them, one row for each recipient. A row to the person that is kept from them is left out, as the rest of their window leaves it out, and so is one
+   * the person dismissed: it goes nowhere
    */
   tasks(): MailTaskRow[] {
-    return this.records.newestWork(TASK_SCAN).flatMap((m) => {
+    return this.records.newestWork(TASK_SCAN, TASK_OPEN).flatMap((m) => {
       const closed = this.records.message(m.rootId)?.facts.closed !== undefined
       return this.records.recipients(m.id).flatMap((r) => {
-        if (r.recipient === PERSON && hiddenFromPerson(r)) return []
+        if ((r.recipient === PERSON && hiddenFromPerson(r)) || r.held === 'dismissed') return []
         const party = parseAddress(r.recipient)
         const working = party?.kind === 'session' && this.host.turnOn(party.sessionId)?.work === m.id
         const { state, outcome } = taskState(m, r, { closed, here: this.here(r.recipient), working })
@@ -149,16 +152,17 @@ export class MailPerson {
   }
 
   /**
-   * A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it. A chain the
-   * person is not in they look in on (#1577, owner 2026-11-14): every message of it, and nothing is read, answered or changed for anyone (§5.5)
+   * A chain with its messages, which the person reads: what is returned is read for them. An old thread's id names the chain moved from it. The
+   * sessions' messages to each other in it are shown too, read-only (#1577, owner 2026-11-14); a chain the person is not in at all they look in on:
+   * nothing is read, answered or changed for anyone (§5.5). A message to them kept from them stays out of sight either way
    */
   thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
     // An old thread's id opens the newest chain moved from it
     const root = this.rootsOf(threadId)[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
-    const theirs = this.shown(root)
-    const lookIn = theirs.length === 0
-    const all = lookIn ? this.records.numbered(root, CHAIN_CAP).map(({ m, n }) => ({ m, seq: n })) : theirs
+    const chain = this.records.numbered(root, CHAIN_CAP).map(({ m, n }) => ({ m, seq: n }))
+    const lookIn = !chain.some((s) => this.involves(s.m))
+    const all = chain.filter((s) => this.readable(s.m) || !this.involves(s.m))
     let page: Shown[]
     if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
     else if (opts.tail !== undefined || !opts.all) {
@@ -273,7 +277,7 @@ export class MailPerson {
     const root = roots[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
     // A chain the person only looks in on is the sessions' own work (#1577): closing it would withdraw what they asked of each other
-    if (roots.every((r) => this.shown(r).length === 0)) throw refuse('not_yours', 'You are not in this mail: you can read it, not close it.')
+    if (roots.every((r) => !this.chainOf(r).some((m) => this.involves(m)))) throw refuse('not_yours', 'You are not in this mail: you can read it, not close it.')
     const now = Date.now()
     /** The sessions to tell, once each across every chain the id names, with the person's requests withdrawn that they had and where each chain ended */
     const tell = new Map<string, { address: string; root: string; ids: string[]; ends: string[] }>()
@@ -447,6 +451,12 @@ export class MailPerson {
   private readable(m: MailRow): boolean {
     if (m.sender === PERSON) return true
     return this.records.recipients(m.id).some((r) => (r.recipient === PERSON && !hiddenFromPerson(r)) || isPersonHold(r.held))
+  }
+
+  /** Whether the person is in the message at all: sent by them, sent to them (kept from their sight or not), or held for them (§5.5 "The person looks in") */
+  private involves(m: MailRow): boolean {
+    if (m.sender === PERSON) return true
+    return this.records.recipients(m.id).some((r) => r.recipient === PERSON || isPersonHold(r.held))
   }
 
   /** An old thread's messages before the first one moved from it: the chain's history, read-only (§6.3) */
@@ -641,14 +651,16 @@ function windowKind(m: MailRow): string {
 /**
  * One recipient's part in a message that waits for a reply, as the Inbox's Tasks words it (#1577), the host's one rule for it. In review: the person's task,
  * reported, in a chain the person has not closed (as the list's row says, a report the person has not looked at wins over its being settled). Done: settled,
- * with how; a row to the person an older build settled without an answer is still a question to them (`asking`), and any other such row is done. Running:
- * the recipient's turn is on this message. Released: nobody is on it, as a stop let it go or its session is gone. Open: the rest
+ * with how; a row to the person an older build settled without an answer is still a question to them (`asking`), and any other such row is done. Held:
+ * it waits for the person to say what happens to it (Waiting's held row). Running: the recipient's turn is on this message. Released: nobody is on it,
+ * as a stop let it go or its session is gone. Open: the rest
  */
 function taskState(m: MailRow, r: RecipientRow, on: { closed: boolean; here: boolean; working: boolean }): { state: string; outcome: string | null } {
   if (m.sender === PERSON && m.kind === 'task' && r.settled === 'reported' && !on.closed) return { state: 'review', outcome: null }
   const asksPerson = r.recipient === PERSON && r.settled === 'legacy' && r.answerId === null
   // `legacy` is no word of the window's: an older build settled the row, which is done
   if (r.settled !== null && !asksPerson) return { state: 'done', outcome: r.settled === 'legacy' ? 'done' : r.settled }
+  if (isPersonHold(r.held)) return { state: 'held', outcome: null }
   if (on.working) return { state: 'running', outcome: null }
   if (r.releasedAt !== null || !on.here) return { state: 'released', outcome: null }
   return { state: 'open', outcome: null }

@@ -106,6 +106,7 @@ describe('a task’s state', () => {
     expect(taskStateLabel({ state: 'open', outcome: null, assignee: person })).toBe('Waiting on you')
     expect(taskStateLabel({ state: 'running', outcome: null, assignee: session })).toBe('Running')
     expect(taskStateLabel({ state: 'review', outcome: null, assignee: session })).toBe('In review')
+    expect(taskStateLabel({ state: 'held', outcome: null, assignee: session })).toBe('Held')
     expect(taskStateLabel({ state: 'released', outcome: null, assignee: session })).toBe('Released')
     expect(taskStateLabel({ state: 'queued', outcome: null, assignee: session })).toBe('queued')
   })
