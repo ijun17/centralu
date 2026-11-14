@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 
 /** The release this build is in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than all */
@@ -614,8 +614,106 @@ describe('UpdateService', () => {
     await settle()
     expect(elapsed).toBe(10 * 60 * 1000)
     expect(h.calls).toHaveLength(21)
+    expect(h.svc.current()).toMatchObject({ phase: 'failed', error: 'npm did not serve 9999.0.0 within 10 minutes: npm error code ETARGET' })
+  })
+
+  /**
+   * npm 11's own stderr, recorded against a registry whose packument lists the version while its tarball answers 404 (#2279),
+   * failing the way `runCommand` throws it. npm adds " - <error>" after the URL only when the 404's body has an `error`
+   * field, as registry.npmjs.org's does and a mirror's may not
+   */
+  const npm404 = (url: string, said = ' - Not found') => {
+    const stderr = [
+      'npm error code E404',
+      `npm error 404 Not Found - GET ${url}${said}`,
+      'npm error 404',
+      `npm error 404  'centralu@${url}' is not in this registry.`,
+      'npm error 404',
+      'npm error 404 Note that you can also install from a',
+      'npm error 404 tarball, folder, http url, or git url.',
+      'npm error A complete log of this run can be found in: /tmp/npm-cache/_logs/2026-11-14T22_28_21_124Z-debug-0.log',
+    ].join('\n')
+    return Object.assign(new Error(failureDetail('npm', stderr) ?? ''), { exitCode: 1, stderr })
+  }
+  const TARBALL = 'https://registry.npmjs.org/centralu/-/centralu-9999.0.0.tgz'
+
+  it.each([
+    ['registry.npmjs.org', ' - Not found'],
+    ['a registry whose 404 has no error field', ''],
+  ])('waits out a 404 on the tarball of the version it installs, which npm serves after the packument (%s)', async (_, said) => {
+    let tries = 0
+    const h = make({
+      registry: '9999.0.0',
+      run: async (file) => {
+        if (file === 'npm' && ++tries === 1) throw npm404(TARBALL, said)
+      },
+      wait: async () => {},
+    })
+    await h.svc.check(true)
+    void h.svc.apply()
+    await settle()
+    expect(h.published.some((s) => s.phase === 'waiting_for_npm' && s.error === 'Waiting for npm to serve 9999.0.0')).toBe(true)
+    expect(h.svc.current().phase).toBe('restart_required')
+  })
+
+  it('ends a tarball 404 at ten minutes, saying the wait ran out and the line npm says it in', async () => {
+    let elapsed = 0
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    onTestFinished(() => logged.mockRestore())
+    const h = make({
+      registry: '9999.0.0',
+      run: async () => { throw npm404(TARBALL) },
+      now: () => elapsed,
+      wait: async (ms) => { elapsed += ms },
+    })
+    await h.svc.check(true)
+    void h.svc.apply()
+    await settle()
+    expect(elapsed).toBe(10 * 60 * 1000)
+    expect(h.svc.current()).toMatchObject({ phase: 'failed', error: `npm did not serve 9999.0.0 within 10 minutes: npm error 404  'centralu@${TARBALL}' is not in this registry.` })
+    expect(logged.mock.calls.filter(([line]) => String(line).startsWith('[updates] install failed'))).toEqual([['[updates] install failed: exit 1: npm error code E404']])
+  })
+
+  it.each([
+    ['the packument', 'https://registry.npmjs.org/centralu'],
+    ['another version', 'https://registry.npmjs.org/centralu/-/centralu-9998.0.0.tgz'],
+    ['a prerelease of the version', 'https://registry.npmjs.org/centralu/-/centralu-9999.0.0-beta.1.tgz'],
+    ['another package', 'https://registry.npmjs.org/left-pad/-/left-pad-9999.0.0.tgz'],
+  ])('fails a 404 on %s at once, and logs it once', async (_, url) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const waits: number[] = []
+      const h = make({
+        registry: '9999.0.0',
+        run: async () => { throw npm404(url) },
+        now: () => waits.reduce((a, b) => a + b, 0),
+        wait: async (ms) => { waits.push(ms) },
+      })
+      await h.svc.check(true)
+      void h.svc.apply()
+      await settle()
+      expect(waits).toEqual([])
+      expect(h.svc.current().phase).toBe('failed')
+      expect(logged.mock.calls.filter(([line]) => String(line).startsWith('[updates] install failed'))).toEqual([['[updates] install failed: exit 1: npm error code E404']])
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  it('fails at once when only a warning before the error names ETARGET', async () => {
+    const waits: number[] = []
+    const stderr = ['npm warn notarget No matching version found for an-optional-dependency@^2.0.0.', 'npm error code EACCES', "npm error EACCES: permission denied, mkdir '/usr/lib/node_modules/centralu'"].join('\n')
+    const h = make({
+      registry: '9999.0.0',
+      run: async () => { throw Object.assign(new Error(failureDetail('npm', stderr) ?? ''), { exitCode: 1, stderr }) },
+      now: () => waits.reduce((a, b) => a + b, 0),
+      wait: async (ms) => { waits.push(ms) },
+    })
+    await h.svc.check(true)
+    void h.svc.apply()
+    await settle()
+    expect(waits).toEqual([])
     expect(h.svc.current().phase).toBe('failed')
-    expect(h.svc.current().error).toContain('ETARGET')
   })
 
   it('fails non-propagation errors immediately without waiting or retrying', async () => {
