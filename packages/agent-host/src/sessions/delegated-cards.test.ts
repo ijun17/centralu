@@ -688,20 +688,4 @@ describe('cards across a host restart (#676, docs/plans/mailbox.md §10.6.4)', (
     next.m.delivery.stop()
     expect(told(parent, child)).toEqual([])
   })
-
-  it('drops the delegated turns an earlier build left, which this build neither reads nor writes', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const first = host()
-    const parent = (await first.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
-    const r = await first.mgr.startAgent(parent, { task: 'write the schema', wait: false })
-    if (!r.ok) throw new Error(r.error)
-    const db = (w.store as unknown as { db: { prepare(sql: string): { all(): unknown[]; run(...a: unknown[]): unknown } } }).db
-    const rows = () => db.prepare('SELECT session_id AS sessionId, caller_session_id AS callerId FROM delegated_turns').all()
-    expect(rows()).toEqual([])
-    await first.mgr.tenure.disposeAll()
-    // An earlier build's row for a turn it gave, as beta.57 writes it
-    db.prepare(`INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards, turn_id) VALUES (?, ?, 1, 'q-1.abcd1234', 't-1')`).run(r.sessionId, parent)
-    host()
-    expect(rows()).toEqual([])
-  })
 })

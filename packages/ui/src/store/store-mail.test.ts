@@ -256,14 +256,13 @@ describe('mail held for the person', () => {
   it('goes now on Release, is let go on Dismiss, and a pause is lifted on Resume', async () => {
     const platform = attached()
     platform.seedMail({ subject: 'a', from: worker, body: 'x', held: { reason: 'loop', recipient: worker } })
-    platform.seedMail({ subject: 'b', from: worker, body: 'y', held: { reason: 'budget', recipient: worker } })
+    platform.seedMail({ subject: 'b', from: worker, body: 'y', held: { reason: 'failed', recipient: worker } })
     await useStore.getState().loadMail()
     const [first, second] = useStore.getState().mail!.held
     expect(await useStore.getState().heldMail('release', first!)).toBe(true)
     expect(await useStore.getState().heldMail('dismiss', second!)).toBe(true)
     expect(useStore.getState().mail?.held).toEqual([])
 
-    expect(await useStore.getState().resumeMail({ sessionId: 's1' })).toBe(true)
     expect(await useStore.getState().resumeMail({ threadId: 't' })).toBe(true)
     platform.mockMail.waiting = 4
     await useStore.getState().loadMail()
@@ -273,7 +272,6 @@ describe('mail held for the person', () => {
     expect(platform.mockMail.calls.filter((c) => /^(release|dismiss|resume|wake)/.test(c))).toEqual([
       `release:${worker.address}:${first!.messageId}`,
       `dismiss:${worker.address}:${second!.messageId}`,
-      'resume:session:s1',
       'resume:thread:t',
       'wake:false',
     ])

@@ -32,8 +32,6 @@ export type MailHooks = {
   stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
   /** The wait of a stop Centralu continues by itself ended, continued or not (#1415): who the stop's notice was held from hears it once */
   waitEnded?(sessionId: string, why: 'limit' | 'network', starter: string | null, end: WaitEnd): void
-  /** This host leaves, with these sessions in a turn: what an earlier build that may take over reads of their open tasks is written (`leaveForEarlierBuild`) */
-  leaving?(inTurn: readonly string[]): void
   /**
    * A handoff moves the original's mail to the successor (mailbox §7.7, §10.6.5, `MessageService.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids), and the tasks it gave the `children` that move. Run inside the
@@ -174,15 +172,6 @@ export class MailSessionsView {
       this.hooks?.waitEnded?.(sessionId, why, starter, end)
     } catch (e) {
       console.error(`[mail] ${sessionId.slice(0, 8)}: the end of its wait could not be told to the senders (${errorMessage(e)})`)
-    }
-  }
-
-  /** This host leaves (`HostTenure.disposeAll`): the sessions still in a turn, for an earlier build that may take over (`MailHooks.leaving`). Never throws */
-  mailLeaving(inTurn: readonly string[]): void {
-    try {
-      this.hooks?.leaving?.(inTurn)
-    } catch (e) {
-      console.error(`[mail] the marks for an earlier build could not be written (${errorMessage(e)})`)
     }
   }
 

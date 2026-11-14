@@ -7,7 +7,6 @@ import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
-import { leaveForEarlierBuild, takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
 import { answerRecorder, delegationRecorder, openTaskParties, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
@@ -312,7 +311,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       service.stops.stopWaitEnded(addressOf(id), why, starter ? addressOf(starter) : null, end)
       if (!end.continued) watches.changed(addressOf(id), 'stopped')
     },
-    leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
     handOver: (from, to, which, children) => {
       const moveMail = () => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
       return aboutSessions(which === 'all' ? watches.handOver(addressOf(from), addressOf(to), moveMail) : moveMail())
@@ -430,9 +428,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
       }
       try {
-        takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id) })
+        // What a build of v70 to v73 left for the builds the store's floor keeps out since step 74 (`dropReportMarks`)
+        store.children.dropReportMarks()
       } catch (e) {
-        console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
+        console.error(`[mail] deleting the report marks an older build left failed: ${errorMessage(e)}`)
       }
       delivery.start()
       // No process outlives its host: a session the last host left at rest after a turn that ended as turns do, with tasks it did not answer,

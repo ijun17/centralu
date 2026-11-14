@@ -293,12 +293,17 @@
   {
    "to": 73,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 74,
+   "breaksOlderReaders": true,
+   "minReader": 70
   }
  ],
- "version": 73,
- "ran": 72,
+ "version": 74,
+ "ran": 73,
  "store": {
-  "userVersion": 73,
+  "userVersion": 74,
   "master": [
    {
     "type": "index",
@@ -1543,7 +1548,7 @@
     "rows": [
      {
       "key": "min_reader_version",
-      "value": "68"
+      "value": "70"
      }
     ]
    },

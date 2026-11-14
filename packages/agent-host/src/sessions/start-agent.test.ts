@@ -348,10 +348,8 @@ describe('starting another agent in the same project', () => {
     await Promise.all(reports)
     expect(said()).toEqual([])
     expect(reports).toEqual([])
-    // Nor settles what the child owes: its task stays open for the next start, to tell the turn stopped or continue it (#1618), and the mark an
-    // earlier build reads is written for it, in case the next host is one (docs/plans/mailbox.md §10.6.3 "Restart, swap and older builds")
+    // Nor settles what the child owes: its task stays open for the next start, to tell the turn stopped or continue it (#1618)
     expect(openTasks(s, child)).toHaveLength(1)
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
   })
 
   it('a safe session in a trusted project still asks (#673)', async () => {

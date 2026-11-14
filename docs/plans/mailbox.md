@@ -235,10 +235,13 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     The guards run before the send's transaction, so the refusal does not take the line back.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
-  - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
+  - **Rows an earlier build held `loop`** still show in the Inbox with their Resume (`mail.resume`), which
     lets them go as the mail they are and marks them `released`, so a previous build still serving during a host swap
     does not hold them again. They are not let go on their own at upgrade: an older build may still be serving, and
-    the person sees what waited.
+    the person sees what waited. **The `budget` Resume is ended (#2247):** store step 72 (#2243) ended every row held
+    `budget`, no build the store's floor admits sets it, and the word is no hold of this build's: the window has no
+    Resume for a session, and `mail.resume {sessionId}` from an older window is accepted and resumes nothing. A v61
+    receipt held `budget` that the move of §6.3 still meets is written `dismissed`.
   - **Loops are left to the agents' judgement:** answer only when there is something to say; when work is not yours,
     tell the sender instead of passing it on; ask back at most once, then ask the person. The quiet answer (D3) still
     ends a courtesy ping-pong without a turn.
@@ -276,6 +279,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     to neither settles M8's open tasks as reported (N1) nor reports a settled one again. M7 stops that write, and its
     store step turns any mark left without a task into one (M7), so a store last served by a build before M8 loses no
     owed report.
+  - **As built (#2258, store step 74).** #1948 steps 2 to 4 did M8's work; the marks went on being written only as a
+    host left, for a rollback to a build before them. Step 74 raises the floor to 70 (beta.58, the first build with
+    those steps), turns what the builds before it left (held requests, marks with no task) into tasks with its own
+    statements, and deletes it with `delegated_turns` and the old per-session keys. This build neither reads nor
+    writes marks; it deletes at each start those a build of v70 to v73 leaves as it goes. Dropping the tables waits
+    for a step with the floor at or above 74.
   - *Not taken:* two records with no stated truth (round 1). A report the old build sent by `report_marks` would leave
     the task row open for good, and every later report would say `waiting`.
   - *Not taken:* "later" with no slice. The report paths are where most of this month's bugs came from (#1386, #1523,
@@ -698,7 +707,7 @@ These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, 
   and acts on its `ReportedAs` answer (`child-reports.ts:194-216`, `delegation.ts:224`). The old plan read the mail
   report as the record.
 - A start already reconciles what an earlier build reported while this one was away: `takeOverFromEarlierBuild`
-  (`adoption.ts:92-125`) adopts report marks and closes threads the marks no longer owe. §9.5 re-keys it to task rows.
+  (`adoption.ts:92-125` (gone since store step 74, #2258, which did it once)) adopts report marks and closes threads the marks no longer owe. §9.5 re-keys it to task rows.
 - There are two holds today, not one: `holdsInbound` for `auto` receivers (`policy.ts:22`) and the untrusted asker's
   request (`delivery.ts:518-520`, wired at `main.ts:441-444` from `askerFacts(...).trusted`).
 
@@ -962,9 +971,10 @@ tables, so nothing in them is pending a second time, and what is not pending sta
   `cause_id` null, `depth` 0.
 
 For the receipt: `attempt_at`, `delivered_at`, `read_at` as the receipt has them (`read_at = COALESCE(r.read_at,
-r.handled_at)`); `held` as it is for every recipient hold (`uncertain`, `failed`, `loop`, `budget` and `policy`, told
+r.handled_at)`); `held` as it is for every recipient hold (`uncertain`, `failed`, `loop` and `policy`, told
 of or not: the move releases nothing held), and the person's `released` (their Resend of a `policy` or `budget`
-hold: sent as it is, never held again).
+hold: sent as it is, never held again). Since #2243 a `budget` hold, and a `policy` hold today's gate would not set, is
+written `dismissed`.
 
 **One transaction, not chunked.** The move blocks the host once, after its ready line: measured at 0.74 s for 20,000
 pending receipts and 3.8 s for 100,000. It runs on the first start of the switch build only (a second finds nothing),
@@ -1442,7 +1452,7 @@ Until M8 a task row the old paths no longer owe does not count, whatever its sta
 - for the owner `person`: `children.personOwes(childId)`, which from M3a reads the task row itself (`personWork.owes`
   is already mail-backed, `main.ts:482`).
 
-**At every `ready`** (`takeOverFromEarlierBuild`, `adoption.ts:92-125`, re-keyed, after §6.3 and before delivery):
+**At every `ready`** (`takeOverFromEarlierBuild`, `adoption.ts:92-125`, re-keyed, after §6.3 and before delivery; until store step 74 did it once and `mail/adoption.ts` went, #2258):
 
 1. **Marks with no task.** For each report mark (`listReportMarks`) with no unsettled task from its caller to its
    session, write one (`mail.task`, `delivered: true`, origin as `adoptOldMarks` chooses today, `facts.paused` when
@@ -1699,8 +1709,8 @@ was never its work). The person's Stop releases only the tasks of the turn it st
 session can still answer the others, so their givers are not told (owner, 2026-11-11). A stop that leaves it unable to answer (an error, a
 usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. The person's own tasks are released and told the same way
 (§10.6.3 "The person's own work"). The rows stay open, so a
-reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
-released task as reported.
+reply after the person continues the session still answers them, and the start's adoption of older report marks (store step 74 since #2258)
+does not settle a released task as reported.
 
 **Who is told, woken, or left to read.** The owner's rule, as the tables give it:
 
@@ -1719,7 +1729,7 @@ own notice says it), nor when an older report path tells it or may (`told`, `hel
 owed the turn's report, the one that gave the turn, and the one that started it (since step 4 only the one that started it, `askedBy`,
 §10.6.4; the notice's key keeps a later start from telling it again). One owed the report is told whoever's turn it was ("Its report to you will not come.") and woken
 unless the same quit cut it: the start drops its report mark, so it would never hear otherwise. The stop notice runs before the start brings
-the report marks and tasks in step (`takeOverFromEarlierBuild`), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
+the report marks and tasks in step (`takeOverFromEarlierBuild` then; store step 74 did it once and it is gone, #2258), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
 turn through the report path (`quitNotices`, `tellAskerOfInterruption`), which woke a parent at rest that was owed nothing.
 
 **What it replaced.** `HostTenure.quitNotices`, `quitRequesters`, `quitTold`, `quitTellEnded` and the requester table at the start;
@@ -1794,14 +1804,15 @@ choose: what a busy target means for these three calls is that the request is ma
 text.
 
 **Restart, swap and older builds.** No store step (the next free is v70). This build writes no `queued_requests` row. At every
-`ready`, `takeOverFromEarlierBuild` turns each row an older build left into an undelivered task from its requester (its text, its
+`ready`, `takeOverFromEarlierBuild` turned (until store step 74, below) each row an older build left into an undelivered task from its requester (its text, its
 `via` as the origin) and deletes the row, in one transaction; a row whose requester or session is gone is deleted with no task, and a
 row through a tool this build does not know stays (#384). The task goes once and only to its session: a restart wakes no one else (a
 delivery half done at a crash is held `uncertain` for the person, §7.6.5, never sent twice). A row the older build was delivering at the
 swap (`delivering_at`) is turned into a task too; the older build delivered such a row again itself, so at most one duplicate, as
 before. An older build (beta.57) after a rollback finds no queued rows; the tasks this build left undelivered are mail it delivers
 itself (its drain takes a task as a turn's work), and its adoption leaves an undelivered task open (`pendingFor` from the sender). Mail
-that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65).
+that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65). **Since store step 74 (#2258):** the step
+turns the rows once and deletes them, the store's floor is 70 (beta.57 is refused), and no start reads `queued_requests`.
 
 **Linked machines (#2067).** Mail does not cross links. A busy child on a linked machine keeps the hub's note hold (`RemoteAgents.hold`,
 `RemoteAgent.queued`), now held without `ifBusy: "queue"`, which the tool no longer has. That is a second definition of "a send to a
@@ -1950,7 +1961,9 @@ the running turn is the work of (its `mail_turns` row), as that build's own mark
 turn's end goes to the one it was for; when the turn is no session's task (the person's, the CLI's own), the sender of the newest open task, the last
 instruction the turn took in. The other senders' tasks are settled by that build with no report. A session at rest at a rollback has its open tasks
 settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (#1948, 2026-11-11): beta.57's shape
-cannot change, and a rollback is rare.
+cannot change, and a rollback is rare. **Since store step 74 (#2258):** the step deletes the five keys and turns the marks once, the store's floor
+is 70 (beta.57 is refused), no start reads a mark, and none is written as this build leaves; every start deletes unread the marks a build of v70 to
+v73 still leaves as it goes (`dropReportMarks`), since those builds read them back at their own start and a mark this build did not write is stale.
 
 **Open points, accepted.** A seat that cannot read mail hears of a session deleted (`gone`) or of a turn lost at a restart (`lost`) only by the
 mailbox's notice, which it never reads, as on main. The cut line kept for the answer after a session's own background work (`cutsUntold`) is memory
@@ -2030,7 +2043,7 @@ turn owner was:
 | Removed | What replaces it |
 |---|---|
 | `ChildOwnership.turnOwners`, `TurnOwner`, `ownTurn`, `releaseTurn`, `adoptTurn`, `markTurnTold`, `restoreTurns` | the open tasks (`openTaskParties`) |
-| `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; every start deletes the rows (`dropDelegatedTurns`) |
+| `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; store step 74 deletes the rows (#2258) |
 | The relayed notice to the owner (`tellCardRaised`) and `told_cards` | the mail notice and its dedupe key; the relay only for a seat that cannot read mail |
 | `answersApproval` as the whole answer rule | the gate above (`cardGivers`' `answerer`, then `refusal`) |
 
@@ -2341,7 +2354,7 @@ checked strictly (`orchestrator-tools.ts:619-626`).
 - `mail.held` keeps Resend / Dismiss for `uncertain` and `failed`; `mail.resume` and `mail.wake` keep their meaning.
 - `mail.resume {threadId}` resolves `threadId` as a root id and lets every row an earlier build held `loop` in that
   chain go (Q-M3a-24; D32: nothing holds `loop` now, so there is no pair count to reset); `mail.resume {sessionId}`
-  lets a session's rows held `budget` go. Both mark the rows `released`.
+  let a session's rows held `budget` go; since #2247 it is accepted and resumes nothing. The thread's Resume marks the rows `released`.
 
 ### 12.2 Host methods (M3a, D29) and older windows
 
@@ -2960,7 +2973,7 @@ and passes on its own; the stack lands together.
   `machine-flow.ts`'s `rollback` case (`:268-273`, before `this.ask`) refuse with S17.
 - **`mail/delegation.ts`.** As §9.1 to §9.3 and §9.6. `closingRecorder`, the thread parts of `answerRecorder` and
   `finishRecorder` go. `reportRecorder` returns `ReportedAs` per §9.3's table.
-- **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5.
+- **`mail/adoption.ts`.** `takeOverFromEarlierBuild` per §9.5 (deleted with store step 74, #2258).
 - **`mail/asked-by.ts`** reads the turn's message; `askerFacts.trusted` is `!reach.untrusted(projectId)` (§7.2).
 - **`mail/person.ts`** (M3a-person, as built: Q-M3a-20). The window's methods (`mail.list`, `mail.thread`,
   `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
@@ -3377,7 +3390,7 @@ step 2), nor finds a mark M8 already reported and reports it again (K1). M7 stop
   task row as the truth: `ReminderSessions.oldOwes` goes, and `covering` and `waitingOn` are called with
   `owes = () => true`.
 - `mail/adoption.ts`: `takeOverFromEarlierBuild` keeps only step 1 of §9.5 (marks a previous build wrote become
-  tasks) for one release, then goes with M7.
+  tasks) for one release, then goes with M7. Done: store step 74 does it once, and the file is gone (#2258).
 - `queued_requests` (a request waiting for the orchestrator's turn) becomes the undelivered request rows; its reads go
   to `MailboxRecords.pendingFor(orchestrator)`.
 - Linked work (`LinkedReports`, `endOwed`) is **not** in this slice: it waits for mail across links (§14).

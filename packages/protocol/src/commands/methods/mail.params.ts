@@ -32,7 +32,10 @@ export const mailParams = {
     recipient: z.string(),
     messageIds: z.array(z.string()).min(1).max(500),
   }),
-  /** The person resumes mail paused for a session's budget, or for a thread's turns (§7.9): exactly one of the two */
+  /**
+   * The person resumes mail paused for a thread's turns (§7.9). `sessionId` was the Resume of a session's budget, a hold no build sets now (#2247):
+   * still accepted, from an older window, and it resumes nothing. Exactly one of the two
+   */
   'mail.resume': z
     .object({ sessionId: z.string().optional(), threadId: z.string().optional() })
     .refine(

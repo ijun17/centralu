@@ -270,7 +270,6 @@ describe("a child's turn and the call waiting on it", () => {
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     expect(await flow.awaitAgent('caller>child', d, undefined, false, 1)).toMatchObject({ ok: true, state: 'working', reported: true })
     expect(answered).toEqual([])
-    expect(store.children.listReportMarks()).toEqual([])
     expect(children.delegations.get('caller>child')).toBe(d)
   })
 

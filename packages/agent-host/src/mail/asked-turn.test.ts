@@ -106,11 +106,11 @@ describe('the asker is read from the turn’s request rows (§4.2)', () => {
     await w.advance(2_000)
     expect(w.row(held.id, ORC)?.held).toBe('policy')
     expect(askerOf(w)).toBeNull()
-    // Told of into the person's turn and held (a spent budget): it did not join the turn, and its words are not shown there
+    // Told of into the person's turn and held (a delivery that may not have arrived): it did not join the turn, and its words are not shown there
     w.turns.beginOther('orc', 'person', null)
     const quiet = w.mail.send(C, { to: [ORC], text: 'quietly' }).message
     w.store.mailbox.markDelivered(ORC, [quiet.id], w.clock.t, w.turns.current('orc')!.turnSeq)
-    w.store.mailbox.hold(ORC, [quiet.id], 'budget')
+    w.store.mailbox.hold(ORC, [quiet.id], 'uncertain')
     expect(askerOf(w)).toBeNull()
     expect(w.tool.run('orc', { action: 'read', thread: quiet.id }).text).not.toContain('quietly')
   })

@@ -2,7 +2,7 @@
  * The Assistant rename's step 4 in the store (#2133, docs/plans/assistant-rename.md §3.2): v69 copies the old forms into
  * the new ones once, deleting a new settings key whose old key is gone, and raises the store's floor to 68, not to its own
  * version: the build of v68 (beta.54 on), which writes both forms, still opens the store, and a build of v67 or before,
- * which writes only the old form, does not.
+ * which writes only the old form, does not. Step 74 (#2258) raises the floor to 70, so the store this checks is the one the build of v73 leaves.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -12,6 +12,8 @@ import type { MigrationStep } from './store/migrations/context.js'
 import { RENAMED_SETTINGS } from './store/settings.js'
 
 const LATEST = new Store().latestKnownVersion
+/** The last build whose store's floor step 69 sets */
+const V73 = 73
 /** The newest step the next store knows */
 let newest = LATEST
 
@@ -112,9 +114,9 @@ describe('#2133 step 4 in the store: v69', () => {
 
   it('runs once: after it, the new key is read first, and a write or delete still reaches both keys', () => {
     const file = v68Store()
-    const s = open(LATEST, file)
+    const s = open(V73, file)
     try {
-      expect(s.schemaVersion).toBe(LATEST)
+      expect(s.schemaVersion).toBe(V73)
       put(s.raw, 'assistant_tool', 'opencode')
       expect(s.settings.appSetting('orchestrator_tool')).toBe('opencode')
       for (const [old, renamed] of RENAMED_SETTINGS) {
@@ -128,7 +130,7 @@ describe('#2133 step 4 in the store: v69', () => {
     }
     // A second open runs nothing: a new key whose old key is absent is no longer deleted
     raw(file, (db) => put(db, 'assistant_tool', 'codex'))
-    const again = new Store(file)
+    const again = open(V73, file)
     try {
       expect(again.migrationsRun).toBe(0)
       expect(again.settings.appSetting('orchestrator_tool')).toBe('codex')
@@ -139,7 +141,7 @@ describe('#2133 step 4 in the store: v69', () => {
 
   it('raises the floor to 68: the build of v68 opens the store, the build of v67 is refused', () => {
     const file = v68Store()
-    new Store(file).close()
+    open(V73, file).close()
     const stored = raw(file, (db) => row(db, 'min_reader_version'))
     expect(stored).toBe('68')
 
@@ -151,6 +153,6 @@ describe('#2133 step 4 in the store: v69', () => {
     expect(() => open(67, file)).toThrow(StoreTooNewError)
     expect(() => open(67, file)).toThrow(/can be read from store version 68 on; this Centralu knows store versions up to 67/)
     // The refusal changed nothing
-    raw(file, (db) => expect([db.pragma('user_version', { simple: true }), row(db, 'min_reader_version')]).toEqual([LATEST, '68']))
+    raw(file, (db) => expect([db.pragma('user_version', { simple: true }), row(db, 'min_reader_version')]).toEqual([V73, '68']))
   })
 })

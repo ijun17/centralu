@@ -216,8 +216,6 @@ export const WARNING_TEXT = {
   ask_rate: (sender: string) => `Centralu refused a request from ${sender} to the Assistant: its project's sessions asked ${ASKS_PER_HOUR} times in the last hour. ${sender} was told to wait or write to you.`,
 } as const
 
-/** The text of a task written for a report mark an earlier build left with no task (§9.5) */
-export const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
 
 /** The line an over-long task ends with once cut: the full text stays in the session's conversation */
 export const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"

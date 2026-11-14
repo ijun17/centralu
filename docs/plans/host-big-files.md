@@ -144,7 +144,7 @@ three. This round kept them as they are; §6 has the answer.
 **Split:** `mail-writer.ts` (core), `mail-views.ts`, `message-send.ts`, `message-read.ts`, `message-drain.ts`,
 `held-mail.ts`, `stop-notices.ts`, `stop-words.ts` (pure text), `handoff.ts`; `MessageService` keeps a facade of about
 130 lines. That facade is 38 delegating methods, the pattern `session-manager-split.md` §2 removes, so the callers
-(`delivery.ts`, `person.ts`, `tool.ts`, `delegation.ts`, `adoption.ts`, `host-mail.ts`) would hold the modules.
+(`delivery.ts`, `person.ts`, `tool.ts`, `delegation.ts`, `host-mail.ts`) would hold the modules.
 #1948 (one channel) and the cross-host mail of #2067 change these same lines: the split waits until #2067 has landed,
 and no module here is shaped for it.
 

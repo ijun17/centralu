@@ -35,7 +35,7 @@ export function sessionDepth(
 }
 
 /**
- * Where a session's depth at its start is kept (#897 review): an app setting per session, the way `report_paused:<id>`
+ * Where a session's depth at its start is kept (#897 review): an app setting per session, the way `tool_prefix:<id>`
  * is, so an older build that does not know it leaves it alone and nothing needs a migration. The session archive's purge deletes
  * it with the session (`TrashStore.purgeSession`).
  */

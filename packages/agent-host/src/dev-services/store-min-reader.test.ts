@@ -30,10 +30,10 @@ afterEach(() => {
 /** The newest step this host knows */
 const KNOWN = new Store().latestKnownVersion
 /**
- * The floor of the last breaking step today: v69 (#2133 step 4) names 68, below its own version, so every store this host
- * has migrated is readable from v68 on (docs/plans/assistant-rename.md §3.2)
+ * The floor of the last breaking step today: v74 (#2258, one record of owed work) names 70, below its own version, so every store this
+ * host has migrated is readable from v70 on (docs/plans/mailbox.md M7)
  */
-const FLOOR = 68
+const FLOOR = 70
 
 /** A store at the current version, with one project in it */
 function currentStore(): string {
@@ -128,7 +128,7 @@ describe('which builds can still read the store (#292)', () => {
 
   it('applying a breaking step raises the record to that step', () => {
     const file = currentStore()
-    // Back to v31, readable from v28 on: the two columns v32 drops are still there. The later breaking steps run too: v69, the last, raises it to 68
+    // Back to v31, readable from v28 on: the two columns v32 drops are still there. The later breaking steps run too: v74, the last, raises it to 70
     raw(file, (db) => {
       db.exec(`ALTER TABLE projects ADD COLUMN default_model TEXT; ALTER TABLE projects ADD COLUMN default_effort TEXT`)
       db.pragma('user_version = 31')
@@ -220,14 +220,14 @@ describe('which builds can still read the store (#292)', () => {
    * The classification is part of the record: changing a step's flag after it shipped changes what older hosts are
    * told. A new breaking or heavy step adds itself here, where a reviewer sees it.
    */
-  it('every step declares whether it breaks older readers; v13, v28, v32, v56 and v69 do, and v3, v11, v21 and v40 are heavy', () => {
+  it('every step declares whether it breaks older readers; v13, v28, v32, v56, v69 and v74 do, and v3, v11, v21 and v40 are heavy', () => {
     type Step = { to: number; breaksOlderReaders: boolean; heavy?: true; minReader?: number }
     const steps = (new Store() as unknown as { migrationSteps(): Step[] }).migrationSteps()
     expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 1 }, (_, i) => i + 2))
     expect(steps.every((s) => typeof s.breaksOlderReaders === 'boolean')).toBe(true)
-    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56, 69])
-    // Only v69 names a floor below its own version
-    expect(steps.filter((s) => s.minReader !== undefined).map((s) => [s.to, s.minReader])).toEqual([[69, 68]])
+    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56, 69, 74])
+    // Only v69 and v74 name a floor below their own version
+    expect(steps.filter((s) => s.minReader !== undefined).map((s) => [s.to, s.minReader])).toEqual([[69, 68], [74, 70]])
     expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([3, 11, 21, 40])
   })
 

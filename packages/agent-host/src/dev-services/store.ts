@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppRunRecords } from './store/app-runs.js'
 import { KeptRuns } from './store/kept-runs.js'
-import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
+import { ChildOwnershipRecords } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords } from './store/linked-machines.js'
@@ -26,7 +26,6 @@ import { TrashRecords } from './store/trash.js'
 import { SubagentStepRecords } from './store/subagent-steps.js'
 
 // The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
-export type { QueuedRequest }
 
 // The migration runner and the reader gate `Store` stands on are named here as they always were
 export { StoreTooNewError, storeTooNewMessage }

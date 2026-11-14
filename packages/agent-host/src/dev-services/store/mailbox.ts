@@ -185,7 +185,7 @@ export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly 
 const ROLE_VIAS = `(${ROLE_VIA_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
-export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
+export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as const
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
@@ -450,7 +450,7 @@ export class MailboxRecords {
     this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
   }
 
-  /** Sets why mail waits for the person (`policy`, `loop`, `budget`, `failed`, `uncertain`), or clears it with null */
+  /** Sets why mail waits for the person (`policy`, `loop`, `failed`, `uncertain`), or clears it with null */
   hold(recipient: string, ids: readonly string[], why: string | null): void {
     this.update('held = ?', [why], recipient, ids)
   }
@@ -471,13 +471,13 @@ export class MailboxRecords {
   }
 
   /**
-   * The person's Resend: held mail goes at `dueAt`. Mail held from waking a session (`policy`, `budget`) goes as the mail
+   * The person's Resend: held mail goes at `dueAt`. Mail held from waking a session (`policy`) goes as the mail
    * it is and is not held again (`released`); `uncertain`, `failed` and `loop` are cleared
    */
   release(recipient: string, ids: readonly string[], dueAt: number): number {
     return this.update(
-      `delivered_at = CASE WHEN held IN ('policy', 'budget') THEN NULL ELSE delivered_at END,
-       held = CASE WHEN held IN ('policy', 'budget') THEN 'released' ELSE NULL END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?`,
+      `delivered_at = CASE WHEN held = 'policy' THEN NULL ELSE delivered_at END,
+       held = CASE WHEN held = 'policy' THEN 'released' ELSE NULL END, attempt_at = NULL, last_error = NULL, attempts = 0, due_at = ?`,
       [dueAt],
       recipient,
       ids,
@@ -607,19 +607,6 @@ export class MailboxRecords {
   /** A held answer was dismissed: the rows it was to settle are open again. Returns how many */
   answerDropped(answerId: string): number {
     return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId).changes
-  }
-
-  /**
-   * Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5). Not a released
-   * one: a stop told its sender it was not answered, and it stays open for the reply (mailbox.md §10.6.1)
-   */
-  unsettledTasks(): { messageId: string; sender: string; recipient: string }[] {
-    return this.db
-      .prepare<[], { message_id: string; sender: string; recipient: string }>(
-        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE m.kind = 'task' AND r.settled IS NULL AND r.released_at IS NULL ORDER BY m.created_at, m.id`,
-      )
-      .all()
-      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient }))
   }
 
   /**

@@ -195,10 +195,9 @@ describe('a turn the network stopped (#698)', () => {
     wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     const kid = a.claude.handles.get(child)!
-    // The work it was given finished and was reported; the mark is gone
+    // The work it was given finished and was reported
     kid.answer('waiting on pnpm verify with a Monitor')
     await eventually(() => mailReportsTo(parent).length === 1)
-    expect(store.children.listReportMarks()).toEqual([])
     expect(info(a, parent).state).toBe('idle')
 
     kid.ownTurnFails(ECONNREFUSED)
@@ -508,21 +507,6 @@ describe('a turn a quit stopped (#698)', () => {
     expect(b.claude.handles.has(parent)).toBe(false)
     expect(info(b, parent)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
-  })
-
-  it('when the session owed the report is gone, the one that started it is told', async () => {
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    // The report is owed to a session deleted since; the child was started by the parent
-    store.children.setReportMark(child, 'a-session-deleted-since')
-    const b = host()
-    wireHostMail(b.mgr, store).afterReady()
-    const [told, ...more] = starterNotices(parent)
-    expect(more).toEqual([])
-    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit', quiet: true } })
-    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn'))
-    expect(starterNotices('a-session-deleted-since')).toEqual([])
-    expect(reportsTo(parent, child)).toEqual([])
   })
 
   it("the Assistant's list says which children stopped and why", async () => {

@@ -55,7 +55,7 @@ const LIST_SCAN = 1_000
 const CHAIN_CAP = 1_000
 const PREVIEW_CHARS = 140
 /** Holds the window shows for the person to act on (`mail.held`), and the ones its Release and Dismiss may change */
-const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
+const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'policy'] as const
 
 /** A message as the window reads it: a moved one with the thread kind it had, a new one in the window's thread words */
 type Shown = { m: MailRow; seq: number }
@@ -320,24 +320,19 @@ export class MailPerson {
     for (const p of projects) this.trusted(p)
     // What the trust let go counts as released here too
     const letGo = policy.filter((id) => this.records.recipient(id, recipient)?.held !== 'policy').length
-    return { changed: letGo + this.service.resendHeld(recipient, messageIds, ['uncertain', 'failed', 'budget']) }
+    return { changed: letGo + this.service.resendHeld(recipient, messageIds) }
   }
 
   /**
-   * Resume on what an earlier build paused (#2014: nothing pauses mail now): a session's rows held `budget`, or a chain's held `loop` (an old thread's id
-   * names the chains moved from it). They go as the mail they are, and a previous build still serving during a swap does not hold them again
+   * Resume on what an earlier build paused (#2014: nothing pauses mail now): a chain's rows held `loop` (an old thread's id names the chains moved
+   * from it). They go as the mail they are, and a previous build still serving during a swap does not hold them again. A session's Resume (an older
+   * window's, for the `budget` hold step 72 ended, #2247) finds nothing to resume
    */
   resume(target: { sessionId?: string | undefined; threadId?: string | undefined }): void {
-    const rows = this.records.heldRows()
-    if (target.sessionId !== undefined) {
-      const recipient = this.service.sessionAddress(target.sessionId)
-      const ids = rows.flatMap((r) => (r.recipient === recipient && r.held === 'budget' ? [r.messageId] : []))
-      if (ids.length > 0) this.service.resendHeld(recipient, ids, ['budget'])
-    } else if (target.threadId !== undefined) {
-      const roots = new Set(this.rootsOf(target.threadId))
-      const ids = new Set(rows.flatMap((r) => (r.held === 'loop' && roots.has(this.records.message(r.messageId)?.rootId ?? '') ? [r.messageId] : [])))
-      for (const id of ids) this.service.resumeHeld(id)
-    }
+    if (target.threadId === undefined) return
+    const roots = new Set(this.rootsOf(target.threadId))
+    const ids = new Set(this.records.heldRows().flatMap((r) => (r.held === 'loop' && roots.has(this.records.message(r.messageId)?.rootId ?? '') ? [r.messageId] : [])))
+    for (const id of ids) this.service.resumeHeld(id)
   }
 
   /** The person trusted a project (§7.4): what its sessions sent that was held for it goes, in order, and the callers refused are told */

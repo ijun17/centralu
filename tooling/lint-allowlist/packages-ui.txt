@@ -123,8 +123,8 @@ packages/ui/src/features/settings/ArchiveSection.tsx @typescript-eslint/no-misus
 packages/ui/src/features/settings/ArchiveSection.tsx @typescript-eslint/unbound-method 3
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/unbound-method 13
-packages/ui/src/features/settings/Settings.tsx @typescript-eslint/no-non-null-assertion 3
-packages/ui/src/features/settings/Settings.tsx @typescript-eslint/unbound-method 13
+packages/ui/src/features/settings/Settings.tsx @typescript-eslint/no-non-null-assertion 2
+packages/ui/src/features/settings/Settings.tsx @typescript-eslint/unbound-method 12
 packages/ui/src/features/settings/SleepSection.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/no-non-null-assertion 2
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/unbound-method 5
