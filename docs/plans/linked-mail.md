@@ -249,7 +249,7 @@ may not open (decided 2026-11-14 on #1987):
   that crashes finds it up within a day), so a host that starts again while its hub is
   away knows that hub before it offers, and the send is refused `link_down` naming it, not kept here unseen. A kept hub
   stands only for mail until it offers: it says nothing of apps, so a session it started keeps its own record for
-  those (remote-hub.md §13.5). A hub whose link has been down 30 days is forgotten for mail, at start and while running:
+  those (remote-hub.md §13.5). A hub whose link has been down 30 days is forgotten for mail at its first use, after a restart or not:
   this host cannot learn that a hub was removed while away, and 30 days outlasts a computer left off over a trip.
 - **The address.** The hub names its person `person`, as always. A machine names the hub's person
   `session:<hub id>/person` (`PERSON_ID`): a foreign address, so the copy, the receipts, a link that is down and a send
