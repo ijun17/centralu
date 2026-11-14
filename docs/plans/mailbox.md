@@ -2022,12 +2022,14 @@ lost them at a restart).
 
 **Who may answer (floor b), re-keyed on the request.** A giver may answer a card only when all hold, read at the answer:
 1. it is the one party with work open in the session (the person's own work counts as a party);
-2. the running turn is its work alone (`StopNotices.alone`, the rule a stop notice quotes by, with `gaveIt`): work it gave started the turn (a
-   `caller` turn: `start_agent`, an `agent_session` send, `ask_project`, the Assistant's sends; not a turn the mailbox started for its task, as
-   when the session was busy at the send, where the turn owner was never set either), every message
+2. the running turn is its work alone (`StopNotices.alone`, the rule a stop notice quotes by, with `gaveIt: 'work'`): work it gave started the turn
+   (a `caller` turn: `start_agent`, an `agent_session` send, `ask_project`, the Assistant's sends; or, since #1948 step 6, a turn the mailbox
+   started by delivering its task, as when the session was busy at the send or the task came from another computer; never a task that joined a
+   turn already running, a note, or a plain message), it is still open and its own (a handoff makes it the heir's), every message
    the mailbox gave into it is its, and nothing else entered it (no message or card answer of the person's, no app's, no other session's).
    Its own answer to a question card keeps the turn its alone (`TurnInputs.answerQuestion(…, 'giver')`);
-3. for an approval, #603/#606's rule as before (`RoutedCards.refusal`): the giver is `auto` and not an app's agent, the session is `normal`
+3. for an approval, its own send started the turn (`gaveIt: 'send'`, `CardGivers.sent`): in a turn the mailbox started for its task an approval
+   stays the person's; and #603/#606's rule as before (`RoutedCards.refusal`): the giver is `auto` and not an app's agent, the session is `normal`
    or `auto` and not an app's agent, and Centralu did not raise the card there; allow or deny, never "always".
 
 Otherwise the giver is told and reads the card, and only the person answers; the refusal says why. A handle still names the card it was read
@@ -2041,7 +2043,7 @@ turn owner was:
 | A second sender's task joined that turn | the owner answers; the other is never told | both told; neither answers |
 | A task joined the person's turn | not told; nobody answers | told; nobody answers |
 | The person wrote into the giver's turn, or answered a card in it | the owner answers | nobody but the person |
-| The giver's task reached a busy session as mail and started a turn of its own | not told; nobody answers | told; nobody answers (deep review) |
+| The giver's task reached a busy session as mail and started a turn of its own | not told; nobody answers | told; the giver answers a question, an approval is the person's (#1948 step 6; before it: nobody answers) |
 | The Assistant's `send_to_session` without `reportBack` | told, answers as the owner | not told: it asked for nothing back, so the card is the person's |
 | A turn the person started after the work was answered | not told | not told: no work is open |
 
@@ -2072,9 +2074,12 @@ adopts no stale link; beta.57, which restores that table only for a turn it cont
 person alone. The notices this build wrote are Centralu notices that build delivers as any. A kept or continued turn keeps its giver's task
 open, so a card in it is told and answered as above.
 
-**Linked machines** (#1948 step 6). The hub's own card path for a linked child (`RemoteAgents.cardRaised`) is deleted. On the machine a card's givers
-are this host's sessions and the person only (`openTaskParties`): a hub's session that gave the task is no session there, whatever its id, so it is
-neither told of the card nor its answerer, and the card is the person's there. Telling a hub's giver of a card across the link is not built.
+**Linked machines** (#1948 step 6). The hub's own card path for a linked child (`RemoteAgents.cardRaised`) is deleted, and so is its own judgement
+of whose a card is: it let a hub caller answer a question the person's own turn raised on the machine while the caller's task only waited there
+(deep review). The machine alone judges, by this rule, with the hub's session that gave the task as a giver named by its address (`openTaskParties`
+with `across`): the hub reads its cards with `host.cards` and answers one with `host.answerCard`, which the machine takes only from the hub that
+offered on that connection, the giver read as that hub's session. Its task always starts its turn by the mailbox, so it answers a question and never
+an approval. Telling a hub's giver of a card across the link is not built: it reads them by `agent_session`.
 
 ### 10.6.5 A handoff is the mail's one move (#1948 step 5)
 

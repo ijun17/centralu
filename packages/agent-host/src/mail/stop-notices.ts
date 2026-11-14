@@ -169,16 +169,19 @@ export class StopNotices {
    * - every message the mailbox gave into it is from `sender`;
    * - everything else that may have entered it (`turnInputs`: each user row stored since the turn before began, and a question card answered
    *   since) was sent by `sender`: none from the person, an app, a script, a relayed report or another session.
-   * A turn anyone else had a part in, or one these records cannot tell, is no one's alone. `gaveIt`: only work `sender` gave it started the turn (a
-   * `caller` turn), not a mail the mailbox delivered
+   * A turn anyone else had a part in, or one these records cannot tell, is no one's alone. `gaveIt`: only work `sender` gave it started the turn:
+   * `send`, its send (a `caller` turn); `work`, that or its task the mailbox delivered to start one (the session was busy at the send, or the task came
+   * from another computer, #1948 step 6), never a mail of another kind, nor a task that joined a turn already running
    */
-  alone(session: string, sender: string, { turnSeq, gaveIt = false }: { turnSeq?: number; gaveIt?: boolean } = {}): boolean {
+  alone(session: string, sender: string, { turnSeq, gaveIt }: { turnSeq?: number; gaveIt?: 'send' | 'work' } = {}): boolean {
     const [party, from] = [parseAddress(session), parseAddress(sender)]
     if (party?.kind !== 'session' || from?.kind !== 'session') return false
     const seq = turnSeq ?? this.d.records.nextTurnSeq(party.sessionId) - 1
     if (this.d.records.nextTurnSeq(party.sessionId) !== seq + 1) return false
     const turn = this.d.records.turn(party.sessionId, seq)
-    if (!turn || (turn.startedBy !== 'caller' && (gaveIt || turn.startedBy !== 'mail')) || turn.starterId === null || this.d.records.message(turn.starterId)?.sender !== sender) return false
+    const starter = turn?.starterId == null ? undefined : this.d.records.message(turn.starterId)
+    if (!turn || starter?.sender !== sender) return false
+    if (turn.startedBy !== 'caller' && (turn.startedBy !== 'mail' || gaveIt === 'send' || (gaveIt === 'work' && starter.kind !== 'task'))) return false
     if (this.d.records.inTurn(session, seq).some((r) => r.message.sender !== sender)) return false
     const given = this.d.turnInputs?.(party.sessionId)
     return given !== undefined && given.every((id) => id === from.sessionId)

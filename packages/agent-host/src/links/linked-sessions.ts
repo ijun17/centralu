@@ -1,5 +1,5 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
-import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, errorMessage, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
+import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit, type RoutedCard } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/centralu-tools.js'
 import { isOrdinary } from '../sessions/tool-profiles.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
@@ -143,6 +143,10 @@ export function linkedSessions(
   }
   /** The row of a machine's session list that `id` (the machine's own, stripped) names */
   const rowOf = async (m: RoutedMachine, id: string): Promise<unknown> => (await listOf(m, 'sessions.list')).find((s) => isObj(s) && s.id === id)
+  /** A call's failure, in the update's words for a machine from before the call (#1948 step 6) */
+  const older = (m: RoutedMachine, e: unknown): never => {
+    throw /Unknown method/i.test(errorMessage(e)) ? new Error(`${m.name} runs an older Centralu, which takes no work from this computer. Update Centralu on ${m.name}.`) : e
+  }
   /** A machine's answer within `lookupMs` (#700): past it, an error that says so (`notWithin`) */
   const boundedAsk = (m: RoutedMachine, method: string, params: unknown): Promise<unknown> => withTimeout(m.call(method, params), lookupMs, notWithin)
   /** A project row a machine answered, in the hub's terms; null when it is not a project row */
@@ -449,22 +453,33 @@ export function linkedSessions(
       })
     },
 
-    cards(sessionId) {
+    cards(sessionId, callerId) {
       return viaSession(sessionId, async (m) => {
-        const raw = await rowOf(m, m.q.strip(sessionId, 'The session'))
+        const id = m.q.strip(sessionId, 'The session')
+        // The machine says which cards are the caller's and whether it may answer each; what each asks is read off its row
+        const mine = RpcMethods['host.cards'].result.safeParse(await m.call('host.cards', { sessionId: id, caller: callerId }).catch((e: unknown) => older(m, e)))
+        if (!mine.success) throw new Error(`${m.name} gave no readable answer about the cards`)
+        if (!mine.data.cards.length) return { cards: [] }
+        const raw = await rowOf(m, id)
         if (!isObj(raw)) throw new Error(`${m.name} no longer has this session`)
         // Read as the window reads them, in the hub's terms: what does not parse is no card the hub can show or answer.
         // The ids an approval's detail names are the machine's, so they are qualified as the window's event has them
-        const card = isObj(raw.pendingApproval) ? { ...raw.pendingApproval, detail: m.q.approvalDetail(raw.pendingApproval.detail) } : null
-        const approval = SessionInfo.shape.pendingApproval.safeParse(card)
+        const pending = isObj(raw.pendingApproval) ? { ...raw.pendingApproval, detail: m.q.approvalDetail(raw.pendingApproval.detail) } : null
+        const approval = SessionInfo.shape.pendingApproval.safeParse(pending)
         const questions = SessionInfo.shape.pendingQuestions.safeParse(raw.pendingQuestions ?? [])
-        return { approval: approval.success ? approval.data : null, questions: questions.success ? questions.data : [] }
+        const cards = mine.data.cards.flatMap((c): RoutedCard[] => {
+          const q = c.kind === 'question' && questions.success ? questions.data.find((x) => x.requestId === c.requestId) : undefined
+          if (q) return [{ ...c, kind: 'question', questions: q.questions }]
+          const a = c.kind === 'approval' && approval.success && approval.data?.requestId === c.requestId ? approval.data : undefined
+          return a ? [{ ...c, kind: 'approval', detail: a.detail }] : []
+        })
+        return { cards }
       })
     },
 
-    answerQuestion(sessionId, requestId, answers) {
-      return viaSession(sessionId, async () => {
-        await route('agents.answerQuestion', { sessionId, requestId, answers })
+    answerCard(sessionId, callerId, card, text) {
+      return viaSession(sessionId, async (m) => {
+        await m.call('host.answerCard', { sessionId: m.q.strip(sessionId, 'The session'), caller: callerId, card, text }).catch((e: unknown) => older(m, e))
         return {}
       })
     },

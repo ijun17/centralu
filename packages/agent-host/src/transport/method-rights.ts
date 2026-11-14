@@ -386,6 +386,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'host.mail': 'link',
   'host.mailRows': 'link',
   'host.mailMove': 'link',
+  'host.cards': 'link',
+  'host.answerCard': 'link',
   // From a hub that offered apps on the same connection only (rpc.ts), as `host.mail` (#1938)
   'host.apps': 'link',
   'host.appCall': 'link',

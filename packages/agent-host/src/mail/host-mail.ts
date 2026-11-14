@@ -383,9 +383,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     // A card a session raised is told to the givers of its open work, and answered by one of them only as the gate allows (§10.6.4)
     cards: {
       // Only a turn the giver's own work started, as the turn owner was: one the mailbox started for its task (the session was busy) is told only
-      givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver) => giver !== PERSON && service.stops.alone(addressOf(id), addressOf(giver), { gaveIt: true })),
-      // The person has the card itself: nothing is written for them
-      tell: (giverId, card, body, delivered) => (giverId === PERSON ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
+      givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver, gaveIt) => giver !== PERSON && service.stops.alone(addressOf(id), parseAddress(giver) ? giver : addressOf(giver), { gaveIt })),
+      // The person has the card itself: nothing is written for them. A giver on another computer (an address) reads it through that computer's call
+      tell: (giverId, card, body, delivered) => (giverId === PERSON || parseAddress(giverId) ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
       turn: (id) => store.mailbox.nextTurnSeq(id) - 1,
       ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
     },

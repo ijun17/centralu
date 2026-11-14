@@ -11,7 +11,6 @@ import { inTurn } from '../idle.js'
 import { depthOf } from './agent-depth.js'
 import { agentStartGateError } from './agent-start-gates.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } from './ask-project.js'
-import { answersFrom, cardHandle } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
 import { aboveCallerError, agentBranch, agentChoice, agentName, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
@@ -428,7 +427,7 @@ export class RemoteAgents {
     }
     switch (opts.action) {
       case 'answer':
-        return this.answer(rec, callerId, opts.card, opts.text ?? '', reader)
+        return this.answer(rec, opts.card, opts.text ?? '', reader)
       case 'status':
       case 'wait': {
         // The task it is on for the caller: a wait reads its report, status says it runs (`openTask`)
@@ -565,7 +564,7 @@ export class RemoteAgents {
     if (s.state === 'ended') return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: its task there ended with no report (${s.why}).` }
     if (s.outcome === 'waiting') {
       const reader = this.host.linkedReader
-      const cards = reader ? await this.cardsOf(rec, reader, taskId) : []
+      const cards = reader ? await this.cardsOf(rec, reader) : []
       return cards.length ? this.asking(rec, cards) : this.working(rec, true)
     }
     if (s.outcome === 'failed' || s.outcome === 'stopped') {
@@ -601,16 +600,12 @@ export class RemoteAgents {
   }
 
   /**
-   * The cards standing in the child's turn, as its caller reads them (#676): its questions, and its approval, which is
-   * never the caller's to answer here (`answer`). Each named by a handle of the caller's open task, the request and
-   * what the card asks, so an answer meant for an earlier card finds nothing on a new one
+   * The cards standing in the child that its machine shows the caller as a giver of work there, each with whether it may answer (#676, #1948 step 6):
+   * that machine alone judges, by its own rule, so none is the caller's from what it gave and none of a turn the person had a part in
    */
-  private async cardsOf(rec: RemoteAgent, reader: LinkedSessions, taskId: string): Promise<RoutedCard[]> {
-    const r = await reader.cards(rec.sessionId)
-    if (!r.ok) return []
-    const cards: RoutedCard[] = r.questions.map((q) => ({ card: cardHandle(taskId, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions, answerable: true }))
-    if (r.approval) cards.push({ card: cardHandle(taskId, r.approval.requestId, r.approval.detail), requestId: r.approval.requestId, kind: 'approval', detail: r.approval.detail, answerable: false })
-    return cards
+  private async cardsOf(rec: RemoteAgent, reader: LinkedSessions): Promise<RoutedCard[]> {
+    const r = await reader.cards(rec.sessionId, rec.callerId)
+    return r.ok ? r.cards : []
   }
 
   private asking(rec: RemoteAgent, cards: RoutedCard[]): ChildRunResult {
@@ -618,17 +613,13 @@ export class RemoteAgents {
   }
 
   /**
-   * agent_session answer on a child of a linked machine (#1038), as on a local child's delegated turn (#676): a task of
-   * the caller's must be open there, and the card must still stand as it read it. A question takes its answer,
-   * through the machine as its window would answer it. An approval stays the person's on that computer, whatever the
-   * child runs under there: a caller's `auto` (which alone lets a caller answer a local child's approval) may give the
-   * child `auto` there (#1273), but never answers that computer's cards, so what runs there is allowed there, by the person
+   * agent_session answer on a child of a linked machine (#1038), as on a local child's delegated turn (#676): its machine decides whether the caller may,
+   * by its own rule for a giver of work there (`host.answerCard`), and the card must still stand as it read it. An approval stays the person's on that
+   * computer, whatever the child runs under there: a caller's `auto` (which alone lets a caller answer a local child's approval) may give the child
+   * `auto` there (#1273), but never answers that computer's cards, so what runs there is allowed there, by the person
    */
-  private async answer(rec: RemoteAgent, callerId: string, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
-    const notYours = { ok: false as const, error: `"${rec.name}" on ${rec.machine} is not running a turn you gave it, so none of its cards are yours to answer.` }
-    const open = this.host.linkedTasks?.open(callerId, rec.sessionId)
-    if (!open) return notYours
-    const cards = await this.cardsOf(rec, reader, open)
+  private async answer(rec: RemoteAgent, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
+    const cards = await this.cardsOf(rec, reader)
     const chosen = card ? cards.find((c) => c.card === card) : undefined
     if (!chosen) {
       return {
@@ -642,11 +633,7 @@ export class RemoteAgents {
     if (chosen.kind === 'approval') {
       return { ok: false, error: `Only the person can answer this approval in "${rec.name}": it runs on ${rec.machine}, and only that computer decides what runs there, whatever preset the session runs under. Tell them if it matters.` }
     }
-    const answers = answersFrom(chosen.questions, text)
-    if ('error' in answers) return { ok: false, error: answers.error }
-    // Read again: the task may have ended while the cards were read
-    if (this.host.linkedTasks?.open(callerId, rec.sessionId) !== open) return notYours
-    const r = await reader.answerQuestion(rec.sessionId, chosen.requestId, answers)
+    const r = await reader.answerCard(rec.sessionId, rec.callerId, chosen.card, text)
     if (!r.ok) return { ok: false, error: `The question was not answered: ${bare(r.error)}.` }
     return { ok: true, state: 'answered', card: chosen.card, sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
   }

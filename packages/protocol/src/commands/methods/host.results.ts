@@ -96,6 +96,8 @@ export const hostResults = {
   'host.mailRows': z.object({ ok: z.literal(true) }),
   // The tasks moved; one this host does not have from that hub, or settled already, is left out
   'host.mailMove': z.union([z.object({ ok: z.literal(true), moved: z.number().int().min(0) }), z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) })]),
+  'host.cards': z.object({ cards: z.array(z.object({ card: z.string().max(200), requestId: z.string().max(200), kind: z.enum(['question', 'approval']), answerable: z.boolean() })).max(50) }),
+  'host.answerCard': z.object({ ok: z.literal(true) }),
   'host.apps': LinkedAppsResult,
   'host.appCall': LinkedAppCallResult,
   'host.appCancel': z.object({ ok: z.literal(true) }),

@@ -34,7 +34,7 @@ class Machine {
       machineLinked: () => true,
       machineNamed: (n: string) => (n === 'Box' ? { id: 'm1', name: 'Box' } : null),
       lastWords: async () => ({ ok: true as const, text: 'the answer there', length: 0, seq: null }),
-      cards: async () => ({ ok: true, approval: null, questions: [] }),
+      cards: async () => ({ ok: true, cards: [] }),
       createSession: async () => {
         this.made++
         return { ok: true, sessionId: CHILD, name: 'Child' }

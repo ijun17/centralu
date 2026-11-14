@@ -38,17 +38,18 @@ export class RoutedCards {
 
   /**
    * The cards standing in a session that `callerId` reads as a giver of its open work, each with whether the gate lets it answer: it is the
-   * one party with work open there and the running turn is its work alone (`answerer`), and for an approval `refusal` finds nothing. None for anyone else
+   * one party with work open there and the running turn is its work alone (`answerer`), and for an approval its own send started that turn (`sent`) and
+   * `refusal` finds nothing. None for anyone else
    */
   routedCards(sessionId: string, callerId: string): RoutedCard[] {
     const m = this.host.meta.get(sessionId)
-    const { givers, answerer } = this.host.mail.cards.givers(sessionId)
+    const { givers, answerer, sent } = this.host.mail.cards.givers(sessionId)
     if (!m || !givers.includes(callerId)) return []
     const turn = String(this.host.mail.cards.turn(sessionId))
     const mine = answerer === callerId
     const cards: RoutedCard[] = m.pendingQuestions.map((q) => ({ card: cardHandle(turn, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions, answerable: mine }))
     const a = m.pendingApproval
-    if (a) cards.push({ card: cardHandle(turn, a.requestId, a.detail), requestId: a.requestId, kind: 'approval', detail: a.detail, answerable: mine && !this.refusal(callerId, sessionId, a.requestId) })
+    if (a) cards.push({ card: cardHandle(turn, a.requestId, a.detail), requestId: a.requestId, kind: 'approval', detail: a.detail, answerable: mine && sent && !this.refusal(callerId, sessionId, a.requestId) })
     return cards
   }
 
@@ -133,7 +134,7 @@ export class RoutedCards {
   async answerRoutedCard(callerId: string, sessionId: string, card: string | undefined, text: string): Promise<ChildRunResult> {
     const m = this.host.meta.get(sessionId)
     const name = m?.name ?? sessionId
-    const { givers, answerer } = this.host.mail.cards.givers(sessionId)
+    const { givers, answerer, sent } = this.host.mail.cards.givers(sessionId)
     if (!m || !givers.includes(callerId)) return { ok: false, error: `"${name}" has no work of yours open, so none of its cards are yours to answer.` }
     const cards = this.routedCards(sessionId, callerId)
     const chosen = card ? cards.find((c) => c.card === card) : undefined
@@ -149,7 +150,10 @@ export class RoutedCards {
       }
     }
     if (!chosen.answerable || (chosen.kind === 'approval' && !this.host.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn'))) {
-      const why = answerer !== callerId ? 'its turn is not your work alone: the person, another session or anything else had a part in it' : this.refusal(callerId, sessionId, chosen.requestId) ?? 'your permission preset is not auto'
+      const why =
+        answerer !== callerId ? 'its turn is not your work alone: the person, another session or anything else had a part in it'
+        : chosen.kind === 'approval' && !sent ? 'its turn began when the mailbox gave it your task, not with your own send'
+        : this.refusal(callerId, sessionId, chosen.requestId) ?? 'your permission preset is not auto'
       return { ok: false, error: `Only the person can answer this ${chosen.kind} in "${name}": ${why}. Tell them if it matters.` }
     }
     try {

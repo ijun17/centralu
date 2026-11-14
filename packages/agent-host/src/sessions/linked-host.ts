@@ -26,7 +26,7 @@ const HOST_RECALL_MAX_HITS = 50
  * What the linked-machine side reaches of the session manager (#1143), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' | 'deliver'> &
+export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' | 'deliver' | 'routedCards' | 'answerRoutedCard'> &
   Pick<SessionTrashHost, 'delegationFlow'> &
   Pick<HandoffFlowHost, 'send'> &
   Pick<SessionToolsHost, 'centraluToolsFor'> & {
@@ -71,6 +71,24 @@ export class LinkedHost {
     if (!target || isAssistantOrCoordinator(target.kind)) {
       throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
     }
+  }
+
+  /**
+   * The cards of a session here that a hub's session reads as a giver of work it gave here (`host.cards`, #1948 step 6): this host judges, by its own
+   * rule for its own givers (`RoutedCards.routedCards`, docs/plans/mailbox.md §10.6.4), the hub's session named by its address. None for a session a
+   * hub is not shown, or one that giver has no work open in
+   */
+  hubCards(sessionId: string, giver: string): { card: string; requestId: string; kind: 'question' | 'approval'; answerable: boolean }[] {
+    this.directedFromHub(sessionId)
+    return this.host.routedCards(sessionId, giver).map(({ card, requestId, kind, answerable }) => ({ card, requestId, kind, answerable }))
+  }
+
+  /** A hub's session answers a card it read (`host.answerCard`): only as this host's rule lets that giver (`RoutedCards.answerRoutedCard`); refused in its words */
+  async hubAnswer(sessionId: string, giver: string, card: string, text: string): Promise<{ ok: true }> {
+    this.directedFromHub(sessionId)
+    const r = await this.host.answerRoutedCard(giver, sessionId, card, text)
+    if (!r.ok) throw rpcError(r.error)
+    return { ok: true }
   }
 
   /**

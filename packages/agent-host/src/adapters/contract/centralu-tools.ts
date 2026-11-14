@@ -296,13 +296,13 @@ export type LinkedSessions = {
    * (`agents.deleteAgentChild` there, #1161 item 3)
    */
   deleteAgentChild?(sessionId: string, branch: string): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }>>
-  /** The cards standing in a machine's session now, as that machine lists them (#1038: agent_session on a child there) */
-  cards(sessionId: string): Promise<Outcome<{
-    approval: { requestId: string; detail: ApprovalDetail } | null
-    questions: { requestId: string; questions: Question[] }[]
-  }>>
-  /** Answers a question card of a machine's session, as its window would (`agents.answerQuestion` there, #1038) */
-  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<Outcome>
+  /**
+   * The cards a machine's session shows `callerId` (a session here) as a giver of work there, each with whether it may answer (`host.cards`, #1948
+   * step 6): that machine alone judges, by its own rule (docs/plans/mailbox.md §10.6.4)
+   */
+  cards(sessionId: string, callerId: string): Promise<Outcome<{ cards: RoutedCard[] }>>
+  /** Answers a card of a machine's session by the handle `callerId` read (`host.answerCard`): refused there unless that machine's rule lets that giver */
+  answerCard(sessionId: string, callerId: string, card: string, text: string): Promise<Outcome>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */

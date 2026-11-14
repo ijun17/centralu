@@ -35,6 +35,7 @@ import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { Watches } from './mail/watches.js'
+import { sessionAddress } from './mail/address.js'
 import type { MailAcross } from './mail/across.js'
 import type { LinkedAppCalls } from './links/linked-app-calls.js'
 import type { InlineViews } from './inline-views.js'
@@ -942,6 +943,17 @@ export function createRpcHandler(
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined
       if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection moves the work it gave here')
       return mailAcross.moveFromHub(hub, p)
+    },
+    // A hub's session reads and answers the cards of work it gave here, as this host's rule for that giver lets it (#1948 step 6)
+    'host.cards': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!hub) throw rpcError('Only a hub that offered on this connection reads the cards of work it gave here')
+      return { cards: mgr.linkedHost.hubCards(p.sessionId, sessionAddress(hub.id, p.caller)) }
+    },
+    'host.answerCard': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!hub) throw rpcError('Only a hub that offered on this connection answers the cards of work it gave here')
+      return mgr.linkedHost.hubAnswer(p.sessionId, sessionAddress(hub.id, p.caller), p.card, p.text)
     },
     'host.apps': async (p, ctx) => {
       const { hub, calls } = appsHub(ctx)

@@ -504,8 +504,9 @@ describe('what a giver of work may answer (#679 review)', () => {
     })
   })
 
-  it('tells, and lets no one answer, a card in a turn the mailbox started for a task that reached a busy session, as the turn owner never was there', async () => {
+  it('lets the giver answer a question in a turn the mailbox started for its task (the session was busy at the send), and leaves an approval there to the person (#1948 step 6)', async () => {
     const caller = await w.callerSession()
+    // Under auto, which may answer an approval in a turn its own send started
     await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
     const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
@@ -517,12 +518,16 @@ describe('what a giver of work may answer (#679 review)', () => {
     await eventually(() => w.mgr.sessionInfo(target)?.state !== 'working')
     await mail.deliver(target)
     await eventually(() => handleOf(target).sent.some((t) => t.includes('then this')))
-    cards.approval('a-mailed')
+    cards.ask('q-mailed')
     expect(mail.told(caller, target)).toHaveLength(1)
-    const [card] = await cardsOf(caller, target)
-    expect(card).toMatchObject({ requestId: 'a-mailed', answerable: false })
-    expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card: card!.card, text: 'allow' })).toMatchObject({ ok: false })
-    expect(cards.answered).toEqual([])
+    const [question] = await cardsOf(caller, target)
+    expect(question).toMatchObject({ requestId: 'q-mailed', answerable: true })
+    expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card: question!.card, text: 'Postgres' })).toMatchObject({ ok: true, state: 'answered' })
+    cards.approval('a-mailed')
+    const [approval] = await cardsOf(caller, target)
+    expect(approval).toMatchObject({ requestId: 'a-mailed', answerable: false })
+    expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card: approval!.card, text: 'allow' })).toMatchObject({ ok: false, error: expect.stringContaining('the mailbox gave it your task') })
+    expect(cards.answered).toEqual([{ requestId: 'q-mailed', answers: [{ question: QUESTION.question, answers: ['Postgres'] }] }])
   })
 
   it('writes the person no notice of a card in their own work: they have the card itself', async () => {

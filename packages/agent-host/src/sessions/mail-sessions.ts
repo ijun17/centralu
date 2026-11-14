@@ -92,7 +92,7 @@ export type MailHooks = {
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
 
-const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null }), turn: () => 0, tell: () => null, ended: () => {} }
+const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null, sent: false }), turn: () => 0, tell: () => null, ended: () => {} }
 
 /**
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it

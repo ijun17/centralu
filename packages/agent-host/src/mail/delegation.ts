@@ -1,6 +1,6 @@
 import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import { PERSON, parseAddress } from './address.js'
+import { PERSON, isPerson, parseAddress } from './address.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
@@ -159,16 +159,21 @@ export function taskSender(mail: MessageService): (callerId: string, childId: st
 
 /**
  * The parties with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`; `PERSON` for the person's
- * own work), or its own tasks' receivers (`from`). The one definition of open work by party (`MailHooks.openTasks`, a card's givers, docs/plans/mailbox.md §10.6.4)
+ * own work), or its own tasks' receivers (`from`). The one definition of open work by party (`MailHooks.openTasks`, a card's givers, docs/plans/mailbox.md §10.6.4).
+ * A session of another computer that gave work here (#1948 step 6) is no session here, whatever its id: left out, or with `across` named by its address
  */
-export function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from'): string[] {
+export function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from', o: { across?: boolean } = {}): string[] {
   const rows = side === 'to' ? records.watchedTo(address) : records.watchedFrom(address)
   const here = parseAddress(address)
   return [...new Set(rows.flatMap((r) => {
     const m = r.deliveredAt === null || r.releasedAt !== null ? undefined : records.message(r.messageId)
-    const other = m?.kind === 'task' ? parseAddress(side === 'to' ? m.sender : r.recipient) : null
-    // Session ids of this host only: a hub's session that gave work here (#1948 step 6) is no session here, whatever its id
-    return other?.kind === 'session' && here?.kind === 'session' && other.host === here.host ? [other.sessionId] : other?.kind === 'person' ? [PERSON] : []
+    const party = m?.kind === 'task' ? (side === 'to' ? m.sender : r.recipient) : ''
+    const other = parseAddress(party)
+    if (other?.kind === 'person') return [PERSON]
+    if (other?.kind !== 'session' || here?.kind !== 'session') return []
+    if (other.host === here.host) return [other.sessionId]
+    // The person of a hub that links this host is the person (`isPerson`)
+    return !o.across ? [] : isPerson(party) ? [PERSON] : [party]
   }))]
 }
 
