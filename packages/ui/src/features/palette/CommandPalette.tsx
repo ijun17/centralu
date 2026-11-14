@@ -1,6 +1,6 @@
 import { usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { newSessionProjectOf, useStore } from '../../store/store.js'
+import { newSessionProjectOf, useStore, type AppState } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
 import { machineNameOf, projectLabelOf } from '../../store/names.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -28,6 +28,7 @@ type Item =
 
 /** Where the palette hangs when no field is on screen to measure: the sidebar's first row under the top bar (8px in, 72px down) */
 const FALLBACK_ANCHOR = { left: 8, bottom: 72 }
+const NO_SESSIONS: AppState['sessions'] = {}
 
 /**
  * Where the search field is inside `within`, in its own pixels: the sum of the offsets up to it, which the window's zoom
@@ -55,7 +56,10 @@ export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   // Esc gives the keyboard back to where it was, the composer included (#115)
   const toggle = useStore((s) => s.togglePalette)
-  const sessions = useStore((s) => s.sessions)
+  // Comes down from the field and fades in, and goes the same way (usePresence keeps it for its exit)
+  const { shown, leaving } = usePresence(open)
+  // Read only while it is on screen: the map changes with every event of every session, and a closed palette has no list
+  const sessions = useStore((s) => (shown ? s.sessions : NO_SESSIONS))
   const projects = useStore((s) => s.projects)
   const focusSession = useStore((s) => s.focusSession)
   const openSearchHit = useStore((s) => s.openSearchHit)
@@ -300,8 +304,6 @@ export function CommandPalette() {
   const listId = useId()
   const optionId = (i: number) => `${listId}-${i}`
 
-  // Comes down from the field and fades in, and goes the same way (usePresence keeps it for its exit)
-  const { shown, leaving } = usePresence(open)
   // The field's place, read before the first paint of the open palette and again as the window resizes
   const catcher = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = useState(FALLBACK_ANCHOR)

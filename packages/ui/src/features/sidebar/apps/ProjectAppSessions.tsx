@@ -7,6 +7,9 @@ import { useSelectedSessionId } from '../../../store/selectors.js'
 import { SessionListRow } from '../rows/SessionListRow.jsx'
 import { ProjectSessionDialogs } from '../project/ProjectSessionDialogs.jsx'
 
+/** An app's rows keep their order: its appId, not a position, is what they belong to */
+const NO_REORDER = () => {}
+
 /** A listed project app owns these rows, so they cannot be reordered into the project's session list. */
 export function ProjectAppSessions({ sessions, projectId, folded }: { sessions: SessionSummary[]; projectId: string; folded: boolean }) {
   const selected = useSelectedSessionId()
@@ -25,7 +28,7 @@ export function ProjectAppSessions({ sessions, projectId, folded }: { sessions: 
           row={row}
           projectId={projectId}
           inApp
-          onReorder={() => {}}
+          onReorder={NO_REORDER}
           focusedSessionId={selected}
           renaming={renaming}
           setRenaming={setRenaming}

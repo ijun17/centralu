@@ -144,7 +144,8 @@ function useNoticePeek(): Peek | null {
       return
     }
     const fresh = notices.filter((n) => !seen.current!.has(key(n)))
-    for (const n of notices) seen.current.add(key(n))
+    // The notices there now, not every one ever: each is made with the instant it was made (`at`), so one that left never comes back under its key
+    seen.current = new Set(notices.map(key))
     if (fresh.length === 0) return
     held.current.push(...fresh)
   }, [notices])
