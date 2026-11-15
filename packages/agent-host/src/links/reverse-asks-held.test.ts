@@ -33,7 +33,7 @@ afterEach(async () => {
 
 /**
  * The ask's limit on the machine. It bounds the whole call: the card, then, once it is answered, the task's delivery on the
- * hub, which comes `DEBOUNCE_MS` after the task is written (mailbox.md §7.9), and its turn. Below that the answered ask
+ * hub, which comes `DEBOUNCE_MS` after the task is written (`dueAt` in mail/rules.ts), and its turn. Below that the answered ask
  * runs out on the debounce alone (2 s, which `1000 * SLOW` was on Linux). Short beyond it, so a test outlasts it
  */
 const LIMIT = DEBOUNCE_MS + 1000 * SLOW
