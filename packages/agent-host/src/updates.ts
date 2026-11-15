@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
-import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
+import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, npmMachine, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
 import { execText, execTextSync } from './os/exec.js'
 import { sleep } from './timing.js'
@@ -161,7 +161,7 @@ async function npmGlobalPackage(): Promise<GlobalPackage | null> {
   const launcher = join(root, APP_SLUG, 'bin', `${APP_SLUG}.mjs`)
   if (!existsSync(launcher)) return null
   const manifest = join(root, APP_SLUG, 'package.json')
-  return { launcher, version: packageVersion(manifest), platform: platformPackage(launcher, manifest, `${process.platform}-${process.arch}`) }
+  return { launcher, version: packageVersion(manifest), platform: platformPackage(launcher, manifest, npmMachine()) }
 }
 
 /**

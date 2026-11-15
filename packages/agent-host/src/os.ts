@@ -103,6 +103,11 @@ export function programFile(name: string, platform: Platform = HOST_PLATFORM): s
   return platform === 'win32' ? `${name}.exe` : name
 }
 
+/** This machine as npm platform packages name it (`<os>-<arch>`, as in `@centralu/darwin-arm64`): Node's own names */
+export function npmMachine(platform: Platform = HOST_PLATFORM, arch: string = process.arch): string {
+  return `${platform}-${arch}`
+}
+
 /**
  * The Rust target triple a CLI built for this machine carries, as Codex's npm package names its binaries (bin/codex.js,
  * codex-cli 0.160.0): musl on Linux and Android, MSVC on Windows. Null where it ships no build.

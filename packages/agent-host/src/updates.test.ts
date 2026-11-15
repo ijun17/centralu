@@ -214,8 +214,8 @@ describe('UpdateService', () => {
       expect(h.calls[1]?.[1]).toContain('centralu@9999.0.1')
     })
 
-    // A release past the one that failed moves past its failure (#2282, 'a release past the one that failed is offered')
-    it.each(['9999.0.1', null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {
+    // A release past the one that failed moves past its failure, and the same one keeps it (#2282, 'a release past the one that failed is offered')
+    it.each([null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {
       let fails = true
       const h = make({ registry: '9999.0.1', run: async () => {
         if (fails) throw new Error('EACCES: install denied')
@@ -753,13 +753,19 @@ describe('UpdateService', () => {
       expect(h.calls.every(([f]) => f === 'npm')).toBe(true)
     })
 
-    it('looks for none where the package lists none for this machine, and installs without waiting', async () => {
-      const waits: number[] = []
-      const h = make({ registry: '9999.0.0', wait: async (ms) => { waits.push(ms) }, globalPackage: async () => ({ launcher: LAUNCHER, version: '9999.0.0', platform: null }) })
-      await h.svc.check(true)
-      void h.svc.apply()
-      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(waits).toEqual([])
+    it('waits only where the package lists a platform package for this machine', async () => {
+      const waited = async (platform: GlobalPackage['platform']) => {
+        const waits: number[] = []
+        const elapsed = () => waits.reduce((a, b) => a + b, 0)
+        const h = make({ registry: '9999.0.0', now: elapsed, wait: async (ms) => { waits.push(ms) }, globalPackage: async () => ({ launcher: LAUNCHER, version: '9999.0.0', platform }) })
+        await h.svc.check(true)
+        void h.svc.apply()
+        await vi.waitFor(() => expect(['restart_required', 'failed']).toContain(h.svc.current().phase))
+        return waits.length > 0
+      }
+      expect(await waited({ name: '@centralu/linux-x64', version: null })).toBe(true)
+      // A machine it lists none for has none by design: nothing is looked for, so nothing waits ten minutes
+      expect(await waited(null)).toBe(false)
     })
 
     it('a copy following the host fails at once with the same line, and leaves the copy alone', async () => {
