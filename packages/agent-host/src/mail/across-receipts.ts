@@ -311,8 +311,13 @@ export class AcrossReceipts extends AcrossCore {
     } finally {
       this.passing.delete(m.id)
       const again = this.passAgain.delete(m.id) ? this.d.records.message(m.id) : undefined
-      if (again) void this.pass(again)
+      if (again) this.passSoon(again)
     }
+  }
+
+  /** `pass`, not awaited: one that fails (the store closing under it) is said, never an unhandled rejection; the next change or connect tries it again */
+  protected passSoon(m: MailRow): void {
+    this.pass(m).catch((e: unknown) => this.d.log?.(`[mail] ${m.id} could not be passed on: ${errorMessage(e)}`))
   }
 
   /**
@@ -340,7 +345,7 @@ export class AcrossReceipts extends AcrossCore {
   protected retryOwed(): void {
     for (const recipient of this.d.records.dueRecipients()) {
       if (!this.foreign(recipient)) continue
-      for (const p of this.d.records.pendingFor(recipient, Number.MAX_SAFE_INTEGER)) if (p.message.sender === CENTRALU) void this.pass(p.message)
+      for (const p of this.d.records.pendingFor(recipient, Number.MAX_SAFE_INTEGER)) if (p.message.sender === CENTRALU) this.passSoon(p.message)
     }
   }
 

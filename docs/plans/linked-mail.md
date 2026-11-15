@@ -204,11 +204,15 @@ notice is written on a machine as the hub's Centralu's, since the hub links the 
 on the hub (and on another machine it is passed to) as that machine's message, from `Centralu on <machine>`, never as
 the hub's Centralu, and only to a session that mailed one of that machine's sessions; any other is refused
 `not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice is
-owed as a report is (#1948 step 6): one that cannot be passed on now (the link is down, or the other side has not answered
-this connection's offer yet) stays undelivered and goes at the next connect or change, under its id, which the other side
-writes once; so a host that restarts while a session works on the other side's task tells that side the stop once the link
-is back. A side that answers it with an error, a machine whose offer said it takes no mail, and a side no longer linked at
-all drop it, said in the host's log. This host's delivery never tries a foreign address.
+owed as a report is (#1948 step 6): one that cannot be passed on now (the link is down, or the send failed on the way)
+stays undelivered and goes at the next connect or change, under its id, which the other side writes once; so a host that
+restarts while a session works on the other side's task tells that side the stop once the link is back. A hub passes a
+notice to a machine without waiting for the machine's answer to this connection's offer; one sent before it is refused
+there, and an error a machine raises on the hub's call reads on the hub as the link failing, so it stays owed. The hub
+tries what it owes a machine again at every answer to its offer, whatever the answer says, and a notice asked to go again
+while its send is out goes once more after it. A refusal the other side gives in its answer (and an error a hub raises on
+a machine's call), a machine whose offer said it takes no mail, and a side no longer linked at all drop it, said in the
+host's log. This host's delivery never tries a foreign address.
 
 ## 7. Refusals across (item 2)
 

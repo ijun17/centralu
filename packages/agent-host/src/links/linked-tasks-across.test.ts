@@ -90,6 +90,19 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(link.offerAnswered()).toBe(link.offerAnswered())
   })
 
+  it('reads a machine whose answer to an offer was an error as not known to take tasks or mail, whatever the offer before it said', async () => {
+    const { machine, hub } = await rig()
+    const link = hub.links.get('m1')!
+    expect(link.takesMail).toBe(true)
+    // Its next answer is an error of its own (handled here, so only the offer reads it)
+    const failing = Promise.reject(new Error('the disk is full'))
+    failing.catch(() => {})
+    machine.holdOffer(failing)
+    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
+    expect(link.takesTasks).toBeUndefined()
+    expect(link.takesMail).toBe(false)
+  })
+
   it('is refused as still connecting once the wait for a machine that never answers is over, never held for good', async () => {
     const { machine, hub, across } = await rig({ offerWaitMs: 200 * SLOW })
     machine.holdOffer(new Promise<void>(() => {}))

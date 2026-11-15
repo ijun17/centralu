@@ -755,13 +755,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
+      if (this.client === client) this.mailBack = false
       // A machine from before the offer takes no tasks; any other failure leaves it unknown until the next connect tells it
       if (this.client === client) this.tasksBack = /Unknown method/i.test(errorMessage(err)) ? false : undefined
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
     // Whatever it said: mail owed to it goes now, or is settled by its answer (one that takes no mail drops a notice), never left for a later change
-    this.deps.offerAnswered?.(this.id)
+    this.deps.onOfferAnswered?.(this.id)
     const changed = note !== this.asksNote
     this.asksNote = note
     if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })

@@ -51,7 +51,7 @@ export type AcrossPeers = {
   selfName(): string
   /**
    * `fn` runs each time a hub offers mail here again: what became of mail that crossed is told then (§6). A hub hears its
-   * machines answer its offer through `LinkDeps.offerAnswered`
+   * machines answer its offer through `LinkDeps.onOfferAnswered`
    */
   onConnect?(fn: () => void): void
 }
