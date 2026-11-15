@@ -46,10 +46,10 @@ const seedSession = (id: string) => {
 }
 const HUB = { sessionId: '_hub-orchestrator', name: 'Parent' }
 /** A message given session `id`'s tool under `inputId`, as the user row the host writes: the person's, a caller's, an app's, a relayed report's or a hub's. Returns its row */
-function give(id: string, inputId: string, by: 'person' | 'caller' | 'app' | 'report' | 'hub' = 'person'): number {
+function give(id: string, inputId: string, by: 'person' | 'caller' | 'app' | 'report' | 'hub' | `_${string}` = 'person'): number {
   seedSession(id)
   const seq = store.messages.nextSeq(id)
-  const from = by === 'hub' ? HUB : by === 'caller' || by === 'report' ? { sessionId: 'c', name: 'C' } : undefined
+  const from = by === 'hub' ? HUB : by.startsWith('_') ? { sessionId: by, name: 'Centralu' } : by === 'caller' || by === 'report' ? { sessionId: 'c', name: 'C' } : undefined
   const payload = { text: 't', inputId, ...(from ? { from } : {}), ...(by === 'app' ? { fromApp: { appId: 'a', name: 'A' } } : {}), ...(by === 'report' ? { relayed: true } : {}) }
   store.messages.appendMessages([{ sessionId: id, seq, role: 'user', kind: 'text', payload, ts: 1 }])
   return seq
@@ -67,7 +67,7 @@ function begins(id: string): void {
 
 describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', () => {
   const heard = () => {
-    const turns: { sessionId: string; by: string; cli: boolean; source: string; ownerId?: string; again?: true }[] = []
+    const turns: { sessionId: string; by: string; cli: boolean; source: string; ownerId?: string; unowned?: true; again?: true }[] = []
     own.onTurnStarted((sessionId, turn) => void turns.push({ sessionId, ...turn }))
     return turns
   }
@@ -123,6 +123,21 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
       ['d', 'work', 'caller', true, false],
       ['d', 'work', 'report', false, true],
     ])
+  })
+
+  it('names no owner for a turn a sender that is no session started, under any of its names, nor any delegation running there (#2290)', () => {
+    const turns = heard()
+    own.setDelegation('owner>s', delegation('owner', 's'))
+    for (const sender of ['_hub-orchestrator', '_hub-assistant', '_centralu'] as const) {
+      give('s', sender, sender)
+      begins('s')
+      own.turnNamed('s', [sender])
+      own.turnEnded('s', [sender])
+    }
+    expect(turns).toEqual(Array.from({ length: 3 }, () => ({ sessionId: 's', by: 'work', cli: false, source: 'caller', unowned: true })))
+    // Nor do they name a session among who gave what entered the latest turn (here only the last sender's row: the span reads from the turn
+    // before's start): a card there is not a giver's alone
+    expect(own.latestTurnInputs('s')).toEqual([null])
   })
 
   it('never breaks the turn when the mailbox fails', () => {

@@ -13,6 +13,7 @@ import { wakesMessage } from '../mail/rules.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
+import { HUB_SENDER } from './hub-sender.js'
 
 let w: CrossWorld
 let m: HostMail
@@ -383,6 +384,26 @@ describe('a turn ends without finishing', () => {
     await w.until(() => stopNotices(asker).length === 1)
     expect(stopNotices(asker)[0]!.message.facts.unanswered).toEqual([{ id: now.id, recipient: addr(child), why: 'stopped' }])
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedAt: null })
+  })
+
+  it('a stop releases the questions of a turn a hub’s Assistant’s words started, as of any turn: the turn is recorded (#2290)', async () => {
+    const { asker, child, question } = await asked()
+    handleOf(child).answer('the release is on main')
+    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+    const logged = vi.spyOn(console, 'error')
+    // A hub from before #2280 gives work as its Assistant's words (`LinkedHost.sendFromHub`): they start the child's next turn
+    await w.mgr.inputs.send(child, 'and tag it', undefined, { sessionId: HUB_SENDER, name: 'Assistant' })
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+    // No session's turn and no task's
+    expect(m.turns.current(child)).toMatchObject({ by: 'caller', messageId: null, starter: null })
+    // A question the delivery gives into the turn going is marked with that turn (`MailDelivery`)
+    const now = m.service.send(addr(asker), { to: [addr(child)], text: 'and the tag?', needsReply: true }).message
+    w.store.mailbox.markDelivered(addr(child), [now.id], Date.now(), m.turns.current(child)?.turnSeq ?? null)
+    handleOf(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.facts.unanswered).toEqual([{ id: now.id, recipient: addr(child), why: 'stopped' }])
+    expect(read.row(question.id, addr(child))).toMatchObject({ releasedAt: null })
+    expect(logged).not.toHaveBeenCalledWith(expect.stringContaining('could not record a turn'))
   })
 
   it('a turn Centralu continues after an update tells no one, and the continued turn that then fails does', async () => {

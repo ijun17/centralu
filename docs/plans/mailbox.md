@@ -2060,7 +2060,9 @@ turn owner was:
 
 **Re-keyed readers of the turn owner.**
 - The turn's starter for C8 (`mail_turns.starter`, `turnRecorder`'s `ownerId`): the session the turn's opening message names (its user row's
-  `from`), else the caller of a delegation still running there (`start_agent`'s first prompt names none).
+  `from`), else the caller of a delegation still running there (`start_agent`'s first prompt names none). A `from` that is no session's id
+  (`isSessionId`: a hub's Assistant's words from a hub before #2280, Centralu's own notice) names no owner and no task, not even the person's: the
+  turn is recorded as a caller's turn of no task, and such a row names no giver among a turn's inputs, so its cards stay the person's (#2290).
 - The stop notice's starter for a cut turn not continued, and for a quit found at the start: the session that started the stopped one
   (`askedBy`). "The session that gave the turn" goes with the owner; a giver of open work is owed and told by its own rows.
 - `agent_session` on another project's session reads and answers its cards while the caller has work open there (`openTasks`).

@@ -50,6 +50,16 @@ export function senderKind(address: string): Party['kind'] | undefined {
   return isPerson(address) ? 'person' : parseAddress(address)?.kind
 }
 
+const SESSION_ID_RE = new RegExp(`^${SEGMENT}$`)
+
+/**
+ * Whether `id` can name a session in an address (#2290). A message's sender id that cannot names no session: a hub's Assistant's (`isHubSender`)
+ * and Centralu's own notices are recorded under ids that start with `_`, which no host makes
+ */
+export function isSessionId(id: unknown): id is string {
+  return typeof id === 'string' && SESSION_ID_RE.test(id)
+}
+
 export function sessionAddress(host: string, sessionId: string): string {
   return checked(`session:${host}/${sessionId}`)
 }

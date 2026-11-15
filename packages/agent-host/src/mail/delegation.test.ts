@@ -109,6 +109,13 @@ describe('a turn the mailbox did not start', () => {
     turnRecorder(w.mail, w.store.mailbox, w.turns)('w', { by: 'work', cli: false, source: 'caller' })
     expect(w.turns.current('w')).toMatchObject({ messageId: task.id })
   })
+
+  it('a turn a sender that is no session started (a hub’s Assistant, Centralu) is a caller’s turn of no task, not the person’s (#2290)', () => {
+    const w = turnWorld()
+    personWorkRecorder(w.mail)('w', 'Sort the photos')
+    turnRecorder(w.mail, w.store.mailbox, w.turns)('w', { by: 'work', cli: false, source: 'caller', unowned: true })
+    expect(w.turns.current('w')).toMatchObject({ by: 'caller', messageId: null, starter: null })
+  })
 })
 
 describe('the end of the Assistant’s request turn (§7.6)', () => {
