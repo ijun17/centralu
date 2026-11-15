@@ -100,7 +100,7 @@ export class MailTool {
     try {
       const me = this.host.caller(sessionId)
       if (!me) throw refuse('gone', 'this session is not here')
-      return { text: this.dispatch(sessionId, me, args, mailCalls(1, this.host.form(sessionId))) }
+      return { text: this.dispatch(sessionId, me, args, mailCalls(this.host.form(sessionId))) }
     } catch (e) {
       return failed(e)
     }
@@ -120,7 +120,7 @@ export class MailTool {
       const pr = args.action === 'watch' ? prNumberOf(args.to ?? '') : null
       if (pr !== null) {
         const watches = this.watchArgs(args)
-        return { text: await watches.registerPr(me.address, pr, args.text?.trim() ?? '', (id) => mailCalls(1, this.host.form(sessionId)).close(id), signal) }
+        return { text: await watches.registerPr(me.address, pr, args.text?.trim() ?? '', (id) => mailCalls(this.host.form(sessionId)).close(id), signal) }
       }
       if (args.action === 'find') {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }

@@ -77,7 +77,7 @@ describe('the frame of mail without threads', () => {
     expect(none).toContain(`</centralu-mail>\n${READ}\n</system-reminder>`)
     const some = buildMessageFrame([item(1, { needsReply: true }), item(2), item(3, { needsReply: true })]).text
     expect(some).toContain(
-      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="send", id="<id>", text="…"), or close it with mail(action="done", id="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you set needsReply=true.\n</system-reminder>`,
+      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…"), or close it with mail(action="handled", thread="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you set needsReply=true.\n</system-reminder>`,
     )
   })
 
@@ -132,47 +132,36 @@ describe('the frame of mail without threads', () => {
   })
 })
 
-describe('the calls a wake names (§11.3)', () => {
-  it('writes the version-2 tool as send, done and read by id', () => {
-    const c = mailCalls(2, 'plain')
-    expect([c.read(), c.read('X'), c.answer('X'), c.done('X'), c.inbox(), c.sessions()]).toEqual([
-      'mail(action="read")',
-      'mail(action="read", id="X")',
-      'mail(action="send", id="X", text="…")',
-      'mail(action="done", id="X")',
-      'mail(action="inbox")',
-      'mail(action="sessions")',
-    ])
-  })
-
-  it('writes the version-1 tool, which a process started before the switch still has, as reply, handled and read by thread', () => {
-    const c = mailCalls(1, 'plain')
-    expect([c.read(), c.read('X'), c.answer('X'), c.done('X'), c.inbox()]).toEqual([
+describe('the calls a wake names', () => {
+  it('writes the tool’s calls as reply, handled, read and close by thread', () => {
+    const c = mailCalls('plain')
+    expect([c.read(), c.read('X'), c.answer('X'), c.done('X'), c.inbox(), c.close('X')]).toEqual([
       'mail(action="read")',
       'mail(action="read", thread="X")',
       'mail(action="reply", thread="X", text="…")',
       'mail(action="handled", thread="X")',
       'mail(action="inbox")',
+      'mail(action="close", thread="X")',
     ])
+    const frame = buildMessageFrame([item(1, { needsReply: true })], c).text
+    expect(frame).toContain('answer each with mail(action="reply", thread="<id>", text="…")')
+    expect(frame).toContain('close it with mail(action="handled", thread="<id>")')
   })
 
   it('writes the Assistant’s calls as the command behind centralu_run, which cannot be called bare (#850)', () => {
-    const v2 = mailCalls(2, 'command')
-    expect([v2.read(), v2.read('X'), v2.answer('X'), v2.done('X'), v2.inbox(), v2.sessions()]).toEqual([
+    const c = mailCalls('command')
+    expect([c.read(), c.read('X'), c.answer('X'), c.done('X'), c.inbox(), c.close('X')]).toEqual([
       'centralu_run(command="mail", args={action: "read"})',
-      'centralu_run(command="mail", args={action: "read", id: "X"})',
-      'centralu_run(command="mail", args={action: "send", id: "X", text: "…"})',
-      'centralu_run(command="mail", args={action: "done", id: "X"})',
+      'centralu_run(command="mail", args={action: "read", thread: "X"})',
+      'centralu_run(command="mail", args={action: "reply", thread: "X", text: "…"})',
+      'centralu_run(command="mail", args={action: "handled", thread: "X"})',
       'centralu_run(command="mail", args={action: "inbox"})',
-      'centralu_run(command="mail", args={action: "sessions"})',
+      'centralu_run(command="mail", args={action: "close", thread: "X"})',
     ])
-    expect(mailCalls(1, 'command').answer('X')).toBe('centralu_run(command="mail", args={action: "reply", thread: "X", text: "…"})')
-    const frame = buildMessageFrame([item(1, { needsReply: true })], v2).text
+    const frame = buildMessageFrame([item(1, { needsReply: true })], c).text
     expect(frame).toContain('Read it with centralu_run(command="mail", args={action: "read"}).')
-    expect(frame).toContain('answer each with centralu_run(command="mail", args={action: "send", id: "<id>", text: "…"})')
+    expect(frame).toContain('answer each with centralu_run(command="mail", args={action: "reply", thread: "<id>", text: "…"})')
+    expect(frame).toContain('close it with centralu_run(command="mail", args={action: "handled", thread: "<id>"})')
     expect(frame).not.toContain('mail(action=')
-    const old = buildMessageFrame([item(1, { needsReply: true })], mailCalls(1, 'plain')).text
-    expect(old).toContain('answer each with mail(action="reply", thread="<id>", text="…")')
-    expect(old).toContain('close it with mail(action="handled", thread="<id>")')
   })
 })

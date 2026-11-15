@@ -129,7 +129,7 @@ describe('what one wake carries', () => {
     expect(toB).not.toContain('wait for your answer')
     const toA = w.mail.drain(A).text
     expect(toA).toContain(`id="${mine.id}" kind="message" from="${B}" sender="a session of your project" needsReply="1"`)
-    expect(toA).toContain('1 of these wait for your answer (needsReply="1"): answer each with mail(action="send", id="<id>", text="…")')
+    expect(toA).toContain('1 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…")')
     const toOrc = w.mail.drain(ORC).text
     expect(toOrc).toContain(`id="${clar.id}" kind="message" from="${W}" sender="a session of another project" needsReply="1"`)
     expect(toOrc).toContain(`clarifies="${t.id}"`)

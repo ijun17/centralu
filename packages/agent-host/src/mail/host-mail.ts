@@ -167,7 +167,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     calls: (address) => {
       const party = parseAddress(address)
-      return mailCalls(1, party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
+      return mailCalls(party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
     standing: (address) => {
