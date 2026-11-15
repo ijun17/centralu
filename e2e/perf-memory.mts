@@ -184,7 +184,7 @@ type Sample = {
   /** The window page's JS heap (Chromium) */
   heapUsedMB: number | null
   heapTotalMB: number | null
-  /** The JS heap of the app view's frames that run in renderers of their own (Chromium, appview); null without any */
+  /** The JS heap of the renderers the app view has to itself, each counted once (Chromium, appview); null without any */
   viewHeapUsedMB: number | null
   domNodes: number
   elements: number
@@ -918,7 +918,7 @@ async function measureEngine(
     const t0 = Date.now()
     const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
     if (snapshots) mkdirSync(snapshots, { recursive: true })
-    /** Sessions on the app view's frames that run in renderers of their own (Chromium, appview), which `cdp` does not reach */
+    /** One session per renderer the app view has to itself (Chromium, appview), which `cdp` does not reach */
     const viewCdp: CDPSession[] = []
     /** The JS heaps by constructor now, the window's and each of `viewCdp`'s, written into the --heap-snapshots folder; null without one */
     const snapshot = async (step: string): Promise<Map<string, HeapClasses> | null> => {
@@ -1253,15 +1253,27 @@ async function measureEngine(
       await card.waitFor({ timeout: 60_000 })
       // Chromium gives a sandboxed frame a renderer of its own, which the page's session does not reach: the view's
       // memory is in `footprintMB.content`, not in the largest content process, and its heap is read through a session
-      // on each such frame. A frame in the page's renderer has no session of its own, and its heap is the page's. WebKit
+      // on such a frame. A frame in the page's renderer has no session of its own, and its heap is the page's. WebKit
       // runs the view in the window's WebContent.
       if (cdp) {
+        // A heap reading and a snapshot cover the renderer's whole isolate, which frames can share: one session per
+        // isolate, so none is read twice, and none on the page's own
+        const isolates = new Set([(await cdp.send('Runtime.getIsolateId')).id])
         const frame = await (await proxy.elementHandle()).contentFrame()
+        let outOfPage = 0
         for (const f of frame ? [frame, ...frame.childFrames()] : []) {
           const s = await context.newCDPSession(f).catch(() => null)
-          if (s) viewCdp.push(s)
+          if (!s) continue
+          outOfPage++
+          const { id } = await s.send('Runtime.getIsolateId')
+          if (isolates.has(id)) {
+            await s.detach()
+            continue
+          }
+          isolates.add(id)
+          viewCdp.push(s)
         }
-        console.error(`[${engine}] appview: ${viewCdp.length} of the view's frames run in a renderer of their own`)
+        console.error(`[${engine}] appview: ${outOfPage} of the view's frames run outside the page's renderer, in ${viewCdp.length} renderer(s)`)
       }
       await open(seed.longSessionId)
       const changed = () => wire.inject({ type: 'external_app_state_changed', appId: boardApp!.appId, projectId: boardApp!.projectId })
