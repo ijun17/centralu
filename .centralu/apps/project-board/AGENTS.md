@@ -1081,7 +1081,10 @@ and refuses with every reason at once, sending nothing.
   it pushes with `--force-with-lease` on the head it read and moves the base. The person's checkout
   never changes: the worktree and the app's temporary refs are removed whatever happens. `lower`
   names the lower pull request when GitHub already moved `pr`'s base to main after deleting the
-  merged branch. `path` defaults to the checkout this app is in. When `pr` is a draft and no open
+  merged branch. `path` defaults to the checkout this app is in. For every tool that takes `path`, it is a folder on the computer the app runs on,
+  and one that is not there is refused before anything runs (`checkoutDir`, board.mjs; #2283: a session a hub started on another
+  computer calls the hub's board, and its own worktree's path made git answer "git was not found"); left out, the app's own
+  checkout serves, since the pushed branches are fetched from GitHub. When `pr` is a draft and no open
   pull request is based on its branch, it says to mark it ready: it is its stack's top now, and a
   draft runs no CI (#1066). It does not mark it itself: a draft may also be work in progress.
 - Tests: `tooling/project-board-contribute.test.ts`, with a fake `gh` and real git repositories

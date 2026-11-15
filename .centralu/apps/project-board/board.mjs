@@ -2,8 +2,9 @@
 // (one line per item). Every tool family reads items by number through `itemOf` here.
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { freshCache } from './cache.mjs'
-import { CACHE_MS, config } from './config.mjs'
-import { checkRepo, parseItemRef, readBoard, sameRepo } from './github.mjs'
+import { APP_DIR, CACHE_MS, config } from './config.mjs'
+import { isFolder } from './git.mjs'
+import { checkRepo, GitHubError, parseItemRef, readBoard, sameRepo } from './github.mjs'
 import { linesAnswer } from './reply.mjs'
 
 // --- The short cache -------------------------------------------------------------------------------
@@ -48,7 +49,24 @@ export const detailInput = z.enum(['compact', 'full']).optional().describe('"ful
 export const itemInput = itemRef.describe(`The issue or pull request: ${REF_HELP}`)
 export const refreshInput = z.boolean().optional().describe('Skip the short cache and ask GitHub now')
 export const repoInput = z.string().optional().describe("owner/name; default this project's repository")
-export const pathInput = z.string().optional().describe('A checkout of the repository; default the one this app is in')
+export const pathInput = z.string().optional().describe('A checkout of the repository on the computer this app runs on; default the one this app is in')
+
+/**
+ * The checkout a tool's `path` names, else the one this app is in. A path that is no folder where this app runs is refused
+ * before anything runs (#2283): a session on another computer (one a hub started, whose apps run on the hub) gave its own
+ * checkout, and git there answered "git was not found". The app's own checkout serves such a session: every tool that takes
+ * `path` fetches what it reads from the remote.
+ */
+export async function checkoutDir(path) {
+  if (path === undefined) return APP_DIR
+  if (!(await isFolder(path))) {
+    throw new GitHubError(
+      'input',
+      `The checkout ${path} is not a folder on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`,
+    )
+  }
+  return path
+}
 
 export const matches = (want) => (i) => i.number === want.number && sameRepo(i.repository, want.repo)
 

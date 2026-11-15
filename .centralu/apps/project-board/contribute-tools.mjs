@@ -1,8 +1,8 @@
 // The contribution procedure: comment, edit_comment, file_issue, open_pr, commit_check, rebase_stack.
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
 import { commentIdOf } from './answers.mjs'
-import { itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
-import { APP_DIR, config } from './config.mjs'
+import { checkoutDir, itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
+import { config } from './config.mjs'
 import { GitError } from './git.mjs'
 import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
 import { progress } from './ci-tools.mjs'
@@ -240,6 +240,7 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
     labels.push('tier:deep')
   } else {
     if (String(args.head).includes(':')) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${args.head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
+    const dir = await checkoutDir(path)
     const r = repoOf(args.repo)
     const info = await readRepo(r)
     const target = args.base ?? info.defaultBranch
@@ -247,7 +248,7 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
     cancelled()
     progress(ctx, 0, `pnpm pre-pr on ${args.head}${lowers.length ? ` and the ${lowers.length} pull request(s) under it` : ''}`)
     const res = await runPrePr({
-      dir: path ?? APP_DIR,
+      dir,
       repo: r,
       head: args.head,
       base: target,
@@ -303,7 +304,7 @@ async function restack({ pr, lower, path, push }) {
   if (below && !sameRepo(below.repo, want.repo)) throw new GitHubError('input', 'lower must be a pull request of the same repository.')
   try {
     const r = await rebaseStack(
-      { repo: want.repo, pr: want.number, lower: below?.number, dir: path ?? APP_DIR, push: push === true },
+      { repo: want.repo, pr: want.number, lower: below?.number, dir: await checkoutDir(path), push: push === true },
       { readPr, prsWithHead, setPrBase, openPrsOnBase },
       (n) => refOf(want.repo, n),
     )
