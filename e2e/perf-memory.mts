@@ -918,20 +918,18 @@ async function measureEngine(
       const pick = reps.find((s) => s.totalFootprintMB === median(reps.map((x) => x.totalFootprintMB)))!
       const h = await heap(cdp)
       pick.jsEventListeners = h.jsEventListeners
-      {
-        // WebKit has no CDP: Playwright's requestGC is the inspector's Heap.gc, a full collection of the page's VM. Its
-        // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
-        if (cdp) await cdp.send('HeapProfiler.collectGarbage')
-        else await page.requestGC()
-        await sleep(cdp ? 1_000 : 5_000)
-        const { procs } = engineProcs(engine, before, host!.pid!)
-        const after = await heap(cdp)
-        pick.afterGc = {
-          contentFootprintMB: round(
-            Math.max(0, ...procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)),
-          ),
-          heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
-        }
+      // WebKit has no CDP: Playwright's requestGC is the inspector's Heap.gc, a full collection of the page's VM. Its
+      // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
+      if (cdp) await cdp.send('HeapProfiler.collectGarbage')
+      else await page.requestGC()
+      await sleep(cdp ? 1_000 : 5_000)
+      const collected = engineProcs(engine, before, host!.pid!).procs
+      const after = await heap(cdp)
+      pick.afterGc = {
+        contentFootprintMB: round(
+          Math.max(0, ...collected.filter((p) => p.role === 'content').map((p) => p.footprintMB)),
+        ),
+        heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
       }
       const out = {
         ...pick,
