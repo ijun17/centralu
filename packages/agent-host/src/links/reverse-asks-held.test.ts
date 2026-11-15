@@ -63,6 +63,24 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     expect(await call).toMatchObject({ ok: true, state: 'done' })
   }, 30_000 * SLOW)
 
+  it('runs on with the time it had left once the card is back, and ends when nobody answers it', async () => {
+    const { machine, hub } = await rig({ askTimeoutMs: LIMIT })
+    const call = machine.ask({ project: hub.projectName, task: 'say hello' })
+    const settled = settledFlag(call)
+    await eventually(() => !!hub.card())
+    await hub.mgr.inputs.send('h1', 'a long job of my own')
+    await eventually(held)
+    await delay(2 * LIMIT)
+    expect(settled()).toBe(false)
+    hub.finish('h1', 'done with mine')
+    // The card is back and released: the limit runs on, and nobody answers
+    await eventually(() => !!hub.card() && told.at(-1) === false)
+    const back = Date.now()
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('did not answer hub.askProject in time') })
+    // What it had left, not the bound on holding
+    expect(Date.now() - back).toBeLessThan(2 * LIMIT)
+  }, 30_000 * SLOW)
+
   it('waits while another card stands in the slot, and comes up when that one is answered', async () => {
     const { machine, hub } = await rig({ askTimeoutMs: LIMIT })
     await hub.mgr.inputs.send('h1', 'please approve my command')
