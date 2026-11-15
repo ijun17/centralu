@@ -742,14 +742,18 @@ export class MailboxRecords {
     )
   }
 
-  /** The open tasks given to addresses that start with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`), oldest first, at most `limit` (#2289) */
-  openTasksToward(prefix: string, limit: number): string[] {
+  /**
+   * The open tasks given after `since` to addresses that start with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`), oldest first,
+   * at most `limit` (#2289)
+   */
+  openTasksToward(prefix: string, since: number, limit: number): string[] {
     return this.db
-      .prepare<[string, number], { id: string }>(
+      .prepare<[string, number, number], { id: string }>(
         `SELECT m.id FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL ORDER BY m.created_at, m.id LIMIT ?`,
+          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND m.created_at > ?
+          ORDER BY m.created_at, m.id LIMIT ?`,
       )
-      .all(likePrefix(prefix), limit)
+      .all(likePrefix(prefix), since, limit)
       .map((r) => r.id)
   }
 

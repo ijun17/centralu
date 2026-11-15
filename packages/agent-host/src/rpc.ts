@@ -928,7 +928,7 @@ export function createRpcHandler(
       if (hubs && ctx) hubs.offer(ctx.client, offer)
       // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2); its tasks come as mail (#1948 step 6)
       // The hub's open tasks that never arrived here (#2289): it deletes its copies of them
-      const lacks = mailAcross && hubs && offer.open?.length ? mailAcross.lacking(offer.open) : []
+      const lacks = mailAcross && hubs && offer.open?.length ? mailAcross.lacking(offer.hub.id, offer.open) : []
       return { ok: true as const, ...(mailAcross && hubs ? { mail: true, tasks: true } : {}), ...(lacks.length ? { lacks } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
     },
     'host.mail': async (p, ctx) => {
