@@ -49,8 +49,9 @@
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
- * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heaps). On Windows
- * (Chromium only) the footprint is each process's private bytes and RSS its working set, read from `Win32_Process`.
+ * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heaps). WebKit is
+ * measured on macOS only (both engines are the default there, Chromium elsewhere). On Windows the footprint is each
+ * process's private bytes and RSS its working set, read from `Win32_Process`.
  *
  * What a number holds differs by engine where a frame is involved. `content` is the largest content process, the
  * window's own; `all content` sums every content process. WebKit runs an app's view in the window's WebContent, so its
@@ -113,7 +114,7 @@ type Step = (typeof STEPS)[number]
 const { values } = parseArgs({
   options: {
     profile: { type: 'string', default: 'owner' },
-    engines: { type: 'string', default: 'webkit,chromium' },
+    engines: { type: 'string' },
     'stream-minutes': { type: 'string', default: '5' },
     'ui-root': { type: 'string', default: root },
     label: { type: 'string', default: 'main' },
@@ -137,7 +138,10 @@ const { values } = parseArgs({
   },
 })
 const profile = values.profile as StoreProfile
-const engines = values.engines.split(',') as Engine[]
+// WebKit's processes are told apart by their macOS names (roleOf); anywhere else every footprint would read 0
+const engines = (values.engines ?? (process.platform === 'darwin' ? 'webkit,chromium' : 'chromium')).split(',') as Engine[]
+if (engines.includes('webkit') && process.platform !== 'darwin')
+  throw new Error('WebKit is measured on macOS only: its processes are found by their macOS names. Use --engines chromium.')
 const streamMs = Number(values['stream-minutes']) * 60_000
 const backgroundMs = Number(values['background-minutes']) * 60_000
 const BACKGROUND_SESSIONS = Number(values['background-sessions'])
