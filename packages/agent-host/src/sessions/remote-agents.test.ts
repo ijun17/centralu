@@ -7,7 +7,8 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 import { raceBound } from '../timing.js'
 import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
 import { ChildOwnership } from './child-ownership.js'
-import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
+import { RemoteAgents, REMOTE_AGENTS_KEY, linkedWords, type RemoteAgentsHost } from './remote-agents.js'
+import { NO_WORDS } from './ask-project.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 
 /**
@@ -220,7 +221,7 @@ describe('a call that waits on a child on a linked machine reads the report on i
     const ra = agents()
     await start(ra)
     const waiting = act(ra, 'wait')
-    tasks.report('hub.m_1', { state: 'reported', outcome: 'finished', answer: 'kept', owner: 'session:hub/h1' })
+    tasks.report('hub.m_1', { state: 'reported', outcome: 'finished', answer: 'the answer…', owner: 'session:hub/h1' })
     expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'the answer there', notice: expect.stringContaining('works on Box') })
     expect(tasks.answered).toEqual([`h1>${CHILD}`])
   })
@@ -478,5 +479,27 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
     more = { autoBoundaryOpen, hostCards: { askHost: async () => (meta.delete(caller.id), 'allow') } }
     expect(await start(agents())).toMatchObject({ ok: false, error: 'The session that asked is no longer here.' })
     expect(tasks.sent).toEqual([])
+  })
+})
+
+describe("the answer of a task on a linked machine (`linkedWords`, #1812)", () => {
+  const reading = (text: string | Error): Pick<LinkedSessions, 'lastWords'> => ({
+    lastWords: async () => (text instanceof Error ? { ok: false as const, error: text.message } : { ok: true as const, text, length: text.length, seq: 9 }),
+  })
+  const words = (reader: Pick<LinkedSessions, 'lastWords'> | null, kept: string | undefined) => linkedWords(reader as LinkedSessions | null, CHILD, 'c1', kept)
+
+  it("is the report's words; the session's last words there only when they are its, which give it whole", async () => {
+    expect(await words(reading('a later turn: the person asked something else'), 'the branch builds')).toBe('the branch builds')
+    expect(await words(reading('the branch builds, and every test passes'), 'the branch builds…')).toBe('the branch builds, and every test passes')
+  })
+
+  it('says a turn that kept no words said nothing, whatever the session said later', async () => {
+    expect(await words(reading('a later turn'), undefined)).toBe(NO_WORDS)
+    expect(await words(null, '')).toBe(NO_WORDS)
+  })
+
+  it('names the read that shows the rest of a cut answer it cannot read there', async () => {
+    expect(await words(reading(new Error('Box is not reachable right now')), 'the branch builds…')).toBe(`the branch builds…[the rest is cut here; read_session(sessionId="${CHILD}") reads it whole]`)
+    expect(await words(null, 'the branch builds')).toBe('the branch builds')
   })
 })

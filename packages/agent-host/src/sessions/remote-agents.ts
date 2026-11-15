@@ -570,12 +570,12 @@ export class RemoteAgents {
     if (s.outcome === 'failed' || s.outcome === 'stopped') {
       return { ok: false, error: `"${rec.name}" [${rec.sessionId}] on ${rec.machine} did not finish: ${s.error ?? s.reason ?? s.outcome}. Tell the person, or give it a clearer task.` }
     }
-    const words = await linkedWords(this.host.linkedReader, rec.sessionId, rec.name, s.answer)
+    const answer = await linkedWords(this.host.linkedReader, rec.sessionId, rec.name, s.answer)
     // The turn left the child's own background work running there (#721): the final report comes as mail when that work ends
     const paused = s.outcome === 'paused'
     return {
-      ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, readable: [], outside: [],
-      notice: `It works on ${rec.machine}: the paths it names are that machine's, not readable from here.${paused ? ' Its own background work still runs there; a final report follows when that work ends.' : ''}${words.notice}`,
+      ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer, readable: [], outside: [],
+      notice: `It works on ${rec.machine}: the paths it names are that machine's, not readable from here.${paused ? ' Its own background work still runs there; a final report follows when that work ends.' : ''}`,
     }
   }
 
@@ -746,13 +746,17 @@ export class RemoteAgents {
 }
 
 /**
- * A linked machine's session's last words, read there and cut as an answer is cut here, the cut naming the read that shows the rest (#1186); the answer
- * its report kept when the machine cannot be read. A read that failed is said in the notice. For start_agent's child and an ask_project task there alike
+ * A linked machine's session's answer to the task a call gave it, for start_agent's child and an ask_project task there alike: the words its report on
+ * that task kept (`kept`), its turn's own (#1812). A session's latest turn there may be a later one (the person's, after the task's ended), so its last
+ * words are read there only to give the whole answer, cut as an answer is cut here with the read that shows the rest (#1186), and only when they are the
+ * report's: they begin with the words it kept. Otherwise, or when they cannot be read, the kept words are the answer. A report that kept none is a turn
+ * that said nothing
  */
-export async function linkedWords(reader: LinkedSessions | null, sessionId: string, name: string, kept: string | undefined): Promise<{ answer: string; notice: string }> {
-  const words = reader ? await reader.lastWords(sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
-  if (!words.ok && kept !== undefined) return { answer: kept, notice: '' }
-  if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${sessionId}") reads it once the machine answers.` }
-  if (words.text === '') return { answer: NO_WORDS, notice: '' }
-  return { answer: clipAnswer(words.text, name, words.seq !== null ? { sessionId, seq: words.seq } : undefined), notice: '' }
+export async function linkedWords(reader: LinkedSessions | null, sessionId: string, name: string, kept: string | undefined): Promise<string> {
+  if (!kept) return NO_WORDS
+  const words = reader ? await reader.lastWords(sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch(() => null) : null
+  // The report keeps the head of the answer, cut with an ellipsis (`clipPreview`)
+  const head = kept.endsWith('…') ? kept.slice(0, -1) : kept
+  if (words?.ok && words.text.startsWith(head)) return clipAnswer(words.text, name, words.seq !== null ? { sessionId, seq: words.seq } : undefined)
+  return kept === head ? clipAnswer(kept, name) : `${kept}[the rest is cut here; read_session(sessionId="${sessionId}") reads it whole]`
 }

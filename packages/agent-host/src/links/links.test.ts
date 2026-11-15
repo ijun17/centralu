@@ -2479,6 +2479,27 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(line.text).toContain('MIDDLE-END')
   })
 
+  it("answers with its task's turn's words, never a later turn's: the person's turn there ended before the hub read it (#1812)", async () => {
+    const { remote, name, ask, answer } = await rig()
+    const real = remote.mgr.linkedHost.hostReader.bind(remote.mgr.linkedHost)
+    // The person writes to the session once the task's turn ended there, and that turn of theirs ends before the hub reads the answer
+    vi.spyOn(remote.mgr.linkedHost, 'hostReader').mockImplementation(() => ({
+      ...real(),
+      lastAnswer: async (...args: Parameters<ReturnType<typeof real>['lastAnswer']>) => {
+        const ended = remote.store.messages.nextSeq('w1')
+        await remote.mgr.inputs.send('w1', 'my own words')
+        await eventually(() => remote.store.messages.loadMessages('w1', 20).some((m) => m.seq >= ended && JSON.stringify(m.payload).includes('echo: my own words')))
+        await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state !== 'working')
+        return real().lastAnswer(...args)
+      },
+    }))
+    const call = ask({ project: name, task: 'say hello' })
+    await answer('allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: true, state: 'done', answer: expect.stringMatching(/^echo: /) })
+    expect((r as { answer: string }).answer).not.toContain('my own words')
+  })
+
   it('answers with the words its report kept when they cannot be read there, rather than answering empty (#1186)', async () => {
     const { remote, name, ask, answer } = await rig()
     const real = remote.mgr.linkedHost.hostReader.bind(remote.mgr.linkedHost)

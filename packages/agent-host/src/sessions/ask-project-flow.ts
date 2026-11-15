@@ -410,15 +410,13 @@ export class AskProjectFlow {
     this.host.children.answered(callerId, ask.child)
     const failed = unfinished(s)
     if (failed !== null || s.state !== 'reported') return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] did not finish: ${failed}. Tell the person, or ask again with a clearer task.` }
-    const words = reader ? await linkedWords(reader, ask.sessionId, ask.sessionName, s.answer) : { answer: clipAnswer(s.answer ?? NO_WORDS, ask.sessionName), notice: '' }
-    // A read that failed is said, not handed back as an empty answer (#1186): the turn ended, and the task is done there
-    if (!words.answer) return { ok: false, error: `${ask.project}'s session "${ask.sessionName}" [${ask.sessionId}] ended its turn.${words.notice} Do not give the task again.` }
+    const answer = await linkedWords(reader, ask.sessionId, ask.sessionName, s.answer)
     // Its own background work still runs there (#721): its final report comes by mail when that work ends
     const paused = s.outcome === 'paused' ? liveBackgroundTasks([...this.host.linkedReports.tasksOf(ask.sessionId)]).filter((t) => !t.timer) : null
     return {
-      ok: true, state: 'done', ...base, answer: words.answer,
+      ok: true, state: 'done', ...base, answer,
       // Paths in the answer are that computer's: listed, not opened to the caller
-      readable: [], outside: pathsIn(words.answer),
+      readable: [], outside: pathsIn(answer),
       ...(paused ? { paused: pausedWords(paused, ask.sessionId, ' there') } : {}),
     }
   }
