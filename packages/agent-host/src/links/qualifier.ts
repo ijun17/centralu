@@ -318,7 +318,7 @@ export class Qualifier {
     if (!isObj(v)) return v
     const party = (x: unknown) => this.mailParty(x)
     const sent = (x: unknown) => (isObj(x) ? { ...x, sender: party(x.sender) } : x)
-    const list = (x: unknown, f: (y: Obj) => unknown) => (Array.isArray(x) ? x.map((y) => (isObj(y) ? f(y) : y)) : x)
+    const list = (x: unknown, f: (y: Obj) => unknown) => (Array.isArray(x) ? x.map((y: unknown) => (isObj(y) ? f(y) : y)) : x)
     const t = v.thread
     return {
       ...v,

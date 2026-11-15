@@ -10,7 +10,7 @@ const list = (unreached: { machineId: string; name: string }[]) =>
 
 // #2268: on a hub, a linked machine whose work could not be read was missing from Tasks without a word
 describe('Tasks on a hub, with a linked machine that was not reached', () => {
-  it('names each such machine, under "No tasks" too, folding in as a change on screen does', () => {
+  it('names each such machine, under "No tasks" too, folding in as a change on screen does, and none when every machine answered', () => {
     const html = list([
       { machineId: 'm1', name: 'Box' },
       { machineId: 'm2', name: 'Laptop' },
@@ -19,9 +19,7 @@ describe('Tasks on a hub, with a linked machine that was not reached', () => {
     expect(html).toContain('data-testid="tasks-unreached"')
     expect(html).toContain('Not listed: the tasks on Box, Laptop, which could not be reached just now.')
     expect(html).toContain('cc-fold')
-  })
-
-  it('says nothing when every machine answered', () => {
+    // And nothing once every machine answered
     expect(list([])).not.toContain('tasks-unreached')
   })
 })

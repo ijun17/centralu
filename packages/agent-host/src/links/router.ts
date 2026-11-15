@@ -538,9 +538,9 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
       const a = isObj(acc) ? acc : { tasks: [] }
       const b = isObj(r) ? r : { tasks: [] }
       // A host that capped its list says how many open rows it listed; one that did not listed every open row it has
-      const listed = (x: Obj) => (typeof x.capped === 'number' ? x.capped : list(x.tasks).filter((t) => isObj(t) && t.state !== 'done').length)
+      const listed = (x: Obj) => (typeof x.capped === 'number' ? x.capped : listIn(x, 'tasks').filter((t) => isObj(t) && t.state !== 'done').length)
       const capped = typeof a.capped !== 'number' && typeof b.capped !== 'number' ? null : listed(a) + listed(b)
-      return { ...a, tasks: [...list(a.tasks), ...list(b.tasks).map((t) => q.taskRow(t))], capped }
+      return { ...a, tasks: [...listIn(a, 'tasks'), ...listIn(b, 'tasks').map((t) => q.taskRow(t))], capped }
     }
     case 'subagents.usage': {
       const a = isObj(acc) ? acc : { sessions: [] }
