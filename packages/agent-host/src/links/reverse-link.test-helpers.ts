@@ -137,7 +137,7 @@ export async function machineHost(
  */
 export async function hubHost(
   machinePort: number,
-  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before' | 'delivered'; children?: readonly RemoteAgent[]; origin?: string; apps?: true } = {},
+  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before' | 'delivered'; children?: readonly RemoteAgent[]; origin?: string; apps?: true; deps?: Partial<LinkDeps> } = {},
 ) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
@@ -210,6 +210,7 @@ export async function hubHost(
     client: { maxBackoffMs: 100 },
     ...(o.origin ? { ownerOf: (sessionId: string) => mgr.linkedHost.remoteAgentParent(sessionId) } : {}),
     ...reverse,
+    ...o.deps,
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   apps?.linked.usePeers(appsPeers({ machines: links }))

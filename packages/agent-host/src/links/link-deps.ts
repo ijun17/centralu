@@ -126,6 +126,8 @@ export type LinkDeps = {
   attemptWaitMs?: number
   /** For tests: how long a call that needs a machine which is down waits for the attempt it starts (10 s when absent, #1532) */
   callWaitMs?: number
+  /** For tests: how long a call waits for a machine's answer to this connection's offer before it reads it as still connecting (10 s when absent, #1948 step 6) */
+  offerWaitMs?: number
   /** For tests: the window within which a machine takes at most one attempt started by a call (15 s when absent, #1532) */
   callWindowMs?: number
   /** For tests: how long a link held at `versions_differ` waits before it looks at the versions again (60 s when absent) */

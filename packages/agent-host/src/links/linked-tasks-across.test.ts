@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TOKEN, cleanups, runCleanups } from './links-world.test-helpers.js'
+import type { LinkDeps } from './link-deps.js'
 import { RemoteClient } from './remote-client.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { PERSON, sessionAddress } from '../mail/address.js'
@@ -9,7 +10,7 @@ import { HOST, W, addr, world } from '../mail/messages.test-helpers.js'
 import { mailReach } from '../mail/reach.js'
 import { openTaskParties } from '../mail/delegation.js'
 import { reportWords } from '../mail/last-response.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Work across a link as mail (#1948 step 6): a hub session's task to a machine's session is a task on the machine, under the hub's id; Centralu's
@@ -22,10 +23,10 @@ afterEach(runCleanups)
 
 const at = (host: { id: string }, sessionId: string) => sessionAddress(host.id, sessionId)
 
-/** A machine with session w1 and a hub with h1 and h2, linked, mail wired and delivered on both */
-async function rig() {
+/** A machine with session w1 and a hub with h1 and h2, linked, mail wired and delivered on both; `deps`: the hub's links' */
+async function rig(deps?: Partial<LinkDeps>) {
   const machine = await machineHost({ sessions: ['w1'], mail: true })
-  const hub = await hubHost(machine.port, { mail: true })
+  const hub = await hubHost(machine.port, { mail: true, ...(deps ? { deps } : {}) })
   await hub.mgr.setProjectTrusted('p-hub', true)
   await eventually(() => hub.machine().status === 'connected')
   await eventually(() => machine.hubs.mailHubs()[0]?.you === 'm1' && hub.links.get('m1')?.takesTasks === true)
@@ -75,6 +76,18 @@ describe('a task across a link (#1948 step 6)', () => {
     await eventually(() => hub.links.get('m1')?.takesTasks === undefined)
     const link = hub.links.get('m1')!
     expect(link.offerAnswered()).toBe(link.offerAnswered())
+  })
+
+  it('is refused as still connecting once the wait for a machine that never answers is over, never held for good', async () => {
+    const { machine, hub, across } = await rig({ offerWaitMs: 200 * SLOW })
+    machine.holdOffer(new Promise<void>(() => {}))
+    void hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
+    await eventually(() => hub.links.get('m1')?.takesTasks === undefined)
+    expect(await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'agent_session' })).toMatchObject({
+      ok: false,
+      why: 'link_down',
+      text: expect.stringContaining('still connecting'),
+    })
   })
 
   it('is refused for a session gone from the machine, named as it is there, never by an address', async () => {

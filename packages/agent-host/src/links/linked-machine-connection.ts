@@ -807,7 +807,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.offerWait) return this.offerWait
     let timer: ReturnType<typeof setTimeout> | undefined
     const bound = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, OFFER_WAIT_MS)
+      timer = setTimeout(resolve, this.deps.offerWaitMs ?? OFFER_WAIT_MS)
       timer.unref?.()
     })
     this.offerWait = Promise.race([this.offering, bound]).finally(() => clearTimeout(timer))
