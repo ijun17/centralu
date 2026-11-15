@@ -99,7 +99,9 @@ export type LinkDeps = {
    * A machine answered this hub's offer on a connection, whatever it said (#2067 review, #1948 step 6): what became of mail that crossed while
    * the link was down is told now, and mail owed to it is passed on or settled by its answer (`MailAcross.changed`)
    */
-  onOfferAnswered?: (machineId: string) => void
+  onOfferAnswered?: (machineId: string, lacks: readonly string[]) => void
+  /** The open tasks this hub gave the machine's sessions, which its offer asks it about (`HubOffer.open`, #2289); `lacks` above are those it never got */
+  openTasks?: (machineId: string) => readonly string[]
   /**
    * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
    * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told

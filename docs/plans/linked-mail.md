@@ -374,7 +374,13 @@ words into the machine's session (`host.send`) and followed its turns over the l
   hub's copy is a task too, so receipts, a withdrawal and a reply go as for any message that crossed. Unlike other mail
   (§6) it is written before the task leaves, so the report finds it whenever it comes, after a restart of the hub too, when
   nothing of the send is remembered; the machine's refusal deletes it, and a send whose answer was lost keeps it, as the task
-  it may be. A machine not connected is not sent to, and nothing is written.
+  it may be. At every connect the hub's offer lists its open tasks there (`open`, oldest first, at most 500; the rest are
+  asked at a later connect), leaving out any whose send is under way, and the machine answers those it never received
+  (`lacks`, #2289). The hub deletes each such copy, as a refusal does, and tells its sender once, woken as for a stop: `Your
+  task to <name> on <machine> did not arrive: the link failed while it was being sent, and nobody is working on it. Give it
+  again if it is still needed.` The machine remembers what it said it lacks and refuses such a task that comes later (a send
+  on a link the hub already counted as dead can still land): in memory, since no connection outlives the process. A machine
+  from before it answers no `lacks`, and the hub keeps every copy, as before. A machine not connected is not sent to, and nothing is written.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
   included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
   `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,

@@ -693,8 +693,9 @@ const links = new Links(linkDepsFor(store, {
   hubMail: true,
   // This hub's apps used by the agents its sessions started on a machine (#1938, §13.5)
   hubApps: true,
-  // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review)
-  onOfferAnswered: () => hostMailbox.across.changed(),
+  // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review); the tasks it says never arrived are settled (#2289)
+  onOfferAnswered: (machineId, lacks) => hostMailbox.across.offerAnswered(machineId, lacks),
+  openTasks: (machineId) => hostMailbox.across.openTasksTo(machineId),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop

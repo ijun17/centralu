@@ -461,6 +461,69 @@ describe('a report on a task across, while its hub is away (#1948 step 6)', () =
   })
 })
 
+describe('a task whose answer was lost (#2289)', () => {
+  /** A task the machine never writes: its `host.mail` is held there, and the link drops under it, so the hub's answer is lost and the copy kept */
+  async function lostTask() {
+    const r = await rig()
+    let release = () => {}
+    r.machine.holdMethod('host.mail', new Promise<void>((resolve) => (release = resolve)))
+    cleanups.push(() => release())
+    const sending = r.across.sendTask('h1', at(r.hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    await eventually(() => r.hub.store.mailbox.feedOf(at(r.hub, 'h1'), { limit: 10 }).some((m) => m.kind === 'task'))
+    const id = r.hub.store.mailbox.feedOf(at(r.hub, 'h1'), { limit: 10 }).find((m) => m.kind === 'task')!.id
+    // A send under way is not asked about: the machine may be writing it now
+    expect(r.across.openTasksTo('m1')).toEqual([])
+    await r.hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    expect(await sending).toMatchObject({ ok: false, why: 'link_down' })
+    expect(r.hub.store.mailbox.message(id)).toMatchObject({ kind: 'task' })
+    expect(r.across.openTasksTo('m1')).toEqual([id])
+    return { ...r, id }
+  }
+  const told = (hub: Awaited<ReturnType<typeof rig>>['hub']) => hub.store.mailbox.feedOf(at(hub, 'h1'), { limit: 20 }).filter((m) => m.facts.notArrived !== undefined)
+
+  it('is deleted at the next connect when the machine never got it, and its sender told once', async () => {
+    const { machine, hub, id } = await lostTask()
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.store.mailbox.message(id) === undefined)
+    expect(machine.store.mailbox.message(id)).toBeUndefined()
+    expect(told(hub)).toHaveLength(1)
+    expect(told(hub)[0]).toMatchObject({
+      body: '[Centralu] Your task to w1 on Remote box did not arrive: the link failed while it was being sent, and nobody is working on it. Give it again if it is still needed.',
+      facts: { notArrived: { message: id } },
+    })
+    // Once: the next connect asks about it no more
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.get('m1')?.takesTasks === true)
+    expect(told(hub)).toHaveLength(1)
+  })
+
+  it('is kept when the machine has it: only the tasks it lacks are settled', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    expect(across.openTasksTo('m1')).toEqual([id])
+    let offers = 0
+    const offer = vi.spyOn(machine.mail!.across, 'lacking').mockImplementation((ids) => (offers++, MailAcross.prototype.lacking.call(machine.mail!.across, ids)))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => offers === 1 && hub.links.get('m1')?.takesTasks === true)
+    expect(offer).toHaveBeenCalledWith([id])
+    expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
+    expect(told(hub)).toEqual([])
+  })
+
+  it('that lands on the machine after it said the task never arrived is refused there, and nothing is written', async () => {
+    const { machine, hub, id } = await lostTask()
+    const there = machine.mail!.across
+    expect(there.lacking([id])).toEqual([id])
+    // The same send, late, on a link the hub already counted as dead
+    const late = await there.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, 'h1'), name: 'h1 on Hub mac', to: 'w1', text: 'review the branch', id, task: { origin: 'start_agent' } })
+    expect(late).toMatchObject({ ok: false, why: 'not_allowed' })
+    expect(machine.store.mailbox.message(id)).toBeUndefined()
+  })
+})
+
 describe("the Assistant across a link (#2274)", () => {
   it("is this host's own only: a session on another computer with the Assistant's id is not it", () => {
     // The hub knows the machine's session by its address (`foreign`): an id is unique on its own host only

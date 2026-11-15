@@ -201,7 +201,7 @@ export async function hubHost(
           }),
           ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across ? { onOfferAnswered: () => across.changed() } : {}),
+          ...(across ? { onOfferAnswered: (id: string, lacks: readonly string[]) => across.offerAnswered(id, lacks), openTasks: (id: string) => across.openTasksTo(id) } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
