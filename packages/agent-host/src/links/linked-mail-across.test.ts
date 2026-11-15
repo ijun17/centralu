@@ -162,9 +162,8 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
     const fromMachine = await tool(machine, 'w1', { action: 'find', to: 'hub' })
     expect(fromMachine.text.split('\n')).toEqual([`1 of 2 sessions match "hub". Mail one by its address.`, `${at(hub, 'h1')} "h1" · hub-project · on Hub mac · session · finished`])
     const fromHub = await tool(hub, 'h1', { action: 'find', to: 'remote w1' })
-    // (the project by the name the machine lists it under to the hub)
-    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its address.`, expect.stringMatching(/^session:hub-[0-9a-f]+\/m1\.w1 "w1" · \S+ · on Remote box · session · finished$/)])
-    expect(fromHub.text).toContain(`${at(hub, 'm1.w1')} "w1"`)
+    // (the project by the name the machine lists it under to the hub: its folder's)
+    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its address.`, `${at(hub, 'm1.w1')} "w1" · remote-project · on Remote box · session · finished`])
     // The address found is the one to mail
     expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'found you' })).text).toMatch(/^Sent /)
   })

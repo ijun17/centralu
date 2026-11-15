@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { APP_VERSION, PROTOCOL_VERSION, type HubMailParams, type LinkedAppNoticeParams, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
@@ -50,11 +52,13 @@ function delivering(mail: HostMail, live: boolean): HostMail {
 }
 
 /**
- * A project folder: an empty one, or with `origin` a git checkout of that repository with one commit, so start_agent
- * finds the same repository on the machine and a worktree can branch from it
+ * A project folder named `name`: an empty one, or with `origin` a git checkout of that repository with one commit, so start_agent
+ * finds the same repository on the machine and a worktree can branch from it. Named, not the temp folder's random name: a machine
+ * lists its projects to the hub by their folder's name, and a `find` matches words against it (#2261)
  */
-function projectFolder(origin?: string): string {
-  const dir = folder()
+function projectFolder(name: string, origin?: string): string {
+  const dir = join(folder(), name)
+  mkdirSync(dir)
   if (!origin) return dir
   fixtureGit(dir, ['init', '-q'])
   fixtureGit(dir, ['commit', '-q', '--allow-empty', '-m', 'first'])
@@ -72,7 +76,7 @@ export async function machineHost(
   o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before' } = {},
 ) {
   const store = new Store()
-  store.projects.addProject({ id: 'p-remote', path: projectFolder(o.origin), name: 'remote-project' })
+  store.projects.addProject({ id: 'p-remote', path: projectFolder('remote-project', o.origin), name: 'remote-project' })
   for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
   for (const id of o.fromHub ?? []) store.settings.setAppSetting(startedFromHubKey(id), 'true')
   const adapters = scriptedAdapters()
@@ -148,7 +152,7 @@ export async function hubHost(
 ) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
-  store.projects.addProject({ id: 'p-hub', path: projectFolder(o.origin), name: projectName })
+  store.projects.addProject({ id: 'p-hub', path: projectFolder(projectName, o.origin), name: projectName })
   seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
   // The children start_agent started on the machine, as the hub's record keeps them (read once, when the manager first asks)
   if (o.children) store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify(o.children))
