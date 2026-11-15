@@ -16,7 +16,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Client | `remote-client.ts` | The hub's WebSocket to the remote host: hello, cursor and epoch, calls, events, terminal frames |
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
-| Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
+| Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached and for the readers that do not ask it (mail's directory and Inbox, the agents' lists). A session row's state facts follow the machine's events by the shared state rule (`applySessionState`, #2288) |
 | Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata ([install-and-update.md](install-and-update.md)) |
 | Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back ([install-and-update.md](install-and-update.md)) |
 | Dev build | `dev-build.ts`, `remote-dev.ts` | `pnpm remote-dev <machine> --ref <commit> --repo <path>` (#1036): a dev build of the host made there from a commit, marked `source: { kind: 'dev' }`, swapped in by the update's steps ([plans/remote-hub.md](../../plans/remote-hub.md) §10.11). A command on the hub, no RPC |

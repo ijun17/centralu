@@ -1,4 +1,4 @@
-import type { SessionInfo } from './commands.js'
+import type { LiveStateFields, SessionInfo } from './commands.js'
 import { liveBackgroundTasks, workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
@@ -305,7 +305,8 @@ export function stepSessionState(
 
 /**
  * The host's copy of a session's live state, for a reconnecting window and for the next host after a swap
- * (`SessionInfo`): the host's `applyStateHint` (agent-host sessions/manager.ts) and the mock's list run this.
+ * (`SessionInfo`): the host's `applyStateHint` (agent-host sessions/manager.ts) and the mock's list run this. A hub's
+ * copy of a linked machine's sessions (its headers mirror, #2288) runs it too, on the same fields.
  *
  * Authority over the live state belongs to the UI (the core reducer); the host records what it needs to restore
  * (M1.5) and nothing more. It runs **the same rules** (`stepSessionState`), not a table of its own: the hand-copied
@@ -319,7 +320,7 @@ export function stepSessionState(
  * a dead card back to life. The event's own facts (a new card, an activity, a limit) are set after that, as the
  * reducer's switch sets them on top of its clearing.
  */
-export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: number): SessionStateStep {
+export function applySessionState(m: LiveStateFields, e: NormalizedEvent, now: number): SessionStateStep {
   const step = stepSessionState(m, e, now)
   if (!step.illegal) {
     m.state = step.state

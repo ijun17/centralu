@@ -4,14 +4,17 @@ import { asObj, isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
   HostHandover,
+  NormalizedEvent,
+  LiveStateFields,
+  applySessionState,
   errorMessage,
+  nextStateFor,
   type HostLogon,
   type MachineInfo,
   type MachineOperation,
   type MachineSide,
   type MachineStatus,
   type MachineVersions,
-  type NormalizedEvent,
   isAssistantOrCoordinator,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
@@ -1403,9 +1406,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (!mayConnect(v)) return
     }
     try {
-      const [sessions, projects] = await Promise.all([client.call('sessions.list', {}), client.call('projects.list', {})])
-      if (Array.isArray(sessions)) this.observe('sessions', sessions)
-      if (Array.isArray(projects)) this.observe('projects', projects)
+      /*
+       * Each list is written as soon as its own answer comes (#2288 review): events after that answer reach the mirror on
+       * top of it (`followState`). Written only once both had answered, a turn that ended while the projects were still
+       * being read was undone by the older sessions list
+       */
+      await Promise.all(
+        (['sessions', 'projects'] as const).map(async (kind) => {
+          const list = await client.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})
+          if (Array.isArray(list)) this.observe(kind, list)
+        }),
+      )
     } catch (err) {
       this.deps.log?.(`[links] ${this.name}: could not read its lists after connecting: ${(err as Error).message}`)
     }
@@ -1485,15 +1496,32 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         this.deps.mirror.removeSession(this.id, sid)
       } else if (raw.type === 'session_title' && typeof raw.title === 'string') {
         this.deps.mirror.patchSession(this.id, sid, { name: raw.title })
-      } else if (raw.type === 'state_change' && typeof raw.state === 'string') {
-        this.deps.mirror.patchSession(this.id, sid, { state: raw.state })
       } else if (raw.type === 'session_owner') {
         // A handoff there moved this session to the session that took over (#693)
         this.deps.mirror.patchSession(this.id, sid, { askedBy: raw.askedBy ?? null, parentSessionId: raw.parentSessionId ?? null })
+      } else {
+        this.followState(sid, raw)
       }
     }
     const out = this.q.event(raw)
     if (out) this.deps.broadcast(out as NormalizedEvent)
+  }
+
+  /**
+   * The mirror's row follows every event that moves the session's state (#2288), by the one state rule the machine's host
+   * and the windows run (`applySessionState`). It used to take `state_change` alone, so a turn's end (`turn_complete`), a
+   * card, a limit or an error left the row as it was: a session that had finished its turn still read as working to every
+   * reader of the mirror. An `activity` (a compaction, a review, a retry: rare) is followed too, as the rule writes it. An
+   * event or a row this build cannot read changes nothing; the machine's next list replaces the rows whole (`observe`).
+   */
+  private followState(sid: string, raw: Record<string, unknown>): void {
+    const e = NormalizedEvent.safeParse(raw)
+    if (!e.success || (nextStateFor(e.data) === null && e.data.type !== 'activity')) return
+    const row = (this.deps.mirror.read(this.id, 'sessions') ?? []).find((s) => isObj(s) && s.id === sid)
+    const live = LiveStateFields.safeParse(row)
+    if (!live.success) return
+    applySessionState(live.data, e.data, Date.now())
+    this.deps.mirror.patchSession(this.id, sid, live.data)
   }
 
   private classify(s: unknown): void {

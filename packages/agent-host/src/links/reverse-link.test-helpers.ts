@@ -97,11 +97,16 @@ export async function machineHost(
   const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? [])
   /** What its answer to a hub's offer waits for, when a test holds it (`holdOffer`) */
   let held: Promise<void> | undefined
+  /** What its answers to other methods wait for, when a test holds them (`holdMethod`) */
+  const heldMethods = new Map<string, Promise<void>>()
   const serve = (port: number) =>
     new HostServer({
       port,
       token: TOKEN,
-      onRpc: (method, ...rest) => (held && method === 'host.hubOffer' ? held.then(() => handler(method, ...rest)) : handler(method, ...rest)),
+      onRpc: (method, ...rest) => {
+        const wait = method === 'host.hubOffer' ? held : heldMethods.get(method)
+        return wait ? wait.then(() => handler(method, ...rest)) : handler(method, ...rest)
+      },
       onClientGone: (client) => hubs.gone(client),
       build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
     })
@@ -119,6 +124,8 @@ export async function machineHost(
   const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
   /** Its answers to a hub's offers from now on wait for `until` */
   const holdOffer = (until: Promise<void>) => void (held = until)
+  /** Its answers to `method` from now on wait for `until` */
+  const holdMethod = (method: string, until: Promise<void>) => void heldMethods.set(method, until)
   /** Its host goes away and comes back on the same port, as one swapped in place does; `until`: its answers to offers wait for it */
   const bounce = async (until?: Promise<void>) => {
     await server.close()
@@ -126,7 +133,7 @@ export async function machineHost(
     server = serve(port)
     await server.listen()
   }
-  return { store, mgr, get server() { return server }, hubs, port, close, ask, mail, id, apps, bounce, holdOffer }
+  return { store, mgr, get server() { return server }, hubs, port, close, ask, mail, id, apps, bounce, holdOffer, holdMethod }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
