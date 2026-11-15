@@ -847,10 +847,10 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     const { hub } = await rig()
     await hub.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.row().status === 'connected')
-    // Past the machine's reach: this rig's machine takes no mail, so the start stops only where its work would go as mail (#1948 step 6)
+    // Past the machine's reach: this rig's hub runs no mail, so the start stops only where its work would go as mail (#1948 step 6)
     expect(await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })).toEqual({
       ok: false,
-      error: 'Laptop runs an older Centralu, which takes no work from this computer. Update Centralu on Laptop, or start the session here.',
+      error: 'Nothing was made on Laptop: this computer gives work to another machine only by mail, and its mail is not running.',
     })
   })
 })
