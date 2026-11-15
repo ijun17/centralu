@@ -112,6 +112,8 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 /** What the synthetic stream is made of; leaving parts out tells which of them the memory goes to */
 const STREAM_PARTS = ['working', 'text', 'reasoning', 'tools', 'subagent', 'images', 'background'] as const
 type StreamPart = (typeof STREAM_PARTS)[number]
+const ENGINES = ['webkit', 'chromium'] as const
+type Engine = (typeof ENGINES)[number]
 const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit', 'appview'] as const
 type Step = (typeof STEPS)[number]
 
@@ -143,7 +145,11 @@ const { values } = parseArgs({
 })
 const profile = values.profile as StoreProfile
 // WebKit's processes are told apart by their macOS names (roleOf); anywhere else every footprint would read 0
-const engines = (values.engines ?? (process.platform === 'darwin' ? 'webkit,chromium' : 'chromium')).split(',') as Engine[]
+const engines = (values.engines ?? (process.platform === 'darwin' ? 'webkit,chromium' : 'chromium')).split(',').map((name) => {
+  const engine = ENGINES.find((e) => e === name)
+  if (!engine) throw new Error(`unknown engine ${name}: use ${ENGINES.join(' or ')}`)
+  return engine
+})
 if (engines.includes('webkit') && process.platform !== 'darwin')
   throw new Error('WebKit is measured on macOS only: its processes are found by their macOS names. Use --engines chromium.')
 const streamMs = Number(values['stream-minutes']) * 60_000
@@ -165,7 +171,6 @@ const TURN_STEPS = Number(values['turn-steps'])
 const SETTLE_MS = quick ? 2_000 : 10_000
 const VIEWPORT = { width: 1440, height: 900 }
 
-type Engine = 'webkit' | 'chromium'
 type Proc = { pid: number; role: string; footprintMB: number; rssMB: number }
 type Sample = {
   step: string
