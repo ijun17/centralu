@@ -4,7 +4,7 @@
  */
 import { SHUTDOWN_WORDS } from '@cc/protocol'
 import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy } from '../dev-services/store/mailbox.js'
-import { parseAddress, senderKind } from './address.js'
+import { parseAddress, senderKind, sessionAddress } from './address.js'
 import { quoted } from './frame.js'
 import type { MailReach } from './reach.js'
 import { hash16 } from './rules.js'
@@ -184,7 +184,8 @@ export class StopNotices {
     if (turn.startedBy !== 'caller' && (turn.startedBy !== 'mail' || gaveIt === 'send' || (gaveIt === 'work' && starter.kind !== 'task'))) return false
     if (this.d.records.inTurn(session, seq).some((r) => r.message.sender !== sender)) return false
     const given = this.d.turnInputs?.(party.sessionId)
-    return given !== undefined && given.every((id) => id === from.sessionId)
+    // A row names a session of this host by its id: one from another computer is never it, whatever its id there
+    return given !== undefined && given.every((id) => id !== null && sessionAddress(party.host, id) === sender)
   }
 
   /**

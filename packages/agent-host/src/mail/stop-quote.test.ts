@@ -3,7 +3,7 @@
  * unless each part of that rule holds.
  */
 import { describe, expect, it } from 'vitest'
-import { parseAddress } from './address.js'
+import { parseAddress, sessionAddress } from './address.js'
 import { MessageService } from './messages.js'
 import { A, B, C, HOST, world } from './messages.test-helpers.js'
 
@@ -97,6 +97,19 @@ describe('what a stop notice quotes of the cut turn', () => {
     s.w.store.mailbox.setTurnMessage(idOf(B), turnSeq, task.id)
     expect(s.w.store.mailbox.turn(idOf(B), turnSeq)).toMatchObject({ startedBy: 'cli', starterId: task.id })
     expect(stopAfterAsking(s, turnSeq)).not.toContain(QUOTED)
+  })
+
+  it("a task from another computer's session, whose id a session here that wrote into the turn shares: not that giver's turn alone (#1948 step 6)", () => {
+    const s = stops()
+    // The hub's session has the same id there as A has here: only its address tells them apart
+    const giver = sessionAddress('hub-0000000b', idOf(A))
+    const task = s.mail.task(giver, B, { text: 'review the branch', origin: 'agent_session', delivered: false, across: { id: 'hub-0000000b.m_01JX000000000000000000000T' } })
+    const { turnSeq } = s.w.startTurn(B, task.id)
+    s.w.store.mailbox.markDelivered(B, [task.id], s.w.clock.t, turnSeq)
+    expect(s.mail.stops.alone(B, giver, { gaveIt: 'work' })).toBe(true)
+    // A here writes into the turn: its row names A's id, which is not the giver
+    s.entered.set(idOf(B), [idOf(A)])
+    expect(s.mail.stops.alone(B, giver, { gaveIt: 'work' })).toBe(false)
   })
 
   it('with no record of what else entered the turn, nothing is quoted', () => {

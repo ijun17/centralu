@@ -382,7 +382,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     watchedAtRest: (id) => watches.waitsForRest(addressOf(id)),
     // A card a session raised is told to the givers of its open work, and answered by one of them only as the gate allows (§10.6.4)
     cards: {
-      // Only a turn the giver's own work started, as the turn owner was: one the mailbox started for its task (the session was busy) is told only
+      // Every giver hears of it; the one giver answers only in a turn its work alone started: a question in one its send or its task the mailbox
+      // delivered started, an approval only in one its own send started (`gaveIt`, §10.6.4). A giver on another computer is named by its address
       givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver, gaveIt) => giver !== PERSON && service.stops.alone(addressOf(id), parseAddress(giver) ? giver : addressOf(giver), { gaveIt })),
       // The person has the card itself: nothing is written for them. A giver on another computer (an address) reads it through that computer's call
       tell: (giverId, card, body, delivered) => (giverId === PERSON || parseAddress(giverId) ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
