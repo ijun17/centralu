@@ -15,7 +15,7 @@ import { HostServer } from '../../agent-host/src/transport/server.js'
 import { SessionManager } from '../../agent-host/src/sessions/manager.js'
 import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
-import { UpdateService } from '../../agent-host/src/updates.js'
+import { isolatedUpdateService } from '../../agent-host/src/updates.test-helpers.js'
 import { AgentVersionService } from '../../agent-host/src/agent-versions.js'
 import { MailPerson } from '../../agent-host/src/mail/person.js'
 import { hostMail, mailSessionsOf } from '../../agent-host/src/mail/host-mail.js'
@@ -172,19 +172,18 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const adapters = new Map<ToolName, AgentAdapter>([['claude', echo]])
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   /*
-   * Both the registry and `npm i -g` are **injected.**
+   * Everything of the machine is **injected**: the registry, `npm i -g`, the global npm package and the installed copy.
    *
    * Otherwise, while this suite runs, a request would go out to the real registry, and in the
-   * worst case a test would swap out this machine's global package. The two lines here are the
-   * guarantee that cannot happen — by structure, not by rule.
+   * worst case a test would swap out this machine's global package, or wait on the one it has (#2299).
+   * The service takes them as required (`UpdateMachine`), and `isolatedUpdateService` gives fakes.
    */
   let registryVersion: string | null = null
-  const updates = new UpdateService((status) => server.broadcast({ type: 'update_status', status }), {
+  const updates = isolatedUpdateService((status) => server.broadcast({ type: 'update_status', status }), {
     fetchLatest: async () =>
       registryVersion === null
         ? { ok: false as const, reason: 'Could not reach the registry — check the network' }
         : { ok: true as const, version: registryVersion },
-    run: async () => {},
   })
   // The themes folder is a temp directory: the real service, never the person's data folder
   const themesRoot = mkdtempSync(join(tmpdir(), 'cc-contract-themes-'))

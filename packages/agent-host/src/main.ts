@@ -39,7 +39,7 @@ import { ThemeFiles } from './themes.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
-import { hubUpdatesMachines, UpdateService } from './updates.js'
+import { hubUpdatesMachines, realUpdateService } from './updates.js'
 import { copyFollowsHost, installsByDefault, updateSwitches } from './update-switches.js'
 import { copySwapMayPrompt, familyOf, installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
@@ -506,7 +506,7 @@ const { auto: autoUpdateCheck, autoApply: autoApplyUpdates } = updateSwitches(st
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
 
-const updates = new UpdateService((status) => events.push({ type: 'update_status', status }), {
+const updates = realUpdateService((status) => events.push({ type: 'update_status', status }), {
   // A host from source never installs by itself, whatever is stored (#1501 review, `installsByItself`)
   build: BUILD,
   // On by default when nothing has been saved yet. Since the check is read-only and every failure
