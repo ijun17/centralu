@@ -303,9 +303,13 @@ export function stepSessionState(
   }
 }
 
+/** The fields of a session the state rule writes (`applySessionState`): a `SessionInfo`, or a copy of one kept elsewhere */
+export type LiveStateFields = Pick<SessionInfo, 'state' | 'waitingSince' | 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit'>
+
 /**
  * The host's copy of a session's live state, for a reconnecting window and for the next host after a swap
- * (`SessionInfo`): the host's `applyStateHint` (agent-host sessions/manager.ts) and the mock's list run this.
+ * (`SessionInfo`): the host's `applyStateHint` (agent-host sessions/manager.ts) and the mock's list run this. A hub's
+ * copy of a linked machine's sessions (its headers mirror, #2288) runs it too, on the same fields.
  *
  * Authority over the live state belongs to the UI (the core reducer); the host records what it needs to restore
  * (M1.5) and nothing more. It runs **the same rules** (`stepSessionState`), not a table of its own: the hand-copied
@@ -319,7 +323,7 @@ export function stepSessionState(
  * a dead card back to life. The event's own facts (a new card, an activity, a limit) are set after that, as the
  * reducer's switch sets them on top of its clearing.
  */
-export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: number): SessionStateStep {
+export function applySessionState(m: LiveStateFields, e: NormalizedEvent, now: number): SessionStateStep {
   const step = stepSessionState(m, e, now)
   if (!step.illegal) {
     m.state = step.state

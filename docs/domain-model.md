@@ -753,7 +753,9 @@ classDiagram
   `<machine>.<id>` and every row carries an explicit `machine` field, so the UI never parses an id. An approval rule
   id from a machine is folded into a negative number per machine (its `slot`).
 - What the hub last heard from a machine is mirrored, so a machine that is away still lists its sessions (marked
-  unreachable, last-known `live`, never woken). The remote's Assistant and coordinators are not shown.
+  unreachable, last-known `live`, never woken). The remote's Assistant and coordinators are not shown. A mirrored
+  session's state follows every event that moves it (a turn's end, a card) by the same state rule as the machine's
+  own (`applySessionState`, #2288), so a reader of the mirror never works the state out on its own.
 - The link's state (`connecting`, `connected`, `unreachable`, `versions_differ`, ...) is live only and sent as
   `machine_status`; a (re)connect says `machine_resync`. Detail: [agent-host/remote/link-states.md](agent-host/remote/link-states.md),
   [protocol.md](protocol.md) §6.
