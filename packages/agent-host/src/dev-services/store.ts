@@ -10,7 +10,6 @@ import { GridRecords } from './store/grid.js'
 import { HandoffMarkers } from './store/handoff-markers.js'
 import { LinkedMachineRecords } from './store/linked-machines.js'
 import { MailboxRecords } from './store/mailbox.js'
-import { legacyChain, legacyChainFor, movePendingThreadMail } from './store/mailbox-adopt.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords } from './store/messages.js'
 import { MigrationRunner } from './store/migrate-runner.js'
@@ -170,28 +169,6 @@ export class Store extends MigrationRunner {
     } finally {
       this.db.pragma(`busy_timeout = ${wait}`)
     }
-  }
-
-  /**
-   * The thread mail an older build left pending, moved into the message tables and marked handled in the old ones, in one transaction
-   * (docs/plans/mailbox.md §6.3): run after every `ready` from M3a to M7, before delivery starts. A second run finds nothing
-   */
-  movePendingThreadMail(
-    now: number,
-    projectOf: (address: string) => string | null,
-    holdsNow: Parameters<typeof movePendingThreadMail>[3],
-  ): { messages: number; recipients: number } {
-    return movePendingThreadMail(this.db, now, projectOf, holdsNow)
-  }
-
-  /** An old thread's messages, read-only (§6.3): the earlier history of a moved message (`legacy_thread`) */
-  legacyChain(threadId: string, before: number | undefined, limit: number): ReturnType<typeof legacyChain> {
-    return legacyChain(this.db, threadId, before, limit)
-  }
-
-  /** What `reader` was shown of an old thread before a moved message (§6.3, `legacyChainFor`) */
-  legacyChainFor(threadId: string, messageId: string, reader: string, limit: number): ReturnType<typeof legacyChainFor> {
-    return legacyChainFor(this.db, threadId, messageId, reader, limit)
   }
 
   /** The migration list. `store/migrations/index.ts` holds it, and the rule a new step follows */

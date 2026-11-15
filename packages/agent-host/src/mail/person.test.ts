@@ -1,6 +1,6 @@
 /**
  * The person's window on the message tables (docs/plans/mailbox.md §12, §16 M3a-person), over the host's own wiring (`hostMail`): the five things
- * M3a-host left wrong until the person's side moved (the M3a section's list), each from an older build's store moved at ready where it applies.
+ * M3a-host left wrong until the person's side moved (the M3a section's list), each on mail moved from an old thread (store step v75) where it applies.
  */
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,7 @@ import { HIDDEN_HOLDS } from '../dev-services/store/mailbox.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { MailPerson } from './person.js'
 import { refusedFor, refusedForAsync } from './messages.test-helpers.js'
-import { oldThread } from './v61.test-helpers.js'
+import { movedThread } from './moved.test-helpers.js'
 
 const A = at('a')
 const B = at('b')
@@ -35,7 +35,6 @@ function ready(w: ReturnType<typeof hostWorld>) {
   const person = new MailPerson(w.service, w.store.mailbox, w.delivery, {
     // A session named `gone` is no longer kept (trashed or deleted)
     session: (id) => (id === 'gone' ? undefined : { name: id, state: 'idle' }),
-    legacyChain: (threadId) => w.store.legacyChain(threadId, undefined, 100),
     projectLabel: (projectId) => w.reach.projectLabel(projectId),
     untrusted: (projectId) => w.reach.untrusted(projectId),
     turnOn: (id) => {
@@ -53,53 +52,46 @@ function ready(w: ReturnType<typeof hostWorld>) {
 const dbOf = (w: ReturnType<typeof hostWorld>) => (w.store as unknown as { db: Database.Database }).db
 const bodies = (w: ReturnType<typeof hostWorld>, id: string) => w.to(id).map((d) => d.input.text).join('\n')
 
-describe("the person's old mail, moved at ready, in the window", () => {
-  it('an old question unread by the person is unread in the window after the move; opening it reads it, with the old thread above it', () => {
+describe("the person's old mail, moved from an old thread (store step v75), in the window", () => {
+  it('an old question unread by the person is unread in the window after the move; opening it reads it', () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(1), owner: A, at: w.clock.t - 1_000 }, [
-      { id: mid(1), sender: A, kind: 'note', body: 'I looked at the branches.', receipts: [{ recipient: PERSON, readAt: w.clock.t - 900, handledAt: w.clock.t - 900 }] },
-      { id: mid(2), sender: A, kind: 'question', body: 'Which branch?', receipts: [{ recipient: PERSON }] },
-    ])
+    movedThread(w, { id: tid(1), at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'question', body: 'Which branch?', to: [{ recipient: PERSON }] }])
     const { person } = ready(w)
     const row = person.list().threads.find((t) => t.id === mid(2))
     expect(row).toMatchObject({ unread: 1, subject: 'Which branch?', state: 'open', owner: { address: A } })
     // The old thread's id names the chain moved from it, as a window from before the switch would ask
     const view = person.thread(tid(1), { tail: 100 })
     expect(view.thread.id).toBe(mid(2))
-    expect(view.messages.map((m) => [m.body, m.kind])).toEqual([
-      ['I looked at the branches.', 'note'],
-      ['Which branch?', 'question'],
-    ])
+    // Only what was moved: what the thread said before it, handled when the step ran, is not mail
+    expect(view.messages.map((m) => [m.body, m.kind])).toEqual([['Which branch?', 'question']])
     expect(person.list().threads.find((t) => t.id === mid(2))?.unread).toBe(0)
   })
 
-  it('what the person writes in the window after ready goes out at once, as an answer to the moved question, and the thread tables are not written', async () => {
+  it('what the person writes in the window after ready goes out at once, as an answer to the moved question', async () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(1), owner: A, at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'question', body: 'Which branch?', receipts: [{ recipient: PERSON }] }])
+    movedThread(w, { id: tid(1), at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'question', body: 'Which branch?', to: [{ recipient: PERSON }] }])
     const { person } = ready(w)
-    const oldRows = dbOf(w).prepare(`SELECT COUNT(*) AS n FROM mail_messages`).get() as { n: number }
     const view = await person.reply(mid(2), 'Use main.', 'answer')
     expect(view.messages.at(-1)).toMatchObject({ body: 'Use main.', kind: 'answer', sender: { kind: 'person' } })
     await w.advance(2_000)
     expect(bodies(w, 'a')).toContain(view.messages.at(-1)?.id)
-    expect(dbOf(w).prepare(`SELECT COUNT(*) AS n FROM mail_messages`).get()).toEqual(oldRows)
   })
 })
 
 describe('mail held for the person, moved still held, released or dismissed from the window', () => {
   /**
-   * Held for the trust of the sender's project (told of or not) and for a session's budget. The move ends the holds an earlier build left (#2243: the
-   * token guard and the first-contact hold are gone), so the holds are put on the moved rows after it, as today's trust gate and an older host's still-served
-   * mail would leave them
+   * Held for the trust of the sender's project (told of or not) and for a session's budget. The step ends the holds an earlier build left (#2243: the
+   * token guard and the first-contact hold are gone), so the rows are written not held and the holds are put on them once the host is ready, as today's
+   * trust gate and an older host's still-served mail would leave them
    */
   function heldWorld() {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(2), owner: X, projectId: 'px', at: t }, [
-      { id: mid(3), sender: X, kind: 'note', body: 'untold policy', receipts: [{ recipient: B }] },
-      { id: mid(4), sender: X, kind: 'question', body: 'told policy', receipts: [{ recipient: B, deliveredAt: t }] },
+    movedThread(w, { id: tid(2), at: t }, [
+      { id: mid(3), sender: X, kind: 'note', body: 'untold policy', to: [{ recipient: B }] },
+      { id: mid(4), sender: X, kind: 'question', body: 'told policy', to: [{ recipient: B, deliveredAt: t }] },
     ])
-    oldThread(w.store, { id: tid(3), owner: A, projectId: 'p1', at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'failed held', receipts: [{ recipient: B }] }])
+    movedThread(w, { id: tid(3), at: t + 10 }, [{ id: mid(5), sender: A, kind: 'note', body: 'failed held', to: [{ recipient: B }] }])
     const r = ready(w)
     r.store.mailbox.hold(B, [mid(3), mid(4)], 'policy')
     r.store.mailbox.hold(B, [mid(5)], 'failed')
@@ -154,7 +146,7 @@ describe('Resume on a moved chain held for its turns', () => {
   for (const by of ['its root', 'its old thread id'] as const) {
     it(`by ${by}: the held mail goes, and is not held again`, async () => {
       const w = hostWorld()
-      oldThread(w.store, { id: tid(4), owner: A, projectId: 'p1', at: w.clock.t - 1_000 }, [{ id: mid(7), sender: A, kind: 'note', body: 'looped', receipts: [{ recipient: B, held: 'loop' }] }])
+      movedThread(w, { id: tid(4), at: w.clock.t - 1_000 }, [{ id: mid(7), sender: A, kind: 'note', body: 'looped', to: [{ recipient: B, held: 'loop' }] }])
       const { person } = ready(w)
       const row = person.list().held[0]
       expect(row).toMatchObject({ messageId: mid(7), threadId: mid(7), reason: 'loop' })
@@ -165,25 +157,6 @@ describe('Resume on a moved chain held for its turns', () => {
       expect(person.list().held).toEqual([])
     })
   }
-})
-
-describe('the window reads and writes no thread table', () => {
-  it('lists, reads, answers, marks done, releases and resumes with the v61 tables gone', async () => {
-    const w = ready(hostWorld())
-    dbOf(w).exec(`DROP TABLE mail_receipts; DROP TABLE mail_messages; DROP TABLE mail_threads; DROP TABLE mail_participants; DROP TABLE mail_blockers`)
-    w.clock.t += 10
-    const q = w.mail.send(A, { to: [PERSON], text: 'Ship it?' }).message
-    expect(w.person.list().threads.map((t) => [t.id, t.unread])).toEqual([[q.id, 1]])
-    expect(w.person.thread(q.id, { tail: 100 }).messages.map((m) => m.body)).toEqual(['Ship it?'])
-    const mine = (await w.person.reply(q.id, 'Do you need a review first?', 'question')).messages.at(-1)?.id ?? ''
-    expect(w.person.close(q.id).state).toBe('done')
-    w.person.resume({ threadId: q.id })
-    expect(w.person.held('release', B, [q.id])).toEqual({ changed: 0 })
-    await w.advance(2_000)
-    // Marked done, the person's own question waits for no answer, and is still delivered
-    expect(bodies(w, 'a')).toContain(mine)
-    expect(w.store.mailbox.watchedFrom(PERSON)).toEqual([])
-  })
 })
 
 describe('the window against chains that change while it is open', () => {
@@ -219,7 +192,7 @@ describe('the window against chains that change while it is open', () => {
 describe('held mail the window lets go or drops, more cases', () => {
   it('a row an older build held loop after telling its recipient of it goes on Resume as mail to deliver', async () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(8), owner: A, projectId: 'p1', at: w.clock.t - 1_000 }, [{ id: mid(8), sender: A, kind: 'note', body: 'told loop', receipts: [{ recipient: B, held: 'loop', deliveredAt: w.clock.t - 900 }] }])
+    movedThread(w, { id: tid(8), at: w.clock.t - 1_000 }, [{ id: mid(8), sender: A, kind: 'note', body: 'told loop', to: [{ recipient: B, held: 'loop', deliveredAt: w.clock.t - 900 }] }])
     const { person, ...rest } = ready(w)
     person.resume({ threadId: mid(8) })
     await rest.advance(2_000)
@@ -228,7 +201,7 @@ describe('held mail the window lets go or drops, more cases', () => {
 
   it('a dismissed question waits for no answer any more', () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(9), owner: A, projectId: 'p1', at: w.clock.t - 1_000 }, [{ id: mid(9), sender: A, kind: 'question', body: 'failed q', receipts: [{ recipient: B, held: 'failed' }] }])
+    movedThread(w, { id: tid(9), at: w.clock.t - 1_000 }, [{ id: mid(9), sender: A, kind: 'question', body: 'failed q', to: [{ recipient: B, held: 'failed' }] }])
     const { person } = ready(w)
     w.clock.t += 10
     const fresh = w.mail.send(A, { to: [B], text: 'a new question' }).message
@@ -239,7 +212,7 @@ describe('held mail the window lets go or drops, more cases', () => {
 
   it("Release on a row held for a project trusted since lets the project's held mail go", async () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(10), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', receipts: [{ recipient: B }] }])
+    movedThread(w, { id: tid(10), at: w.clock.t - 1_000 }, [{ id: mid(10), sender: X, kind: 'note', body: 'held then trusted', to: [{ recipient: B }] }])
     const r = ready(w)
     r.store.mailbox.hold(B, [mid(10)], 'policy')
     w.store.projects.setProjectTrusted('px', true)
@@ -250,7 +223,7 @@ describe('held mail the window lets go or drops, more cases', () => {
 
   it("a deleted project's held mail is dropped after it is gone, and its senders are told its name", () => {
     const w = hostWorld()
-    oldThread(w.store, { id: tid(11), owner: X, projectId: 'px', at: w.clock.t - 1_000 }, [{ id: mid(11), sender: X, kind: 'note', body: 'held', receipts: [{ recipient: B }] }])
+    movedThread(w, { id: tid(11), at: w.clock.t - 1_000 }, [{ id: mid(11), sender: X, kind: 'note', body: 'held', to: [{ recipient: B }] }])
     const r = ready(w)
     r.store.mailbox.hold(B, [mid(11)], 'policy')
     const name = r.person.projectName('px')
@@ -291,13 +264,13 @@ describe('whom the person’s reply goes to (Q-M3a-25)', () => {
   it('passes over a sender that is gone and a message hidden from the person', async () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(20), owner: A, at: t }, [
-      { id: mid(20), sender: A, kind: 'note', body: 'from alpha', receipts: [{ recipient: PERSON }] },
-      { id: mid(21), sender: at('gone'), kind: 'note', body: 'from a session since trashed', replyTo: mid(20), receipts: [{ recipient: PERSON }] },
+    movedThread(w, { id: tid(20), at: t }, [
+      { id: mid(20), sender: A, kind: 'note', body: 'from alpha', to: [{ recipient: PERSON }] },
+      { id: mid(21), sender: at('gone'), kind: 'note', body: 'from a session since trashed', replyTo: mid(20), to: [{ recipient: PERSON }] },
     ])
-    oldThread(w.store, { id: tid(21), owner: A, at: t }, [
-      { id: mid(22), sender: A, kind: 'note', body: 'shown', receipts: [{ recipient: PERSON }] },
-      { id: mid(23), sender: A, kind: 'note', body: 'held for its depth', replyTo: mid(22), receipts: [{ recipient: PERSON, held: 'loop' }] },
+    movedThread(w, { id: tid(21), at: t }, [
+      { id: mid(22), sender: A, kind: 'note', body: 'shown', to: [{ recipient: PERSON }] },
+      { id: mid(23), sender: A, kind: 'note', body: 'held for its depth', replyTo: mid(22), to: [{ recipient: PERSON, held: 'loop' }] },
     ])
     const r = ready(w)
     expect(sentOf(w, (await r.person.reply(mid(20), 'seen', 'note')))).toMatchObject({ message: { replyTo: mid(20) }, to: [A] })
@@ -336,9 +309,9 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
   it('an old thread’s id opens the newest chain moved from it, and Mark done on it closes every one', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(22), owner: A, at: t }, [
-      { id: mid(24), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
-      { id: mid(25), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    movedThread(w, { id: tid(22), at: t }, [
+      { id: mid(24), sender: A, kind: 'question', body: 'first chain', to: [{ recipient: PERSON }] },
+      { id: mid(25), sender: A, kind: 'question', body: 'second chain', to: [{ recipient: PERSON }] },
     ])
     const r = ready(w)
     expect(r.person.thread(tid(22), { tail: 100 }).thread.id).toBe(mid(25))
@@ -349,9 +322,9 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
   it('an old thread’s id naming a chain of the person’s and one of the sessions’ alone: each is decided for itself, and close leaves the sessions’ one be', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(23), owner: A, at: t }, [
-      { id: mid(26), sender: A, kind: 'question', body: 'to the person', receipts: [{ recipient: PERSON }] },
-      { id: mid(27), sender: A, kind: 'question', body: 'between sessions', receipts: [{ recipient: B }] },
+    movedThread(w, { id: tid(23), at: t }, [
+      { id: mid(26), sender: A, kind: 'question', body: 'to the person', to: [{ recipient: PERSON }] },
+      { id: mid(27), sender: A, kind: 'question', body: 'between sessions', to: [{ recipient: B }] },
     ])
     const r = ready(w)
     // The newest chain is the sessions' own: the person looks in on it
@@ -379,8 +352,8 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
   it('Release over rows of a trusted and an untrusted project is refused whole, before any goes', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(23), owner: A, at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'failed', receipts: [{ recipient: B }] }])
-    oldThread(w.store, { id: tid(24), owner: X, projectId: 'px', at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', receipts: [{ recipient: B }] }])
+    movedThread(w, { id: tid(23), at: t }, [{ id: mid(26), sender: A, kind: 'note', body: 'failed', to: [{ recipient: B }] }])
+    movedThread(w, { id: tid(24), at: t }, [{ id: mid(27), sender: X, kind: 'note', body: 'policy', to: [{ recipient: B }] }])
     const r = ready(w)
     r.store.mailbox.hold(B, [mid(26)], 'failed')
     r.store.mailbox.hold(B, [mid(27)], 'policy')
@@ -563,9 +536,9 @@ describe('closing a chain a session works on, and its state, as on main (owner d
   it('closing the chains an old thread’s id names tells a session once, not once for each chain', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(60), owner: A, at: t }, [
-      { id: mid(60), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
-      { id: mid(61), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    movedThread(w, { id: tid(60), at: t }, [
+      { id: mid(60), sender: A, kind: 'question', body: 'first chain', to: [{ recipient: PERSON }] },
+      { id: mid(61), sender: A, kind: 'question', body: 'second chain', to: [{ recipient: PERSON }] },
     ])
     const r = ready(w)
     r.live.add('b')
@@ -632,9 +605,9 @@ describe('closing a chain a session works on, and its state, as on main (owner d
   it('on an old thread’s id, Drop closes every chain moved from it as dropped; a later Mark done on a chain that opened again stands', () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(40), owner: A, at: t }, [
-      { id: mid(40), sender: A, kind: 'question', body: 'first chain', receipts: [{ recipient: PERSON }] },
-      { id: mid(41), sender: A, kind: 'question', body: 'second chain', receipts: [{ recipient: PERSON }] },
+    movedThread(w, { id: tid(40), at: t }, [
+      { id: mid(40), sender: A, kind: 'question', body: 'first chain', to: [{ recipient: PERSON }] },
+      { id: mid(41), sender: A, kind: 'question', body: 'second chain', to: [{ recipient: PERSON }] },
     ])
     const r = ready(w)
     r.person.close(tid(40), 'dropped')
@@ -810,11 +783,11 @@ describe('an answer reads what it answers (#2233)', () => {
   it('there is one rule for an open question: the thread’s `ask.open` is what the reply box answers; a sender that is gone, a message held for the person and a note are not in it', async () => {
     const w = hostWorld()
     const t = w.clock.t - 1_000
-    oldThread(w.store, { id: tid(30), owner: A, at: t }, [
-      { id: mid(30), sender: at('gone'), kind: 'question', body: 'from a session since trashed', receipts: [{ recipient: PERSON }] },
-      { id: mid(31), sender: A, kind: 'question', body: 'held for its depth', receipts: [{ recipient: PERSON, held: 'loop' }] },
-      { id: mid(32), sender: A, kind: 'note', body: 'only a note', receipts: [{ recipient: PERSON }] },
-      { id: mid(33), sender: A, kind: 'question', body: 'Which one?', receipts: [{ recipient: PERSON }] },
+    movedThread(w, { id: tid(30), at: t }, [
+      { id: mid(30), sender: at('gone'), kind: 'question', body: 'from a session since trashed', to: [{ recipient: PERSON }] },
+      { id: mid(31), sender: A, kind: 'question', body: 'held for its depth', to: [{ recipient: PERSON, held: 'loop' }] },
+      { id: mid(32), sender: A, kind: 'note', body: 'only a note', to: [{ recipient: PERSON }] },
+      { id: mid(33), sender: A, kind: 'question', body: 'Which one?', to: [{ recipient: PERSON }] },
     ])
     const r = ready(w)
     const view = r.person.thread(tid(30))

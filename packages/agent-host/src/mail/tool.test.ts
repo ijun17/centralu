@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
 import { HOST, at, hostWorld } from './host-mail.test-helpers.js'
-import { oldThread } from './v61.test-helpers.js'
+import { movedThread } from './moved.test-helpers.js'
 
 const A = at('a')
 const B = at('b')
@@ -241,12 +241,11 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
     const w = world()
     const message = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
     const thread = { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07' }
-    oldThread(w.store, { id: thread.id, owner: A, subject: 'about #12', at: w.clock.t }, [{ id: message.id, sender: A, kind: 'question', body: 'still open?', receipts: [{ recipient: B }] }])
-    w.store.movePendingThreadMail(w.clock.t, () => null, () => false)
+    movedThread(w, { id: thread.id, at: w.clock.t }, [{ id: message.id, sender: A, kind: 'question', body: 'still open?', to: [{ recipient: B }] }])
     w.clock.t += 10
     w.run('b', { action: 'reply', thread: thread.id, text: 'yes' })
     expect(w.store.mailbox.feedOf(B, { limit: 1 })[0]).toMatchObject({ replyTo: message.id })
-    // Its history reads from the old tables
+    // The moved message is read by its own id
     expect(w.run('b', { action: 'read', thread: message.id }).text).toContain('still open?')
   })
 

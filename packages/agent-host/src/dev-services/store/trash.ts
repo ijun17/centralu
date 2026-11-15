@@ -204,7 +204,7 @@ export class TrashRecords {
       this.db.prepare(`UPDATE app_runs SET caller_session_id = NULL WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       /*
-       * The mail it was a party to (#1347): its receipts and rows, its place in old threads and its turns go with the
+       * The mail it was a party to (#1347): its rows and its turns go with the
        * session. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay while another
        * party has a row. What waited on it was settled when it went to the trash (`StopNotices.partyGone`)
        */
@@ -212,9 +212,7 @@ export class TrashRecords {
       if (host) {
         // This host's own address only: a session of another host with the same id is not this one (linked machines, slice 4)
         const address = `session:${host}/${sessionId}`
-        this.db.prepare(`DELETE FROM mail_receipts WHERE recipient = ?`).run(address)
-        this.db.prepare(`DELETE FROM mail_participants WHERE address = ?`).run(address)
-        // Its rows in the message tables too, and each message left with no row (docs/plans/mailbox.md §6)
+        // Its rows in the message tables, and each message left with no row (docs/plans/mailbox.md §6)
         this.mailbox.purgeParty(address)
       }
       this.db.prepare(`DELETE FROM mail_turns WHERE session_id = ?`).run(sessionId)

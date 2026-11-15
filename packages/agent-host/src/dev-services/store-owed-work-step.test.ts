@@ -1,7 +1,8 @@
 /**
  * Step 74 (#2258 item 1, docs/plans/mailbox.md M7, M8): the task rows become the one record of owed work. What a build before v70 kept beside
  * them (requests held for a busy session, report marks, delegated turns, whose a turn is) becomes mail once and goes, and the store's floor
- * goes to 70: the builds of v70 on (beta.58 on) write none of it but the marks they leave as they go, which this build deletes at every start.
+ * goes to 70: the builds of v70 on (beta.58 on) write none of it but the marks they leave as they go, which stay in a table no build reads after this
+ * step: store step v75 raises the store's floor to v74, and a later step drops the table.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -180,20 +181,5 @@ describe('step 74: one record of owed work (#2258)', () => {
     expect(() => open(69, file)).toThrow(StoreTooNewError)
     expect(() => open(69, file)).toThrow(/can be read from store version 70 on; this Centralu knows store versions up to 69/)
     as(STEP, file, (db) => expect([db.pragma('user_version', { simple: true }), setting(db, 'min_reader_version')]).toEqual([STEP, '70']))
-  })
-
-  it('forward and back with a build of v70 to v73: the table it still writes its marks to stays, and the marks are deleted unread', () => {
-    const file = v69Store()
-    open(STEP, file).close()
-    // The v72 build serves the store and leaves a mark for w, in a turn as it goes: the table it writes is still there
-    as(72, file, (db) => db.prepare(`INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES ('w', 'a', 9)`).run())
-    const s = open(STEP, file)
-    try {
-      const before = count(s.raw, 'mail')
-      s.children.dropReportMarks()
-      expect([count(s.raw, 'report_marks'), count(s.raw, 'mail')]).toEqual([0, before])
-    } finally {
-      s.close()
-    }
   })
 })

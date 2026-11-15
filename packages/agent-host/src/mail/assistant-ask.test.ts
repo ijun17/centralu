@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { at, hostWorld } from './host-mail.test-helpers.js'
-import { oldThread } from './v61.test-helpers.js'
+import { movedThread } from './moved.test-helpers.js'
 import { ASKS_PER_HOUR } from './rules.js'
 
 const A = at('a')
@@ -126,7 +126,7 @@ describe('the end of a request turn (§7.6, S12)', () => {
   it('a request moved from an old thread starts a request turn with its asker; its end settles nothing more and reports S12 to the asker', async () => {
     const w = hostWorld()
     const message = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F06' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F06', owner: A, subject: 'please', at: w.clock.t }, [{ id: message.id, sender: A, kind: 'assign', body: 'please look at CI', receipts: [{ recipient: ORC }] }])
+    movedThread(w, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F06', at: w.clock.t }, [{ id: message.id, sender: A, kind: 'assign', body: 'please look at CI', to: [{ recipient: ORC }] }])
     started(w)
     await w.advance(2_000)
     await w.advance(1)

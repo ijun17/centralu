@@ -160,7 +160,7 @@ const movedRow = (db: Database.Database, id: string) => moved(db).find((r) => r.
 /** A moved message's facts as they are stored */
 const storedFacts = (db: Database.Database, id: string | undefined): unknown => JSON.parse(rows<{ facts: string }>(db, `SELECT facts FROM mail WHERE id = ?`, id)[0]?.facts ?? 'null')
 
-/** What the build of v74 moves at its every start: the receipts its `movePendingThreadMail` selects */
+/** What the build of v74 moves at its every start: the receipts its move at ready selects */
 const pendingForV74 = (db: Database.Database) =>
   rows<{ id: string }>(
     db,

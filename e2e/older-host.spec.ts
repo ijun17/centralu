@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { HelloServer, NormalizedEvent, RpcMethods, type RpcMethodName } from '@cc/protocol'
 import { withoutDefaultedFields } from '../packages/protocol/src/test-helpers.js'
 import { sessionAddress } from '../packages/agent-host/src/mail/address.js'
-import { oldThread } from '../packages/agent-host/src/mail/v61.test-helpers.js'
+import { movedThread } from '../packages/agent-host/src/mail/moved.test-helpers.js'
 import { RECOVERY_RELAY_PORT, Relay, freePort, hostCall, seedSession, startHost, withStore, workspace, type RealHost } from './fixtures/real-host.js'
 
 /**
@@ -30,8 +30,8 @@ test('a window on an older host draws its sessions and a conversation without cr
     store.projects.addProject({ id: PROJECT, path: ws.project, name: 'older' })
     seedSession(store, PROJECT, SESSION, 'alpha')
     // A question to the person, from that session: the thread row's `ask` (#2229) is a field an older host never sends
-    oldThread(store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F01', owner: sessionAddress('hub-aaaaaaaa', SESSION), at: Date.now() - 5_000 }, [
-      { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F02', sender: sessionAddress('hub-aaaaaaaa', SESSION), kind: 'question', body: 'Which branch?', receipts: [{ recipient: 'person' }] },
+    movedThread({ store, reach: { projectOf: () => PROJECT } }, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F01', at: Date.now() - 5_000 }, [
+      { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F02', sender: sessionAddress('hub-aaaaaaaa', SESSION), kind: 'question', body: 'Which branch?', to: [{ recipient: 'person' }] },
     ])
   })
   const port = await freePort()

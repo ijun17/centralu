@@ -287,7 +287,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
-    legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
     across,
     watches,
     ...(sessions.work ? { work: sessions.work } : {}),
@@ -416,17 +415,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         console.error(`[mail] taking back the notices of ended cards failed: ${errorMessage(e)}`)
       }
       try {
-        const moved = store.movePendingThreadMail(
-          now(),
-          (address) => reach.projectOf(address),
-          (m, recipient) => reach.holdFor(m, recipient) !== null,
-        )
-        if (moved.messages > 0) console.error(`[mail] moved ${moved.messages} pending message(s) an older build left in its threads`)
-      } catch (e) {
-        // The move is one transaction: nothing moved, and the next ready tries again
-        console.error(`[mail] moving the thread mail an older build left pending failed: ${errorMessage(e)}`)
-      }
-      try {
         // A turn a quit or the system's end cut, found cut at this start (mailbox.md "The stop notice"): what it left unanswered is released and its senders
         // told, so a restart wakes only a sender owed a reply. Released once; a start that finds the same mark again finds nothing to release
         // One write for all of them: the person, and a session that asked several, read one notice. The cut turn is the one this host never saw end
@@ -441,12 +429,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         service.stops.sessionsStopped(stops)
       } catch (e) {
         console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
-      }
-      try {
-        // What a build of v70 to v73 left for the builds the store's floor keeps out since step 74 (`dropReportMarks`)
-        store.children.dropReportMarks()
-      } catch (e) {
-        console.error(`[mail] deleting the report marks an older build left failed: ${errorMessage(e)}`)
       }
       delivery.start()
       // No process outlives its host: a session the last host left at rest after a turn that ended as turns do, with tasks it did not answer,

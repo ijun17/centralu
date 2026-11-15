@@ -34,7 +34,6 @@ function personOf(hub: Hub): MailPerson {
   const m = hub.mail!
   return new MailPerson(m.service, m.records, m.delivery, {
     session: personSessions((id) => (id === 'h1' ? { name: 'h1', state: 'idle' } : undefined), m),
-    legacyChain: () => [],
     projectLabel: (p) => p,
     untrusted: () => false,
     turnOn: () => undefined,

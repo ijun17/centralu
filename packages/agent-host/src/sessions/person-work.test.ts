@@ -57,7 +57,6 @@ const threadState = (id: string) =>
       const s = w.mgr.sessionInfo(sid)
       return s ? { name: s.name, state: s.state } : undefined
     },
-    legacyChain: () => [],
     projectLabel: (pid) => pid,
     untrusted: () => false,
     turnOn: (sid) => {

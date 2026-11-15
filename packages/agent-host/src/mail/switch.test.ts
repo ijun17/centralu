@@ -3,11 +3,10 @@
  * and the seams between rules that the M2 review found misses at (D3 vs §7.6, delivery vs turns, turn end vs settling, an update's continue vs mail
  * turns, the person's words vs the counts the warning reads, the one hold vs a refused delegation). The last part is a seeded model of delivery, turns and settling.
  */
-import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
 import { at, hostWorld, NOW } from './host-mail.test-helpers.js'
-import { oldThread, type OldReceipt } from './v61.test-helpers.js'
+import { movedThread, type MovedRow } from './moved.test-helpers.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 const A = at('a')
@@ -26,29 +25,24 @@ const started = (w: ReturnType<typeof hostWorld>) => {
   stops.push(w.stop)
   return w
 }
-const dbOf = (w: ReturnType<typeof hostWorld>) => (w.store as unknown as { db: Database.Database }).db
 
-/** An older build's question to `b` in a thread, still pending in the v61 tables */
-function oldQuestion(w: ReturnType<typeof hostWorld>, body = 'Is #12 still open?', receipt: Partial<OldReceipt> = {}) {
+/** A question to `b` moved from an old thread, as far along as its receipt there was */
+function movedQuestion(w: ReturnType<typeof hostWorld>, row: Partial<MovedRow> = {}) {
   const q = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F01', threadId: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F01' }
-  oldThread(w.store, { id: q.threadId, owner: A, subject: 'about #12', at: w.clock.t }, [{ id: q.id, sender: A, kind: 'question', body, receipts: [{ recipient: B, ...receipt }] }])
+  movedThread(w, { id: q.threadId, at: w.clock.t }, [{ id: q.id, sender: A, kind: 'question', body: 'Is #12 still open?', to: [{ recipient: B, ...row }] }])
   return q
 }
-const oldReceipt = (w: ReturnType<typeof hostWorld>, id: string) =>
-  dbOf(w).prepare<[string, string], { handled_at: number | null; delivered_at: number | null }>(`SELECT handled_at, delivered_at FROM mail_receipts WHERE message_id = ? AND recipient = ?`).get(id, B)
 
-describe('pending thread mail across the switch (§6.3): at most once, nothing lost', () => {
-  it('is moved at ready, delivered once, never awaited, and its old receipt says handled; the next ready moves nothing', async () => {
+describe('mail moved from an old thread (§6.3): at most once, nothing lost', () => {
+  it('not delivered yet, it is delivered once and never awaited; the next host sends nothing again', async () => {
     const w = hostWorld()
-    const q = oldQuestion(w)
+    const q = movedQuestion(w)
     started(w)
-    expect(w.row(q.id, B)).toMatchObject({ settled: 'legacy', deliveredAt: null })
-    expect(oldReceipt(w, q.id)!.handled_at).not.toBeNull()
     await w.advance(2_000)
     await w.advance(1)
     expect(w.to('b')).toHaveLength(1)
     expect(w.to('b')[0]!.input.text).toContain(q.id)
-    // A second ready (the next host start) finds nothing to move and sends nothing again
+    // The next host start sends nothing again
     w.stop()
     const again = hostWorld({ store: w.store, clock: w.clock })
     started(again)
@@ -59,30 +53,13 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.store.mailbox.watchedTo(B)).toEqual([])
   })
 
-  it('a move that fails midway leaves both sides as they were, the host still starts, and the next ready moves it once', async () => {
-    const w = hostWorld()
-    const q = oldQuestion(w)
-    dbOf(w).exec(`CREATE TRIGGER crash AFTER INSERT ON mail_recipients BEGIN SELECT RAISE(ABORT, 'disk gone'); END`)
-    started(w)
-    expect(w.store.mailbox.message(q.id)).toBeUndefined()
-    expect(oldReceipt(w, q.id)).toMatchObject({ handled_at: null, delivered_at: null })
-    await w.advance(60_000)
-    expect(w.delivered).toEqual([])
-    w.stop()
-    dbOf(w).exec(`DROP TRIGGER crash`)
-    const next = started(hostWorld({ store: w.store, clock: w.clock }))
-    await next.advance(2_000)
-    expect(next.to('b')).toHaveLength(1)
-    expect(oldReceipt(w, q.id)!.handled_at).not.toBeNull()
-  })
-
-  it('an answer delivered and not read yet is still unread after the switch, by the inbox and by its old thread', async () => {
+  it('an answer delivered and not read yet is still unread, by the inbox and by its old thread', async () => {
     const w = hostWorld()
     const q = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F02', threadId: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F02' }
     const answer = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F03' }
-    oldThread(w.store, { id: q.threadId, owner: A, subject: 'colour', at: w.clock.t }, [
-      { id: q.id, sender: A, kind: 'question', body: 'Which colour?', receipts: [{ recipient: B, deliveredAt: w.clock.t, readAt: w.clock.t }] },
-      { id: answer.id, sender: B, kind: 'answer', body: 'Purple.', replyTo: q.id, receipts: [{ recipient: A, deliveredAt: w.clock.t }] },
+    movedThread(w, { id: q.threadId, at: w.clock.t }, [
+      { id: q.id, sender: A, kind: 'question', body: 'Which colour?', to: [{ recipient: B, deliveredAt: w.clock.t, readAt: w.clock.t }] },
+      { id: answer.id, sender: B, kind: 'answer', body: 'Purple.', replyTo: q.id, to: [{ recipient: A, deliveredAt: w.clock.t }] },
     ])
     started(w)
     expect(w.tool.run('a', { action: 'inbox' }).text).toContain(`unread    ${answer.id}`)
@@ -90,9 +67,9 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.tool.run('a', { action: 'read', thread: q.threadId }).text).toContain('Purple.')
   })
 
-  it('a question read and not answered can be answered after the switch by its old thread id', async () => {
+  it('a question read and not answered can be answered by its old thread id', async () => {
     const w = hostWorld()
-    const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, readAt: w.clock.t })
+    const q = movedQuestion(w, { deliveredAt: w.clock.t, readAt: w.clock.t })
     started(w)
     expect(w.tool.run('b', { action: 'reply', thread: q.threadId, text: 'Yes, still open.' }).text).not.toContain('unknown_message')
     await w.advance(2_000)
@@ -100,45 +77,16 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.tool.run('a', { action: 'read' }).text).toContain('Yes, still open.')
   })
 
-  it('an untrusted project’s old request to the Assistant stays held for the person, as the same request on this build is', async () => {
-    const w = hostWorld()
-    const ask = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F04' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F04', owner: X, subject: 'please', at: w.clock.t }, [{ id: ask.id, sender: X, kind: 'assign', body: 'OLD-ASK delete the branch', receipts: [{ recipient: ORC }] }])
-    started(w)
-    await w.advance(60_000)
-    expect(w.to('orc').map((d) => d.input.text).join('\n')).not.toContain('OLD-ASK')
-    expect(w.row(ask.id, ORC)).toMatchObject({ held: 'policy' })
-    expect(w.store.mailbox.message(ask.id)?.senderProject).toBe('px')
-  })
-
-  it('an app’s report in the thread of the session that called it is delivered after the switch', async () => {
+  it('an app’s report in the thread of the session that called it is delivered', async () => {
     const w = hostWorld()
     const app = 'app:hub-aaaaaaaa/p1/board'
     const thread = 'hub-aaaaaaaa.t_app'
     const id = 'hub-aaaaaaaa.m_app'
-    oldThread(w.store, { id: thread, owner: B, projectId: 'p1', subject: 'ci', origin: 'app', at: w.clock.t }, [{ id, sender: app, kind: 'report', body: 'CI is green on #12', receipts: [{ recipient: B }] }])
+    movedThread(w, { id: thread, origin: 'app', at: w.clock.t }, [{ id, sender: app, kind: 'report', body: 'CI is green on #12', to: [{ recipient: B }] }])
     started(w)
     await w.advance(2_000)
     expect(w.row(id, B)?.deliveredAt).not.toBeNull()
     expect(w.tool.run('b', { action: 'read' }).text).toContain('CI is green on #12')
-  })
-
-  it('mail an older build held for the person is moved: a hold today’s gate would not set is ended (#2243), one it would set, and the other holds, are kept, and nothing is released', () => {
-    const w = hostWorld()
-    const q = oldQuestion(w, undefined, { deliveredAt: w.clock.t, held: 'budget' })
-    const note = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F05' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F05', owner: A, subject: 'fyi', at: w.clock.t }, [{ id: note.id, sender: A, kind: 'note', body: 'A note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'policy' }] }])
-    // A note from Pex, whose project is not trusted, to a session of another project: today's gate holds it too (`reach.holdFor`)
-    const asked = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07', owner: X, projectId: 'px', subject: 'hello', at: w.clock.t }, [{ id: asked.id, sender: X, kind: 'note', body: 'May I?', receipts: [{ recipient: B, held: 'policy' }] }])
-    const kept = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F06' }
-    oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F06', owner: X, subject: 'later', at: w.clock.t }, [{ id: kept.id, sender: X, kind: 'note', body: 'A later note.', receipts: [{ recipient: B, deliveredAt: w.clock.t, held: 'uncertain' }] }])
-    started(w)
-    // The token guard and the first-contact hold are gone: dismissed, not delivered, not listed. What today's gate holds, and the other holds, are carried as they were
-    expect(w.row(q.id, B)).toMatchObject({ held: 'dismissed' })
-    expect(w.row(note.id, B)).toMatchObject({ held: 'dismissed' })
-    expect(w.row(asked.id, B)).toMatchObject({ held: 'policy' })
-    expect(w.row(kept.id, B)).toMatchObject({ held: 'uncertain' })
   })
 })
 
