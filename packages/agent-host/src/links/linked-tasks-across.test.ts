@@ -73,6 +73,24 @@ describe('a task across a link (#1948 step 6)', () => {
     await eventually(() => machine.store.mailbox.recipients(machine.store.mailbox.reportsOn(id)[0]!.id)[0]?.deliveredAt !== null)
   })
 
+  it("whose session stops while the hub is not linked (a restart there that found its turn cut) is told to the hub's session once the link is back", async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    machine.store.mailbox.markDelivered(at(machine, 'w1'), [id], Date.now(), 1)
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
+    machine.mail!.service.stops.sessionStopped(at(machine, 'w1'), 'quit', { turnSeq: 1 })
+    const notices = () => hub.store.mailbox.feedOf(at(hub, 'h1'), { limit: 10 }).filter((m) => m.sender === at(hub, 'm1.centralu'))
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => notices().length === 1)
+    expect(notices()[0]!.body).toContain('w1')
+    // Once: a later change or connect does not pass it again
+    machine.mail!.across.changed()
+    await eventually(() => machine.store.mailbox.pendingFor(at(hub, 'h1'), Number.MAX_SAFE_INTEGER).length === 0)
+    expect(notices()).toHaveLength(1)
+  })
+
   it('crosses a report whose words are longer than a report across takes as what it says, cut', async () => {
     const { machine, hub, across } = await rig()
     const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })

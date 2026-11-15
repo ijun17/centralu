@@ -22,6 +22,8 @@ type Machine = {
   lastKnown(kind: 'sessions' | 'projects'): unknown[] | null
   /** It takes this hub's tasks as mail (`LinkedMachineConnection.takesTasks`, #1948 step 6) */
   takesTasks?: boolean
+  /** It takes this hub's mail (`LinkedMachineConnection.takesMail`, #2067 item 2) */
+  takesMail?: boolean
 }
 
 export function mailPeers(o: {
@@ -55,7 +57,7 @@ export function mailPeers(o: {
       ? {
           machine: (id: string) => {
             const m = machines.get(id)
-            return m && { id: m.id, name: m.name, reachable: m.reachable, tasks: m.takesTasks, call: (method: string, params: unknown) => m.call(method, params) }
+            return m && { id: m.id, name: m.name, reachable: m.reachable, tasks: m.takesTasks, mail: m.takesMail, call: (method: string, params: unknown) => m.call(method, params) }
           },
           machineSession: (machineId: string, sessionId: string) => {
             const m = machines.get(machineId)

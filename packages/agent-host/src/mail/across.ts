@@ -52,8 +52,11 @@ export type AcrossPeers = {
   hubs?(): (AcrossPeer & { id: string; you: string | null })[]
   /** The hub that started a session here (`startingHub`), for `parent` */
   startingHub?(sessionId: string): { id: string; name: string } | null
-  /** A machine this hub links, by its id; `tasks`: it takes this hub's tasks as mail (#1948 step 6) */
-  machine?(id: string): (AcrossPeer & { id: string; tasks?: boolean }) | undefined
+  /**
+   * A machine this hub links, by its id; `tasks`: it takes this hub's tasks as mail (#1948 step 6), undefined until it answered this connection's offer;
+   * `mail`: its answer said it takes mail from this hub (#2067 item 2)
+   */
+  machine?(id: string): (AcrossPeer & { id: string; tasks?: boolean; mail?: boolean }) | undefined
   /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
   machineSession?(machineId: string, sessionId: string): string | undefined
   /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */
@@ -671,7 +674,8 @@ export class MailAcross {
     if (p.replyTo !== undefined) this.adopt(p.replyTo, from)
     try {
       if (from === CENTRALU) {
-        const m = this.d.service.notice(to, { body: p.text, facts: {}, dedupeKey: `across:${this.now()}:${Math.random().toString(36).slice(2, 10)}` })
+        // A notice passed again after its answer was lost is the one written then (its id, `pass`)
+        const m = this.d.service.notice(to, { body: p.text, facts: {}, dedupeKey: p.id ? `across:${p.id}` : `across:${this.now()}:${Math.random().toString(36).slice(2, 10)}` })
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
@@ -744,7 +748,7 @@ export class MailAcross {
       this.untoldMoves.delete(machineId)
       for (const move of moves) await this.tellMove(machineId, move)
     }
-    this.retryReports()
+    this.retryOwed()
     const out = new Map<string, { peer: { kind: 'hub'; id: string } | { kind: 'machine'; id: string }; rows: (MailRowState & { sender: string })[]; keys: [string, string][] }>()
     // Read before the rows: a row that changes after is newer, and its change runs this again
     const at = this.now()
@@ -857,79 +861,87 @@ export class MailAcross {
   // ── Notices ──
 
   /**
-   * A Centralu notice written here to a session on the other side (the "no longer watched" notice to a sender there): passed
-   * on as a notice, and its row here marked delivered and read, so this host never tries it. One that cannot be passed on
-   * is dropped and said in the log: nothing waits for a link
+   * A Centralu notice or report written here to a session on the other side (`pass`): a stop notice, the "no longer watched" notice to a sender there,
+   * a report on a task that side gave a session here
    */
   async passOn(messageId: string): Promise<void> {
     const m = this.d.records.message(messageId)
-    if (!m || m.sender !== CENTRALU) return
-    if (m.kind === 'report') return this.passReport(m)
-    for (const row of this.d.records.recipients(messageId)) {
-      if (!this.foreign(row.recipient) || row.deliveredAt !== null) continue
-      const now = this.now()
-      this.d.records.markDelivered(row.recipient, [messageId], now, null)
-      this.d.records.markRead(row.recipient, [messageId], now)
-      const r = this.route(row.recipient)
-      let sent: { ok: boolean; text?: string } = { ok: false, text: 'no link' }
-      if (r?.kind === 'machine') {
-        const peer = this.peers?.machine?.(r.machineId)
-        if (peer) sent = await this.ask(peer, 'host.mail', { from: CENTRALU, to: r.sessionId, text: m.body, notice: true } satisfies HostMailParams)
-      } else if (r?.kind === 'hub') {
-        const peer = this.peers?.hub?.(r.hubId)
-        // `hub.mail` names a session of the machine as its sender; a notice has none, and the hub writes it as its own
-        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: this.asHubNames(r.hubId, row.recipient), text: m.body, notice: true } satisfies HubMailParams)
-      }
-      if (!sent.ok) this.d.log?.(`[mail] a notice to ${row.recipient} could not be passed on, and was dropped: ${sent.text ?? ''}`)
-    }
+    if (m?.sender === CENTRALU) return this.pass(m)
   }
 
   /**
-   * Centralu's report on a task the other side gave a session here (#1948 step 6): on a machine, a hub's session's; on a hub, a machine's session's
-   * ask_project. Passed there, which writes it on its copy. Unlike a notice it is owed work: while that side cannot be reached it stays undelivered here
-   * and goes at the next connect (`changed`, under the dedupe of the report there). One that refuses it is said in the log, and it is not tried again. A
-   * side no longer linked at all will never take it: the person here is told, with where the answer is. A machine that takes no tasks (an older build)
-   * reads it by asking again (`MachineAsks`), and one the call that asks carries waits for it (`holdReports`)
+   * Centralu's mail to a session on the other side, passed there; owed like the work it is about, so while that side cannot be reached it stays
+   * undelivered here and goes at the next connect or change (`retryOwed`), under that side's dedupe (a report's on its task, a notice's by its id). A
+   * stop notice is owed as the report it stands for (#1948 step 6): a host that restarts while a session works on another computer's task tells that
+   * computer once it is linked again. A notice goes as one (`notice`), which that side writes as this computer's words.
+   *
+   * A report is Centralu's on a task the other side gave a session here (#1948 step 6): on a machine, a hub's session's; on a hub, a machine's session's
+   * ask_project. That side writes it on its copy, in its words from the facts. One that side refuses is said in the log, and it is not tried again. A
+   * side no longer linked at all will never take it: the person here is told of a report, with where the answer is; a notice is dropped, said in the
+   * log. A machine that takes no tasks (an older build) reads a report by asking again (`MachineAsks`), and one the call that asks carries waits for it
+   * (`holdReports`)
    */
-  private async passReport(m: MailRow): Promise<void> {
+  private async pass(m: MailRow): Promise<void> {
     if (this.passing.has(m.id)) return
     this.passing.add(m.id)
     try {
       for (const row of this.d.records.recipients(m.id)) {
         const r = this.route(row.recipient)
-        if (!r || r.kind === 'here' || row.deliveredAt !== null || (m.replyTo !== null && this.held.has(m.replyTo))) continue
+        if (!r || r.kind === 'here' || row.deliveredAt !== null) continue
+        const report = m.kind === 'report'
+        if (report && m.replyTo !== null && this.held.has(m.replyTo)) continue
         const hub = r.kind === 'hub' ? this.peers?.hub?.(r.hubId) : undefined
         const machine = r.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
         const peer = hub ?? machine
-        if (!peer) {
-          this.uncrossed(m, row.recipient)
+        // A machine whose answer to this connection's offer said it takes no mail from this hub never reads a notice: dropped, as a side no longer linked
+        const mailless = !report && machine !== undefined && machine.tasks !== undefined && machine.mail !== true
+        if (!peer || mailless) {
+          if (report) this.uncrossed(m, row.recipient)
+          else {
+            this.d.log?.(`[mail] a notice to ${row.recipient} could not be passed on, as ${peer ? `${peer.name} takes no mail from this computer` : 'no such computer is linked'}, and was dropped`)
+            this.passed(row.recipient, m.id)
+          }
           continue
         }
-        if (!peer.reachable || (hub && !hub.you) || (machine && machine.tasks !== true)) continue
-        const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
-        const report = facts.success ? facts.data : { outcome: 'finished' as const }
-        const replyTo = m.replyTo ? { replyTo: m.replyTo } : {}
-        // The facts are what that side takes; it words the report itself (`reportFrom`), so `text` is this host's wording, which it does not keep
-        const sent = r.kind === 'hub'
-          ? await this.ask(peer, 'hub.mail', { sessionId: CENTRALU, to: this.asHubNames(r.hubId, row.recipient), text: m.body, ...replyTo, report } satisfies HubMailParams)
-          : await this.ask(peer, 'host.mail', { from: CENTRALU, to: r.sessionId, text: m.body, ...replyTo, report } satisfies HostMailParams)
-        // Not known to have arrived: tried again at the next change or connect
-        if (!sent.ok && (sent.maybe || sent.why === 'link_down')) continue
-        if (!sent.ok) this.d.log?.(`[mail] ${peer.name} refused the report ${m.id}: ${sent.text}`)
-        const now = this.now()
-        this.d.records.markDelivered(row.recipient, [m.id], now, null)
-        this.d.records.markRead(row.recipient, [m.id], now)
+        if (!peer.reachable || (hub && !hub.you) || (report && machine && machine.tasks !== true)) continue
+        const sent = await this.ask(peer, r.kind === 'hub' ? 'hub.mail' : 'host.mail', this.frameOf(m, r, row.recipient))
+        // Not known to have arrived: tried again at the next change or connect. A notice the other side answered with an error is not: it is news, and a
+        // side that takes no mail from this one answers every try so
+        if (!sent.ok && (sent.why === 'link_down' || (report && sent.maybe))) continue
+        if (!sent.ok) this.d.log?.(`[mail] ${peer.name} refused the ${m.kind} ${m.id}: ${sent.text}`)
+        this.passed(row.recipient, m.id)
       }
     } finally {
       this.passing.delete(m.id)
     }
   }
 
-  /** The reports to the other side still undelivered here (`passReport`), passed on again: at a connect, or any change */
-  private retryReports(): void {
+  /**
+   * The frame Centralu's mail `m` goes in to the other side: a report's facts, which that side words itself (`reportFrom`), so `text` is this host's
+   * wording, which it does not keep; a notice as a notice, with its id. `hub.mail` names a session of the machine as its sender; a notice has none,
+   * and the hub writes it as that machine's Centralu's
+   */
+  private frameOf(m: MailRow, r: Exclude<Route, { kind: 'here' }>, recipient: string): HubMailParams | HostMailParams {
+    const rest = m.kind === 'report'
+      ? { ...(m.replyTo ? { replyTo: m.replyTo } : {}), report: reportOf(m) }
+      : { notice: true, id: m.id }
+    return r.kind === 'hub'
+      ? ({ sessionId: CENTRALU, to: this.asHubNames(r.hubId, recipient), text: m.body, ...rest } satisfies HubMailParams)
+      : ({ from: CENTRALU, to: r.sessionId, text: m.body, ...rest } satisfies HostMailParams)
+  }
+
+  /** Centralu's mail to the other side, its row here marked delivered and read: passed on, refused there, or told here instead */
+  private passed(recipient: string, messageId: string): void {
+    const now = this.now()
+    this.d.records.markDelivered(recipient, [messageId], now, null)
+    this.d.records.markRead(recipient, [messageId], now)
+  }
+
+  /** Centralu's mail to the other side still undelivered here (`pass`), passed on again: at a connect, or any change */
+  private retryOwed(): void {
     for (const recipient of this.d.records.dueRecipients()) {
       if (!this.foreign(recipient)) continue
-      for (const p of this.d.records.pendingFor(recipient, Number.MAX_SAFE_INTEGER)) if (p.message.sender === CENTRALU && p.message.kind === 'report') void this.passReport(p.message)
+      for (const p of this.d.records.pendingFor(recipient, Number.MAX_SAFE_INTEGER)) if (p.message.sender === CENTRALU) void this.pass(p.message)
     }
   }
 
@@ -1042,6 +1054,12 @@ const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waiting
 
 /** A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says */
 const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : v)
+
+/** A report's facts as `TaskReport` takes them; one whose facts do not fit is a turn that ended */
+function reportOf(m: MailRow): TaskReport {
+  const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
+  return facts.success ? facts.data : { outcome: 'finished' }
+}
 
 /** What a send whose answer was lost says to do */
 const AGAIN = 'Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.'

@@ -203,9 +203,12 @@ recipient stops or goes without answering, `tellUnanswered`) is passed on and wr
 notice is written on a machine as the hub's Centralu's, since the hub links the machine. A machine's notice is written
 on the hub (and on another machine it is passed to) as that machine's message, from `Centralu on <machine>`, never as
 the hub's Centralu, and only to a session that mailed one of that machine's sessions; any other is refused
-`not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice that
-cannot be passed on (the link is down) is dropped and said in the host's log: nothing is held. This host's delivery
-never tries a foreign address.
+`not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice is
+owed as a report is (#1948 step 6): one that cannot be passed on now (the link is down, or the other side has not answered
+this connection's offer yet) stays undelivered and goes at the next connect or change, under its id, which the other side
+writes once; so a host that restarts while a session works on the other side's task tells that side the stop once the link
+is back. A side that answers it with an error, a machine whose offer said it takes no mail, and a side no longer linked at
+all drop it, said in the host's log. This host's delivery never tries a foreign address.
 
 ## 7. Refusals across (item 2)
 
@@ -368,14 +371,15 @@ words into the machine's session (`host.send`) and followed its turns over the l
   message that crossed.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
   included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
-  `hub.mail` with `report` (the outcome and its facts; the words name the child as the hub does, `<machine>.<id>`). The
-  hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
+  `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,
+  the same as a returning call's report here), naming the child as the hub does, `<machine>.<id>`: the machine's text is never
+  the hub's Centralu's words, and its answer, error and reason stay facts. The hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
   reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
   settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
   first does not make the report a stale one. A report on a task whose send to that machine has not answered yet keeps the
   copy first (the machine has it, as a receipt would say). The answer, error and reason are cut to what a report across
   takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
-- **A report is owed, not dropped.** Unlike a notice (§6, Notices), a report the hub cannot take now (its link is down,
+- **A report is owed, not dropped.** As a notice (§6, Notices), a report the hub cannot take now (its link is down,
   or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second
   one as the first. Kept reports are swept with other mail. A hub that no longer links the machine at all will never take
   it: the machine's person is told once, with where the session's answer is (`uncrossed`).
