@@ -1,5 +1,5 @@
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process'
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { removeTree } from '../../../tooling/remove-tree.js'
@@ -19,6 +19,13 @@ export { removeTree }
  */
 export function tempRoot(prefix: string): string {
   return realpathSync.native(mkdtempSync(join(tmpdir(), prefix)))
+}
+
+/** A new empty folder `name` in `root`: a name a test can rely on, where `tempRoot`'s ends in random characters (#2261) */
+export function namedFolder(root: string, name: string): string {
+  const dir = join(root, name)
+  mkdirSync(dir)
+  return dir
 }
 
 /**
