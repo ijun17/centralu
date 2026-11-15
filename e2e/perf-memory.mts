@@ -3,9 +3,9 @@
  *
  *   pnpm perf:memory [--profile small|owner|stress] [--engines webkit,chromium] [--stream-minutes 5]
  *                    [--ui-root <checkout>] [--label <name>] [--out <file.json>] [--quick]
- *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background,revisit] [--dpr 2]
+ *                    [--steps blank,shell,long,scrolled,grid,switched,stream,background,revisit,appview]
  *                    [--background-minutes 30] [--background-sessions 8] [--heap-snapshots <dir>]
- *                    [--revisit-rounds 5] [--revisit-streaming 4]
+ *                    [--revisit-rounds 5] [--revisit-streaming 4] [--appview-idle] [--dpr 2]
  *                    [--stream-parts working,text,reasoning,tools,subagent,images,background] [--turn-steps 12]
  *                    [--reduced-motion] [--freeze-animations] [--css <file>] [--layers] [--blur]
  *
@@ -42,13 +42,28 @@
  *               sessions (`--revisit-streaming 0` takes them out). A first open of a streaming session may read its
  *               newest page instead of an older one. Run it without background, whose streams use the same event
  *               numbers.
+ *   appview-*   the same with an app's view open all along: an app shaped like the project board
+ *               (e2e/fixtures/board-app.ts) in the first project, its view drawing the whole board again whenever the
+ *               window is told the app changed, which here is on every tool result the streams send, and polling its
+ *               queue every 15 s (not in the default steps). `--appview-idle` opens no sessions meanwhile
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
- * over CDP, also after a forced collection. On Windows (Chromium only) the footprint is each process's private bytes and
- * RSS its working set, read from `Win32_Process`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
- * the last background sample (revisit: the first, after the first round and the last), writes them to that folder and
- * prints what grew between them by constructor.
+ * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heaps). WebKit is
+ * measured on macOS only (both engines are the default there, Chromium elsewhere). On Windows the footprint is each
+ * process's private bytes and RSS its working set, read from `Win32_Process`.
+ *
+ * What a number holds differs by engine where a frame is involved. `content` is the largest content process, the
+ * window's own; `all content` sums every content process. WebKit runs an app's view in the window's WebContent, so its
+ * `content` holds the view. Chromium gives the view's sandboxed frame a renderer of its own: its `content` and `JS heap`
+ * are the window without the view, `all content` counts the view's renderer (and any spare renderer Chromium keeps), and
+ * `view heap` is the heap of the view's renderers, read and collected through a session on each. Compare WebKit's
+ * `content` with Chromium's `all content`.
+ *
+ * `--heap-snapshots` (Chromium) takes a heap snapshot at the first and the last background sample (revisit and appview:
+ * the first, after the first round and the last), writes them to that folder and prints what grew between them by
+ * constructor. In appview each of the view's own renderers gets its snapshots too (`<step>-view-<n>`), and its own
+ * growth tables.
  *
  * The streaming is not a model: the page's socket to the host is routed through Playwright (`routeWebSocket`) and
  * the events are injected there, in the host's own envelope, with the host's later event numbers shifted past
@@ -87,6 +102,8 @@ import {
   type Page,
   type WebSocketRoute,
 } from '@playwright/test'
+import { errorMessage } from '@cc/protocol'
+import { seedBoardApp } from './fixtures/board-app.js'
 import { screenshotPng, seedHeavyStore, type SeedSummary, type StoreProfile } from './fixtures/heavy-store.js'
 import { freePort } from './fixtures/real-host.js'
 
@@ -95,13 +112,15 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 /** What the synthetic stream is made of; leaving parts out tells which of them the memory goes to */
 const STREAM_PARTS = ['working', 'text', 'reasoning', 'tools', 'subagent', 'images', 'background'] as const
 type StreamPart = (typeof STREAM_PARTS)[number]
-const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit'] as const
+const ENGINES = ['webkit', 'chromium'] as const
+type Engine = (typeof ENGINES)[number]
+const STEPS = ['blank', 'shell', 'long', 'scrolled', 'grid', 'switched', 'stream', 'background', 'revisit', 'appview'] as const
 type Step = (typeof STEPS)[number]
 
 const { values } = parseArgs({
   options: {
     profile: { type: 'string', default: 'owner' },
-    engines: { type: 'string', default: 'webkit,chromium' },
+    engines: { type: 'string' },
     'stream-minutes': { type: 'string', default: '5' },
     'ui-root': { type: 'string', default: root },
     label: { type: 'string', default: 'main' },
@@ -121,10 +140,18 @@ const { values } = parseArgs({
     'heap-snapshots': { type: 'string' },
     'revisit-rounds': { type: 'string', default: '5' },
     'revisit-streaming': { type: 'string', default: '4' },
+    'appview-idle': { type: 'boolean', default: false },
   },
 })
 const profile = values.profile as StoreProfile
-const engines = values.engines.split(',') as Engine[]
+// WebKit's processes are told apart by their macOS names (roleOf); anywhere else every footprint would read 0
+const engines = (values.engines ?? (process.platform === 'darwin' ? 'webkit,chromium' : 'chromium')).split(',').map((name) => {
+  const engine = ENGINES.find((e) => e === name)
+  if (!engine) throw new Error(`unknown engine ${name}: use ${ENGINES.join(' or ')}`)
+  return engine
+})
+if (engines.includes('webkit') && process.platform !== 'darwin')
+  throw new Error('WebKit is measured on macOS only: its processes are found by their macOS names. Use --engines chromium.')
 const streamMs = Number(values['stream-minutes']) * 60_000
 const backgroundMs = Number(values['background-minutes']) * 60_000
 const BACKGROUND_SESSIONS = Number(values['background-sessions'])
@@ -144,7 +171,6 @@ const TURN_STEPS = Number(values['turn-steps'])
 const SETTLE_MS = quick ? 2_000 : 10_000
 const VIEWPORT = { width: 1440, height: 900 }
 
-type Engine = 'webkit' | 'chromium'
 type Proc = { pid: number; role: string; footprintMB: number; rssMB: number }
 type Sample = {
   step: string
@@ -153,12 +179,18 @@ type Sample = {
   footprintMB: Record<string, number>
   rssMB: Record<string, number>
   totalFootprintMB: number
-  /** The largest content process — the page's own */
+  /**
+   * The largest content process: the window's own. A Chromium renderer of a frame's own (an app's view) is not in it;
+   * `footprintMB.content` sums every content process
+   */
   contentFootprintMB: number
   hostFootprintMB: number
   processes: number
+  /** The window page's JS heap (Chromium) */
   heapUsedMB: number | null
   heapTotalMB: number | null
+  /** The JS heap of the renderers the app view has to itself, each counted once (Chromium, appview); null without any */
+  viewHeapUsedMB: number | null
   domNodes: number
   elements: number
   jsEventListeners: number | null
@@ -173,9 +205,18 @@ type Sample = {
   /** Conversation rows the page received over its socket so far (history pages and injected events) */
   rowsReceived: number
   wsBytesIn: number
-  /** Chromium only: the same after a forced collection, which tells what is held from what is merely not yet collected */
-  afterGc: { contentFootprintMB: number; heapUsedMB: number | null } | null
-  /** The last injected text is in the page */
+  /** The same after a forced collection (the heaps: Chromium only), which tells what is held from what is merely not yet collected */
+  afterGc: {
+    contentFootprintMB: number
+    /** Every content process together, as `footprintMB.content` */
+    allContentFootprintMB: number
+    heapUsedMB: number | null
+    viewHeapUsedMB: number | null
+  } | null
+  /**
+   * The last injected text is in the page: stream steps only, where it goes to the open session. Elsewhere it goes to
+   * sessions out of view, so the answer would be false whatever the window drew: null there
+   */
   painted: boolean | null
 }
 
@@ -446,6 +487,18 @@ async function heap(cdp: CDPSession | null) {
   }
 }
 
+/** The JS heap used in these sessions' renderers together; null without any, or once one of them is gone */
+async function heapOf(sessions: CDPSession[]): Promise<number | null> {
+  if (!sessions.length) return null
+  let used = 0
+  for (const s of sessions) {
+    const h = (await s.send('Runtime.getHeapUsage').catch(() => null)) as { usedSize: number } | null
+    if (!h) return null
+    used += h.usedSize
+  }
+  return used / 1048576
+}
+
 type HeapClasses = Map<string, { bytes: number; count: number }>
 
 /**
@@ -481,16 +534,14 @@ async function heapClasses(cdp: CDPSession, file: string): Promise<HeapClasses> 
   return out
 }
 
-/** The constructors that grew most between two snapshots */
+/** The constructors that grew most between two snapshots: only those whose bytes grew, so fewer than `top` rows when fewer grew */
 function heapGrowth(from: HeapClasses, to: HeapClasses, top = 25): { name: string; mb: number; count: number }[] {
   return [...to]
-    .map(([name, v]) => ({
-      name,
-      mb: round((v.bytes - (from.get(name)?.bytes ?? 0)) / 1048576),
-      count: v.count - (from.get(name)?.count ?? 0),
-    }))
-    .sort((a, b) => b.mb - a.mb)
+    .map(([name, v]) => ({ name, bytes: v.bytes - (from.get(name)?.bytes ?? 0), count: v.count - (from.get(name)?.count ?? 0) }))
+    .filter((g) => g.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
     .slice(0, top)
+    .map(({ name, bytes, count }) => ({ name, mb: round(bytes / 1048576), count }))
 }
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0
@@ -582,13 +633,16 @@ class Wire {
 
 // ── Synthetic streaming ────────────────────────────────────────────────────────────────────
 
-/** A deterministic turn loop at a model's pace: ~70 tokens a second, a tool call every few seconds */
+/**
+ * A deterministic turn loop at a model's pace: ~70 tokens a second, a tool call every few seconds. `sample` is called
+ * at 60 s, 150 s and the end; `onToolResult` after each tool result is sent.
+ */
 async function stream(
   wire: Wire,
   sessionId: string,
   firstSeq: number,
   ms: number,
-  sample?: (step: string) => Promise<void>,
+  { sample, onToolResult }: { sample?: (step: string) => Promise<void>; onToolResult?: () => void } = {},
 ): Promise<void> {
   let seq = firstSeq
   let n = 0
@@ -688,6 +742,7 @@ async function stream(
         await sleep(100)
       }
       send(card, { type: 'tool_result', seq: ++seq, callId, ok: true, summary: say(50).slice(0, 300) })
+      onToolResult?.()
       if (step === 9 && turn % 2 === 1)
         send('images', { type: 'message_image', mime: 'image/png', data: png })
       send('working', {
@@ -837,6 +892,7 @@ async function measureEngine(
   try {
     console.error(`[${engine}] seeding ${profile}`)
     const seed = seedHeavyStore(dataDir, profile)
+    const boardApp = steps.has('appview') ? seedBoardApp(dataDir, seed.projects[0]!) : null
     const token = randomBytes(16).toString('hex')
     const [hostPort, uiPort] = [await freePort(), await freePort()]
     const origin = `http://127.0.0.1:${uiPort}`
@@ -854,6 +910,12 @@ async function measureEngine(
       // The app's spinning markers stop under reduced motion (styles/index.css), which isolates what they cost
       reducedMotion: values['reduced-motion'] ? 'reduce' : 'no-preference',
     })
+    // Playwright holds a handle on every console argument in the page and does not release the ones it trims from its
+    // list (1.62), so a page that logs objects (ext-apps' message transport logs every app message) would grow here
+    // without end, and not in the app. Releasing them leaves the engine's own bounded console store.
+    context.on('console', (m) => {
+      for (const arg of m.args()) void arg.dispose().catch(() => {})
+    })
     const wire = new Wire()
     await wire.attach(context, hostPort)
     const page = await context.newPage()
@@ -861,9 +923,35 @@ async function measureEngine(
     const t0 = Date.now()
     const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
     if (snapshots) mkdirSync(snapshots, { recursive: true })
-    /** The JS heap by constructor now, its snapshot written into the --heap-snapshots folder; null without one */
-    const snapshot = (name: string) => (snapshots ? heapClasses(cdp!, join(snapshots, `${engine}-${name}.heapsnapshot`)) : null)
+    /** One session per renderer the app view has to itself (Chromium, appview), which `cdp` does not reach */
+    const viewCdp: CDPSession[] = []
+    /** The JS heaps by constructor now, the window's and each of `viewCdp`'s, written into the --heap-snapshots folder; null without one */
+    const snapshot = async (step: string): Promise<Map<string, HeapClasses> | null> => {
+      if (!snapshots) return null
+      const heaps = [
+        { heapName: 'window', session: cdp!, name: step },
+        ...viewCdp.map((session, i) => ({ heapName: `view ${i + 1}`, session, name: `${step}-view-${i + 1}` })),
+      ]
+      const out = new Map<string, HeapClasses>()
+      for (const { heapName, session, name } of heaps) {
+        try {
+          out.set(heapName, await heapClasses(session, join(snapshots, `${engine}-${name}.heapsnapshot`)))
+        } catch (e) {
+          // A view's renderer can go mid-run (heapOf reads it as gone too); the window's failing is the run failing
+          if (session === cdp) throw e
+          console.error(`[${engine}] ${step}: no snapshot of ${heapName}, its session is gone: ${errorMessage(e)}`)
+        }
+      }
+      return out
+    }
     const grown: { span: string; rows: ReturnType<typeof heapGrowth> }[] = []
+    /** What each heap gained between two snapshots */
+    const grow = (span: string, from: Map<string, HeapClasses> | null, to: Map<string, HeapClasses> | null) => {
+      for (const [heapName, classes] of from ?? []) {
+        const end = to?.get(heapName)
+        if (end) grown.push({ span: `${span}, ${heapName}`, rows: heapGrowth(classes, end) })
+      }
+    }
 
     const sample = async (step: string) => {
       const reps: Sample[] = []
@@ -889,12 +977,13 @@ async function measureEngine(
           hostFootprintMB: hostFp,
           processes: procs.length,
           ...(await heap(cdp)),
+          viewHeapUsedMB: await heapOf(viewCdp),
           ...(await pageCounts(page)),
           jsEventListeners: null,
           rowsReceived: wire.rowsReceived,
           wsBytesIn: wire.bytesIn,
           afterGc: null,
-          painted: wire.lastText
+          painted: step.startsWith('stream-') && wire.lastText
             ? await page.evaluate((t) => document.body.innerText.includes(t.trim()), wire.lastText)
             : null,
         })
@@ -903,16 +992,28 @@ async function measureEngine(
       const pick = reps.find((s) => s.totalFootprintMB === median(reps.map((x) => x.totalFootprintMB)))!
       const h = await heap(cdp)
       pick.jsEventListeners = h.jsEventListeners
-      if (cdp) {
-        await cdp.send('HeapProfiler.collectGarbage')
-        await sleep(1_000)
-        const { procs } = engineProcs(engine, before, host!.pid!)
+      // WebKit has no CDP: Playwright's requestGC is the inspector's Heap.gc, a full collection of the page's VM. Its
+      // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
+      // The after-GC numbers are extra: when the collection fails they are left out (null) and the run goes on.
+      let collected = true
+      try {
+        if (cdp) await cdp.send('HeapProfiler.collectGarbage')
+        else await page.requestGC()
+      } catch (e) {
+        collected = false
+        console.error(`[${engine}] ${step}: the forced collection failed, so there are no after-GC numbers: ${errorMessage(e)}`)
+      }
+      if (collected) {
+        for (const s of viewCdp) await s.send('HeapProfiler.collectGarbage').catch(() => {})
+        await sleep(cdp ? 1_000 : 5_000)
+        const content = engineProcs(engine, before, host!.pid!).procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)
         const after = await heap(cdp)
+        const afterView = await heapOf(viewCdp)
         pick.afterGc = {
-          contentFootprintMB: round(
-            Math.max(0, ...procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)),
-          ),
+          contentFootprintMB: round(Math.max(0, ...content)),
+          allContentFootprintMB: round(content.reduce((a, b) => a + b, 0)),
           heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
+          viewHeapUsedMB: afterView === null ? null : round(afterView),
         }
       }
       const out = {
@@ -924,12 +1025,19 @@ async function measureEngine(
         hostFootprintMB: round(pick.hostFootprintMB),
         heapUsedMB: pick.heapUsedMB === null ? null : round(pick.heapUsedMB),
         heapTotalMB: pick.heapTotalMB === null ? null : round(pick.heapTotalMB),
+        viewHeapUsedMB: pick.viewHeapUsedMB === null ? null : round(pick.viewHeapUsedMB),
       }
       samples.push(out)
+      // Only what was read: WebKit has no heaps, a step without a view no view heap, a failed collection no after-GC
+      const heapText = (windowMB: number | null, viewMB: number | null) =>
+        (windowMB === null ? '' : ` heap=${windowMB}MB`) + (viewMB === null ? '' : ` view=${viewMB}MB`)
+      const gc = out.afterGc
       console.error(
-        `[${engine}] ${step.padEnd(14)} content=${out.contentFootprintMB}MB total=${out.totalFootprintMB}MB heap=${out.heapUsedMB ?? '-'}MB ` +
-          `gc=${out.afterGc ? `${out.afterGc.contentFootprintMB}/${out.afterGc.heapUsedMB}MB` : '-'} nodes=${out.domNodes} rows=${out.renderedRows} ` +
-          `received=${out.rowsReceived} host=${out.hostFootprintMB}MB painted=${out.painted ?? '-'}`,
+        `[${engine}] ${step.padEnd(14)} content=${out.contentFootprintMB}MB all=${out.footprintMB.content ?? 0}MB` +
+          `${heapText(out.heapUsedMB, out.viewHeapUsedMB)} total=${out.totalFootprintMB}MB | after GC: ` +
+          (gc ? `content=${gc.contentFootprintMB}MB all=${gc.allContentFootprintMB}MB${heapText(gc.heapUsedMB, gc.viewHeapUsedMB)}` : 'none') +
+          ` | nodes=${out.domNodes} rows=${out.renderedRows} received=${out.rowsReceived} host=${out.hostFootprintMB}MB` +
+          (out.painted === null ? '' : ` painted=${out.painted}`),
       )
     }
 
@@ -1036,7 +1144,7 @@ async function measureEngine(
       }
       await sleep(SETTLE_MS)
       await sample('stream-0s')
-      await stream(wire, seed.longSessionId, seed.sessions[0]!.lastSeq, streamMs, sample)
+      await stream(wire, seed.longSessionId, seed.sessions[0]!.lastSeq, streamMs, { sample })
       await sample(`stream-${Math.round(streamMs / 1000)}s`)
       await sleep(quick ? 2_000 : 30_000)
       await sample('stream-settled')
@@ -1098,44 +1206,92 @@ async function measureEngine(
       await sleep(quick ? 2_000 : 30_000)
       await sample('background-settled')
       const end = await snapshot('background-end')
-      if (first && end) grown.push({ span: 'background-0s → background-end', rows: heapGrowth(first, end) })
+      grow('background-0s → background-end', first, end)
     }
 
     /*
      * revisit: the long session open, as in background, while the person works through the other sessions over the hour,
      * opening each in turn, reading back a page in every other one, and coming back to the long one. A few of them stream
      * out of view meanwhile. Rounds 1 and 2 open every session once and read each back once; the later rounds repeat
-     * them, so growth after round 2 is something an open leaves behind (or the streaming).
+     * them, so growth after round 2 is something an open leaves behind (or the streaming). `idle` keeps the streaming and
+     * the schedule but opens nothing; `onToolResult` runs for each tool result the streams send.
      */
-    if (steps.has('revisit')) {
+    const revisit = async (label: string, idle: boolean, onToolResult?: () => void) => {
       const others = seed.sessions.filter((s) => s.id !== seed.longSessionId)
       const ms = REVISIT_ROUNDS * others.length * REVISIT_EVERY_MS
-      await open(seed.longSessionId)
       await sleep(SETTLE_MS)
-      await sample('revisit-0s')
-      const first = await snapshot('revisit-0s')
-      let afterFirst: HeapClasses | null = null
+      await sample(`${label}-0s`)
+      const first = await snapshot(`${label}-0s`)
+      let afterFirst: Map<string, HeapClasses> | null = null
       const start = Date.now()
       const opens = async () => {
         for (let round = 1; round <= REVISIT_ROUNDS; round++) {
           for (const [i, s] of others.entries()) {
             const n = (round - 1) * others.length + i
             await sleep(start + n * REVISIT_EVERY_MS - Date.now())
+            if (idle) continue
             await open(s.id)
             if (n % 2) await pageBack()
             await sleep(quick ? 1_000 : 5_000)
             await open(seed.longSessionId)
           }
-          await sample(`revisit-round-${round}`)
-          if (round === 1) afterFirst = await snapshot('revisit-round-1')
+          await sample(`${label}-round-${round}`)
+          if (round === 1) afterFirst = await snapshot(`${label}-round-1`)
         }
       }
-      await Promise.all([...others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms)), opens()])
+      const streams = others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms, { onToolResult }))
+      await Promise.all([...streams, opens()])
       await sleep(quick ? 2_000 : 30_000)
-      await sample('revisit-settled')
-      const end = await snapshot('revisit-end')
-      if (first && afterFirst) grown.push({ span: 'revisit-0s → revisit-round-1', rows: heapGrowth(first, afterFirst) })
-      if (afterFirst && end) grown.push({ span: 'revisit-round-1 → revisit-end', rows: heapGrowth(afterFirst, end) })
+      await sample(`${label}-settled`)
+      const end = await snapshot(`${label}-end`)
+      grow(`${label}-0s → ${label}-round-1`, first, afterFirst)
+      grow(`${label}-round-1 → ${label}-end`, afterFirst, end)
+    }
+    if (steps.has('revisit')) {
+      await open(seed.longSessionId)
+      await revisit('revisit', false)
+    }
+
+    /*
+     * appview: an app's view open in the window (an app shaped like the project board, e2e/fixtures/board-app.ts) for the
+     * whole of the revisit pattern. Each tool result the streams send also tells the window the app changed, as an
+     * agent's call to the board's tools does, so the view reads the board and draws it again; it polls its queue too.
+     */
+    if (steps.has('appview')) {
+      const key = `${boardApp!.projectId}/${boardApp!.appId}`
+      await page.getByTestId(`app-row-${key}`).click()
+      const proxy = page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe')
+      const card = proxy.contentFrame().locator('iframe').contentFrame().locator('[data-card]').first()
+      await card.waitFor({ timeout: 60_000 })
+      // Chromium gives a sandboxed frame a renderer of its own, which the page's session does not reach: the view's
+      // memory is in `footprintMB.content`, not in the largest content process, and its heap is read through a session
+      // on such a frame. A frame in the page's renderer has no session of its own, and its heap is the page's. WebKit
+      // runs the view in the window's WebContent.
+      if (cdp) {
+        // A heap reading and a snapshot cover the renderer's whole isolate, which frames can share: one session per
+        // isolate, so none is read twice, and none on the page's own
+        const isolates = new Set([(await cdp.send('Runtime.getIsolateId')).id])
+        const frame = await (await proxy.elementHandle()).contentFrame()
+        let outOfPage = 0
+        for (const f of frame ? [frame, ...frame.childFrames()] : []) {
+          const s = await context.newCDPSession(f).catch(() => null)
+          if (!s) continue
+          outOfPage++
+          const { id } = await s.send('Runtime.getIsolateId')
+          if (isolates.has(id)) {
+            await s.detach()
+            continue
+          }
+          isolates.add(id)
+          viewCdp.push(s)
+        }
+        console.error(`[${engine}] appview: ${outOfPage} of the view's frames run outside the page's renderer, in ${viewCdp.length} renderer(s)`)
+      }
+      await open(seed.longSessionId)
+      const changed = () => wire.inject({ type: 'external_app_state_changed', appId: boardApp!.appId, projectId: boardApp!.projectId })
+      await revisit('appview', values['appview-idle'], changed)
+      // How many times the view read the board: it says so in every card, whether it is on screen or not
+      console.error(`[${engine}] appview: ${await card.textContent({ timeout: 10_000 }).catch(() => 'the view is gone')}`)
     }
 
     const { sessions: _s, projects: _p, ...rest } = seed
@@ -1171,13 +1327,16 @@ if (values.out) writeFileSync(values.out, JSON.stringify(report, null, 2))
 for (const r of results) {
   console.log(`\n## ${values.label} · ${r.engine} · ${profile}\n`)
   console.log(
-    '| step | content MB | content after GC | total MB | gpu MB | ui MB | JS heap MB | heap after GC | DOM nodes | rows drawn | rows received | host MB |',
+    '| step | content MB | content after GC | all content MB | all content after GC | total MB | gpu MB | ui MB | ' +
+      'JS heap MB | heap after GC | view heap MB | view heap after GC | DOM nodes | rows drawn | rows received | host MB |',
   )
-  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
   for (const s of r.samples) {
     console.log(
-      `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
-        `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
+      `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.footprintMB.content ?? 0} | ` +
+        `${s.afterGc?.allContentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
+        `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.viewHeapUsedMB ?? '–'} | ${s.afterGc?.viewHeapUsedMB ?? '–'} | ` +
+        `${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
     )
   }
   for (const { span, rows } of r.heapGrowth) {
