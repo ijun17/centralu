@@ -7,7 +7,7 @@ import { alertPerson } from './events/notices.js'
 import { coalescedRead } from './single-flight.js'
 
 /** What Tasks lists when the host answered its first read with an error: an older host ("Unknown method"), or one that refused it */
-const NO_TASKS = { tasks: [], capped: null }
+const NO_TASKS = { tasks: [], capped: null, unreached: [] }
 
 /** Whether a failed call is the host's answer (an error with the protocol's code), not a link that dropped, timed out or never sent it */
 const hostAnswered = (e: unknown): boolean => e instanceof Error && 'code' in e && ProtocolErrorCode.safeParse(e.code).success

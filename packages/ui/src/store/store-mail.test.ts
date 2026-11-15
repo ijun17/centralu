@@ -77,11 +77,14 @@ describe('the list', () => {
     platform.mail.tasks = real
     platform.mockMail.knowsTasks = false
     await useStore.getState().loadTasks()
-    expect(useStore.getState().mailTasks).toEqual({ tasks: [], capped: null })
+    expect(useStore.getState().mailTasks).toEqual({ tasks: [], capped: null, unreached: [] })
     platform.mockMail.knowsTasks = true
     platform.seedTask({ subject: 'Port the docs', owner: worker, assignee: mockSessionParty('s2', 'Docs') })
+    // A hub names the linked machine whose work it could not read (#2268)
+    platform.mockMail.tasksUnreached = [{ machineId: 'm1', name: 'Box' }]
     await useStore.getState().loadTasks()
     expect(useStore.getState().mailTasks?.tasks.map((t) => t.subject)).toEqual(['Port the docs'])
+    expect(useStore.getState().mailTasks?.unreached).toEqual([{ machineId: 'm1', name: 'Box' }])
     platform.mail.tasks = async () => {
       throw new Error('link down')
     }

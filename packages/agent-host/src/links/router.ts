@@ -5,6 +5,8 @@ import type { Qualifier } from './qualifier.js'
 import { ROUTES, SCRIPT_TEXT, type Route } from './routes.js'
 import { isObj, type Obj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
+import { older } from '../mail/across-core.js'
+import { parseMailId } from '../mail/ids.js'
 
 /**
  * The hub's request router (docs/plans/remote-hub.md §5): one function in front of
@@ -138,6 +140,8 @@ export class Router {
         return this.byKey(method, params, route.key ?? 'projectId', route, ctx)
       case 'terminal':
         return this.byKey(method, params, 'terminalId', route, ctx)
+      case 'chain':
+        return this.byKey(method, params, 'threadId', { ...route, accepts: isChainId }, ctx)
       case 'view':
         return this.byView(method, params, route, ctx)
       case 'noRemote': {
@@ -155,9 +159,10 @@ export class Router {
     }
   }
 
-  /** The linked machine an id names, or null for the hub's own (an unprefixed id, or a prefix no link has) */
-  private owner(value: unknown): RoutedMachine | null {
-    return typeof value === 'string' ? (qualifiedMachine(this.opts.machines(), value)?.machine ?? null) : null
+  /** The linked machine an id names, or null for the hub's own (an unprefixed id, a prefix no link has, or what follows it not an id `accepts`) */
+  private owner(value: unknown, accepts?: (id: string) => boolean): RoutedMachine | null {
+    const found = typeof value === 'string' ? qualifiedMachine(this.opts.machines(), value) : null
+    return found && (accepts?.(found.id) ?? true) ? found.machine : null
   }
 
   private machineById(id: unknown): RoutedMachine | null {
@@ -182,7 +187,7 @@ export class Router {
     method: string,
     params: unknown,
     key: string,
-    route: { params?: (p: Obj, q: Qualifier) => Obj; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean },
+    route: { params?: (p: Obj, q: Qualifier) => Obj; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean; accepts?: (id: string) => boolean },
     ctx?: RpcContext,
   ): Promise<unknown> {
     if (!isObj(params)) return this.opts.local(method, params, ctx)
@@ -194,7 +199,7 @@ export class Router {
       const r = await this.forward(m, method, route.params ? route.params(rest, m.q) : rest, ctx)
       return route.result ? route.result(r, m.q) : r
     }
-    const m = this.owner(params[key])
+    const m = this.owner(params[key], route.accepts)
     if (!m) return this.opts.local(method, params, ctx)
     const { machine: _machine, ...own } = params
     let p: Obj = { ...(route.orMachine ? own : params), [key]: m.q.strip(params[key], 'The id') }
@@ -424,8 +429,12 @@ export class Router {
         .filter((m) => m.reachable)
         .map(async (m) => {
           try {
+            // Its parties read in the hub's terms by what it answered this connection's offer (`Qualifier.mail`): a machine just connected is waited for
+            if (method === 'mail.tasks') await m.offerAnswered?.()
             return { m, r: await callOn(m, method, params, ctx) }
-          } catch {
+          } catch (e) {
+            // A machine from before Tasks has none to list (#2268): it follows the hub's update, so it is not named as one missed
+            if (method === 'mail.tasks' && older(e)) return null
             // One machine failing does not fail the list; it is simply not in it this time
             missed.push(m)
             return null
@@ -451,12 +460,50 @@ export class Router {
       const failed = Array.isArray(out.failed) ? out.failed : []
       out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its archived sessions were not deleted' }))] }
     }
-    // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds
-    if ((method === 'trash.list' || method === 'subagents.usage') && missed.length && isObj(out)) {
+    if (method === 'mail.tasks' && isObj(out)) out = { ...out, tasks: this.oneTaskEach(listIn(local, 'tasks'), listIn(out, 'tasks')) }
+    // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds; so does Tasks (#2268)
+    if ((method === 'trash.list' || method === 'subagents.usage' || method === 'mail.tasks') && missed.length && isObj(out)) {
       out = { ...out, unreached: missed.map((m) => ({ machineId: m.id, name: m.name })) }
     }
     return out
   }
+
+  /**
+   * Tasks one row per message and recipient (#2268, docs/plans/linked-mail.md §11). Mail that crossed is stored on both hosts under one id, so two
+   * hosts list it. The hub's own row is kept, as it opens there to answer; a machine's mail to another machine, which the hub keeps no copy of, keeps
+   * the row of the machine its recipient is on. That machine is the authority on its row and alone knows `running`, so the kept row takes its state
+   */
+  private oneTaskEach(hub: readonly unknown[], rows: readonly unknown[]): unknown[] {
+    const own = new Set(hub)
+    const kept = new Map<string, { row: Obj; authority: Obj | null }>()
+    const odd: unknown[] = []
+    for (const t of rows) {
+      if (!isObj(t) || !isObj(t.assignee)) {
+        odd.push(t)
+        continue
+      }
+      // The row of the machine its recipient is on (`<machine>.<id>` in the hub's terms); the hub's own rows are never a machine's
+      const on = this.owner(t.assignee.sessionId)
+      const authority = on !== null && !own.has(t) && this.owner(t.root) === on ? t : null
+      const key = `${String(t.id)}\u0000${String(t.assignee.address)}`
+      const seen = kept.get(key)
+      if (!seen) kept.set(key, { row: t, authority })
+      else kept.set(key, { row: own.has(seen.row) || !authority ? seen.row : t, authority: seen.authority ?? authority })
+    }
+    const rest = [...kept.values()].map(({ row, authority }) =>
+      authority && authority !== row ? { ...row, state: authority.state, outcome: authority.outcome, updatedAt: authority.updatedAt } : row,
+    )
+    return [...rest, ...odd]
+  }
+}
+
+/** A field of an answer that is a list, else none */
+const listIn = (x: unknown, field: string): unknown[] => (isObj(x) && Array.isArray(x[field]) ? x[field] : [])
+
+/** What follows a machine's prefix in a `threadId` that names that machine's chain: a mail id of any host, a message's or an old thread's */
+const isChainId = (id: string): boolean => {
+  const kind = parseMailId(id)?.kind
+  return kind === 'message' || kind === 'thread'
 }
 
 /** One remote answer folded into the merged one, for the merges `mergeSimple` handles */
@@ -486,6 +533,14 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
           ? { subagentSteps: [...list(a.subagentSteps), ...list(b.subagentSteps).map((t) => q.subagentSteps(t))] }
           : {}),
       }
+    }
+    case 'mail.tasks': {
+      const a = isObj(acc) ? acc : { tasks: [] }
+      const b = isObj(r) ? r : { tasks: [] }
+      // A host that capped its list says how many open rows it listed; one that did not listed every open row it has
+      const listed = (x: Obj) => (typeof x.capped === 'number' ? x.capped : list(x.tasks).filter((t) => isObj(t) && t.state !== 'done').length)
+      const capped = typeof a.capped !== 'number' && typeof b.capped !== 'number' ? null : listed(a) + listed(b)
+      return { ...a, tasks: [...list(a.tasks), ...list(b.tasks).map((t) => q.taskRow(t))], capped }
     }
     case 'subagents.usage': {
       const a = isObj(acc) ? acc : { sessions: [] }

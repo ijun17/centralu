@@ -435,3 +435,41 @@ words into the machine's session (`host.send`) and followed its turns over the l
 - **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
   caller is told once, in one notice for all its children, that the report no longer comes, and how to read where the child stands. Notes the old hub held for
   a busy child (`queued`) are not sent by the new one; their caller is told once too.
+
+## 11. Tasks across machines (#2268)
+
+The person sees every linked machine as one place (owner, 2026-11-09), so the hub's Inbox Tasks lists the linked
+machines' open work beside its own, and a row from a machine opens there.
+
+- **One list.** `mail.tasks` is a merge on the hub (`links/routes.ts`, `router.ts`): the hub's rows, then each reachable
+  machine's, read in the hub's terms. A machine's parties are named as the hub's mail names them (§6, `inHubTerms`): its
+  own session is `session:<hub id>/<machine id>.<id>`, named `<name> on <machine>` as §7a names one; the hub's person,
+  which the machine names `session:<hub id>/person`, is `person`; its app's project is qualified. What the machine names
+  on the hub's side already, the person and Centralu stay as they are. The hub learns the machine's own id in mail
+  addresses from its answer to the offer (`host.hubOffer` answered with `host`, an addition): nothing else the hub hears
+  from a machine says it, and a machine linked by two hubs holds the other hub's sessions under an id of the same shape.
+  A machine from before it says none, and its own sessions keep its terms until it is updated.
+- **One row per message and recipient.** Mail that crossed is stored on both hosts under one id (§6), so two hosts list
+  it. The rows are matched by the message id and the recipient's address in the hub's terms. The hub's own row is kept:
+  it opens on the hub, where the person answers or closes it as before. It takes `state`, `outcome` and `updatedAt` from
+  the row of the machine its recipient is on, which is the authority on that row (§6, Receipts) and alone knows
+  `running`. Mail between two machines, which the hub passes on and keeps no copy of, keeps the row of the machine its
+  recipient is on. A row's `id` (the message) stays as it is, being every host's; its `root` is `<machine id>.<root>`.
+- **Read-only opening.** `mail.thread` goes to the machine its `threadId`'s prefix names when what follows the prefix is
+  itself a mail id (`<host>.m_…`, or an old `<host>.t_…`). A hub's own ids start with its host id, `hub-` and 8 hex
+  digits, which is shaped as a machine id too: `hub-<8 hex>.m_…` is never read as a machine's chain, since `m_…` is no
+  mail id. The machine's answer is named as the rows are and comes back with `lookIn: true` and `canReply: false`, so the
+  Inbox offers neither reply nor close: the person's reply and Mark done are the hub's mailbox's (`mail.reply` and
+  `mail.close` stay on the hub).
+- **News.** A machine's `mail_changed` reaches the hub's windows with its `threadId` qualified, `toPerson: false` and no
+  `arrived`: the window reads Tasks and its list again (each read coalesced) and the machine's chain if one is open, and
+  raises no notification. What the machine's own Inbox holds is not news for the hub's person; mail to them reaches the
+  hub's mailbox, which tells them itself (§7a).
+- **A machine not reached is named.** A machine that is not reachable, or whose `mail.tasks` fails, is named in the
+  answer's `unreached` (`{ machineId, name }[]`, an addition whose default is none), as `trash.list` names one, and the
+  Inbox says under the list `Not listed: the tasks on <A>, <B>, which could not be reached just now.` `capped` is null
+  unless a host capped its list; then it is the sum of each host's, a host that did not cap counting the open rows it
+  listed.
+- **An older machine is left out, unnamed.** A machine that answers `mail.tasks` "Unknown method" (a build from before
+  Tasks) has none to list and is not named. Machines follow the hub's update, so such a machine is a passing state of an
+  update, not one the person acts on; naming it as not reached would say it is down when it is not.

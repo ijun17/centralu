@@ -89,6 +89,25 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     await eventually(() => machine.store.mailbox.recipient(later, at(machine, 'w1'))?.settled === 'withdrawn')
   })
 
+  it("the hub's Tasks lists the machine's work beside its own, mail that crossed once, and a machine's chain opens there to read (#2268)", async () => {
+    const { machine, hub } = await rig()
+    const between = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'which branch?' }))
+    const crossed = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'are you free for a review?' }))
+    type Tasks = { tasks: { id: string; root: string; owner: { address: string; name: string | null }; assignee: { address: string } }[]; unreached: unknown }
+    const tasks = async () => (await hub.router.handle('mail.tasks', {})) as Tasks
+    await eventually(async () => (await tasks()).tasks.some((t) => t.id === between))
+    const listed = await tasks()
+    // Between two of the machine's sessions, named as the hub names them, opening on the machine
+    expect(listed.tasks.filter((t) => t.id === between)).toEqual([
+      expect.objectContaining({ root: `m1.${between}`, owner: expect.objectContaining({ address: at(hub, 'm1.w1'), name: 'w1 on Remote box' }), assignee: expect.objectContaining({ address: at(hub, 'm1.c1') }) }),
+    ])
+    // Stored on both computers, listed once: the hub's own row, which opens here
+    expect(listed.tasks.filter((t) => t.id === crossed)).toEqual([expect.objectContaining({ root: crossed, assignee: expect.objectContaining({ address: at(hub, 'm1.w1') }) })])
+    expect(listed.unreached).toEqual([])
+    const chain = (await hub.router.handle('mail.thread', { threadId: `m1.${between}`, tail: 100 })) as { thread: { id: string }; lookIn: boolean; canReply: boolean; messages: { body: string }[] }
+    expect(chain).toMatchObject({ thread: { id: `m1.${between}` }, lookIn: true, canReply: false, messages: [{ body: 'which branch?' }] })
+  })
+
   it("a machine's session reaches a hub session by its name, and a name on both computers is refused with both", async () => {
     const { machine, hub } = await rig({ machineSessions: ['w1', 'c1', 'x1'] })
     machine.mgr.rename('x1', 'h1')
