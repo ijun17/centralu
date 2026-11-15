@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { PURE_CALLS } from '../../../tooling/pure-calls.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PKG = resolve(HERE, '..')
@@ -209,6 +210,8 @@ async function buildInto(outDir) {
     format: 'iife',
     globalName: 'McpApp',
     minify: true,
+    // ext-apps' transport logs every app message with console.debug, which the console keeps
+    pure: PURE_CALLS,
     legalComments: 'none',
     banner: { js: VIEW_HEADER },
     metafile: true,
