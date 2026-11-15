@@ -205,6 +205,15 @@ describe('the window against chains that change while it is open', () => {
     expect(w.person.thread(q.id, { after: mine?.seq ?? 0 }).messages.map((m) => m.id)).toEqual([third.id])
   })
 
+  it('a chain read as a look in (a hub showing it read-only, #2268) is read for nobody, and offers no reply', () => {
+    const w = ready(hostWorld())
+    w.clock.t += 10
+    const q = w.mail.send(A, { to: [PERSON], text: 'unread' }).message
+    expect(w.person.thread(q.id, { tail: 100, lookIn: true })).toMatchObject({ lookIn: true, messages: [{ body: 'unread' }] })
+    expect(w.store.mailbox.recipient(q.id, PERSON)?.readAt).toBeNull()
+    expect(w.person.list().threads.map((t) => t.unread)).toEqual([1])
+  })
+
   it('reading a chain tells every window: the list is read again', () => {
     const w = ready(hostWorld())
     w.clock.t += 10

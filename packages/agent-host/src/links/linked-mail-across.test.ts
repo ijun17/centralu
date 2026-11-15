@@ -3,7 +3,7 @@ import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
-import { sessionAddress } from '../mail/address.js'
+import { PERSON, sessionAddress } from '../mail/address.js'
 import { FIND_MS, MailAcross, NAMED_HERE_MS } from '../mail/across.js'
 import { mailPeers } from './mail-peers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -106,6 +106,22 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(listed.unreached).toEqual([])
     const chain = (await hub.router.handle('mail.thread', { threadId: `m1.${between}`, tail: 100 })) as { thread: { id: string }; lookIn: boolean; canReply: boolean; messages: { body: string }[] }
     expect(chain).toMatchObject({ thread: { id: `m1.${between}` }, lookIn: true, canReply: false, messages: [{ body: 'which branch?' }] })
+  })
+
+  it("the hub's Tasks leaves out the machine's own Inbox, and opening a chain of it from the hub reads nothing there (#2268)", async () => {
+    const { machine, hub } = await rig()
+    // The machine's own person asks its session in that computer's window, and the session answers there
+    const asked = machine.mail!.service.send(PERSON, { to: [at(machine, 'w1')], text: 'which branch?', needsReply: true }).message
+    const answer = idOf(await tool(machine, 'w1', { action: 'reply', thread: asked.id, text: 'main' }))
+    expect(machine.store.mailbox.recipient(answer, PERSON)?.readAt).toBeNull()
+    const between = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'and the docs?' }))
+    type Tasks = { tasks: { id: string }[] }
+    const ids = async () => ((await hub.router.handle('mail.tasks', {})) as Tasks).tasks.map((t) => t.id)
+    await eventually(async () => (await ids()).includes(between))
+    expect(await ids()).not.toContain(asked.id)
+    const chain = await hub.router.handle('mail.thread', { threadId: `m1.${asked.id}`, tail: 100 })
+    expect(chain).toMatchObject({ lookIn: true, messages: [{ body: 'which branch?' }, { body: 'main' }] })
+    expect(machine.store.mailbox.recipient(answer, PERSON)?.readAt).toBeNull()
   })
 
   it("a machine's session reaches a hub session by its name, and a name on both computers is refused with both", async () => {

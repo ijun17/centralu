@@ -46,7 +46,7 @@ export type Route =
   | { kind: 'machine'; result?: ResultFix; sharesAccount?: boolean }
   | { kind: 'view'; keys: readonly string[]; result?: ResultFix; orMachine?: boolean }
   | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
-  | { kind: 'chain'; result?: ResultFix }
+  | { kind: 'chain'; result?: ResultFix; params?: ParamsFix }
 
 const session = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'session', result, params })
 const project = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'project', result, params })
@@ -327,10 +327,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'workspace.load': HUB,
   // The mailbox is the hub's: a linked machine's mail reaches it there (slice 4 of #1347)
   'mail.list': HUB,
-  // Every machine's open work in one list (#2268, router.ts); a machine's chain opens there, to read only: reply and close are the hub's mailbox's
+  // Every machine's open work in one list (#2268, router.ts); a machine's chain opens there, to read only: reply and close are the hub's mailbox's,
+  // and the machine reads nothing in it for its own person (`lookIn`)
   'mail.tasks': MERGE,
   'mail.thread': {
     kind: 'chain',
+    params: (p) => ({ ...p, lookIn: true }),
     result: (r, q) => {
       const v = q.mailThread(r)
       return isObj(v) ? { ...v, lookIn: true, canReply: false } : v

@@ -503,8 +503,8 @@ export function createRpcHandler(
     },
     'mail.list': async () => requireMail().list(),
     'mail.tasks': async () => requireMail().tasks(),
-    'mail.thread': async ({ threadId, after, all, tail, before }) => {
-      return requireMail().thread(threadId, { after, all, tail, before })
+    'mail.thread': async ({ threadId, after, all, tail, before, lookIn }) => {
+      return requireMail().thread(threadId, { after, all, tail, before, lookIn })
     },
     'mail.reply': async ({ threadId, text, kind, answers }) => {
       return requireMail().reply(threadId, text, kind, answers)

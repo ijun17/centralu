@@ -73,6 +73,15 @@ describe("a linked machine's mail parties in the hub's terms", () => {
     })
   })
 
+  it("leaves out the items of the machine's own Inbox: what its own person gave or has, and what is held there for them", () => {
+    const w1 = party(`session:${OWN}/w1`, { sessionId: 'w1' })
+    const me = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }
+    const t = (owner: unknown, assignee: unknown, state = 'open') => ({ id: ROOT, root: ROOT, owner, assignee, state })
+    const rows = machine().taskRows([t(me, w1, 'review'), t(w1, me), t(w1, party(`session:${OWN}/w2`), 'held'), t(w1, party(`session:${HUB}/person`)), 3])
+    // What it cannot read passes as it is, for the window's parse
+    expect(rows).toEqual([{ ...t(party(`session:${HUB}/m1.w1`, { sessionId: 'm1.w1' }), me), root: `m1.${ROOT}` }, 3])
+  })
+
   it('names every party of a chain in the hub’s terms, and the chain and the ones it follows as the machine’s', () => {
     const w1 = party(`session:${OWN}/w1`, { sessionId: 'w1', name: 'Docs' })
     const hubW1 = party(`session:${HUB}/m1.w1`, { sessionId: 'm1.w1', name: 'Docs on Box' })

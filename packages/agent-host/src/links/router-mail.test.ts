@@ -90,12 +90,16 @@ describe("the hub's Tasks across linked machines (#2268)", () => {
     expect(await router.handle('mail.tasks', {})).toEqual({ tasks: [], capped: null })
   })
 
-  it('says how many open rows are listed when a host capped its list, an uncapped host counting the open rows it listed', async () => {
+  it('says how many open rows it shows when a host capped its list, each counted once', async () => {
     const { router, localAnswers, m1 } = linked()
-    localAnswers['mail.tasks'] = { tasks: [], capped: 2000 }
+    const crossed = id(HUB, '05')
+    localAnswers['mail.tasks'] = { tasks: [row({ id: crossed, owner: at(HUB, 'h1'), assignee: at(HUB, 'm1.w1') })], capped: 1 }
     const w = at(OWN1, 'w1')
-    m1.answers['mail.tasks'] = { tasks: [row({ id: id(OWN1, '05'), owner: w, assignee: w }), row({ id: id(OWN1, '06'), owner: w, assignee: w, state: 'done' })], capped: null }
-    expect(await router.handle('mail.tasks', {})).toMatchObject({ capped: 2001 })
+    m1.answers['mail.tasks'] = {
+      tasks: [row({ id: crossed, owner: at(HUB, 'h1'), assignee: w }), row({ id: id(OWN1, '06'), owner: w, assignee: w }), row({ id: id(OWN1, '07'), owner: w, assignee: w, state: 'done' })],
+      capped: null,
+    }
+    expect(await router.handle('mail.tasks', {})).toMatchObject({ capped: 2 })
     localAnswers['mail.tasks'] = { tasks: [], capped: null }
     expect(await router.handle('mail.tasks', {})).toMatchObject({ capped: null })
   })
@@ -116,7 +120,8 @@ describe("a linked machine's chain, opened from the hub's Tasks (#2268)", () => 
     const root = id(OWN1, '07')
     m1.answers['mail.thread'] = view(root, at(OWN1, 'w1', 'Docs'))
     const r = await router.handle('mail.thread', { threadId: `m1.${root}`, tail: 100 })
-    expect(m1.calls).toEqual([{ method: 'mail.thread', params: { threadId: root, tail: 100 } }])
+    // Read there as a look in: the machine reads nothing in it for its own person
+    expect(m1.calls).toEqual([{ method: 'mail.thread', params: { threadId: root, tail: 100, lookIn: true } }])
     expect(local).toEqual([])
     const hubW1 = at(HUB, 'm1.w1', 'Docs on Machine m1')
     expect(r).toEqual({ ...view(`m1.${root}`, hubW1), messages: [{ id: root, seq: 1, sender: hubW1, kind: 'assign', body: 'Translate the guide', createdAt: 1 }], canReply: false, lookIn: true })
@@ -132,6 +137,6 @@ describe("a linked machine's chain, opened from the hub's Tasks (#2268)", () => 
     expect(shaped.calls).toEqual([])
     // The same prefix before another host's id is that machine's chain
     await router.handle('mail.thread', { threadId: `${HUB}.${id(OWN1, '09')}` })
-    expect(shaped.calls).toEqual([{ method: 'mail.thread', params: { threadId: id(OWN1, '09') } }])
+    expect(shaped.calls).toEqual([{ method: 'mail.thread', params: { threadId: id(OWN1, '09'), lookIn: true } }])
   })
 })

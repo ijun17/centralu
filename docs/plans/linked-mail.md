@@ -455,12 +455,20 @@ machines' open work beside its own, and a row from a machine opens there.
   the row of the machine its recipient is on, which is the authority on that row (§6, Receipts) and alone knows
   `running`. Mail between two machines, which the hub passes on and keeps no copy of, keeps the row of the machine its
   recipient is on. A row's `id` (the message) stays as it is, being every host's; its `root` is `<machine id>.<root>`.
+  Which host a row comes from is read off its `root`, the hub's own never reading as a machine's (below).
+- **Not the machine's own Inbox.** A machine's row its own person gave or has (`person` in the machine's terms: the
+  machine's own window, not the hub's person, who is `session:<hub id>/person` there), and one held there for that
+  person to act on, are left out. The hub shows nothing else of that computer's Inbox: its `mail.list` and `mail.held`
+  are the hub's own, so such a row could be neither answered, closed nor released here, and would stand in the hub's
+  Needs you as the hub's person's own. That person sees them in the machine's own window, as before.
 - **Read-only opening.** `mail.thread` goes to the machine its `threadId`'s prefix names when what follows the prefix is
   itself a mail id (`<host>.m_…`, or an old `<host>.t_…`). A hub's own ids start with its host id, `hub-` and 8 hex
   digits, which is shaped as a machine id too: `hub-<8 hex>.m_…` is never read as a machine's chain, since `m_…` is no
-  mail id. The machine's answer is named as the rows are and comes back with `lookIn: true` and `canReply: false`, so the
-  Inbox offers neither reply nor close: the person's reply and Mark done are the hub's mailbox's (`mail.reply` and
-  `mail.close` stay on the hub).
+  mail id. The hub asks it with `lookIn: true` (an addition, default false), so the machine reads nothing in it for its
+  own person: read-only writes nothing. A machine from before it drops the field and reads what is its person's there,
+  as opening it in its own window would. The machine's answer is named as the rows are and comes back with
+  `lookIn: true` and `canReply: false`, so the Inbox offers neither reply nor close: the person's reply and Mark done
+  are the hub's mailbox's (`mail.reply` and `mail.close` stay on the hub).
 - **News.** A machine's `mail_changed` reaches the hub's windows with its `threadId` qualified, `toPerson: false` and no
   `arrived`: the window reads Tasks and its list again (each read coalesced) and the machine's chain if one is open, and
   raises no notification. What the machine's own Inbox holds is not news for the hub's person; mail to them reaches the
@@ -468,8 +476,8 @@ machines' open work beside its own, and a row from a machine opens there.
 - **A machine not reached is named.** A machine that is not reachable, or whose `mail.tasks` fails, is named in the
   answer's `unreached` (`{ machineId, name }[]`, an addition whose default is none), as `trash.list` names one, and the
   Inbox says under the list `Not listed: the tasks on <A>, <B>, which could not be reached just now.` `capped` is null
-  unless a host capped its list; then it is the sum of each host's, a host that did not cap counting the open rows it
-  listed.
+  unless a host capped its list; then it is how many open rows the merged list shows, counted once de-duplicated, as
+  the window counts its rows.
 - **An older machine is left out, unnamed.** A machine that answers `mail.tasks` "Unknown method" (a build from before
   Tasks) has none to list and is not named. Machines follow the hub's update, so such a machine is a passing state of an
   update, not one the person acts on; naming it as not reached would say it is down when it is not.

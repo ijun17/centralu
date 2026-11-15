@@ -313,6 +313,16 @@ export class Qualifier {
     return isObj(t) ? { ...t, root: this.maybeId(t.root), owner: this.mailParty(t.owner), assignee: this.mailParty(t.assignee) } : t
   }
 
+  /**
+   * A `mail.tasks` answer's rows in the hub's terms (`taskRow`), but for the items of this machine's own Inbox: a row its own person gave or has, and one
+   * held there for them to act on. The hub shows nothing of that Inbox (`mail.list` and `mail.held` are the hub's own), so such a row could be neither
+   * answered, closed nor released here, and would stand in the hub's Needs you as the hub's person's own
+   */
+  taskRows(rows: unknown): unknown[] {
+    const own = (p: unknown) => isObj(p) && p.address === PERSON
+    return (Array.isArray(rows) ? rows : []).flatMap((t: unknown) => (isObj(t) && (own(t.owner) || own(t.assignee) || t.state === 'held') ? [] : [this.taskRow(t)]))
+  }
+
   /** A `MailThreadView` of this machine: its chain and the chains it follows qualified, every party in the hub's terms. Message ids are every host's */
   mailThread(v: unknown): unknown {
     if (!isObj(v)) return v

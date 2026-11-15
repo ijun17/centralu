@@ -89,13 +89,15 @@ export const hostResults = {
   // `tasks`: this host takes the hub's tasks as mail and reports them back (`host.mail` with `task`, #1948 step 6)
   // `lacks`: the offer's `open` tasks this host never received (#2289); absent from an older host, which the hub reads as none
   // `host`: this host's own id in mail addresses (`hubSelfId`), by which the hub reads this host's mail in its own terms (#2268)
+  // `lacks`: the offer's `open` tasks this host never received (#2289); absent from an older host, which the hub reads as none
+  // `host`: this host's own id in mail addresses (`hubSelfId`), by which the hub reads this host's mail in its own terms (#2268)
   'host.hubOffer': z.object({
     ok: z.literal(true),
     mail: z.boolean().optional(),
     apps: z.boolean().optional(),
     tasks: z.boolean().optional(),
     lacks: z.array(z.string().max(200)).max(500).optional(),
-    host: z.string().optional(),
+    host: z.string().max(200).optional(),
   }),
   // As `hub.mail` answers (machines-hub.ts `HubMailResult`, which the window's bundle leaves out, #1648)
   'host.mail': z.union([

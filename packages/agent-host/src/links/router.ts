@@ -460,7 +460,7 @@ export class Router {
       const failed = Array.isArray(out.failed) ? out.failed : []
       out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its archived sessions were not deleted' }))] }
     }
-    if (method === 'mail.tasks' && isObj(out)) out = { ...out, tasks: this.oneTaskEach(listIn(local, 'tasks'), listIn(out, 'tasks')) }
+    if (method === 'mail.tasks' && isObj(out)) out = this.oneTaskEach(out)
     // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds; so does Tasks (#2268)
     if ((method === 'trash.list' || method === 'subagents.usage' || method === 'mail.tasks') && missed.length && isObj(out)) {
       out = { ...out, unreached: missed.map((m) => ({ machineId: m.id, name: m.name })) }
@@ -471,29 +471,34 @@ export class Router {
   /**
    * Tasks one row per message and recipient (#2268, docs/plans/linked-mail.md §11). Mail that crossed is stored on both hosts under one id, so two
    * hosts list it. The hub's own row is kept, as it opens there to answer; a machine's mail to another machine, which the hub keeps no copy of, keeps
-   * the row of the machine its recipient is on. That machine is the authority on its row and alone knows `running`, so the kept row takes its state
+   * the row of the machine its recipient is on. That machine is the authority on its row and alone knows `running`, so the kept row takes its state.
+   * A host that capped its list makes the answer say how many open rows it shows, counted once de-duplicated, as the window counts its rows
    */
-  private oneTaskEach(hub: readonly unknown[], rows: readonly unknown[]): unknown[] {
-    const own = new Set(hub)
-    const kept = new Map<string, { row: Obj; authority: Obj | null }>()
+  private oneTaskEach(out: Obj): Obj {
+    // Where a row comes from: the machine whose chain it opens (`<machine>.<mail id>`), else the hub, whose own chain ids never read as a machine's
+    const from = (t: Obj) => this.owner(t.root, isChainId)
+    const kept = new Map<string, { row: Obj; hub: boolean; authority: Obj | null }>()
     const odd: unknown[] = []
-    for (const t of rows) {
+    for (const t of listIn(out, 'tasks')) {
       if (!isObj(t) || !isObj(t.assignee)) {
         odd.push(t)
         continue
       }
-      // The row of the machine its recipient is on (`<machine>.<id>` in the hub's terms); the hub's own rows are never a machine's
+      const origin = from(t)
+      // The row of the machine its recipient is on (`<machine>.<id>` in the hub's terms)
       const on = this.owner(t.assignee.sessionId)
-      const authority = on !== null && !own.has(t) && this.owner(t.root) === on ? t : null
+      const authority = on !== null && origin === on ? t : null
       const key = `${String(t.id)}\u0000${String(t.assignee.address)}`
       const seen = kept.get(key)
-      if (!seen) kept.set(key, { row: t, authority })
-      else kept.set(key, { row: own.has(seen.row) || !authority ? seen.row : t, authority: seen.authority ?? authority })
+      if (!seen) kept.set(key, { row: t, hub: origin === null, authority })
+      else if (seen.hub || !authority) kept.set(key, { ...seen, authority: seen.authority ?? authority })
+      else kept.set(key, { row: t, hub: false, authority })
     }
-    const rest = [...kept.values()].map(({ row, authority }) =>
+    const rows = [...kept.values()].map(({ row, authority }) =>
       authority && authority !== row ? { ...row, state: authority.state, outcome: authority.outcome, updatedAt: authority.updatedAt } : row,
     )
-    return [...rest, ...odd]
+    const capped = typeof out.capped === 'number' ? rows.filter((t) => t.state !== 'done').length : null
+    return { ...out, tasks: [...rows, ...odd], capped }
   }
 }
 
@@ -537,10 +542,9 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
     case 'mail.tasks': {
       const a = isObj(acc) ? acc : { tasks: [] }
       const b = isObj(r) ? r : { tasks: [] }
-      // A host that capped its list says how many open rows it listed; one that did not listed every open row it has
-      const listed = (x: Obj) => (typeof x.capped === 'number' ? x.capped : listIn(x, 'tasks').filter((t) => isObj(t) && t.state !== 'done').length)
-      const capped = typeof a.capped !== 'number' && typeof b.capped !== 'number' ? null : listed(a) + listed(b)
-      return { ...a, tasks: [...listIn(a, 'tasks'), ...listIn(b, 'tasks').map((t) => q.taskRow(t))], capped }
+      // Whether a host capped its list; how many open rows the merged list shows is counted once it is de-duplicated (`oneTaskEach`)
+      const capped = typeof a.capped === 'number' ? a.capped : typeof b.capped === 'number' ? b.capped : null
+      return { ...a, tasks: [...listIn(a, 'tasks'), ...q.taskRows(listIn(b, 'tasks'))], capped }
     }
     case 'subagents.usage': {
       const a = isObj(acc) ? acc : { sessions: [] }
