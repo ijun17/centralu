@@ -1406,9 +1406,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (!mayConnect(v)) return
     }
     try {
-      const [sessions, projects] = await Promise.all([client.call('sessions.list', {}), client.call('projects.list', {})])
-      if (Array.isArray(sessions)) this.observe('sessions', sessions)
-      if (Array.isArray(projects)) this.observe('projects', projects)
+      /*
+       * Each list is written as soon as its own answer comes (#2288 review): events after that answer reach the mirror on
+       * top of it (`followState`). Written only once both had answered, a turn that ended while the projects were still
+       * being read was undone by the older sessions list
+       */
+      await Promise.all(
+        (['sessions', 'projects'] as const).map(async (kind) => {
+          const list = await client.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})
+          if (Array.isArray(list)) this.observe(kind, list)
+        }),
+      )
     } catch (err) {
       this.deps.log?.(`[links] ${this.name}: could not read its lists after connecting: ${(err as Error).message}`)
     }

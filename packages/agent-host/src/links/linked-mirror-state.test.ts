@@ -47,6 +47,24 @@ describe("the hub's copy of a linked machine's session state (#2288)", () => {
     expect(inbox()).toBe('waiting_input')
   })
 
+  it("keeps a turn that ended while the connect's lists were still being read (#2288 review)", async () => {
+    const machine = await machineHost()
+    let release = () => {}
+    machine.holdMethod('projects.list', new Promise<void>((r) => (release = r)))
+    const hub = await hubHost(machine.port, { mail: true })
+    const row = () => {
+      const s = (hub.links.get('m1')!.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === 'w1')
+      return isObj(s) ? s : undefined
+    }
+    // The sessions list is written on its own answer, while the projects list is still held
+    await eventually(() => row()?.state === 'idle')
+    await machine.mgr.inputs.send('w1', 'hello')
+    await eventually(() => row()?.state === 'waiting_input')
+    release()
+    await eventually(() => hub.machine().status === 'connected')
+    expect(row()).toMatchObject({ state: 'waiting_input' })
+  })
+
   it('keeps the rest of the row: only the state facts are written', async () => {
     const { machine, row } = await rig()
     const before = row()!
