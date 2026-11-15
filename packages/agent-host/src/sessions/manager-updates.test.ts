@@ -9,7 +9,7 @@ import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
-import { UpdateService } from '../updates.js'
+import { isolatedUpdateService } from '../updates.test-helpers.js'
 import { UpdateApplyBroker } from '../update-apply.js'
 import { FakeAdapter, managerWorld } from './manager.test-helpers.js'
 
@@ -141,7 +141,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
 
 describe('ordinary session update consent (#581)', () => {
   it.each(['auto', 'safe', 'normal'] as const)('%s: update_centralu opens only for auto, without remembering consent or changing update preferences', async (preset) => {
-    const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
+    const updates = isolatedUpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }) })
     const check = vi.spyOn(updates, 'check')
     const apply = vi.spyOn(updates, 'apply').mockImplementation(async () => ({ ...updates.current(), phase: 'updating' as const }))
     const autoApply = vi.spyOn(updates, 'setAutoApply')
@@ -170,7 +170,7 @@ describe('ordinary session update consent (#581)', () => {
 
   it('blocks denial, asks again after allow once, and keeps always within the calling session', async () => {
     const fetchLatest = vi.fn(async () => ({ ok: true as const, version: '9999.0.0' }))
-    const updates = new UpdateService(() => {}, { fetchLatest, run: async () => {}, installedCopy: () => null })
+    const updates = isolatedUpdateService(() => {}, { fetchLatest })
     const apply = vi.spyOn(updates, 'apply')
     const setAutoApply = vi.spyOn(updates, 'setAutoApply')
     mgr.useUpdates(updates)
@@ -289,7 +289,7 @@ describe('applying an installed update for an agent (#665)', () => {
 
   it("normal: an earlier install's always does not cover applying", async () => {
     windowWith({ ready: true })
-    const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
+    const updates = isolatedUpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }) })
     vi.spyOn(updates, 'apply').mockImplementation(async () => ({ ...updates.current(), phase: 'updating' as const }))
     mgr.useUpdates(updates)
     const project = await addProject()

@@ -99,13 +99,28 @@ export function hubUpdatesMachines(f: { build: string; current: string; autoAppl
 }
 
 /**
- * Seams, and why they exist.
- *
- * Two of them, both for the same reason: without them a test of this file reaches the
- * real registry and runs a real `npm i -g` on the machine running the suite. That is
- * not a test, it is a side effect. Everything else here is the real thing.
+ * What the service reaches of the machine, each given and none defaulted (#2299): the registry, `npm i -g`, the global npm
+ * package and the app copy `centralu install` made. A service that took them as defaults reached the real ones from any
+ * test that left one out, and a test passed or failed by what the machine running it had installed (the install tests waited
+ * for npm on any machine with a global `centralu`, once #2294 read that package after an install). The host gets the real
+ * ones from `realUpdateService`; a test gives fakes (`isolatedUpdateService`, `updates.test-helpers.ts`). A seam added here
+ * is required, so a type error finds every place that builds the service.
  */
-export type UpdateDeps = {
+export type UpdateMachine = {
+  /** Ask the registry what `latest` points at */
+  fetchLatest: (timeoutMs: number) => Promise<LatestResult>
+  /** Run a command to completion, rejecting with its stderr */
+  run: (file: string, args: string[]) => Promise<void>
+  /** The copy `centralu install` made, when there is one (`installedCopyPath`) */
+  installedCopy: () => string | null
+  /** The version that copy carries, when it can be read (`readInstalledCopyVersion`) */
+  installedCopyVersion: (copy: string) => string | null
+  /** The globally installed npm package, when it is there (`npmGlobalPackage`) */
+  globalPackage: () => Promise<GlobalPackage | null>
+}
+
+/** What else the service is given, none of it reaching the machine: tests give some of it, the host the rest */
+export type UpdateServiceOptions = {
   /**
    * The version this build is: `APP_VERSION` when not given. Tests give a release, since a source tree carries the
    * placeholder `0.0.0-dev` (#1501) and every release is newer than that
@@ -113,14 +128,6 @@ export type UpdateDeps = {
   current?: string
   /** The bundled build id, `dev` for a host run from source (`BUILD`); it never installs by itself (`installsByItself`) */
   build?: string
-  /** Ask the registry what `latest` points at */
-  fetchLatest?: (timeoutMs: number) => Promise<LatestResult>
-  /** Run a command to completion, rejecting with its stderr */
-  run?: (file: string, args: string[]) => Promise<void>
-  /** The copy `centralu install` made, when there is one (`installedCopyPath`) */
-  installedCopy?: () => string | null
-  /** The version that copy carries, when it can be read (`readInstalledCopyVersion`) */
-  installedCopyVersion?: (copy: string) => string | null
   now?: () => number
   /** Test seam for the automatic retry timer: runs `fn` after `ms`, returns how to cancel it */
   schedule?: (fn: () => void, ms: number) => () => void
@@ -132,11 +139,11 @@ export type UpdateDeps = {
   writeAutoApply?: (enabled: boolean) => void
   /** Test seam for the bounded registry-propagation wait. */
   wait?: (ms: number) => Promise<void>
-  /** The globally installed npm package, when it is there (`npmGlobalPackage`) */
-  globalPackage?: () => Promise<GlobalPackage | null>
   /** The Node that runs that launcher: this host's (`process.execPath`) */
   node?: string
 }
+
+type UpdateDeps = UpdateMachine & UpdateServiceOptions
 
 /** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
 export { installedCopyPath }
@@ -375,15 +382,15 @@ export class UpdateService {
 
   constructor(
     private publish: (status: UpdateStatus) => void,
-    deps: UpdateDeps = {},
+    deps: UpdateDeps,
   ) {
     this.deps = {
       current: deps.current ?? APP_VERSION,
       build: deps.build ?? '',
-      fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
-      run: deps.run ?? runCommand,
-      installedCopy: deps.installedCopy ?? (() => existingCopy(installedCopyPath())),
-      installedCopyVersion: deps.installedCopyVersion ?? ((copy) => readInstalledCopyVersion(copy)),
+      fetchLatest: deps.fetchLatest,
+      run: deps.run,
+      installedCopy: deps.installedCopy,
+      installedCopyVersion: deps.installedCopyVersion,
       now: deps.now ?? Date.now,
       schedule:
         deps.schedule ??
@@ -401,7 +408,7 @@ export class UpdateService {
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
       wait: deps.wait ?? sleep,
-      globalPackage: deps.globalPackage ?? npmGlobalPackage,
+      globalPackage: deps.globalPackage,
       node: deps.node ?? process.execPath,
     }
     this.status = {
@@ -944,6 +951,21 @@ export class UpdateService {
   private emit(): void {
     this.publish(this.current())
   }
+}
+
+/**
+ * The service of the host: the real registry, `npm i -g`, global npm package and installed copy (`UpdateMachine`). The one
+ * place they are named; a bare `new UpdateService` reaches none of them (#2299).
+ */
+export function realUpdateService(publish: (status: UpdateStatus) => void, options: UpdateServiceOptions = {}): UpdateService {
+  return new UpdateService(publish, {
+    ...options,
+    fetchLatest: fetchLatestFromRegistry,
+    run: runCommand,
+    installedCopy: () => existingCopy(installedCopyPath()),
+    installedCopyVersion: (copy) => readInstalledCopyVersion(copy),
+    globalPackage: npmGlobalPackage,
+  })
 }
 
 /** npm exited 0 without this machine's platform package at the version it installed (`installGlobal`) */
