@@ -24,6 +24,8 @@ export class AcrossReceipts extends AcrossCore {
   private again = false
   /** Reports being passed on now (`passOn`): a change and a connect at once send one once */
   private readonly passing = new Set<string>()
+  /** Messages whose `pass` was asked for again while one was under way */
+  private readonly passAgain = new Set<string>()
   /** On a hub: handoff moves a machine has not been told yet (`movedAcross`), by machine id, told again at each round of receipts */
   private readonly untoldMoves = new Map<string, MailMoveParams[]>()
   /** Tasks whose reports wait for the answer of the call that asked (`holdReports`) */
@@ -276,7 +278,8 @@ export class AcrossReceipts extends AcrossCore {
    * (`holdReports`)
    */
   protected async pass(m: MailRow): Promise<void> {
-    if (this.passing.has(m.id)) return
+    // Asked again while it is under way (the machine answered the offer while the send before it was in flight): run once more after it, on what is known then
+    if (this.passing.has(m.id)) return void this.passAgain.add(m.id)
     this.passing.add(m.id)
     try {
       for (const row of this.d.records.recipients(m.id)) {
@@ -285,13 +288,7 @@ export class AcrossReceipts extends AcrossCore {
         const report = m.kind === 'report'
         if (report && m.replyTo !== null && this.held.has(m.replyTo)) continue
         const hub = r.kind === 'hub' ? this.peers?.hub?.(r.hubId) : undefined
-        let machine = r.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
-        // Whether it takes this mail is its answer to this connection's offer: passed before it, the machine refuses it as from a hub that never offered,
-        // and an answer that it takes no mail brings no retry. Waited for, bounded, while it is up only: passing on never brings a link up
-        if (machine?.reachable && machine.tasks === undefined && machine.answered) {
-          await machine.answered()
-          machine = this.peers?.machine?.(machine.id)
-        }
+        const machine = r.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
         const peer = hub ?? machine
         // A machine whose answer to this connection's offer said it takes no mail from this hub never reads a notice: dropped, as a side no longer linked
         const mailless = !report && machine !== undefined && machine.tasks !== undefined && machine.mail !== true
@@ -313,6 +310,8 @@ export class AcrossReceipts extends AcrossCore {
       }
     } finally {
       this.passing.delete(m.id)
+      const again = this.passAgain.delete(m.id) ? this.d.records.message(m.id) : undefined
+      if (again) void this.pass(again)
     }
   }
 

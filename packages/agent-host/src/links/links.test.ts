@@ -188,7 +188,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
           across: { fromMachine: (machine: { id: string; name: string }, p: HubMailParams) => across.fromMachine(machine, p), rows: across.rows.bind(across), answerFind: across.answerFind.bind(across) },
         }),
         hubMail: true,
-        mailReady: () => across.changed(),
+        offerAnswered: () => across.changed(),
       }
     : {}
   const registry = storeRegistry(store)

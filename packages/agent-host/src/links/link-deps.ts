@@ -96,10 +96,10 @@ export type LinkDeps = {
    */
   hubApps?: boolean
   /**
-   * A machine took this hub's offer of mail at a connect (#2067 review): what became of mail that crossed while the link was
-   * down is told now (`MailAcross.changed`)
+   * A machine answered this hub's offer on a connection, whatever it said (#2067 review, #1948 step 6): what became of mail that crossed while
+   * the link was down is told now, and mail owed to it is passed on or settled by its answer (`MailAcross.changed`)
    */
-  mailReady?: (machineId: string) => void
+  offerAnswered?: (machineId: string) => void
   /**
    * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
    * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told

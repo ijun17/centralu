@@ -752,7 +752,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
       if (this.client === client) this.tasksBack = isObj(answer) && answer.tasks === true
-      if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
@@ -761,6 +760,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
+    // Whatever it said: mail owed to it goes now, or is settled by its answer (one that takes no mail drops a notice), never left for a later change
+    this.deps.offerAnswered?.(this.id)
     const changed = note !== this.asksNote
     this.asksNote = note
     if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })

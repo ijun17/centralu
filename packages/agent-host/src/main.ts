@@ -694,7 +694,7 @@ const links = new Links(linkDepsFor(store, {
   // This hub's apps used by the agents its sessions started on a machine (#1938, §13.5)
   hubApps: true,
   // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review)
-  mailReady: () => hostMailbox.across.changed(),
+  offerAnswered: () => hostMailbox.across.changed(),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop

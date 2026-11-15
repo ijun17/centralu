@@ -53,27 +53,55 @@ describe('the hub takes mail from a session it started on a linked machine (#206
     await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
   })
 
-  it("passes the notice of a parent that went once the machine answered this connection's offer: one that takes no mail drops it, never leaves it due", async () => {
+  it("passes the notice of a parent that went, sent before the machine answered this connection's offer, again on its answer: one that takes no mail drops it", async () => {
     let release = () => {}
     const { hub, call, addressOf } = await rig(true, new Promise<void>((resolve) => (release = resolve)))
-    expect(hub.links.get('m1')?.takesTasks).toBeUndefined()
     expect(await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })).toMatchObject({ ok: true })
-    // The answer is let go once the hub either waits for it or passed the notice before it (and heard the machine's refusal)
     const link = hub.links.get('m1')!
+    expect(link.takesTasks).toBeUndefined()
+    // The machine refuses the notice (no hub offered on this connection yet); its answer, that it takes no mail, comes after the refusal is heard
     const call0 = link.call.bind(link)
-    const answered0 = link.offerAnswered.bind(link)
-    let onTurn = () => {}
-    const turn = new Promise<void>((resolve) => (onTurn = resolve))
+    let refused = () => {}
+    const heard = new Promise<void>((resolve) => (refused = resolve))
     link.call = (method, params, timeoutMs) => {
       const p = call0(method, params, timeoutMs)
-      if (method === 'host.mail') void p.catch(() => {}).finally(onTurn)
+      if (method === 'host.mail') void p.catch(() => {}).finally(refused)
       return p
     }
-    link.offerAnswered = () => (onTurn(), answered0())
     hub.mail!.service.stops.partyGone(addressOf('h1'))
-    await turn
+    await heard
+    expect(hub.store.mailbox.dueRecipients()).toContain(addressOf('m1.c1'))
     release()
-    await eventually(() => hub.links.get('m1')?.takesTasks === false)
+    await eventually(() => link.takesTasks === false)
+    await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
+  })
+
+  it("passes that notice again when the machine's answer came while the send before it was still out", async () => {
+    let release = () => {}
+    const { hub, call, addressOf } = await rig(true, new Promise<void>((resolve) => (release = resolve)))
+    expect(await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })).toMatchObject({ ok: true })
+    const link = hub.links.get('m1')!
+    // The refusal of the first send is held until the notice was asked to go again after the answer (`pass`, while that send is out)
+    const across = hub.mail!.across as unknown as { pass(m: unknown): Promise<void> }
+    let askedAgain = () => {}
+    const after = new Promise<void>((resolve) => (askedAgain = resolve))
+    const pass0 = across.pass.bind(across)
+    across.pass = (m) => {
+      const p = pass0(m)
+      if (link.takesTasks !== undefined) askedAgain()
+      return p
+    }
+    const call0 = link.call.bind(link)
+    let sent = () => {}
+    const out = new Promise<void>((resolve) => (sent = resolve))
+    link.call = (method, params, timeoutMs) => {
+      if (method !== 'host.mail') return call0(method, params, timeoutMs)
+      sent()
+      return call0(method, params, timeoutMs).finally(() => after)
+    }
+    hub.mail!.service.stops.partyGone(addressOf('h1'))
+    await out
+    release()
     await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
   })
 

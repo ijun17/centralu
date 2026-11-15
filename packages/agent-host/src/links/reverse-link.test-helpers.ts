@@ -194,7 +194,7 @@ export async function hubHost(
           }),
           ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across ? { mailReady: () => across.changed() } : {}),
+          ...(across ? { offerAnswered: () => across.changed() } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
