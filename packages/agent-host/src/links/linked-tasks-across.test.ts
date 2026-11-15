@@ -518,7 +518,7 @@ describe('a task whose answer was lost (#2289)', () => {
     const there = machine.mail!.across
     expect(there.lacking([id])).toEqual([id])
     // The same send, late, on a link the hub already counted as dead
-    const late = await there.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, 'h1'), name: 'h1 on Hub mac', to: 'w1', text: 'review the branch', id, task: { origin: 'start_agent' } })
+    const late = there.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, 'h1'), name: 'h1 on Hub mac', to: 'w1', text: 'review the branch', id, task: { origin: 'start_agent' } })
     expect(late).toMatchObject({ ok: false, why: 'not_allowed' })
     expect(machine.store.mailbox.message(id)).toBeUndefined()
   })
