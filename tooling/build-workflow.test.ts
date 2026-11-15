@@ -1077,6 +1077,7 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
       ['e2e/fixtures/linked-hosts.ts', 'join(dir, `${name}-project`)', 'a folder under a temporary one'],
       ['e2e/fixtures/public-apps.ts', 'join(CACHE_DIR, `${app.pkg.replace(', 'the cache of downloaded packages, outside the repository'],
       ['e2e/perf-memory.mts', "resolve(dir, '.' + path)", 'serves a request path from the built bundle folder it was given'],
+      ['e2e/perf-memory.mts', 'join(snapshots, `${engine}-${name}.heapsnapshot`)', 'the heap snapshots it writes into the folder --heap-snapshots names'],
       ['e2e/style-snapshot.spec.ts', 'join(OUT!, THEME ?', 'where it writes its pictures'],
       ['e2e/style-snapshot.spec.ts', 'join(dir, `${scene}.json`)', 'where it writes and reads its pictures'],
       ['e2e/style-snapshot.spec.ts', 'join(dir, `${scene}.png`)', 'where it writes and reads its pictures'],
