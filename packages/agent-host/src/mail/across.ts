@@ -72,6 +72,8 @@ export class MailAcross extends AcrossReceipts {
     if ('why' in there) return { ok: false, ...there }
     const { m, sessionId } = there
     if (text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
+    // Before an id is kept as unsure: a send never made leaves no doubt
+    if (!m.reachable) return unreachable(m)
     const origin = task.origin === 'script' ? 'send_to_session' : task.origin
     const fields = { text, needsReply: false }
     const work: Work = { origin, ...(task.note ? { note: true as const } : {}) }
@@ -81,7 +83,6 @@ export class MailAcross extends AcrossReceipts {
       // For the person only as `forPersonOf` reads it here: this host's own Assistant's send_to_session (#2258, #2274)
       task: { origin, ...(task.note ? { note: true as const } : {}), ...(task.forPerson && origin === 'send_to_session' && this.d.reach.isAssistant(sender) ? { forPerson: true as const } : {}), ...(task.depth ? { depth: task.depth } : {}) },
     }
-    if (!m.reachable) return unreachable(m)
     // The copy is kept before the task leaves, so the report that answers it finds it whenever it comes: after this host restarted too, when nothing
     // of the send is remembered. A send again of an unsure one has its copy already
     if (!this.d.records.message(id)) {

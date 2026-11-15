@@ -272,8 +272,12 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     expect(await lost).toMatchObject({ ok: false, why: 'link_down' })
     expect(w.records.message(String(sent[1]!.id))).toMatchObject({ kind: 'task' })
     machine.reachable = false
+    const unsure = () => (across as unknown as { unsure: Map<string, unknown> }).unsure.size
+    const before = unsure()
     expect(await across.sendTask('orc', child, 'and the docs', { origin: 'start_agent' })).toMatchObject({ ok: false, why: 'link_down' })
     expect(sent).toHaveLength(2)
+    // A send never made leaves no doubt to match a later one against
+    expect(unsure()).toBe(before)
     expect(w.records.feedOf(addr('orc'), { limit: 10 }).filter((m) => m.body === 'and the docs')).toEqual([])
   })
 
