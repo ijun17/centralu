@@ -511,6 +511,15 @@ describe('a task whose answer was lost (#2289)', () => {
     for (const id of ids) expect(told(hub)[0]!.body).toContain(id)
   })
 
+  it('names ten of them in that notice and counts the rest', async () => {
+    const { hub, ids } = await lostTasks(11)
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => told(hub).length === 1)
+    const body = told(hub)[0]!.body
+    expect(body).toMatch(/^\[Centralu\] 11 of your tasks did not arrive: .*, and 1 more\. The link failed/)
+    expect(ids.filter((id) => body.includes(id))).toHaveLength(10)
+  })
+
   it('is kept when the machine has it: only the tasks it lacks are settled', async () => {
     const { machine, hub, across } = await rig()
     const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })

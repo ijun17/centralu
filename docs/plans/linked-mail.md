@@ -385,8 +385,9 @@ words into the machine's session (`host.send`) and followed its turns over the l
   learns nothing of what it stores and cannot have this hub's task refused; it remembers, per hub, what it said it lacks and
   refuses such a task from that hub that comes later (a send on a link the hub already counted as dead can still land): in
   memory, since no connection outlives the process. One case reads wrongly: a session sent to the trash releases its open
-  tasks `gone` ([mailbox.md](mailbox.md) §10.6.1) and the release crosses as a receipt (§6); if the trash is emptied before that release reached the hub, the machine keeps no record of the
-  task, so the hub tells its sender it did not arrive. Nobody works on it either way, and giving it again is still the
+  tasks `gone` ([mailbox.md](mailbox.md) §10.6.1) and the release crosses as a receipt (§6); if the trash is emptied
+  before that release reached the hub, the machine keeps no record of the task, so the hub tells its sender it did not
+  arrive. Nobody works on it either way, and giving it again is still the
   remedy; the machine does not keep a record of every purged task to tell the two apart. A machine from before it answers
   no `lacks`, and the hub keeps every copy, as before. A machine not connected is not sent to, and nothing is written.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card

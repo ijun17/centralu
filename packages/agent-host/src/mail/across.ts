@@ -60,7 +60,7 @@ const NAMED_MAX = 10
 export class MailAcross extends AcrossReceipts {
   /** On a hub: tasks whose `host.mail` is under way now, which an offer neither asks about nor deletes */
   private readonly sending = new Set<string>()
-  /** On a machine: tasks it told a hub never arrived (`lacking`), by hub */
+  /** On a machine: tasks it told a hub never arrived (`lacking`), by hub, so one hub's many cannot push another's out under `LACKED_MAX` */
   private readonly lacked = new Map<string, Set<string>>()
 
   // ── Sending from here ──
@@ -160,7 +160,7 @@ export class MailAcross extends AcrossReceipts {
    * no connection outlives this process: after a restart nothing sent before it can arrive
    */
   lacking(hubId: string, ids: readonly string[]): string[] {
-    const lacks = ids.filter((id) => id.startsWith(`${hubId}.`) && FOREIGN_ID.test(id) && !this.d.records.message(id))
+    const lacks = ids.filter((id) => id.startsWith(`${hubId}.`) && !id.startsWith(`${this.d.hostId}.`) && FOREIGN_ID.test(id) && !this.d.records.message(id))
     const lacked = this.lacked.get(hubId) ?? new Set<string>()
     for (const id of lacks) lacked.add(id)
     for (const old of lacked) {
