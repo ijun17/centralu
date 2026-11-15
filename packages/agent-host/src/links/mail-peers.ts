@@ -69,6 +69,7 @@ export function mailPeers(o: {
               m && {
                 id: m.id, name: m.name, reachable: m.reachable, tasks: m.takesTasks, mail: m.takesMail,
                 call: (method: string, params: unknown) => m.call(method, params),
+                answered: () => m.offerAnswered?.() ?? Promise.resolve(),
                 reach: async () => (await settleForCall(m), m.reachable ? null : awaySentence(m, TAIL.tryAgain)),
               }
             )

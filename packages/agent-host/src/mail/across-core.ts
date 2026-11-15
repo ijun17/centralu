@@ -28,7 +28,11 @@ export type AcrossPeer = {
  * down is tried now, and one up has answered this connection's offer; null once it is up, else why not as such a call says it (`awaySentence`).
  * Absent: it is not tried
  */
-export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: boolean; reach?(): Promise<string | null> }
+/**
+ * A linked machine: `tasks` and `mail` are its answer to this connection's offer, unknown until it came; `answered` waits for that answer, bounded
+ * (`offerAnswered`); `reach` is a call's way to it, which may bring the link up (`settleForCall`)
+ */
+export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: boolean; answered?(): Promise<void>; reach?(): Promise<string | null> }
 
 /** What this host reaches, given once its links exist (main.ts); absent parts are a role this host does not have */
 export type AcrossPeers = {

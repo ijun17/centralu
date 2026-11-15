@@ -285,7 +285,13 @@ export class AcrossReceipts extends AcrossCore {
         const report = m.kind === 'report'
         if (report && m.replyTo !== null && this.held.has(m.replyTo)) continue
         const hub = r.kind === 'hub' ? this.peers?.hub?.(r.hubId) : undefined
-        const machine = r.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
+        let machine = r.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
+        // Whether it takes this mail is its answer to this connection's offer: passed before it, the machine refuses it as from a hub that never offered,
+        // and an answer that it takes no mail brings no retry. Waited for, bounded, while it is up only: passing on never brings a link up
+        if (machine?.reachable && machine.tasks === undefined && machine.answered) {
+          await machine.answered()
+          machine = this.peers?.machine?.(machine.id)
+        }
         const peer = hub ?? machine
         // A machine whose answer to this connection's offer said it takes no mail from this hub never reads a notice: dropped, as a side no longer linked
         const mailless = !report && machine !== undefined && machine.tasks !== undefined && machine.mail !== true
