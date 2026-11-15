@@ -103,7 +103,11 @@ export function programFile(name: string, platform: Platform = HOST_PLATFORM): s
   return platform === 'win32' ? `${name}.exe` : name
 }
 
-/** This machine as npm platform packages name it (`<os>-<arch>`, as in `@centralu/darwin-arm64`): Node's own names */
+/**
+ * This machine as npm platform packages name it (`<os>-<arch>`, as in `@centralu/darwin-arm64`): Node's own names. The
+ * launcher's `targetFor` (`packaging/npm/centralu/bin/platform.mjs`) names them too; it is re-derived here, not imported,
+ * as `installedCopyPath` is, and `updates.test.ts` holds the two to one answer on every machine the launcher publishes for.
+ */
 export function npmMachine(platform: Platform = HOST_PLATFORM, arch: string = process.arch): string {
   return `${platform}-${arch}`
 }

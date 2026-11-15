@@ -7,7 +7,7 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 
 /** The release this build is in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than all */
 const RELEASE = '0.1.0-beta.20'
-import { installedCopyVersionSource } from './os.js'
+import { installedCopyVersionSource, npmMachine, type Platform } from './os.js'
 import { resolveCommand } from './tool-launch.js'
 import { UpdateService, hubUpdatesMachines, commandFor, existingCopy, failureDetail, failureLine, installedCopyPath, platformPackage, readInstalledCopyVersion, runCommand, type GlobalPackage, type LatestResult } from './updates.js'
 
@@ -15,7 +15,7 @@ import { UpdateService, hubUpdatesMachines, commandFor, existingCopy, failureDet
 const LAUNCHER = '/prefix/node_modules/centralu/bin/centralu.mjs'
 const INSTALL: [string, string[]] = ['/host/node', [LAUNCHER, 'install']]
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { bundleVersionCommand, installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
+import { bundleVersionCommand, installedPaths, TARGETS, targetFor } from '../../../packaging/npm/centralu/bin/platform.mjs'
 
 /**
  * Checking for and installing app updates (issue #43).
@@ -804,6 +804,21 @@ describe('UpdateService', () => {
       expect(platformPackage(skipped.launcher, skipped.manifest, 'linux-x64')).toEqual({ name: '@centralu/linux-x64', version: null })
       expect(platformPackage(skipped.launcher, skipped.manifest, 'darwin-x64')).toBeNull()
       expect(platformPackage(skipped.launcher, join(skipped.manifest, 'missing'), 'linux-x64')).toBeNull()
+    })
+
+    /**
+     * The host names this machine's platform package itself (`npmMachine`, `platformPackage`) rather than importing the
+     * launcher's `targetFor`: the launcher is a published npm package, not a workspace dependency (os.ts, `installedCopyPath`).
+     * This holds the two to one answer for every machine the launcher publishes for, and to none for one it does not.
+     */
+    it('names the platform package as the launcher does, on every machine it publishes for (#2282 review)', () => {
+      const targets = TARGETS as Record<string, { pkg: string }>
+      const machines = [...Object.keys(targets).map((m) => m.split('-') as [Platform, string]), ['darwin', 'x64'] as [Platform, string]]
+      const { launcher, manifest } = prefix({ lists: Object.values(targets).map((t) => t.pkg) })
+      for (const [platform, arch] of machines) {
+        const launcherTarget = targetFor(platform, arch) as { pkg: string } | null
+        expect(platformPackage(launcher, manifest, npmMachine(platform, arch))?.name ?? null, `${platform}-${arch}`).toBe(launcherTarget?.pkg ?? null)
+      }
     })
   })
 
