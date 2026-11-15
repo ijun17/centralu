@@ -204,7 +204,10 @@ type Sample = {
     heapUsedMB: number | null
     viewHeapUsedMB: number | null
   } | null
-  /** The last injected text is in the page */
+  /**
+   * The last injected text is in the page: stream steps only, where it goes to the open session. Elsewhere it goes to
+   * sessions out of view, so the answer would be false whatever the window drew: null there
+   */
   painted: boolean | null
 }
 
@@ -966,7 +969,7 @@ async function measureEngine(
           rowsReceived: wire.rowsReceived,
           wsBytesIn: wire.bytesIn,
           afterGc: null,
-          painted: wire.lastText
+          painted: step.startsWith('stream-') && wire.lastText
             ? await page.evaluate((t) => document.body.innerText.includes(t.trim()), wire.lastText)
             : null,
         })
