@@ -227,7 +227,7 @@ export class StepsV65 extends MigrationRange {
          * such row goes. A `policy` row settled `legacy` stays while `reach.holdFor` (mail/reach.ts) would hold it: a `message` from an untrusted project (a
          * missing project row is untrusted) to a session of another project, which is how a genuine untrusted asker's request is still held. The
          * delivery also holds moved rows that way (it judges a `legacy` row like any other, and `records.hold` writes `held` alone), so the same row looks
-         * the same whoever held it, and this step cannot tell them apart; it asks the gate, as the move asks it for the rows it moves from now on. What the
+         * the same whoever held it, and this step cannot tell them apart; it asks the gate, as step 75 asks it for the rows it moves (`endOldHolds`). What the
          * gate would not hold goes, and what goes is `dismissed`, the hold word the person's Dismiss sets (not held for the person, never delivered):
          * `gone` says a sender or recipient is gone and `withdrawn` that the sender said it no longer waits, and neither is so. `settled` stays `legacy`.
          *
@@ -249,17 +249,7 @@ export class StepsV65 extends MigrationRange {
           // A store with no table, or no row held `budget` or `policy`, has nothing to judge (and a test's partial schema lacks the tables the judgement reads)
           if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mail_recipients'`).get() === undefined) return
           if (this.db.prepare(`SELECT 1 FROM mail_recipients WHERE held IN ('budget', 'policy') LIMIT 1`).get() === undefined) return
-          this.db.exec(
-            `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
-              WHERE held = 'budget'
-                 OR (held = 'policy' AND settled = 'legacy' AND NOT EXISTS (
-                      SELECT 1 FROM mail m, sessions s
-                       WHERE m.id = mail_recipients.message_id AND m.kind = 'message' AND s.deleted_at IS NULL
-                         AND m.sender_project IS NOT NULL
-                         AND COALESCE((SELECT p.trusted FROM projects p WHERE p.id = m.sender_project), 0) = 0
-                         AND mail_recipients.recipient LIKE 'session:%' AND substr(mail_recipients.recipient, instr(mail_recipients.recipient, '/') + 1) = s.id
-                         AND s.project_id IS NOT m.sender_project))`,
-          )
+          endOldHolds(this.db)
         },
       },
       {
@@ -316,7 +306,7 @@ export class StepsV65 extends MigrationRange {
          * **A frozen copy of `MessageService.task`, its cut and the old adoption, on purpose**: a step runs once on every store and must not call
          * code that may change. Only the id and address shapes are imported (mail/ids.ts, mail/address.ts), as the stored shapes they are.
          *
-         * The tables stay: the builds from v70 to v73 read them at every start. They go in a later step, once the floor is at or above 74.
+         * The tables stay: the builds from v70 to v73 read them at every start. They go in step 76, once step 75 has put the floor at 74.
          */
         run: () => this.oneRecordOfOwedWork(),
       },
@@ -417,6 +407,27 @@ class OldWorkTasks {
     // Not delivered: due after the delivery's 2 s gap, as a session's task was (`dueAt`)
     this.row.run({ id, recipient, project: session.project, dueAt: t.delivered ? this.now : this.now + 2_000, delivered: t.delivered ? this.now : null })
   }
+}
+
+/**
+ * Step 72's judgement of the holds an earlier build set (its comment says what is mirrored and what is not): every `budget` hold ends, and a
+ * `policy` hold ends unless today's gate would hold the mail now. Step 72 judges the rows settled `legacy`, all of them moved by then; step 75
+ * judges the rows it moves (`moved`, their rowids), whatever they are settled as, and leaves a row moved before it to the delivery that may hold it
+ */
+export function endOldHolds(db: Database.Database, moved?: readonly number[]): void {
+  db.prepare(
+    `UPDATE mail_recipients SET held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0
+      WHERE held = 'budget'
+         OR (held = 'policy'
+             AND CASE WHEN @moved IS NULL THEN settled = 'legacy' ELSE rowid IN (SELECT value FROM json_each(@moved)) END
+             AND NOT EXISTS (
+               SELECT 1 FROM mail m, sessions s
+                WHERE m.id = mail_recipients.message_id AND m.kind = 'message' AND s.deleted_at IS NULL
+                  AND m.sender_project IS NOT NULL
+                  AND COALESCE((SELECT p.trusted FROM projects p WHERE p.id = m.sender_project), 0) = 0
+                  AND mail_recipients.recipient LIKE 'session:%' AND substr(mail_recipients.recipient, instr(mail_recipients.recipient, '/') + 1) = s.id
+                  AND s.project_id IS NOT m.sender_project))`,
+  ).run({ moved: moved ? JSON.stringify(moved) : null })
 }
 
 /** The addresses of a caller and its session, or null when an id is one no address carries (`checked`): it makes no task, as the start's adoption skipped it */

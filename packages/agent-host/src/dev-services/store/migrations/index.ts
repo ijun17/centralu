@@ -8,6 +8,7 @@ import { StepsV55 } from './v55.js'
 import { StepsV58 } from './v58.js'
 import { StepsV62 } from './v62.js'
 import { StepsV65 } from './v65.js'
+import { StepsV75 } from './v75.js'
 
 /*
  * The steps are kept in files of 200 to 470 lines by version range, each a class with one `steps()` that returns
@@ -55,5 +56,6 @@ export function migrationSteps(host: MigrationHost): MigrationStep[] {
     ...new StepsV58(host).steps(),
     ...new StepsV62(host).steps(),
     ...new StepsV65(host).steps(),
+    ...new StepsV75(host).steps(),
   ]
 }
