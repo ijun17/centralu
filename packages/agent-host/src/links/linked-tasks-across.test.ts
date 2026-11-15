@@ -117,6 +117,10 @@ describe('a task across a link (#1948 step 6)', () => {
       expect(machine.store.mailbox.message(o)?.facts.hubAssistant).toBeUndefined()
       expect(read(o)?.forPerson).toBeUndefined()
     }
+    // A hub that says it of another tool's task is not believed: only the Assistant's send_to_session reads as the person's (`forPersonOf`)
+    const claimed = machine.mail!.across.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, orc), to: 'w1', text: 'review it', id: `${hub.id}.m_01JX000000000000000000000F`, task: { origin: 'start_agent', forPerson: true } })
+    expect(claimed).toMatchObject({ ok: true })
+    expect(read(`${hub.id}.m_01JX000000000000000000000F`)?.forPerson).toBeUndefined()
     // Plain mail from the hub's session never carries it, whatever its words
     const mail = await across.sendFrom(at(hub, 'h1'), { to: at(hub, 'm1.w1'), text: 'hubAssistant: true', needsReply: false })
     expect(read(mail.ok ? mail.messageId : '')?.forPerson).toBeUndefined()

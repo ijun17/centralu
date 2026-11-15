@@ -623,8 +623,7 @@ export class MailAcross {
     if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
     if (this.d.reach.mayWrite(from, to, false) === 'gone') return { ok: false, why: 'gone', text: `${oneLineText(this.asHubNames(hub.id, to), 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
-      const forPerson = p.task.forPerson === true && p.task.origin === 'send_to_session'
-      const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
+      const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
       return { ok: true, messageId: m.id, to: this.label(to), address: to }
     } catch (e) {
       return { ok: false, why: refusalReason(e) ?? 'failed', text: oneLineText(errorMessage(e), 4000) }
