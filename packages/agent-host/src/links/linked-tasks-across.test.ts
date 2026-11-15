@@ -282,8 +282,22 @@ describe('a report on a task across, while its hub is away (#1948 step 6)', () =
     expect(w.records.recipient(id, sender)?.deliveredAt).not.toBeNull()
     const told = w.records.unreadFor(PERSON).map((p) => p.message)
     expect(told).toHaveLength(1)
-    expect(told[0]!.body).toContain('which is no longer linked to this one, so the report cannot reach it there. Its last response is in')
+    // Nothing heard of that hub on this run (a restart since): named in words, never by its id or an address
+    expect(told[0]!.body).toBe('[Centralu] worker finished work that a session on another computer gave it, but that computer is no longer linked to this computer, so its report cannot be delivered. The answer is in worker.')
     expect(told[0]!.facts).toMatchObject({ uncrossed: { message: id } })
+  })
+
+  it('names the session that gave the work and its computer as they were heard, never by an id', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    // The person removes the machine on the hub: the hub withdraws its offer, and the machine no longer links it
+    await hub.router.handle('machines.remove', { machineId: 'm1' })
+    await eventually(() => machine.hubs.mailHubs().length === 0)
+    machine.mail!.service.report(id, { outcome: 'finished', body: 'ended', answer: 'LGTM' })
+    const told = () => machine.store.mailbox.unreadFor(PERSON).map((p) => p.message).filter((m) => m.facts.uncrossed)
+    await eventually(() => told().length === 1)
+    expect(told()[0]!.body).toBe('[Centralu] w1 finished work that h1 on Hub mac gave it, but Hub mac is no longer linked to this computer, so its report cannot be delivered. The answer is in w1.')
   })
 })
 

@@ -135,6 +135,8 @@ export class MailAcross {
   private peers: AcrossPeers | null = null
   /** The names of sessions on the other side, as last heard (from a message or a search) */
   private readonly names = new Map<string, string>()
+  /** The names of the computers on the other side, by host id, as last heard on a call of theirs: a notice names one that is no longer linked by it (`uncrossed`) */
+  private readonly computers = new Map<string, string>()
   /** The state of each crossing row the other side was told last, by `<message id>|<recipient>` */
   private readonly told = new Map<string, string>()
   /**
@@ -554,6 +556,7 @@ export class MailAcross {
    * session of another machine is passed on to it, and the answer is that machine's
    */
   async fromMachine(machine: { id: string; name: string }, p: HubMailParams): Promise<HubMailResult & { address?: string }> {
+    this.computers.set(machine.id, machine.name)
     if (p.report) return this.reportFrom({ machine: machine.id }, machine.name, p.report, { ...p, centralu: p.sessionId === CENTRALU })
     const sender = this.d.service.sessionAddress(`${machine.id}.${p.sessionId}`)
     if (p.name) this.names.set(sender, `${oneLineText(p.name, 120)} on ${machine.name}`)
@@ -586,6 +589,7 @@ export class MailAcross {
    * side; `to` is a session of this host
    */
   fromHub(hub: { id: string; name: string }, p: HostMailParams): HubMailResult & { address?: string } {
+    this.computers.set(hub.id, hub.name)
     if (p.report) return this.reportFrom({ hub: hub.id }, hub.name, p.report, { ...p, centralu: p.from === CENTRALU })
     const from = p.from === CENTRALU ? CENTRALU : this.fromHubNames(hub.id, p.from)
     const party = parseAddress(from)
@@ -945,20 +949,23 @@ export class MailAcross {
     }
   }
 
-  /** A report whose other side is no longer linked to this computer: it ends here, told to the person here once, never dropped without a word */
+  /**
+   * A report whose other side is no longer linked to this computer: it ends here, told to the person here once, never dropped without a word. Names
+   * only, as the person knows them, never an id or an address: the computer as last heard on this run, else in words
+   */
   private uncrossed(m: MailRow, recipient: string): void {
     const about = m.facts.about as { session?: unknown } | undefined
     const child = typeof about?.session === 'string' ? this.label(about.session) : 'a session here'
     const r = this.route(recipient)
-    const computer = r?.kind === 'hub' ? r.hubId : r?.kind === 'machine' ? r.machineId : recipient
+    const known = r?.kind === 'hub' ? this.computers.get(r.hubId) : r?.kind === 'machine' ? this.computers.get(r.machineId) : undefined
+    const computer = known === undefined ? undefined : oneLineText(known, 120)
+    const sender = this.names.get(recipient) ?? `a session on ${computer ?? 'another computer'}`
     this.d.service.notice(PERSON, {
-      body: `[Centralu] ${child} ended a turn of work that ${this.foreignName(recipient)?.name ?? recipient} gave it from another computer (${computer}), which is no longer linked to this one, so the report cannot reach it there. Its last response is in ${child}.`,
+      body: `[Centralu] ${child} finished work that ${oneLineText(sender, 200)} gave it, but ${computer ?? 'that computer'} is no longer linked to this computer, so its report cannot be delivered. The answer is in ${child}.`,
       facts: { uncrossed: { message: m.id } },
       dedupeKey: `uncrossed:${m.id}`,
     })
-    const now = this.now()
-    this.d.records.markDelivered(recipient, [m.id], now, null)
-    this.d.records.markRead(recipient, [m.id], now)
+    this.passed(recipient, m.id)
   }
 
   // ── Finding ──
