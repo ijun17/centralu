@@ -58,9 +58,12 @@
  * `content` holds the view. Chromium gives the view's sandboxed frame a renderer of its own: its `content` and `JS heap`
  * are the window without the view, `all content` counts the view's renderer (and any spare renderer Chromium keeps), and
  * `view heap` is the heap of the view's renderers, read and collected through a session on each. Compare WebKit's
- * `content` with Chromium's `all content`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
- * the last background sample (revisit: the first, after the first round and the last), writes them to that folder and
- * prints what grew between them by constructor.
+ * `content` with Chromium's `all content`.
+ *
+ * `--heap-snapshots` (Chromium) takes a heap snapshot at the first and the last background sample (revisit and appview:
+ * the first, after the first round and the last), writes them to that folder and prints what grew between them by
+ * constructor. In appview each of the view's own renderers gets its snapshots too (`<step>-view-<n>`), and its own
+ * growth tables.
  *
  * The streaming is not a model: the page's socket to the host is routed through Playwright (`routeWebSocket`) and
  * the events are injected there, in the host's own envelope, with the host's later event numbers shifted past
