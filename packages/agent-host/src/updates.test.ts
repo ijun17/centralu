@@ -1438,6 +1438,26 @@ describe('the installed copy follows a host a hub installed (#1736)', () => {
     expect(older.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${RELEASE}`]], INSTALL])
   })
 
+  it('installs a global package npm left without its platform package again, at its own version (#2282 review)', async () => {
+    for (const was of [null, '0.1.0-beta.19']) {
+      let platform: string | null = was
+      const h = make({
+        installedCopy: '/Programs/Centralu',
+        installedCopyVersion: () => '0.1.0-beta.19',
+        run: async (file, args) => {
+          if (file === 'npm') platform = args.at(-1)?.replace(/^centralu@/, '') ?? null
+        },
+        globalPackage: async () => ({ launcher: LAUNCHER, version: '0.1.0-beta.21', platform: { name: '@centralu/linux-x64', version: platform } }),
+      })
+      await h.svc.followHost()
+      expect(h.calls, String(was)).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@0.1.0-beta.21']], INSTALL])
+    }
+    // One whose platform package is there runs only its install, as before
+    const whole = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version: '0.1.0-beta.21', platform: { name: '@centralu/linux-x64', version: '0.1.0-beta.21' } }) })
+    await whole.svc.followHost()
+    expect(whole.calls).toEqual([INSTALL])
+  })
+
   it('logs the exit code and the first line naming the error, not npm\'s last line', () => {
     const stderr = 'npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error network request failed\nnpm error \'proxy\' config is set properly.  See: \'npm help config\''
     expect(failureLine(Object.assign(new Error('last line'), { exitCode: 1, stderr }))).toBe('exit 1: npm error code ENOTFOUND')

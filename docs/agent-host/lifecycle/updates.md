@@ -76,7 +76,9 @@ no app and no host. So after npm exits 0 the host looks for that package where t
 counts that pass as not served and waits the same way (#2282). Which machines have one is the package's own
 `optionalDependencies`, the launcher's `TARGETS` (`tooling/launcher-platform.test.ts` holds the two together): on a
 machine it lists none for, nothing is looked for, so nothing waits. Bringing the copy to a host's version
-(`followHost`) checks the same and fails at once, to be tried at the next start. Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
+(`followHost`) checks the same and fails at once, to be tried at the next start; a global package it would not
+take down, already at or above that version, is installed again at its own version when its platform package is
+missing or at another version, since otherwise every start would fail until a newer release. Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
 error. ETARGET counts only on npm's last line, since a warning above an unrelated error may name it; the
 tarball's 404 is read anywhere in npm's output, since the last line under it never names the URL. A wait that reaches
 the cap fails as “npm did not serve <version> within 10 minutes: <npm's line>”, so the person sees that a wait ran out;

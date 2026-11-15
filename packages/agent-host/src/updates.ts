@@ -838,7 +838,8 @@ export class UpdateService {
    * The same two steps as an install from the app (`runApply`): `npm i -g centralu@<this version>`, pinned since the hub
    * decides it, then the npm package's own launcher's `install` by its path (`installCopy`), which on Windows renames the
    * running copy aside. A global package already at or above this version is never taken down to it: only its `install`
-   * runs. Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
+   * runs, after npm installs that package's own version again when its platform package is missing or at another version
+   * (#2282: an npm that skipped it would otherwise fail every start until a newer release). Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
    * which is also when the hub's next update arrives. Never beside an install from the app: one running leaves this for
    * the next start, and one asked for meanwhile waits for this to end (`runApply`).
    */
@@ -859,6 +860,8 @@ export class UpdateService {
     try {
       const global = await this.deps.globalPackage()
       if (!atLeast(global?.version ?? null, to)) await this.installGlobal(to)
+      // One npm left without its platform package (#2282) is installed again at the version it holds, never taken down
+      else if (global?.version && global.platform && global.platform.version !== global.version) await this.installGlobal(global.version)
       if (this.stopped) return
       await this.installCopy()
       console.error(`[updates] the installed copy at ${copy} was refreshed from the npm package at ${global?.version && atLeast(global.version, to) ? global.version : to} (it held ${was ?? 'an unreadable version'}; this host is ${to})`)
