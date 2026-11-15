@@ -47,7 +47,11 @@ const firstLine = (s) =>
     .find(Boolean) ?? ''
 
 /** Whether `dir` is a folder on the computer this app runs on */
-export const isFolder = (dir) => stat(dir).then((s) => s.isDirectory(), () => false)
+export const isFolder = (dir) =>
+  stat(dir).then(
+    (s) => s.isDirectory(),
+    () => false,
+  )
 
 /** Runs git in `cwd`; answers stdout. `input` goes to stdin. */
 export async function git(cwd, args, { input, timeoutMs = 120_000, env } = {}) {
@@ -58,7 +62,13 @@ export async function git(cwd, args, { input, timeoutMs = 120_000, env } = {}) {
   } catch (error) {
     // Node answers ENOENT for a cwd that does not exist too, with git installed (#2283: a session on another computer
     // gave its own checkout's path to this app, which runs on its hub): the folder is asked about before git is blamed
-    if (error.code === 'ENOENT') throw new GitError(cwd !== undefined && !(await isFolder(cwd)) ? `${cwd} is not a folder on the computer this app runs on.` : 'git was not found on this machine.')
+    if (error.code === 'ENOENT') {
+      throw new GitError(
+        cwd !== undefined && !(await isFolder(cwd))
+          ? `${cwd} is not a folder on the computer this app runs on.`
+          : 'git was not found on this machine.',
+      )
+    }
     if (error.killed) throw new GitError(`git ${args[0]} did not finish within ${Math.round(timeoutMs / 1000)} s.`)
     const verb = args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? ''
     throw new GitError(`git ${verb} failed: ${firstLine(error.stderr) || firstLine(error.stdout) || `exit ${error.code}`}`, error.stderr, error.code)

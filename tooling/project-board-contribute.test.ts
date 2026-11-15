@@ -695,7 +695,9 @@ describe('topLevel on a real repository', { timeout: 60_000 * SLOW }, () => {
   // #2283: Node answers ENOENT for a missing cwd too, and a session on another computer gave its own checkout's path
   it('says a folder is missing, not git, when it runs in a folder that is not on this computer', async () => {
     const elsewhere = join(root, 'on-another-computer')
-    await expect(git(elsewhere, ['--version'])).rejects.toThrow(`${elsewhere} is not a folder on the computer this app runs on.`)
+    await expect(git(elsewhere, ['--version'])).rejects.toThrow(
+      `${elsewhere} is not a folder on the computer this app runs on.`,
+    )
     const path = process.env.PATH
     process.env.PATH = ''
     try {
@@ -852,7 +854,7 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
   it('refuses a path that is not on the computer the app runs on, saying so, with nothing run', async () => {
     stack()
     const elsewhere = join(root, 'on-another-computer')
-    const why = `The checkout ${elsewhere} is not on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`
+    const why = `The checkout ${elsewhere} is not a folder on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`
     runtime()
     expect((await call('rebase_stack', { pr: 2, path: elsewhere, push: true })).text).toBe(`Not restacked: ${why}`)
     expect((await call('release_status', { path: elsewhere })).text).toBe(why)
@@ -1103,7 +1105,9 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     runtime()
     const r = await call('open_pr', { ...PR_PLAIN, path: elsewhere })
     expect(r.isError).toBe(true)
-    expect(r.text).toBe(`Not opened: The checkout ${elsewhere} is not on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`)
+    expect(r.text).toBe(
+      `Not opened: The checkout ${elsewhere} is not a folder on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`,
+    )
     expect(prePrCalls()).toEqual([])
     expect(writes()).toEqual([])
   })

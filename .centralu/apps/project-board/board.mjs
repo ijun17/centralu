@@ -59,7 +59,12 @@ export const pathInput = z.string().optional().describe('A checkout of the repos
  */
 export async function checkoutDir(path) {
   if (path === undefined) return APP_DIR
-  if (!(await isFolder(path))) throw new GitHubError('input', `The checkout ${path} is not on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`)
+  if (!(await isFolder(path))) {
+    throw new GitHubError(
+      'input',
+      `The checkout ${path} is not a folder on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`,
+    )
+  }
   return path
 }
 
