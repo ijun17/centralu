@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runCleanups } from './links-world.test-helpers.js'
+import { TOKEN, cleanups, runCleanups } from './links-world.test-helpers.js'
+import { RemoteClient } from './remote-client.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { PERSON, sessionAddress } from '../mail/address.js'
 import { MailAcross, type AcrossPeers } from '../mail/across.js'
@@ -48,6 +49,25 @@ describe('a task across a link (#1948 step 6)', () => {
     const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
     expect(sent).toMatchObject({ ok: false, why: 'gone', text: expect.stringContaining(' is gone from Remote box: ') })
     expect(sent.ok ? '' : sent.text).not.toContain('session:')
+  })
+
+  it('is taken, moved and told of only from a hub that offered on the same connection: another connection, with the full token, is refused', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    // A connection with the full token that never offered as a hub
+    let hello = false
+    const other = new RemoteClient({ url: `ws://127.0.0.1:${machine.port}`, token: TOKEN, maxBackoffMs: 100 }, { hello: () => void (hello = true) })
+    cleanups.push(() => other.close())
+    other.connect()
+    await eventually(() => hello)
+    const forged = `${hub.id}.m_01JX000000000000000000000Z`
+    await expect(other.call('host.mail', { from: at(hub, 'h1'), to: 'w1', text: 'and the tests', id: forged, task: { origin: 'start_agent' } })).rejects.toThrow('Only a hub that offered on this connection')
+    expect(machine.store.mailbox.message(forged)).toBeUndefined()
+    await expect(other.call('host.mailMove', { from: at(hub, 'h1'), to: at(hub, 'h2'), ids: [id] })).rejects.toThrow('Only a hub that offered on this connection')
+    expect(machine.store.mailbox.message(id)?.sender).toBe(at(hub, 'h1'))
+    await expect(other.call('host.mailRows', { rows: [{ messageId: id, recipient: at(hub, 'm1.w1'), deliveredAt: 1, readAt: 1, settled: 'withdrawn', settledAt: 1, answerId: null, releasedAt: null, releasedWhy: null }] })).rejects.toThrow('Only a hub that offered on this connection')
+    expect(machine.store.mailbox.recipient(id, at(machine, 'w1'))?.settled).toBeNull()
   })
 
   it('reads a machine that does not know the offer as an older one, not as still connecting', async () => {
