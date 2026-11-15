@@ -183,7 +183,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
         reverse: reverseCalls({
           allowed: (id) => store.machines.linkedMachineAsks(id),
           projects: () => mgr.projectsForMachines(),
-          ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
+          ask: (machine, params, signal, hold) => mgr.machineAsks.ask(machine, params, signal, hold),
           selfName: () => 'Hub mac',
           across: { fromMachine: (machine: { id: string; name: string }, p: HubMailParams) => across.fromMachine(machine, p), rows: across.rows.bind(across), answerFind: across.answerFind.bind(across) },
         }),

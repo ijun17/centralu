@@ -125,6 +125,24 @@ export type ProofServer = z.infer<typeof ProofServer>
  */
 export const CANCEL_CALL_METHOD = 'call.cancel'
 
+/**
+ * How a hub holds the time limit of a call a host sent it (#2271): a call of this method from the hub, on the socket the
+ * call came in on, `{ id, held }` naming that call. The hub holds it while the work the call waits on cannot go on without
+ * the person and the person cannot see it (a machine's ask whose card the person's own turn hides). Held, the call's limit
+ * stops; released, it runs on with the time it had left. A held call still ends as any call does: its socket goes, or the
+ * host withdraws it (`call.cancel`). And it ends after `CALL_HOLD_MAX_MS` held in all, so no hub can keep a host's call
+ * forever. A host answers `{ ok: true }`; one from before it answers "Unknown method", and its call runs to its limit as before.
+ */
+export const HOLD_CALL_METHOD = 'call.hold'
+export const HoldCallParams = z.object({ id: z.string().max(200), held: z.boolean() })
+export type HoldCallParams = z.infer<typeof HoldCallParams>
+
+/**
+ * The longest a call may be held in all (`HOLD_CALL_METHOD`): longer than a person's working session at one turn, short
+ * enough that a hub that never releases a call does not keep the asking session's tool call open past a working day
+ */
+export const CALL_HOLD_MAX_MS = 4 * 60 * 60_000
+
 // 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union.
 // `rpc` here is a host's call to a hub linked to it (#550, `RpcAnswer`)
 export const ServerFrame = z.union([

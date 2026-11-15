@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { CANCEL_CALL_METHOD, HANDSHAKE_TIMEOUT_MS, errorMessage, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
+import { CANCEL_CALL_METHOD, HANDSHAKE_TIMEOUT_MS, HOLD_CALL_METHOD, type HoldCallParams, errorMessage, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
 import { proofNonce, provesCredential, provesToken } from '../transport/host-proof.js'
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
@@ -109,9 +109,10 @@ export type RemoteClientEvents = {
   refused?: (r: RemoteRefusal) => void
   /**
    * Answers a call the remote host makes to the hub (#550, the reverse direction). Absent: every such call is dropped,
-   * as before the reverse direction existed. `signal` fires when the host withdraws the call or the socket goes
+   * as before the reverse direction existed. `signal` fires when the host withdraws the call or the socket goes; `hold`
+   * holds or releases the call's limit on the host (`call.hold`, #2271), while the call runs on the socket it came in on
    */
-  call?: (method: string, params: unknown, signal: AbortSignal) => Promise<unknown>
+  call?: (method: string, params: unknown, signal: AbortSignal, hold: (held: boolean) => void) => Promise<unknown>
 }
 
 /** How many calls from the remote may run on the hub at once (#550): one past it is refused, not queued */
@@ -388,7 +389,12 @@ export class RemoteClient {
     if (this.incoming.size >= MAX_INCOMING_CALLS) return refuse('Too many calls at once; try again shortly', 'internal', true)
     const ctl = new AbortController()
     this.incoming.set(id, ctl)
-    void handle(method, params, ctl.signal)
+    // Said only while the call runs on the socket it came in on; a host from before it refuses the method, and its limit runs as before
+    const hold = (held: boolean) => {
+      if (this.ws !== ws || this.incoming.get(id) !== ctl) return
+      this.call(HOLD_CALL_METHOD, { id, held } satisfies HoldCallParams).catch(() => undefined)
+    }
+    void handle(method, params, ctl.signal, hold)
       .then(
         (result) => answer({ ok: true, result: result ?? null }),
         (err: unknown) => {

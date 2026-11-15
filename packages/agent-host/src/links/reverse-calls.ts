@@ -20,7 +20,8 @@ export function reverseCalls(o: {
   /** Whether the machine's switch is on now (the store's) */
   allowed: (machineId: string) => boolean
   projects: () => HubProject[]
-  ask: (machine: { id: string; name: string }, p: HubAskParams, signal: AbortSignal) => Promise<HubAskResult>
+  /** `hold`: the ask's limit on the machine is held while its card is out of the person's sight (#2271) */
+  ask: (machine: { id: string; name: string }, p: HubAskParams, signal: AbortSignal, hold: (held: boolean) => void) => Promise<HubAskResult>
   /** This computer's name, as the machine's session reads it */
   selfName: () => string
   /** Mail across linked machines (mail/across.ts): a machine's session's message, what became of mail, and a search */
@@ -31,7 +32,7 @@ export function reverseCalls(o: {
    */
   apps?: { calls: Pick<LinkedAppCalls, 'list' | 'call' | 'cancel'>; notice(machine: { id: string; name: string }, p: LinkedAppNoticeParams): Promise<void> }
 }): ReverseCalls {
-  return async (machine, method, params, signal) => {
+  return async (machine, method, params, signal, hold) => {
     const apps = o.apps
     if (apps && method === 'hub.apps') {
       const p = read(HubMethods['hub.apps'].params.safeParse(params))
@@ -62,7 +63,7 @@ export function reverseCalls(o: {
     if (method === 'hub.projects') return { projects: o.projects() }
     const p = HubMethods['hub.askProject'].params.safeParse(params)
     if (!p.success) throw rpcError('Not an ask this computer reads')
-    return o.ask(machine, p.data, signal)
+    return o.ask(machine, p.data, signal, hold)
   }
 }
 

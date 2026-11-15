@@ -702,7 +702,7 @@ const links = new Links(linkDepsFor(store, {
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
     projects: () => mgr.projectsForMachines(),
-    ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
+    ask: (machine, params, signal, hold) => mgr.machineAsks.ask(machine, params, signal, hold),
     selfName: hubName,
     // Every session on a machine mails every session this hub reaches, and finds them (#2067, docs/plans/linked-mail.md §5 to §8)
     across: hostMailbox.across,

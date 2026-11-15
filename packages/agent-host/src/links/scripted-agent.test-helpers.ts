@@ -225,6 +225,13 @@ export class ScriptedAdapter implements AgentAdapter {
     return handle.holdAnswer()
   }
 
+  /** Ends a session's long job with this answer (`ScriptedHandle.finish`) */
+  finish(sessionId: string, text: string): void {
+    const handle = this.handles.get(sessionId)
+    if (!handle) throw new Error(`no scripted session ${sessionId}`)
+    handle.finish(text)
+  }
+
   /** Opens the turn a session's `holdNext` kept waiting (`ScriptedHandle.release`) */
   release(sessionId: string): void {
     this.handles.get(sessionId)?.release()

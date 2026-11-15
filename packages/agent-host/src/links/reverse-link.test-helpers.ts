@@ -10,7 +10,7 @@ import { reverseCalls } from './reverse-calls.js'
 import { Router } from './router.js'
 import { DirectTunnel } from './tunnel.js'
 import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
-import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { fixtureGit } from '../temp-dir.test-helpers.js'
@@ -69,7 +69,7 @@ function projectFolder(origin?: string): string {
  */
 /** `apps`: an app runtime wired as main.ts wires it (#1938); `'before'`, as a build from before `host.apps` (its offer's answer says nothing of apps) */
 export async function machineHost(
-  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before' } = {},
+  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; askHoldMaxMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before' } = {},
 ) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: projectFolder(o.origin), name: 'remote-project' })
@@ -83,6 +83,7 @@ export async function machineHost(
     record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
     settings: store.settings,
     ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}),
+    ...(o.askHoldMaxMs ? { askHoldMaxMs: o.askHoldMaxMs } : {}),
     ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}),
   })
   mgr.useLinkedHubs(hubs)
@@ -172,7 +173,7 @@ export async function hubHost(
           reverse: reverseCalls({
             allowed: (id) => store.machines.linkedMachineAsks(id),
             projects: () => mgr.projectsForMachines(),
-            ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
+            ask: (machine, params, signal, hold) => mgr.machineAsks.ask(machine, params, signal, hold),
             selfName: () => name,
             ...(across
               ? {
@@ -252,12 +253,16 @@ export async function hubHost(
     return c
   }
   const machine = () => links.list()[0]!
-  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName, mail, heard, apps }
+  /** Ends a hub session's long job (a message with "long job" started it) */
+  const finish = (sessionId: string, text: string) => {
+    for (const a of adapters.values()) if (a instanceof ScriptedAdapter && a.tool === mgr.listSessions().find((s) => s.id === sessionId)?.tool) a.finish(sessionId, text)
+  }
+  return { store, mgr, links, router, server, card, answer, finish, machine, stop, name, id: hubSelfId(store), projectName, mail, heard, apps }
 }
 
 /** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise; the hub delivers its mail, the asks' tasks */
-export async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
-  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs })
+export async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; askHoldMaxMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
+  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs, askHoldMaxMs: o.askHoldMaxMs })
   const hub = await hubHost(machine.port, { preset: o.preset, mail: 'delivered' })
   await eventually(() => hub.machine().status === 'connected')
   if (o.on !== false) {
