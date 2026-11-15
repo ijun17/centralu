@@ -65,6 +65,8 @@ const NOTHING_REPORTED = '(no report on a task you gave it has come back)'
 /** What a start on a machine that takes no work from this hub says to do (#1948 step 6) */
 const stillConnecting = (machine: string) => `${machine} is still connecting to this computer, so nothing was made there. Try again in a moment.`
 const olderThere = (machine: string) => `${machine} runs an older Centralu, which takes no work from this computer. Update Centralu on ${machine}, or start the session here.`
+/** What a child on a machine says when this computer's own mail, which carries its work, is not running */
+const NO_MAIL = 'this computer gives work to another machine only by mail, and its mail is not running'
 
 /**
  * What a child on a linked machine reaches of the session manager (#1038), typed as the manager declares each member.
@@ -235,8 +237,9 @@ export class RemoteAgents {
     if (asked && 'error' in asked) return { ok: false, error: asked.error }
     // Its work goes as mail (#1948 step 6): a machine whose Centralu takes no tasks from this hub is told to update before anything is asked or made
     const takes = this.machineTasks?.(machine.id)
-    if (takes === undefined && this.host.linkedTasks) return { ok: false, error: stillConnecting(machine.name) }
-    if (!this.host.linkedTasks || takes !== true) return { ok: false, error: olderThere(machine.name) }
+    if (!this.host.linkedTasks) return { ok: false, error: `Nothing was made on ${machine.name}: ${NO_MAIL}.` }
+    if (takes === undefined) return { ok: false, error: stillConnecting(machine.name) }
+    if (takes !== true) return { ok: false, error: olderThere(machine.name) }
     const tool = opts.tool ?? target.defaultTool ?? caller.tool
     // The person's model for a difficulty is read here, as for a local child; the machine is not asked for its list
     const { model, effort, difficulty } = agentChoice(opts, undefined, this.host.uiPreferences().agentModels?.[tool])
@@ -390,7 +393,7 @@ export class RemoteAgents {
   /** Work for the child, as a task from the caller across the link (#1948 step 6): the machine holds it while the child is busy, and reports it */
   private giveTask(rec: RemoteAgent, callerId: string, text: string, origin: DelegationOrigin): Promise<{ ok: true; messageId: string } | { ok: false; text: string }> {
     const tasks = this.host.linkedTasks
-    return tasks ? tasks.send(callerId, rec.sessionId, text, { origin }) : Promise.resolve({ ok: false, text: olderThere(rec.machine) })
+    return tasks ? tasks.send(callerId, rec.sessionId, text, { origin }) : Promise.resolve({ ok: false, text: NO_MAIL })
   }
 
   /**

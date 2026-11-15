@@ -189,6 +189,15 @@ describe('the work a start and a send give a child on a linked machine (#1948 st
     expect(await send(ra, 'and this')).toEqual({ ok: false, error: 'Could not send to "Child" on Box: Box runs an older Centralu, which takes no work from this computer. Update Centralu on Box.' })
   })
 
+  it("says that this computer's mail is not running, not that the machine is older, when there is no mail to carry the work", async () => {
+    const ra = agents()
+    await start(ra)
+    more = { linkedTasks: null }
+    const without = agents()
+    expect(await start(without)).toEqual({ ok: false, error: 'Nothing was made on Box: this computer gives work to another machine only by mail, and its mail is not running.' })
+    expect(await send(without, 'and this')).toEqual({ ok: false, error: 'Could not send to "Child" on Box: this computer gives work to another machine only by mail, and its mail is not running.' })
+  })
+
   it('refuses a start on a machine that takes no tasks before its card, and makes nothing there', async () => {
     const askHost = vi.fn(async () => 'allow')
     more = { hostCards: { askHost } }
