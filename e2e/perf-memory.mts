@@ -99,6 +99,7 @@ import {
   type Page,
   type WebSocketRoute,
 } from '@playwright/test'
+import { errorMessage } from '@cc/protocol'
 import { seedBoardApp } from './fixtures/board-app.js'
 import { screenshotPng, seedHeavyStore, type SeedSummary, type StoreProfile } from './fixtures/heavy-store.js'
 import { freePort } from './fixtures/real-host.js'
@@ -978,18 +979,27 @@ async function measureEngine(
       pick.jsEventListeners = h.jsEventListeners
       // WebKit has no CDP: Playwright's requestGC is the inspector's Heap.gc, a full collection of the page's VM. Its
       // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
-      if (cdp) await cdp.send('HeapProfiler.collectGarbage')
-      else await page.requestGC()
-      for (const s of viewCdp) await s.send('HeapProfiler.collectGarbage').catch(() => {})
-      await sleep(cdp ? 1_000 : 5_000)
-      const content = engineProcs(engine, before, host!.pid!).procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)
-      const after = await heap(cdp)
-      const afterView = await heapOf(viewCdp)
-      pick.afterGc = {
-        contentFootprintMB: round(Math.max(0, ...content)),
-        allContentFootprintMB: round(content.reduce((a, b) => a + b, 0)),
-        heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
-        viewHeapUsedMB: afterView === null ? null : round(afterView),
+      // The after-GC numbers are extra: when the collection fails they are left out (null) and the run goes on.
+      let collected = true
+      try {
+        if (cdp) await cdp.send('HeapProfiler.collectGarbage')
+        else await page.requestGC()
+      } catch (e) {
+        collected = false
+        console.error(`[${engine}] ${step}: the forced collection failed, so there are no after-GC numbers: ${errorMessage(e)}`)
+      }
+      if (collected) {
+        for (const s of viewCdp) await s.send('HeapProfiler.collectGarbage').catch(() => {})
+        await sleep(cdp ? 1_000 : 5_000)
+        const content = engineProcs(engine, before, host!.pid!).procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)
+        const after = await heap(cdp)
+        const afterView = await heapOf(viewCdp)
+        pick.afterGc = {
+          contentFootprintMB: round(Math.max(0, ...content)),
+          allContentFootprintMB: round(content.reduce((a, b) => a + b, 0)),
+          heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
+          viewHeapUsedMB: afterView === null ? null : round(afterView),
+        }
       }
       const out = {
         ...pick,
