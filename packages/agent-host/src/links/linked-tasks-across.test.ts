@@ -57,6 +57,18 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(await sending).toMatchObject({ ok: true, computer: 'Remote box' })
   })
 
+  it("waits for the new connection's answer after the link came back, though a call before the drop had the old one's", async () => {
+    const { machine, hub, across } = await rig()
+    // The call before the drop waited on (and settled) the first connection's offer
+    expect(await across.sendTask('h1', at(hub, 'm1.w1'), 'first', { origin: 'agent_session' })).toMatchObject({ ok: true })
+    let release = () => {}
+    await machine.bounce(new Promise<void>((resolve) => (release = resolve)))
+    await eventually(() => hub.machine().status === 'connected' && hub.links.get('m1')?.takesTasks === undefined)
+    const sending = across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'agent_session' })
+    release()
+    expect(await sending).toMatchObject({ ok: true, computer: 'Remote box' })
+  })
+
   it("goes right after the hub offered again on the same connection (the person switched asks), its answer read first", async () => {
     const { machine, hub, across } = await rig()
     let release = () => {}
