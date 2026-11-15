@@ -4,6 +4,7 @@ import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { asObj, tryParseJson } from '../json-value.js'
 import { isHubSender } from './hub-sender.js'
+import { isSessionId } from '../mail/address.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -45,8 +46,12 @@ export type Delegation = {
  * the work. `cut`: an update of Centralu cut the turn and Centralu continued it (#1966): its end says so.
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; cut?: true }
-/** A message given the tool, as its user row keeps it (#1639): the input id it went in under, whose it is, and a hub's message's origin (#1604) */
-type Entry = { id: string; by: 'person' | 'work'; source: TurnSource; origin?: TurnOrigin; from?: string }
+/**
+ * A message given the tool, as its user row keeps it (#1639): the input id it went in under, whose it is, and a hub's message's origin (#1604).
+ * `from`: the session that sent it; `unowned`: its sender is no session (`isSessionId`: a hub's Assistant, Centralu's own notice), so a turn it
+ * starts has no owner here and is no task's, not even the person's (#2290)
+ */
+type Entry = { id: string; by: 'person' | 'work'; source: TurnSource; origin?: TurnOrigin; from?: string; unowned?: true }
 /**
  * The entry a user row is, when it went in under an input id (#1639): the person's when no one else is named on it. A first prompt and the
  * words read back from the tool's own record (`transcript`) carry none
@@ -60,14 +65,14 @@ function entryOf(row: StoredMessage): Entry | undefined {
   return {
     id: p.inputId, by: work ? 'work' : 'person', source: p.relayed === true ? 'report' : p.fromApp !== undefined ? 'app' : 'caller',
     ...(hub.success && isHubSender(hub.data.from.sessionId) ? { origin: hub.data } : {}),
-    ...(typeof from === 'string' ? { from } : {}),
+    ...(isSessionId(from) ? { from } : from !== undefined ? { unowned: true as const } : {}),
   }
 }
 /**
  * Whose a turn is, as the mailbox is told it (`TurnStart`): `cli`, it ran for no message (a mail wake, a compact, the CLI on its own); `from`, the
  * session whose message of the work it ran for
  */
-type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource; from?: string }
+type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource; from?: string; unowned?: true }
 /**
  * Whose a turn that ran for these messages is (#1377): the work's if any is (the work's instruction is in it), with the person's noted
  * (`wrote`), and its source the first of the work's; else the person's; none, the CLI's own (the work's)
@@ -75,7 +80,7 @@ type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource; from?: str
 function starterFor(ran: readonly Entry[]): Decided {
   const work = ran.find((e) => e.by === 'work')
   if (!work) return ran.length ? { turn: { by: 'person' }, cli: false, source: 'caller' } : { turn: { by: 'work' }, cli: true, source: 'caller' }
-  return { turn: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, cli: false, source: work.source, ...(work.from ? { from: work.from } : {}) }
+  return { turn: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, cli: false, source: work.source, ...(work.from ? { from: work.from } : {}), ...(work.unowned ? { unowned: true as const } : {}) }
 }
 /**
  * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub
@@ -356,8 +361,8 @@ export class ChildOwnership {
     const rows = this.store.messages.loadUserRowsFrom(sessionId, from).map((row) => {
       const p = asObj(row.payload)
       const sender = asObj(p.from).sessionId
-      // Only a session's own message names it (`from`): the person's, an app's, a script's and the tool's own record's rows name none
-      return typeof sender === 'string' && p.relayed !== true ? sender : null
+      // Only a session's own message names it (`from`): the person's, an app's, a script's, a hub's Assistant's, Centralu's and the tool's own record's rows name none
+      return isSessionId(sender) && p.relayed !== true ? sender : null
     })
     return answered >= from ? [...rows, null] : rows
   }
@@ -412,10 +417,14 @@ export class ChildOwnership {
     if (again && was && was.turn.by === decided.turn.by && !!was.turn.wrote === !!decided.turn.wrote && was.cli === decided.cli) return
     this.starters.set(sessionId, decided)
     if (!this.turnStartedHook) return
-    // The session whose request the turn runs for: the message it opened with names it, else a delegation still running there gave it (its first prompt)
-    const ownerId = decided.from ?? [...this.runs.values()].find((d) => d.sessionId === sessionId && !d.settled)?.callerId
+    // The session whose request the turn runs for: the message it opened with names it, else a delegation still running there gave it (its first prompt).
+    // A message from no session (`unowned`) opened it: no session's
+    const ownerId = decided.unowned ? undefined : (decided.from ?? [...this.runs.values()].find((d) => d.sessionId === sessionId && !d.settled)?.callerId)
     try {
-      this.turnStartedHook(sessionId, { by: decided.turn.by, cli: decided.cli, source: decided.source, ...(ownerId ? { ownerId } : {}), ...(again ? { again: true as const } : {}) })
+      this.turnStartedHook(sessionId, {
+        by: decided.turn.by, cli: decided.cli, source: decided.source,
+        ...(ownerId ? { ownerId } : {}), ...(decided.unowned ? { unowned: true as const } : {}), ...(again ? { again: true as const } : {}),
+      })
     } catch (e) {
       console.error(`[mail] could not record a turn of ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
     }

@@ -10,6 +10,7 @@ import { SessionManager } from './manager.js'
 import { runCentraluTool } from './centralu-tools.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { PERSON } from '../mail/address.js'
+import { HUB_SENDER } from './hub-sender.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -173,6 +174,15 @@ describe('cards in work another session gave (#676, docs/plans/mailbox.md §10.6
     expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'answer', card: q1, text: 'sqlite' })).toMatchObject({ ok: true, state: 'answered', card: q1 })
     expect(cards.answered).toEqual([{ requestId: 'q-1', answers: [{ question: QUESTION.question, answers: ['SQLite'] }] }])
     expect(w.mgr.listSessions().find((s) => s.id === child)!.pendingQuestions).toEqual([])
+  })
+
+  it('leaves a card to the person once a hub’s Assistant’s words went into the parent’s task turn, and the parent still reads it (#2290)', async () => {
+    const { parent, child, cards } = await parentAndChild()
+    // A hub from before #2280 gives work as its Assistant's words (`LinkedHost.sendFromHub`), here into the turn the parent's task runs
+    await w.mgr.inputs.send(child, 'and seed it', undefined, { sessionId: HUB_SENDER, name: 'Assistant' })
+    cards.ask('q-1')
+    expect(mail.told(parent, child)).toHaveLength(1)
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'asking', cards: [{ requestId: 'q-1', answerable: false }] })
   })
 
   it('lets the person answer first by the card itself; the parent\'s later answer does not land', async () => {

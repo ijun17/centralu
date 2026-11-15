@@ -262,7 +262,7 @@ export function turnRecorder(mail: MessageService, records: MailboxRecords, turn
   return (sessionId, turn) => {
     const child = mail.sessionAddress(sessionId)
     const taskId = turn.ownerId && turn.by === 'work' ? (records.newestTask(mail.sessionAddress(turn.ownerId), child)?.id ?? null) : null
-    const personWork = (): string | null => (turn.ownerId ? null : (records.newestTask(PERSON, child)?.id ?? null))
+    const personWork = (): string | null => (turn.ownerId || turn.unowned ? null : (records.newestTask(PERSON, child)?.id ?? null))
     // Decided again by the input the tool named (#1639): the same turn's row is corrected, not a new one begun
     const record = (by: Parameters<MailTurns['beginOther']>[1], messageId: string | null, owner?: string) =>
       turn.again ? turns.restate(sessionId, by, messageId, owner) : turns.beginOther(sessionId, by, messageId, owner)

@@ -23,10 +23,11 @@ const turnStartedBy = (stored: string): TurnStartedBy => STARTED_BY.find((s) => 
 
 /**
  * A turn that started, as the mailbox hears of it (docs/plans/mailbox.md §8.2): whose it is, whether the CLI ran it on its own, and
- * the caller it is the work of, when there is one
+ * the caller it is the work of, when there is one.
+ * `again`: the turn was decided at its start, and the tool's naming of its inputs decided it otherwise (#1639). `unowned`: a message from a sender that is no
+ * session started it (a hub's Assistant, Centralu's own notice; #2290): no caller's and no task's, not even the person's
  */
-/** `again`: the turn was decided at its start, and the tool's naming of its inputs decided it otherwise (#1639) */
-export type TurnStart = { by: 'person' | 'work'; cli: boolean; source: TurnSource; ownerId?: string; again?: true }
+export type TurnStart = { by: 'person' | 'work'; cli: boolean; source: TurnSource; ownerId?: string; unowned?: true; again?: true }
 
 /** What a message of the work that starts a turn is: a caller's own, a report or notice about another session (Centralu's), or an app's */
 export type TurnSource = 'caller' | 'report' | 'app'
