@@ -59,10 +59,9 @@ wrote is its only trace in the conversation, and `read_session` and `recall` nev
 once in `mail/host-mail.ts` (`hostMail`, used by `main.ts` and by the tests): the message service (`mail/messages.ts`), the one reach module
 (`mail/reach.ts`: who may write to whom, project trust, the one hold), the turns and guards (`mail/turns.ts`), the delivery, and the `mail` tool,
 whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, and a task only with `kind: "answer"`, plans/mailbox.md §10.6.3; `handled` is `done`,
-`read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). After the ready line, before
-delivery starts, `afterReady` moves the thread mail an older build left pending (once, in one transaction, `Store.movePendingThreadMail`), then
-deletes the report marks a build of v70 to v73 left as it went (`dropReportMarks`; store step 74 turned the older builds' marks and held requests into tasks, #2258). The person's window still reads the thread tables
-until the person's host methods move to the service (M3a-person, in the same release).
+`read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). The thread mail
+an older build left pending was moved by store step 75, once (#2258; step 74 turned the older builds' report marks and held requests into tasks):
+no live code reads the old thread tables.
 
 **Delegations write tasks** (mailbox.md §9, D18). Each place a session gives another work calls
 `ChildOwnership.delegated` once the old path delivered it (start_agent before its frame goes in, which can outlast the call's bound, and

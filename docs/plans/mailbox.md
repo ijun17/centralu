@@ -283,8 +283,8 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     host left, for a rollback to a build before them. Step 74 raises the floor to 70 (beta.58, the first build with
     those steps), turns what the builds before it left (held requests, marks with no task) into tasks with its own
     statements, and deletes it with `delegated_turns` and the old per-session keys. This build neither reads nor
-    writes marks; it deletes at each start those a build of v70 to v73 leaves as it goes. Dropping the tables waits
-    for a step with the floor at or above 74.
+    writes marks. The builds of v70 to v73 leave marks as they go, so step 75 raises the floor to 74 and the store
+    refuses them; step 76 drops the tables (M7).
   - *Not taken:* two records with no stated truth (round 1). A report the old build sent by `report_marks` would leave
     the task row open for good, and every later report would say `waiting`.
   - *Not taken:* "later" with no slice. The report paths are where most of this month's bugs came from (#1386, #1523,
@@ -388,10 +388,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   fields; this has 7 fields. A process started before the switch keeps its old schema, which a CLI never reloads
   mid-session; until M7 the host maps the old actions onto the new ones and names calls in the form that process knows
   (§11.3).
+  - **As built (M7, #2258).** The 5-action schema was not built: the old schema is the tool, mapped onto the
+    service (§11.3).
 - **D28. New tables (`mail`, `mail_recipients`), not re-keyed old ones.** After each start, once the host is ready
   and the host it replaced is gone, only the old receipts still pending are **moved**: copied, and the old receipt
-  marked handled in the same transaction (§6.3). History stays in the v61 tables, read-only, until M7 copies what is
-  within retention and drops them.
+  marked handled in the same transaction (§6.3). History stays in the v61 tables, read-only, until M7 (as built: store
+  step 75 runs the move a last time and copies no history, and step 76 drops the tables, §6.3).
   - **The switch stack is forward-fix only after its first `ready`** (§16). A revert, or a rollback that never comes
     back, leaves the mail written in the new tables undelivered, held mail included, and the reports answered
     `mailed` untold. *Not taken:* a down-move (new pending rows back into v61 receipts) shipped a release earlier. Each
@@ -647,9 +649,8 @@ named again on trust** (D12, Q7 (b)). Left:
 1. **Q2. Person-visible wording.** Each item has a proposal in §12.4: the guidance to trust a project whose mail is
    held (it names refused delegations too), the host-wide cap's line, the "needs a reply" toggle, option B's rows,
    and (round 5) the refusal of a linked machine's rollback across the mail switch (S17).
-   Recommended: the proposals as written. One effect to know: until M7 copies the last 30 days, the new Inbox feed
-   shows no mail from before the switch; an old thread is reached only by opening a moved message (its chain reads the
-   thread, `legacyChain`, §6.3).
+   Recommended: the proposals as written. One effect to know: the new Inbox feed shows no mail from before the switch
+   but the messages moved (§6.3): M7 as built copies no history, and nothing reads an old thread since store step 75.
 2. **Q8. The word `orchestrator` on a linked machine.** The orchestrator lives on the hub. A session on a linked
    machine that sends to `orchestrator` is refused "there is no orchestrator to ask yet", and neither §11.1's
    `resolveTo` nor §14 says whether the word reaches the hub's orchestrator through the link. No code before this
@@ -898,14 +899,14 @@ CREATE INDEX IF NOT EXISTS mail_recipients_by      ON mail_recipients(recipient,
 CREATE INDEX IF NOT EXISTS mail_recipients_pending ON mail_recipients(recipient, due_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS mail_recipients_open    ON mail_recipients(recipient) WHERE settled IS NULL;
 CREATE INDEX IF NOT EXISTS mail_recipients_untold  ON mail_recipients(released_at) WHERE released_at IS NOT NULL AND told_at IS NULL;
--- mail_turns gains the turn's work message; thread_id is written NULL from M3a on and stays until M7
+-- mail_turns gains the turn's work message; thread_id is written NULL from M3a on and stays (M7 item 4)
 ALTER TABLE mail_turns ADD COLUMN message_id TEXT;   -- guarded by PRAGMA table_info, as v63 does
 -- the message that started the turn (the work message, else the wake's first item, the person's words included;
 -- NULL for a turn the session started itself): cause_id of what the turn sends, and the cover's key (§8.2 step 6, §10.3), across a restart
 ALTER TABLE mail_turns ADD COLUMN starter_id TEXT;   -- guarded the same way
 -- how the turn ended: 'stopped' (by the person), 'error', or NULL; read by the release rule (§10.3), written from M5
 ALTER TABLE mail_turns ADD COLUMN ended_how TEXT;    -- guarded the same way
--- the tool schema a session's process was spawned with: 2 from M3b on; NULL reads as 1 (§11.3, M7b)
+-- meant for the tool schema a session's process was spawned with; never read or written, as M3b was not built (§11.3); store step 76 drops it
 ALTER TABLE sessions ADD COLUMN mail_args INTEGER;   -- guarded the same way
 ```
 
@@ -927,6 +928,7 @@ older or newer build must be able to write a word the other does not know. The r
   written in the new tables since: the switch stack is forward-fix only after its first `ready` (D28, §16). A linked
   machine's rollback across the stack's release is refused (D28, S17).
 - **The newer build moves what an older build left pending** (§6.3) after every `ready`, before delivery starts.
+  Since store step 75 the step has done it, once, and no start moves anything (M7).
 - **`mail_turns`:** the older build writes `thread_id`. The newer one writes `message_id` and `starter_id` and leaves
   `thread_id` NULL. Each reads only its own columns; a turn the older build began has `starter_id` NULL, so its sends
   have no cause (depth 0) and it covers by the null-cause clause only (§10.3). `turnStartedBy` already reads an unknown starter safely (`turns.ts:27`).
@@ -943,6 +945,13 @@ older or newer build must be able to write a word the other does not know. The r
   builds meet only on paths that do not change.
 
 ### 6.3 Moving pending thread mail (`movePendingThreadMail`, after every `ready` from M3a to M7)
+
+**As built (#2258, store step 75, M7).** The host ran this move after every `ready` from M3a until step 75, as written
+below. Step 75 runs it once, on its own copy of the move's statements (`moveThreadMail`, `migrations/v75.ts`), and raises
+the store's floor to 74 (M7). `movePendingThreadMail`, its call after `ready` and `legacyChain` are gone: only migration
+steps name the v61 tables. Two things the step reads differently: it copies `facts` as stored (`factsFrom` reads them key
+by key at every read), and it takes a sender's project from its `sessions` row by the session id alone, where the host
+asked only for a session of its own.
 
 **When:** in the step `main.ts` runs after the ready line, where `takeOverFromEarlierBuild` and `mailDelivery.start()`
 run today (`main.ts:947-961` on `12f5dad86`), and before both. Its comment holds the reason: by then the host this one
@@ -1005,10 +1014,12 @@ whatever its age; it cites nothing, so the orchestrator reads it as the session'
 and the asker gets S12 as for any request turn. `requestsSince` counts it by its `created_at`, as stored. A moved
 pending `assign` that became a `task` is work the same way, and its report is the old path's (D18).
 
-**History.** `mail read id=X` and `mail.chain` on a message with `legacy_thread` show its thread's earlier messages
-from the v61 tables, read-only (`MailboxRecords.legacyChain(threadId, before, limit)`, the only v61 reader besides
-this move). An older window's `mail.thread` reads a legacy thread the same way (§12.2). M7 copies the v61 messages
-within 30 days of `created_at` into `mail` (settled `legacy`), then drops the tables.
+**History.** Until store step 75, a message with `legacy_thread` showed its thread's earlier messages from the v61
+tables, read-only (`legacyChain`), to a session that read it and to the person in the window. Step 75 copies none of
+them, and the copy of the last 30 days that M7 planned was not built: those messages were read only as lines before a
+moved message, and the builds of store v61 to v64 wrote them (about 420 in the owner's store). What was not pending stays in
+the v61 tables, unread, and goes with them in store step 76. An old thread's id still names what was moved from it
+(`legacy_thread`; §11.3, §12.2).
 
 ### 6.4 Retention (`MessageService.sweep`, with the delivery's 60 s sweep, as today)
 
@@ -1018,7 +1029,7 @@ within 30 days of `created_at` into `mail` (settled `legacy`), then drops the ta
 | Any other message | 30 days after `created_at` |
 | A read `notice` (reminders included) | 14 days |
 | A trashed session's rows | as any other row (M1: no trash exemption, as the v61 sweep; D31). They go with `purgeParty` when the trash is emptied |
-| The v61 tables | read-only history until M7 copies what is within 30 days and drops them |
+| The v61 tables | unread since store step 75; store step 76 drops them (M7) |
 
 Plain batched `DELETE`s, as `mail-retention.ts` does today.
 
@@ -1986,8 +1997,8 @@ turn's end goes to the one it was for; when the turn is no session's task (the p
 instruction the turn took in. The other senders' tasks are settled by that build with no report. A session at rest at a rollback has its open tasks
 settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (#1948, 2026-11-11): beta.57's shape
 cannot change, and a rollback is rare. **Since store step 74 (#2258):** the step deletes the five keys and turns the marks once, the store's floor
-is 70 (beta.57 is refused), no start reads a mark, and none is written as this build leaves; every start deletes unread the marks a build of v70 to
-v73 still leaves as it goes (`dropReportMarks`), since those builds read them back at their own start and a mark this build did not write is stale.
+is 70 (beta.57 is refused), no start reads a mark, and none is written as this build leaves; a build of v70 to
+v73 still leaves marks as it goes and reads them back at its own start, so store step 75 raises the floor to 74 and the store refuses those builds (M7).
 
 **Open points, accepted.** A seat that cannot read mail hears of a session deleted (`gone`) or of a turn lost at a restart (`lost`) only by the
 mailbox's notice, which it never reads, as on main. The cut line kept for the answer after a session's own background work (`cutsUntold`) is memory
@@ -2082,7 +2093,7 @@ gets), and its first line drops "in that turn". The giver's agent reads the noti
 `mail read` gives its words (before, the words were the turn's input).
 
 **Restart, swap and older builds.** No store step (the next free is v70). `facts.card` is a new key of `mail.facts`, which an older build keeps
-and does not read. This build neither reads nor writes `delegated_turns`, and every start deletes its rows, so an older build after a rollback
+and does not read. This build neither reads nor writes `delegated_turns`, and every start deleted its rows until store step 74 did it once (#2258), so an older build after a rollback
 adopts no stale link; beta.57, which restores that table only for a turn it continues after an update, then tells a card in such a turn to the
 person alone. The notices this build wrote are Centralu notices that build delivers as any. A kept or continued turn keeps its giver's task
 open, so a card in it is told and answered as above.
@@ -2350,6 +2361,13 @@ told of take that form. Its instruction line (`tool-definitions.ts:999`) becomes
 
 ### 11.3 Sessions started before the switch (until M7)
 
+**As built (M7, #2258): the version-2 tool was not built.** There is one tool schema, the one this section calls
+version 1 (`MAIL_TOOLS`, `sessions/tool-definitions.ts`), and it is the tool: every session's calls are mapped onto the
+service as below (`MailTool`, `mail/tool.ts`) and named to it in that form (`mailCalls(form)`). The version-2 column of
+the table below, `SessionHandle.mailArgs` and `MAIL_ARGS_ACCEPTED` are a design nobody built, and `sessions.mail_args`
+was never read or written (store step 76 drops it). A second schema would be a product decision of its own: every word
+of a tool definition rides in every request, and raising a budget is the owner's decision (`docs/tool-cost.md`).
+
 The CLI's tool list is fixed when its process starts. A process adopted across the swap, or still running from before
 it, has the old schema. Its calls are validated against that schema, and on the orchestrator's command path they are
 checked strictly (`orchestrator-tools.ts:619-626`).
@@ -2420,7 +2438,7 @@ and not the approval one; any kind, a question included, sounds once as a finish
 | Old method | Answer |
 |---|---|
 | `mail.list` | `{ threads: [], held, waiting }`: the held and sleeping lists as today, no threads |
-| `mail.thread {threadId}` | when `threadId` is a legacy thread id: its messages read from the v61 tables (`legacyChain`) in the old message shape, `parties: []`, `blockers: []`, `follows: []`. Else `refused`, `removed` |
+| `mail.thread {threadId}` | when `threadId` is a legacy thread id: the newest chain moved from it (`MailPerson.rootsOf`; no v61 table is read since store step 75) in the old message shape, `blockers: []`, `follows: []`. A message's id opens its chain the same way (Q-M3a-20); any other id is refused `unknown_message` |
 | `mail.reply`, `mail.close` | `refused`, `data.reason = 'removed'` |
 | `mail.reassign`, `mail.unblock` | retired (owner decision on #1914, Q-M3a-34): the unknown-method error (protocol.md §3.2) |
 
@@ -2551,12 +2569,12 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 | M3a-host | the host on the new tables: delivery, turns, cause and depth, delegation and its refusal, clarifications, reach, the one hold, the guards, §9.5; the **old** tool surface mapped | forward-fix only after its first `ready` (D28) |
 | M3a-person | the person's window on the message tables (as built: Q-M3a-20), the trust and project-delete calls, the old service deleted | with the stack (forward-fix) |
 | M6 | the Inbox, option B | with the stack (forward-fix) |
-| M3b | the version-2 tool, `mailArgs`, sentences S4 to S9, `sessions`, name resolution, the budget | the stack |
+| M3b | **the second schema was not built** (§11.3). Planned: the version-2 tool, `mailArgs`, sentences S4 to S9, `sessions`, name resolution, the budget | the stack |
 | M3c | deletions: `service.ts`, `relations.ts`, `policy.ts`, the v61 readers but the move's and `legacyChain`, thread tests | M3b |
 | M5 | the reminder, with its log | M3c |
 | M8 | the task row becomes the one record of an owed report; `report_marks` still written | M5 |
-| M7 | contract: copy what is left, then drop the v61 tables; stop writing `report_marks` | — (a contract step) |
-| M7b | delete the version-1 tool mapping, once no v1 call was seen for a release | M7 |
+| M7 | contract: copy what is left, then drop the v61 tables; stop writing `report_marks`. As built: store steps 74 and 75 and the deletion of every reader; the drop is step 76, one release after step 75 | — (a contract step) |
+| M7b | delete the version-1 tool mapping, once no v1 call was seen for a release. Closed with M7: with no second schema, nothing to delete | M7 |
 
 **For every slice:**
 
@@ -2577,7 +2595,8 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 - `packages/agent-host/src/dev-services/store/mailbox.ts`: the types and `MailboxRecords` (below).
 - `packages/agent-host/src/dev-services/store/mailbox-adopt.ts`: `movePendingThreadMail(db, now): { messages: number;
   recipients: number }` (§6.3) and `legacyChain(db, threadId, before, limit)`. Free functions over a connection (they
-  import `mailbox.ts`, so `MailboxRecords` cannot call them without a cycle); M3a gives `main.ts` the call.
+  import `mailbox.ts`, so `MailboxRecords` cannot call them without a cycle); M3a gives `main.ts` the call. Gone with
+  store step 75 (M7), which has the move's statements as its own.
 - Tests: `store-mailbox.test.ts`, `store-mailbox-adopt.test.ts`.
 
 **Changes**
@@ -3012,7 +3031,7 @@ and passes on its own; the stack lands together.
   `mail.reply`, `mail.close`, `mail.held`, `mail.resume`) over the message service, a thread being a chain named by
   its root; `mail.reassign` and `mail.unblock` retired with the window's controls (Q-M3a-34). The five methods of §12.2 and
   `mail.resume { messageId }` come with M6's screen, which calls them.
-- **`mail/frame.ts`.** The calls come from `mailCalls(1, form)` (the `COMMAND_CALLS` and `PLAIN_CALLS` constants and
+- **`mail/frame.ts`.** The calls come from `mailCalls(form)` (the `COMMAND_CALLS` and `PLAIN_CALLS` constants and
   `buildMailFrame` are gone, #1996); the delivery uses `buildMessageFrame`.
 - **`sessions/manager.ts`.**
   - `oldOwes(ownerId, childId)` (§9.5), passed to `MessageService` users that need it (`waitingOn`,
@@ -3036,7 +3055,7 @@ export type MailToolHost = {
   caller(sessionId: string): { address: string; askedBy: string | null; projectId: string | null; host: string } | undefined
   sessions(callerId: string, project?: string): { id: string; name: string; project: string | null; tool: string; state: SessionState; asleep: boolean; pendingCard: boolean; canReadMail: boolean; isOrchestrator: boolean }[]
   byName(word: string): { id: string; name: string; project: string | null }[]   // §11.1 name resolution, sessions here, not in the trash
-  mailArgs(sessionId: string): 1 | 2                                              // 1 everywhere in M3a; the stub is gone (#1996): the tool calls `mailCalls(1, form)`, and the `sessions.mail_args` column stays
+  mailArgs(sessionId: string): 1 | 2                                              // 1 everywhere in M3a; the stub is gone (#1996): the tool calls `mailCalls(form)`, and the `sessions.mail_args` column stays until store step 76
   orchestratorId(): string | null
 }
 ```
@@ -3181,6 +3200,10 @@ covers each of these, with a test in `mail/person.test.ts` unless named:
 Also: a purged session's rows in the message tables go (Q-M3a-29, `store-mail.test.ts`).
 
 ### M3b. The version-2 tool
+
+**The second schema was not built** (as built, M7; §11.3). Nothing below that names version 2, `mailArgs`,
+`MAIL_ARGS_ACCEPTED`, `mailbox.v1_last_seen` or the `sessions` action exists; what did not need a second schema (`parent`,
+a session by its name, §11.1) came to the one tool. What follows is the slice as planned.
 
 **Changes**
 
@@ -3454,6 +3477,25 @@ the final one. A swap during the pause: the final report still comes once. On Co
 
 ### M7. Contract
 
+**As built (#2258): store steps 74 and 75, and step 76 owed.**
+
+- **Step 74** (floor 70) did item 2, and with it this build stopped writing marks (D18's note).
+- **Step 75** (`breaksOlderReaders: true`, `minReader: 74`) is item 1's final move, run once by the step on its own
+  statements (§6.3). In the same pull request every reader and writer of the v61 tables, `report_marks`,
+  `delegated_turns`, `queued_requests` and `sessions.mail_args` left live code: only migration steps name them. The
+  step breaks the builds of v70 to v73 (beta.58 to beta.69), which still leave report marks as they go and make tasks
+  of them at their next start: the store refuses them at start, untouched (`StoreTooNewError`). The build of v74
+  (beta.70, beta.71) writes no mark and finds every receipt handled, so it still opens the store, and the tables stay
+  one step more for it.
+- **No history is copied** (item 1's 30 days): §6.3 "History" says why.
+- **Step 76, owed** (`breaksOlderReaders: true`, `minReader: 75`), is item 3's drop and the column
+  `sessions.mail_args`, in a pull request of its own, merged only after a release with step 75 has shipped
+  (`docs/agent-host/store-migrations.md`, step 75). What stays for good: `mail_turns.thread_id` (item 4), and what moved
+  mail is read by, `mail.legacy_thread`, `settled = 'legacy'`, `facts.legacyKind` and `facts.releasedTo`.
+- The window's old methods (`mail.list`, `mail.thread`, `mail.reply`, `mail.close`) were not turned into `removed`:
+  built on the message tables (Q-M3a-20), they read no v61 table.
+- The gate's "one release after M3b" fell away with M3b (§11.3).
+
 **Gate.** Merged only when one release has shipped after M3b and one after M8. The gate is written in the PR and
 checked by the orchestrator at merge.
 
@@ -3496,6 +3538,10 @@ and answer `removed`; `mail.reassign` and `mail.unblock` left it in M3a, Q-M3a-3
 
 ### M7b. The version-1 tool goes
 
+**Closed with M7, with nothing to delete** (as built, #2258). M3b's second schema was not built (§11.3), so there is no
+`MAIL_ARGS_ACCEPTED`, no `mailbox.v1_last_seen`, no `agents.mailArgs` and no process to wait out: the mapping this slice
+would delete is the tool. The unused version-2 arm of `mailCalls` went with M7. What follows is the slice as planned.
+
 **Gate.** The host records the time of the last version-1 call it mapped (`mailbox.v1_last_seen`, an app setting
 written by `mapV1`, M3b) and `sessions.mail_args` per spawned process (M1's column, written 2 by M3b's spawn). M7b is
 merged when, on the owner's machine, `mailbox.v1_last_seen` is older than one release and no live session has
@@ -3522,6 +3568,7 @@ then.`
 
 Product lines, without tests, on today's main. Estimates are ±15 %. They count M6's UI, the protocol entities, the
 providers, and the old report paths until M8. "After M7" includes M5 and M6; M7b removes the version-1 mapping.
+As built, M7b removed nothing (the mapping is the tool, §11.3), and `mailbox-adopt.ts` went with store step 75.
 
 | Area | Today | After M3c | After M7 | After M8 and M7b | Note |
 |---|---|---|---|---|---|
