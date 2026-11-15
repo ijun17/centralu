@@ -525,16 +525,14 @@ async function heapClasses(cdp: CDPSession, file: string): Promise<HeapClasses> 
   return out
 }
 
-/** The constructors that grew most between two snapshots */
+/** The constructors that grew most between two snapshots: only those whose bytes grew, so fewer than `top` rows when fewer grew */
 function heapGrowth(from: HeapClasses, to: HeapClasses, top = 25): { name: string; mb: number; count: number }[] {
   return [...to]
-    .map(([name, v]) => ({
-      name,
-      mb: round((v.bytes - (from.get(name)?.bytes ?? 0)) / 1048576),
-      count: v.count - (from.get(name)?.count ?? 0),
-    }))
-    .sort((a, b) => b.mb - a.mb)
+    .map(([name, v]) => ({ name, bytes: v.bytes - (from.get(name)?.bytes ?? 0), count: v.count - (from.get(name)?.count ?? 0) }))
+    .filter((g) => g.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
     .slice(0, top)
+    .map(({ name, bytes, count }) => ({ name, mb: round(bytes / 1048576), count }))
 }
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0
