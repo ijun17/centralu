@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { buildInbox, countWaiting, isAway, type InboxItem } from '@cc/core'
+import { useShallow } from 'zustand/react/shallow'
+import { buildInbox, countWaiting, isAway, type InboxItem, type WaitingCounts } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
@@ -9,8 +10,11 @@ import { machineNameOf, projectMachineOf } from './names.js'
 /**
  * All derived state is computed here (docs/state-management.md §3) — never stored.
  * Caution: a zustand selector that builds a new object on every call causes an infinite
- * re-render loop. So only a stable reference (the sessions map) is pulled out of the store, and
- * the computation itself is wrapped in useMemo.
+ * re-render loop. So either only a stable reference (the sessions map) is pulled out of the store
+ * and the computation is wrapped in useMemo, or the selector is wrapped in `useShallow`, which
+ * keeps the last result while its entries are the same. The second is for what is always on
+ * screen: the sessions map changes with every event of every session, and a component that reads
+ * it whole draws again for each of them.
  */
 
 /**
@@ -60,23 +64,17 @@ export function useInbox(now: number): InboxItem[] {
   )
 }
 
-export function useCounts() {
-  const sessions = useStore((s) => s.sessions)
-  const mcpProposals = useStore((s) => s.mcpProposals)
-  const skillProposals = useStore((s) => s.skillProposals)
-  const appArrivals = useStore((s) => s.appArrivals)
-  return useMemo(
-    () => countWaiting(candidates({ sessions, mcpProposals, skillProposals, appArrivals })),
-    [sessions, mcpProposals, skillProposals, appArrivals],
-  )
+/** The waiting counts the top bar shows: it draws again when a count moves, not on every event of every session */
+export function useCounts(): WaitingCounts {
+  return useStore(useShallow((s) => countWaiting(candidates(s))))
 }
 
+/**
+ * A project's sessions, the same array while none of them changed: an event of another project's session does not
+ * draw this project's sidebar block again.
+ */
 export function useSessionsOf(projectId: string): SessionSummary[] {
-  const sessions = useStore((s) => s.sessions)
-  return useMemo(
-    () => Object.values(sessions).filter((x) => x.projectId === projectId),
-    [sessions, projectId],
-  )
+  return useStore(useShallow((s) => Object.values(s.sessions).filter((x) => x.projectId === projectId)))
 }
 
 export function useFocusedSession(): SessionSummary | undefined {

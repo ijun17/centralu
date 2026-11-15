@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { memo, type Dispatch, type SetStateAction } from 'react'
 import { isMirrored, isUnread } from '@cc/core'
 import { childrenGroupKey } from '../../../store/foldGroups.js'
 import { useStore } from '../../../store/store.js'
@@ -19,8 +19,29 @@ import type { TreeRow } from '../tree.js'
  * rename, the ⋯ menu, and the fold toggle for the sessions it started. A project's own list and the
  * list under one of its apps draw the same row; what differs is `inApp` (one level deeper, its own
  * test id) and what a drop on it does (`onReorder`).
+ *
+ * Drawn again only when its own session, its children or a prop changed (`sameRow`). The list is rebuilt for every
+ * event of any session in it, a streamed reply's every piece included, and drawing every row for each of them was most
+ * of what the window allocated while sessions worked out of view. So the callers pass functions that stay the same.
  */
-export function SessionListRow({
+export const SessionListRow = memo(SessionListRowView, sameRow)
+
+type Props = Parameters<typeof SessionListRowView>[0]
+
+/** The tree is built anew each time; a row is the same when what it holds is the same objects */
+function sameRow(a: Props, b: Props): boolean {
+  // Every other prop the same value, in any order, without building anything: this runs for every row on every list draw
+  for (const k in a) if (k !== 'row' && !Object.is(Reflect.get(a, k), Reflect.get(b, k))) return false
+  for (const k in b) if (!(k in a)) return false
+  const x = a.row
+  const y = b.row
+  if (x.s !== y.s || x.nested !== y.nested || x.depth !== y.depth || x.folded !== y.folded) return false
+  if (x.children.length !== y.children.length) return false
+  for (let i = 0; i < x.children.length; i++) if (x.children[i] !== y.children[i]) return false
+  return true
+}
+
+function SessionListRowView({
   row: { s, nested, depth, children, folded: childrenFolded },
   projectId,
   inApp = false,
@@ -37,8 +58,8 @@ export function SessionListRow({
   projectId: string
   /** The row hangs under a listed app of the project, not directly under the project */
   inApp?: boolean
-  /** Another session row was dropped on this one: `before` says which edge */
-  onReorder: (draggedId: string, before: boolean) => void
+  /** Another session row was dropped on the row `rowId`: `before` says which edge */
+  onReorder: (rowId: string, draggedId: string, before: boolean) => void
   focusedSessionId: string | null
   renaming: string | null
   setRenaming: (id: string | null) => void
@@ -67,7 +88,7 @@ export function SessionListRow({
        * and the screen would end up lying.
        */
       draggable={renaming !== s.id && !nested}
-      onReorder={onReorder}
+      onReorder={(draggedId, before) => onReorder(s.id, draggedId, before)}
     >
       {renaming === s.id ? (
         <SessionNameInput

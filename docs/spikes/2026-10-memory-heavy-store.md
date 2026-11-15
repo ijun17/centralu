@@ -507,3 +507,47 @@ has to be parsed before the first frame.
    cheap now (0.1–0.8 MB each); in Chromium they still split each conversation's contents into extra layers (189 →
    66 MB GPU with sideways scrolling off). Wrapping long lines in narrow panels instead would be a design change.
 3. **The folded composer** is composited because it lies over the conversation's scroller (1.1 MB per panel).
+
+## 11. Sessions working out of view (`--steps background`)
+
+The owner's window grew about 57 MB/h in real use (5–8 sessions working at once, most of them out of view) while the
+`stream` step, which streams into the open session, settles flat. The `background` step (it lands with #2277) models
+that use: the long session open, 8 others streaming the same turn loop out of view for 30 minutes, three of them
+visited and left every 3 minutes, mail arriving every minute. Chromium on Windows, owner profile, 6,632 rows received:
+
+| | content MB, sampled | content after GC | JS heap MB | heap after GC |
+|---|---:|---:|---:|---:|
+| main, 0 s | 94 | 94 | 18 | 18 |
+| main, 5–30 min | 352–677 | 155–184 | 118–364 | 27–40 |
+| main, settled | 166 | 164 | 28 | 28 |
+| fix, 0 s | 91 | 91 | 18 | 18 |
+| fix, 5–30 min | 218–306 | 115–127 | 111–136 | 28–36 |
+| fix, settled | 115 | 113 | 28 | 28 |
+
+**What is held does not grow.** On main too, the heap after a collection levels off at about 28 MB after the first
+minutes, and two heap snapshots 30 minutes apart differ by 6.5 MB of strings: the rows the eight windows keep (§4 of
+docs/state-management.md, trimmed to 50–100 rows out of view). The first-minutes rise reproduces; the steady growth
+does not, in Chromium.
+
+**What churns is the sidebar.** An allocation profile of the first 3 minutes (CDP `HeapProfiler.startSampling`, mapped to
+source through a source-map build) put most of the 7 GB allocated in React drawing the whole sidebar again for every event of every session, each
+streamed piece included: every project block, every session row with its tool mark, the top bar with the usage
+donuts, and the closed palette. Chromium hands that memory back after a collection; the sampled footprint (before a
+forced collection) is where it shows. The fix (docs/state-management.md §3, "What is always on screen reads only what it
+draws") cut the same 3 minutes to 2.3 GB, and the footprint the table shows with it.
+
+**WebKit is flat too** (Mac, main e734c200a, `--steps blank,long,background --background-minutes 60
+--background-sessions 8`): WebContent 108 MB with the long session open, 132 MB at 5 minutes, then 132, 133, 134 and
+135 MB at 10, 30, 50 and 60 minutes and after settling, over about 12,500 events. So this step does not reproduce the
+real window's ~57 MB/h in either engine, and the churn fix is not that cure: it cuts what every event costs, not what
+is kept. What the step still lacks from real use: an app's view (the project board) in the window, opening many
+sessions one after another over hours (the `switched` step alone added 90 MB for 10 sessions), images, reconnects.
+
+**Opening sessions over time is flat too** (`--steps blank,long,revisit`, #2277). The long session stays open; every
+30 s the next of the 23 other sessions is opened, every other one read back a history page, for five rounds (57.5 min),
+with 4 sessions streaming out of view. WebKit (Mac, main): WebContent 120 MB at the start, 163 after the first round,
+then 156, 157, 157 and 156, and 156 settled. The window pays about 43 MB once for opening every session and nothing per
+re-open. Chromium (Windows, private bytes after GC) creeps about 9 MB a round, on main (184 → 220) and with this change
+(147 → 217) alike. That creep is not held by anything the page can reach: the JS heap stays at 25–37 MB, the heap
+diff from round 1 to the end has nothing over 0.6 MB, listeners and DOM nodes return to their start, and main's
+working set settles at its start (199 MB). It reads as allocator commit, not a leak. Next in line is the app's view.
