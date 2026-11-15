@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ASK_WAIT_MS, NO_WORDS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, pickAskedSession, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { awayRefusal } from '../links/machine-reach.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult } from '@cc/protocol'

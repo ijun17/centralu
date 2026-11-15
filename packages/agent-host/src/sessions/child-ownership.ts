@@ -1,5 +1,5 @@
 import { errorMessage, TurnOrigin } from '@cc/protocol'
-import type { BackgroundTask, StoredMessage } from '@cc/protocol'
+import type { StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { asObj, tryParseJson } from '../json-value.js'

@@ -11,7 +11,6 @@ import type {
   RpcResult,
   ApprovalDetail,
   Question,
-  QuestionAnswer,
   SessionInfo,
   PermissionPreset,
   ToolName,
