@@ -694,7 +694,7 @@ const links = new Links(linkDepsFor(store, {
   // This hub's apps used by the agents its sessions started on a machine (#1938, §13.5)
   hubApps: true,
   // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review)
-  mailReady: () => hostMailbox.across.changed(),
+  onOfferAnswered: () => hostMailbox.across.changed(),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop
@@ -734,8 +734,8 @@ const hubs = new LinkedHubs({
 hostMailbox.across.usePeers(
   mailPeers({ hostId: hubSelfId(store), selfName: hubName, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), hubs, settings: store.settings }),
 )
-// A machine that takes mail from this hub is told so in its children's task (#2067 item 2)
-mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
+// Work for a linked machine's sessions goes as tasks when it takes them (#1948 step 6)
+mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
 mgr.useLinkedHubs(hubs)
 // The hosts whose apps a session here uses (#1938): this hub's machines, and the hub that started a session here
 linkedApps.usePeers(appsPeers({ machines: links, hubs, settings: store.settings }))
@@ -745,7 +745,7 @@ mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
 mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 // The Assistant reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
-mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
+mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))
 // The Assistant's list_machines reads the list Settings shows (#1220)
 mgr.useMachineList(() => links.list())
 // And changes them, behind the person's card where it matters (#1219)

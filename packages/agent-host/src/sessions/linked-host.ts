@@ -3,7 +3,6 @@ import { oneLineText, isAssistantKind, isAssistantOrCoordinator } from '@cc/prot
 import { rpcError } from '../rpc-error.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { budgetOf } from './session-lines.js'
-import type { AskProjectFlow } from './ask-project-flow.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HandoffFlowHost } from './handoff-flow.js'
 import { HUB_SENDER } from './hub-sender.js'
@@ -27,13 +26,11 @@ const HOST_RECALL_MAX_HITS = 50
  * What the linked-machine side reaches of the session manager (#1143), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' | 'deliver'> &
+export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' | 'deliver' | 'routedCards' | 'answerRoutedCard'> &
   Pick<SessionTrashHost, 'delegationFlow'> &
   Pick<HandoffFlowHost, 'send'> &
   Pick<SessionToolsHost, 'centraluToolsFor'> & {
-    /** ask_project, here or on a linked machine (ask-project-flow.ts) */
-    readonly askProjectFlow: AskProjectFlow
-    /** The Assistant's reports from linked machines' sessions (linked-reports.ts) */
+    /** Each linked machine's session's own background work, as the hub last heard it (linked-reports.ts) */
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
     readonly turnContinue: Pick<TurnContinue, 'stands'>
@@ -56,18 +53,11 @@ export class LinkedHost {
   }
 
   /**
-   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, with a
-   * pause over the session's own background work (#723, `LinkedReports`): this host's own sessions are answered by the
-   * mailbox instead (docs/plans/mailbox.md §10.6.3), until mail crosses links.
+   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts): what its sessions' own background work is (`LinkedReports`,
+   * #723). The work given a session there is the mailbox's, reported by its machine (#1948 step 6).
    */
   observeLinked(e: LinkedEvent): void {
-    if (e.type === 'machine_status') this.host.askProjectFlow.observeLinkLoss(e.machine)
-    else if (typeof e.sessionId === 'string') {
-      const ask = this.host.askProjectFlow.linkedAsks.get(e.sessionId)
-      if (ask) this.host.askProjectFlow.observeLinkedAsk(ask, e)
-    }
-    // A call waiting on a child there reads its turn's end; no report is armed while it waits, so nothing comes twice (#1038)
+    // A child start_agent started there that was deleted, or a machine whose link is back (#1038)
     this.host.delegationFlow.remote.observe(e)
     this.host.linkedReports.observe(e)
   }
@@ -84,7 +74,25 @@ export class LinkedHost {
   }
 
   /**
-   * A hub's Assistant's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
+   * The cards of a session here that a hub's session reads as a giver of work it gave here (`host.cards`, #1948 step 6): this host judges, by its own
+   * rule for its own givers (`RoutedCards.routedCards`, docs/plans/mailbox.md §10.6.4), the hub's session named by its address. None for a session a
+   * hub is not shown, or one that giver has no work open in
+   */
+  hubCards(sessionId: string, giver: string): { card: string; requestId: string; kind: 'question' | 'approval'; answerable: boolean }[] {
+    this.directedFromHub(sessionId)
+    return this.host.routedCards(sessionId, giver).map(({ card, requestId, kind, answerable }) => ({ card, requestId, kind, answerable }))
+  }
+
+  /** A hub's session answers a card it read (`host.answerCard`): only as this host's rule lets that giver (`RoutedCards.answerRoutedCard`); refused in its words */
+  async hubAnswer(sessionId: string, giver: string, card: string, text: string): Promise<{ ok: true }> {
+    this.directedFromHub(sessionId)
+    const r = await this.host.answerRoutedCard(giver, sessionId, card, text)
+    if (!r.ok) throw rpcError(r.error)
+    return { ok: true }
+  }
+
+  /**
+   * A hub's Assistant's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2), as a hub from before #1948 step 6 sends work. Delivered as
    * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
    *
    * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
@@ -94,7 +102,7 @@ export class LinkedHost {
     this.directedFromHub(sessionId)
     const name = oneLineText(fromName, 120) || 'Assistant on a linked computer'
     /*
-     * An ask_project task from the hub (#838 item 12): the session works on it at the depth the hub counts, until the
+     * An ask_project task from such a hub (#838 item 12): the session works on it at the depth the hub counts, until the
      * turn that consumes it is recorded (`hubAskDepthKey`), so its start_agent and ask_project read the same depth as a
      * session asked here. Marked before the send, as the turn may end before it returns; taken back if the send fails.
      * The input is tracked where the adapter can (`sendTracked`), so the mark goes with that turn and not with another

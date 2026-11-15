@@ -387,6 +387,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // Mail from a hub to this host's sessions, and what became of mail that crossed (#2067 item 2): answered here, never passed on
   'host.mail': HUB,
   'host.mailRows': HUB,
+  'host.mailMove': HUB,
+  'host.cards': HUB,
+  'host.answerCard': HUB,
   // A project's app here used by the hub's sessions (#1938): answered here, never passed on
   'host.apps': HUB,
   'host.appCall': HUB,

@@ -11,7 +11,6 @@ import type {
   RpcResult,
   ApprovalDetail,
   Question,
-  QuestionAnswer,
   SessionInfo,
   PermissionPreset,
   ToolName,
@@ -238,9 +237,6 @@ type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string }
  * Assistant reaches through it: a manager, a lead and an ordinary session keep their own machine's view
  */
 export type LinkedSessions = {
-  /** An instruction to a machine's session, recorded there as sent by `fromName` (`host.send`) */
-  /** `ask`: the text is an ask_project task, worked on at that agent depth until its turn ends (#838) */
-  send(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<Outcome>
   /** A machine's session's model, effort or verbosity (`agents.updateSettings` there); the answer in the hub's terms */
   updateSettings(
     sessionId: string,
@@ -297,29 +293,16 @@ export type LinkedSessions = {
    */
   deleteAgentChild?(sessionId: string, branch: string): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }>>
   /**
-   * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
-   * last thousand messages: whose turn it is running (#1038 review). `seq`: its row there. `atRest`: the session is in no
-   * turn as that machine lists it now (absent when it did not say), so no turn is still to open for a message before its last (#1604)
+   * The cards a machine's session shows `callerId` (a session here) as a giver of work there, each with whether it may answer (`host.cards`, #1948
+   * step 6): that machine alone judges, by its own rule (docs/plans/mailbox.md §10.6.4)
    */
-  lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown; seq?: number } | null; atRest?: boolean }>>
-  /** The cards standing in a machine's session now, as that machine lists them (#1038: agent_session on a child there) */
-  cards(sessionId: string): Promise<Outcome<{
-    approval: { requestId: string; detail: ApprovalDetail } | null
-    questions: { requestId: string; questions: Question[] }[]
-  }>>
-  /** Answers a question card of a machine's session, as its window would (`agents.answerQuestion` there, #1038) */
-  answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<Outcome>
+  cards(sessionId: string, callerId: string): Promise<Outcome<{ cards: RoutedCard[] }>>
+  /** Answers a card of a machine's session by the handle `callerId` read (`host.answerCard`): refused there unless that machine's rule lets that giver */
+  answerCard(sessionId: string, callerId: string, card: string, text: string): Promise<Outcome>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */
   machineLinked(machineId: string): boolean
-  /**
-   * Whether the machine is not connected and nothing here will connect it until the person does (#1341): not while its
-   * client redials, an attempt is under way or an install or update holds it. False for a machine not linked
-   */
-  machineWaitsForPerson(machineId: string): boolean
-  /** Whether the machine's host continues the turns an update's stop cuts (#1618, its hello's `updateContinued`) */
-  continuesCutTurns?(machineId: string): boolean
   /**
    * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
    * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up
@@ -447,7 +430,6 @@ export type AskProjectResult =
  *   asking    the turn the caller gave it waits on a card the caller reads here and answers with agent_session (#676)
  *   answered  agent_session answer reached the card
  *   busy      the session is busy with a turn that is not the caller's: nothing was sent, the choices are listed (#677)
- *   queued    held until the session's running turn ends, then delivered as a new turn (#677)
  *   stopped   agent_session stop ended the turn
  *   deleted   agent_session delete put a child in the session archive; worktree children also report branch cleanup
  *   pending   no session yet (#673): the start waits on the person's card. `sessionId` is the request's handle, which
@@ -475,8 +457,6 @@ export type ChildRunResult =
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
       | { state: 'mailed'; messageId: string; lowMemory?: string }
-      /** A note held for a child on a linked machine until it is at rest (#1682): mail does not cross links yet */
-      | { state: 'queued'; queueId: string; position: number }
       | { state: 'stopped' }
       /**
        * No session yet (#673): the person has not answered the card; or, with `lowMemory`, the start is allowed and

@@ -1,13 +1,12 @@
-import { stamped } from '../log-file.js'
-import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy, isAssistantKind } from '@cc/protocol'
+import { blockedOnQuestion, defaultPresetFor, isInTurn, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy, isAssistantKind } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
-import type { AgentListRow, AgentSessionOpts, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import type { AgentListRow, AgentSessionOpts, BusyAnswer, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import type { Asker } from '../mail/asked-by.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
-import type { ChildOwnership, LinkedReport } from './child-ownership.js'
+import type { ChildOwnership } from './child-ownership.js'
 import type { AssistantProposals } from './assistant-proposals.js'
 import type { DelegationForks } from './delegation-forks.js'
 import type { DelegationHost } from './delegation-host.js'
@@ -45,7 +44,7 @@ export function createdPreset(seat: PermissionPreset, project: { trusted: boolea
  */
 export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   Pick<ProjectCreation, 'createProjectAsked' | 'askAppProject' | 'createProjectOnMachine' | 'addFolderAsked' | 'addFolderOnMachine'> &
-  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation' | 'projectTrusted' | 'takesSendNow' | 'mailTask'> & {
+  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'linkedTasks'> & {
   /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
@@ -53,8 +52,6 @@ export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   readonly proposals: Pick<AssistantProposals, 'proposeMcpServer' | 'proposeSkill'>
   /** The links to other machines, once wired (`useLinkedReader`), else null */
   linkedReader(): LinkedSessions | null
-  /** A linked machine's report put back after a failed send: a paused one's settle wait starts again (#723) */
-  linkedReportRestored(sessionId: string): void
   emit(e: NormalizedEvent): void
   updateCentraluAsked(
     sessionId: string,
@@ -106,15 +103,8 @@ export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   handoffWait(callerId: string, handle: string, signal?: AbortSignal): Promise<HandoffResult>
 }
 
-/**
- * Report requests of overlapping linked sends (#839): what each one replaced, and those whose send failed while another
- * send's request stood over them. A failed send puts back what was there before it, past any such failed request.
- */
 /** The rows one read from an offset loads (#1186): a response's messages, merged into the one line it reads */
 const OFFSET_READ_ROWS = 200
-
-const replacedBy = new WeakMap<LinkedReport, LinkedReport | undefined>()
-const failedSends = new WeakSet<LinkedReport>()
 
 /**
  * The tools given to an Assistant (FR-11).
@@ -208,47 +198,19 @@ export function centraluToolsFor(
     : `Not a session this app manages: ${id}`
 
   /**
-   * An instruction to a linked machine's session (#82 phase 4), send_to_session's and create_session's first message
-   * (#1233): delivered there as an instruction from this Assistant, under that session's own approval settings. The report is watched for before the send, since the machine's first
-   * events can reach this hub before its answer does. The new wait reads nothing until the machine's record of this
-   * instruction is relayed (`instruction`, #1082): a turn end before it is an earlier turn's. An earlier report
-   * paused over its own work (#723) is replaced by it, as a new task ends a pause here; if the send fails it is
-   * put back, and its settle wait starts again from the work as the hub knows it now. A turn end of the old work
-   * that came in that moment is not the new wait's, and is not told again.
+   * Work for a linked machine's session (#82 phase 4), send_to_session's and create_session's first message (#1233): a task across the link
+   * (#1948 step 6), which that machine's delivery gives the session (held while it is busy) under its own approval settings, and whose report comes
+   * back to this seat as a local session's does; without `reportBack`, a note that asks for nothing back. Only this host's Assistant's
+   * send_to_session is said to be for the person (`forPerson`), as its own is here (#2258)
    */
-  const sendLinked = async (reader: LinkedSessions, sessionId: string, text: string, reportBack: boolean | undefined): Promise<{ ok: boolean; error?: string }> => {
-    const earlier = host.children.linkedReports.get(sessionId)
-    const mine: LinkedReport | undefined = reportBack ? { assistantId, busy: false, instruction: text } : undefined
-    if (mine) host.children.setLinkedReport(sessionId, mine)
-    const r = await reader.send(sessionId, text, host.meta.get(assistantId)?.name ?? 'Assistant')
-    // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
-    const current = host.children.linkedReports.get(sessionId)
-    if (mine) replacedBy.set(mine, earlier)
-    if (!r.ok) {
-      if (mine && current === mine) {
-        // What was there before: past any request of an overlapping send that failed while this one was out (#839)
-        let back = earlier
-        while (back && failedSends.has(back)) back = replacedBy.get(back)
-        if (back) {
-          host.children.setLinkedReport(sessionId, back)
-          host.linkedReportRestored(sessionId)
-        } else host.children.dropLinkedReport(sessionId)
-      } else if (mine) failedSends.add(mine)
-      return r
-    }
-    /*
-     * The machine records the instruction before it answers, and its events and answers come in order on one link,
-     * read as they come: by now its record has been heard, unless it was lost (the machine's host swapped or restarted
-     * before it went out, past what a reconnect replays). Then nothing would ever start the wait, so it reads turn
-     * ends from here on, as before #1082: anything older came before this answer, and was not taken for its end
-     */
-    if (mine?.instruction !== undefined) {
-      console.error(stamped(`[links] ${sessionId}: the machine's record of the instruction was not heard; the next turn end reports`))
-      delete mine.instruction
-    }
-    // As here (#166): a new instruction without a report replaces this Assistant's earlier request
-    if (!reportBack && earlier?.assistantId === assistantId && current === earlier) host.children.dropLinkedReport(sessionId)
-    return { ok: true }
+  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session', reader?: LinkedSessions): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }> => {
+    if (!host.linkedTasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
+    // Where the session stands, as its machine says now: one in a turn is answered as a busy one here is. Unknown (the read failed) says nothing of it
+    const now = reader ? await reader.read(sessionId, 1).catch(() => null) : null
+    const r = await host.linkedTasks.send(assistantId, sessionId, text, { origin, ...(reportBack ? {} : { note: true as const }), ...(origin === 'send_to_session' ? { forPerson: true as const } : {}) })
+    if (!r.ok) return { ok: false, error: r.text }
+    // Mailed, waiting there until it is free
+    return now?.ok && isInTurn(now.state) ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
   }
 
   return {
@@ -418,8 +380,8 @@ export function centraluToolsFor(
         const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset: lowestPreset(preset, 'normal'), ...(preset === 'auto' ? { callerPreset: 'auto' as const } : {}) })
         if (!r.ok) return r
         if (opts.firstMessage) {
-          // On a linked machine as send_to_session's instruction there: the report is watched for before it goes
-          const sent = await sendLinked(reader, r.sessionId, opts.firstMessage, reportBack)
+          // On a linked machine as a task across the link, as send_to_session's (#1948 step 6)
+          const sent = await sendLinked(r.sessionId, opts.firstMessage, reportBack, 'create_session')
           if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
         }
         return { ok: true, sessionId: r.sessionId, name: r.name }
@@ -683,7 +645,7 @@ export function centraluToolsFor(
         // §7.4: asked before anything goes over the link
         const refused = host.refusesDelegation(assistantId, { sessionId, linked: true }, { tool: 'send_to_session', target: `a session on ${remote.machineOf(sessionId) ?? 'a linked machine'}`, text })
         if (refused) return { ok: false, error: refused }
-        return sendLinked(remote, sessionId, text, reportBack)
+        return sendLinked(sessionId, text, reportBack, 'send_to_session', remote)
       }
       const target = host.meta.get(sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId, 'send') }

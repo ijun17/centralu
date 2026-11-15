@@ -80,7 +80,7 @@ for word: the same injection path as a worker's report, so the same rule applies
   separators, the bidi controls, the zero-width space and word joiner, and the tag characters (which
   hide text from a reader) become one space. ZWJ, ZWNJ and the soft hyphen stay: they are part of names.
   A linked machine's paths keep their spaces and joiners and lose only what breaks a line (`onePath`). Every name or task line the host puts on one line uses it: a frame's names (`askFrame`,
-  `agentFrame`, `agentNoteFrame`), a linked machine's names, consent cards' task lines, session labels.
+  `agentFrame`), a linked machine's names, consent cards' task lines, session labels.
   The ten copies had different sets, and the narrower ones let a NEL, a bidi override or U+2028 through.
 
 The same rule covers an app's error report. "Send to builder" hands the builder a bundle made of

@@ -1,12 +1,12 @@
-import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type MailRowState } from '@cc/protocol'
-import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { isPeerAnswer } from '../rpc-error.js'
+import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
 import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
-import type { MessageService } from './messages.js'
-import type { MailReach } from './reach.js'
+import type { DelegationOrigin } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
+import { reportWords } from './last-response.js'
+import { older, unreachable, type AcrossMachine, type AcrossSent, type Work } from './across-core.js'
+import { AcrossReceipts } from './across-receipts.js'
 
 /**
  * Mail across linked machines (#2067 items 2 and 3, docs/plans/linked-mail.md §5 to §8): every session reaches every
@@ -33,86 +33,8 @@ export function mayReachAcross(_from: string, _to: string): boolean {
   return true
 }
 
-/** What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written */
-export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string } | { ok: false; why: string; text: string }
-
-/** One side of a link this host calls: a hub that offered on a connection here, or a machine this hub links */
-export type AcrossPeer = {
-  name: string
-  /** Connected now */
-  reachable: boolean
-  call(method: string, params: unknown): Promise<unknown>
-}
-
-/** What this host reaches, given once its links exist (main.ts); absent parts are a role this host does not have */
-export type AcrossPeers = {
-  /** A hub, by its id, as it offered here; `you` is this machine's id there, null for a hub from before item 2 */
-  hub?(id: string): (AcrossPeer & { you: string | null }) | undefined
-  hubs?(): (AcrossPeer & { id: string; you: string | null })[]
-  /** The hub that started a session here (`startingHub`), for `parent` */
-  startingHub?(sessionId: string): { id: string; name: string } | null
-  /** A machine this hub links, by its id */
-  machine?(id: string): (AcrossPeer & { id: string }) | undefined
-  /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
-  machineSession?(machineId: string, sessionId: string): string | undefined
-  /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */
-  machineState?(machineId: string, sessionId: string): string | undefined
-  /** The linked machines' sessions as this hub's mirror last had them, and the machines that are not reachable */
-  machineDirectory?(): { entries: FoundEntry[]; away: { name: string; why: string }[] }
-  /** The session here that started a machine's child, by the child's qualified id (`<machine>.<id>`), for that child's `parent` */
-  parentOf?(qualifiedId: string): string | undefined
-  /** This computer's name, as the other side reads it */
-  selfName(): string
-  /**
-   * `fn` runs each time a hub offers mail here again: what became of mail that crossed is told then (§6). A hub hears its
-   * machines connect through `LinkDeps.mailReady`
-   */
-  onConnect?(fn: () => void): void
-}
-
-export type MailAcrossDeps = {
-  hostId: string
-  service: MessageService
-  records: MailboxRecords
-  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel'>
-  /** This host's own sessions as the directory lists them */
-  ownEntries(): FoundEntry[]
-  now?: () => number
-  /**
-   * When what became of crossing mail was last told to every linked side, kept in the store: rows settled since are told
-   * again after a restart, so none that was never told is lost. Absent: every crossing row is read at each change
-   */
-  toldAt?: { get(): number | null; set(at: number): void }
-  /** Runs `fn` soon; tests run it at once */
-  soon?: (fn: () => void) => void
-  log?: (line: string) => void
-}
-
-/**
- * How far before the kept mark (`toldAt`) crossing rows are read again: a row's `settled_at` can be the other side's
- * time, merged from its rows, and a clock behind this one would put a row settled after the mark before it (#2067 re-check)
- */
-const TOLD_SLACK_MS = 10 * 60_000
-
-/** Where an address is, from this host: here, a machine this hub links, or a hub's side */
-type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; sessionId: string } | { kind: 'hub'; hubId: string }
-
-/** The words a call failed with for an older build (it has no such method) */
-const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
-
 /** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
 type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[] }
-
-/** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
-type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }; computer: string; at: number }
-
-/** Whether two sends say the same: a send again of an unsure one goes under its id only then (`idFor`) */
-const sameMessage = (a: Unsure['fields'], b: Unsure['fields']): boolean =>
-  a.text === b.text && a.replyTo === b.replyTo && a.needsReply === b.needsReply && (a.urgent ?? false) === (b.urgent ?? false)
-
-/** How long, and how many, unsure sends are kept: a copy is kept for one only while it is likely to be heard of */
-const UNSURE_MS = 24 * 60 * 60_000
-const UNSURE_MAX = 500
 
 /** A message id another host picked: its host's id and a ulid (`messageIdOf`), never one of this host's */
 const FOREIGN_ID = /^[^\s/]{1,120}\.m_[0-9A-Za-z]{10,40}$/
@@ -122,95 +44,7 @@ export const FIND_MS = 4000
 /** How long a send by name waits for a hub when a session here has that name already: what a reachable hub answers in */
 export const NAMED_HERE_MS = 600
 
-export class MailAcross {
-  private peers: AcrossPeers | null = null
-  /** The names of sessions on the other side, as last heard (from a message or a search) */
-  private readonly names = new Map<string, string>()
-  /** The state of each crossing row the other side was told last, by `<message id>|<recipient>` */
-  private readonly told = new Map<string, string>()
-  /**
-   * The sends from here not yet answered, or whose answer was lost (the link failed or the answer did not come in time),
-   * by message id. The other side may have written one: a second send of the same words reuses its id, which the other
-   * side takes as the one it has, and the copy is kept here once the other side's row or a reply to it arrives
-   */
-  private readonly unsure = new Map<string, Unsure>()
-  private syncing = false
-  private again = false
-  private readonly now: () => number
-
-  constructor(private readonly d: MailAcrossDeps) {
-    this.now = d.now ?? Date.now
-  }
-
-  /** The links, once they exist. Rows the other side may not have heard of yet are sent now and at each connect */
-  usePeers(peers: AcrossPeers): void {
-    this.peers = peers
-    peers.onConnect?.(() => this.changed())
-    this.changed()
-  }
-
-  // ── Addresses ──
-
-  private route(address: string): Route | null {
-    const p = parseAddress(address)
-    if (p?.kind !== 'session') return null
-    if (p.host === this.d.hostId) {
-      const dot = p.sessionId.indexOf('.')
-      return dot < 0 ? { kind: 'here' } : { kind: 'machine', machineId: p.sessionId.slice(0, dot), sessionId: p.sessionId.slice(dot + 1) }
-    }
-    return { kind: 'hub', hubId: p.host }
-  }
-
-  /** Whether `hostId` is a hub that links this host, reachable now or not: one that offered here on this run, or one kept from an earlier run that took mail (`LinkedHubs.peer`) */
-  isHub(hostId: string): boolean {
-    return this.peers?.hub?.(hostId) !== undefined
-  }
-
-  /** Whether an address is a session on another host: this host never delivers to it, and never writes to it but a copy */
-  foreign(address: string): boolean {
-    const r = this.route(address)
-    return r !== null && r.kind !== 'here'
-  }
-
-  /** A foreign session's name as last heard, with its computer: what this host's mail shows for it */
-  foreignName(address: string): { name: string } | undefined {
-    const r = this.route(address)
-    if (!r || r.kind === 'here') return undefined
-    const heard = this.names.get(address) ?? (r.kind === 'machine' ? this.peers?.machineSession?.(r.machineId, r.sessionId) : undefined)
-    if (heard) return { name: heard }
-    const computer = this.computerOf(r)
-    return { name: computer ? `a session on ${computer}` : address }
-  }
-
-  /** A linked machine's session's state as this hub's mirror last had it, for the person's Inbox; undefined for any other address */
-  foreignState(address: string): string | undefined {
-    const r = this.route(address)
-    return r?.kind === 'machine' ? this.peers?.machineState?.(r.machineId, r.sessionId) : undefined
-  }
-
-  private computerOf(r: Route): string | null {
-    if (r.kind === 'machine') return this.peers?.machine?.(r.machineId)?.name ?? null
-    if (r.kind === 'hub') return this.peers?.hub?.(r.hubId)?.name ?? null
-    return null
-  }
-
-  /** On a machine, its own session as the hub `hubId` names it */
-  private asHubNames(hubId: string, address: string): string {
-    if (address === sessionAddress(hubId, PERSON_ID)) return PERSON
-    const you = this.peers?.hub?.(hubId)?.you
-    const p = parseAddress(address)
-    return you && p?.kind === 'session' && p.host === this.d.hostId && !p.sessionId.includes('.') ? sessionAddress(hubId, `${you}.${p.sessionId}`) : address
-  }
-
-  /** On a machine, an address as the hub `hubId` names it, as this host names it (its own sessions are its own again) */
-  private fromHubNames(hubId: string, address: string): string {
-    if (address === PERSON) return sessionAddress(hubId, PERSON_ID)
-    const you = this.peers?.hub?.(hubId)?.you
-    const p = parseAddress(address)
-    if (!you || p?.kind !== 'session' || p.host !== hubId || !p.sessionId.startsWith(`${you}.`)) return address
-    return this.d.service.sessionAddress(p.sessionId.slice(you.length + 1))
-  }
-
+export class MailAcross extends AcrossReceipts {
   // ── Sending from here ──
 
   /**
@@ -219,6 +53,83 @@ export class MailAcross {
    */
   async send(sessionId: string, input: SendInput): Promise<AcrossSent> {
     return this.sendFrom(this.d.service.sessionAddress(sessionId), input)
+  }
+
+  /**
+   * On a hub: work a session here gives a linked machine's session (#1948 step 6, docs/plans/linked-mail.md §9): written there as a task (or a note),
+   * which that machine's delivery gives the session and its engine reports; the copy here is a task too, so the report that comes back answers it. A
+   * machine that does not take tasks is refused `older`, and nothing is written. `forPerson` is said only for this host's Assistant's `send_to_session`;
+   * `depth`, the agent depth the session there works at on it
+   */
+  async sendTask(senderId: string, to: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent> {
+    const sender = this.d.service.sessionAddress(senderId)
+    // As an agent's other calls on a machine (#1532): one that is down is tried now, and one just connected has answered this hub's offer, which says
+    // whether it takes tasks, before it is read
+    const route = this.route(to)
+    const away = route?.kind === 'machine' ? await this.peers?.machine?.(route.machineId)?.reach?.() : null
+    if (away) return { ok: false, why: 'link_down', text: away }
+    const there = this.taskPeer(to)
+    if ('why' in there) return { ok: false, ...there }
+    const { m, sessionId } = there
+    if (text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
+    // Before an id is kept as unsure: a send never made leaves no doubt
+    if (!m.reachable) return unreachable(m)
+    const origin = task.origin === 'script' ? 'send_to_session' : task.origin
+    const fields = { text, needsReply: false }
+    const work: Work = { origin, ...(task.note ? { note: true as const } : {}) }
+    const id = this.idFor(sender, to, fields, m.name, work)
+    const params: HostMailParams = {
+      from: sender, name: `${this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: sessionId, text, id,
+      // For the person only as `forPersonOf` reads it here: this host's own Assistant's send_to_session (#2258, #2274)
+      task: { origin, ...(task.note ? { note: true as const } : {}), ...(task.forPerson && origin === 'send_to_session' && this.d.reach.isAssistant(sender) ? { forPerson: true as const } : {}), ...(task.depth ? { depth: task.depth } : {}) },
+    }
+    // The copy is kept before the task leaves, so the report that answers it finds it whenever it comes: after this host restarted too, when nothing
+    // of the send is remembered. A send again of an unsure one has its copy already
+    if (!this.d.records.message(id)) {
+      try {
+        this.d.service.sentAcross(sender, { id, to, ...fields, task: work })
+      } catch (e) {
+        this.unsure.delete(id)
+        return { ok: false, why: 'failed', text: `this computer could not keep its copy of the task, so nothing was sent: ${oneLineText(errorMessage(e), 500)}` }
+      }
+    }
+    const r = this.settle(id, await this.ask(m, 'host.mail', params))
+    if (!r.ok) {
+      // Refused there: nothing there answers the copy. One that may have arrived keeps it, as the task it may be
+      if (!r.maybe) this.d.records.deleteRows([{ messageId: id, recipient: to }])
+      return { ok: false, why: r.why, text: r.text }
+    }
+    this.names.set(to, `${r.to} on ${m.name}`)
+    return { ok: true, messageId: id, to: r.to, address: to, computer: m.name }
+  }
+
+  /** Why a task to `to` cannot go now (`sendTask` says the same), or null: not a linked machine's session, no such machine, or one that takes no tasks yet or at all */
+  taskRefusal(to: string): { why: string; text: string } | null {
+    const there = this.taskPeer(to)
+    return 'why' in there ? there : null
+  }
+
+  private taskPeer(to: string): { m: AcrossMachine; sessionId: string } | { why: string; text: string } {
+    const route = this.route(to)
+    if (route?.kind !== 'machine') return { why: 'bad_address', text: `${this.nameOf(to)} is not a session on a machine this computer links.` }
+    const m = this.peers?.machine?.(route.machineId)
+    if (!m) return { why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
+    if (m.reachable && m.tasks === undefined) return { why: 'link_down', text: `${m.name} is still connecting to this computer, so nothing was sent. Try again in a moment.` }
+    if (m.reachable && m.tasks !== true) return { why: 'older', text: `${m.name} runs an older Centralu, which takes no work from this computer. Update Centralu on ${m.name}.` }
+    return { m, sessionId: route.sessionId }
+  }
+
+  /**
+   * On a machine: the copy of the task a hub wrote for `sender`'s ask_project to its session `to` (`HubAskResult.taskId`, #1948 step 6), under the hub's
+   * id, so the report the hub sends (`host.mail` with `report`) answers it. An id that is not another host's, or that names a message here, keeps nothing
+   */
+  keepAsk(sender: string, to: string, id: string, text: string): void {
+    if (!FOREIGN_ID.test(id) || id.startsWith(`${this.d.hostId}.`) || this.d.records.message(id)) return
+    try {
+      this.d.service.sentAcross(sender, { id, to, text, needsReply: false, task: { origin: 'ask_project' } })
+    } catch (e) {
+      this.d.log?.(`[mail] the copy of the ask ${id}, which ${this.foreignName(to)?.name ?? to} took, could not be kept here: ${errorMessage(e)}`)
+    }
   }
 
   /**
@@ -266,7 +177,7 @@ export class MailAcross {
     if (!route || route.kind === 'here') return { ok: false, why: 'bad_address', text: `${input.to} is not a session on another computer.` }
     if (route.kind === 'machine') {
       const m = this.peers?.machine?.(route.machineId)
-      if (!m) return { ok: false, why: 'link_down', text: `no machine ${route.machineId} is linked to this computer, so nothing was sent.` }
+      if (!m) return { ok: false, why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
       const id = this.idFor(sender, input.to, fields, m.name)
       // The machine shows the sender as it reads here, with this computer's name
       const params: HostMailParams = { from: sender, name: `${sender === PERSON ? 'the person' : this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: route.sessionId, ...fields, id }
@@ -286,47 +197,6 @@ export class MailAcross {
     // A hub from before the person's mail crossed reads `person` as no address
     if (!r.ok && r.why === 'bad_address' && toPerson) return { ok: false, why: 'older', text: `${h.name} runs an older Centralu, which takes no mail to the person from here. Update it there.` }
     return this.wrote(sender, input.to, fields, h.name, r)
-  }
-
-  /**
-   * The id a send to `to` goes under: the one of an unsure send of the same message by the same sender (its words, what it
-   * answers, whether it is urgent and wants a reply), so the other side takes it as the message it may have, else a new
-   * one, kept as unsure until the other side answers. A send again that changes any of them is another message: under the
-   * same id the other side would keep the first, and its urgency or question would be lost (#2067 re-check)
-   */
-  private idFor(sender: string, to: string, fields: Unsure['fields'], computer: string): string {
-    const now = this.now()
-    for (const [id, u] of this.unsure) {
-      if (now - u.at > UNSURE_MS) this.unsure.delete(id)
-      else if (u.sender === sender && u.to === to && sameMessage(u.fields, fields)) return id
-    }
-    const id = this.d.service.mintId()
-    this.unsure.set(id, { sender, to, fields, computer, at: now })
-    for (const old of this.unsure.keys()) {
-      if (this.unsure.size <= UNSURE_MAX) break
-      this.unsure.delete(old)
-    }
-    return id
-  }
-
-  /** The other side's answer to the send of `id`: one it gave, written or refused, ends the doubt; a lost one keeps it */
-  private settle<R extends { ok: boolean; maybe?: boolean }>(id: string, r: R): R {
-    if (r.ok || !r.maybe) this.unsure.delete(id)
-    return r
-  }
-
-  /**
-   * The copy of an unsure send, kept now that the other side showed it has the message (its row or a reply came). It stays
-   * unsure: the sender, told the send failed, may send the same words again, which then go under this id and find it there
-   */
-  private adopt(messageId: string, recipient: string): void {
-    const u = this.unsure.get(messageId)
-    if (!u || u.to !== recipient || this.d.records.message(messageId)) return
-    try {
-      this.d.service.sentAcross(u.sender, { id: messageId, to: u.to, ...u.fields })
-    } catch (e) {
-      this.d.log?.(`[mail] the copy of ${messageId}, which ${u.computer} took, could not be kept here: ${errorMessage(e)}`)
-    }
   }
 
   /** A session a hub started here, to the session there that started it: through that hub only, which knows who that is */
@@ -349,26 +219,6 @@ export class MailAcross {
     if (!r.ok && r.why === 'older') return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
     // A hub from before item 2 does not say the parent's address: nothing to keep a copy under, and it took the message as a note
     return this.wrote(sender, r.ok ? (r.address ?? null) : null, fields, name, r)
-  }
-
-  /** One call to the other side, its failure in the words the sender reads; `maybe`: it may have been written there */
-  private async ask(peer: AcrossPeer, method: string, params: unknown): Promise<{ ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }> {
-    if (!peer.reachable) return { ok: false, why: 'link_down', text: `${peer.name} is not reachable right now, so nothing was sent. Send it again once the link is back.` }
-    let raw: unknown
-    try {
-      raw = await peer.call(method, params)
-    } catch (err) {
-      const said = oneLineText(errorMessage(err), 500).replace(/\.$/, '')
-      if (older(err)) return { ok: false, why: 'older', text: `${peer.name} runs an older Centralu, which this mail does not reach. Update it there.` }
-      // It answered with an error of its own: it was there, and an error raised after it wrote cannot be told from one before
-      if (isPeerAnswer(err)) return { ok: false, why: 'refused', maybe: true, text: `${peer.name} answered the send with an error: ${said}. It may not have taken the message. ${AGAIN}` }
-      return { ok: false, why: 'link_down', maybe: true, text: `the link to ${peer.name} failed during the send (${said}), so it is not known whether the message arrived. ${AGAIN}` }
-    }
-    const parsed = HubMailResult.safeParse(raw)
-    if (!parsed.success) return { ok: false, why: 'link_down', maybe: true, text: `${peer.name} answered in a form this computer does not read, so it is not known whether the message arrived. ${AGAIN}` }
-    const r = parsed.data
-    if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
-    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), ...(r.address ? { address: r.address } : {}) }
   }
 
   /** The other host's answer: on success the copy is written here, under its id */
@@ -403,6 +253,8 @@ export class MailAcross {
    * session of another machine is passed on to it, and the answer is that machine's
    */
   async fromMachine(machine: { id: string; name: string }, p: HubMailParams): Promise<HubMailResult & { address?: string }> {
+    this.computers.set(machine.id, machine.name)
+    if (p.report) return this.reportFrom({ machine: machine.id }, machine.name, p.report, { ...p, centralu: p.sessionId === CENTRALU })
     const sender = this.d.service.sessionAddress(`${machine.id}.${p.sessionId}`)
     if (p.name) this.names.set(sender, `${oneLineText(p.name, 120)} on ${machine.name}`)
     // A machine's notice is its Centralu's, read as that computer's words (`write`)
@@ -422,7 +274,7 @@ export class MailAcross {
     if (route.kind === 'machine') {
       if (route.machineId === machine.id) return { ok: false, why: 'bad_address', text: `${oneLineText(to, 200)} is a session on your own computer: write to it by its id, ${route.sessionId}.` }
       const m = this.peers?.machine?.(route.machineId)
-      if (!m) return { ok: false, why: 'link_down', text: `no machine ${route.machineId} is linked to ${this.selfName()}, so nothing was sent.` }
+      if (!m) return { ok: false, why: 'link_down', text: `That computer is no longer linked to ${this.selfName()}, so nothing was sent.` }
       const r = await this.ask(m, 'host.mail', { from: sender, name: this.names.get(sender) ?? p.name, to: route.sessionId, text: p.text, ...pick(p) } satisfies HostMailParams)
       return r.ok ? { ok: true, messageId: r.messageId, to: `${r.to} on ${m.name}`, address: to } : r
     }
@@ -434,13 +286,64 @@ export class MailAcross {
    * side; `to` is a session of this host
    */
   fromHub(hub: { id: string; name: string }, p: HostMailParams): HubMailResult & { address?: string } {
+    this.computers.set(hub.id, hub.name)
+    if (p.report) return this.reportFrom({ hub: hub.id }, hub.name, p.report, { ...p, centralu: p.from === CENTRALU })
     const from = p.from === CENTRALU ? CENTRALU : this.fromHubNames(hub.id, p.from)
     const party = parseAddress(from)
     if (from !== CENTRALU && (party?.kind !== 'session' || party.host !== hub.id)) return { ok: false, why: 'not_allowed', text: `${hub.name} may send mail only from its own side.` }
     // The hub names the sender with its computer (`<name> on <computer>`)
     if (from !== CENTRALU) this.names.set(from, p.name ? oneLineText(p.name, 200) : `a session on ${hub.name}`)
     const to = this.d.service.sessionAddress(p.to)
+    if (p.task) return this.taskFrom(hub, from, to, { ...p, task: p.task })
     return this.write(from, to, p, this.asHubNames(hub.id, to))
+  }
+
+  /**
+   * On a machine: work a session of the hub gives one here (#1948 step 6), written as the task it is, under the hub's id, and given by this host's own
+   * delivery (held while the session is busy, as here). `forPerson` is the hub's word for its Assistant's `send_to_session`, taken from this link only
+   */
+  private taskFrom(hub: { id: string; name: string }, from: string, to: string, p: HostMailParams & { task: NonNullable<HostMailParams['task']> }): HubMailResult & { address?: string } {
+    if (from === CENTRALU || isPerson(from)) return { ok: false, why: 'not_allowed', text: `${hub.name} gives work here only from its sessions.` }
+    // Never to this host's Assistant or a coordinator, which a hub is not shown and may not direct (remote-hub.md §3.4, as `LinkedHost.directedFromHub`)
+    const role = this.d.ownEntries().find((e) => e.address === to)?.role
+    if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${this.label(to)}` }
+    if (p.id === undefined || !FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: 'a task from another computer comes with the id it gave it.' }
+    const had = this.d.records.message(p.id)
+    if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
+    // A session gone from here has no name left here: the sender knows which it gave the work to
+    if (this.d.reach.mayWrite(from, to, false) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === to ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
+    try {
+      const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
+      return { ok: true, messageId: m.id, to: this.label(to), address: to }
+    } catch (e) {
+      return { ok: false, why: refusalReason(e) ?? 'failed', text: oneLineText(errorMessage(e), 4000) }
+    }
+  }
+
+  /**
+   * Centralu's report on a task a session here gave one on the other side (#1948 step 6): on a hub, a machine's session; on a machine, the hub's session
+   * its ask_project went to. Taken only from the side that task went to (its copy's one row is a session there), and written here as this host's report
+   * on its copy: the task's sender here (the heir, after a handoff) reads it as a local child's, answering the task. The same report again is the one
+   * written (`MessageService.report` dedupes it)
+   */
+  private reportFrom(side: { hub: string } | { machine: string }, name: string, report: TaskReport, p: { replyTo?: string | undefined; text: string; centralu: boolean }): HubMailResult {
+    const task = p.replyTo === undefined ? undefined : this.d.records.message(p.replyTo)
+    const row = task ? this.d.records.recipients(task.id)[0] : undefined
+    if (!task || !p.centralu || task.kind !== 'task' || !this.tells(side, row?.recipient)) {
+      this.d.log?.(`[mail] ${name} sent a report on ${oneLineText(p.replyTo ?? '(none)', 200)}, which is no task this computer gave it: refused`)
+      return { ok: false, why: 'not_allowed', text: `${this.selfName()} gave ${name} no such task, so nothing was written.` }
+    }
+    try {
+      // Centralu's words are this host's own, from the report's facts: the other side's text is never written as Centralu's (#120). The session it is
+      // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
+      const party = row ? parseAddress(row.recipient) : null
+      const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
+      const body = reportWords(childId, { outcome: report.outcome, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
+      const written = this.d.service.report(task.id, { ...report, body })
+      return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
+    } catch (e) {
+      return { ok: false, why: refusalReason(e) ?? 'failed', text: oneLineText(errorMessage(e), 4000) }
+    }
   }
 
   /**
@@ -469,7 +372,8 @@ export class MailAcross {
     if (p.replyTo !== undefined) this.adopt(p.replyTo, from)
     try {
       if (from === CENTRALU) {
-        const m = this.d.service.notice(to, { body: p.text, facts: {}, dedupeKey: `across:${this.now()}:${Math.random().toString(36).slice(2, 10)}` })
+        // A notice passed again after its answer was lost is the one written then (its id, `pass`)
+        const m = this.d.service.notice(to, { body: p.text, facts: {}, dedupeKey: p.id ? `across:${p.id}` : `across:${this.now()}:${Math.random().toString(36).slice(2, 10)}` })
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
@@ -495,174 +399,11 @@ export class MailAcross {
     }
   }
 
-  /** A session here as the other side's answer names it; written whatever its label */
-  private label(to: string): string {
-    if (to === PERSON) return 'the person'
-    try {
-      return oneLineText(this.d.reach.labelOf(to), 120)
-    } catch {
-      return to
-    }
-  }
-
-  private selfName(): string {
-    return this.peers?.selfName() ?? 'this computer'
-  }
-
-  // ── Receipts ──
-
-  /** Something in the mailbox changed: the rows that crossed are compared with what the other side was told, soon */
-  changed(): void {
-    if (!this.peers) return
-    if (this.syncing) {
-      this.again = true
-      return
-    }
-    ;(this.d.soon ?? ((fn) => setImmediate(fn)))(() => void this.sync())
-  }
-
-  /** Tells the other side of each crossing row what changed since it was last told; a row that could not be told is tried again on the next change */
-  async sync(): Promise<void> {
-    if (this.syncing || !this.peers) return
-    this.syncing = true
-    try {
-      do {
-        this.again = false
-        await this.syncOnce()
-      } while (this.again)
-    } finally {
-      this.syncing = false
-    }
-  }
-
-  private async syncOnce(): Promise<void> {
-    const out = new Map<string, { peer: { kind: 'hub'; id: string } | { kind: 'machine'; id: string }; rows: (MailRowState & { sender: string })[]; keys: [string, string][] }>()
-    // Read before the rows: a row that changes after is newer, and its change runs this again
-    const at = this.now()
-    let all = true
-    const mark = this.d.toldAt?.get() ?? null
-    for (const row of this.d.records.acrossRows(this.d.hostId, mark === null ? 0 : Math.max(0, mark - TOLD_SLACK_MS))) {
-      const copy = this.foreign(row.recipient)
-      // The copy's side tells only a withdrawal; the recipient's side tells everything else
-      if (copy && row.settled !== 'withdrawn') continue
-      const toward = this.route(copy ? row.recipient : row.sender)
-      if (!toward || toward.kind === 'here') continue
-      const state = stateOf(row)
-      const key = `${row.messageId}|${row.recipient}`
-      const sig = JSON.stringify(state)
-      if (this.told.get(key) === sig) continue
-      const peer = toward.kind === 'hub' ? { kind: 'hub' as const, id: toward.hubId } : { kind: 'machine' as const, id: toward.machineId }
-      const k = `${peer.kind}:${peer.id}`
-      const batch = out.get(k) ?? { peer, rows: [], keys: [] }
-      const named = peer.kind === 'hub' ? { ...state, recipient: this.asHubNames(peer.id, state.recipient), sender: this.asHubNames(peer.id, row.sender) } : { ...state, sender: row.sender }
-      batch.rows.push(named)
-      batch.keys.push([key, sig])
-      out.set(k, batch)
-    }
-    await Promise.all(
-      [...out.values()].map(async (b) => {
-        const p = b.peer.kind === 'hub' ? this.peers?.hub?.(b.peer.id) : this.peers?.machine?.(b.peer.id)
-        // A side no longer linked is never told, and does not hold the mark back; one linked and away is told when it connects
-        if (!p) return
-        if (!p.reachable) return void (all = false)
-        try {
-          for (let i = 0; i < b.rows.length; i += 200) await p.call(b.peer.kind === 'hub' ? 'hub.mailRows' : 'host.mailRows', { rows: b.rows.slice(i, i + 200) })
-          for (const [key, sig] of b.keys) this.told.set(key, sig)
-        } catch (e) {
-          // Told again at the next change or connect; one from before item 2 never hears it, and does not hold the mark back
-          if (older(e)) return
-          all = false
-          this.d.log?.(`[mail] ${p.name} could not be told what became of ${b.rows.length} message(s): ${errorMessage(e)}`)
-        }
-      }),
-    )
-    if (all) this.d.toldAt?.set(at)
-  }
-
-  /**
-   * The other side's rows (`hub.mailRows`, `host.mailRows`). Each is merged into the row here when this host has it; on a
-   * hub, a row of mail between two machines is passed on to the machine it is for (by the sender for a receipt, by the
-   * recipient for a withdrawal). `from`: the hub whose names they are, on a machine
-   */
-  async rows(rows: readonly (MailRowState & { sender?: string })[], from: { hub: string } | { machine: string }): Promise<void> {
-    const onward = new Map<string, MailRowState[]>()
-    for (const raw of rows) {
-      const recipient = 'hub' in from ? this.fromHubNames(from.hub, raw.recipient) : raw.recipient
-      const sender = raw.sender === undefined ? undefined : 'hub' in from ? this.fromHubNames(from.hub, raw.sender) : raw.sender
-      const row = { ...pickState(raw), recipient }
-      // The row of a send whose answer was lost: the other side has it, so the copy is kept here now
-      if (this.tells(from, recipient)) this.adopt(row.messageId, recipient)
-      const here = this.d.records.recipient(row.messageId, recipient)
-      if (here) {
-        const side = this.foreign(recipient) ? 'copy' : 'recipient'
-        // Who may tell it, read off what is stored here, never off what the row says: a receipt is the recipient's side's
-        // (the copy's recipient), a withdrawal the sender's side's (the stored message's sender)
-        const stored = this.d.records.message(row.messageId)?.sender
-        if (!this.tells(from, side === 'copy' ? recipient : stored)) continue
-        // A row a hub passes on from another machine names the sender that machine told; it must be the one stored here
-        if (sender !== undefined && sender !== stored) continue
-        if (this.d.records.mergeAcross(row, side)) {
-          // What this side now has is what the other side told: not told back
-          const merged = this.d.records.recipient(row.messageId, recipient)
-          if (merged) this.told.set(`${row.messageId}|${recipient}`, JSON.stringify(stateOf(merged)))
-        }
-        continue
-      }
-      if (!('machine' in from)) continue
-      // Between two machines: on to the other one. This hub keeps no copy of such mail, so the machine that tells it must be
-      // the side it is about (the recipient's for a receipt, the sender's for a withdrawal), and the other machine checks
-      // the sender against the message it has
-      const withdrawn = row.settled === 'withdrawn'
-      const target = this.route(withdrawn ? recipient : (sender ?? ''))
-      if (target?.kind !== 'machine' || target.machineId === from.machine || !this.tells(from, withdrawn ? sender : recipient)) continue
-      onward.set(target.machineId, [...(onward.get(target.machineId) ?? []), { ...row, ...(sender ? { sender } : {}) }])
-    }
-    await Promise.all(
-      [...onward].map(async ([id, list]) => {
-        const m = this.peers?.machine?.(id)
-        if (m?.reachable) await m.call('host.mailRows', { rows: list }).catch((e) => this.d.log?.(`[mail] ${m.name} could not be told what became of ${list.length} message(s): ${errorMessage(e)}`))
-      }),
-    )
-  }
-
-  /**
-   * Whether the side that sent rows (`from`) is the one `address` is on, and so may tell what became of its row: a machine
-   * this hub links for its own sessions, a hub for the sessions on its side
-   */
-  private tells(from: { hub: string } | { machine: string }, address: string | undefined): boolean {
-    if (address === undefined) return false
+  /** A session by its name, here or on the other side, as a refusal names it; an address that is no session, quoted */
+  private nameOf(address: string): string {
     const r = this.route(address)
-    if ('machine' in from) return r?.kind === 'machine' && r.machineId === from.machine
-    return r?.kind === 'hub' && r.hubId === from.hub
-  }
-
-  // ── Notices ──
-
-  /**
-   * A Centralu notice written here to a session on the other side (the "no longer watched" notice to a sender there): passed
-   * on as a notice, and its row here marked delivered and read, so this host never tries it. One that cannot be passed on
-   * is dropped and said in the log: nothing waits for a link
-   */
-  async passOn(messageId: string): Promise<void> {
-    const m = this.d.records.message(messageId)
-    if (!m || m.sender !== CENTRALU) return
-    for (const row of this.d.records.recipients(messageId)) {
-      if (!this.foreign(row.recipient) || row.deliveredAt !== null) continue
-      const now = this.now()
-      this.d.records.markDelivered(row.recipient, [messageId], now, null)
-      this.d.records.markRead(row.recipient, [messageId], now)
-      const r = this.route(row.recipient)
-      let sent: { ok: boolean; text?: string } = { ok: false, text: 'no link' }
-      if (r?.kind === 'machine') {
-        const peer = this.peers?.machine?.(r.machineId)
-        if (peer) sent = await this.ask(peer, 'host.mail', { from: CENTRALU, to: r.sessionId, text: m.body, notice: true } satisfies HostMailParams)
-      } else if (r?.kind === 'hub') {
-        const peer = this.peers?.hub?.(r.hubId)
-        // `hub.mail` names a session of the machine as its sender; a notice has none, and the hub writes it as its own
-        if (peer?.you) sent = await this.ask(peer, 'hub.mail', { sessionId: 'centralu', to: this.asHubNames(r.hubId, row.recipient), text: m.body, notice: true } satisfies HubMailParams)
-      }
-      if (!sent.ok) this.d.log?.(`[mail] a notice to ${row.recipient} could not be passed on, and was dropped: ${sent.text ?? ''}`)
-    }
+    if (!r) return JSON.stringify(oneLineText(address, 200))
+    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? address)
   }
 
   // ── Finding ──
@@ -753,28 +494,5 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
   return { ...(p.needsReply !== undefined ? { needsReply: p.needsReply } : {}), ...(p.urgent ? { urgent: true } : {}), ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.notice ? { notice: true } : {}), ...(p.id ? { id: p.id } : {}) }
 }
 
-/** What a send whose answer was lost says to do */
-const AGAIN = 'Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.'
-
-/** A row as the other side reads it: a stored row, or one the other side sent */
-type RowLike = Omit<Pick<RecipientRow, 'messageId' | 'recipient' | 'deliveredAt' | 'readAt' | 'settledAt' | 'answerId' | 'releasedAt'>, never> & { settled: string | null; releasedWhy: string | null }
-
-function stateOf(r: RowLike): MailRowState {
-  return {
-    messageId: r.messageId,
-    recipient: r.recipient,
-    deliveredAt: r.deliveredAt,
-    readAt: r.readAt,
-    settled: r.settled,
-    settledAt: r.settledAt,
-    answerId: r.answerId,
-    releasedAt: r.releasedAt,
-    releasedWhy: r.releasedWhy,
-  }
-}
-
-function pickState(r: MailRowState): Omit<MailRowState, 'sender'> {
-  return stateOf(r)
-}
-
 const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`
+

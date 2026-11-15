@@ -1374,14 +1374,17 @@ that existed on a linked machine and listed only this computer's.
   is refused with both listed; a machine that is not connected is named, with its projects from the headers mirror.
   The "other projects" list says which machine each is on once a machine is linked.
 - **Delivery.** `host.send` (step 2's call), waited on through the machine's relayed events and answered with the
-  session's last words (`host.readSession`). No new host-to-host call and no store change.
+  session's last words (`host.readSession`). No new host-to-host call and no store change. Since #1948 step 6 the task is
+  mail instead: a task across the link at the caller's depth plus one, held while the session is busy, and its report
+  is the answer ([linked-mail.md](linked-mail.md) §10).
 - **Consent.** The card names the machine; the answer "always" is read as once and nothing is remembered. Remembering
   needs a store step (`project_consents` has foreign keys to `projects`), which this does not take (§12.5, question 4
   stays open for a remembered form).
-- **Races.** The machine's sessions are read again after the card is answered and nothing is sent into a turn the person
-  started there meanwhile; a project list that takes over 4 s counts the machine as away for that call; a link that drops
-  after the task was sent ends the wait with a sentence (`machine_status`), since the turn's end can no longer be seen.
-- **Not built**: `ifBusy` (a note or a queue into a busy session there; the refusal names the mail to that session, which it gets as soon as it can take it, #1186), the caller answering the machine's cards
+- **Races.** A project list that takes over 4 s counts the machine as away for that call. Until #1948 step 6 the
+  machine's sessions were read again after the card and nothing was sent into a turn the person started there meanwhile,
+  and a link that dropped after the task was sent ended the wait with a sentence; as mail, a busy session's task is held
+  there, and the report a dropped link holds back comes at the next connect.
+- **Not built**: `ifBusy` (a busy session there gets the task as mail, held until it can take it, #1948 step 6), the caller answering the machine's cards
   (`asking`; they stand in the hub's window and the call reports the wait), and stopping the machine's turn when the
   call is cancelled.
 - **`find_apps` is unchanged.** It lists apps another project shares, and attaching one needs the app process and the
@@ -1426,15 +1429,16 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   .machine`, `.session`, additive). Approving it is remembered for the pair (that session of that machine, this
   project; `machine_ask_consents`, store v60) until withdrawn in Settings → Machines, the switch going off, or the
   machine or project being removed; a remembered pair passes with no card. Deny is not remembered. The switch and the
-  project are read again once the card is answered, and once more when the session is awake to take the task (a wake
-  or a deferred restart takes seconds).
+  project are read again once the card is answered; since #1948 step 6 the switch going off withdraws the machine's tasks
+  the session has not been given yet (it was read once more when the session woke to take the task).
 - **What runs** (`MachineAsks`, sessions/machine-asks.ts). An existing ordinary session of the project, chosen as an ask
-  here chooses one (#614); never created, never an app's or a builder's; one busy with a turn gets nothing (no note or
-  queue from another machine, as §12.6 the other way; the refusal names the mail to it, which it gets as soon as it can take it, #1186). The task is framed as from that session on that machine
-  (`MACHINE_ASKER`, never the person and never an orchestrator), and the session works on it one level below the asker
-  (the depth the machine sends, kept until the turn ends, #867), so it cannot ask on. The call waits up to
-  `ASK_WAIT_MS` and then says "still working"; a call with no task waits again. The answer goes back cut to size; its
-  paths are the hub's files, listed and none opened on the machine.
+  here chooses one (#614); never created, never an app's or a builder's. Since #1948 step 6 the task is mail: a task
+  from that session's address on the hub (`<machine>.<id>`, never the person and never an orchestrator), held while the
+  session is busy as any task is, and the session works on it one level below the asker (the depth the machine sends,
+  kept until the turn ends, #867), so it cannot ask on. The call waits up to `ASK_WAIT_MS` for its report and then says
+  "still working" with the task's id: the machine keeps a copy, and the report reaches it later (linked-mail.md §10); a
+  call with no task waits again. The answer goes back cut to size; its paths are the hub's files, listed and none opened
+  on the machine. Before, a busy session got nothing, and the task went in as from `<session> on <machine>`.
 - **Several hubs** (question 3). Each hub that offered appears to the machine's sessions by its own name; one whose
   connection is gone stays listed as "not reachable right now", with the projects it last listed, until it offers again
   or the machine's host restarts (the machine keeps the hubs in memory only). A hub that said off is forgotten at once.
@@ -1451,8 +1455,9 @@ Tested: `links/reverse-asks.test.ts` (real hosts: off by default and a call that
 the machine and the session, an approved pair with no card, withdrawing, another session of the machine as another
 pair, the switch off forgetting the pairs and refusing an approval given after it, a cancelled call withdrawing the
 card, a call that runs out of time closing the card, the switch going off closing a standing card, a hub session under
-`auto` still asked, removing the machine, a busy session, two hubs by name and one away, a machine and a hub from
-before it), `transport/server.test.ts`
+`auto` still asked, removing the machine, two hubs by name and one away, a machine and a hub from before it),
+`links/linked-asks-mail.test.ts` (the task as mail both ways: held while busy, the depth counted, a report past the bound,
+older builds on each side), `transport/server.test.ts`
 and `links/remote-client.test.ts` (the calls on the socket), `dev-services/store-machine-asks.test.ts` (the switch and
 pairs, removed with the machine by an older build and with the project), `e2e/machine-asks.spec.ts` (the switch
 off for a new machine, its question, the pairs withdrawn, off forgetting them; the card naming the machine and the

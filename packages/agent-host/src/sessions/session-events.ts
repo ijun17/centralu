@@ -371,7 +371,7 @@ export class SessionEvents {
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   /**
-   * A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a turn, here
+   * Work from another computer's session ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a turn, here
    * and by a turn the host ends itself (`HostTenure.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
    * the one that takes the mark (`LinkedHost.sendFromHub`)
    */

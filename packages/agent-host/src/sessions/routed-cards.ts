@@ -5,6 +5,7 @@ import type { ChildRunResult, RoutedCard } from '../adapters/contract.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { CardHooks } from '../mail/card-notices.js'
+import { parseAddress } from '../mail/address.js'
 import type { SessionTrashHost } from './session-trash.js'
 
 /**
@@ -38,26 +39,29 @@ export class RoutedCards {
 
   /**
    * The cards standing in a session that `callerId` reads as a giver of its open work, each with whether the gate lets it answer: it is the
-   * one party with work open there and the running turn is its work alone (`answerer`), and for an approval `refusal` finds nothing. None for anyone else
+   * one party with work open there and the running turn is its work alone (`answerer`), and for an approval its own send started that turn (`sent`) and
+   * `refusal` finds nothing. None for anyone else
    */
   routedCards(sessionId: string, callerId: string): RoutedCard[] {
     const m = this.host.meta.get(sessionId)
-    const { givers, answerer } = this.host.mail.cards.givers(sessionId)
+    const { givers, answerer, sent } = this.host.mail.cards.givers(sessionId)
     if (!m || !givers.includes(callerId)) return []
     const turn = String(this.host.mail.cards.turn(sessionId))
     const mine = answerer === callerId
     const cards: RoutedCard[] = m.pendingQuestions.map((q) => ({ card: cardHandle(turn, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions, answerable: mine }))
     const a = m.pendingApproval
-    if (a) cards.push({ card: cardHandle(turn, a.requestId, a.detail), requestId: a.requestId, kind: 'approval', detail: a.detail, answerable: mine && !this.refusal(callerId, sessionId, a.requestId) })
+    if (a) cards.push({ card: cardHandle(turn, a.requestId, a.detail), requestId: a.requestId, kind: 'approval', detail: a.detail, answerable: mine && sent && !this.refusal(callerId, sessionId, a.requestId) })
     return cards
   }
 
   /**
    * Why a giver may not answer an approval (#603/#606, read at the call, never above the session that asks), or null: it is `auto` and not an
    * app's agent; the session is `normal` or `auto` and not an app's agent, so an `auto` giver never raises a `safe` session's permissions; and
-   * Centralu did not raise the card there (its own reach is the person's to allow)
+   * Centralu did not raise the card there (its own reach is the person's to allow). A giver on another computer (a hub's session, named by its
+   * address, #1948 step 6) never: its preset is that computer's, which this host does not read
    */
   private refusal(callerId: string, sessionId: string, requestId: string): string | null {
+    if (parseAddress(callerId)?.kind === 'session') return 'you are a session on another computer, whose permissions this computer does not read'
     const caller = this.host.meta.get(callerId)
     const target = this.host.meta.get(sessionId)
     if (this.host.hostCards.hostAsks.has(requestId)) return 'Centralu raised it there'
@@ -133,7 +137,7 @@ export class RoutedCards {
   async answerRoutedCard(callerId: string, sessionId: string, card: string | undefined, text: string): Promise<ChildRunResult> {
     const m = this.host.meta.get(sessionId)
     const name = m?.name ?? sessionId
-    const { givers, answerer } = this.host.mail.cards.givers(sessionId)
+    const { givers, answerer, sent } = this.host.mail.cards.givers(sessionId)
     if (!m || !givers.includes(callerId)) return { ok: false, error: `"${name}" has no work of yours open, so none of its cards are yours to answer.` }
     const cards = this.routedCards(sessionId, callerId)
     const chosen = card ? cards.find((c) => c.card === card) : undefined
@@ -149,7 +153,10 @@ export class RoutedCards {
       }
     }
     if (!chosen.answerable || (chosen.kind === 'approval' && !this.host.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn'))) {
-      const why = answerer !== callerId ? 'its turn is not your work alone: the person, another session or anything else had a part in it' : this.refusal(callerId, sessionId, chosen.requestId) ?? 'your permission preset is not auto'
+      const why =
+        answerer !== callerId ? 'its turn is not your work alone: the person, another session or anything else had a part in it'
+        : chosen.kind === 'approval' && !sent ? 'its turn began when the mailbox gave it your task, not with your own send'
+        : this.refusal(callerId, sessionId, chosen.requestId) ?? 'your permission preset is not auto'
       return { ok: false, error: `Only the person can answer this ${chosen.kind} in "${name}": ${why}. Tell them if it matters.` }
     }
     try {

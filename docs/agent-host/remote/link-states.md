@@ -101,16 +101,17 @@ which machines it could not search. What a machine answers is fenced as a worker
 ids that are not ids dropped, a conversation line that is not one line quoted. A manager, a lead and an ordinary
 session keep their own machine's view.
 
-**And directs them** (phase 4 step 2, remote-hub.md §12.4). `send_to_session` goes to the machine as `host.send` (additive),
-delivered there as an instruction from `<assistant> on <this computer>`; with `reportBack`, `observeLinked` watches
-the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
-session's own background work running included ([../delegation/start-agent-steps.md](../delegation/start-agent-steps.md) step 7, #723). The watch starts at the instruction's own
-`user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
-is an earlier turn's. A record lost before it was relayed is not waited for past the send's answer: the machine's events and answers come in order on one link, so from that answer on the next turn end reports, as before.
+**And directs them** (phase 4 step 2, remote-hub.md §12.4). `send_to_session` goes to the machine as a task across the link (#1948 step 6,
+`MailAcross.sendTask`, `host.mail` with `task`), from `<assistant> on <this computer>`, said to be the Assistant's for the person
+(`forPerson`, which only this hub's Assistant's `send_to_session` says, and the machine takes only on the link of the hub that says it); without
+`reportBack` it is a note, which asks for nothing back. That machine's delivery gives it to the session, held while it is busy, and its engine
+reports its end, which comes back as Centralu's report on the hub's copy of the task, as for a session here
+([../delegation/start-agent-linked-machine.md](../delegation/start-agent-linked-machine.md)). A machine that takes no tasks from this hub is
+refused, with a line to update it there.
 `update_session_settings` and `create_session` go through the router (`agents.updateSettings`,
 `agents.createSession`), a project found by name or qualified id on any reachable machine, a name two machines share
-refused with the ids. `create_session`'s first message goes as `send_to_session`'s instruction, its turn's end
-reported the same way unless `reportBack` is false (#1233). `create_project { machine }` raises the same card, naming the machine (`project_create`'s
+refused with the ids. `create_session`'s first message goes as a task across the link too (origin `create_session`), its turn's end
+reported the same way unless `reportBack` is false, when it is a note (#1233). `create_project { machine }` raises the same card, naming the machine (`project_create`'s
 `machine`, additive), with the path that machine's `projects.createPreview` gives, and has that machine make it.
 
 **Measured through the hub** (probe 3, 2026-10-05; a MacBook on Wi-Fi, the remote a Windows 11 laptop on the same

@@ -76,9 +76,10 @@ export function mailReach(host: ReachHost): MailReach {
 
   return {
     untrusted,
+    // This host's Assistant only (#2274): a session id is unique on its own host, and another computer's session may carry the same one
     isAssistant: (address) => {
-      const s = sessionOf(address)
-      return s !== undefined && host.assistantId() === s.id
+      const party = parseAddress(address)
+      return party?.kind === 'session' && party.host === host.hostId && host.assistantId() === party.sessionId
     },
     askGroupMembers: (address) => host.askGroupMembers(address),
     projectOf: (address) => sessionOf(address)?.info?.projectId ?? null,

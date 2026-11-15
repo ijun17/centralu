@@ -39,6 +39,23 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     expect(turnRows(w.store, 'b')).toEqual([expect.objectContaining({ turnSeq: 1, startedBy: 'mail', starterId: message.id, messageId: null, endedAt: null })])
   })
 
+  it('a timer that runs a moment before its mail is due looks again when it is, not at the next sweep', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'can you look at #12?' })
+    await settle()
+    // Node's timers may run a millisecond before the clock reaches their time
+    const [look] = w.timers.sort((a, b) => a.at - b.at)
+    w.timers.shift()
+    w.clock.t = look!.at - 1
+    look!.fn()
+    // and the clock reaches it while the delivery looks
+    w.clock.t = look!.at
+    await settle()
+    expect(w.to('b')).toHaveLength(0)
+    await w.advance(1_000)
+    expect(w.to('b')).toHaveLength(1)
+  })
+
   it('a burst is one delivery, and nothing is delivered twice', async () => {
     const w = started()
     // Sent at once: one wake carries both

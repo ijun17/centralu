@@ -96,10 +96,10 @@ export type LinkDeps = {
    */
   hubApps?: boolean
   /**
-   * A machine took this hub's offer of mail at a connect (#2067 review): what became of mail that crossed while the link was
-   * down is told now (`MailAcross.changed`)
+   * A machine answered this hub's offer on a connection, whatever it said (#2067 review, #1948 step 6): what became of mail that crossed while
+   * the link was down is told now, and mail owed to it is passed on or settled by its answer (`MailAcross.changed`)
    */
-  mailReady?: (machineId: string) => void
+  onOfferAnswered?: (machineId: string) => void
   /**
    * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
    * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told
@@ -126,6 +126,8 @@ export type LinkDeps = {
   attemptWaitMs?: number
   /** For tests: how long a call that needs a machine which is down waits for the attempt it starts (10 s when absent, #1532) */
   callWaitMs?: number
+  /** For tests: how long a call waits for a machine's answer to this connection's offer before it reads it as still connecting (10 s when absent, #1948 step 6) */
+  offerWaitMs?: number
   /** For tests: the window within which a machine takes at most one attempt started by a call (15 s when absent, #1532) */
   callWindowMs?: number
   /** For tests: how long a link held at `versions_differ` waits before it looks at the versions again (60 s when absent) */

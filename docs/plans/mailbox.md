@@ -813,6 +813,7 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
+| `agentDepth` | task | the agent depth a task from another computer's session gives the session here while it works on it (#838, #1948 step 6; [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)) |
 | `picked` | message | `true`: the person's answer to a session's question is one of the question's `choices`, pressed in the window (`mail.reply` with `answers`, D33, #1630); the host decides it, so `mail read` can say it to the asker |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
@@ -1838,10 +1839,9 @@ itself (its drain takes a task as a turn's work), and its adoption leaves an und
 that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65). **Since store step 74 (#2258):** the step
 turns the rows once and deletes them, the store's floor is 70 (beta.57 is refused), and no start reads `queued_requests`.
 
-**Linked machines (#2067).** Mail does not cross links. A busy child on a linked machine keeps the hub's note hold (`RemoteAgents.hold`,
-`RemoteAgent.queued`), now held without `ifBusy: "queue"`, which the tool no longer has. That is a second definition of "a send to a
-busy session waits", kept until mail crosses links (#1948 step 6). #2114 is fixed in that path: nothing held goes while the caller
-deletes the child, and a note held for a child that is gone is never sent; the stop notice tells its caller (docs/agent-host/delegation/start-agent-linked-machine.md).
+**Linked machines (#1948 step 6).** Work for a child on a linked machine is a task across the link (docs/plans/linked-mail.md §10): the machine's
+mailbox holds it while the child is busy, as for a child here, so the hub's note hold (`RemoteAgents.hold`, `RemoteAgent.queued`) is gone and
+"a send to a busy session waits" has one definition. A hub updated with notes still held tells each caller once that they were not sent.
 
 **Decided as is.** A send to a session at rest still goes in directly: the delegation's bounded wait is its own row of #1948's table. A
 handoff leaves a mailed task's sender as it was: the original that stays still gets its report; an original that goes no longer sends
@@ -1994,8 +1994,9 @@ mailbox's notice, which it never reads, as on main. The cut line kept for the an
 only: a restart before the settle answers loses it, and that answer does not say the update cut the turn. A relay held for a
 mail-less seat's next message (`tellSession`) is memory only too: a host swap loses it and the stored report stays undelivered, as on main.
 
-**Linked machines** keep their copy (`LinkedReports`, `RemoteAgents.reportGate`, `deliverReport`'s relayed report and its paused reports) until mail
-crosses links (step 6): that is the second definition of "a turn's end is reported", reported, not changed here.
+**Linked machines** (#1948 step 6): the machine's own engine reports a turn of a task a hub gave, and the report crosses as the hub's report on its copy
+of that task (docs/plans/linked-mail.md §10). The hub's copy (`LinkedReports`' report gate, `RemoteAgents.reportGate`, the relayed report) is deleted,
+so "a turn's end is reported" has one definition.
 
 **Re-keyed, not dropped.** C11, the asked gate, was keyed on the request rows in P2 (`requestsIn`) and is unchanged. C8, `mail_turns.started_by`,
 is still written (`mail` by the delivery and for a turn the tool opens for mail it held, `MailTurns.openedFor`; the rest from the turn's opening input)
@@ -2032,12 +2033,14 @@ lost them at a restart).
 
 **Who may answer (floor b), re-keyed on the request.** A giver may answer a card only when all hold, read at the answer:
 1. it is the one party with work open in the session (the person's own work counts as a party);
-2. the running turn is its work alone (`StopNotices.alone`, the rule a stop notice quotes by, with `gaveIt`): work it gave started the turn (a
-   `caller` turn: `start_agent`, an `agent_session` send, `ask_project`, the Assistant's sends; not a turn the mailbox started for its task, as
-   when the session was busy at the send, where the turn owner was never set either), every message
+2. the running turn is its work alone (`StopNotices.alone`, the rule a stop notice quotes by, with `gaveIt: 'work'`): work it gave started the turn
+   (a `caller` turn: `start_agent`, an `agent_session` send, `ask_project`, the Assistant's sends; or, since #1948 step 6, a turn the mailbox
+   started by delivering its task, as when the session was busy at the send or the task came from another computer; never a task that joined a
+   turn already running, a note, or a plain message), it is still open and its own (a handoff makes it the heir's), every message
    the mailbox gave into it is its, and nothing else entered it (no message or card answer of the person's, no app's, no other session's).
    Its own answer to a question card keeps the turn its alone (`TurnInputs.answerQuestion(…, 'giver')`);
-3. for an approval, #603/#606's rule as before (`RoutedCards.refusal`): the giver is `auto` and not an app's agent, the session is `normal`
+3. for an approval, its own send started the turn (`gaveIt: 'send'`, `CardGivers.sent`): in a turn the mailbox started for its task an approval
+   stays the person's; and #603/#606's rule as before (`RoutedCards.refusal`): the giver is `auto` and not an app's agent, the session is `normal`
    or `auto` and not an app's agent, and Centralu did not raise the card there; allow or deny, never "always".
 
 Otherwise the giver is told and reads the card, and only the person answers; the refusal says why. A handle still names the card it was read
@@ -2051,7 +2054,7 @@ turn owner was:
 | A second sender's task joined that turn | the owner answers; the other is never told | both told; neither answers |
 | A task joined the person's turn | not told; nobody answers | told; nobody answers |
 | The person wrote into the giver's turn, or answered a card in it | the owner answers | nobody but the person |
-| The giver's task reached a busy session as mail and started a turn of its own | not told; nobody answers | told; nobody answers (deep review) |
+| The giver's task reached a busy session as mail and started a turn of its own | not told; nobody answers | told; the giver answers a question, an approval is the person's (#1948 step 6; before it: nobody answers) |
 | The Assistant's `send_to_session` without `reportBack` | told, answers as the owner | not told: it asked for nothing back, so the card is the person's |
 | A turn the person started after the work was answered | not told | not told: no work is open |
 
@@ -2082,9 +2085,12 @@ adopts no stale link; beta.57, which restores that table only for a turn it cont
 person alone. The notices this build wrote are Centralu notices that build delivers as any. A kept or continued turn keeps its giver's task
 open, so a card in it is told and answered as above.
 
-**Linked machines.** A child on a linked machine keeps its own card path (`RemoteAgents.cardRaised`, its relayed notice through
-`tellSession`, its caller the one that gave the turn) until mail crosses links (step 6): the second definition of "who hears of a card",
-reported, not changed. It shares the notice's words and `cardHandle`; its cards say `answerable` for a question too (always true there).
+**Linked machines** (#1948 step 6). The hub's own card path for a linked child (`RemoteAgents.cardRaised`) is deleted, and so is its own judgement
+of whose a card is: it let a hub caller answer a question the person's own turn raised on the machine while the caller's task only waited there
+(deep review). The machine alone judges, by this rule, with the hub's session that gave the task as a giver named by its address (`openTaskParties`
+with `across`): the hub reads its cards with `host.cards` and answers one with `host.answerCard`, which the machine takes only from the hub that
+offered on that connection, the giver read as that hub's session. Its task always starts its turn by the mailbox, so it answers a question and never
+an approval. Telling a hub's giver of a card across the link is not built: it reads them by `agent_session`.
 
 ### 10.6.5 A handoff is the mail's one move (#1948 step 5)
 
@@ -2118,8 +2124,9 @@ handed-on work ends rather than at the successor's first turn.
 every row on the successor, the re-pointed tasks with them. The withdrawn tasks are `withdrawn` rows and the new ones ordinary task rows, which
 an older build reads as any. A child's reply to the task it was first given (the withdrawn one) goes to that task's sender, as before this step.
 
-**Linked machines.** A child on a linked machine keeps its own move (`RemoteAgents.moveCaller`, its report waits in `LinkedReports`) until mail
-crosses links (step 6): the second definition of a handoff's move, reported, not changed.
+**Linked machines** (#1948 step 6). A handoff moves the hub's copy of a task given across as it moves any task (`handOver`), and tells the machine
+(`host.mailMove`), whose copy then names the heir and reads as handed over; the report comes back to the heir. `RemoteAgents.moveCaller` moves only the
+record's caller (docs/plans/linked-mail.md §10).
 
 ### 10.6.6 More work is mail; agent_session keeps the rest (#1948)
 

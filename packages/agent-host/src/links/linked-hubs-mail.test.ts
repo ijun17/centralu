@@ -81,7 +81,7 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
       hostId: 'hub-0000000f',
       service: { sessionAddress: (id: string) => `session:hub-0000000f/${id}`, mintId: () => 'hub-0000000f.m_01JX0000000000000000000000' } as never,
       records: {} as never,
-      reach: { labelOf: () => 'child', projectOf: () => null, untrusted: () => false, projectLabel: (p) => p },
+      reach: { labelOf: () => 'child', projectOf: () => null, untrusted: () => false, projectLabel: (p) => p, mayWrite: () => null, isAssistant: () => false },
       ownEntries: () => [],
       soon: () => {},
     })

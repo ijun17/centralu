@@ -22,7 +22,7 @@ below retained for `safe` and `normal`:
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
    A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
-   while a call waits on its turn or its report is owed (`RemoteAgents.workingIn`); a removed machine's child holds no place,
+   while a task its parent gave it is open (`RemoteAgents.workingIn`, #1948 step 6); a removed machine's child holds no place,
    and one deleted there while the link was down is forgotten when the link is back (`caughtUp`). Checked before the card and again after it,
    and for a new turn given by `mail` send. The check after the card also takes the place (#673 review,
    `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
@@ -153,35 +153,13 @@ below retained for `safe` and `normal`:
    | Across a host restart, an update or a swap the child's process ends, and with it the work it paused on; the next host answers its open tasks once it is at rest, as above (an update tells the agent of the background tasks it ended, [../lifecycle/continue-after-update.md](../lifecycle/continue-after-update.md)) | No process outlives its host |
    | A handoff moves a paused child with its open task (`MessageService.handOver`, [plans/mailbox.md](../../plans/mailbox.md) §10.6.5); the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
 
-   A linked machine's session the hub's Assistant asked to hear about (`reportBack`) still pauses, as this host's children did before #1948 step 3, until mail crosses links (#723,
-   `sessions/linked-reports.ts`). The hub keeps each linked session's task list for every session a machine relays,
-   so work started before the Assistant asked is known: read whole from the machine's `sessions.list`
-   (`LinkedSessions.backgroundTasks`) each time its link comes up (`machine_resync`: the first link, after a drop, after
-   the hub's start), since a machine resends its work only when it changes, and then changed by the relayed
-   `background_tasks` (the same `applyBackgroundTasks`). A change relayed while that read is out is newer and kept. A
-   completed turn there with its own work running (timers left out) sends the paused notice once and keeps the linked
-   report (`LinkedReport.paused`); a later turn end with none of that work left sends the final report; the work ending
-   with no turn after it settles the report after `OWN_WORK_SETTLE_MS`, saying how each task ended; a failed turn
-   is reported as it ended. The Assistant has no `agent_session`, so the notice offers no stop, as for its own
-   sessions here; a new `send_to_session` to that session replaces the report, as before. While that send is out, the
-   session's events go to the new wait; a send that fails puts the paused report back and starts its settle wait again.
-   The machine's link dropping while the report is paused sends it at once, saying the link dropped before the work
-   ended and to read the session once it is back (the hub would not see the end; the report carries the last response
-   the hub read there, marked as read before the machine went out of reach, #1186), or as settled when the work had
-   already ended and only the settle wait was running. A dropped link forgets that machine's task lists until it is
-   back. A turn in progress keeps its wait across a drop, as before. The same report is kept for an `ask_project` task there
-   whose turn ended on its own background work (`oweAsker`, [ask-project-linked-machine.md](ask-project-linked-machine.md), #1457): the asking session is its owner, and the call
-   was told of the pause when it returned. Whose a turn there is (#1377), the hub reads from the machine's relayed `user_message`
-   (no source: the person's; the hub's instruction, another session's and an app's are the work's) and the turn's events
-   (`LinkedReport.next` / `turn`), and the person's own turn is reported to nobody and changes nothing of the wait. A
-   person's message into a running turn of the work is noted in its report. A machine before #1948 may still relay the
-   composer's choice on it (`intent`), and say `added` on a turn's end; the hub reads neither. The machine's host says whose each turn was on the event that ends it (`turn`), and the hub reads that; a host that does
-   not say (an older one) is read from the messages the hub saw, taking a message seen while a turn runs as joining it. A child `start_agent` started keeps the rule of #1038
-   (`RemoteAgents`, which reads the event first): the person's turn there is not the caller's to read, and the caller is
-   told. A machine removed from Centralu reports every wait
-   on it, paused or mid-turn ("…was removed from Centralu before …, so its end will not be reported"), named as the hub
-   last knew the session. A session deleted there drops its report. Linked reports live in the hub's memory: a hub swap
-   drops them, as before.
+   Work this hub gives a session on a linked machine (start_agent, agent_session, send_to_session, ask_project) is a task across the link
+   (#1948 step 6): that machine pauses it by these same rules, and its report comes back as mail. The hub keeps only each linked session's
+   task list, for agent_session list and an ask's paused answer (`LinkedReports`, #723): read whole from the machine's `sessions.list`
+   (`LinkedSessions.backgroundTasks`) each time its link comes up (`machine_resync`: the first link, after a drop, after the hub's start),
+   since a machine resends its work only when it changes, and then changed by the relayed `background_tasks` (the same
+   `applyBackgroundTasks`). A change relayed while that read is out is newer and kept; a dropped link, a removed machine or a session
+   deleted there forgets its lists.
 
    Codex lists child threads as background work, so a Codex parent thread that ends with a child thread running is
    paused the same way; a tool that cannot report its background work (`capabilities.backgroundTasks` off) never

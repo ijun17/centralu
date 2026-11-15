@@ -66,6 +66,10 @@ export const MailFacts = z.looseObject({
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
   /** On the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection (`scriptLabel`), so no reader takes it for the person's words */
   fromScript: z.object({ credential: z.string() }).optional(),
+  /** On a task a hub's own Assistant gave with send_to_session (#1948 step 6, #2258): the hub's word that it is for the person; set only from that hub's `host.mail` */
+  hubAssistant: z.literal(true).optional(),
+  /** On a task from another computer's session (#838, #1948 step 6): the agent depth the session here counts while it works on it */
+  agentDepth: z.number().int().min(1).max(64).optional(),
   /** On the person's answer to a session's question (#1630): it is one of the choices the question offered, pressed in the window; the host decides it, so a session reads it as Centralu's word */
   picked: z.boolean().optional(),
 })

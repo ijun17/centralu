@@ -3,9 +3,10 @@ import { z } from 'zod'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { isObj } from '../json-value.js'
 import { sessionAddress } from '../mail/address.js'
-import type { AcrossPeers } from '../mail/across.js'
+import type { AcrossPeers } from '../mail/across-core.js'
 import { entryOf, type FoundEntry } from '../mail/find.js'
 import { startingHub } from '../sessions/hub-preset.js'
+import { awaySentence, settleForCall, TAIL } from './machine-reach.js'
 import type { LinkedHubs } from './linked-hubs.js'
 
 /**
@@ -18,8 +19,19 @@ type Machine = {
   id: string
   name: string
   reachable: boolean
+  /** What a call that needs it reads to reach it (`settleForCall`, `awaySentence`; `RoutedMachine`'s fields) */
+  readonly attemptUnderWay?: boolean
+  readonly waitsForPerson?: boolean
+  readonly whyDown?: string | null
+  settled?(): Promise<void>
+  reachForCall?(): Promise<void>
+  offerAnswered?(): Promise<void>
   call(method: string, params: unknown): Promise<unknown>
   lastKnown(kind: 'sessions' | 'projects'): unknown[] | null
+  /** It takes this hub's tasks as mail (`LinkedMachineConnection.takesTasks`, #1948 step 6) */
+  takesTasks?: boolean
+  /** It takes this hub's mail (`LinkedMachineConnection.takesMail`, #2067 item 2) */
+  takesMail?: boolean
 }
 
 export function mailPeers(o: {
@@ -53,7 +65,13 @@ export function mailPeers(o: {
       ? {
           machine: (id: string) => {
             const m = machines.get(id)
-            return m && { id: m.id, name: m.name, reachable: m.reachable, call: (method: string, params: unknown) => m.call(method, params) }
+            return (
+              m && {
+                id: m.id, name: m.name, reachable: m.reachable, tasks: m.takesTasks, mail: m.takesMail,
+                call: (method: string, params: unknown) => m.call(method, params),
+                reach: async () => (await settleForCall(m), m.reachable ? null : awaySentence(m, TAIL.tryAgain)),
+              }
+            )
           },
           machineSession: (machineId: string, sessionId: string) => {
             const m = machines.get(machineId)

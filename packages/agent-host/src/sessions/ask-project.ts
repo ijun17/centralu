@@ -123,40 +123,6 @@ export type AnswerAt = { sessionId: string; seq: number }
 export const NO_WORDS = '(its turn ended without saying anything: read_session shows what it did)'
 
 /**
- * In a report's place of the session's last response when its machine could not be reached and nothing of it was read (#1186): Centralu's words, not
- * the session's, so a report does not keep them as the session's answer. `IN_PAUSE_REPORT`: the work's pause had read it, and that report holds it
- */
-export const MACHINE_UNREACHABLE = '(not read: its machine could not be reached)'
-export const IN_PAUSE_REPORT = '(in the paused report before this one)'
-
-/** What made a session asked across a link busy: a turn not the caller's (its state), another session's task, or either while the person's card stood */
-export type BusyAcross = { turn: string } | 'task' | 'during_card'
-
-/**
- * How a caller may still leave a busy session across a link work (`MailSessionsView.wayAcross`): mail to its address, which crosses (#2067) and goes in
- * as soon as the session can take it (into a turn whose tool takes input, else at rest, docs/plans/mailbox.md §10.6.2); none when the machine
- * of the link takes no mail (`older`, its name), or this host has no mailbox (null)
- */
-export type WayAcross = { mail: string } | { older: string } | null
-
-/**
- * Every refusal of an ask across a link, either way, whose session is busy (#1186 item 10): one wording for the hub's ask of a machine
- * (`askLinkedProject`) and a machine's ask of the hub (`MachineAsks`), before and after the person's card. A task does not cross yet (#1948 step 6)
- */
-export function busyAcross(session: { name: string; label: string }, why: BusyAcross, way: WayAcross): string {
-  const what = `The session "${session.name}" in ${session.label}`
-  const busy =
-    why === 'task' ? `${what} is busy with another session's task.`
-    : why === 'during_card' ? `${what} became busy while the question to the person stood; nothing was sent.`
-    : `${what} is busy with a turn that is not yours (${why.turn}).`
-  const on =
-    way && 'mail' in way ? `To leave it work, mail it: mail(action="send", to="${way.mail}"); it gets the mail as soon as it can take it. Or name another session.`
-    : way ? `${way.older} runs a Centralu that takes no mail from another computer: update Centralu there, or name another session.`
-    : 'Name another session, or ask again later.'
-  return `${busy} ${on}`
-}
-
-/**
  * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it
  * left out (#1186): read_session from the answer's first message, at the character the cut starts. It used to send
  * the caller to the session by name only, and read_session cut the same answer again at 2,000 characters, so the

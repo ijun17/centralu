@@ -15,9 +15,10 @@ afterEach(runCleanups)
 
 const child = (sessionId: string, callerId = 'h1'): RemoteAgent => ({ sessionId: `m1.${sessionId}`, callerId, machineId: 'm1', machine: 'Remote box', name: sessionId, tool: 'claude', project: 'remote-project', startedAt: 1 })
 
-/** A machine and a hub that started `c1` there, linked; the hub's switch for asks stays off */
-async function rig(mail: true | 'before' = true) {
+/** A machine and a hub that started `c1` there, linked; the hub's switch for asks stays off. `held`: the machine's answers to the hub's offers wait for it */
+async function rig(mail: true | 'before' = true, held?: Promise<void>) {
   const machine = await machineHost()
+  if (held) machine.holdOffer(held)
   const hub = await hubHost(machine.port, { mail, children: [child('c1')] })
   await eventually(() => hub.machine().status === 'connected')
   const client = [...(machine.server as unknown as { byClient: Map<number, unknown> }).byClient.keys()][0]!
@@ -49,6 +50,58 @@ describe('the hub takes mail from a session it started on a linked machine (#206
     hub.mail!.service.stops.partyGone(addressOf('h1'))
     // The notice to the child is passed on (this machine takes no mail, so it is dropped and said in the log), never delivered here
     await eventually(() => hub.store.mailbox.feedOf(addressOf('m1.c1'), { limit: 10 }).some((m) => m.sender === 'centralu'))
+    await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
+  })
+
+  it("passes the notice of a parent that went, sent before the machine answered this connection's offer, again on its answer: one that takes no mail drops it", async () => {
+    let release = () => {}
+    const { hub, call, addressOf } = await rig(true, new Promise<void>((resolve) => (release = resolve)))
+    expect(await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })).toMatchObject({ ok: true })
+    const link = hub.links.get('m1')!
+    expect(link.takesTasks).toBeUndefined()
+    // The machine refuses the notice (no hub offered on this connection yet); its answer, that it takes no mail, comes after the refusal is heard
+    const call0 = link.call.bind(link)
+    let refused = () => {}
+    const heard = new Promise<void>((resolve) => (refused = resolve))
+    link.call = (method, params, timeoutMs) => {
+      const p = call0(method, params, timeoutMs)
+      if (method === 'host.mail') void p.catch(() => {}).finally(refused)
+      return p
+    }
+    hub.mail!.service.stops.partyGone(addressOf('h1'))
+    await heard
+    expect(hub.store.mailbox.dueRecipients()).toContain(addressOf('m1.c1'))
+    release()
+    await eventually(() => link.takesTasks === false)
+    await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
+  })
+
+  it("passes that notice again when the machine's answer came while the send before it was still out", async () => {
+    let release = () => {}
+    const { hub, call, addressOf } = await rig(true, new Promise<void>((resolve) => (release = resolve)))
+    expect(await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })).toMatchObject({ ok: true })
+    const link = hub.links.get('m1')!
+    // The refusal of the first send is held until the notice was asked to go again after the answer (`pass`, while that send is out)
+    const across = hub.mail!.across as unknown as { pass(m: unknown): Promise<void> }
+    let askedAgain = () => {}
+    const after = new Promise<void>((resolve) => (askedAgain = resolve))
+    const pass0 = across.pass.bind(across)
+    across.pass = (m) => {
+      const p = pass0(m)
+      if (link.takesTasks !== undefined) askedAgain()
+      return p
+    }
+    const call0 = link.call.bind(link)
+    let sent = () => {}
+    const out = new Promise<void>((resolve) => (sent = resolve))
+    link.call = (method, params, timeoutMs) => {
+      if (method !== 'host.mail') return call0(method, params, timeoutMs)
+      sent()
+      return call0(method, params, timeoutMs).finally(() => after)
+    }
+    hub.mail!.service.stops.partyGone(addressOf('h1'))
+    await out
+    release()
     await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))
   })
 

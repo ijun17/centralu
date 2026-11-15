@@ -31,8 +31,8 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    project are checked again after consent (`askGateError`). The caller's project losing trust or being removed, or
    the target project being removed, withdraws a card still standing (`withdrawReaches`).
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
-   back (the caller's project name a one-line field, `frameField`, as the parent's name in `agentFrame` and
-   `agentNoteFrame` is, #428), and names the asking session by its name (one line, written as a JSON string so a quote in it cannot close it) and id (#1186: the model
+   back (the caller's project name a one-line field, `frameField`, as the parent's name in `agentFrame`
+   is, #428), and names the asking session by its name (one line, written as a JSON string so a quote in it cannot close it) and id (#1186: the model
    read the project only; `from`, which identifies the session, is in the store and on screen, not in the input). It
    appears in the target conversation with `from` identifying the asking session. An idle
    session resumes as needed, and once it is awake (a wake or a deferred restart takes seconds) the caller's trust and

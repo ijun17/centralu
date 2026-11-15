@@ -33,14 +33,12 @@ const NOT_PROJECT = 'Not a project of a linked machine: m2.p1'
 const NO_MACHINE = 'No linked machine m2'
 
 const CASES: [string, Call, string][] = [
-  ['send', (r) => r.send('m2.s1', 'hi', 'orchestrator'), NOT_SESSION],
   ['updateSettings', (r) => r.updateSettings('m2.s1', { model: 'opus' }), NOT_SESSION],
   ['interrupt', (r) => r.interrupt('m2.s1'), NOT_SESSION],
   ['deleteSession', (r) => r.deleteSession('m2.s1'), NOT_SESSION],
   ['deleteAgentChild', (r) => r.deleteAgentChild!('m2.s1', 'feat/x'), NOT_SESSION],
-  ['lastUserMessage', (r) => r.lastUserMessage('m2.s1'), NOT_SESSION],
-  ['cards', (r) => r.cards('m2.s1'), NOT_SESSION],
-  ['answerQuestion', (r) => r.answerQuestion('m2.s1', 'q1', []), NOT_SESSION],
+  ['cards', (r) => r.cards('m2.s1', 'a1'), NOT_SESSION],
+  ['answerCard', (r) => r.answerCard('m2.s1', 'a1', 'c1', 'yes'), NOT_SESSION],
   ['lastWords', (r) => r.lastWords('m2.s1', 100), NOT_SESSION],
   ['read', (r) => r.read('m2.s1', 10), NOT_SESSION],
   ['projectSessions', (r) => r.projectSessions(project), NOT_PROJECT],

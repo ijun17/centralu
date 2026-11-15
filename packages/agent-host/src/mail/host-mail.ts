@@ -8,7 +8,7 @@ import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, openTaskParties, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedTasksOf, openTaskParties, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
@@ -126,7 +126,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const projects = () => store.projects.listProjects()
   // Filled once `across` exists: the reach names a session on another computer through it
   const far: { across?: MailAcross } = {}
-  const records = watched(store.mailbox, () => far.across?.changed())
+  /** Who hears each change of the mail (`LinkedTasks.onChange`) */
+  const changes = new Set<() => void>()
+  const records = watched(store.mailbox, () => {
+    far.across?.changed()
+    for (const listener of changes) listener()
+  })
   const reach = mailReach({
     hostId,
     session: (id) => {
@@ -300,7 +305,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       service.stops.partyGone(addressOf(id))
       watches.gone(addressOf(id))
     },
-    linkedGone: linkedGoneRecorder(service, store.mailbox),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) => {
       void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
@@ -312,7 +316,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       if (!end.continued) watches.changed(addressOf(id), 'stopped')
     },
     handOver: (from, to, which, children) => {
-      const moveMail = () => service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
+      const moveMail = () => {
+        const moved = service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
+        // Tasks given across a link keep their id there: the machines are told whose they are now (#1948 step 6)
+        void across.movedAcross(service.takeMoves())
+        return moved
+      }
       return aboutSessions(which === 'all' ? watches.handOver(addressOf(from), addressOf(to), moveMail) : moveMail())
     },
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
@@ -329,6 +338,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
     sendTask: taskSender(service),
+    // Work given a session on a linked machine crosses as a task, and its report comes back (#1948 step 6)
+    linkedTasks: linkedTasksOf(service, records, across, (listener) => {
+      changes.add(listener)
+      return () => void changes.delete(listener)
+    }),
     withdrawTasks: taskWithdrawer(service, store.mailbox),
     answered: answerRecorder(service, store.mailbox),
     // A session a script or the RPC started with a first message: the person's task, answered as any task is (§9.6, §10.6.3)
@@ -368,10 +382,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     watchedAtRest: (id) => watches.waitsForRest(addressOf(id)),
     // A card a session raised is told to the givers of its open work, and answered by one of them only as the gate allows (§10.6.4)
     cards: {
-      // Only a turn the giver's own work started, as the turn owner was: one the mailbox started for its task (the session was busy) is told only
-      givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver) => giver !== PERSON && service.stops.alone(addressOf(id), addressOf(giver), { gaveIt: true })),
-      // The person has the card itself: nothing is written for them
-      tell: (giverId, card, body, delivered) => (giverId === PERSON ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
+      // Every giver hears of it; the one giver answers only in a turn its work alone started: a question in one its send or its task the mailbox
+      // delivered started, an approval only in one its own send started (`gaveIt`, §10.6.4). A giver on another computer is named by its address
+      givers: (id) => cardGivers(store.mailbox, addressOf(id), (giver, gaveIt) => giver !== PERSON && service.stops.alone(addressOf(id), parseAddress(giver) ? giver : addressOf(giver), { gaveIt })),
+      // The person has the card itself: nothing is written for them. A giver on another computer (an address) reads it through that computer's call
+      tell: (giverId, card, body, delivered) => (giverId === PERSON || parseAddress(giverId) ? null : tellCard(service, addressOf(giverId), { ...card, session: addressOf(card.session) }, body, delivered)),
       turn: (id) => store.mailbox.nextTurnSeq(id) - 1,
       ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
     },

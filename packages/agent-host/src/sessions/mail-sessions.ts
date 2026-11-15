@@ -2,7 +2,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { BusyAnswer, IfBusy } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
-import type { AnswerGiven } from '../mail/delegation.js'
+import type { AnswerGiven, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
@@ -15,11 +15,11 @@ import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { ChildReports, SessionLastResponse } from './child-reports.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
-import type { WayAcross } from './ask-project.js'
 import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
 import { seatHas } from './tool-seats.js'
+import { hubAskDepthKey } from './agent-depth.js'
 import { agentCallsFor } from './centralu-tools.js'
 import { agentRunText } from './tool-answers.js'
 
@@ -50,14 +50,17 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
-  /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
-  linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void
-  /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); a `note` needs no reply (#2258). Returns its id */
-  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean): string
+  /**
+   * A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); a `note` needs no reply (#2258);
+   * `depth`, the agent depth a linked machine's session's ask gives it (`MailInput.depth`). Returns its id
+   */
+  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string, note?: boolean, depth?: number): string
   /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
   withdrawTasks?(callerId: string, childId: string): number
+  /** Work given a session on a linked machine, as a task across the link (#1948 step 6) */
+  linkedTasks?: LinkedTasks
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1), a task answered as any task is */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
@@ -89,7 +92,7 @@ export type MailHooks = {
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
 
-const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null }), turn: () => 0, tell: () => null, ended: () => {} }
+const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null, sent: false }), turn: () => 0, tell: () => null, ended: () => {} }
 
 /**
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
@@ -123,35 +126,14 @@ export class MailSessionsView {
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   hooks: MailHooks | null = null
 
-  /** Whether a linked machine takes mail from this hub (#2067 item 2), as the manager is told it (`useMachineMail`) */
-  machineMail: ((machineId: string) => boolean) | null = null
-
-  /**
-   * How to leave a busy session across the link to `machineId` work, for an ask's refusal (`busyAcross`, #1186): mail to its address, unless that machine
-   * takes no mail (an older build: told to update) or this host has no mailbox
-   */
-  wayAcross(sessionId: string, machineId: string, machine: string): WayAcross {
-    const address = this.hooks?.address?.(sessionId)
-    if (!address) return null
-    return this.machineMail?.(machineId) === false ? { older: machine } : { mail: address }
-  }
-
   /** A child this host started on a linked machine, by its name there (#2067): mail refuses it as elsewhere, not as gone */
   onLinkedMachine(sessionId: string): { name: string } | undefined {
     return this.host.linkedChild(sessionId)
   }
 
-  /**
-   * A child this host started on a linked machine is gone, with notes its caller had the hub hold for it (#2114): they were not given, and the
-   * stop notice tells the caller so, as of any task a gone session leaves. Never throws: the child is gone already
-   */
-  linkedChildGone(childId: string, callerId: string, notes: readonly string[]): void {
-    if (this.host.closing) return
-    try {
-      this.hooks?.linkedGone?.(childId, callerId, notes)
-    } catch (e) {
-      console.error(`[mail] ${childId.slice(0, 8)}: the notes held for it could not be told to ${callerId.slice(0, 8)} (${errorMessage(e)})`)
-    }
+  /** Work given a session on a linked machine, as a task across the link (#1948 step 6); null in a manager that has no mailbox */
+  get linkedTasks(): LinkedTasks | null {
+    return this.hooks?.linkedTasks ?? null
   }
 
   /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
@@ -232,7 +214,17 @@ export class MailSessionsView {
     return {
       receiver: (id) => this.mailReceiver(id),
       deliver: async (id, input, late) => {
-        await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, late)
+        // Work from another computer's session: the session counts that depth until the turn that takes it ends (`SessionEvents.endHubAsk`, #838)
+        const settings = this.host.store.settings
+        const before = settings.appSetting(hubAskDepthKey(id))
+        if (input.depth) settings.setAppSetting(hubAskDepthKey(id), String(Math.max(input.depth, Number(before) || 0)))
+        try {
+          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, late)
+        } catch (e) {
+          if (input.depth && before === null) settings.deleteAppSetting(hubAskDepthKey(id))
+          else if (input.depth && before !== null) settings.setAppSetting(hubAskDepthKey(id), before)
+          throw e
+        }
       },
       note: (id, text) => {
         if (this.host.meta.has(id)) this.host.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
@@ -303,11 +295,11 @@ export class MailSessionsView {
    * A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2).
    * A `note` (send_to_session without reportBack, #2258) is a message that needs no reply, given the same way, busy or not
    */
-  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note = false): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
+  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note = false, depth?: number): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
     const hooks = this.hooks
     if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
     try {
-      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note), ...(note ? { note: true as const } : {}) }
+      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note, depth), ...(note ? { note: true as const } : {}) }
     } catch (e) {
       return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
     }

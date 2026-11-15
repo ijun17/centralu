@@ -115,30 +115,21 @@ export function agentChoice(
 
 /**
  * The task of a child started on a linked machine (#1038): as `agentFrame`, said as from a session of the same
- * repository on another computer, whose name the link already gives as "<name> on <hub>". `mail`: the machine said it
- * takes mail from this hub (its answer to `host.hubOffer`, #2067 item 2), so the child can mail its parent mid-task; a
- * machine from before it cannot, and its task says the answer is the only way
+ * repository on another computer, whose name the link already gives as "<name> on <hub>". It goes as a task by mail
+ * (#1948 step 6) to a machine that takes the hub's mail, so the child can mail its parent mid-task (#2067 item 2)
  */
-export function remoteAgentFrame(parentName: string, task: string, instructions = '', mail = false): string {
+export function remoteAgentFrame(parentName: string, task: string, instructions = ''): string {
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
       `${ANSWER_GROUNDS} ` +
-      (mail
-        ? PARENT_MAIL
-        : // #1987: this machine's Centralu takes no mail from that computer, so the answer is the only way it hears from the child
-          'Mail does not reach it from here yet: the answer is how it hears from you. ') +
+      PARENT_MAIL +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     '',
     task,
     // The machine's own copy of the project's instructions: its paths and its shell, not the parent's (#1161 item 2)
     ...projectInstructions(instructions),
   ].join('\n')
-}
-
-/** A follow-up to a child on a linked machine carries the parent's words without replacing the task or promising an independent answer. */
-export function agentNoteFrame(parentName: string, text: string): string {
-  return `[A note from the parent session "${frameField(parentName)}" through Centralu's mail. These are the parent's words about your ongoing work.]\n\n${text}`
 }
 
 /**

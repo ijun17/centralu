@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
-import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
+import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey, startingHub } from '../sessions/hub-preset.js'
 import { sessionAddress } from '../mail/address.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
@@ -119,14 +119,14 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     await eventually(() => offered(machine))
     // Work given to another computer waits for the person to trust the project
     await hub.mgr.setProjectTrusted('p-hub', true)
-    const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box' })
+    const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', wait: false })
     await hub.answer('allow')
     const r = await call
     if (!r.ok) throw new Error(r.error)
     const childId = r.sessionId.replace(/^m1\./, '')
-    // The machine said at the offer that it takes mail from the hub: the child's task says to mail its parent (#2067 item 2)
-    const sent = (JSON.parse(hub.store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]') as { sent?: string }[]).map((a) => a.sent ?? '')
-    expect(sent).toEqual([expect.stringContaining('call mail with `to: "parent"`')])
+    // Its task came as mail from the hub, which the machine takes (#1948 step 6): it says to mail its parent (#2067 item 2)
+    const task = machine.store.mailbox.feedOf(at(machine, childId), { limit: 5 }).find((m) => m.kind === 'task')
+    expect(task?.body).toContain('call mail with `to: "parent"`')
     // The machine recorded the hub from the connection the start came in on, and the hub recorded its parent
     expect(startingHub(machine.store.settings, childId)).toEqual({ id: hub.id, name: 'Hub mac', apps: false })
     expect(await send(machine, 'done: hello said', { from: childId })).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac\. /) })

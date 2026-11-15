@@ -24,7 +24,7 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
-import type { WayAcross } from './ask-project.js'
+import type { LinkedTasks } from '../mail/delegation.js'
 import type { SelfCompaction } from './self-compaction.js'
 
 /** The tool a send to another session came through, the task's origin when it goes as mail */
@@ -57,9 +57,7 @@ export type DelegationHost = {
   /** Whether a send reaches the session as a turn it starts now; otherwise it goes as mail (`MailSessionsView.takesSendNow`) */
   takesSendNow: (sessionId: string) => boolean
   /** A send to a session that cannot take it now, as a mail task, or a note that needs no reply (`MailSessionsView.mailTask`) */
-  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note?: boolean) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
-  /** How to leave a busy session across the link to `machineId` work (`MailSessionsView.wayAcross`, #1186) */
-  wayAcross: (sessionId: string, machineId: string, machine: string) => WayAcross
+  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note?: boolean, depth?: number) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
   /** The caller's tasks to the session not delivered yet, withdrawn (`MailSessionsView.withdrawTasks`); how many */
   withdrawTasks: (callerId: string, sessionId: string) => number
   readonly children: ChildOwnership
@@ -82,8 +80,8 @@ export type DelegationHost = {
   readonly closing: boolean
   readonly handles: Map<string, SessionHandle>
   readonly linkedReader: LinkedSessions | null
-  /** A child on a linked machine is gone with notes held for it (#2114): the stop notice tells its caller they were not given (`MailSessionsView.linkedChildGone`) */
-  linkedChildGone: (childId: string, callerId: string, notes: readonly string[]) => void
+  /** Work given a session on a linked machine, as a task across the link (`MailSessionsView.linkedTasks`, #1948 step 6); null with no mailbox */
+  readonly linkedTasks: LinkedTasks | null
   readonly memoryGate: MemoryGate | null
   readonly meta: Map<string, SessionInfo>
   modelsWithin: (tool: ToolName, ms: number, fresh?: boolean) => Promise<{ models: ModelOption[]; cached: boolean; } | null>
@@ -105,10 +103,8 @@ export type DelegationHost = {
   untilCard: (sessionId: string, callerId: string) => { asked: Promise<"asked">; done(): void; }
   /** A project's `origin` remote (#1038); null with no repository or no origin */
   readonly files: Pick<ProjectFiles, 'projectOrigin'>
-  /** A linked machine's session's own background work running there, as the hub last heard it (`LinkedReports`, #723) */
-  readonly linkedReports: Pick<LinkedReports, 'ownTasksRunning' | 'tasksOf'>
-  /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
-  settleLinkedTurn: (sessionId: string) => void
+  /** A linked machine's session's own background work there, as the hub last heard it (`LinkedReports`, #723) */
+  readonly linkedReports: Pick<LinkedReports, 'tasksOf'>
   /**
    * §7.4: asked before a delegation creates, starts or delivers anything. S15, the whole refusal the tool answers, when
    * the mailbox refuses it (it has written the record S16 is built from); null when it may go, or with no mailbox

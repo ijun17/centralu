@@ -324,31 +324,6 @@ describe('what the owner reads with the tool', () => {
   })
 })
 
-describe("a linked machine's child whose last response could not be read because its machine is out of reach (#1186)", () => {
-  it('is told so in the relayed report, with how to read it, and no mail report is written', async () => {
-    const { parent, child } = await parentAndChild()
-    const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
-    const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
-    await reports.deliverReport(parent, child, 'name', 'project', '(not read: its machine could not be reached)', { type: 'turn_complete' }, { linkLost: 'Box', paused })
-    const [told] = oldReports(parent, child)
-    expect(told).toContain('Its last response could not be read: its machine could not be reached.')
-    expect(told).toContain(`read_session(sessionId="${child}") reads it once that machine is back.`)
-    expect(reportsIn(parent, child)).toEqual([])
-  })
-})
-
-describe("a linked machine's child whose last response was read before its machine went out of reach (#1186)", () => {
-  it('is told in the relayed report as what was last read there, and its words do not reach the model', async () => {
-    const { parent, child } = await parentAndChild()
-    const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
-    const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
-    await reports.deliverReport(parent, child, 'name', 'project', 'the verify is at step 3', { type: 'turn_complete' }, { linkLost: 'Box', paused, asRead: true })
-    const [told] = oldReports(parent, child)
-    expect(told).toContain('as it was last read there, before its machine went out of reach')
-    expect(told).not.toContain('the verify is at step 3')
-  })
-})
-
 describe('work handed on', () => {
   /** The parent's child hands a part of its work on to a child of its own, without waiting */
   async function handOn() {

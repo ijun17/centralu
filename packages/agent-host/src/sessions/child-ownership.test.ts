@@ -192,7 +192,6 @@ describe('moveOwner', () => {
     own.setDelegation('from>c1', d1)
     own.setDelegation('from>proj>c2', d2)
     own.setDelegation('from>stays', kept)
-    own.setLinkedReport('c2', { assistantId: 'from', busy: false })
     const made = start('r-made', 'from', { ended: { childId: 'c1' } })
     const open = start('r-open', 'from')
     own.addAgentStart(made)
@@ -203,7 +202,6 @@ describe('moveOwner', () => {
     expect([...own.delegations.keys()].sort()).toEqual(['from>stays', 'to>c1', 'to>proj>c2'])
     expect(d1.callerId).toBe('to')
     expect(kept.callerId).toBe('from')
-    expect(own.linkedReports.get('c2')?.assistantId).toBe('to')
     expect(made.req.callerId).toBe('to')
     // The open request's caller is the card mover's to change, with its card
     expect(open.req.callerId).toBe('from')

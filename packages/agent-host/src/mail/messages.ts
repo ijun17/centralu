@@ -109,8 +109,13 @@ export type SendResult = {
 export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
-/** `note`: a send that asks for nothing back (`send_to_session` without `reportBack`, #2258): a message that needs no reply, given as the task would be */
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true }
+/**
+ * `note`: a send that asks for nothing back (`send_to_session` without `reportBack`, #2258): a message that needs no reply, given as the task would be.
+ * `across`: work a hub gave over its link (#1948 step 6), written under the id the hub picked; `forPerson`, that hub said its Assistant gave it, so it acts for
+ * the person here as the Assistant's own does (`forPersonOf`). Only a hub's `host.mail` on its own link sets it (`MailAcross.fromHub`). `depth`: work from
+ * another computer's session, which the session here counts that agent depth for while it works on it (`MailInput.depth`, #838)
+ */
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string }; note?: true; across?: { id: string; forPerson?: true }; depth?: number }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -182,6 +187,8 @@ export class MessageService {
   private readonly ulids: UlidMaker
   private readonly listeners = createListeners<MailChange>((e) => console.error(`[mail] a listener failed: ${errorMessage(e)}`))
   private queued: MailChange[] = []
+  /** Tasks across a link a handoff re-pointed, for `takeMoves` */
+  private readonly queuedMoves: { from: string; to: string; ids: string[] }[] = []
   private running = false
   /** Who hears that a session stopped or went (mailbox.md §10.6.1) */
   readonly stops: StopNotices
@@ -336,12 +343,14 @@ export class MessageService {
    * what becomes of it (`MailboxRecords.mergeAcross`). No guard runs here: they ran where the message was written. An
    * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer)
    */
-  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }): MailRow {
+  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; task?: { origin: DelegationOrigin; note?: true } }): MailRow {
     return this.run(() => {
       const now = this.now()
       const target = input.replyTo === undefined ? undefined : this.records.message(input.replyTo)
+      // Work given across a link (#1948 step 6) is a task here as there: the report the machine sends back answers this copy, and settles it
+      const work = input.task ? { kind: input.task.note ? ('message' as const) : ('task' as const), origin: input.task.origin, causeId: this.causeOf(sender) } : { kind: 'message' as const, origin: 'mail' as const }
       const stored = this.put(
-        { id: input.id, sender, kind: 'message', body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, origin: 'mail', createdAt: now },
+        { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work },
         [this.row(input.to, { dueAt: now, deliveredAt: now })],
       )
       if (target && replyAnswers(target, input) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
@@ -377,7 +386,11 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       return this.put(
-        { sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
+        {
+          sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin,
+          facts: { ...(input.fromScript ? { fromScript: input.fromScript } : input.across?.forPerson ? { hubAssistant: true } : {}), ...(input.depth ? { agentDepth: input.depth } : {}) },
+          ...(input.across ? { id: input.across.id } : {}),
+        },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })
@@ -845,17 +858,52 @@ export class MessageService {
        * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`). Its words
        * are `from`'s, not `to`'s: fact `handedOver` says so, and keeps an heir that is the Assistant from passing them off as the person's (`forPersonOf`)
        */
+      const across: string[] = []
       for (const row of this.records.watchedFrom(from)) {
         const m = children.includes(row.recipient) ? this.records.message(row.messageId) : undefined
         if (m?.kind !== 'task') continue
+        /*
+         * A task across a link (#1948 step 6) keeps its one id on both sides: the child's turn there is that task's, and a task sent again would leave its
+         * answer to a withdrawn one. It is the heir's here at once (the report that comes back is written to its sender), and the machine is told (`movedAcross`)
+         */
+        if (this.across(row.recipient)) {
+          this.records.repoint(m.id, to, this.reach.projectOf(to), { ...m.facts, handedOver: true })
+          across.push(m.id)
+          continue
+        }
         this.records.settle(m.id, row.recipient, 'withdrawn', this.now())
         const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: { ...m.facts, handedOver: true } }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
         // A task a stop released stays released: its sender was told, and no one is owed it twice
         if (row.releasedAt !== null && row.releasedWhy !== null) this.records.markReleased(again.id, row.recipient, row.releasedAt, row.releasedWhy)
       }
       this.movedNotice(to, fresh.map((p) => p.messageId))
+      if (across.length) this.queuedMoves.push({ from, to, ids: across })
       return plan
     })
+  }
+
+  /**
+   * On a machine: a hub's handoff gave the tasks it sent here (`ids`) from its session `from` to its session `to` (`host.mailMove`, #1948 step 6). Only an
+   * open task of this host's that `from` sent is moved; it keeps its rows, its delivery and the turn it runs in, and reads as handed over (fact
+   * `handedOver`), so an heir's words never pass for the Assistant's. The caller checks that both are that hub's. Returns how many moved
+   */
+  moveAcross(from: string, to: string, ids: readonly string[]): number {
+    return this.run(() => {
+      let moved = 0
+      for (const id of new Set(ids)) {
+        const m = this.records.message(id)
+        if (!m || m.sender !== from || (m.kind !== 'task' && m.kind !== 'message')) continue
+        if (!this.records.recipients(id).some((r) => r.settled === null)) continue
+        this.records.repoint(id, to, null, { ...m.facts, handedOver: true })
+        moved++
+      }
+      return moved
+    })
+  }
+
+  /** The handoffs that moved tasks across a link, for the links to tell the machines (`MailAcross.movedAcross`); taken once */
+  takeMoves(): { from: string; to: string; ids: string[] }[] {
+    return this.queuedMoves.splice(0)
   }
 
   /** What `handOver` would move, read only: each message by id and the first line of its words, for the handoff note to quote */
@@ -1063,9 +1111,15 @@ export class MessageService {
     return { message: m, row, relation, ...(forPerson ? { forPerson } : {}) }
   }
 
+  /** Whether an address is a session on another computer: another host's, or on a hub a linked machine's (`<machine>.<id>`, as `MailAcross` routes it) */
+  private across(address: string): boolean {
+    const p = parseAddress(address)
+    return p?.kind === 'session' && (p.host !== this.opts.hostId || p.sessionId.includes('.'))
+  }
+
   /** The Assistant's `send_to_session` words, which act for the person (`forPersonOf`) */
   private forPerson(m: MailRow): 'task' | 'note' | undefined {
-    return forPersonOf(m, this.reach.isAssistant(m.sender))
+    return forPersonOf(m, this.reach.isAssistant(m.sender) || m.facts.hubAssistant === true)
   }
 
   /** The line for an earlier message that is no longer kept (S5) */

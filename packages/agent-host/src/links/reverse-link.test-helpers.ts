@@ -36,6 +36,19 @@ export function without(handler: ReturnType<typeof createRpcHandler>, methods: r
   }
 }
 
+/** `mail: 'delivered'`: the host delivers its mail as main.ts starts it, on real timers, rather than when a test asks (`MailDelivery.process`) */
+const LIVE = { schedule: (ms: number, fn: () => void) => {
+  const t = setTimeout(fn, ms)
+  return () => clearTimeout(t)
+} }
+function delivering(mail: HostMail, live: boolean): HostMail {
+  if (live) {
+    mail.delivery.start()
+    cleanups.push(() => mail.delivery.stop())
+  }
+  return mail
+}
+
 /**
  * A project folder: an empty one, or with `origin` a git checkout of that repository with one commit, so start_agent
  * finds the same repository on the machine and a worktree can branch from it
@@ -56,7 +69,7 @@ function projectFolder(origin?: string): string {
  */
 /** `apps`: an app runtime wired as main.ts wires it (#1938); `'before'`, as a build from before `host.apps` (its offer's answer says nothing of apps) */
 export async function machineHost(
-  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean; origin?: string; apps?: true | 'before' } = {},
+  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before' } = {},
 ) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: projectFolder(o.origin), name: 'remote-project' })
@@ -74,20 +87,25 @@ export async function machineHost(
   })
   mgr.useLinkedHubs(hubs)
   const id = hubSelfId(store)
-  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store, { hostId: id }) : null
+  const mail: HostMail | null = o.mail ? delivering(wireHostMail(mgr, store, { hostId: id, ...(o.mail === 'delivered' ? { delivery: LIVE } : {}) }), o.mail === 'delivered') : null
   mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
   const apps = o.apps ? hostApps(store, mgr) : null
   apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }))
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
   const appsAcross =
     apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
-  const server: HostServer = new HostServer({
-    port: 0,
-    token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? []),
-    onClientGone: (client) => hubs.gone(client),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
-  })
+  const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? [])
+  /** What its answer to a hub's offer waits for, when a test holds it (`holdOffer`) */
+  let held: Promise<void> | undefined
+  const serve = (port: number) =>
+    new HostServer({
+      port,
+      token: TOKEN,
+      onRpc: (method, ...rest) => (held && method === 'host.hubOffer' ? held.then(() => handler(method, ...rest)) : handler(method, ...rest)),
+      onClientGone: (client) => hubs.gone(client),
+      build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
+    })
+  let server: HostServer = serve(0)
   const port = await server.listen()
   await mgr.setProjectTrusted('p-remote', true)
   let closed = false
@@ -99,7 +117,16 @@ export async function machineHost(
   }
   cleanups.push(close)
   const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
-  return { store, mgr, server, hubs, port, close, ask, mail, id, apps }
+  /** Its answers to a hub's offers from now on wait for `until` */
+  const holdOffer = (until: Promise<void>) => void (held = until)
+  /** Its host goes away and comes back on the same port, as one swapped in place does; `until`: its answers to offers wait for it */
+  const bounce = async (until?: Promise<void>) => {
+    await server.close()
+    held = until
+    server = serve(port)
+    await server.listen()
+  }
+  return { store, mgr, get server() { return server }, hubs, port, close, ask, mail, id, apps, bounce, holdOffer }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
@@ -110,7 +137,7 @@ export async function machineHost(
  */
 export async function hubHost(
   machinePort: number,
-  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before'; children?: readonly RemoteAgent[]; origin?: string; apps?: true } = {},
+  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before' | 'delivered'; children?: readonly RemoteAgent[]; origin?: string; apps?: true; deps?: Partial<LinkDeps> } = {},
 ) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
@@ -122,10 +149,10 @@ export async function hubHost(
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const name = o.name ?? 'Hub mac'
   mgr.useHubName(() => name)
-  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store, { hostId: hubSelfId(store) }) : null
+  const mail: HostMail | null = o.mail ? delivering(wireHostMail(mgr, store, { hostId: hubSelfId(store), ...(o.mail === 'delivered' ? { delivery: LIVE } : {}) }), o.mail === 'delivered') : null
   // Every `hub.mail` this hub was sent, as it read it
   const heard: HubMailParams[] = []
-  const across = mail && o.mail === true ? mail.across : null
+  const across = mail && o.mail !== 'before' ? mail.across : null
   // A project's app used from another machine (#1938), as main.ts wires it
   const apps = o.apps ? hostApps(store, mgr) : null
   const registry = storeRegistry(store)
@@ -165,9 +192,9 @@ export async function hubHost(
                 }
               : {}),
           }),
-          ...(o.mail === true ? { hubMail: true } : {}),
+          ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across ? { mailReady: () => across.changed() } : {}),
+          ...(across ? { onOfferAnswered: () => across.changed() } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
@@ -183,17 +210,19 @@ export async function hubHost(
     client: { maxBackoffMs: 100 },
     ...(o.origin ? { ownerOf: (sessionId: string) => mgr.linkedHost.remoteAgentParent(sessionId) } : {}),
     ...reverse,
+    ...o.deps,
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   apps?.linked.usePeers(appsPeers({ machines: links }))
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ machines: links }))
   // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => name, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
-  if (across) mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
+  // Unknown until the machine answers this connection's offer, as main.ts passes it
+  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
   // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
   if (o.origin) {
     mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
-    mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), name))
+    mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))
   }
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()
@@ -219,10 +248,10 @@ export async function hubHost(
   return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName, mail, heard, apps }
 }
 
-/** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise */
+/** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise; the hub delivers its mail, the asks' tasks */
 export async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
   const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs })
-  const hub = await hubHost(machine.port, { preset: o.preset })
+  const hub = await hubHost(machine.port, { preset: o.preset, mail: 'delivered' })
   await eventually(() => hub.machine().status === 'connected')
   if (o.on !== false) {
     await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })

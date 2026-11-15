@@ -44,11 +44,11 @@ export const agentDepthKey = (sessionId: string) => `agent_depth:${sessionId}`
 type DepthStore = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }
 
 /**
- * Where a hub's ask_project task marks the session of this machine working on it (#838 item 12): the depth the hub
- * counts it at, kept until that turn ends (`LinkedHost.sendFromHub`). The hub's caller is on another machine, so no
- * link here leads to it; without the mark, a session asked from a linked machine could start agents and ask projects
- * as if the person had started it, past the depth on both machines. An app setting, as `agentDepthKey`: an older
- * build leaves it alone.
+ * Where work from another computer's session marks the session here working on it (#838 item 12): the depth that computer
+ * counts it at, kept until that turn ends. Set when the mail delivery gives the session such a task (`MailInput.depth`,
+ * #1948 step 6), and by an older hub's ask (`LinkedHost.sendFromHub`). The caller is on another machine, so no link here
+ * leads to it; without the mark, a session asked from a linked machine could start agents and ask projects as if the
+ * person had started it, past the depth on both machines. An app setting, as `agentDepthKey`: an older build leaves it alone.
  */
 export const hubAskDepthKey = (sessionId: string) => `hub_ask_depth:${sessionId}`
 

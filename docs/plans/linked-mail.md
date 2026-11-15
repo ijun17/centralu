@@ -120,8 +120,8 @@ Item 1's `parent` is now a case of the general rule: a hub that offers mail take
 machine, and only the resolution of the word `parent` (the hub's own record of whom it started) stays its own.
 
 One send is not mail since #1948 ([mailbox.md](mailbox.md) §10.6.6): a hub session's `send` to a child it started on a machine (by its
-`<machine>.<id>` or address) is more work for it, given through the link as `agent_session`'s send was (`RemoteAgents.send`), with the gates
-and the report that has. A send to any other session there is mail, as above.
+`<machine>.<id>` or address) is more work for it: a task across the link (§10), with the gates a send to a child has and its report. A send to any
+other session there is mail, as above.
 
 The hold for untrusted projects (mailbox.md §7.4) cannot hold across a link, since nothing is held there. A session of
 an untrusted project that mails a session on another computer is refused `untrusted_project` at once, with words that
@@ -203,9 +203,16 @@ recipient stops or goes without answering, `tellUnanswered`) is passed on and wr
 notice is written on a machine as the hub's Centralu's, since the hub links the machine. A machine's notice is written
 on the hub (and on another machine it is passed to) as that machine's message, from `Centralu on <machine>`, never as
 the hub's Centralu, and only to a session that mailed one of that machine's sessions; any other is refused
-`not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice that
-cannot be passed on (the link is down) is dropped and said in the host's log: nothing is held. This host's delivery
-never tries a foreign address.
+`not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice is
+owed as a report is (#1948 step 6): one that cannot be passed on now (the link is down, or the send failed on the way)
+stays undelivered and goes at the next connect or change, under its id, which the other side writes once; so a host that
+restarts while a session works on the other side's task tells that side the stop once the link is back. A hub passes a
+notice to a machine without waiting for the machine's answer to this connection's offer; one sent before it is refused
+there, and an error a machine raises on the hub's call reads on the hub as the link failing, so it stays owed. The hub
+tries what it owes a machine again at every answer to its offer, whatever the answer says, and a notice asked to go again
+while its send is out goes once more after it. A refusal the other side gives in its answer (and an error a hub raises on
+a machine's call), a machine whose offer said it takes no mail, and a side no longer linked at all drop it, said in the
+host's log. This host's delivery never tries a foreign address.
 
 ## 7. Refusals across (item 2)
 
@@ -350,3 +357,66 @@ characters, projects and machines of 80, 30 computers with long names and reason
 2. **Items 2 and 3, with the trust decision** (one change on `dev`): `mayReachAcross`, `host.mail` and the extended
    `hub.mail`, the sender's copy and receipts both ways, notices across, replies, `needsReply` honoured, the follow-ups
    of item 1's review, and `mail find` with names resolved across machines.
+
+## 10. Work across a link (#1948 step 6)
+
+Since #1948 step 6, the work a hub session gives a session on a linked machine is mail too, as it is between two sessions
+of one host ([mailbox.md](mailbox.md) §10.6): `start_agent`'s task to the child it made there, `agent_session send` and a
+`mail` to that child, the Assistant's `send_to_session` and `create_session` first message, and `ask_project`'s task to
+a machine's session either way (below). Before, the hub sent the
+words into the machine's session (`host.send`) and followed its turns over the link to report them itself
+(`LinkedReports`, `RemoteAgents`); that copy of the machine's engine is gone.
+
+- **The task.** `host.mail` with `task: { origin, note?, forPerson?, depth? }` (an addition; `depth` is the agent depth the
+  session counts while it works on it, [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)). The machine writes it as a task (a
+  note) from the hub's session, under the id the hub picked, undelivered, and its own delivery gives it: at once at rest,
+  into a turn whose tool takes input, else held until the session is free, as a busy session's task here is (#2189). The
+  hub's copy is a task too, so receipts, a withdrawal and a reply go as for any message that crossed. Unlike other mail
+  (§6) it is written before the task leaves, so the report finds it whenever it comes, after a restart of the hub too, when
+  nothing of the send is remembered; the machine's refusal deletes it, and a send whose answer was lost keeps it, as the task
+  it may be. A machine not connected is not sent to, and nothing is written.
+- **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
+  included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
+  `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,
+  the same as a returning call's report here), naming the child as the hub does, `<machine>.<id>`: the machine's text is never
+  the hub's Centralu's words, and its answer, error and reason stay facts. The hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
+  reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
+  settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
+  first does not make the report a stale one. The answer, error and reason are cut to what a report across
+  takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
+- **A report is owed, not dropped.** As a notice (§6, Notices), a report the hub cannot take now (its link is down,
+  or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second
+  one as the first. Kept reports are swept with other mail. A hub that no longer links the machine at all will never take
+  it: the machine's person is told once, with where the session's answer is (`uncrossed`).
+- **For the person.** The Assistant's `send_to_session` words act for the person ([mailbox.md](mailbox.md), #2258). Across a
+  link that is the hub's word, `forPerson`, which it says only for its own Assistant's `send_to_session` and which the
+  machine reads only from the hub of the link it came on (fact `hubAssistant`). A handed-over task, plain mail, a session
+  of another computer with the Assistant's id (#2274) and a machine's mail to a hub never get it.
+- **`ask_project` both ways.** A hub session's ask of a machine's session is such a task (origin `ask_project`), given
+  after the card; the call waits for its report up to its bound, and past it answers `working`, its next call with no task
+  waiting again. A machine session's ask of a hub (`hub.askProject`, kept for its gates and card) is a task the hub writes
+  from the asker's address there (`<machine>.<id>`); the hub answers with the report's words, or `working` with the task's
+  id (`taskId`, an addition). Then the machine keeps a copy (sent across, origin `ask_project`), and the hub's report comes
+  as `host.mail` with `report` (an addition, `replyTo` the task), taken only from the hub the copy went to, owed as the
+  machine's are; a report the answer to the call carried is not sent again, and one in as the call's wait reaches its bound
+  is answered with, not sent behind the answer, where it could reach the machine before its copy. A machine with no copy (an older build) asks
+  again and is answered from the report the hub kept; a hub that gives no `taskId` (an older build) is asked again. The
+  machine's switch going off withdraws its tasks not given yet. A later call with no task, once the report is in, reads the
+  session's words only while they are still that turn's; once it has said more since, the report's words.
+- **A handoff** on the hub keeps such a task under its one id (the child's turn there is that task's): the hub re-points its
+  copy to the heir at once, so the report that comes back is the heir's, and tells the machine (`host.mailMove`, an
+  addition), which re-points its own and marks it handed over. Only a hub's own sessions, and only tasks they gave there;
+  a machine that cannot be told now is told again at the next round of receipts (in memory: a hub that restarts first
+  forgets it). Until then its copy names the old sender: the report still reaches the heir, and the machine's receipts on
+  the task, which name that sender, are still taken by the hub (they are the machine's to tell) and make the hub tell
+  the move again.
+- **Older builds.** A machine that does not answer the offer with `tasks: true` gets no work from the hub: `start_agent`
+  and a send to it are refused, naming the machine to update. Until a connection's offer is answered that is not known:
+  a call that needs the machine (`settleForCall`, after it tried a machine that was down) waits for the answer to the
+  latest offer on the connection, a connect's or the person's switch, one bounded wait (10 s) that every call shares, so
+  a start or send right after a reconnect reads the answer. Past the bound it is refused as still connecting, never as an
+  older machine; a machine that does not know the offer at all ("Unknown method") is an older one. A newer machine linked by an older hub takes `host.send`
+  as before (`sendFromHub`); that path goes with the release floor.
+- **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
+  caller is told once, in one notice for all its children, that the report no longer comes, and how to read where the child stands. Notes the old hub held for
+  a busy child (`queued`) are not sent by the new one; their caller is told once too.

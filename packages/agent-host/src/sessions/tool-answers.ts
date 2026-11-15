@@ -95,11 +95,6 @@ export function mailedText(m: { sessionName: string; sessionId: string; messageI
   return `${instead}"${m.sessionName}" [${m.sessionId}] is busy, so this went to it as mail ${m.messageId}: it reaches the session in its current turn, or as soon as it can take it${m.note ? '' : '; you are told by mail when that turn ends'}.${fork}`
 }
 
-/** A note held for a child on a linked machine until it is at rest (#1682): mail does not cross links yet */
-export function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number }): string {
-  return `Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
-}
-
 export const ANSWER_FORM = 'Answer a question with its option label, or your own words; one line per question; several choices of one question separated by ";". The person may answer first; the first answer counts.'
 
 /**
@@ -229,8 +224,6 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       }
     case 'mailed':
       return { text: `${mailedText(r, 'mail')} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it until it is delivered.` }
-    case 'queued':
-      return { text: `${queuedText(r)} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it.` }
     case 'answered':
       return { text: `Answered card ${r.card} in ${who}; it goes on. agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer.` }
     case 'stopped':

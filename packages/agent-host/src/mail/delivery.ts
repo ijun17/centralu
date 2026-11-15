@@ -74,6 +74,8 @@ export type MailInput = {
   shown?: { senderId: string; text: string; alone: boolean }
   /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
   id?: string
+  /** The agent depth a task from another computer's session gives the receiver while it works on it (`TaskInput.depth`, #838): the deepest it carries */
+  depth?: number
 }
 
 /**
@@ -474,14 +476,15 @@ export class MailDelivery {
     if (due === null) return
     this.timers.get(recipient)?.()
     this.timers.delete(recipient)
-    const wait = due - now
-    this.timers.set(
-      recipient,
-      this.schedule(wait, () => {
-        this.timers.delete(recipient)
-        void this.process(recipient)
-      }),
-    )
+    const fire = (): void => {
+      this.timers.delete(recipient)
+      // A timer may run a moment before the clock reaches its time (Node's do): the mail is not due yet, and a look now would find nothing and leave
+      // it to the sweep, a minute on
+      const early = due - this.now()
+      if (early > 0) this.timers.set(recipient, this.schedule(early, fire))
+      else void this.process(recipient)
+    }
+    this.timers.set(recipient, this.schedule(due - now, fire))
   }
 
   /** Delivers to one mailbox what is due, once, if the receiver can take it now */
@@ -557,8 +560,9 @@ export class MailDelivery {
     const delivered: { at?: number } = {}
     const shown = quiet ? undefined : this.shownOf(drained)
     const inputId = joins ? randomUUID() : undefined
+    const depth = Math.max(0, ...drained.messageIds.map((id) => this.records.message(id)?.facts.agentDepth ?? 0))
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)

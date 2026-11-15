@@ -109,6 +109,11 @@ const ATTEMPT_WAIT_MS = 60_000
  * answered as not reachable and the attempt goes on
  */
 const CALL_WAIT_MS = 10_000
+/**
+ * How long a call that needs a machine which just connected waits for its answer to this hub's offer (`offerAnswered`, #1948 step 6): the
+ * answer says whether it takes tasks, and comes in a round trip on a link that is up. Past it the call reads the machine as still connecting
+ */
+const OFFER_WAIT_MS = 10_000
 /** How long the reason a call's attempt failed is still given to the calls that follow it: past it, a stale reason would be told of a new drop */
 const CALL_FAILURE_KEPT_MS = 60_000
 /** At most one attempt started by a call per machine within this window, so calls cannot defeat the backoff (#1532) */
@@ -725,22 +730,39 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * here, by which it reads this hub's names for its own sessions. The machine's answer says whether it takes mail back
    * (`takesMail`)
    */
-  protected async offerAsks(client: RemoteClient): Promise<void> {
+  protected offerAsks(client: RemoteClient): Promise<void> {
+    const offered = this.offerOnce(client)
+    // Every offer on this connection, a connect's or a switch's, is the one a call that needs the machine waits on (`offerAnswered`)
+    if (this.client === client) {
+      this.offering = offered
+      this.offerWait = null
+    }
+    return offered
+  }
+
+  private async offerOnce(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
     if (!self) return
     const on = this.record.asks === true
     let note: string | null = null
+    // Not known on this connection until the machine answers (#1948 step 6): a start before it waits for the connect, never reads as an older machine
+    if (this.client === client) this.tasksBack = undefined
     try {
       const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
-      if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
+      if (this.client === client) this.tasksBack = isObj(answer) && answer.tasks === true
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
+      if (this.client === client) this.mailBack = false
+      // A machine from before the offer takes no tasks; any other failure leaves it unknown until the next connect tells it
+      if (this.client === client) this.tasksBack = /Unknown method/i.test(errorMessage(err)) ? false : undefined
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
     if (this.client !== client) return
+    // Whatever it said: mail owed to it goes now, or is settled by its answer (one that takes no mail drops a notice), never left for a later change
+    this.deps.onOfferAnswered?.(this.id)
     const changed = note !== this.asksNote
     this.asksNote = note
     if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
@@ -773,8 +795,35 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
   }
 
+  /** This connection's latest offer (`offerAsks`), until the machine answered it */
+  private offering: Promise<void> = Promise.resolve()
+  /** The one bounded wait for it that every call shares, so a machine whose answer is late holds each call up once at most */
+  private offerWait: Promise<void> | null = null
+
+  /**
+   * Resolves once the machine answered this connection's offer (or it failed), or after a bound (`offerWaitMs`, `OFFER_WAIT_MS` when absent): a call that needs the machine
+   * right after it connected, an agent's call that brought it up among them (`reachForCall`), reads whether it takes tasks from that answer, never
+   * the unknown of a connection not told yet (#1948 step 6). One wait per offer, shared: past the bound, the calls after it do not wait again
+   */
+  offerAnswered(): Promise<void> {
+    if (this.offerWait) return this.offerWait
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.deps.offerWaitMs ?? OFFER_WAIT_MS)
+      timer.unref?.()
+    })
+    this.offerWait = Promise.race([this.offering, bound]).finally(() => clearTimeout(timer))
+    return this.offerWait
+  }
+
   /** Whether the machine said, at this connection's offer, that it takes mail from this hub (`host.mail`, #2067 item 2) */
   private mailBack = false
+  /** The machine takes this hub's tasks as mail and reports them back (#1948 step 6), as its answer to the offer said; undefined until it answers */
+  private tasksBack: boolean | undefined = undefined
+
+  get takesTasks(): boolean | undefined {
+    return this.tasksBack
+  }
 
   get takesMail(): boolean {
     return this.mailBack
@@ -949,7 +998,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.opening = null
       for (const w of [...this.statusWaiters]) w()
       // An attempt that failed set its status while it was still under way: the machine waits for the person only from here,
-      // and whoever reads `waitsForPerson` on a status event (the reports of a working child) is told again
+      // and whoever reads `waitsForPerson` on a status event is told again
       if (this.waitsForPerson) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     })
     return this.opening
@@ -1393,7 +1442,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.switchFailure = null
     this.seen()
     this.setStatus('connected', null)
-    // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect
+    // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect, its answer awaited by a call that needs it
     void this.offerAsks(client)
     // And when agents compact (#1376)
     void this.offerAutoCompact(client)

@@ -66,6 +66,33 @@ export function answerAtRest(
   })
 }
 
+/**
+ * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is for the session's own
+ * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
+ * words, and the report must not contradict them
+ */
+export const TURN_ENDED = "[Centralu] The session ended its turn. Its last response says whether the work is done."
+/** The same line for the person, on their own work: one line, with nothing to call (§10.6.3) */
+export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its turn. Its last response says whether the work is done.'
+
+/**
+ * Centralu's words on a report of work given the session read as `childId`, from how it ended alone: a call that returned that end (`answerRecorder`)
+ * and a report another computer sends on work given there (`MailAcross.reportFrom`, #1948 step 6). Nothing the session, its tool or that computer
+ * wrote goes in (#120): its answer, error and reason are the report's facts, never these words. `kind`: the kind of its tool's error, a word of this
+ * host's (`errorKind`), which a report from another computer never brings
+ */
+export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean }): string {
+  const read = `read_session(sessionId="${childId}")`
+  const lines =
+    r.outcome === 'finished'
+      ? [`${TURN_ENDED}\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`]
+      : [
+          `[Centralu] ${r.outcome === 'failed' ? 'The assigned work did not finish.' : 'The assigned work stopped before finishing.'}\nid: ${childId}\n\n` +
+            `${r.kind ? `Its tool's error, by kind: ${r.kind}. ` : ''}Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
+        ]
+  return [...lines, ...(r.personSince ? [PERSON_SINCE] : []), ...(r.after ? [AFTER] : [])].join('\n')
+}
+
 /** On a last response the person may have been answering (docs/plans/turn-owned-by-no-one.md §2.4, Q2) */
 const PERSON_SINCE = 'The person also wrote in this session after your task was given, so this last response may be an answer to them.'
 /** On a last response written before the task arrived (Q4) */

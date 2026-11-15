@@ -2,7 +2,10 @@ import { z } from 'zod'
 import { SessionId } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
 import { MachineId, RemoteShell } from '../../machines.js'
-import { HostMailParams, HubOffer, LinkedAppCallParams, LinkedAppCancelParams, LinkedAppNoticeParams, LinkedAppsParams, MailRowsParams } from '../../machines-hub.js'
+import { HostMailParams, HubOffer, LinkedAppCallParams, LinkedAppCancelParams, LinkedAppNoticeParams, LinkedAppsParams, MailMoveParams, MailRowsParams } from '../../machines-hub.js'
+
+/** A session of the hub, by its id there: one piece of a mail address (`session:<hub id>/<id>`) */
+const HubCaller = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,63}$/)
 
 /** The parameters of the `host` methods, which the host validates (docs/protocol.md §3). Their results: ./host.results.ts */
 export const hostParams = {
@@ -353,6 +356,15 @@ export const hostParams = {
   'host.mail': HostMailParams,
   /** The rows of messages that crossed, as the hub knows them (#2067 item 2). Additive */
   'host.mailRows': MailRowsParams,
+  /** A handoff on the hub gave tasks it sent here to another of its sessions (#1948 step 6). Additive */
+  'host.mailMove': MailMoveParams,
+  /**
+   * The cards a session here shows a hub's session `caller` (its id on the hub) as a giver of work it gave here, and answering one (#1948 step 6,
+   * docs/plans/mailbox.md §10.6.4): this host alone judges which, and whether that giver may answer, by its own rule. Taken only on a connection a hub
+   * offered on, the giver read as that hub's session. Additive
+   */
+  'host.cards': z.object({ sessionId: SessionId, caller: HubCaller }),
+  'host.answerCard': z.object({ sessionId: SessionId, caller: HubCaller, card: z.string().min(1).max(200), text: z.string().max(20_000) }),
   /**
    * A project's app here used by a session of the hub (#1938, docs/plans/remote-hub.md §13): the apps it may reach, one
    * call, its withdrawal, and a notice of a hub's app to a session here that called it. Taken only on a connection a hub

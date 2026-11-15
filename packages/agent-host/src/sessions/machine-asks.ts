@@ -1,13 +1,9 @@
 import type { HubAskParams, HubAskResult, HubProject, SessionState } from '@cc/protocol'
 import { oneLineText } from '@cc/protocol'
-import { inTurn } from '../idle.js'
-import { AgentRunWait } from './app-agents.js'
-import { ASK_WAIT_MS, askFrame, busyAcross, clipAnswer, pickAskedSession, taskLine } from './ask-project.js'
-import { hubAskDepthKey } from './agent-depth.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, pickAskedSession, taskLine } from './ask-project.js'
 import type { DelegationHost } from './delegation-host.js'
-import { MACHINE_ASKER } from './hub-sender.js'
-import { raceBound } from '../timing.js'
-import { turnAnswer } from './turn-answer.js'
+import { lastResponse } from './turn-answer.js'
+import { unfinished } from '../mail/delegation.js'
 import { lastActiveOf } from './transcript-view.js'
 import { isOrdinary } from './tool-profiles.js'
 
@@ -15,45 +11,32 @@ import { isOrdinary } from './tool-profiles.js'
  * What a linked machine's ask reaches of the session manager (#550), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
  */
-export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'deliver' | 'emit' | 'meta' | 'store' | 'wayAcross'>
+export type MachineAsksHost = Pick<DelegationHost, 'children' | 'hostCards' | 'emit' | 'linkedTasks' | 'mailTask' | 'meta' | 'store'>
 
 /** The machine a call came from, as the link it came in on names it: never what the call says */
 export type AskingMachine = { id: string; name: string }
-
-/** A task a machine's session gave a session here, while its turn runs and until its answer is read */
-type Given = {
-  machineId: string
-  callerId: string
-  sessionId: string
-  sessionName: string
-  project: string
-  wait: AgentRunWait
-  notice?: string
-  settledAt?: number
-}
-
-/** How long an answer nobody came back for is kept (#550): the machine's session may ask again after a link drop */
-const UNREAD_KEPT_MS = 60 * 60_000
 
 /**
  * The reverse direction, on the hub (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): a linked machine's
  * session asks a project of this computer, as `ask_project` does here, behind this computer's card for the pair.
  *
  *   - Only while that machine's switch is on (Settings → Machines), read at every step that waits: before the card,
- *     after it, when a pair is remembered, and once the session is awake to take the task.
+ *     after it, and when a pair is remembered.
  *   - The card is this computer's, in the session here that would get the task, so only this computer's windows can
  *     answer it; it names the machine and the asking session there. Approving it is remembered for the pair (that
  *     session, this project) until withdrawn in Settings → Machines, or until the switch goes off; a remembered pair
  *     passes with no card. Deny is not remembered.
  *   - The target is an existing ordinary session, as for an ask here (#614): never created, never an app's or a
- *     builder's. A session busy with a turn gets nothing: the refusal names the mail it gets as soon as it can take it
- *     (`busyAcross`, #1186), as for step 3's asks the other way (§12.6).
- *   - The task arrives framed as from that session on that machine (`MACHINE_ASKER`, never the person and never an
- *     assistant), and the session works on it one level deeper than the asker (#867), so it cannot ask on.
- *   - The answer goes back cut to size. Paths in it are this computer's: the machine lists them and opens none.
+ *     builder's.
+ *   - The task is mail (#1948 step 6): a task from that session on that machine (its address here, `<machine>.<id>`),
+ *     framed as from it (never the person and never an assistant), which this host's delivery gives the session, held
+ *     while it is busy as any task is, and whose turn its engine reports. The session works on it one level deeper than
+ *     the asker (#867, the task's `depth`), so it cannot ask on.
+ *   - The call waits for that report up to the bound and answers with the session's words, cut to size; past the bound
+ *     it answers `working` with the task's id, and the report goes to the machine when it comes (`MailAcross.passReport`).
+ *     Paths in it are this computer's: the machine lists them and opens none.
  */
 export class MachineAsks {
-  private readonly given = new Map<string, Given>()
   /** What closes the cards standing for each machine (#550 review): turning its switch off, or removing it */
   private readonly standing = new Map<string, Set<AbortController>>()
 
@@ -82,18 +65,13 @@ export class MachineAsks {
       .map((s) => ({ id: s.id, name: s.name, state: s.state }))
   }
 
-  private busy(sessionId: string): boolean {
-    const m = this.host.meta.get(sessionId)
-    const run = this.host.agentRuns.get(sessionId)
-    return !m || inTurn(m.state) || (!!run && !run.finished)
-  }
-
   /** `hub.askProject`: one ask of a machine's session, as `ask_project` is here */
   async ask(machine: AskingMachine, p: HubAskParams, signal?: AbortSignal): Promise<HubAskResult> {
-    this.prune()
     const shut = this.gate(machine)
     if (shut) return { ok: false, error: shut }
     const here = this.selfName()
+    const tasks = this.host.linkedTasks
+    if (!tasks) return { ok: false, error: `${here} takes work from another computer only by mail, and its mail is not running.` }
     const projects = this.host.store.projects.listProjects()
     const wanted = p.project.trim()
     const target =
@@ -102,30 +80,25 @@ export class MachineAsks {
       return { ok: false, error: `No project named "${oneLineText(wanted, 120)}" on ${here}. Its projects are: ${projects.map((x) => x.name).join(', ') || 'none'}.` }
     }
     const label = `${target.name} on ${here}`
-    const mine = [...this.given.values()].filter((g) => g.machineId === machine.id && g.callerId === p.caller.sessionId && g.project === target.id)
-    const wantedSession = p.session?.trim()
-    if (!p.task && !wantedSession && mine.length === 1) return this.awaitGiven(mine[0]!, signal)
+    // The asking session as this host names it, and its asks of the project's sessions not answered yet
+    const caller = `${machine.id}.${p.caller.sessionId}`
     const sessions = this.ordinary(target.id)
+    const mine = tasks.asks(caller).flatMap((a) => {
+      const s = sessions.find((x) => x.id === a.sessionId)
+      return s ? [{ taskId: a.taskId, session: s }] : []
+    })
+    const wantedSession = p.session?.trim()
+    const [only] = mine
+    if (!p.task && !wantedSession && only && mine.length === 1) return this.answer(only.taskId, only.session, target.name, signal)
     const picked = pickAskedSession(sessions, wantedSession, label, (s) => lastActiveOf(this.host.store.messages, s.id))
     if ('error' in picked) return { ok: false, error: picked.error }
     const chosen = picked.chosen
-    const key = this.keyOf(machine.id, p.caller.sessionId, chosen.id)
-    const pending = this.given.get(key)
-    if (pending && !p.task) return this.awaitGiven(pending, signal)
-    const other = [...this.given.values()].find((g) => g.sessionId === chosen.id && !g.wait.finished)
-    if (other) {
-      return {
-        ok: false,
-        error:
-          other === pending
-            ? `${label} is still working on your last task in the session "${chosen.name}". Call ask_project again with that session and no task to wait for it.`
-            : busyAcross({ name: chosen.name, label }, 'task', this.host.wayAcross(chosen.id, machine.id, machine.name)),
-      }
+    const pending = mine.find((g) => g.session.id === chosen.id)
+    if (pending && !p.task) return this.answer(pending.taskId, chosen, target.name, signal)
+    if (pending && tasks.open(caller, chosen.id) === pending.taskId) {
+      return { ok: false, error: `${label} is still working on your last task in the session "${chosen.name}". Call ask_project again with that session and no task to wait for it.` }
     }
     if (!p.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
-    if (this.busy(chosen.id)) {
-      return { ok: false, error: busyAcross({ name: chosen.name, label }, { turn: chosen.state }, this.host.wayAcross(chosen.id, machine.id, machine.name)) }
-    }
 
     // The pair's card (owner decision 2026-10-18): asked once, then remembered until withdrawn
     if (!this.host.store.machines.machineAskConsent(machine.id, p.caller.sessionId, target.id)) {
@@ -173,101 +146,50 @@ export class MachineAsks {
       this.host.emit({ type: 'project_consents_changed' })
     }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
-    // The card stood while the person could use the session: nothing goes into a turn that is not the caller's
-    const now = this.ordinary(target.id).find((s) => s.id === chosen.id)
+    const now = this.ordinary(target.id).some((s) => s.id === chosen.id) ? this.host.meta.get(chosen.id) : undefined
     if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
-    if (this.busy(chosen.id) || [...this.given.values()].some((g) => g.sessionId === chosen.id && !g.wait.finished)) {
-      return { ok: false, error: busyAcross({ name: chosen.name, label }, 'during_card', this.host.wayAcross(chosen.id, machine.id, machine.name)) }
-    }
-    return this.give(machine, p, p.task, target, chosen, key, signal)
-  }
-
-  /** Hands the task over and waits for its turn: registered before the send, as the turn can end before it returns */
-  private async give(
-    machine: AskingMachine,
-    p: HubAskParams,
-    task: string,
-    target: { id: string; name: string },
-    chosen: { id: string; name: string },
-    key: string,
-    signal?: AbortSignal,
-  ): Promise<HubAskResult> {
-    let after = this.host.meta.get(chosen.id)?.lastSeq ?? 0
-    const given: Given = {
-      machineId: machine.id,
-      callerId: p.caller.sessionId,
-      sessionId: chosen.id,
-      sessionName: chosen.name,
-      project: target.id,
-      wait: new AgentRunWait(
-        (message) => (given.notice = message),
-        () => this.host.meta.get(chosen.id)?.name ?? chosen.name,
-        undefined,
-        () => {
-          const answer = turnAnswer(this.host.store.messages.loadMessages(chosen.id, 50), { afterSeq: after })
-          after = this.host.meta.get(chosen.id)?.lastSeq ?? after
-          return answer
-        },
-      ),
-    }
-    const depthKey = hubAskDepthKey(chosen.id)
-    const done = () => {
-      given.settledAt = Date.now()
-      if (this.host.agentRuns.get(chosen.id) === given.wait) this.host.agentRuns.delete(chosen.id)
-      this.host.store.settings.deleteAppSetting(depthKey)
-    }
-    void given.wait.done.then(done, done)
-    this.given.set(key, given)
-    this.host.agentRuns.set(chosen.id, given.wait)
-    // One level below the asker on its machine (#867): the session cannot start agents or ask on past the depth
-    this.host.store.settings.setAppSetting(depthKey, String(p.depth))
-    const from = { sessionId: MACHINE_ASKER, name: `${oneLineText(p.caller.name, 120) || 'A session'} on ${machine.name}` }
-    // The switch and the project are read once more when the session is awake: waking or restarting it takes seconds
-    const stillAllowed = () =>
-      this.gate(machine) ?? (this.host.store.projects.listProjects().some((x) => x.id === target.id) ? null : `${target.name} was removed from ${this.selfName()}, so it was not reached.`)
-    try {
-      await this.host.deliver(chosen.id, askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, task, { name: from.name }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
-    } catch (e) {
-      given.wait.fail(e as Error)
-      this.given.delete(key)
-      return { ok: false, error: `Could not hand the task to ${target.name} on ${this.selfName()}: ${(e as Error).message}` }
-    }
-    return this.awaitGiven(given, signal)
+    const from = `${oneLineText(p.caller.name, 120) || 'A session'} on ${machine.name}`
+    const mailed = this.host.mailTask(caller, now, 'ask_project', askFrame(`${oneLineText(p.caller.project, 120) || 'a project'} on ${machine.name}`, p.task, { name: from }), false, p.depth)
+    if ('error' in mailed) return { ok: false, error: `Could not hand the task to ${label}: ${mailed.error}` }
+    return this.answer(mailed.messageId, chosen, target.name, signal)
   }
 
   /**
    * Closes every card still standing for a machine (#550 review): its switch went off, or it was removed. The asks
-   * answer with the switch's refusal; nothing is delivered and nothing is remembered
+   * answer with the switch's refusal; nothing is delivered and nothing is remembered. Its tasks not given yet are
+   * withdrawn, so none reaches a session after the switch went off; one given already runs on, as it did
    */
   closeCards(machineId: string): void {
     for (const c of [...(this.standing.get(machineId) ?? [])]) c.abort()
+    this.host.linkedTasks?.withdrawAsks(`${machineId}.`)
   }
 
-  /** Waits for a given task up to the bound, as `awaitDelegation` does; its answer is read once */
-  private async awaitGiven(g: Given, signal?: AbortSignal): Promise<HubAskResult> {
-    const base = { project: this.host.store.projects.listProjects().find((x) => x.id === g.project)?.name ?? g.project, sessionId: g.sessionId, sessionName: g.sessionName }
-    const outcome = g.wait.done.then(
-      (r) => ({ ok: true as const, answer: r.answer ?? '' }),
-      (e: Error) => ({ ok: false as const, error: e.message }),
-    )
-    const r = await raceBound(outcome, ASK_WAIT_MS, signal)
-    if (r === 'bound' || r === 'aborted') return { ok: true, state: 'working', ...base, ...(g.notice ? { notice: g.notice } : {}) }
-    this.forget(g)
-    if (!r.ok) return { ok: false, error: `${base.project}'s session "${g.sessionName}" on ${this.selfName()} did not finish: ${r.error}. Tell the person, or ask again with a clearer task.` }
-    return { ok: true, state: 'done', ...base, answer: clipAnswer(r.answer, g.sessionName) }
-  }
-
-  private keyOf(machineId: string, callerId: string, sessionId: string): string {
-    return `${machineId}/${callerId}>${sessionId}`
-  }
-
-  private forget(g: Given): void {
-    for (const [k, v] of this.given) if (v === g) this.given.delete(k)
-  }
-
-  /** Answers nobody came back for are not kept for good */
-  private prune(): void {
-    const now = Date.now()
-    for (const [k, g] of this.given) if (g.settledAt !== undefined && now - g.settledAt > UNREAD_KEPT_MS) this.given.delete(k)
+  /**
+   * Waits for the task's report up to the bound, as an ask here waits for its turn. The answer carries a report it read, which is then not passed to the
+   * machine; a report that comes after the answer is (`holdReports`)
+   */
+  private async answer(taskId: string, session: { id: string; name: string }, project: string, signal?: AbortSignal): Promise<HubAskResult> {
+    const tasks = this.host.linkedTasks!
+    const base = { project, sessionId: session.id, sessionName: session.name, taskId }
+    const release = tasks.holdReports(taskId)
+    let told = false
+    try {
+      const r = await tasks.settled(taskId, ASK_WAIT_MS, { signal })
+      const s = tasks.standing(taskId)
+      // A report in at the bound is answered with, not passed after the answer: it would reach the machine before its copy of the task
+      if (r === 'aborted' || s.state === 'open') return { ok: true, state: 'working', ...base }
+      told = true
+      const failed = unfinished(s)
+      if (failed !== null) return { ok: false, error: `${project}'s session "${session.name}" on ${this.selfName()} did not finish: ${failed}. Tell the person, or ask again with a clearer task.` }
+      // The session's own words, whole, while they are still the task's: once it has said more since the report, they are other work's, and the report's are read
+      const rows = this.host.store.messages.loadMessages(session.id, 200)
+      const reportAt = this.host.store.mailbox.reportsOn(taskId).at(-1)?.createdAt ?? Infinity
+      const words = rows.some((row) => row.ts > reportAt) ? '' : lastResponse(rows, this.host.children.turnRows(session.id))
+      const answer = words || (s.state === 'reported' ? (s.answer ?? '') : '')
+      return { ok: true, state: 'done', ...base, answer: clipAnswer(answer, session.name) }
+    } finally {
+      release(told)
+    }
   }
 }
+

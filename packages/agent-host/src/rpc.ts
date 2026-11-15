@@ -35,6 +35,7 @@ import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { Watches } from './mail/watches.js'
+import { sessionAddress } from './mail/address.js'
 import type { MailAcross } from './mail/across.js'
 import type { LinkedAppCalls } from './links/linked-app-calls.js'
 import type { InlineViews } from './inline-views.js'
@@ -123,7 +124,7 @@ export type RpcServices = {
    * Mail across linked machines (#2067 item 2, mail/across.ts): `host.mail` and `host.mailRows` from the hub that offered
    * on the connection they came in on, and from no other. Without it both are refused, as a build from before them
    */
-  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows'>
+  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows' | 'moveFromHub'>
   /**
    * This host's project apps used by the hub's sessions (#1938, docs/plans/remote-hub.md §13): `host.apps`, `host.appCall`
    * and `host.appCancel` from the hub that offered apps on the connection they came in on, and from no other; and a hub's
@@ -925,8 +926,8 @@ export function createRpcHandler(
     'host.hubOffer': async (p, ctx) => {
       const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
-      // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2)
-      return { ok: true as const, ...(mailAcross && hubs ? { mail: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
+      // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2); its tasks come as mail (#1948 step 6)
+      return { ok: true as const, ...(mailAcross && hubs ? { mail: true, tasks: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
     },
     'host.mail': async (p, ctx) => {
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined
@@ -938,6 +939,22 @@ export function createRpcHandler(
       if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection says what became of mail here')
       await mailAcross.rows(p.rows, { hub: hub.id })
       return { ok: true as const }
+    },
+    'host.mailMove': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection moves the work it gave here')
+      return mailAcross.moveFromHub(hub, p)
+    },
+    // A hub's session reads and answers the cards of work it gave here, as this host's rule for that giver lets it (#1948 step 6)
+    'host.cards': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!hub) throw rpcError('Only a hub that offered on this connection reads the cards of work it gave here')
+      return { cards: mgr.linkedHost.hubCards(p.sessionId, sessionAddress(hub.id, p.caller)) }
+    },
+    'host.answerCard': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!hub) throw rpcError('Only a hub that offered on this connection answers the cards of work it gave here')
+      return mgr.linkedHost.hubAnswer(p.sessionId, sessionAddress(hub.id, p.caller), p.card, p.text)
     },
     'host.apps': async (p, ctx) => {
       const { hub, calls } = appsHub(ctx)

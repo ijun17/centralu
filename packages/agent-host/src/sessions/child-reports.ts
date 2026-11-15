@@ -9,15 +9,13 @@ import { inTurn } from '../idle.js'
 import { agentLook, errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind } from './error-kind.js'
 import { wentWithItsProcess } from './interruptions.js'
-import { PERSON_TURN_ENDED, TURN_ENDED } from '../mail/delegation.js'
+import { PERSON_TURN_ENDED, TURN_ENDED } from '../mail/last-response.js'
 import type { LastResponse } from '../mail/last-response.js'
 import type { StopWhy } from '../mail/stop-notices.js'
 import { asObj, str } from '../json-value.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
-import { type DelegationHost, taskList } from './delegation-flow.js'
-import type { ReportPart, ReportWork } from './linked-reports.js'
+import type { DelegationHost } from './delegation-flow.js'
 import type { ProjectRegistry } from './project-registry.js'
-import { MACHINE_UNREACHABLE } from './ask-project.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
@@ -25,59 +23,9 @@ import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
 import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 
-/**
- * How a report's first line names the session's own background work and its machine. The stored report names them
- * (`STORED`); what reaches the model only counts the tasks and says "its machine" (`FOR_MODEL`, #1186): a task's
- * description is the session's own words, and a name can carry a line of its own, so neither goes in (#120)
- */
-type Naming = { tasks: (tasks: readonly BackgroundTask[], status?: boolean) => string; machine: (machine: string) => string }
-const STORED: Naming = { tasks: taskList, machine: (m) => frameField(m) }
-const FOR_MODEL: Naming = {
-  tasks: (tasks, status) => {
-    const n = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`
-    if (!status) return n
-    const done = tasks.filter((t) => t.status === 'completed').length
-    return done === tasks.length ? `${n}, all completed` : `${n}, ${done} completed`
-  },
-  machine: () => 'its machine',
-}
+/** The person's part in a turn a report tells of (#1377), and what Centralu did to it: an update cut it (#1966) */
+export type ReportPart = { wrote?: true; cut?: true }
 
-/**
- * The first line of a report held over the session's own background work (#721). `update` (#1540): not the first pause but a later turn of
- * the paused work, which ended with a new answer while that work still runs. `listed`: the call that names each task, for the model, which
- * reads them counted (#1186)
- */
-function pausedReportLine(running: readonly BackgroundTask[], stop: string | undefined, name: Naming = STORED, update = false, listed?: string): string {
-  return (
-    (update
-      ? `[Centralu] An update on the assigned work, which is still paused: a later turn ended with a new answer while its own background work is still running (${name.tasks(running)}). `
-      : `[Centralu] The assigned work paused: its turn ended while its own background work is still running (${name.tasks(running)}). `) +
-    (listed ? `${listed} names each of them. ` : '') +
-    'If that work is a server or watcher it leaves running, the answer below may be its final one. ' +
-    'A final report follows only if that work ends' +
-    (stop ? `; ${stop} on it stops that work and ends the wait.\n` : '.\n')
-  )
-}
-/**
- * The first line of a linked machine's paused report whose link dropped before the work ended (#723): the hub cannot see
- * that end, so the report goes out now
- */
-function linkLostReportLine(machine: string, paused: readonly BackgroundTask[], name: Naming = STORED): string {
-  return (
-    `[Centralu] The assigned work paused on its own background work (${name.tasks(paused)}), and the link to ${name.machine(machine)} dropped before that work ended, ` +
-    'so its end will not be reported. It may still be running there; read the session once the link is back.\n'
-  )
-}
-/** The first line of a linked machine's report whose machine was removed before the work ended (#723) */
-function machineRemovedReportLine(machine: string, paused: readonly BackgroundTask[] | undefined, name: Naming = STORED): string {
-  const which = name === STORED ? `its machine ${name.machine(machine)}` : 'its machine'
-  return (
-    (paused
-      ? `[Centralu] The assigned work paused on its own background work (${name.tasks(paused)}), and ${which} was removed from Centralu before that work ended`
-      : `[Centralu] The assigned work's machine${name === STORED ? ` ${name.machine(machine)}` : ''} was removed from Centralu before its turn ended`) +
-    ', so its end will not be reported.\n'
-  )
-}
 /** A turn an update cut and Centralu continued (#1966): whoever it answers heard nothing of the cut, so its end says so */
 const CUT_CONTINUED = 'An update of Centralu cut this turn and Centralu continued it.\n'
 
@@ -88,15 +36,6 @@ export function personPartLine(turn: ReportPart | undefined): string {
   if (turn?.wrote) return `${centralu}The person wrote in this session during this turn.\n`
   return centralu
 }
-/** The first line of a linked machine's paused report settled with no turn after its work ended (#721, #723): how that work ended */
-function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED): string {
-  const clean = tasks.every((t) => t.status === 'completed')
-  return (
-    `[Centralu] The assigned work's background work ended (${name.tasks(tasks, true)}) and no turn followed` +
-    (clean ? '; its last answer is below.\n' : ', so the work may not have finished; its last answer is below.\n')
-  )
-}
-
 /**
  * What a child's reports reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
@@ -160,7 +99,7 @@ export class ChildReports {
       const { preview, seq } = this.turnWords(stoppedId)
       const error = why === 'error' ? this.host.store.messages.loadMessages(stoppedId, 50).findLast((r) => r.role === 'system' && asObj(r.payload).type === 'error') : undefined
       const ending = why === 'error' ? { type: 'error' as const, error: { message: str(asObj(asObj(error?.payload).error).message) } } : { type: why === 'limit' ? ('limit_reached' as const) : ('state_change' as const) }
-      void this.deliverReport(receiverId, stoppedId, name, project, preview, ending, undefined, seq, undefined, told)
+      void this.deliverReport(receiverId, stoppedId, name, project, preview, ending, seq, undefined, told)
     } catch (e) {
       console.error(`[mail] ${stoppedId.slice(0, 8)}: its stop could not be told to ${receiverId.slice(0, 8)} (${errorMessage(e)})`)
     }
@@ -211,7 +150,7 @@ export class ChildReports {
         body: (receiverId) => this.lastResponseWords(receiverId, sessionId, words !== '', seq, cut),
         relay: (receiverId, told) => {
           const { name, project } = this.reportedAs(m)
-          void this.deliverReport(receiverId, sessionId, name, project, words, { type: 'turn_complete' }, undefined, seq, cut ? { cut: true } : undefined, told)
+          void this.deliverReport(receiverId, sessionId, name, project, words, { type: 'turn_complete' }, seq, cut ? { cut: true } : undefined, told)
         },
         ...(words ? { answer: words } : {}),
         ...(writtenAt !== undefined ? { writtenAt } : {}),
@@ -276,8 +215,8 @@ export class ChildReports {
   }
 
   /**
-   * Reports the end of a turn as one relayed message in the session told (#166): a linked machine's session the Assistant asked to hear about (#82
-   * phase 4), and the last response that answers a task of a session whose seat cannot read mail (`SessionLastResponse.relay`, mailbox.md §10.6.3)
+   * Reports the end of a turn as one relayed message in the session told (#166): the last response that answers a task of a session whose seat cannot
+   * read mail (`SessionLastResponse.relay`, mailbox.md §10.6.3), and its stop
    */
   async deliverReport(
     assistantId: string,
@@ -286,13 +225,6 @@ export class ChildReports {
     project: string,
     preview: string,
     ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
-    /**
-     * The session's own background work (#721): `paused`, what its turn ended with (the report is still owed, and
-     * `stoppable` when the caller can stop it with agent_session); `settled`, the paused work's tasks that ended with no
-     * turn after them; `linkLost`, a linked machine's paused work whose link dropped before it ended (#723);
-     * `machineRemoved`, a linked machine removed before the work or its turn ended
-     */
-    work?: ReportWork,
     /** Where its last response starts in its conversation, when it is read here: the read the model is pointed to (#1186) */
     answerSeq?: number,
     /** The person's part in the turn reported (#1377): they wrote into it; and an update's part in it (#1966) */
@@ -311,39 +243,23 @@ export class ChildReports {
      */
     const stop = this.host.meta.get(sessionId)?.interruption
     const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || wentWithItsProcess(stop)
-    const outcomeOf = (name: Naming) =>
-      work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
-      : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
-      : work && 'paused' in work
-        ? pausedReportLine(
-            work.paused,
-            work.stoppable ? this.agentCall(assistantId, { action: 'stop' }) : undefined,
-            name,
-            work.update === true,
-            // The model reads the tasks counted (#1186): the call that names each, where the caller may make it
-            name === FOR_MODEL && work.stoppable ? this.agentCall(assistantId, { action: 'status' }) : undefined,
-          )
-      : work && 'settled' in work ? settledReportLine(work.settled, name)
-      : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
+    const outcome =
+      (stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
       : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
       : stop?.reason === 'shutdown' ? `[Centralu] The assigned work stopped before finishing: ${SHUTDOWN_WORDS} during its turn.\n`
       : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `${TURN_ENDED}\n`
-      : `[Centralu] The assigned work stopped before finishing.\n`
-    const outcome = outcomeOf(STORED) + personPartLine(part)
+      : `[Centralu] The assigned work stopped before finishing.\n`) + personPartLine(part)
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
     const resume = cutShort
       ? `It keeps its conversation: send it a message to go on${stop?.reason === 'network' ? ', once the network is back' : ''}, the same one the person's Continue sends: "Continue where you stopped. Check what already happened before repeating a step."\n`
       : ''
-    const cleanUp = !work && !stop && ending.type === 'turn_complete' ? this.cleanUpWords(assistantId, sessionId) : ''
+    const cleanUp = !stop && ending.type === 'turn_complete' ? this.cleanUpWords(assistantId, sessionId) : ''
     const read = `read_session(sessionId="${sessionId}"${answerSeq !== undefined ? `, around=${answerSeq}` : ''})`
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
-    // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
-    const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
-    const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''
     /*
      * What the model reads (#1186): how the work ended, the session's id, the kind of its tool's error, how to go on, and the read that shows
      * its last response and that error. Nothing the reported session, its tool, its machine or a name could have written goes in (#120): not
@@ -352,13 +268,11 @@ export class ChildReports {
      * screen and never the model. The thread's report is these words too: the mailbox shows it under Centralu's name
      */
     const forModel =
-      outcomeOf(FOR_MODEL) + personPartLine(part) +
+      outcome +
       `id: ${sessionId}\n\n` +
       (kind ? `Its tool's error, by kind: ${kind}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.\n\n` : '') +
       resume +
-      (preview === MACHINE_UNREACHABLE
-          ? `Its last response could not be read: its machine could not be reached. ${read} reads it once that machine is back.`
-        : `Its last response${asReadWords} is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
+      `Its last response is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.` +
       cleanUp
     const stored =
       outcome +
@@ -367,11 +281,10 @@ export class ChildReports {
       `Project: ${frameField(project)}\n\n` +
       failure +
       resume +
-      `Last response${asReadWords}:\n${preview || '(no content)'}\n\n` +
+      `Last response:\n${preview || '(no content)'}\n\n` +
       `If you need more, you can read that session's recent conversation with read_session.` +
       cleanUp
-    // A linked machine's child has no task in this host's mailbox (§14), and a seat without the mail tool reads no mail: the relayed message is how
-    // either is told (#1948 step 6 moves the first to mail)
+    // A seat without the mail tool reads no mail: the relayed message is how it is told
     return this.tellSession(
       assistantId,
       stored,

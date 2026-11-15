@@ -1,5 +1,5 @@
 import { errorMessage, TurnOrigin } from '@cc/protocol'
-import type { BackgroundTask, StoredMessage } from '@cc/protocol'
+import type { StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { asObj, tryParseJson } from '../json-value.js'
@@ -109,25 +109,6 @@ function readTurnSpan(raw: string | null): TurnSpan {
 function startsOf(span: TurnSpan): readonly number[] {
   return span.starts ?? [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined)
 }
-/**
- * A linked machine's session an Assistant asked to hear about (#82 phase 4). `paused`: the session's own background
- * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left.
- * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
- * (#1082); until then nothing it relays is about that instruction's turn
- */
-export type LinkedReport = {
-  assistantId: string
-  busy: boolean
-  paused?: BackgroundTask[]
-  instruction?: string
-  /** Whose the turn running there is (#1377), and whose the next will be: from the message each started with. Memory only */
-  turn?: TurnStarter
-  next?: TurnStarter
-  /** Whose the last turn there was: its last response is the person's answer when it was theirs */
-  lastBy?: 'person' | 'work'
-  /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
-  read?: { preview: string; seq: number | undefined }
-}
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
 export type OwnerMove = {
@@ -180,19 +161,6 @@ export class ChildOwnership {
    */
   private readonly given = new Map<string, { from: string; to: string }>()
   readonly handedOver: ReadonlyMap<string, { from: string; to: string }> = this.given
-  /**
-   * A linked machine's sessions whose turn the Assistant asked to hear about (`reportBack`, #82 phase 4), by
-   * qualified id. `busy` is whether that turn was seen working yet, so a state the machine reports before the turn
-   * starts (the session waking) is not taken for its end.
-   */
-  private readonly linked = new Map<string, LinkedReport>()
-  readonly linkedReports: ReadonlyMap<string, LinkedReport> = this.linked
-  /**
-   * Told of each change to a linked report (#1038): a child start_agent started on a linked machine keeps what it is
-   * owed in its stored record (`RemoteAgents`), so a restarted hub still reports its end
-   */
-  private linkedChanged: ((sessionId: string) => void) | undefined
-
   constructor(private readonly store: OwnershipStore) {}
 
   /** The mailbox's way of hearing that a session gave another one work (docs/plans/mailbox.md §8.1), set by the host when it has one */
@@ -504,21 +472,9 @@ export class ChildOwnership {
     for (const [id, h] of [...this.given]) if (id === sessionId || h.from === sessionId || h.to === sessionId) this.given.delete(id)
   }
 
-  /** Set again with the same report after changing it in place, so its listener reads the change */
-  setLinkedReport(sessionId: string, wait: LinkedReport): void {
-    this.linked.set(sessionId, wait)
-    this.linkedChanged?.(sessionId)
-  }
-  dropLinkedReport(sessionId: string): void {
-    if (this.linked.delete(sessionId)) this.linkedChanged?.(sessionId)
-  }
-  onLinkedReportChange(listener: (sessionId: string) => void): void {
-    this.linkedChanged = listener
-  }
-
   /**
    * Moves what `from` owns of the given children to `to`, in memory (#693, #738): its delegations and observer notes on them (their keys
-   * name the caller), linked machines' reports, and the start requests that made
+   * name the caller) and the start requests that made
    * them. `moveCards` runs next, for the cards that stand for the moving `starts`; then what moved is recorded as
    * handed over, and the original's calls still waiting on it are ended.
    *
@@ -534,11 +490,6 @@ export class ChildOwnership {
       this.runs.delete(key)
       d.callerId = to
       this.runs.set(to + key.slice(from.length), d)
-    }
-    for (const [id, wait] of this.linked) {
-      if (wait.assistantId !== from || !moving.has(id)) continue
-      wait.assistantId = to
-      this.linkedChanged?.(id)
     }
     // A start that already made its child: its handle follows the child
     for (const r of this.starts.values()) if (r.req.callerId === from && r.ended && 'childId' in r.ended && moving.has(r.ended.childId)) r.req.callerId = to
