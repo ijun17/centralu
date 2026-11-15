@@ -213,7 +213,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks === true)
   mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
   mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
-  mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
+  mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))
   // As main.ts wires it: the Assistant's list_machines reads what machines.list answers (#1220)
   mgr.useMachineList(() => links.list())
   mgr.useMachineOps(links)

@@ -206,7 +206,7 @@ export async function hubHost(
   // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
   if (o.origin) {
     mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
-    mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), name))
+    mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))
   }
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()

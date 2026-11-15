@@ -238,9 +238,6 @@ type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string }
  * Assistant reaches through it: a manager, a lead and an ordinary session keep their own machine's view
  */
 export type LinkedSessions = {
-  /** An instruction to a machine's session, recorded there as sent by `fromName` (`host.send`) */
-  /** `ask`: the text is an ask_project task, worked on at that agent depth until its turn ends (#838) */
-  send(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<Outcome>
   /** A machine's session's model, effort or verbosity (`agents.updateSettings` there); the answer in the hub's terms */
   updateSettings(
     sessionId: string,

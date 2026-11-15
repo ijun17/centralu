@@ -124,7 +124,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   }
   const links = new Links(deps)
   mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
-  mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
+  mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()
@@ -385,7 +385,7 @@ describe('a call that needs a machine that is connecting (#1341)', () => {
         return tunnel
       },
     })
-    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params))
     return { hub, reader, tunnel: () => tunnel! }
   }
 
@@ -788,7 +788,7 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     }
     const opens = hub.tunnel().opens
     const name = (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === 'p-app')!.name
-    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params))
     return { remote, hub, opens, name, reader }
   }
   const askThePerson = expect.stringContaining('ask the person to connect it')
@@ -817,9 +817,9 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     expect(hub.tunnel().opens).toBe(opens)
   })
 
-  it('a send to a session there, reading it and its last words say so too', async () => {
+  it('reading a session there and its last words say so too', async () => {
     const { hub, opens, reader } = await rig()
-    for (const r of [await reader.send('m1.w1', 'hello', 'h1'), await reader.read('m1.w1', 1), await reader.lastWords('m1.w1', 100)]) {
+    for (const r of [await reader.read('m1.w1', 1), await reader.lastWords('m1.w1', 100)]) {
       expect(r).toMatchObject({ ok: false, error: askThePerson })
     }
     expect(hub.tunnel().opens).toBe(opens)
@@ -867,7 +867,7 @@ describe("an agent's call that needs a machine whose link is down makes it conne
       deps: { retryMs: [60_000, 300_000], ...o.deps },
     })
     await eventually(() => hub.row().status === 'connected')
-    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params))
     return { hub, reader, tunnel: hub.tunnel(), remote }
   }
   type Rig = Awaited<ReturnType<typeof rig>>
@@ -892,7 +892,7 @@ describe("an agent's call that needs a machine whose link is down makes it conne
     expect(r.tunnel.opens).toBe(opens + 1)
   })
 
-  it('also covers the lookup of a project a start_agent needs, and a send', async () => {
+  it('also covers the lookup of a project a start_agent needs, and a read of a session there', async () => {
     const r = await rig({ deps: { callWindowMs: 50 } })
     await drop(r, { sshAnswers: true })
     const opens = r.tunnel.opens
@@ -902,9 +902,9 @@ describe("an agent's call that needs a machine whose link is down makes it conne
     expect(r.tunnel.opens).toBe(opens + 1)
     await drop(r, { sshAnswers: true })
     await pause(80)
-    // The link is brought up for the send; the session is not live there, so the machine itself refuses it: not for reachability
-    const sent = await r.reader.send('m1.w1', 'hello', 'Assistant')
-    expect(JSON.stringify(sent)).not.toContain('not reachable')
+    // The link is brought up for the read, which the machine answers: not refused for reachability
+    const read = await r.reader.read('m1.w1', 1)
+    expect(JSON.stringify(read)).not.toContain('not reachable')
     expect(r.hub.row().status).toBe('connected')
     expect(r.tunnel.opens).toBe(opens + 2)
   })
@@ -1115,7 +1115,7 @@ describe('an answer that a machine could not be reached says what was tried, onc
       hides: () => false,
     }
     // The machine that is down is a real link, mid-backoff with a long step; Desk is a stand-in that is up
-    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk], (method, params) => hub.call(method, params), 'Hub mac'))
+    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk], (method, params) => hub.call(method, params)))
     hub.tunnel().openMs = 5_000 * SLOW
     const opens = hub.tunnel().opens
     const at = Date.now()
@@ -1186,7 +1186,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       },
       lastKnown: () => null,
     }
-    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk, ...(o.dead ? [dead] : [])], (method, params) => hub.call(method, params), 'Hub mac'))
+    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk, ...(o.dead ? [dead] : [])], (method, params) => hub.call(method, params)))
     return { hub, remote, opens: hub.tunnel().opens, deskLists }
   }
   const notFound = expect.stringContaining('No project named')

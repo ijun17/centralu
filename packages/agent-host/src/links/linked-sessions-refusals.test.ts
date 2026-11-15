@@ -33,7 +33,6 @@ const NOT_PROJECT = 'Not a project of a linked machine: m2.p1'
 const NO_MACHINE = 'No linked machine m2'
 
 const CASES: [string, Call, string][] = [
-  ['send', (r) => r.send('m2.s1', 'hi', 'orchestrator'), NOT_SESSION],
   ['updateSettings', (r) => r.updateSettings('m2.s1', { model: 'opus' }), NOT_SESSION],
   ['interrupt', (r) => r.interrupt('m2.s1'), NOT_SESSION],
   ['deleteSession', (r) => r.deleteSession('m2.s1'), NOT_SESSION],

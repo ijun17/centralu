@@ -960,7 +960,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.opening = null
       for (const w of [...this.statusWaiters]) w()
       // An attempt that failed set its status while it was still under way: the machine waits for the person only from here,
-      // and whoever reads `waitsForPerson` on a status event (the reports of a working child) is told again
+      // and whoever reads `waitsForPerson` on a status event is told again
       if (this.waitsForPerson) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     })
     return this.opening

@@ -110,7 +110,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
 
   it('does not wait on a machine that never answers its "Allow auto from a linked computer": that is the reason it gives', async () => {
     const stalled = { ...machine({}), call: () => new Promise<never>(() => {}) }
-    const reader = linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 })
+    const reader = linkedSessions(() => [stalled], undefined, { lookupMs: 30 })
     expect(await reader.hubAuto('m1')).toEqual({ ok: false, error: 'did not answer within 30 milliseconds' })
   })
 
@@ -243,7 +243,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
   it('tells a call on a machine only the person connects to ask the person, at once, and never connects it (#1341)', async () => {
     const m = machine({}, { reachable: false, waitsForPerson: true })
     const reader = linkedSessions(() => [m])
-    for (const r of [await reader.send('m1.w1', 'hi', 'h1'), await reader.read('m1.w1'), await reader.lastWords('m1.w1', 600)]) {
+    for (const r of [await reader.read('m1.w1'), await reader.lastWords('m1.w1', 600)]) {
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Box is not connected, and nothing here connects it by itself; ask the person to connect it') })
     }
   })
@@ -414,7 +414,7 @@ describe("a linked machine in every session's list and search (#984)", () => {
 
   it('does not wait on a machine that never answers: its list comes from the mirror and its search is named as not searched', async () => {
     const fine = machine({ 'host.sessions': [row()], 'host.recall': [{ sessionId: 'w1', session: 'Worker', project: 'api', snippet: 'found', seq: 4 }] })
-    const reader = linkedSessions(() => [slow(), fine], undefined, undefined, { lookupMs: 30 })
+    const reader = linkedSessions(() => [slow(), fine], undefined, { lookupMs: 30 })
     const listed = await reader.list()
     expect(listed.map((s) => [s.sessionId, s.away])).toEqual([
       ['slow.w9', 'did not answer within 30 milliseconds'],
@@ -481,7 +481,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
       call: () => new Promise(() => {}),
     }
     const fine = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
-    const reader = linkedSessions(() => [slow, fine], undefined, undefined, { lookupMs: 30 })
+    const reader = linkedSessions(() => [slow, fine], undefined, { lookupMs: 30 })
     const t0 = Date.now()
     const { projects, away } = await reader.projects()
     expect(Date.now() - t0).toBeLessThan(2000)
@@ -518,7 +518,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
         },
       }
       const mgr = new SessionManager(store, scriptedAdapters(), () => {})
-      mgr.useLinkedReader(linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 }))
+      mgr.useLinkedReader(linkedSessions(() => [stalled], undefined, { lookupMs: 30 }))
       cleanupSeat.push(() => mgr.tenure.disposeAll())
       return { mgr, asked }
     }
@@ -709,7 +709,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     let lists = 0
     const stalled: RoutedMachine = { ...machine({}), call: async () => (lists++, new Promise(() => {})) }
     const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
-    const reader = linkedSessions(() => [stalled, far], undefined, undefined, { lookupMs: 40 })
+    const reader = linkedSessions(() => [stalled, far], undefined, { lookupMs: 40 })
     const prior = await reader.projects({ ref: 'typo' })
     // Far box is connecting, so the first answer does not call it away; the one that stalled is
     expect(prior.away.map((a) => a.machineId)).toEqual(['m1'])

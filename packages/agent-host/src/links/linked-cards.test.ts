@@ -18,7 +18,7 @@ async function rig() {
   const hub = await hubHost(machine.port, { mail: true })
   await eventually(() => hub.machine().status === 'connected')
   await eventually(() => machine.hubs.mailHubs()[0]?.you === 'm1' && hub.links.get('m1')?.takesTasks === true)
-  const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params), hub.name)
+  const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params))
   const send = async (from: string, text: string) => {
     const sent = await hub.mail!.across.sendTask(from, sessionAddress(hub.id, 'm1.w1'), text, { origin: 'agent_session' })
     if (!sent.ok) throw new Error(sent.text)
@@ -80,7 +80,7 @@ describe("a machine's cards, as a hub's giver of work there reads them (#1948 st
     const machine = await machineHost({ sessions: ['w1'], mail: true, without: ['host.cards', 'host.answerCard'] })
     const hub = await hubHost(machine.port, { mail: true })
     await eventually(() => hub.machine().status === 'connected')
-    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params), hub.name)
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params))
     expect(await reader.cards('m1.w1', 'h1')).toEqual({ ok: false, error: 'Remote box runs an older Centralu, which takes no work from this computer. Update Centralu on Remote box.' })
     expect(await reader.answerCard('m1.w1', 'h1', 'c', 'Yes')).toEqual({ ok: false, error: 'Remote box runs an older Centralu, which takes no work from this computer. Update Centralu on Remote box.' })
   })

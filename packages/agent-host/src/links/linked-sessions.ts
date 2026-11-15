@@ -78,14 +78,12 @@ function cause(err: unknown): string {
 
 /**
  * `route` is the hub's router (`router.ts`): a call in the hub's terms, sent to the machine its ids name and answered
- * qualified. The reads and `host.send` go to each machine directly; acting on a session or a project goes through the
- * router, so it is the same call, with the same rewriting, that the hub's window makes.
+ * qualified. The reads go to each machine directly; acting on a session or a project goes through the router, so it is
+ * the same call, with the same rewriting, that the hub's window makes.
  */
 export function linkedSessions(
   machines: () => Iterable<RoutedMachine>,
   route: RpcHandler = notRouted,
-  /** This computer, as a machine names who sent an instruction (`host.send`): the Assistant is not that machine's own */
-  hubName?: string,
   /** How long resolving a project name waits for one machine's project list (`lookupMs`); tests shorten it */
   options: { lookupMs?: number } = {},
 ): LinkedSessions {
@@ -328,12 +326,6 @@ export function linkedSessions(
   }
 
   return {
-    send(sessionId, text, fromName, ask) {
-      return viaSession(sessionId, async (m) => {
-        await m.call('host.send', { sessionId: m.q.strip(sessionId, 'The session'), text, from: { name: hubName ? `${fromName} on ${hubName}` : fromName }, ...(ask ? { ask } : {}) })
-        return {}
-      })
-    },
 
     updateSettings(sessionId, s) {
       return viaSession(sessionId, async (m) => {
