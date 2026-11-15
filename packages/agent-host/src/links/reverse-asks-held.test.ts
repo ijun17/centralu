@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { HOLD_CALL_METHOD, HoldCallParams } from '@cc/protocol'
 import { runCleanups } from './links-world.test-helpers.js'
 import { rig } from './reverse-link.test-helpers.js'
+import { RemoteClient } from './remote-client.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -10,7 +12,23 @@ import { SLOW, eventually } from '../../../../tooling/test-timing.js'
  * goes, when the machine withdraws it, and past the bound on holding. Real hosts in one process, linked over loopback.
  */
 
-afterEach(runCleanups)
+/** The holds the hub said and the machine answered, in order (`call.hold`): a test waits on what the machine has taken, not on time */
+const told: boolean[] = []
+const held = () => told.at(-1) === true
+
+beforeEach(() => {
+  told.length = 0
+  const call = RemoteClient.prototype.call
+  vi.spyOn(RemoteClient.prototype, 'call').mockImplementation(function (this: RemoteClient, method, params, timeoutMs) {
+    const answer = call.call(this, method, params, timeoutMs)
+    if (method === HOLD_CALL_METHOD) answer.then(() => told.push(HoldCallParams.parse(params).held), () => undefined)
+    return answer
+  })
+})
+afterEach(async () => {
+  await runCleanups()
+  vi.restoreAllMocks()
+})
 
 /** The ask's limit on the machine: short, so a test outlasts it, and wide enough that raising the card fits in it under load */
 const LIMIT = 1000 * SLOW
@@ -36,6 +54,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     // The person works in that session: the card leaves the slot for the length of their turn
     await hub.mgr.inputs.send('h1', 'a long job of my own')
     await eventually(() => !hub.card() && hub.mgr.listSessions().find((s) => s.id === 'h1')?.state === 'working')
+    await eventually(held)
     await delay(2 * LIMIT)
     expect(settled()).toBe(false)
     hub.finish('h1', 'done with mine')
@@ -51,6 +70,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     const call = machine.ask({ project: hub.projectName, task: 'say hello' })
     const settled = settledFlag(call)
     await eventually(() => hub.mgr.hostCards.hostAsks.size === 1)
+    await eventually(held)
     await delay(2 * LIMIT)
     expect(settled()).toBe(false)
     expect(hub.card()?.requestId).toBe(own.requestId)
@@ -68,6 +88,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await hub.mgr.inputs.send('h1', 'a long job of my own')
     await eventually(() => !hub.card())
     // Held past its limit
+    await eventually(held)
     await delay(2 * LIMIT)
     expect(settled()).toBe(false)
     await hub.stop()
@@ -84,6 +105,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await hub.mgr.inputs.send('h1', 'a long job of my own')
     await eventually(() => !hub.card())
     // Held past its limit
+    await eventually(held)
     await delay(2 * LIMIT)
     expect(settled()).toBe(false)
     stop.abort()
