@@ -66,7 +66,10 @@ turn ends, which raises it again (#673), and another card can stand in its place
 on the machine (`call.hold`, #2271; `HostCards.noteStanding` tells `MachineAsks`), so the ask is not refused while nobody
 could answer it. The limit runs on with what it had left once the card stands again. Holding changes nothing else: the
 link's end and the machine withdrawing the call still end it, and the machine ends a call held for 4 hours in all
-(`CALL_HOLD_MAX_MS`). Option (a) of #2271, the card shown beside the person's turn, would change the layout and was not
+(`CALL_HOLD_MAX_MS`). A turn of the person's that ends in an error does not raise the card again: the error is left
+showing and the card comes back at the session's next turn end (#673, `session-events.ts`). The ask stays held until
+then, or until the 4-hour bound. That rule is kept as it is: the error is what the person has to see first, and
+holding costs the machine nothing but the open call. Option (a) of #2271, the card shown beside the person's turn, would change the layout and was not
 taken. A tool's own ceiling on the asking call (Codex's `tool_timeout_sec`, 300 s) is the machine's tool's, and no hold
 reaches it.
 
