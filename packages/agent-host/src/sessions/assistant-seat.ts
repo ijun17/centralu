@@ -1,4 +1,4 @@
-import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy, isAssistantKind } from '@cc/protocol'
+import { blockedOnQuestion, defaultPresetFor, isInTurn, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy, isAssistantKind } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
@@ -203,12 +203,14 @@ export function centraluToolsFor(
    * back to this seat as a local session's does; without `reportBack`, a note that asks for nothing back. Only this host's Assistant's
    * send_to_session is said to be for the person (`forPerson`), as its own is here (#2258)
    */
-  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session'): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }> => {
+  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session', reader?: LinkedSessions): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }> => {
     if (!host.linkedTasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
+    // Where the session stands, as its machine says now: one in a turn is answered as a busy one here is. Unknown (the read failed) says nothing of it
+    const now = reader ? await reader.read(sessionId, 1).catch(() => null) : null
     const r = await host.linkedTasks.send(assistantId, sessionId, text, { origin, ...(reportBack ? {} : { note: true as const }), ...(origin === 'send_to_session' ? { forPerson: true as const } : {}) })
     if (!r.ok) return { ok: false, error: r.text }
-    // A session there in a turn is answered as a busy one here is: mailed, waiting until it is free
-    return r.busy ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
+    // Mailed, waiting there until it is free
+    return now?.ok && isInTurn(now.state) ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
   }
 
   return {
@@ -643,7 +645,7 @@ export function centraluToolsFor(
         // §7.4: asked before anything goes over the link
         const refused = host.refusesDelegation(assistantId, { sessionId, linked: true }, { tool: 'send_to_session', target: `a session on ${remote.machineOf(sessionId) ?? 'a linked machine'}`, text })
         if (refused) return { ok: false, error: refused }
-        return sendLinked(sessionId, text, reportBack, 'send_to_session')
+        return sendLinked(sessionId, text, reportBack, 'send_to_session', remote)
       }
       const target = host.meta.get(sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId, 'send') }

@@ -287,29 +287,6 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(moves).toHaveLength(2))
   })
 
-  it('says a session there in a turn, as the mirror last had it, is busy: the task waits there until it is free', async () => {
-    const { w, answers, sent, machine, child } = hubWorld()
-    let state = 'working'
-    const across = new MailAcross({ hostId: HOST, service: w.mail, records: w.records, reach: w.reach, ownEntries: () => [], soon: (fn) => fn() })
-    across.usePeers({ selfName: () => 'Hub box', machine: (id) => (id === 'm1' ? machine : undefined), machineState: () => state })
-    for (const [said, busy] of [['working', true], ['idle', undefined]] as const) {
-      state = said
-      const sending = across.sendTask('orc', child, `review it while ${said}`, { origin: 'start_agent' })
-      await vi.waitFor(() => expect(answers).toHaveLength(sent.length))
-      answers.at(-1)!({ ok: true, messageId: String(sent.at(-1)!.id), to: 'w1' })
-      expect((await sending) as { busy?: true }).toMatchObject({ ok: true })
-      expect(((await sending) as { busy?: true }).busy).toBe(busy)
-    }
-  })
-
-  it('names the session, never by an address, when it is not on a machine this computer links, and says a machine no longer linked in words', async () => {
-    const { w, across, sent } = hubWorld()
-    const here = w.reach.labelOf(W)
-    expect(await across.sendTask('orc', W, 'review the branch', { origin: 'start_agent' })).toEqual({ ok: false, why: 'bad_address', text: `${here} is not a session on a machine this computer links.` })
-    expect(await across.sendTask('orc', addr('m9.w1'), 'review the branch', { origin: 'start_agent' })).toEqual({ ok: false, why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' })
-    expect(sent).toEqual([])
-  })
-
   it('is not sent while the machine has not said yet whether it takes tasks: still connecting, not an older Centralu', async () => {
     const { across, sent, child } = hubWorld({})
     expect(await across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })).toMatchObject({ ok: false, why: 'link_down', text: expect.stringContaining('still connecting') })

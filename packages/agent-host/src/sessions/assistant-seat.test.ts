@@ -417,16 +417,18 @@ describe('what a send leaves', () => {
 
   // #1948 step 6: a task across the link, said to be the Assistant's for the person; without reportBack a note
   it("gives a linked machine's session a task across the link, a note without reportBack, and says the machine's refusal", async () => {
-    linked = { machineOf: (id: string) => (id === 'm1/x' ? 'm1' : null) } as unknown as LinkedSessions
+    let state = 'waiting_input'
+    linked = { machineOf: (id: string) => (id === 'm1/x' ? 'm1' : null), read: async () => ({ ok: true, state }) } as unknown as LinkedSessions
     const send = vi.mocked(host.linkedTasks!.send)
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: true })
     expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'hi', { origin: 'send_to_session', forPerson: true })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true })
     expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'fyi', { origin: 'send_to_session', note: true, forPerson: true })
-    // A session there in a turn: mailed, as a busy one here is answered
-    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_1', to: 'X', address: 'session:hub/m1.x', computer: 'Far', busy: true })
+    // A session there in a turn, as its machine says now: mailed, as a busy one here is answered
+    state = 'working'
+    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_1', to: 'X', address: 'session:hub/m1.x', computer: 'Far' })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: true, busy: { state: 'mailed', sessionId: 'm1/x', sessionName: 'X', messageId: 'hub.m_1' } })
-    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_2', to: 'X', address: 'session:hub/m1.x', computer: 'Far', busy: true })
+    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_2', to: 'X', address: 'session:hub/m1.x', computer: 'Far' })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true, busy: { state: 'mailed', sessionId: 'm1/x', sessionName: 'X', messageId: 'hub.m_2', note: true } })
     send.mockResolvedValueOnce({ ok: false, why: 'older', text: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: false, error: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })

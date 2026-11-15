@@ -64,10 +64,7 @@ function linkMachine(): void {
       overLink.push('createSession')
       return { ok: true as const, sessionId: 'm1.new', name: 'New' }
     },
-    send: async (sessionId: string, text: string) => {
-      overLink.push(`send ${sessionId}: ${text}`)
-      return { ok: true as const }
-    },
+    read: async () => ({ ok: true, state: 'idle' }),
     origin: async () => {
       overLink.push('origin')
       return { ok: false as const, error: 'not asked further here' }
