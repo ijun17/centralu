@@ -1,9 +1,9 @@
 // The release: release_status and release.
 import { z } from './runtime/centralu-app-runtime.mjs'
-import { pathInput } from './board.mjs'
+import { checkoutDir, pathInput } from './board.mjs'
 import { ciLines, progress } from './ci-tools.mjs'
 import { evaluateChecks, ranTier, workflowCheckNames } from './ci.mjs'
-import { APP_DIR, CI, config } from './config.mjs'
+import { CI, config } from './config.mjs'
 import { approveDeployments, cancelWorkflowRun, dispatchWorkflow, pendingDeployments, readRepo, readRequired, readWorkflowChecks, runJobs, workflowRuns } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { approveRelease, cancelDuplicateRelease, guarded, rehearseRelease, releaseConfig, ReleaseRefusal, releaseStatus, tagRelease } from './release.mjs'
@@ -51,7 +51,7 @@ const RELEASE_GH = { readRepo, workflowRuns, runJobs, pendingDeployments, approv
 
 async function release(args, step, call) {
   const repo = config.repository
-  const ctx = { repo, dir: args.path ?? APP_DIR, cfg: RELEASE, gh: RELEASE_GH, ci: (sha, options) => ciForRelease(repo, sha, options), registry: npmVersion }
+  const ctx = { repo, dir: await checkoutDir(args.path), cfg: RELEASE, gh: RELEASE_GH, ci: (sha, options) => ciForRelease(repo, sha, options), registry: npmVersion }
   try {
     if (step === 'status') {
       const r = await guarded(() => releaseStatus(ctx))

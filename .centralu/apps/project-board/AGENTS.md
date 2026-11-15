@@ -1037,7 +1037,11 @@ and refuses with every reason at once, sending nothing.
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
   When those rules pass, it runs the repository's `pnpm pre-pr` (`scripts/pre-pr.mjs`, or
-  `rules.prePr` in project.json; #1181) in the checkout at `path` (default this app's), on the
+  `rules.prePr` in project.json; #1181) in the checkout at `path` (default this app's; `path` is read on the computer the
+  app runs on, and a folder not there is refused before anything runs, `checkoutDir` in board.mjs, for every tool that takes
+  it: a session a hub started on another computer calls the hub's board, and its own worktree's path made git answer "git was
+  not found", #2283. Leaving it out serves that session: the pushed branches are fetched from GitHub. `git()` itself asks
+  whether its folder exists before it blames git), on the
   pushed head and the branches of the open pull requests under it, fetched under
   `refs/centralu-pre-pr/<one per call>/` and removed again (`pre-pr.mjs`); a ref it cannot remove
   is a warning naming it. The script that runs is **main's, as just fetched** (#1931), not the checkout's copy: the folder holding it is

@@ -21,7 +21,7 @@ import {
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { topLevel } from '../.centralu/apps/project-board/git.mjs'
+import { git, topLevel } from '../.centralu/apps/project-board/git.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 import { g, githubStandIn } from './git-fixture.test-helpers.js'
@@ -691,6 +691,19 @@ describe('topLevel on a real repository', { timeout: 60_000 * SLOW }, () => {
     const { work } = bare()
     expect(await topLevel(work)).toBe(work)
   })
+
+  // #2283: Node answers ENOENT for a missing cwd too, and a session on another computer gave its own checkout's path
+  it('says a folder is missing, not git, when it runs in a folder that is not on this computer', async () => {
+    const elsewhere = join(root, 'on-another-computer')
+    await expect(git(elsewhere, ['--version'])).rejects.toThrow(`${elsewhere} is not a folder on the computer this app runs on.`)
+    const path = process.env.PATH
+    process.env.PATH = ''
+    try {
+      await expect(git(root, ['--version'])).rejects.toThrow('git was not found on this machine.')
+    } finally {
+      process.env.PATH = path
+    }
+  })
 })
 
 describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
@@ -833,6 +846,17 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(r.isError).toBe(false)
     expect(r.data.steps.at(-1)).toBe("#2's base is already main.")
     expect(writes()).toEqual([])
+  })
+
+  // #2283: the app runs on the hub, and a session a hub started on another computer gave its own checkout
+  it('refuses a path that is not on the computer the app runs on, saying so, with nothing run', async () => {
+    stack()
+    const elsewhere = join(root, 'on-another-computer')
+    const why = `The checkout ${elsewhere} is not on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`
+    runtime()
+    expect((await call('rebase_stack', { pr: 2, path: elsewhere, push: true })).text).toBe(`Not restacked: ${why}`)
+    expect((await call('release_status', { path: elsewhere })).text).toBe(why)
+    expect(ghCalls()).toEqual([])
   })
 
   it('refuses a checkout with no remote for the repository', async () => {
@@ -1070,6 +1094,41 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     // Not judged, so deep: skipping pre-pr never lowers the review (#1259)
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain('only documents.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).')
     expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  // #2283: the app runs on the hub, and a session a hub started on another computer gave its own checkout as path
+  it('refuses a path that is not on the computer the app runs on, before pre-pr runs and with nothing sent', async () => {
+    prePrCheckout()
+    const elsewhere = join(root, 'on-another-computer')
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: elsewhere })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe(`Not opened: The checkout ${elsewhere} is not on the computer this app runs on. Leave path out to use this app's own checkout, which fetches what it reads (the pushed branches, main, the tags) from GitHub.`)
+    expect(prePrCalls()).toEqual([])
+    expect(writes()).toEqual([])
+  })
+
+  // What that refusal advises holds: the checkout the app uses is not the one the branch was pushed from, and has never
+  // seen the branch; pre-pr fetches it from the remote
+  it('opens from a checkout that has never seen the branch, pushed from another one', async () => {
+    const c = prePrCheckout()
+    const own = join(root, 'the-apps-own')
+    g(root, 'clone', '-q', join(root, 'origin.git'), own)
+    g(own, 'remote', 'set-url', 'origin', 'https://github.com/ijun17/centralu.git')
+    g(own, 'config', `url.${join(root, 'origin.git')}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+    // Pushed after the clone, from the session's worktree on the other computer
+    const session = join(root, 'the-sessions-worktree')
+    g(c.work, 'worktree', 'add', '-q', session, 'feat/tools')
+    const pushed = commit(session, 'd.txt', 'd\n', 'tools, later')
+    g(session, 'push', '-q', 'origin', 'feat/tools')
+    expect(g(own, 'rev-parse', 'refs/remotes/origin/feat/tools')).toBe(c.tools)
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: pushed }], head: pushed, tier: { name: 'light', line: 'Tier: light.' } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: own })
+    expect(r.isError, r.text).toBe(false)
+    const [run] = prePrCalls()
+    expect(run!.refs).toContain(`${spaceOf(run!.args)}/feat/tools ${pushed}`)
+    expect(writes().length).toBeGreaterThan(0)
   })
 
   it('labels deep when pre-pr answers no tier (#1259)', async () => {
