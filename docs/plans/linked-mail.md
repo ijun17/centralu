@@ -367,8 +367,10 @@ words into the machine's session (`host.send`) and followed its turns over the l
   session counts while it works on it, [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)). The machine writes it as a task (a
   note) from the hub's session, under the id the hub picked, undelivered, and its own delivery gives it: at once at rest,
   into a turn whose tool takes input, else held until the session is free, as a busy session's task here is (#2189). The
-  hub's copy is a task too, written once the machine answered (§6), so receipts, a withdrawal and a reply go as for any
-  message that crossed.
+  hub's copy is a task too, so receipts, a withdrawal and a reply go as for any message that crossed. Unlike other mail
+  (§6) it is written before the task leaves, so the report finds it whenever it comes, after a restart of the hub too, when
+  nothing of the send is remembered; the machine's refusal deletes it, and a send whose answer was lost keeps it, as the task
+  it may be. A machine not connected is not sent to, and nothing is written.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
   included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
   `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,
@@ -376,8 +378,7 @@ words into the machine's session (`host.send`) and followed its turns over the l
   the hub's Centralu's words, and its answer, error and reason stay facts. The hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
   reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
   settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
-  first does not make the report a stale one. A report on a task whose send to that machine has not answered yet keeps the
-  copy first (the machine has it, as a receipt would say). The answer, error and reason are cut to what a report across
+  first does not make the report a stale one. The answer, error and reason are cut to what a report across
   takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
 - **A report is owed, not dropped.** As a notice (§6, Notices), a report the hub cannot take now (its link is down,
   or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second

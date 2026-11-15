@@ -194,10 +194,42 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(answers).toHaveLength(2))
     const second = String(sent[1]!.id)
     expect(await across.fromMachine({ id: 'm2', name: 'Other box' }, finished(second))).toMatchObject({ ok: false, why: 'not_allowed' })
-    expect(w.records.message(second)).toBeUndefined()
+    expect(w.records.reportsOn(second)).toEqual([])
     answers[0]!({ ok: true, messageId: id, to: 'w1' })
     answers[1]!({ ok: true, messageId: second, to: 'w1' })
     await Promise.all([sending, other])
+  })
+
+  it('is kept before the task leaves, so a report after this hub restarted, before any answer or receipt, answers it', async () => {
+    const { w, across, answers, sent, machine, child } = hubWorld()
+    void across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    const id = String(sent[0]!.id)
+    // The hub stops here: a new run of it has its store and nothing of the send
+    const after = new MailAcross({ hostId: HOST, service: w.mail, records: w.records, reach: w.reach, ownEntries: () => [], soon: (fn) => fn() })
+    after.usePeers({ selfName: () => 'Hub box', machine: (m) => (m === 'm1' ? machine : undefined) })
+    expect(await after.fromMachine({ id: 'm1', name: 'Remote box' }, finished(id))).toMatchObject({ ok: true })
+    expect(w.records.reportsOn(id)).toHaveLength(1)
+    expect(w.records.recipient(id, child)?.settled).toBe('reported')
+  })
+
+  it('is deleted when the machine refuses the task, and kept when its answer is lost, as the task it may be; nothing is written for a machine away', async () => {
+    const { w, across, answers, sent, machine, child } = hubWorld()
+    const refused = across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    answers[0]!({ ok: false, why: 'gone', text: 'w1 is gone.' })
+    expect(await refused).toMatchObject({ ok: false, why: 'gone' })
+    expect(w.records.message(String(sent[0]!.id))).toBeUndefined()
+    // An answer in a form not read: it may have arrived
+    const lost = across.sendTask('orc', child, 'and the tests', { origin: 'start_agent' })
+    await vi.waitFor(() => expect(answers).toHaveLength(2))
+    answers[1]!({ nonsense: true })
+    expect(await lost).toMatchObject({ ok: false, why: 'link_down' })
+    expect(w.records.message(String(sent[1]!.id))).toMatchObject({ kind: 'task' })
+    machine.reachable = false
+    expect(await across.sendTask('orc', child, 'and the docs', { origin: 'start_agent' })).toMatchObject({ ok: false, why: 'link_down' })
+    expect(sent).toHaveLength(2)
+    expect(w.records.feedOf(addr('orc'), { limit: 10 }).filter((m) => m.body === 'and the docs')).toEqual([])
   })
 
   it("tells the machine a handoff it could not be told then, at the next round, and takes the machine's receipts on the task meanwhile", async () => {

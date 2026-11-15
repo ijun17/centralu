@@ -259,17 +259,25 @@ export class MailAcross {
       // For the person only as `forPersonOf` reads it here: this host's own Assistant's send_to_session (#2258, #2274)
       task: { origin, ...(task.note ? { note: true as const } : {}), ...(task.forPerson && origin === 'send_to_session' && this.d.reach.isAssistant(sender) ? { forPerson: true as const } : {}), ...(task.depth ? { depth: task.depth } : {}) },
     }
-    const r = this.settle(id, await this.ask(m, 'host.mail', params))
-    if (!r.ok) return { ok: false, why: r.why, text: r.text }
-    this.names.set(to, `${r.to} on ${m.name}`)
-    if (!this.d.records.message(r.messageId)) {
+    if (!m.reachable) return unreachable(m)
+    // The copy is kept before the task leaves, so the report that answers it finds it whenever it comes: after this host restarted too, when nothing
+    // of the send is remembered. A send again of an unsure one has its copy already
+    if (!this.d.records.message(id)) {
       try {
-        this.d.service.sentAcross(sender, { id: r.messageId, to, ...fields, task: work })
+        this.d.service.sentAcross(sender, { id, to, ...fields, task: work })
       } catch (e) {
-        this.d.log?.(`[mail] the copy of the task ${r.messageId}, which ${m.name} took, could not be kept here: ${errorMessage(e)}`)
+        this.unsure.delete(id)
+        return { ok: false, why: 'failed', text: `this computer could not keep its copy of the task, so nothing was sent: ${oneLineText(errorMessage(e), 500)}` }
       }
     }
-    return { ok: true, messageId: r.messageId, to: r.to, address: to, computer: m.name }
+    const r = this.settle(id, await this.ask(m, 'host.mail', params))
+    if (!r.ok) {
+      // Refused there: nothing there answers the copy. One that may have arrived keeps it, as the task it may be
+      if (!r.maybe) this.d.records.deleteRows([{ messageId: id, recipient: to }])
+      return { ok: false, why: r.why, text: r.text }
+    }
+    this.names.set(to, `${r.to} on ${m.name}`)
+    return { ok: true, messageId: id, to: r.to, address: to, computer: m.name }
   }
 
   /** Why a task to `to` cannot go now (`sendTask` says the same), or null: not a linked machine's session, no such machine, or one that takes no tasks yet or at all */
@@ -476,7 +484,7 @@ export class MailAcross {
     const u = this.unsure.get(messageId)
     if (!u || u.to !== recipient || this.d.records.message(messageId)) return
     try {
-      this.d.service.sentAcross(u.sender, { id: messageId, to: u.to, ...u.fields, ...(u.task ? { task: u.task } : {}) })
+      this.d.service.sentAcross(u.sender, { id: messageId, to: u.to, ...u.fields })
     } catch (e) {
       this.d.log?.(`[mail] the copy of ${messageId}, which ${u.computer} took, could not be kept here: ${errorMessage(e)}`)
     }
@@ -506,7 +514,7 @@ export class MailAcross {
 
   /** One call to the other side, its failure in the words the sender reads; `maybe`: it may have been written there */
   private async ask(peer: AcrossPeer, method: string, params: unknown): Promise<{ ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }> {
-    if (!peer.reachable) return { ok: false, why: 'link_down', text: `${peer.name} is not reachable right now, so nothing was sent. Send it again once the link is back.` }
+    if (!peer.reachable) return unreachable(peer)
     let raw: unknown
     try {
       raw = await peer.call(method, params)
@@ -630,9 +638,6 @@ export class MailAcross {
    * written (`MessageService.report` dedupes it)
    */
   private reportFrom(side: { hub: string } | { machine: string }, name: string, report: TaskReport, p: { replyTo?: string | undefined; text: string; centralu: boolean }): HubMailResult {
-    // A report on a task whose send there has not answered yet: the other side has it, so the copy is kept here first
-    const unsure = p.replyTo === undefined ? undefined : this.unsure.get(p.replyTo)
-    if (p.replyTo !== undefined && unsure?.task && this.tells(side, unsure.to)) this.adopt(p.replyTo, unsure.to)
     const task = p.replyTo === undefined ? undefined : this.d.records.message(p.replyTo)
     const row = task ? this.d.records.recipients(task.id)[0] : undefined
     if (!task || !p.centralu || task.kind !== 'task' || !this.tells(side, row?.recipient)) {
@@ -1067,6 +1072,9 @@ function reportOf(m: MailRow): TaskReport {
   const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
   return facts.success ? facts.data : { outcome: 'finished' }
 }
+
+/** A send to a side not connected now: not sent */
+const unreachable = (peer: AcrossPeer) => ({ ok: false as const, why: 'link_down', text: `${peer.name} is not reachable right now, so nothing was sent. Send it again once the link is back.` })
 
 /** What a send whose answer was lost says to do */
 const AGAIN = 'Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.'
