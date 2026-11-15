@@ -56,6 +56,27 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(await sending).toMatchObject({ ok: true, computer: 'Remote box' })
   })
 
+  it("goes right after the hub offered again on the same connection (the person switched asks), its answer read first", async () => {
+    const { machine, hub, across } = await rig()
+    let release = () => {}
+    machine.holdOffer(new Promise<void>((resolve) => (release = resolve)))
+    const switching = hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
+    await eventually(() => hub.links.get('m1')?.takesTasks === undefined)
+    const sending = across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'agent_session' })
+    release()
+    expect(await sending).toMatchObject({ ok: true, computer: 'Remote box' })
+    await switching
+  })
+
+  it("waits for a machine's late answer once: every call on it shares that one bounded wait", async () => {
+    const { machine, hub } = await rig()
+    machine.holdOffer(new Promise<void>(() => {}))
+    void hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
+    await eventually(() => hub.links.get('m1')?.takesTasks === undefined)
+    const link = hub.links.get('m1')!
+    expect(link.offerAnswered()).toBe(link.offerAnswered())
+  })
+
   it('is refused for a session gone from the machine, named as it is there, never by an address', async () => {
     const { machine, hub, across } = await rig()
     await machine.mgr.trash.trashSession('w1')

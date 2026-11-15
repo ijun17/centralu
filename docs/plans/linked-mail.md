@@ -407,9 +407,11 @@ words into the machine's session (`host.send`) and followed its turns over the l
   the task, which name that sender, are still taken by the hub (they are the machine's to tell) and make the hub tell
   the move again.
 - **Older builds.** A machine that does not answer the offer with `tasks: true` gets no work from the hub: `start_agent`
-  and a send to it are refused, naming the machine to update. Until a connection's offer is answered that is not known,
-  and a start or send then is refused as still connecting, never as an older machine; a machine that does not know the
-  offer at all ("Unknown method") is an older one. A newer machine linked by an older hub takes `host.send`
+  and a send to it are refused, naming the machine to update. Until a connection's offer is answered that is not known:
+  a call that needs the machine (`settleForCall`, after it tried a machine that was down) waits for the answer to the
+  latest offer on the connection, a connect's or the person's switch, one bounded wait (10 s) that every call shares, so
+  a start or send right after a reconnect reads the answer. Past the bound it is refused as still connecting, never as an
+  older machine; a machine that does not know the offer at all ("Unknown method") is an older one. A newer machine linked by an older hub takes `host.send`
   as before (`sendFromHub`); that path goes with the release floor.
 - **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
   caller is told once, in one notice for all its children, that the report no longer comes, and how to read where the child stands. Notes the old hub held for
