@@ -22,6 +22,13 @@ export type AcrossPeer = {
   call(method: string, params: unknown): Promise<unknown>
 }
 
+/**
+ * A machine a hub links. `tasks`: it takes this hub's tasks as mail (#1948 step 6), undefined until it answered this connection's offer; `mail`: its
+ * answer said it takes mail from this hub (#2067 item 2); `reach`: a task needs it, as an agent's call on it does (#1532, `settleForCall`): one that is
+ * down is tried now, null once it is up, else why not as such a call says it (`awaySentence`). Absent: it is not tried
+ */
+export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: boolean; reach?(): Promise<string | null> }
+
 /** What this host reaches, given once its links exist (main.ts); absent parts are a role this host does not have */
 export type AcrossPeers = {
   /** A hub, by its id, as it offered here; `you` is this machine's id there, null for a hub from before item 2 */
@@ -29,11 +36,8 @@ export type AcrossPeers = {
   hubs?(): (AcrossPeer & { id: string; you: string | null })[]
   /** The hub that started a session here (`startingHub`), for `parent` */
   startingHub?(sessionId: string): { id: string; name: string } | null
-  /**
-   * A machine this hub links, by its id; `tasks`: it takes this hub's tasks as mail (#1948 step 6), undefined until it answered this connection's offer;
-   * `mail`: its answer said it takes mail from this hub (#2067 item 2)
-   */
-  machine?(id: string): (AcrossPeer & { id: string; tasks?: boolean; mail?: boolean }) | undefined
+  /** A machine this hub links, by its id */
+  machine?(id: string): AcrossMachine | undefined
   /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
   machineSession?(machineId: string, sessionId: string): string | undefined
   /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */

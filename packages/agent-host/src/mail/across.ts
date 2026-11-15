@@ -5,7 +5,7 @@ import type { DelegationOrigin } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
 import { reportWords } from './last-response.js'
-import { older, unreachable, type AcrossPeer, type AcrossSent, type Work } from './across-core.js'
+import { older, unreachable, type AcrossMachine, type AcrossSent, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
 
 /**
@@ -63,7 +63,13 @@ export class MailAcross extends AcrossReceipts {
    */
   async sendTask(senderId: string, to: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent> {
     const sender = this.d.service.sessionAddress(senderId)
-    const there = this.taskPeer(to)
+    let there = this.taskPeer(to)
+    // A machine that is down is tried now, as an agent's other calls on it are (#1532), and read again once it is up
+    if (!('why' in there) && !there.m.reachable && there.m.reach) {
+      const away = await there.m.reach()
+      if (away !== null) return { ok: false, why: 'link_down', text: away }
+      there = this.taskPeer(to)
+    }
     if ('why' in there) return { ok: false, ...there }
     const { m, sessionId } = there
     if (text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
@@ -103,7 +109,7 @@ export class MailAcross extends AcrossReceipts {
     return 'why' in there ? there : null
   }
 
-  private taskPeer(to: string): { m: AcrossPeer; sessionId: string } | { why: string; text: string } {
+  private taskPeer(to: string): { m: AcrossMachine; sessionId: string } | { why: string; text: string } {
     const route = this.route(to)
     if (route?.kind !== 'machine') return { why: 'bad_address', text: `${this.nameOf(to)} is not a session on a machine this computer links.` }
     const m = this.peers?.machine?.(route.machineId)

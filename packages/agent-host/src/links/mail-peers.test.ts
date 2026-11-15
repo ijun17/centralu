@@ -35,3 +35,33 @@ describe("a hub's mail directory of a machine's sessions", () => {
     ])
   })
 })
+
+describe("a hub's machine that a task needs (#1532)", () => {
+  /** A machine that is down; `connects`: whether the attempt a call starts brings it up */
+  function down(o: { connects: boolean; waitsForPerson?: boolean }) {
+    const m = {
+      id: 'm1', name: 'Box', reachable: false, attempts: 0, whyDown: 'the attempt to connect it just now failed: refused', waitsForPerson: o.waitsForPerson ?? false,
+      call: async () => null, lastKnown: () => [],
+      reachForCall: async () => {
+        if (m.waitsForPerson) return
+        m.attempts++
+        if (o.connects) m.reachable = true
+      },
+    }
+    return { m, peer: mailPeers({ hostId: 'hub-1a2b3c4d', selfName: () => 'Hub', machines: { get: () => m, all: () => [m] } }).machine!('m1')! }
+  }
+
+  it("is tried now, as an agent's call on it is, and is up after", async () => {
+    const { m, peer } = down({ connects: true })
+    expect(await peer.reach!()).toBeNull()
+    expect(m.attempts).toBe(1)
+  })
+
+  it('still down after the try is said as such a call says it: the attempt and how it failed, or that the person connects it', async () => {
+    const failed = down({ connects: false })
+    expect(await failed.peer.reach!()).toBe('Box is not reachable right now; the attempt to connect it just now failed: refused; try again once its link is back')
+    const off = down({ connects: false, waitsForPerson: true })
+    expect(await off.peer.reach!()).toContain('ask the person to connect it')
+    expect(off.m.attempts).toBe(0)
+  })
+})

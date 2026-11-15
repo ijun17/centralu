@@ -288,6 +288,26 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(moves).toHaveLength(2))
   })
 
+  it("tries a machine that is down now, as an agent's other calls on it do (#1532): sent once it is up, refused in its words while it is not", async () => {
+    const { w, across, answers, sent, machine, child } = hubWorld()
+    machine.reachable = false
+    const tries: string[] = []
+    const up = { ...machine, get reachable() { return machine.reachable }, reach: async () => (tries.push('up'), (machine.reachable = true), null) }
+    across.usePeers({ selfName: () => 'Hub box', machine: (id) => (id === 'm1' ? up : undefined) })
+    const sending = across.sendTask('orc', child, 'review the branch', { origin: 'agent_session' })
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    answers[0]!({ ok: true, messageId: String(sent[0]!.id), to: 'w1' })
+    expect(await sending).toMatchObject({ ok: true })
+    expect(tries).toEqual(['up'])
+    // Still down after the try: refused as the try words it, nothing sent or written
+    machine.reachable = false
+    const down = { ...machine, reachable: false, reach: async () => 'Remote box is not connected; ask the person to connect it, then try again' }
+    across.usePeers({ selfName: () => 'Hub box', machine: (id) => (id === 'm1' ? down : undefined) })
+    expect(await across.sendTask('orc', child, 'and the tests', { origin: 'agent_session' })).toEqual({ ok: false, why: 'link_down', text: 'Remote box is not connected; ask the person to connect it, then try again' })
+    expect(sent).toHaveLength(1)
+    expect(w.records.feedOf(addr('orc'), { limit: 10 }).filter((m) => m.body === 'and the tests')).toEqual([])
+  })
+
   it('is not sent while the machine has not said yet whether it takes tasks: still connecting, not an older Centralu', async () => {
     const { across, sent, child } = hubWorld({})
     expect(await across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })).toMatchObject({ ok: false, why: 'link_down', text: expect.stringContaining('still connecting') })

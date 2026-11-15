@@ -5,7 +5,7 @@ import { isOrdinary } from '../sessions/tool-profiles.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
-import { awaySentence, LOOKUP_MS, notReachable, TAIL, type Tail } from './machine-reach.js'
+import { awaySentence, LOOKUP_MS, notReachable, settleForCall, TAIL, type Tail } from './machine-reach.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj, tryParseJson } from '../json-value.js'
 import { durationText, withTimeout } from '../timing.js'
@@ -90,20 +90,10 @@ export function linkedSessions(
   const lookupMs = options.lookupMs ?? LOOKUP_MS
   const owner = (qualifiedId: string): RoutedMachine | null => qualifiedMachine(machines(), qualifiedId)?.machine ?? null
   const machineById = (id: string): RoutedMachine | null => findMachine(machines(), id)
-  /**
-   * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
-   * as it did when a need connected it. With nothing trying, the call is answered at once
-   */
-  const settle = async (m: RoutedMachine): Promise<void> => {
-    if (m.reachable) return
-    // A call that needs a machine which is down tries to connect it (#1532, `reachForCall`); one that cannot do that waits for an attempt under way
-    if (m.reachForCall) await m.reachForCall()
-    else if (m.attemptUnderWay) await m.settled?.()
-  }
   type Refusal = { ok: false; error: string }
-  /** A machine that is still down after `settle`, as the refusal the model reads (`tail`: see `away`); null when it is up */
+  /** A machine that is still down after `settleForCall`, as the refusal the model reads (`tail`: see `away`); null when it is up */
   const reach = async (m: RoutedMachine, tail: Tail): Promise<Refusal | null> => {
-    await settle(m)
+    await settleForCall(m)
     return m.reachable ? null : { ok: false, error: awaySentence(m, tail) }
   }
   /** The router's call, its refusal as the sentence the model reads */
@@ -282,7 +272,7 @@ export function linkedSessions(
     const g = guessed.get(m.id)
     if (g && Date.now() - g.at < (m.callWindowMs ?? 0)) return g.wait ?? undefined
     const entry: { at: number; wait: Promise<void> | null } = { at: Date.now(), wait: null }
-    entry.wait = settle(m).finally(() => {
+    entry.wait = settleForCall(m).finally(() => {
       entry.wait = null
     })
     guessed.set(m.id, entry)
@@ -294,7 +284,7 @@ export function linkedSessions(
    * mirror last held, each project marked `away` with why. A name looked up goes through this too, so a stalled link holds
    * it up no longer than it holds the list, and a project there is found as away, never as missing.
    *
-   * With `need`, the machines the act needs that are down are tried first (#1532, `settle`) and listed again after: only
+   * With `need`, the machines the act needs that are down are tried first (#1532, `settleForCall`) and listed again after: only
    * those. A list does not wait on a machine the act does not need, nor on an attempt to one (it never did).
    * `need.anyDown` with `need.prior` (#1547): the caller found a bare name nowhere in its first answer, `prior`, so the mirror
    * cannot say where it is (it is empty after a restart, or older than the project): every down machine is a candidate,
@@ -315,7 +305,7 @@ export function linkedSessions(
     const parts = await Promise.all(
       all.map(async (m): Promise<Listed> => {
         if (wanted.includes(m)) {
-          await (anyDown && !named(m) ? guess(m) : settle(m))
+          await (anyDown && !named(m) ? guess(m) : settleForCall(m))
           return projectsOf(m, true)
         }
         if (prior) return { projects: prior.projects.filter((p) => p.machineId === m.id), away: prior.away.filter((a) => a.machineId === m.id) }
