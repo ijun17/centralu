@@ -25,6 +25,7 @@ type Machine = {
   readonly whyDown?: string | null
   settled?(): Promise<void>
   reachForCall?(): Promise<void>
+  offerAnswered?(): Promise<void>
   call(method: string, params: unknown): Promise<unknown>
   lastKnown(kind: 'sessions' | 'projects'): unknown[] | null
   /** It takes this hub's tasks as mail (`LinkedMachineConnection.takesTasks`, #1948 step 6) */

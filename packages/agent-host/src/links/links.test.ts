@@ -210,7 +210,8 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     ...extra,
   })
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => 'Hub mac', machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
-  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks === true)
+  // Unknown until the machine answers this connection's offer, as main.ts passes it
+  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
   mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
   mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params)))

@@ -25,7 +25,8 @@ export type AcrossPeer = {
 /**
  * A machine a hub links. `tasks`: it takes this hub's tasks as mail (#1948 step 6), undefined until it answered this connection's offer; `mail`: its
  * answer said it takes mail from this hub (#2067 item 2); `reach`: a task needs it, as an agent's call on it does (#1532, `settleForCall`): one that is
- * down is tried now, null once it is up, else why not as such a call says it (`awaySentence`). Absent: it is not tried
+ * down is tried now, and one up has answered this connection's offer; null once it is up, else why not as such a call says it (`awaySentence`).
+ * Absent: it is not tried
  */
 export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: boolean; reach?(): Promise<string | null> }
 

@@ -63,13 +63,12 @@ export class MailAcross extends AcrossReceipts {
    */
   async sendTask(senderId: string, to: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent> {
     const sender = this.d.service.sessionAddress(senderId)
-    let there = this.taskPeer(to)
-    // A machine that is down is tried now, as an agent's other calls on it are (#1532), and read again once it is up
-    if (!('why' in there) && !there.m.reachable && there.m.reach) {
-      const away = await there.m.reach()
-      if (away !== null) return { ok: false, why: 'link_down', text: away }
-      there = this.taskPeer(to)
-    }
+    // As an agent's other calls on a machine (#1532): one that is down is tried now, and one just connected has answered this hub's offer, which says
+    // whether it takes tasks, before it is read
+    const route = this.route(to)
+    const away = route?.kind === 'machine' ? await this.peers?.machine?.(route.machineId)?.reach?.() : null
+    if (away) return { ok: false, why: 'link_down', text: away }
+    const there = this.taskPeer(to)
     if ('why' in there) return { ok: false, ...there }
     const { m, sessionId } = there
     if (text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }

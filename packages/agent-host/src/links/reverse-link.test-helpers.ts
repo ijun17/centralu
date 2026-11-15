@@ -94,13 +94,17 @@ export async function machineHost(
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
   const appsAcross =
     apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
-  const server: HostServer = new HostServer({
-    port: 0,
-    token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? []),
-    onClientGone: (client) => hubs.gone(client),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
-  })
+  const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? [])
+  /** Its server on `port`; `holdOffer`: its answer to a hub's offer waits for it */
+  const serve = (port: number, holdOffer?: Promise<void>) =>
+    new HostServer({
+      port,
+      token: TOKEN,
+      onRpc: (method, ...rest) => (holdOffer && method === 'host.hubOffer' ? holdOffer.then(() => handler(method, ...rest)) : handler(method, ...rest)),
+      onClientGone: (client) => hubs.gone(client),
+      build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
+    })
+  let server: HostServer = serve(0)
   const port = await server.listen()
   await mgr.setProjectTrusted('p-remote', true)
   let closed = false
@@ -112,7 +116,13 @@ export async function machineHost(
   }
   cleanups.push(close)
   const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
-  return { store, mgr, server, hubs, port, close, ask, mail, id, apps }
+  /** Its host goes away and comes back on the same port, as one swapped in place does; `holdOffer`: as above, for the new one */
+  const bounce = async (holdOffer?: Promise<void>) => {
+    await server.close()
+    server = serve(port, holdOffer)
+    await server.listen()
+  }
+  return { store, mgr, get server() { return server }, hubs, port, close, ask, mail, id, apps, bounce }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
@@ -202,7 +212,8 @@ export async function hubHost(
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ machines: links }))
   // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => name, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
-  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks === true)
+  // Unknown until the machine answers this connection's offer, as main.ts passes it
+  if (across) mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
   // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
   if (o.origin) {
     mgr.layout.useLinkedSessions((id) => links.knowsSession(id))

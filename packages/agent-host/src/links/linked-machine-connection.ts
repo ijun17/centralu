@@ -109,6 +109,11 @@ const ATTEMPT_WAIT_MS = 60_000
  * answered as not reachable and the attempt goes on
  */
 const CALL_WAIT_MS = 10_000
+/**
+ * How long a call that needs a machine which just connected waits for its answer to this hub's offer (`offerAnswered`, #1948 step 6): the
+ * answer says whether it takes tasks, and comes in a round trip on a link that is up. Past it the call reads the machine as still connecting
+ */
+const OFFER_WAIT_MS = 10_000
 /** How long the reason a call's attempt failed is still given to the calls that follow it: past it, a stale reason would be told of a new drop */
 const CALL_FAILURE_KEPT_MS = 60_000
 /** At most one attempt started by a call per machine within this window, so calls cannot defeat the backoff (#1532) */
@@ -778,6 +783,24 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
   }
 
+  /** This connection's offer (`offerAsks`), until the machine answered it */
+  private offering: Promise<void> = Promise.resolve()
+
+  /**
+   * Resolves once the machine answered this connection's offer (or it failed), or after a bound (`OFFER_WAIT_MS`): a call that needs the machine
+   * right after it connected, an agent's call that brought it up among them (`reachForCall`), reads whether it takes tasks from that answer, never
+   * the unknown of a connection not told yet (#1948 step 6)
+   */
+  async offerAnswered(waitMs = OFFER_WAIT_MS): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs)
+      timer.unref?.()
+    })
+    await Promise.race([this.offering.catch(() => {}), bound])
+    clearTimeout(timer)
+  }
+
   /** Whether the machine said, at this connection's offer, that it takes mail from this hub (`host.mail`, #2067 item 2) */
   private mailBack = false
   /** The machine takes this hub's tasks as mail and reports them back (#1948 step 6), as its answer to the offer said; undefined until it answers */
@@ -1404,8 +1427,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.switchFailure = null
     this.seen()
     this.setStatus('connected', null)
-    // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect
-    void this.offerAsks(client)
+    // Who this hub is, and whether the machine's sessions may ask it (#550); said at every connect, its answer awaited by a call that needs it
+    this.offering = this.offerAsks(client)
     // And when agents compact (#1376)
     void this.offerAutoCompact(client)
     // Who else holds full access there, kept current while the link is up (#1405)

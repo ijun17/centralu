@@ -44,6 +44,18 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
   })
 
+  it("goes right after the link came back by itself: the machine's answer to the new connection's offer is read, never \"still connecting\"", async () => {
+    const { machine, hub, across } = await rig()
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    // The machine's host comes back on the same port; the hub reconnects by itself (Auto reconnect) and offers again, its answer not in yet
+    await machine.bounce(held)
+    await eventually(() => hub.machine().status === 'connected' && hub.links.get('m1')?.takesTasks === undefined)
+    const sending = across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'agent_session' })
+    release()
+    expect(await sending).toMatchObject({ ok: true, computer: 'Remote box' })
+  })
+
   it('is refused for a session gone from the machine, named as it is there, never by an address', async () => {
     const { machine, hub, across } = await rig()
     await machine.mgr.trash.trashSession('w1')

@@ -82,6 +82,24 @@ describe('start_agent on a linked machine gives its task as mail, and its end co
     expect(hub.store.mailbox.recipient(copy.id, at.hub(r.sessionId))).toMatchObject({ settled: 'reported' })
   })
 
+  it("starts right after the link came back by itself: the machine's answer to the new connection's offer is read, never \"still connecting\"", async () => {
+    const { machine, hub } = await tasksRig()
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    // The machine's host comes back on the same port; the hub reconnects by itself and offers again, its answer not in yet
+    await machine.bounce(held)
+    await eventually(() => hub.machine().status === 'connected' && hub.links.get('m1')?.takesTasks === undefined)
+    // The answer comes once the start waits for it; a start that read the machine without waiting is answered first
+    const link = hub.links.get('m1')!
+    const answered = link.offerAnswered.bind(link)
+    const waits = new Promise<'waits'>((resolve) => (link.offerAnswered = (...a) => (resolve('waits'), answered(...a))))
+    const starting = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', wait: false })
+    expect(await Promise.race([waits, starting])).toBe('waits')
+    release()
+    await hub.answer('allow')
+    expect(await starting).toMatchObject({ ok: true, state: 'working' })
+  })
+
   it("answers a start that waits with the child's answer, and marks the report read so it does not wake the caller again", async () => {
     const { hub, at, copyOf, delivered } = await tasksRig()
     const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box' })

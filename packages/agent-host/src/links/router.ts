@@ -55,6 +55,8 @@ export interface RoutedMachine {
    * The caller reads `reachable` after. Absent: nothing to try
    */
   reachForCall?(): Promise<void>
+  /** Resolves once the machine answered this connection's offer, bounded (`LinkedMachineConnection.offerAnswered`, #1948 step 6). Absent: nothing to wait for */
+  offerAnswered?(): Promise<void>
   /** How long after a call started an attempt on it another may not (#1532): the window a guess for a name is held off by too (#1547). Absent: no window kept */
   readonly callWindowMs?: number
   /** Whether the machine's host continues the turns an update's stop cuts (#1618, its hello's `updateContinued`) */
