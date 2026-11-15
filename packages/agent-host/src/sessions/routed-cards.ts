@@ -5,6 +5,7 @@ import type { ChildRunResult, RoutedCard } from '../adapters/contract.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { CardHooks } from '../mail/card-notices.js'
+import { parseAddress } from '../mail/address.js'
 import type { SessionTrashHost } from './session-trash.js'
 
 /**
@@ -56,9 +57,11 @@ export class RoutedCards {
   /**
    * Why a giver may not answer an approval (#603/#606, read at the call, never above the session that asks), or null: it is `auto` and not an
    * app's agent; the session is `normal` or `auto` and not an app's agent, so an `auto` giver never raises a `safe` session's permissions; and
-   * Centralu did not raise the card there (its own reach is the person's to allow)
+   * Centralu did not raise the card there (its own reach is the person's to allow). A giver on another computer (a hub's session, named by its
+   * address, #1948 step 6) never: its preset is that computer's, which this host does not read
    */
   private refusal(callerId: string, sessionId: string, requestId: string): string | null {
+    if (parseAddress(callerId)?.kind === 'session') return 'you are a session on another computer, whose permissions this computer does not read'
     const caller = this.host.meta.get(callerId)
     const target = this.host.meta.get(sessionId)
     if (this.host.hostCards.hostAsks.has(requestId)) return 'Centralu raised it there'

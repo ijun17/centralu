@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { runCleanups } from './links-world.test-helpers.js'
+import { TOKEN, cleanups, runCleanups } from './links-world.test-helpers.js'
+import { RemoteClient } from './remote-client.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { linkedSessions } from './linked-sessions.js'
 import { sessionAddress } from '../mail/address.js'
@@ -74,6 +75,22 @@ describe("a machine's cards, as a hub's giver of work there reads them (#1948 st
     expect(card).toMatchObject({ kind: 'approval', answerable: false })
     expect(await reader.answerCard('m1.w1', 'h1', card!.card, 'allow')).toMatchObject({ ok: false, error: expect.stringContaining('Only the person') })
     expect(standing().pendingApproval).toBeTruthy()
+  })
+
+  it('are read and answered only from a hub that offered on the same connection: another connection, with the full token, is refused', async () => {
+    const { machine, send, standing } = await rig()
+    await send('h1', 'a question for the hub')
+    await eventually(() => standing().pendingQuestions.length === 1)
+    const requestId = standing().pendingQuestions[0]!.requestId
+    // A connection with the full token that never offered as a hub
+    let hello = false
+    const other = new RemoteClient({ url: `ws://127.0.0.1:${machine.port}`, token: TOKEN, maxBackoffMs: 100 }, { hello: () => void (hello = true) })
+    cleanups.push(() => other.close())
+    other.connect()
+    await eventually(() => hello)
+    await expect(other.call('host.cards', { sessionId: 'w1', caller: 'h1' })).rejects.toThrow('Only a hub that offered on this connection reads')
+    await expect(other.call('host.answerCard', { sessionId: 'w1', caller: 'h1', card: `x:${requestId}`, text: 'Yes' })).rejects.toThrow('Only a hub that offered on this connection answers')
+    expect(standing().pendingQuestions.map((q) => q.requestId)).toEqual([requestId])
   })
 
   it('a machine from before the calls is named as needing an update', async () => {

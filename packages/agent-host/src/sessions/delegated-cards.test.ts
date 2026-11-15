@@ -591,6 +591,29 @@ describe('what a giver of work may answer (#679 review)', () => {
   })
 })
 
+describe("a giver on another computer and an approval (#1948 step 6)", () => {
+  it('is refused by name, whoever started the turn: its preset is not read here', async () => {
+    const hub = 'session:hub-1a2b3c4d/h1'
+    const meta = new Map([['s', { id: 's', name: 'Worker', permissionPreset: 'auto', pendingQuestions: [], pendingApproval: { requestId: 'req-1', detail: { kind: 'command', command: 'ls', cwd: '/' } } }]])
+    const host = {
+      meta,
+      children: { latestTurnRows: () => ({ after: 7 }) },
+      // As if its own send started the turn: the rule still never lets it answer
+      mail: { cards: { givers: () => ({ givers: [hub], answerer: hub, sent: true }), turn: () => 1 } },
+      hostCards: { hostAsks: new Set<string>() },
+      apps: { isAppAgentSession: () => false },
+      autoBoundaryOpen: () => true,
+    } as unknown as RoutedCardsHost
+    const cards = new RoutedCards(host)
+    const [card] = cards.routedCards('s', hub)
+    expect(card).toMatchObject({ kind: 'approval', answerable: false })
+    expect(await cards.answerRoutedCard(hub, 's', card!.card, 'allow')).toEqual({
+      ok: false,
+      error: 'Only the person can answer this approval in "Worker": you are a session on another computer, whose permissions this computer does not read. Tell them if it matters.',
+    })
+  })
+})
+
 describe('a card handle is bound to the turn the mailbox recorded (#1948 review)', () => {
   it('differs across two turns with no stored row between them, for the same request id and question', () => {
     let turn = 4
