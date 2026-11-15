@@ -588,14 +588,16 @@ class Wire {
 
 // ── Synthetic streaming ────────────────────────────────────────────────────────────────────
 
-/** A deterministic turn loop at a model's pace: ~70 tokens a second, a tool call every few seconds */
+/**
+ * A deterministic turn loop at a model's pace: ~70 tokens a second, a tool call every few seconds. `sample` is called
+ * at 60 s, 150 s and the end; `onToolResult` after each tool result is sent.
+ */
 async function stream(
   wire: Wire,
   sessionId: string,
   firstSeq: number,
   ms: number,
-  sample?: (step: string) => Promise<void>,
-  onToolResult?: () => void,
+  { sample, onToolResult }: { sample?: (step: string) => Promise<void>; onToolResult?: () => void } = {},
 ): Promise<void> {
   let seq = firstSeq
   let n = 0
@@ -1052,7 +1054,7 @@ async function measureEngine(
       }
       await sleep(SETTLE_MS)
       await sample('stream-0s')
-      await stream(wire, seed.longSessionId, seed.sessions[0]!.lastSeq, streamMs, sample)
+      await stream(wire, seed.longSessionId, seed.sessions[0]!.lastSeq, streamMs, { sample })
       await sample(`stream-${Math.round(streamMs / 1000)}s`)
       await sleep(quick ? 2_000 : 30_000)
       await sample('stream-settled')
@@ -1147,7 +1149,7 @@ async function measureEngine(
           if (round === 1) afterFirst = await snapshot(`${label}-round-1`)
         }
       }
-      const streams = others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms, undefined, onToolResult))
+      const streams = others.slice(0, REVISIT_STREAMING).map((s) => stream(wire, s.id, s.lastSeq, ms, { onToolResult }))
       await Promise.all([...streams, opens()])
       await sleep(quick ? 2_000 : 30_000)
       await sample(`${label}-settled`)
