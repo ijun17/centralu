@@ -29,19 +29,16 @@ export const SessionListRow = memo(SessionListRowView, sameRow)
 type Props = Parameters<typeof SessionListRowView>[0]
 
 /** The tree is built anew each time; a row is the same when what it holds is the same objects */
-function sameRow({ row: x, ...a }: Props, { row: y, ...b }: Props): boolean {
-  // In the order they were passed, which one call site keeps; not zustand's `shallow`, which builds a Map per comparison
-  const [was, is] = [Object.entries(a), Object.entries(b)]
-  return (
-    was.length === is.length &&
-    was.every(([k, v], i) => is[i]?.[0] === k && Object.is(v, is[i]?.[1])) &&
-    x.s === y.s &&
-    x.nested === y.nested &&
-    x.depth === y.depth &&
-    x.folded === y.folded &&
-    x.children.length === y.children.length &&
-    x.children.every((c, i) => c === y.children[i])
-  )
+function sameRow(a: Props, b: Props): boolean {
+  // Every other prop the same value, in any order, without building anything: this runs for every row on every list draw
+  for (const k in a) if (k !== 'row' && !Object.is(Reflect.get(a, k), Reflect.get(b, k))) return false
+  for (const k in b) if (!(k in a)) return false
+  const x = a.row
+  const y = b.row
+  if (x.s !== y.s || x.nested !== y.nested || x.depth !== y.depth || x.folded !== y.folded) return false
+  if (x.children.length !== y.children.length) return false
+  for (let i = 0; i < x.children.length; i++) if (x.children[i] !== y.children[i]) return false
+  return true
 }
 
 function SessionListRowView({

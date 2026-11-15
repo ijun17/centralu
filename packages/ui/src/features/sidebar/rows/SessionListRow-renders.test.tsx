@@ -3,10 +3,12 @@
  * event of every session used to draw every row of every project, a streamed reply's every piece included, and that was
  * most of what the window allocated while sessions worked out of view (perf:memory --steps background).
  *
- * Real React and the real store; the node test run has no DOM, so the row's element (`SessionRow`) is replaced by one
- * that counts and draws nothing, and nothing here makes an element (as in useChatScroll.test.ts).
+ * Real React, the real store and the real list (`ProjectSessionList`), so a function it made anew on each draw and
+ * passed to its rows would fail this. The node test run has no DOM: the row's element (`SessionRow`) is replaced by one
+ * that counts and draws nothing, and the list's one element is drawn into a stand-in that only takes it (as in
+ * useChatScroll.test.ts).
  */
-import { act, createElement, Fragment, type ComponentProps } from 'react'
+import { act, createElement, Fragment, useMemo } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol/client'
@@ -14,7 +16,7 @@ import { sessionFromInfo } from '../../../store/sessionList.js'
 import { useCounts, useSessionsOf } from '../../../store/selectors.js'
 import { useStore } from '../../../store/store.js'
 import { resetStore, sessionInfo } from '../../../store/store.test-helpers.js'
-import { treeRows } from '../tree.js'
+import { groupProjectAppSessions } from '../tree.js'
 
 const drawn: string[] = []
 vi.mock('./SessionRow.jsx', () => ({
@@ -23,32 +25,37 @@ vi.mock('./SessionRow.jsx', () => ({
     return null
   },
 }))
-const { SessionListRow } = await import('./SessionListRow.jsx')
+const { ProjectSessionList } = await import('../project/ProjectSessionList.jsx')
 
 const keep = () => {}
-const noReorder = (_row: string, _dragged: string, _before: boolean) => {}
 const blocks: string[] = []
 
-/** A project's rows as its block draws them, with the functions a list passes staying the same */
-function Rows({ projectId }: { projectId: string }) {
+/** A project's list as its block draws it (ProjectBlock), with the functions the block passes staying the same */
+function Block({ projectId }: { projectId: string }) {
   const sessions = useSessionsOf(projectId)
   blocks.push(projectId)
-  const props: Omit<ComponentProps<typeof SessionListRow>, 'row'> = {
+  const groupedSessions = useMemo(() => groupProjectAppSessions(sessions, []), [sessions])
+  return createElement(ProjectSessionList, {
     projectId,
-    onReorder: noReorder,
-    focusedSessionId: null,
+    sessions,
+    groupedSessions,
     renaming: null,
     setRenaming: keep,
     sessionMenu: null,
     setSessionMenu: keep,
     setHandingOff: keep,
     setConfirming: keep,
-  }
-  return createElement(
-    Fragment,
-    null,
-    treeRows(sessions, () => false).map((row) => createElement(SessionListRow, { key: row.s.id, row, ...props })),
-  )
+  })
+}
+
+/** An element that takes what React puts in it and draws nothing */
+function standIn(tag: string, ownerDocument: object): Element {
+  const name = tag.toUpperCase()
+  return {
+    nodeType: 1, tagName: name, nodeName: name, namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument, style: {},
+    textContent: '', appendChild() {}, insertBefore() {}, removeChild() {}, setAttribute() {}, removeAttribute() {},
+    addEventListener() {}, removeEventListener() {},
+  } as unknown as Element
 }
 
 let root: Root
@@ -57,15 +64,15 @@ const initial = useStore.getState()
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
-  const doc = { addEventListener() {}, removeEventListener() {}, defaultView: { document: { activeElement: null }, HTMLIFrameElement: class {} } }
-  root = createRoot({
-    nodeType: 1, tagName: 'DIV', nodeName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: doc,
-    addEventListener() {}, removeEventListener() {}, textContent: '',
-  } as unknown as Element)
+  const doc = {
+    addEventListener() {}, removeEventListener() {}, defaultView: { document: { activeElement: null }, HTMLIFrameElement: class {} },
+    createElement: (tag: string) => standIn(tag, doc),
+  }
+  root = createRoot(standIn('div', doc))
   resetStore()
   const info = [sessionInfo('a1'), sessionInfo('a2'), sessionInfo('a3', { parentSessionId: 'a1' }), sessionInfo('b1', { projectId: 'p2' })]
   useStore.setState({ sessions: Object.fromEntries(info.map((i) => [i.id, sessionFromInfo(i)])) })
-  act(() => root.render(createElement(Fragment, null, createElement(Rows, { projectId: 'p1' }), createElement(Rows, { projectId: 'p2' }))))
+  act(() => root.render(createElement(Fragment, null, createElement(Block, { projectId: 'p1' }), createElement(Block, { projectId: 'p2' }))))
   drawn.length = 0
   blocks.length = 0
 })

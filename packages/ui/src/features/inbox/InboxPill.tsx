@@ -138,16 +138,10 @@ function useNoticePeek(): Peek | null {
   const held = useRef<Notice[]>([])
   const [peek, setPeek] = useState<Peek | null>(null)
   useEffect(() => {
-    const key = (n: Notice) => `${n.sessionId}:${n.kind}:${n.at}`
-    if (!seen.current) {
-      seen.current = new Set(notices.map(key))
-      return
-    }
-    const fresh = notices.filter((n) => !seen.current!.has(key(n)))
-    // The notices there now, not every one ever: each is made with the instant it was made (`at`), so one that left never comes back under its key
-    seen.current = new Set(notices.map(key))
-    if (fresh.length === 0) return
-    held.current.push(...fresh)
+    const next = arrivedNotices(seen.current, notices)
+    seen.current = next.seen
+    if (next.fresh.length === 0) return
+    held.current.push(...next.fresh)
   }, [notices])
   useEffect(() => {
     if (!appFocused || held.current.length === 0) return
@@ -170,3 +164,13 @@ function useNoticePeek(): Peek | null {
 }
 
 type Peek = { notice: Notice; more: number; at: number }
+
+/**
+ * Which of `notices` arrived since `seen` (null: the screen just opened, and nothing there is news), and what is seen
+ * now. That is the notices there now, not every one ever: each is made with the instant it was made (`at`), so one that
+ * left never comes back under its key, and keeping it would only grow the set for the window's life.
+ */
+export function arrivedNotices(seen: Set<string> | null, notices: Notice[]): { fresh: Notice[]; seen: Set<string> } {
+  const key = (n: Notice) => `${n.sessionId}:${n.kind}:${n.at}`
+  return { fresh: seen ? notices.filter((n) => !seen.has(key(n))) : [], seen: new Set(notices.map(key)) }
+}

@@ -50,7 +50,6 @@ packages/ui/src/features/grid/GridView.tsx @typescript-eslint/unbound-method 5
 packages/ui/src/features/grid/drop.ts @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/inbox/Inbox.tsx @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/inbox/Inbox.tsx @typescript-eslint/unbound-method 3
-packages/ui/src/features/inbox/InboxPill.tsx @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/machines/AddRemoteProjectDialog.tsx @typescript-eslint/no-misused-promises 1
 packages/ui/src/features/machines/AddRemoteProjectDialog.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/features/machines/remoteIde.ts @typescript-eslint/unbound-method 1
