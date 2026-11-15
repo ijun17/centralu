@@ -7,6 +7,7 @@ import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatDay } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { Unreached } from '../../components/Unreached.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './ArchiveReaderItem.jsx'
 import { ArchiveRunReader, ArchiveRuns, runsHaveRow } from './ArchiveRuns.jsx'
@@ -23,19 +24,6 @@ import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './Settin
  *
  * Deleting for good is only here. Nothing empties the session archive on its own, which is why the total is in the first line.
  */
-/**
- * The linked machines whose trash was not read (#841 item 4): without this line the list read as the whole trash,
- * and what a machine still holds looked deleted
- */
-export function ArchiveUnreached({ unreached }: { unreached?: readonly { name: string }[] }) {
-  if (!unreached?.length) return null
-  return (
-    <p className="mt-2 text-sm text-ink" data-testid="trash-unreached">
-      Not listed: the session archive on {unreached.map((m) => m.name).join(', ')}, which could not be reached just now.
-    </p>
-  )
-}
-
 export function ArchiveSection() {
   const platform = usePlatform()
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
@@ -166,7 +154,7 @@ export function ArchiveSection() {
       {(list.error || trash?.unreached?.length) && (
         <div>
           {list.error && <LoadFailed what="the archive" error={list.error} onRetry={load} testId="trash-load-error" />}
-          <ArchiveUnreached unreached={trash?.unreached} />
+          <Unreached what="the session archive" unreached={trash?.unreached} className="mt-2" testId="trash-unreached" />
         </div>
       )}
 

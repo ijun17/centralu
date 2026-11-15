@@ -1,8 +1,7 @@
-import { useRef } from 'react'
 import { taskKey, type TaskGroups } from '@cc/core'
 import type { MailTaskRow, UnreachedMachine } from '@cc/protocol/client'
 import { Badge } from '../../components/Badge.jsx'
-import { Fold } from '../../components/Fold.jsx'
+import { Unreached } from '../../components/Unreached.jsx'
 import { FoldedGroup } from './FoldedGroup.jsx'
 import { ListRow, People, RowEnd, RowSubject } from './MailRows.jsx'
 import { taskStateLabel } from './mailLabels.js'
@@ -48,7 +47,7 @@ export function TaskList({
         <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-tasks-empty">
           No tasks
         </p>
-        <TasksUnreached unreached={unreached} />
+        <Unreached what="the tasks" unreached={unreached} className="px-4 py-2" testId="tasks-unreached" />
       </>
     )
   }
@@ -79,21 +78,8 @@ export function TaskList({
           Showing the newest {capped.toLocaleString('en-US')} open tasks.
         </p>
       )}
-      <TasksUnreached unreached={unreached} />
+      <Unreached what="the tasks" unreached={unreached} className="px-4 py-2" testId="tasks-unreached" />
     </div>
-  )
-}
-
-/** Which linked machines' work is not in the list, as the archive says it of their sessions (`ArchiveUnreached`). It keeps the last names for its exit */
-export function TasksUnreached({ unreached }: { unreached: readonly UnreachedMachine[] }) {
-  const last = useRef('')
-  if (unreached.length > 0) last.current = unreached.map((m) => m.name).join(', ')
-  return (
-    <Fold open={unreached.length > 0}>
-      <p className="px-4 py-2 text-xs text-ink-faint" data-testid="tasks-unreached">
-        Not listed: the tasks on {last.current}, which could not be reached just now.
-      </p>
-    </Fold>
   )
 }
 
