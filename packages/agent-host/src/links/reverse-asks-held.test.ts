@@ -3,6 +3,7 @@ import { HOLD_CALL_METHOD, HoldCallParams } from '@cc/protocol'
 import { runCleanups } from './links-world.test-helpers.js'
 import { rig } from './reverse-link.test-helpers.js'
 import { RemoteClient } from './remote-client.js'
+import { DEBOUNCE_MS } from '../mail/rules.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -30,8 +31,14 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-/** The ask's limit on the machine: short, so a test outlasts it, and wide enough that raising the card fits in it under load */
-const LIMIT = 1000 * SLOW
+/**
+ * The ask's limit on the machine. It bounds the whole call: the card, then, once it is answered, the task's delivery on the
+ * hub, which comes `DEBOUNCE_MS` after the task is written (mailbox.md §7.9), and its turn. Below that the answered ask
+ * runs out on the debounce alone (2 s, which `1000 * SLOW` was on Linux). Short beyond it, so a test outlasts it
+ */
+const LIMIT = DEBOUNCE_MS + 1000 * SLOW
+/** Long enough to be past the limit with room to spare: an ask not held would have ended by then */
+const PAST_LIMIT = LIMIT + 1000 * SLOW
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -55,7 +62,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await hub.mgr.inputs.send('h1', 'a long job of my own')
     await eventually(() => !hub.card() && hub.mgr.listSessions().find((s) => s.id === 'h1')?.state === 'working')
     await eventually(held)
-    await delay(2 * LIMIT)
+    await delay(PAST_LIMIT)
     expect(settled()).toBe(false)
     hub.finish('h1', 'done with mine')
     // Raised again at the turn's end (#673); the limit runs on with what it had left
@@ -70,7 +77,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await eventually(() => !!hub.card())
     await hub.mgr.inputs.send('h1', 'a long job of my own')
     await eventually(held)
-    await delay(2 * LIMIT)
+    await delay(PAST_LIMIT)
     expect(settled()).toBe(false)
     hub.finish('h1', 'done with mine')
     // The card is back and released: the limit runs on, and nobody answers
@@ -89,7 +96,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     const settled = settledFlag(call)
     await eventually(() => hub.mgr.hostCards.hostAsks.size === 1)
     await eventually(held)
-    await delay(2 * LIMIT)
+    await delay(PAST_LIMIT)
     expect(settled()).toBe(false)
     expect(hub.card()?.requestId).toBe(own.requestId)
     hub.mgr.inputs.respondApproval('h1', own.requestId, 'allow')
@@ -107,7 +114,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await eventually(() => !hub.card())
     // Held past its limit
     await eventually(held)
-    await delay(2 * LIMIT)
+    await delay(PAST_LIMIT)
     expect(settled()).toBe(false)
     await hub.stop()
     // The link's end answers the held call
@@ -124,7 +131,7 @@ describe("a linked machine's ask whose card the person cannot see (#2271)", () =
     await eventually(() => !hub.card())
     // Held past its limit
     await eventually(held)
-    await delay(2 * LIMIT)
+    await delay(PAST_LIMIT)
     expect(settled()).toBe(false)
     stop.abort()
     expect(await call).toMatchObject({ ok: false, error: 'The call was cancelled.' })
