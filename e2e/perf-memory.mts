@@ -928,8 +928,15 @@ async function measureEngine(
         ...viewCdp.map((session, i) => ({ heapName: `view ${i + 1}`, session, name: `${step}-view-${i + 1}` })),
       ]
       const out = new Map<string, HeapClasses>()
-      for (const { heapName, session, name } of heaps)
-        out.set(heapName, await heapClasses(session, join(snapshots, `${engine}-${name}.heapsnapshot`)))
+      for (const { heapName, session, name } of heaps) {
+        try {
+          out.set(heapName, await heapClasses(session, join(snapshots, `${engine}-${name}.heapsnapshot`)))
+        } catch (e) {
+          // A view's renderer can go mid-run (heapOf reads it as gone too); the window's failing is the run failing
+          if (session === cdp) throw e
+          console.error(`[${engine}] ${step}: no snapshot of ${heapName}, its session is gone: ${errorMessage(e)}`)
+        }
+      }
       return out
     }
     const grown: { span: string; rows: ReturnType<typeof heapGrowth> }[] = []
