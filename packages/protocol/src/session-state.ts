@@ -1,4 +1,4 @@
-import type { SessionInfo } from './commands.js'
+import type { LiveStateFields, SessionInfo } from './commands.js'
 import { liveBackgroundTasks, workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
@@ -302,9 +302,6 @@ export function stepSessionState(
     cardsDead,
   }
 }
-
-/** The fields of a session the state rule writes (`applySessionState`): a `SessionInfo`, or a copy of one kept elsewhere */
-export type LiveStateFields = Pick<SessionInfo, 'state' | 'waitingSince' | 'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit'>
 
 /**
  * The host's copy of a session's live state, for a reconnecting window and for the next host after a swap

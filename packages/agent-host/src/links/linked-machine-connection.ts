@@ -5,7 +5,7 @@ import { rpcError } from '../rpc-error.js'
 import {
   HostHandover,
   NormalizedEvent,
-  SessionInfo,
+  LiveStateFields,
   applySessionState,
   errorMessage,
   nextStateFor,
@@ -44,9 +44,6 @@ function installOf(i: RemoteInstall | undefined): MachineInfo['install'] {
 function autostartOf(a: RemoteAutostart | undefined): MachineInfo['autostart'] {
   return a ? { on: a.on, how: a.how, linger: a.linger } : null
 }
-
-/** What the state rule (`applySessionState`) reads and writes of a mirrored session's row (#2288), with the defaults a window applies */
-const LiveState = SessionInfo.pick({ state: true, waitingSince: true, pendingApproval: true, pendingQuestions: true, activity: true, limit: true })
 
 /** A session the hub does not show: the remote's Assistant (under either of its kind values, #2133) and its coordinators (§3.4) */
 export function hiddenKind(s: unknown): boolean {
@@ -1513,7 +1510,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const e = NormalizedEvent.safeParse(raw)
     if (!e.success || nextStateFor(e.data) === null) return
     const row = (this.deps.mirror.read(this.id, 'sessions') ?? []).find((s) => isObj(s) && s.id === sid)
-    const live = LiveState.safeParse(row)
+    const live = LiveStateFields.safeParse(row)
     if (!live.success) return
     applySessionState(live.data, e.data, Date.now())
     this.deps.mirror.patchSession(this.id, sid, live.data)

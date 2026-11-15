@@ -277,6 +277,13 @@ export const SessionInfo = z.object({
 export type SessionInfo = z.infer<typeof SessionInfo>
 
 /**
+ * The fields of a session the state rule writes (`applySessionState`, session-state.ts): a `SessionInfo`, or a copy of one
+ * kept elsewhere, read with this schema (a hub's copy of a linked machine's sessions, #2288)
+ */
+export const LiveStateFields = SessionInfo.pick({ state: true, waitingSince: true, pendingApproval: true, pendingQuestions: true, activity: true, limit: true })
+export type LiveStateFields = z.infer<typeof LiveStateFields>
+
+/**
  * When a settings change reached the running process (#164) — so the screen can say exactly
  * what happened.
  *
