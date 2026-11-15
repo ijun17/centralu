@@ -150,7 +150,8 @@ const HANDLERS: ToolHandlers = {
     const apply = callForm(caller.profile, 'update_centralu', { action: 'apply' })
     const applies = `The person applies the installed build from Centralu${apply ? `, or ${apply} does` : ''}; their automatic-update setting was not changed.`
     // A check says what an install is doing or left (#2279): "is available" beside it hid a failure and a wait for npm
-    if (s.phase === 'failed') return { text: `Centralu update failed: ${s.error}` }
+    // And that installing tries again (#2282): a check alone never does, while automatic retries wait out a backoff
+    if (s.phase === 'failed') return { text: `Centralu update failed: ${(s.error ?? 'unknown error').replace(/\.$/, '')}. ${namedCall(caller.profile, 'update_centralu', { action: 'install' })} tries again.` }
     if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }
     if (action === 'check') {
       // A release installed and waiting for a restart is not one to install again (#2130)

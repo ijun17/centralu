@@ -148,10 +148,13 @@ describe('Centralu update tool', () => {
     const installed = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'restart_required' }) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
     expect(installed.text).toContain('Centralu 0.1.1 is installed')
     const failed = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
-    expect(failed.text).toBe('Centralu update failed: EACCES')
-    // #2279: a check after a failed install says it failed, not that the release is available
-    const checkedAfterFailure = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'check' })
-    expect(checkedAfterFailure.text).toBe('Centralu update failed: EACCES')
+    expect(failed.text).toBe('Centralu update failed: EACCES. update_centralu(action="install") tries again.')
+    // #2279: a check after a failed install says it failed, not that the release is available; #2282: and how to try again,
+    // in the form the caller's seat makes the call
+    const checkedAfterFailure = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'npm did not serve 0.1.1 within 10 minutes.' }) }), 'update_centralu', { action: 'check' })
+    expect(checkedAfterFailure.text).toBe('Centralu update failed: npm did not serve 0.1.1 within 10 minutes. update_centralu(action="install") tries again.')
+    const assistantAfterFailure = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'check' }, { sessionId: 's', profile: 'assistant' })
+    expect(assistantAfterFailure.text).toBe('Centralu update failed: EACCES. centralu_run(command="update_centralu", args={action: "install"}) tries again.')
     // #2279 review: a check during the install, npm's wait included, says it is installing, not that the release is available
     for (const phase of ['updating', 'waiting_for_npm'] as const) {
       const checkedDuringInstall = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase }) }), 'update_centralu', { action: 'check' })
