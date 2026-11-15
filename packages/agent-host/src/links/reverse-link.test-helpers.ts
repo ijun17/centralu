@@ -1,5 +1,3 @@
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { APP_VERSION, PROTOCOL_VERSION, type HubMailParams, type LinkedAppNoticeParams, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
@@ -15,7 +13,7 @@ import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
-import { fixtureGit } from '../temp-dir.test-helpers.js'
+import { fixtureGit, namedFolder } from '../temp-dir.test-helpers.js'
 import { mailPeers } from './mail-peers.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
@@ -57,8 +55,7 @@ function delivering(mail: HostMail, live: boolean): HostMail {
  * lists its projects to the hub by their folder's name, and a `find` matches words against it (#2261)
  */
 function projectFolder(name: string, origin?: string): string {
-  const dir = join(folder(), name)
-  mkdirSync(dir)
+  const dir = namedFolder(folder(), name)
   if (!origin) return dir
   fixtureGit(dir, ['init', '-q'])
   fixtureGit(dir, ['commit', '-q', '--allow-empty', '-m', 'first'])
