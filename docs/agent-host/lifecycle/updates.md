@@ -11,7 +11,8 @@ the newest it has shown, and a failure of such an older request raises no toast 
 The host's `update_status` events are always taken, as its newest state. Focus/visibility restoration also
 checks only with automatic checking on, when the last successful check is more than an hour old; attempts are
 throttled for an hour, including failures and paired focus/visibility events. Checks leave an active install or pending apply alone. A failed install
-keeps its phase and error throughout later checks, until the next install attempt. Successful ordinary checks
+keeps its phase and error throughout later checks, until the next install attempt or a check that finds a release past
+the one that failed, which is then offered as any newer release is (#2282). Successful ordinary checks
 follow npm exactly, including a lower `latest` after a dist-tag rollback, and recompute whether it is newer.
 
 **The install** (`updates.ts`). Before installing, `updates.apply` refreshes the registry with the forced eight-second
@@ -45,7 +46,8 @@ an older one, leaves `restart_required` as it was, so that release installs once
 newer (`idle`), and installing it, by a click or by itself, replaces the waiting build; the window then offers it
 rather than the build on disk, which an agent can still apply. A failed install of it, also one npm took whose copy was
 not replaced, stays `failed` and is retried as any failure is; the line shows its error beside the build on disk. A failed install stays visible until another install attempt;
-a background or requested check does not erase its error. With `autoApply` on, the host tries again by itself on a
+a background or requested check does not erase its error, unless it finds a release past the one that failed: that
+error names a version nobody installs any more, so the line offers the new one (#2282). With `autoApply` on, the host tries again by itself on a
 backoff — 10 minutes, then 1 hour, then every 6 hours — from a timer kept in memory (#645): a check that lands
 before the delay starts nothing, one after it retries too, and a release other than the one that failed is tried at
 once. The error stays on the line until the next attempt starts; success, turning the setting off and shutdown end
@@ -67,18 +69,26 @@ the copy's path and `centralu install` to finish by hand.
 edge it installs from, and the edge can serve the packument that lists a version before that version's tarball (#2279). On
 npm's narrow `ETARGET`/`notarget` response, or an E404 on `centralu`'s own tarball at the target version, only, the host retries the exact install with
 `--prefer-online` for up to ten minutes, reporting `waiting_for_npm` and “Waiting for npm to serve <version>” between
-attempts. The platform package's tarball is not matched: npm skips an optional dependency it cannot fetch and exits 0
-(npm 11, against a registry answering 404 for it). Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
+attempts. The platform package's tarball (`@centralu/<os>-<arch>`) never shows as an error: npm skips an optional
+dependency it cannot fetch and exits 0 (npm 8 to 11, against a registry answering 404 for it), leaving a launcher with
+no app and no host. So after npm exits 0 the host looks for that package where the launcher does (`platformPackage`:
+`require.resolve` from the launcher's folder, as its `bundledApp` does) and, when it is missing or at another version,
+counts that pass as not served and waits the same way (#2282). Which machines have one is the package's own
+`optionalDependencies`, the launcher's `TARGETS` (`tooling/launcher-platform.test.ts` holds the two together): on a
+machine it lists none for, nothing is looked for, so nothing waits. Bringing the copy to a host's version
+(`followHost`) checks the same and fails at once, to be tried at the next start. Other failures, a 404 on the packument or on another package or version included, still fail at once; a bounded propagation wait must not hide a credential, disk or package
 error. ETARGET counts only on npm's last line, since a warning above an unrelated error may name it; the
 tarball's 404 is read anywhere in npm's output, since the last line under it never names the URL. A wait that reaches
-the cap fails as “npm did not serve <version> within 10 minutes: <npm's line>”, so the person sees that a wait ran out.
+the cap fails as “npm did not serve <version> within 10 minutes: <npm's line>”, so the person sees that a wait ran out;
+for the platform package the line is “npm installed centralu <version> without @centralu/<os>-<arch>@<version>”.
 
 **Agent updates (#581).** `update_centralu(action: "check" | "install")` reaches the same `UpdateService`
 methods as the window. In the commands tier it is discovered and run through `centralu_commands`, `centralu_help`
 and `centralu_run`; an ordinary session gets a minimal definition, deferred behind Claude's tool search
 like `app_guide` because updates are rare (Codex is offered it without a deferral flag). Its first call raises a consent card:
 allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
-cannot change the person's automatic-apply preference with it. (The Assistant's `set_preferences` can turn it on, behind a
+cannot change the person's automatic-apply preference with it. A failed install answers a check or an install with its
+error and the call that tries again (`install`, in the form the caller's seat makes it, #2282). (The Assistant's `set_preferences` can turn it on, behind a
 card in every preset, [../assistant/window-parity.md](../assistant/window-parity.md#the-inventory-behind-1219-what-the-window-calls-and-what-the-assistant-reaches).) An install starts the normal host install; the window still
 performs its own safe relaunch step.
 

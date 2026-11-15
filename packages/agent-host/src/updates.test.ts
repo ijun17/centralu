@@ -9,7 +9,7 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 const RELEASE = '0.1.0-beta.20'
 import { installedCopyVersionSource } from './os.js'
 import { resolveCommand } from './tool-launch.js'
-import { UpdateService, hubUpdatesMachines, commandFor, existingCopy, failureDetail, failureLine, installedCopyPath, readInstalledCopyVersion, runCommand, type GlobalPackage, type LatestResult } from './updates.js'
+import { UpdateService, hubUpdatesMachines, commandFor, existingCopy, failureDetail, failureLine, installedCopyPath, platformPackage, readInstalledCopyVersion, runCommand, type GlobalPackage, type LatestResult } from './updates.js'
 
 /** The global npm package's launcher the fake `npm root -g` finds */
 const LAUNCHER = '/prefix/node_modules/centralu/bin/centralu.mjs'
@@ -46,6 +46,8 @@ function make(
   let registry = opts.registry ?? null
   let fetches = 0
   let now = 1000
+  /** The version the last fake `npm i -g` that worked installed, with its platform package (#2282) */
+  let npmInstalled: string | null = null
   const svc = new UpdateService((s) => published.push(s), {
     ...(opts.current === null ? {} : { current: opts.current ?? RELEASE }),
     ...(opts.build === undefined ? {} : { build: opts.build }),
@@ -57,6 +59,7 @@ function make(
     run: async (file, args) => {
       calls.push([file, args])
       await (opts.run?.(file, args) ?? Promise.resolve())
+      if (file === 'npm' && args[0] === 'i') npmInstalled = args.at(-1)?.replace(/^centralu@/, '') ?? null
     },
     installedCopy: () => opts.installedCopy ?? null,
     installedCopyVersion: opts.installedCopyVersion ?? (() => null),
@@ -65,7 +68,7 @@ function make(
     wait: opts.wait,
     now: opts.now ?? (() => now),
     schedule: opts.schedule ?? (() => () => {}),
-    globalPackage: opts.globalPackage ?? (async () => ({ launcher: LAUNCHER, version: null })),
+    globalPackage: opts.globalPackage ?? (async () => ({ launcher: LAUNCHER, version: null, platform: { name: '@centralu/linux-x64', version: npmInstalled } })),
     node: '/host/node',
   })
   return {
@@ -211,7 +214,8 @@ describe('UpdateService', () => {
       expect(h.calls[1]?.[1]).toContain('centralu@9999.0.1')
     })
 
-    it.each(['9999.0.2', null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {
+    // A release past the one that failed moves past its failure (#2282, 'a release past the one that failed is offered')
+    it.each(['9999.0.1', null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {
       let fails = true
       const h = make({ registry: '9999.0.1', run: async () => {
         if (fails) throw new Error('EACCES: install denied')
@@ -700,6 +704,103 @@ describe('UpdateService', () => {
     }
   })
 
+  /**
+   * #2282: npm skips an optional dependency whose tarball the edge does not serve yet and exits 0 (npm 8 to 11, measured
+   * against a registry answering 404 for it), so the platform package is checked after npm, not read from its output
+   */
+  describe("npm exits 0 without this machine's platform package (#2282)", () => {
+    /** The global package as `npm root -g` finds it after each fake npm: the platform package at `platform()` */
+    const withPlatform = (platform: () => string | null, name = '@centralu/linux-x64') => async (): Promise<GlobalPackage> => ({ launcher: LAUNCHER, version: null, platform: { name, version: platform() } })
+
+    it.each([
+      ['left out', null],
+      ['at the version installed before', '9998.0.0'],
+    ])('waits for npm to serve it when it is %s, then installs', async (_, before) => {
+      let npmRuns = 0
+      const h = make({
+        registry: '9999.0.0',
+        installedCopy: '/Programs/Centralu',
+        run: async (file) => {
+          if (file === 'npm') npmRuns++
+        },
+        wait: async () => {},
+        globalPackage: withPlatform(() => (npmRuns >= 2 ? '9999.0.0' : before)),
+      })
+      await h.svc.check(true)
+      void h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.published.some((s) => s.phase === 'waiting_for_npm' && s.error === 'Waiting for npm to serve 9999.0.0')).toBe(true)
+      // The copy is refreshed only from a package that has its app
+      expect(h.calls.map(([f]) => f)).toEqual(['npm', 'npm', '/host/node'])
+    })
+
+    it('ends the wait at ten minutes, naming the platform package npm left out', async () => {
+      let elapsed = 0
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      onTestFinished(() => logged.mockRestore())
+      const h = make({
+        registry: '9999.0.0',
+        installedCopy: '/Programs/Centralu',
+        now: () => elapsed,
+        wait: async (ms) => { elapsed += ms },
+        globalPackage: withPlatform(() => null, '@centralu/win32-x64'),
+      })
+      await h.svc.check(true)
+      void h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+      expect(elapsed).toBe(10 * 60 * 1000)
+      expect(h.svc.current().error).toBe('npm did not serve 9999.0.0 within 10 minutes: npm installed centralu 9999.0.0 without @centralu/win32-x64@9999.0.0')
+      expect(h.calls.every(([f]) => f === 'npm')).toBe(true)
+    })
+
+    it('looks for none where the package lists none for this machine, and installs without waiting', async () => {
+      const waits: number[] = []
+      const h = make({ registry: '9999.0.0', wait: async (ms) => { waits.push(ms) }, globalPackage: async () => ({ launcher: LAUNCHER, version: '9999.0.0', platform: null }) })
+      await h.svc.check(true)
+      void h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(waits).toEqual([])
+    })
+
+    it('a copy following the host fails at once with the same line, and leaves the copy alone', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      onTestFinished(() => log.mockRestore())
+      const waits: number[] = []
+      const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', wait: async (ms) => { waits.push(ms) }, globalPackage: withPlatform(() => null) })
+      await h.svc.followHost()
+      expect(h.calls.map(([f]) => f)).toEqual(['npm'])
+      expect(waits).toEqual([])
+      expect(log.mock.calls.join(' ')).toContain(`npm installed centralu ${RELEASE} without @centralu/linux-x64@${RELEASE}`)
+    })
+
+    /** A global prefix laid out as npm leaves it: the launcher, its package.json, and the platform package nested under it */
+    function prefix(o: { lists: string[]; installed?: string }) {
+      const root = mkdtempSync(join(tmpdir(), 'cc-npm-root-'))
+      onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+      const pkg = join(root, 'centralu')
+      mkdirSync(join(pkg, 'bin'), { recursive: true })
+      writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'centralu', version: '9999.0.0', optionalDependencies: Object.fromEntries(o.lists.map((n) => [n, '9999.0.0'])) }))
+      writeFileSync(join(pkg, 'bin', 'centralu.mjs'), '')
+      // npm leaves the scope folder behind, empty, when it skipped the package
+      mkdirSync(join(pkg, 'node_modules', '@centralu'), { recursive: true })
+      if (o.installed !== undefined) {
+        mkdirSync(join(pkg, 'node_modules', '@centralu', 'linux-x64'))
+        writeFileSync(join(pkg, 'node_modules', '@centralu', 'linux-x64', 'package.json'), JSON.stringify({ name: '@centralu/linux-x64', version: o.installed }))
+      }
+      return { launcher: join(pkg, 'bin', 'centralu.mjs'), manifest: join(pkg, 'package.json') }
+    }
+
+    it('finds the platform package the way the launcher does, and only where the package lists one', () => {
+      const lists = ['@centralu/darwin-arm64', '@centralu/linux-x64']
+      const there = prefix({ lists, installed: '9999.0.0' })
+      expect(platformPackage(there.launcher, there.manifest, 'linux-x64')).toEqual({ name: '@centralu/linux-x64', version: '9999.0.0' })
+      const skipped = prefix({ lists })
+      expect(platformPackage(skipped.launcher, skipped.manifest, 'linux-x64')).toEqual({ name: '@centralu/linux-x64', version: null })
+      expect(platformPackage(skipped.launcher, skipped.manifest, 'darwin-x64')).toBeNull()
+      expect(platformPackage(skipped.launcher, join(skipped.manifest, 'missing'), 'linux-x64')).toBeNull()
+    })
+  })
+
   it('fails at once when only a warning before the error names ETARGET', async () => {
     const waits: number[] = []
     const stderr = ['npm warn notarget No matching version found for an-optional-dependency@^2.0.0.', 'npm error code EACCES', "npm error EACCES: permission denied, mkdir '/usr/lib/node_modules/centralu'"].join('\n')
@@ -1060,6 +1161,22 @@ describe('UpdateService', () => {
         expect(h.calls).toHaveLength(3)
       })
 
+      it('a release past the one that failed is offered, not reported as that failure (#2282)', async () => {
+        const h = make({ registry: '9999.0.1', run: async () => { throw new Error('EACCES: install denied') } })
+        await h.svc.check(true)
+        await h.svc.apply()
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        // The release that failed, seen again, keeps its failure
+        await h.svc.check(true)
+        expect(h.svc.current()).toMatchObject({ phase: 'failed', error: 'EACCES: install denied', latest: '9999.0.1' })
+        h.offer('9999.0.2')
+        await h.svc.check(true)
+        expect(h.svc.current()).toMatchObject({ phase: 'idle', error: null, latest: '9999.0.2', newer: true })
+        // Without automatic apply, nothing installs by itself
+        await settle()
+        expect(h.calls).toHaveLength(1)
+      })
+
       it('turning automatic apply off cancels the retry, on schedules it, and shutdown cancels it', async () => {
         const t = timers()
         const h = make({ registry: '9999.0.1', schedule: t.schedule, run: async () => {
@@ -1306,11 +1423,11 @@ describe('the installed copy follows a host a hub installed (#1736)', () => {
 
   it('never takes the global npm package down: one at or above this host only runs its install', async () => {
     for (const version of ['0.1.0-beta.21', RELEASE]) {
-      const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version }) })
+      const h = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version, platform: null }) })
       await h.svc.followHost()
       expect(h.calls, version).toEqual([INSTALL])
     }
-    const older = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version: '0.1.0-beta.19' }) })
+    const older = make({ installedCopy: '/Programs/Centralu', installedCopyVersion: () => '0.1.0-beta.19', globalPackage: async () => ({ launcher: LAUNCHER, version: '0.1.0-beta.19', platform: null }) })
     await older.svc.followHost()
     expect(older.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${RELEASE}`]], INSTALL])
   })

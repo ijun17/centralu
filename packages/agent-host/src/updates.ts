@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
@@ -140,8 +141,12 @@ export type UpdateDeps = {
 /** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
 export { installedCopyPath }
 
-/** The globally installed npm package: its launcher's path and its version (null when unreadable) */
-export type GlobalPackage = { launcher: string; version: string | null }
+/**
+ * The globally installed npm package: its launcher's path and its version (null when unreadable), and this machine's
+ * platform package as that launcher finds it (#2282): its name and version (null when npm left it out), or null when
+ * the package lists none for this machine, so there is nothing to look for
+ */
+export type GlobalPackage = { launcher: string; version: string | null; platform: { name: string; version: string | null } | null }
 
 /**
  * The globally installed npm package, found by `npm root -g`: its launcher (`centralu/bin/centralu.mjs`) is what
@@ -154,7 +159,37 @@ async function npmGlobalPackage(): Promise<GlobalPackage | null> {
   const root = out.trim().split(/\r?\n/).at(-1)?.trim()
   if (!root) return null
   const launcher = join(root, APP_SLUG, 'bin', `${APP_SLUG}.mjs`)
-  return existsSync(launcher) ? { launcher, version: packageVersion(join(root, APP_SLUG, 'package.json')) } : null
+  if (!existsSync(launcher)) return null
+  const manifest = join(root, APP_SLUG, 'package.json')
+  return { launcher, version: packageVersion(manifest), platform: platformPackage(launcher, manifest, `${process.platform}-${process.arch}`) }
+}
+
+/**
+ * This machine's platform package (`@centralu/<os>-<arch>`) beside a launcher (#2282). Which machines have one is the
+ * package's own answer, its `optionalDependencies` (the launcher's `TARGETS`, held to them by
+ * `tooling/launcher-platform.test.ts`): a machine it lists none for has none by design, and nothing is looked for. Found
+ * the way the launcher finds it (`bundledApp`, `require.resolve` from its own folder); npm skips an optional dependency
+ * it could not fetch and exits 0, leaving the version null.
+ */
+export function platformPackage(launcher: string, manifest: string, machine: string): { name: string; version: string | null } | null {
+  const name = `@${APP_SLUG}/${machine}`
+  if (!Object.hasOwn(optionalDependencies(manifest), name)) return null
+  try {
+    return { name, version: packageVersion(createRequire(launcher).resolve(`${name}/package.json`)) }
+  } catch {
+    return { name, version: null }
+  }
+}
+
+/** The `optionalDependencies` of a package.json, empty when it cannot be read */
+function optionalDependencies(file: string): Record<string, unknown> {
+  try {
+    const pkg: unknown = JSON.parse(readFileSync(file, 'utf8'))
+    const deps = typeof pkg === 'object' && pkg !== null && 'optionalDependencies' in pkg ? pkg.optionalDependencies : null
+    return typeof deps === 'object' && deps !== null ? { ...deps } : {}
+  } catch {
+    return {}
+  }
 }
 
 /** `path` when the copy `centralu install` made is there; on Linux, a menu entry whose AppImage is gone is not */
@@ -596,7 +631,13 @@ export class UpdateService {
       this.emit()
       return this.current()
     }
-    const failure = kept?.phase === 'failed' ? kept : null
+    /*
+     * A failure stays with the release that failed (#2282): one past it is a new offer, not that failure, and with
+     * `autoApply` on it is installed at once (`retryDue`). Saying the old error under it would name a version nobody
+     * is installing any more.
+     */
+    const failed = this.retry?.version
+    const failure = kept?.phase === 'failed' && !(failed && isNewerVersion(latest, failed)) ? kept : null
     this.status = {
       ...this.status,
       latest,
@@ -817,7 +858,7 @@ export class UpdateService {
   private async runFollow(copy: string, was: string | null, to: string): Promise<void> {
     try {
       const global = await this.deps.globalPackage()
-      if (!atLeast(global?.version ?? null, to)) await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${to}`])
+      if (!atLeast(global?.version ?? null, to)) await this.installGlobal(to)
       if (this.stopped) return
       await this.installCopy()
       console.error(`[updates] the installed copy at ${copy} was refreshed from the npm package at ${global?.version && atLeast(global.version, to) ? global.version : to} (it held ${was ?? 'an unreadable version'}; this host is ${to})`)
@@ -838,7 +879,8 @@ export class UpdateService {
   /**
    * A just-published release can be visible from `latest` before its package is on the npm edge
    * this machine reaches: `notarget`/ETARGET while the packument lacks it, or E404 on its own tarball while the packument
-   * already lists it (#2279, the registry edge serves the two apart). That narrow condition only; credentials, disk and
+   * already lists it (#2279, the registry edge serves the two apart), or an exit 0 without this machine's platform
+   * package, whose tarball the edge did not serve yet (#2282, `installGlobal`). That narrow condition only; credentials, disk and
    * package errors still fail immediately. The ten minute cap makes this a wait with an end, not
    * a hidden retry loop. `--prefer-online` makes npm revalidate instead of trusting its stale cache.
    */
@@ -848,11 +890,11 @@ export class UpdateService {
     for (;;) {
       if (this.stopped) return
       try {
-        await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${version}`])
+        await this.installGlobal(version)
         return
       } catch (err) {
         if (this.stopped) return
-        if (!npmHasNotServedVersion(err, version)) throw err
+        if (!(err instanceof PlatformPackageMissing) && !npmHasNotServedVersion(err, version)) throw err
         // npm's own line, which `failureLine` still reads (stderr, exit code), after what ran out
         if (this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw Object.assign(new Error(`npm did not serve ${version} within ${NPM_RETRY_WINDOW_MS / 60_000} minutes: ${errorMessage(err)}`), err)
         this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
@@ -863,6 +905,20 @@ export class UpdateService {
         this.emit()
       }
     }
+  }
+
+  /**
+   * `npm i -g centralu@<version>`, and this machine's platform package with it (#2282): npm skips an optional dependency
+   * whose tarball the registry edge does not serve yet and exits 0, which leaves a launcher with no app and no host.
+   * That is the same publish race as a 404 on `centralu`'s own tarball, so it throws `PlatformPackageMissing`, which
+   * the install waits out (`installPackage`). A global package npm root does not lead to is left to `installCopy`,
+   * which says so.
+   */
+  private async installGlobal(version: string): Promise<void> {
+    await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${version}`])
+    if (this.stopped) return
+    const platform = (await this.deps.globalPackage())?.platform
+    if (platform && platform.version !== version) throw new PlatformPackageMissing(`npm installed ${APP_SLUG} ${version} without ${platform.name}@${version}`)
   }
 
   /** `version` is past the release installed and waiting, or nothing is waiting */
@@ -886,6 +942,9 @@ export class UpdateService {
     this.publish(this.current())
   }
 }
+
+/** npm exited 0 without this machine's platform package at the version it installed (`installGlobal`) */
+class PlatformPackageMissing extends Error {}
 
 /**
  * ETARGET by npm's last line only, as a warning above an unrelated error may name it; the tarball's 404 anywhere in
