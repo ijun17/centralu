@@ -326,7 +326,7 @@ describe('a record an older build kept', () => {
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...legacy, owed: {}, whose: 'caller', sent: 'TASK', turn: 't1', given: [3], queued: [{ id: 'q', text: 'x' }] }]))
     agents()
     expect(told).toEqual([
-      `[Centralu] Centralu was updated while "Child" on Box was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="${CHILD}") reads where it stands.\n` +
+      `[Centralu] Centralu was updated while "Child" on Box was working on a task from this session, so its report will not arrive. read_session(sessionId="${CHILD}") shows where it stands.\n` +
         '[Centralu] Centralu was updated while a message from this session waited for "Child" on Box to be free. It was not sent; send again what still matters.',
     ])
     expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY)!)).toEqual([legacy])
@@ -338,8 +338,8 @@ describe('a record an older build kept', () => {
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...legacy, owed: {} }, { ...legacy, sessionId: 'm1.c2', name: 'Other', owed: {} }]))
     agents()
     expect(told).toEqual([
-      `[Centralu] Centralu was updated while "Child" on Box was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="${CHILD}") reads where it stands.\n` +
-        '[Centralu] Centralu was updated while "Other" on Box was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="m1.c2") reads where it stands.',
+      `[Centralu] Centralu was updated while "Child" on Box was working on a task from this session, so its report will not arrive. read_session(sessionId="${CHILD}") shows where it stands.\n` +
+        '[Centralu] Centralu was updated while "Other" on Box was working on a task from this session, so its report will not arrive. read_session(sessionId="m1.c2") shows where it stands.',
     ])
   })
 

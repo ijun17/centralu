@@ -2256,6 +2256,8 @@ describe("the hub's Assistant reads the linked machines (#82 phase 4)", () => {
     expect(hidden).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
     const sent = await tool('send_to_session', { sessionId: 'm1.orch', text: 'do it' })
     expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
+    // Named, never by an address
+    expect(sent.text).not.toContain('session:')
     expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
   })
 

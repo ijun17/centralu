@@ -13,7 +13,7 @@ import { SessionManager } from './manager.js'
 import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 
 const CHILD = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'api', startedAt: 1, sent: 'TASK' }
-const REFUSED = 'Refused (link_down): no machine m1 is linked to this computer, so nothing was sent.'
+const REFUSED = 'Refused (link_down): That computer is no longer linked to this one, so nothing was sent.'
 const ELSEWHERE = `${addr(CHILD.sessionId)} is on another computer, and only a session's mail tool sends mail there: nothing was written.`
 
 let store: Store

@@ -121,7 +121,7 @@ export class RemoteAgents {
       const held = Array.isArray(r.queued) ? r.queued.length : 0
       if ((r.owed === undefined && !held) || !this.host.meta.has(r.callerId)) continue
       const text = [
-        r.owed === undefined ? '' : `[Centralu] Centralu was updated while "${r.name}" on ${r.machine} was working on a task from this session. Its report no longer comes back by this path; read_session(sessionId="${r.sessionId}") reads where it stands.`,
+        r.owed === undefined ? '' : `[Centralu] Centralu was updated while "${r.name}" on ${r.machine} was working on a task from this session, so its report will not arrive. read_session(sessionId="${r.sessionId}") shows where it stands.`,
         held ? `[Centralu] Centralu was updated while ${held === 1 ? 'a message' : `${held} messages`} from this session waited for "${r.name}" on ${r.machine} to be free. ${held === 1 ? 'It was' : 'They were'} not sent; send again what still matters.` : '',
       ].filter(Boolean)
       const notice = notices.get(r.callerId)

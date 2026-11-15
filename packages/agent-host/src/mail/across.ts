@@ -291,9 +291,9 @@ export class MailAcross {
 
   private taskPeer(to: string): { m: AcrossPeer; sessionId: string } | { why: string; text: string } {
     const route = this.route(to)
-    if (route?.kind !== 'machine') return { why: 'bad_address', text: `${to} is not a session on a machine this computer links.` }
+    if (route?.kind !== 'machine') return { why: 'bad_address', text: `${this.nameOf(to)} is not a session on a machine this computer links.` }
     const m = this.peers?.machine?.(route.machineId)
-    if (!m) return { why: 'link_down', text: `no machine ${route.machineId} is linked to this computer, so nothing was sent.` }
+    if (!m) return { why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
     if (m.reachable && m.tasks === undefined) return { why: 'link_down', text: `${m.name} is still connecting to this computer, so nothing was sent. Try again in a moment.` }
     if (m.reachable && m.tasks !== true) return { why: 'older', text: `${m.name} runs an older Centralu, which takes no work from this computer. Update Centralu on ${m.name}.` }
     return { m, sessionId: route.sessionId }
@@ -430,7 +430,7 @@ export class MailAcross {
     if (!route || route.kind === 'here') return { ok: false, why: 'bad_address', text: `${input.to} is not a session on another computer.` }
     if (route.kind === 'machine') {
       const m = this.peers?.machine?.(route.machineId)
-      if (!m) return { ok: false, why: 'link_down', text: `no machine ${route.machineId} is linked to this computer, so nothing was sent.` }
+      if (!m) return { ok: false, why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
       const id = this.idFor(sender, input.to, fields, m.name)
       // The machine shows the sender as it reads here, with this computer's name
       const params: HostMailParams = { from: sender, name: `${sender === PERSON ? 'the person' : this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: route.sessionId, ...fields, id }
@@ -588,7 +588,7 @@ export class MailAcross {
     if (route.kind === 'machine') {
       if (route.machineId === machine.id) return { ok: false, why: 'bad_address', text: `${oneLineText(to, 200)} is a session on your own computer: write to it by its id, ${route.sessionId}.` }
       const m = this.peers?.machine?.(route.machineId)
-      if (!m) return { ok: false, why: 'link_down', text: `no machine ${route.machineId} is linked to ${this.selfName()}, so nothing was sent.` }
+      if (!m) return { ok: false, why: 'link_down', text: `That computer is no longer linked to ${this.selfName()}, so nothing was sent.` }
       const r = await this.ask(m, 'host.mail', { from: sender, name: this.names.get(sender) ?? p.name, to: route.sessionId, text: p.text, ...pick(p) } satisfies HostMailParams)
       return r.ok ? { ok: true, messageId: r.messageId, to: `${r.to} on ${m.name}`, address: to } : r
     }
@@ -620,11 +620,12 @@ export class MailAcross {
     if (from === CENTRALU || isPerson(from)) return { ok: false, why: 'not_allowed', text: `${hub.name} gives work here only from its sessions.` }
     // Never to this host's Assistant or a coordinator, which a hub is not shown and may not direct (remote-hub.md §3.4, as `LinkedHost.directedFromHub`)
     const role = this.d.ownEntries().find((e) => e.address === to)?.role
-    if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${oneLineText(this.asHubNames(hub.id, to), 200)}` }
+    if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${this.label(to)}` }
     if (p.id === undefined || !FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: 'a task from another computer comes with the id it gave it.' }
     const had = this.d.records.message(p.id)
     if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
-    if (this.d.reach.mayWrite(from, to, false) === 'gone') return { ok: false, why: 'gone', text: `${oneLineText(this.asHubNames(hub.id, to), 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
+    // A session gone from here has no name left here: the sender knows which it gave the work to
+    if (this.d.reach.mayWrite(from, to, false) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === to ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
       const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
       return { ok: true, messageId: m.id, to: this.label(to), address: to }
@@ -710,6 +711,13 @@ export class MailAcross {
           : `${this.selfName()} could not take the message: ${oneLineText(errorMessage(e), 500)}`
       return { ok: false, why: why ?? 'failed', text: text.slice(0, 4000) }
     }
+  }
+
+  /** A session by its name, here or on the other side, as a refusal names it; an address that is no session, quoted */
+  private nameOf(address: string): string {
+    const r = this.route(address)
+    if (!r) return JSON.stringify(oneLineText(address, 200))
+    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? address)
   }
 
   /** A session here as the other side's answer names it; written whatever its label */

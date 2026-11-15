@@ -42,6 +42,14 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
   })
 
+  it('is refused for a session gone from the machine, named as it is there, never by an address', async () => {
+    const { machine, hub, across } = await rig()
+    await machine.mgr.trash.trashSession('w1')
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    expect(sent).toMatchObject({ ok: false, why: 'gone', text: expect.stringContaining(' is gone from Remote box: ') })
+    expect(sent.ok ? '' : sent.text).not.toContain('session:')
+  })
+
   it('reads a machine that does not know the offer as an older one, not as still connecting', async () => {
     const machine = await machineHost({ sessions: ['w1'], mail: true, without: ['host.hubOffer'] })
     const hub = await hubHost(machine.port, { mail: true })
@@ -272,6 +280,14 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
       expect((await sending) as { busy?: true }).toMatchObject({ ok: true })
       expect(((await sending) as { busy?: true }).busy).toBe(busy)
     }
+  })
+
+  it('names the session, never by an address, when it is not on a machine this computer links, and says a machine no longer linked in words', async () => {
+    const { w, across, sent } = hubWorld()
+    const here = w.reach.labelOf(W)
+    expect(await across.sendTask('orc', W, 'review the branch', { origin: 'start_agent' })).toEqual({ ok: false, why: 'bad_address', text: `${here} is not a session on a machine this computer links.` })
+    expect(await across.sendTask('orc', addr('m9.w1'), 'review the branch', { origin: 'start_agent' })).toEqual({ ok: false, why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' })
+    expect(sent).toEqual([])
   })
 
   it('is not sent while the machine has not said yet whether it takes tasks: still connecting, not an older Centralu', async () => {
