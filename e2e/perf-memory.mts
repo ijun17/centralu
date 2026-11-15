@@ -49,8 +49,15 @@
  *
  * Each step samples the browser's processes (footprint from `top`, the number Activity Monitor shows, and RSS
  * from `ps`), the page's DOM, its rendered conversation rows and running animations, and in Chromium the JS heap
- * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heap). On Windows (Chromium only) the footprint is each process's private bytes and
- * RSS its working set, read from `Win32_Process`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
+ * over CDP. After a forced collection it reads the content footprint again (and in Chromium the heaps). On Windows
+ * (Chromium only) the footprint is each process's private bytes and RSS its working set, read from `Win32_Process`.
+ *
+ * What a number holds differs by engine where a frame is involved. `content` is the largest content process, the
+ * window's own; `all content` sums every content process. WebKit runs an app's view in the window's WebContent, so its
+ * `content` holds the view. Chromium gives the view's sandboxed frame a renderer of its own: its `content` and `JS heap`
+ * are the window without the view, `all content` counts the view's renderer (and any spare renderer Chromium keeps), and
+ * `view heap` is the heap of the view's renderers, read and collected through a session on each. Compare WebKit's
+ * `content` with Chromium's `all content`. `--heap-snapshots` (Chromium) takes a heap snapshot at the first and
  * the last background sample (revisit: the first, after the first round and the last), writes them to that folder and
  * prints what grew between them by constructor.
  *
@@ -159,12 +166,18 @@ type Sample = {
   footprintMB: Record<string, number>
   rssMB: Record<string, number>
   totalFootprintMB: number
-  /** The largest content process — the page's own */
+  /**
+   * The largest content process: the window's own. A Chromium renderer of a frame's own (an app's view) is not in it;
+   * `footprintMB.content` sums every content process
+   */
   contentFootprintMB: number
   hostFootprintMB: number
   processes: number
+  /** The window page's JS heap (Chromium) */
   heapUsedMB: number | null
   heapTotalMB: number | null
+  /** The JS heap of the app view's frames that run in renderers of their own (Chromium, appview); null without any */
+  viewHeapUsedMB: number | null
   domNodes: number
   elements: number
   jsEventListeners: number | null
@@ -179,8 +192,14 @@ type Sample = {
   /** Conversation rows the page received over its socket so far (history pages and injected events) */
   rowsReceived: number
   wsBytesIn: number
-  /** The same after a forced collection (the heap: Chromium only), which tells what is held from what is merely not yet collected */
-  afterGc: { contentFootprintMB: number; heapUsedMB: number | null } | null
+  /** The same after a forced collection (the heaps: Chromium only), which tells what is held from what is merely not yet collected */
+  afterGc: {
+    contentFootprintMB: number
+    /** Every content process together, as `footprintMB.content` */
+    allContentFootprintMB: number
+    heapUsedMB: number | null
+    viewHeapUsedMB: number | null
+  } | null
   /** The last injected text is in the page */
   painted: boolean | null
 }
@@ -450,6 +469,18 @@ async function heap(cdp: CDPSession | null) {
     heapTotalMB: h.totalSize / 1048576,
     jsEventListeners: d.jsEventListeners,
   }
+}
+
+/** The JS heap used in these sessions' renderers together; null without any, or once one of them is gone */
+async function heapOf(sessions: CDPSession[]): Promise<number | null> {
+  if (!sessions.length) return null
+  let used = 0
+  for (const s of sessions) {
+    const h = (await s.send('Runtime.getHeapUsage').catch(() => null)) as { usedSize: number } | null
+    if (!h) return null
+    used += h.usedSize
+  }
+  return used / 1048576
 }
 
 type HeapClasses = Map<string, { bytes: number; count: number }>
@@ -878,9 +909,28 @@ async function measureEngine(
     const t0 = Date.now()
     const snapshots = values['heap-snapshots'] && cdp ? resolve(values['heap-snapshots']) : null
     if (snapshots) mkdirSync(snapshots, { recursive: true })
-    /** The JS heap by constructor now, its snapshot written into the --heap-snapshots folder; null without one */
-    const snapshot = (name: string) => (snapshots ? heapClasses(cdp!, join(snapshots, `${engine}-${name}.heapsnapshot`)) : null)
+    /** Sessions on the app view's frames that run in renderers of their own (Chromium, appview), which `cdp` does not reach */
+    const viewCdp: CDPSession[] = []
+    /** The JS heaps by constructor now, the window's and each of `viewCdp`'s, written into the --heap-snapshots folder; null without one */
+    const snapshot = async (step: string): Promise<Map<string, HeapClasses> | null> => {
+      if (!snapshots) return null
+      const heaps = [
+        { heapName: 'window', session: cdp!, name: step },
+        ...viewCdp.map((session, i) => ({ heapName: `view ${i + 1}`, session, name: `${step}-view-${i + 1}` })),
+      ]
+      const out = new Map<string, HeapClasses>()
+      for (const { heapName, session, name } of heaps)
+        out.set(heapName, await heapClasses(session, join(snapshots, `${engine}-${name}.heapsnapshot`)))
+      return out
+    }
     const grown: { span: string; rows: ReturnType<typeof heapGrowth> }[] = []
+    /** What each heap gained between two snapshots */
+    const grow = (span: string, from: Map<string, HeapClasses> | null, to: Map<string, HeapClasses> | null) => {
+      for (const [heapName, classes] of from ?? []) {
+        const end = to?.get(heapName)
+        if (end) grown.push({ span: `${span}, ${heapName}`, rows: heapGrowth(classes, end) })
+      }
+    }
 
     const sample = async (step: string) => {
       const reps: Sample[] = []
@@ -906,6 +956,7 @@ async function measureEngine(
           hostFootprintMB: hostFp,
           processes: procs.length,
           ...(await heap(cdp)),
+          viewHeapUsedMB: await heapOf(viewCdp),
           ...(await pageCounts(page)),
           jsEventListeners: null,
           rowsReceived: wire.rowsReceived,
@@ -924,14 +975,16 @@ async function measureEngine(
       // allocator gives freed pages back to the system on a timer of its own, so the footprint is read after a wait.
       if (cdp) await cdp.send('HeapProfiler.collectGarbage')
       else await page.requestGC()
+      for (const s of viewCdp) await s.send('HeapProfiler.collectGarbage').catch(() => {})
       await sleep(cdp ? 1_000 : 5_000)
-      const collected = engineProcs(engine, before, host!.pid!).procs
+      const content = engineProcs(engine, before, host!.pid!).procs.filter((p) => p.role === 'content').map((p) => p.footprintMB)
       const after = await heap(cdp)
+      const afterView = await heapOf(viewCdp)
       pick.afterGc = {
-        contentFootprintMB: round(
-          Math.max(0, ...collected.filter((p) => p.role === 'content').map((p) => p.footprintMB)),
-        ),
+        contentFootprintMB: round(Math.max(0, ...content)),
+        allContentFootprintMB: round(content.reduce((a, b) => a + b, 0)),
         heapUsedMB: after.heapUsedMB === null ? null : round(after.heapUsedMB),
+        viewHeapUsedMB: afterView === null ? null : round(afterView),
       }
       const out = {
         ...pick,
@@ -942,10 +995,12 @@ async function measureEngine(
         hostFootprintMB: round(pick.hostFootprintMB),
         heapUsedMB: pick.heapUsedMB === null ? null : round(pick.heapUsedMB),
         heapTotalMB: pick.heapTotalMB === null ? null : round(pick.heapTotalMB),
+        viewHeapUsedMB: pick.viewHeapUsedMB === null ? null : round(pick.viewHeapUsedMB),
       }
       samples.push(out)
       console.error(
-        `[${engine}] ${step.padEnd(14)} content=${out.contentFootprintMB}MB total=${out.totalFootprintMB}MB heap=${out.heapUsedMB ?? '-'}MB ` +
+        `[${engine}] ${step.padEnd(14)} content=${out.contentFootprintMB}MB all=${out.footprintMB.content ?? 0}MB total=${out.totalFootprintMB}MB ` +
+          `heap=${out.heapUsedMB ?? '-'}MB${out.viewHeapUsedMB === null ? '' : ` view=${out.viewHeapUsedMB}MB`} ` +
           `gc=${out.afterGc ? `${out.afterGc.contentFootprintMB}/${out.afterGc.heapUsedMB}MB` : '-'} nodes=${out.domNodes} rows=${out.renderedRows} ` +
           `received=${out.rowsReceived} host=${out.hostFootprintMB}MB painted=${out.painted ?? '-'}`,
       )
@@ -1116,7 +1171,7 @@ async function measureEngine(
       await sleep(quick ? 2_000 : 30_000)
       await sample('background-settled')
       const end = await snapshot('background-end')
-      if (first && end) grown.push({ span: 'background-0s → background-end', rows: heapGrowth(first, end) })
+      grow('background-0s → background-end', first, end)
     }
 
     /*
@@ -1132,7 +1187,7 @@ async function measureEngine(
       await sleep(SETTLE_MS)
       await sample(`${label}-0s`)
       const first = await snapshot(`${label}-0s`)
-      let afterFirst: HeapClasses | null = null
+      let afterFirst: Map<string, HeapClasses> | null = null
       const start = Date.now()
       const opens = async () => {
         for (let round = 1; round <= REVISIT_ROUNDS; round++) {
@@ -1154,8 +1209,8 @@ async function measureEngine(
       await sleep(quick ? 2_000 : 30_000)
       await sample(`${label}-settled`)
       const end = await snapshot(`${label}-end`)
-      if (first && afterFirst) grown.push({ span: `${label}-0s → ${label}-round-1`, rows: heapGrowth(first, afterFirst) })
-      if (afterFirst && end) grown.push({ span: `${label}-round-1 → ${label}-end`, rows: heapGrowth(afterFirst, end) })
+      grow(`${label}-0s → ${label}-round-1`, first, afterFirst)
+      grow(`${label}-round-1 → ${label}-end`, afterFirst, end)
     }
     if (steps.has('revisit')) {
       await open(seed.longSessionId)
@@ -1170,15 +1225,21 @@ async function measureEngine(
     if (steps.has('appview')) {
       const key = `${boardApp!.projectId}/${boardApp!.appId}`
       await page.getByTestId(`app-row-${key}`).click()
-      const card = page
-        .getByTestId(`pinned-app-${key}`)
-        .getByTestId('app-frame-iframe')
-        .contentFrame()
-        .locator('iframe')
-        .contentFrame()
-        .locator('[data-card]')
-        .first()
+      const proxy = page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe')
+      const card = proxy.contentFrame().locator('iframe').contentFrame().locator('[data-card]').first()
       await card.waitFor({ timeout: 60_000 })
+      // Chromium gives a sandboxed frame a renderer of its own, which the page's session does not reach: the view's
+      // memory is in `footprintMB.content`, not in the largest content process, and its heap is read through a session
+      // on each such frame. A frame in the page's renderer has no session of its own, and its heap is the page's. WebKit
+      // runs the view in the window's WebContent.
+      if (cdp) {
+        const frame = await (await proxy.elementHandle()).contentFrame()
+        for (const f of frame ? [frame, ...frame.childFrames()] : []) {
+          const s = await context.newCDPSession(f).catch(() => null)
+          if (s) viewCdp.push(s)
+        }
+        console.error(`[${engine}] appview: ${viewCdp.length} of the view's frames run in a renderer of their own`)
+      }
       await open(seed.longSessionId)
       const changed = () => wire.inject({ type: 'external_app_state_changed', appId: boardApp!.appId, projectId: boardApp!.projectId })
       await revisit('appview', values['appview-idle'], changed)
@@ -1219,13 +1280,16 @@ if (values.out) writeFileSync(values.out, JSON.stringify(report, null, 2))
 for (const r of results) {
   console.log(`\n## ${values.label} · ${r.engine} · ${profile}\n`)
   console.log(
-    '| step | content MB | content after GC | total MB | gpu MB | ui MB | JS heap MB | heap after GC | DOM nodes | rows drawn | rows received | host MB |',
+    '| step | content MB | content after GC | all content MB | all content after GC | total MB | gpu MB | ui MB | ' +
+      'JS heap MB | heap after GC | view heap MB | view heap after GC | DOM nodes | rows drawn | rows received | host MB |',
   )
-  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
   for (const s of r.samples) {
     console.log(
-      `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
-        `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
+      `| ${s.step} | ${s.contentFootprintMB} | ${s.afterGc?.contentFootprintMB ?? '–'} | ${s.footprintMB.content ?? 0} | ` +
+        `${s.afterGc?.allContentFootprintMB ?? '–'} | ${s.totalFootprintMB} | ${s.footprintMB.gpu ?? 0} | ${s.footprintMB.ui ?? 0} | ` +
+        `${s.heapUsedMB ?? '–'} | ${s.afterGc?.heapUsedMB ?? '–'} | ${s.viewHeapUsedMB ?? '–'} | ${s.afterGc?.viewHeapUsedMB ?? '–'} | ` +
+        `${s.domNodes} | ${s.renderedRows} | ${s.rowsReceived} | ${s.hostFootprintMB} |`,
     )
   }
   for (const { span, rows } of r.heapGrowth) {
