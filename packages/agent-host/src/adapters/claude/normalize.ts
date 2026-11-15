@@ -133,9 +133,20 @@ export function normalizeMessage(
  *   - correctly ignored: types only sent for options or features Centralu does not use (`side_question`, synchronous
  *     plugin installs, session-state events, the remote bridge, file checkpoints, URL elicitation, prompt suggestions,
  *     a `SessionStore`)
+ *   - ignored because something else already carries what they say (#2291, measured on CLI 2.1.296, recordings of every
+ *     scenario and `permission-denied`):
+ *       `system/commands_changed`  the command list after a mid-session change: the SDK keeps the latest in the query
+ *                                  (`latestCommands`) and `listCommands` asks the query each time
+ *       `command_lifecycle`       queued, started, completed or cancelled for each message sent with a uuid: delivery
+ *                                  is read from the turn's own messages (`user_message_uuids`) and the interrupt's
+ *                                  receipt (`cancelled`), and the SDK's types do not declare it at all
+ *       `system/permission_denied` a call the CLI denied without asking: the tool's result follows at once with an
+ *                                  error carrying the same words (`message`), so the card already ends failed with them. Measured only for
+ *                                  `decision_reason_type: "mode"` (don't-ask mode); a classifier's or a subagent's denial
+ *                                  (`decision_reason`, `agent_id`) is not recorded
  *
- * The types the survey would show or store but nobody has wired yet stay out on purpose: `system/permission_denied`,
- * `system/commands_changed` and `system/memory_recall` among them. Their log line is how a real instance gets noticed.
+ * The types the survey would show or store but nobody has wired yet stay out on purpose: `system/memory_recall`,
+ * `tool_use_summary` and `auth_status` among them. Their log line is how a real instance gets noticed.
  */
 export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // mapped
@@ -149,6 +160,8 @@ export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // ignored by #58
   'tool_progress', 'system/task_progress', 'system/hook_started', 'system/hook_progress', 'system/hook_response',
   'system/thinking_tokens',
+  // ignored: what they say arrives some other way (#2291)
+  'system/commands_changed', 'command_lifecycle', 'system/permission_denied',
   // correctly ignored
   'system/control_request_progress', 'system/plugin_install', 'system/session_state_changed',
   'system/worker_shutting_down', 'system/files_persisted', 'system/elicitation_complete', 'prompt_suggestion',

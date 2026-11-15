@@ -76,7 +76,7 @@ export const CLAUDE_LIMITATIONS: readonly SurfaceLimitation[] = [
       '(`ClaudeGoalTracker`). When a CLI sends it, the tracker stands down.',
   },
   // The #58 survey's "show or store it, wire it when it is seen" rows: out of CLAUDE_KNOWN_TYPES on purpose
-  ...['auth_status', 'tool_use_summary', 'system/commands_changed', 'system/memory_recall', 'system/permission_denied'].map(
+  ...['auth_status', 'tool_use_summary', 'system/memory_recall'].map(
     (name): SurfaceLimitation => ({
       kind: 'message',
       name,

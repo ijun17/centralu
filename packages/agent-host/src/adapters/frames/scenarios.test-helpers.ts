@@ -47,10 +47,12 @@ export type Scenario = {
   /**
    * The tool's own settings for the run (Codex: its settings folder holds them; Claude Code: flags of the recording's own, as its
    * settings files are off): `mcp` sets it up with a small MCP server, `probe`, whose one tool `ping` answers `pong`; `tasks`
-   * (Claude Code) offers the task-list tools, which this CLI leaves out of a non-interactive run. Thinking is no setting: a session
+   * (Claude Code) offers the task-list tools, which this CLI leaves out of a non-interactive run; `dont-ask` (Claude Code) runs
+   * it in don't-ask mode, which denies a call that needs a permission without asking (a classifier or a settings rule may deny with other
+   * reasons, which no recording holds). Thinking is no setting: a session
    * passes no flag for it (the model decides), and the adapter asks for its text in every session (#2062)
    */
-  settings?: 'mcp' | 'tasks'
+  settings?: 'mcp' | 'tasks' | 'dont-ask'
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */
@@ -285,6 +287,15 @@ export const SCENARIOS: readonly Scenario[] = [
     },
     async run(d) {
       await turn(d, 'Use the forecast tool of the weather app for the city Paris, and tell me what it says.')
+    },
+  },
+  {
+    // A call the CLI denies without asking (don't-ask mode): `system/permission_denied`, then the tool's result with the same words as an error
+    name: 'permission-denied',
+    tools: ['claude'],
+    settings: 'dont-ask',
+    async run(d) {
+      await turn(d, 'Use the Write tool to create a file named note.txt containing the word hi. Then say done in one word.')
     },
   },
   {

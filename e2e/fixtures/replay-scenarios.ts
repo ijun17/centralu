@@ -487,6 +487,15 @@ export const REPLAYS: Replay[] = [
   { tool: 'claude', scenario: 'subagent' },
   {
     tool: 'claude',
+    scenario: 'permission-denied',
+    async shows(page, _held, seen) {
+      // A write the CLI denied without asking (#2291): its thought and call fold to one failed tool, and the denial has no mark or card of its own
+      expect(seen.folds).toEqual(['1 thought · 1 tool 1 failed'])
+      await expect(page.getByTestId('msg-mark')).toHaveCount(0)
+    },
+  },
+  {
+    tool: 'claude',
     scenario: 'tool-error',
     async shows(page, _held, seen) {
       // A command that exits with an error and a read of a file that is not there: both calls are counted failed, and the turn goes on to say so

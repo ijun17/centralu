@@ -19,7 +19,7 @@
    and their fields, the fields the adapter reads (a hand-kept list, `RULES`), their JSON types, the values it tells
    apart (a stop reason, a permission answer's behavior) and the order of the kinds sent once in a turn; never text, ids
    or timing. It cannot see what no canary scenario brings: on Claude Code, `active_goal`, `conversation_reset`,
-   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, the refusal pair, a
+   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, `system/permission_denied` (the `permission-denied` recording holds one), the refusal pair, a
    failed turn's API error, a question's answer and plan mode; on Codex, a compaction and background work. Nor a
    value or a field the model sends only on some runs, as each version has one run of each scenario: such a change shows
    in the replay tests of the recordings that hold it, or not until a person meets it. For a new tool, record
