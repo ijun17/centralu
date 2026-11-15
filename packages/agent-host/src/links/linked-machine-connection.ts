@@ -799,7 +799,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private offerWait: Promise<void> | null = null
 
   /**
-   * Resolves once the machine answered this connection's offer (or it failed), or after a bound (`OFFER_WAIT_MS`): a call that needs the machine
+   * Resolves once the machine answered this connection's offer (or it failed), or after a bound (`offerWaitMs`, `OFFER_WAIT_MS` when absent): a call that needs the machine
    * right after it connected, an agent's call that brought it up among them (`reachForCall`), reads whether it takes tasks from that answer, never
    * the unknown of a connection not told yet (#1948 step 6). One wait per offer, shared: past the bound, the calls after it do not wait again
    */
