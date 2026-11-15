@@ -791,9 +791,9 @@ describe('unmapped message types (#58)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const one = new ClaudeStreamNormalizer('aaaaaaaa-1')
-      // What a settings deny rule sends (measured in #58, CLI 2.1.282): nothing maps it, so it is said once however often it comes
-      one.push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' }))
-      one.push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' }))
+      // A type nothing maps is said once however often it comes (the CLI sends `tool_use_summary` and `memory_recall` only when asked to, and no cheap run records them: hand-written messages)
+      one.push(sdk({ type: 'system', subtype: 'memory_recall', mode: 'select', memories: [] }))
+      one.push(sdk({ type: 'system', subtype: 'memory_recall', mode: 'select', memories: [] }))
       one.push(sdk({ type: 'tool_use_summary', summary: 'Read 3 files' }))
       // Mapped, and ignored on purpose: no line
       one.push(sdk({ type: 'system', subtype: 'init', session_id: 'x' }))
@@ -801,15 +801,58 @@ describe('unmapped message types (#58)', () => {
       one.push(sdk({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } }))
       one.push(sdk({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' }))
       // Another session has not said it yet
-      new ClaudeStreamNormalizer('bbbbbbbb-2').push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Edit' }))
+      new ClaudeStreamNormalizer('bbbbbbbb-2').push(sdk({ type: 'system', subtype: 'memory_recall', mode: 'select', memories: [] }))
       expect(unmappedLines(spy)).toEqual([
-        '[claude] aaaaaaaa unmapped message type: system/permission_denied',
+        '[claude] aaaaaaaa unmapped message type: system/memory_recall',
         '[claude] aaaaaaaa unmapped message type: tool_use_summary',
-        '[claude] bbbbbbbb unmapped message type: system/permission_denied',
+        '[claude] bbbbbbbb unmapped message type: system/memory_recall',
       ])
     } finally {
       spy.mockRestore()
     }
+  })
+
+  /*
+   * #2291: three types the CLI sends in nearly every session (measured on 2.1.296 and 2.1.316) were said once per session in host.log with
+   * nothing on screen to show for it. Each is ignored on purpose now; the recordings are the proof that nothing is lost, as what each
+   * says is carried by another message.
+   */
+  describe('the types ignored on purpose', () => {
+    const ignored = ['system/commands_changed', 'command_lifecycle', 'system/permission_denied']
+    const typeOf = (m: { type?: string; subtype?: string }) => (m.subtype ? `${m.type}/${m.subtype}` : String(m.type))
+
+    it('a whole session that holds all three says nothing in host.log, and the three types are in the recordings', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const sent = [...recordedMessages('permission-denied'), ...recordedMessages('basic', 'claude-code-2.1.296')]
+        const held = new Set(sent.map((m) => typeOf(m as { type?: string; subtype?: string })))
+        for (const type of ignored) expect(held.has(type), `the recordings hold no ${type}`).toBe(true)
+        const stream = new ClaudeStreamNormalizer('cccccccc-1')
+        for (const m of sent) stream.push(sdk(m))
+        expect(unmappedLines(spy)).toEqual([])
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('makes no event of them', () => {
+      const sent = [...recordedMessages('permission-denied'), ...recordedMessages('basic', 'claude-code-2.1.296')].filter((m) => ignored.includes(typeOf(m as { type?: string; subtype?: string })))
+      expect(sent.length).toBeGreaterThan(3)
+      expect(sent.flatMap((m) => normalizeMessage(sdk(m), SID))).toEqual([])
+    })
+
+    // The reason `system/permission_denied` needs no card of its own: what the person sees of a denied call is its tool card, ended failed
+    it('a call the CLI denied without asking ends its card failed with the words it gave the model, so the denial says nothing more', () => {
+      const sent = recordedMessages('permission-denied')
+      const denied = sent.find((m) => typeOf(m as { type?: string; subtype?: string }) === 'system/permission_denied') as unknown as { tool_use_id: string; message: string }
+      const stream = new ClaudeStreamNormalizer(SID)
+      const events = sent.flatMap((m) => stream.push(sdk(m)))
+      const results = events.filter((e) => e.type === 'tool_result')
+      expect(results).toMatchObject([{ callId: denied.tool_use_id, ok: false }])
+      expect(JSON.stringify(results)).toContain(denied.message.slice(0, 60))
+      // The turn went on and ended, the denial being a result for the model to answer
+      expect(events.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+    })
   })
 })
 

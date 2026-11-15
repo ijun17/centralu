@@ -117,6 +117,8 @@ export const RULES: Record<string, Rules> = {
       'in rate_limit_event': [],
       'out control_request:get_context_usage': [],
       'in command_lifecycle': [],
+      // The CLI's own push of the command list when skills are found (#2291): the adapter ignores it, as the SDK keeps the list
+      'in system:commands_changed': [],
     },
     unordered: ['in rate_limit_event', 'out control_request:get_context_usage', 'in control_response:success', 'in command_lifecycle', 'in system:commands_changed', 'in system:thinking_tokens', 'exit'],
     stateful: ['in rate_limit_event'],

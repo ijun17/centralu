@@ -62,8 +62,11 @@ surface. They cannot notice a type we do not use *arriving*, and protocol.md §4
 know. So each adapter keeps a second list, of every type it maps or leaves out on purpose
 (`CLAUDE_KNOWN_TYPES` and `CODEX_KNOWN_NOTIFICATIONS`, grouped as in the #58 survey). The first time a session
 receives a type outside that list, `adapters/unmapped.ts` writes one host.log line:
-`[claude] 1a2b3c4d unmapped message type: system/permission_denied`. Nothing on screen changes. Types the survey wants shown
+`[claude] 1a2b3c4d unmapped message type: system/memory_recall`. Nothing on screen changes. Types the survey wants shown
 but nobody has wired yet stay off the list on purpose, so their first real instance is a grep away. When you wire one,
-or decide it is noise, move it onto the list in the same PR. Server *requests* need no list: the Codex adapter already
+or decide it is noise, move it onto the list in the same PR, with what carries its content instead (#2291: Claude's
+`system/commands_changed`, `command_lifecycle` and `system/permission_denied` went there, each shown by a recording to say
+nothing another message does not: the SDK keeps the command list, a turn's result names the inputs it took, and a denied
+call's tool result carries the denial's words, measured for a denial by don't-ask mode only: a classifier's or a subagent's is not recorded). Server *requests* need no list: the Codex adapter already
 logs every request it answers with `{}`. The weekly counterpart, which hears of a type before any session receives
 it, is the surface check in the table above: a `dropped` limitation there is exactly a type kept off this list.

@@ -91,8 +91,11 @@ describe('the shape of a recording', () => {
     expect(differs(diff([task({ last_tool_name: 'Bash' })], [task({})]))).toBe(true)
     expect(differs(diff([result(0.001), { dir: 'exit', msg: {} }], [result(0.001)]))).toBe(false)
     const commands: Frame = { dir: 'in', msg: { type: 'system', subtype: 'commands_changed', commands: [] } }
-    expect(unreadKinds('claude', CLAUDE_LIMITATIONS)).toContain('in system:commands_changed')
+    // Dropped by the adapter (its surface's limitations) and ignored on purpose (optional in the rules): neither counts as gone
+    expect(unreadKinds('claude', CLAUDE_LIMITATIONS)).toContain('in system:memory_recall')
     expect(diff([commands, result(0.001)], [result(0.001)]).gone).toEqual([])
+    const recall: Frame = { dir: 'in', msg: { type: 'system', subtype: 'memory_recall', memories: [] } }
+    expect(diff([recall, result(0.001)], [result(0.001)]).gone).toEqual([])
     const inputs = (id: string): Frame => ({ dir: 'in', msg: { type: 'result', subtype: 'success', modelUsage: { 'claude-haiku-5-5': { costUSD: 1 } }, wire_tool_inputs: { [id]: { command: 'ls' } } } })
     expect(differs(diff([inputs('toolu_01QjToWWW6xXUPcfZfSq8ffz')], [inputs('toolu_012DA1wgjh8WkTFgknrUwnbh')]))).toBe(false)
     // The servers a run had: their fields are not gone when the list is empty now, and are when its items lack them

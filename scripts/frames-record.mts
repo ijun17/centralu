@@ -143,12 +143,14 @@ function modelOf(tool: string): string {
 }
 
 /**
- * Claude Code's own settings for a scenario, as flags of its process (the run reads no settings file): an MCP server to connect, or
- * the task-list tools. They are appended after the flags the SDK passes. Thinking takes none: a recording runs as a session does,
+ * Claude Code's own settings for a scenario, as flags of its process (the run reads no settings file): an MCP server to connect,
+ * the task-list tools, or don't-ask mode. They are appended after the flags the SDK passes. Thinking takes none: a recording runs as a session does,
  * whose thinking the model decides and whose text the adapter asks for (#2062)
  */
 function claudeFlags(spec: AgentSpawnSpec, settings: Scenario['settings'], config: { mcpConfig(): string } | null): AgentSpawnSpec {
   if (settings === 'mcp' && config) return { ...spec, args: [...spec.args, '--mcp-config', config.mcpConfig()] }
+  // Last on the line, so it wins over the mode the session sent itself (measured on CLI 2.1.296: the later `--permission-mode` applies)
+  if (settings === 'dont-ask') return { ...spec, args: [...spec.args, '--permission-mode', 'dontAsk'] }
   if (settings === 'tasks') return { ...spec, args: [...spec.args, '--tools', 'TaskCreate,TaskUpdate,TaskList'] }
   return spec
 }
