@@ -60,6 +60,16 @@ answers with the report it kept for it; a hub that gives no `taskId` (an older b
 going off withdraws its tasks not given yet, and a cancelled call there withdraws a card still standing here. The hub
 answers nothing else of the machine (`reverseCalls`) but mail (`hub.mail`, `hub.mailRows`, `hub.find`; below).
 
+The machine's call waits on the person's card, and its limit is the machine's (`REVERSE_CALL_TIMEOUT_MS`, 30 minutes). The
+card can be out of the person's sight while it waits: the person's own turn in that session clears the slot until the
+turn ends, which raises it again (#673), and another card can stand in its place. The hub then holds the call's limit
+on the machine (`call.hold`, #2271; `HostCards.noteStanding` tells `MachineAsks`), so the ask is not refused while nobody
+could answer it. The limit runs on with what it had left once the card stands again. Holding changes nothing else: the
+link's end and the machine withdrawing the call still end it, and the machine ends a call held for 4 hours in all
+(`CALL_HOLD_MAX_MS`). Option (a) of #2271, the card shown beside the person's turn, would change the layout and was not
+taken. A tool's own ceiling on the asking call (Codex's `tool_timeout_sec`, 300 s) is the machine's tool's, and no hold
+reaches it.
+
 **Mail across linked machines** (#2067, [plans/linked-mail.md](../../plans/linked-mail.md)). Every session mails every
 other, on this computer or on one linked to it, both ways (owner decision 2026-11-09; `mayReachAcross`, mail/across.ts,
 allows every pair, and the asks switch is not read). The tool (`MailTool.call`) sends a message for another computer's

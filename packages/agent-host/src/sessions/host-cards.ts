@@ -26,6 +26,9 @@ export type HostAsk = {
   /** The state the session rested in when the card was raised between turns (#673), to return to once it closes */
   restState?: SessionState
   resolve: (d: HostAskAnswer) => void
+  /** Told when the card goes out of the person's sight and back (`noteStanding`, #2271); `held`: what it was told last */
+  onHeld?: (held: boolean) => void
+  held?: boolean
 }
 
 /**
@@ -115,7 +118,12 @@ export class HostCards {
    * (a request carried over from the previous host) without recording it again; `log` is what auto's log line names;
    * `alwaysAsk` raises the card for auto too. `uncovered` raises it even while an Allow covers the session's cards (`cover`): the card that asks for that Allow.
    */
-  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; uncovered?: boolean } = {}): Promise<HostAskAnswer> {
+  askHost(
+    sessionId: string,
+    detail: HostAsk['detail'],
+    signal?: AbortSignal,
+    card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; uncovered?: boolean; onHeld?: (held: boolean) => void } = {},
+  ): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
     if (!card.uncovered && this.isCovered(sessionId)) return Promise.resolve('allow')
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
@@ -125,7 +133,7 @@ export class HostCards {
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
       const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
-      const ask: HostAsk = { requestId, sessionId, detail, shown: card.shown ?? false, resolve }
+      const ask: HostAsk = { requestId, sessionId, detail, shown: card.shown ?? false, resolve, ...(card.onHeld ? { onHeld: card.onHeld } : {}) }
       this.hostAsks.set(requestId, ask)
       // An unanswerable card is never left behind, in the session it stands in now (a handoff moves it, #693)
       signal?.addEventListener('abort', () => this.withdrawHostAsk(requestId), { once: true })
@@ -226,6 +234,29 @@ export class HostCards {
    * conversation never ends up with the same card as two separate lines).
    */
   raiseHostAsks(sessionId: string): void {
+    this.raiseNext(sessionId)
+    // A card that waits behind another, or one just raised, tells its caller (`noteStanding`)
+    this.noteStanding(sessionId)
+  }
+
+  /**
+   * Tells the callers of a session's cards whether each is in the person's sight (#2271): standing in the session's slot,
+   * or not (another card stands there, or the person's own turn cleared the slot, `cardsDead`, until the turn ends and
+   * raises it again, #673). Only a change is told. Run after every change of the slot (`applyStateHint`) and every raise;
+   * a caller that waits on the person holds its limit meanwhile (a linked machine's ask, `call.hold`)
+   */
+  noteStanding(sessionId: string): void {
+    const slot = this.host.meta.get(sessionId)?.pendingApproval?.requestId
+    for (const ask of this.hostAsks.values()) {
+      if (ask.sessionId !== sessionId || !ask.onHeld) continue
+      const held = slot !== ask.requestId
+      if (held === (ask.held ?? false)) continue
+      ask.held = held
+      ask.onHeld(held)
+    }
+  }
+
+  private raiseNext(sessionId: string): void {
     const m = this.host.meta.get(sessionId)
     if (!m || m.pendingApproval) return
     const next = [...this.hostAsks.values()].find((a) => a.sessionId === sessionId)

@@ -1312,7 +1312,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),
         // The machine's calls to this hub (#550): answered as this machine, whatever they say, by the hub's allowlist
-        ...(this.deps.reverse ? { call: (method: string, params: unknown, signal: AbortSignal) => this.deps.reverse!({ id: this.id, name: this.name }, method, params, signal) } : {}),
+        ...(this.deps.reverse ? { call: (method: string, params: unknown, signal: AbortSignal, hold: (held: boolean) => void) => this.deps.reverse!({ id: this.id, name: this.name }, method, params, signal, hold) } : {}),
         terminal: (f) => this.deps.terminal({ ...f, terminalId: this.q.id(f.terminalId) }),
         down: (reason, detail) => {
           if (this.client !== client) return

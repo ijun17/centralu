@@ -36,10 +36,12 @@ export type HubProjectRef = { id: string; projectId: string; name: string; hub: 
 
 export type LinkedHubsDeps = {
   /** A call to a connected client (`HostServer.call`) */
-  call: (client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal }) => Promise<unknown>
+  call: (client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal; holdMaxMs?: number }) => Promise<unknown>
   lookupMs?: number
   /** How long one ask may wait for the hub's answer, its card included; the transport's bound when absent. For tests */
   askTimeoutMs?: number
+  /** How long the hub may hold one ask's limit in all (#2271); `CALL_HOLD_MAX_MS` when absent. For tests */
+  askHoldMaxMs?: number
   /** How long one message may wait for the hub's answer (30 s when absent). For tests */
   mailTimeoutMs?: number
   /** Records the hub that started a session here (`recordStartingHub`), for one created before that hub offered (`awaitOffer`) */
@@ -220,7 +222,11 @@ export class LinkedHubs {
     if (h.client === null) return { ok: false, error: `${h.name} is ${NOT_REACHABLE}. Try again once its link is back.` }
     let raw: unknown
     try {
-      raw = await this.deps.call(h.client, 'hub.askProject', params, { signal, ...(this.deps.askTimeoutMs ? { timeoutMs: this.deps.askTimeoutMs } : {}) })
+      raw = await this.deps.call(h.client, 'hub.askProject', params, {
+        signal,
+        ...(this.deps.askTimeoutMs ? { timeoutMs: this.deps.askTimeoutMs } : {}),
+        ...(this.deps.askHoldMaxMs ? { holdMaxMs: this.deps.askHoldMaxMs } : {}),
+      })
     } catch (err) {
       if (signal?.aborted) return { ok: false, error: 'The call was cancelled.' }
       if (older(err)) return { ok: false, error: `${h.name} runs a Centralu from before this, so it cannot be asked. Update it there.` }

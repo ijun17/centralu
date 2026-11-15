@@ -47,9 +47,10 @@ export interface MachineRegistry {
 
 /**
  * What answers a linked machine's call to this hub (#550, the reverse direction): the machine is the link's own, never
- * what the call says; `signal` fires when the machine withdraws the call or its link goes
+ * what the call says; `signal` fires when the machine withdraws the call or its link goes; `hold` holds or releases the
+ * call's limit on the machine (#2271)
  */
-export type ReverseCalls = (machine: { id: string; name: string }, method: string, params: unknown, signal: AbortSignal) => Promise<unknown>
+export type ReverseCalls = (machine: { id: string; name: string }, method: string, params: unknown, signal: AbortSignal, hold: (held: boolean) => void) => Promise<unknown>
 
 /**
  * What the hub last heard from a machine, for when it cannot ask (mirror.ts): the session and

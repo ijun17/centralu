@@ -65,8 +65,11 @@ export class MachineAsks {
       .map((s) => ({ id: s.id, name: s.name, state: s.state }))
   }
 
-  /** `hub.askProject`: one ask of a machine's session, as `ask_project` is here */
-  async ask(machine: AskingMachine, p: HubAskParams, signal?: AbortSignal): Promise<HubAskResult> {
+  /**
+   * `hub.askProject`: one ask of a machine's session, as `ask_project` is here. `hold` holds the call's limit on the machine
+   * while the pair's card is out of the person's sight (#2271)
+   */
+  async ask(machine: AskingMachine, p: HubAskParams, signal?: AbortSignal, hold?: (held: boolean) => void): Promise<HubAskResult> {
     const shut = this.gate(machine)
     if (shut) return { ok: false, error: shut }
     const here = this.selfName()
@@ -127,9 +130,11 @@ export class MachineAsks {
         closing.signal,
         /*
          * Raised whatever the target session's preset (#550 review): its `auto` is its own, and answers no card of another
-         * machine, as start_agent's on another computer is asked every time (#1038)
+         * machine, as start_agent's on another computer is asked every time (#1038). The machine's call waits on the person,
+         * so its limit stops while the person cannot see the card (#2271): their own turn in that session hides it until the
+         * turn ends (#673), or another card stands in its place
          */
-        { alwaysAsk: true },
+        { alwaysAsk: true, ...(hold ? { onHeld: hold } : {}) },
       ).finally(() => {
         signal?.removeEventListener('abort', onAbort)
         mine.delete(closing)

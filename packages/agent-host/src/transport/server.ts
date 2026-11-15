@@ -1,7 +1,10 @@
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import {
+  CALL_HOLD_MAX_MS,
   CANCEL_CALL_METHOD,
+  HOLD_CALL_METHOD,
+  HoldCallParams,
   PROTOCOL_VERSION,
   ProtocolErrorCode,
   type HostBuild,
@@ -26,6 +29,7 @@ import { LINK_AUTH_MARKER } from './link-keys.js'
 import { answerKeyProve, HostSigningKey, linkAddressOf, verifyKeyHello, type KeyProve } from './link-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { peerAnswer, rpcError } from '../rpc-error.js'
+import { durationText } from '../timing.js'
 
 /**
  * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
@@ -235,7 +239,7 @@ export const TRANSPORT_LIMITS = {
 const PRE_HELLO_SLACK_BYTES = 1024
 
 /** A call this host sent a client (#550), until its answer */
-type ReverseCall = { resolve: (v: unknown) => void; reject: (e: Error) => void }
+type ReverseCall = { resolve: (v: unknown) => void; reject: (e: Error) => void; hold: (held: boolean) => void }
 
 /** How long a call this host sends a client may wait for its answer, when the caller sets no bound (#550) */
 export const REVERSE_CALL_TIMEOUT_MS = 30 * 60_000
@@ -839,6 +843,14 @@ export class HostServer {
         return
       }
 
+      // A hub holds or releases the limit of a call this host sent it on this socket (#2271); one it never sent is nobody's
+      if (frame.data.method === HOLD_CALL_METHOD) {
+        const hold = HoldCallParams.safeParse(frame.data.params)
+        if (hold.success && bridgeOf === null && !limited) this.calls.get(ws)?.get(hold.data.id)?.hold(hold.data.held)
+        this.sendTo(ws, JSON.stringify({ kind: 'res', id: frame.data.id, ok: true, result: { ok: true } }))
+        return
+      }
+
       // RPC
       const { method, params, id } = frame.data
       if (bridgeOf !== null) {
@@ -921,8 +933,12 @@ export class HostServer {
    * over the socket the hub opened, and nowhere else. Fails at once when that connection is gone; withdrawn with
    * `call.cancel` when `signal` fires, and when `timeoutMs` runs out (a call nobody answers is not held for good, and its
    * work on the other side, a card standing there, is not left waiting for nobody: #550 review).
+   *
+   * The hub may hold the limit while what the call waits on is out of the person's sight (`call.hold`, #2271): the time
+   * stops while held and runs on with what was left when released. Held for `holdMaxMs` in all (`CALL_HOLD_MAX_MS`), the
+   * call is withdrawn as one that ran out of time. A held call still ends when its socket goes or `signal` fires.
    */
-  call(client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<unknown> {
+  call(client: number, method: string, params: unknown, opts: { timeoutMs?: number; signal?: AbortSignal; holdMaxMs?: number } = {}): Promise<unknown> {
     const ws = this.byClient.get(client)
     if (!ws || ws.readyState !== ws.OPEN) return Promise.reject(rpcError('That connection is not open', 'internal', { retryable: true }))
     if (opts.signal?.aborted) return Promise.reject(rpcError('The call was cancelled', 'internal'))
@@ -944,12 +960,32 @@ export class HostServer {
         withdraw()
         reject(rpcError('The call was cancelled', 'internal'))
       }
-      const timer = setTimeout(() => {
+      const expire = (why: string) => () => {
         if (!calls.has(id)) return
         done()
         withdraw()
-        reject(rpcError(`The other side did not answer ${method} in time`, 'internal', { retryable: true }))
-      }, opts.timeoutMs ?? REVERSE_CALL_TIMEOUT_MS)
+        reject(rpcError(why, 'internal', { retryable: true }))
+      }
+      const late = expire(`The other side did not answer ${method} in time`)
+      // The limit's time left, and the time held so far; each counted up to `since`, when the running stretch began
+      let left = opts.timeoutMs ?? REVERSE_CALL_TIMEOUT_MS
+      let heldFor = 0
+      let held = false
+      let since = Date.now()
+      let timer = setTimeout(late, left)
+      const hold = (h: boolean) => {
+        if (h === held || !calls.has(id)) return
+        const now = Date.now()
+        clearTimeout(timer)
+        if (h) left -= now - since
+        else heldFor += now - since
+        held = h
+        since = now
+        const holdMax = opts.holdMaxMs ?? CALL_HOLD_MAX_MS
+        timer = h
+          ? setTimeout(expire(`The other side held ${method} longer than ${durationText(holdMax)}`), Math.max(0, holdMax - heldFor))
+          : setTimeout(late, Math.max(0, left))
+      }
       calls.set(id, {
         resolve: (v) => {
           done()
@@ -959,6 +995,7 @@ export class HostServer {
           done()
           reject(e)
         },
+        hold,
       })
       opts.signal?.addEventListener('abort', onAbort, { once: true })
       if (!this.sendTo(ws, JSON.stringify({ kind: 'rpc', id, method, params }))) {

@@ -385,6 +385,8 @@ export class SessionEvents {
     // An illegal transition is ignored and logged, as the window does (docs/state-management.md §2)
     if (applySessionState(m, e, Date.now()).illegal) console.warn(`[agent-host] ignored ${e.type} for ${m.id.slice(0, 8)}: ${from} cannot go to ${nextStateFor(e)}`)
     this.trackLiveFacts(e, m)
+    // The card slot may have changed: a host card it hid or showed tells its caller (#2271)
+    this.host.hostCards.noteStanding(m.id)
   }
 
   /**
