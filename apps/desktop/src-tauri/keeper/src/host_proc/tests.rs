@@ -121,9 +121,9 @@ fn a_host_leads_a_process_group_of_its_own() {
     assert_ne!(ids[1] as i32, unsafe { libc::getpgrp() }, "the host shares the supervisor's group");
 }
 
-/// A group leader and the pid of a member it started in its group, read from its first line. The
-/// script prints that line only once its own trap is set, so a signal sent after the read finds the
-/// leader ready; the member is started before the trap and keeps the default TERM.
+/// A group leader and the pid of a member it started in its group, read from its first line. A
+/// script must print that line only once its own trap is set, so a signal sent after the read finds
+/// the leader ready, and start the member before the trap, so the member keeps the default TERM.
 #[cfg(unix)]
 fn group_with_a_member(script: &str) -> (Child, u32) {
     use std::io::BufRead;
