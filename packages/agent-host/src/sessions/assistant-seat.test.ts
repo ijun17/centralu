@@ -423,6 +423,11 @@ describe('what a send leaves', () => {
     expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'hi', { origin: 'send_to_session', forPerson: true })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true })
     expect(send).toHaveBeenLastCalledWith('orch', 'm1/x', 'fyi', { origin: 'send_to_session', note: true, forPerson: true })
+    // A session there in a turn: mailed, as a busy one here is answered
+    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_1', to: 'X', address: 'session:hub/m1.x', computer: 'Far', busy: true })
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: true, busy: { state: 'mailed', sessionId: 'm1/x', sessionName: 'X', messageId: 'hub.m_1' } })
+    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_2', to: 'X', address: 'session:hub/m1.x', computer: 'Far', busy: true })
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true, busy: { state: 'mailed', sessionId: 'm1/x', sessionName: 'X', messageId: 'hub.m_2', note: true } })
     send.mockResolvedValueOnce({ ok: false, why: 'older', text: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: false, error: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
     expect(host.send).not.toHaveBeenCalled()

@@ -2,7 +2,7 @@ import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo,
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
-import type { AgentListRow, AgentSessionOpts, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import type { AgentListRow, AgentSessionOpts, BusyAnswer, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import type { Asker } from '../mail/asked-by.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
@@ -203,10 +203,12 @@ export function centraluToolsFor(
    * back to this seat as a local session's does; without `reportBack`, a note that asks for nothing back. Only this host's Assistant's
    * send_to_session is said to be for the person (`forPerson`), as its own is here (#2258)
    */
-  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session'): Promise<{ ok: boolean; error?: string }> => {
+  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session'): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }> => {
     if (!host.linkedTasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
     const r = await host.linkedTasks.send(assistantId, sessionId, text, { origin, ...(reportBack ? {} : { note: true as const }), ...(origin === 'send_to_session' ? { forPerson: true as const } : {}) })
-    return r.ok ? { ok: true } : { ok: false, error: r.text }
+    if (!r.ok) return { ok: false, error: r.text }
+    // A session there in a turn is answered as a busy one here is: mailed, waiting until it is free
+    return r.busy ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
   }
 
   return {

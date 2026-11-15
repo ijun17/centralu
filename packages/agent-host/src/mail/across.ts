@@ -1,4 +1,4 @@
-import { HubFindResult, HubMailResult, TaskReport as TaskReportShape, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
+import { HubFindResult, HubMailResult, TaskReport as TaskReportShape, errorMessage, isInTurn, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
 import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
@@ -34,8 +34,11 @@ export function mayReachAcross(_from: string, _to: string): boolean {
   return true
 }
 
-/** What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written */
-export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string } | { ok: false; why: string; text: string }
+/**
+ * What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written. `busy`: a task to a
+ * session in a turn as this hub's mirror last had it (`sendTask`), which waits there until the session is free
+ */
+export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; busy?: true } | { ok: false; why: string; text: string }
 
 /** One side of a link this host calls: a hub that offered on a connection here, or a machine this hub links */
 export type AcrossPeer = {
@@ -277,7 +280,7 @@ export class MailAcross {
       return { ok: false, why: r.why, text: r.text }
     }
     this.names.set(to, `${r.to} on ${m.name}`)
-    return { ok: true, messageId: id, to: r.to, address: to, computer: m.name }
+    return { ok: true, messageId: id, to: r.to, address: to, computer: m.name, ...(isInTurn(this.foreignState(to)) ? { busy: true as const } : {}) }
   }
 
   /** Why a task to `to` cannot go now (`sendTask` says the same), or null: not a linked machine's session, no such machine, or one that takes no tasks yet or at all */
