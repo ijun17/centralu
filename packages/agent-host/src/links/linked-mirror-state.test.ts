@@ -47,6 +47,14 @@ describe("the hub's copy of a linked machine's session state (#2288)", () => {
     expect(inbox()).toBe('waiting_input')
   })
 
+  it('follows an activity too, as the rule writes it', async () => {
+    const { machine, row } = await rig()
+    await machine.mgr.inputs.send('w1', 'a long job')
+    await eventually(() => row()?.state === 'working')
+    machine.mgr.events.onEvent({ type: 'activity', sessionId: 'w1', activity: 'compacting' })
+    await eventually(() => row()?.activity === 'compacting')
+  })
+
   it("keeps a turn that ended while the connect's lists were still being read (#2288 review)", async () => {
     const machine = await machineHost()
     let release = () => {}

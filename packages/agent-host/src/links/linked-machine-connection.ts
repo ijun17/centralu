@@ -1511,12 +1511,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * The mirror's row follows every event that moves the session's state (#2288), by the one state rule the machine's host
    * and the windows run (`applySessionState`). It used to take `state_change` alone, so a turn's end (`turn_complete`), a
    * card, a limit or an error left the row as it was: a session that had finished its turn still read as working to every
-   * reader of the mirror. An event or a row this build cannot read changes nothing; the machine's next list replaces the
-   * rows whole (`observe`).
+   * reader of the mirror. An `activity` (a compaction, a review, a retry: rare) is followed too, as the rule writes it. An
+   * event or a row this build cannot read changes nothing; the machine's next list replaces the rows whole (`observe`).
    */
   private followState(sid: string, raw: Record<string, unknown>): void {
     const e = NormalizedEvent.safeParse(raw)
-    if (!e.success || nextStateFor(e.data) === null) return
+    if (!e.success || (nextStateFor(e.data) === null && e.data.type !== 'activity')) return
     const row = (this.deps.mirror.read(this.id, 'sessions') ?? []).find((s) => isObj(s) && s.id === sid)
     const live = LiveStateFields.safeParse(row)
     if (!live.success) return
