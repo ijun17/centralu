@@ -1024,13 +1024,13 @@ async function measureEngine(
       }
       samples.push(out)
       // Only what was read: WebKit has no heaps, a step without a view no view heap, a failed collection no after-GC
-      const heaps = (heap: number | null, view: number | null) =>
-        (heap === null ? '' : ` heap=${heap}MB`) + (view === null ? '' : ` view=${view}MB`)
+      const heapText = (windowMB: number | null, viewMB: number | null) =>
+        (windowMB === null ? '' : ` heap=${windowMB}MB`) + (viewMB === null ? '' : ` view=${viewMB}MB`)
       const gc = out.afterGc
       console.error(
         `[${engine}] ${step.padEnd(14)} content=${out.contentFootprintMB}MB all=${out.footprintMB.content ?? 0}MB` +
-          `${heaps(out.heapUsedMB, out.viewHeapUsedMB)} total=${out.totalFootprintMB}MB | after GC: ` +
-          (gc ? `content=${gc.contentFootprintMB}MB all=${gc.allContentFootprintMB}MB${heaps(gc.heapUsedMB, gc.viewHeapUsedMB)}` : 'none') +
+          `${heapText(out.heapUsedMB, out.viewHeapUsedMB)} total=${out.totalFootprintMB}MB | after GC: ` +
+          (gc ? `content=${gc.contentFootprintMB}MB all=${gc.allContentFootprintMB}MB${heapText(gc.heapUsedMB, gc.viewHeapUsedMB)}` : 'none') +
           ` | nodes=${out.domNodes} rows=${out.renderedRows} received=${out.rowsReceived} host=${out.hostFootprintMB}MB` +
           (out.painted === null ? '' : ` painted=${out.painted}`),
       )
