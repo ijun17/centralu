@@ -1,7 +1,7 @@
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { build, type Rollup } from 'vite'
+import type { Rollup } from 'vite'
 import { SLOW } from './test-timing.js'
+import { WINDOW_BUILDS, windowChunks } from './window-build.test-helpers.js'
 
 /**
  * What the window loads before its first frame (#364).
@@ -23,22 +23,6 @@ const LATER: [RegExp, string][] = [
   [/features\/git\/GitPanel\.tsx$/, 'the diff overlay'],
 ]
 
-const ENTRIES = {
-  desktop: 'apps/desktop/vite.config.ts',
-  web: 'apps/web/vite.config.ts',
-}
-
-async function chunks(config: string): Promise<Rollup.OutputChunk[]> {
-  const out = (await build({
-    configFile: fileURLToPath(new URL(`../${config}`, import.meta.url)),
-    logLevel: 'silent',
-    build: { write: false, sourcemap: false, minify: false, reportCompressedSize: false },
-  })) as Rollup.RollupOutput | Rollup.RollupOutput[]
-  return (Array.isArray(out) ? out : [out]).flatMap((o) =>
-    o.output.filter((c): c is Rollup.OutputChunk => c.type === 'chunk'),
-  )
-}
-
 /** The entry chunk and every chunk it reaches by static import: what loads before the first frame */
 function startup(all: Rollup.OutputChunk[]): Rollup.OutputChunk[] {
   const byName = new Map(all.map((c) => [c.fileName, c] as const))
@@ -52,9 +36,9 @@ function startup(all: Rollup.OutputChunk[]): Rollup.OutputChunk[] {
   return [...seen].map((n) => byName.get(n)!).filter(Boolean)
 }
 
-describe.each(Object.entries(ENTRIES))('the %s startup bundle', (_, config) => {
+describe.each(Object.entries(WINDOW_BUILDS))('the %s startup bundle', (_, config) => {
   it('leaves out the screens that are never on the first frame, and still builds them', async () => {
-    const all = await chunks(config)
+    const all = await windowChunks(config, { minify: false })
     const first = startup(all)
     expect(first.length, 'the entry chunk was not found').toBeGreaterThan(0)
     const atStartup = first.flatMap((c) => c.moduleIds)
