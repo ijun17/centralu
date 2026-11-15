@@ -1,0 +1,4 @@
+{
+  "bytes": 800,
+  "reason": "The hub's Inbox Tasks names the linked machines it could not read (#2268): the TasksUnreached line in the shared Fold, its wording, and the `unreached` field (UnreachedMachine) in the mail.tasks answer's schema and the store's empty answer. CI's verify at 9d2aade measured the app's JS at 1,956,498 B, 298 B over the ceiling, while its comparison with main stayed within the allowance. Plain component and schema code with no dependency; nothing heavier would do it."
+}
