@@ -769,6 +769,68 @@ describe('a call to a client: the reverse direction (#550)', () => {
     expect(calls(a.c)[3]).toMatchObject({ method: 'call.cancel', params: { id: calls(a.c)[2]!.id } })
   })
 
+  describe('call.hold (#2271)', () => {
+    /** A call's limit here: short, so a test outlasts it */
+    const T = 300 * SLOW
+    let n = 0
+    /** Sends a hold for a call id and waits for this host's answer to it, so it was read before anything after */
+    async function hold(c: ReturnType<typeof connect>, id: string, held: boolean) {
+      const rpc = `hold-${++n}`
+      c.send({ kind: 'rpc', id: rpc, method: 'call.hold', params: { id, held } })
+      await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === rpc && f.ok === true))
+    }
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    function settledFlag(p: Promise<unknown>): () => boolean {
+      let settled = false
+      p.then(
+        () => void (settled = true),
+        () => void (settled = true),
+      )
+      return () => settled
+    }
+
+    it('holds a call on the socket it was sent on, and released, runs on with the time it had left', async () => {
+      const { server, port } = await start(echoClient)
+      const a = await inClient(port)
+      const call = server.call(a.client, 'hub.askProject', {}, { timeoutMs: T })
+      const settled = settledFlag(call)
+      await a.c.wait(() => calls(a.c).length === 1)
+      await hold(a.c, calls(a.c)[0]!.id, true)
+      await delay(3 * T)
+      expect(settled()).toBe(false)
+      await hold(a.c, calls(a.c)[0]!.id, false)
+      await expect(call).rejects.toThrow('did not answer hub.askProject in time')
+    })
+
+    it('holds nothing for another socket, an id it never sent, another call of the same socket, or a limited connection', async () => {
+      const { server, port } = await start(echoClient)
+      const a = await inClient(port)
+      const b = await inClient(port)
+      const kept = server.call(a.client, 'hub.askProject', {}, { timeoutMs: T })
+      const other = server.call(a.client, 'hub.askProject', {}, { timeoutMs: T })
+      void kept.catch(() => undefined)
+      await a.c.wait(() => calls(a.c).length === 2)
+      const [first, second] = calls(a.c)
+      // Another socket naming a's call, and a's own socket naming an id it was never sent
+      await hold(b.c, second!.id, true)
+      await hold(a.c, 'h-never', true)
+      // The first call held: the second is not
+      await hold(a.c, first!.id, true)
+      await expect(other).rejects.toThrow('did not answer hub.askProject in time')
+
+      const limited = connect(port)
+      await limited.open()
+      limited.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION })
+      limited.send({ kind: 'rpc', id: 'who', method: 'sessions.list', params: {} })
+      await limited.wait(() => limited.frames.some((f) => f.kind === 'res' && f.id === 'who'))
+      const client = (limited.frames.find((f) => f.id === 'who') as { result: { client: number } }).result.client
+      const theirs = server.call(client, 'hub.askProject', {}, { timeoutMs: T })
+      await limited.wait(() => calls(limited).length === 1)
+      await hold(limited, calls(limited)[0]!.id, true)
+      await expect(theirs).rejects.toThrow('did not answer hub.askProject in time')
+    })
+  })
+
   it('never calls a bridge, and takes no answer from a socket before hello', async () => {
     const { server, port } = await start(echoClient)
     const bridge = connect(port)
