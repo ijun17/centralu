@@ -1,7 +1,6 @@
 /**
- * The version-1 `mail` tool mapped onto the message service (docs/plans/mailbox.md §11.3, M3a): a process started before the switch keeps its schema,
- * and every old action runs on the new tables. `reply` answers, `handled` is done, `read` reads a message and its chain, `send` sends; `watch` sets a
- * watch and `close` cancels one (threads are gone).
+ * The `mail` tool on the message service (docs/plans/mailbox.md §11.3): `reply` answers, `handled` is done, `read` reads a message and its chain,
+ * `send` sends; `watch` sets a watch and `close` cancels one.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'

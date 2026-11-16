@@ -396,7 +396,7 @@ depends on a turn owner:
 
 | Data | Where | Stop reading | Stop writing | Drop |
 |---|---|---|---|---|
-| `report_marks` (v49) | table | P4 (M8) | one release after P4 ships (`writeLegacyMarks` both ways, mailbox M8) | contract step, with M7 |
+| `report_marks` (v49) | table | P4 (M8) | one release after P4 ships (`writeLegacyMarks` both ways, mailbox M8) | store step 76 (mailbox M7) |
 | `delegated_turns` (v51) | table | P5 | P5 + one release | same |
 | `queued_requests` | table | P8 | P8 + one release | same |
 | `report_turn:<s>` | `app_settings` | P6 | P7 | delete keys in the contract step |

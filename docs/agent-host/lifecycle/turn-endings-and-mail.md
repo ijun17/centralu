@@ -58,7 +58,7 @@ wrote is its only trace in the conversation, and `read_session` and `recall` nev
 **Mail without threads (M3a, #1684, docs/plans/mailbox.md §7 to §9).** The host's mail is messages in `mail` and `mail_recipients`, wired
 once in `mail/host-mail.ts` (`hostMail`, used by `main.ts` and by the tests): the message service (`mail/messages.ts`), the one reach module
 (`mail/reach.ts`: who may write to whom, project trust, the one hold), the turns and guards (`mail/turns.ts`), the delivery, and the `mail` tool,
-whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, and a task only with `kind: "answer"`, plans/mailbox.md §10.6.3; `handled` is `done`,
+each action of which runs on the service (`reply` answers a message, and a task only with `kind: "answer"`, plans/mailbox.md §10.6.3; `handled` is `done`,
 `read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). The thread mail
 an older build left pending was moved by store step 75, once (#2258; step 74 turned the older builds' report marks and held requests into tasks):
 no live code reads the old thread tables.

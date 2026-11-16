@@ -20,8 +20,8 @@ const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => strin
 }
 
 /**
- * The arguments of the `mail` tool a session calls, as the version-1 schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts, unchanged in
- * M3a: docs/plans/mailbox.md §11.3). This is what the tool reads once they are checked.
+ * The arguments of the `mail` tool a session calls, as its schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts). This is what the tool
+ * reads once they are checked.
  */
 export type MailToolArgs = {
   action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'close' | 'find' | 'watch'
@@ -77,7 +77,7 @@ export type MailToolHost = {
 }
 
 /**
- * A session's mailbox through the version-1 tool (§11.3, `mapV1`): every old action runs on the message service. `reply {thread}` answers a message
+ * A session's mailbox through the `mail` tool (docs/plans/mailbox.md §11.3): every action runs on the message service. `reply {thread}` answers a message
  * (`needsReply` false unless `kind: "question"`; a task only with `kind: "answer"`, docs/plans/mailbox.md §10.6.3), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
  * (`needsReply` true unless `kind: "note"`), `watch` sets a watch (§18.2) and `close` cancels one: threads, which it closed before, are gone. `thread`
  * names a message id, or a legacy thread id, which means the newest message of that thread sent to the caller. The address a session acts as is the host's, never one the call names (§7.1).
