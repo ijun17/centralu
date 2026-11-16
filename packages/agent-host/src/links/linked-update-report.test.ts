@@ -15,7 +15,7 @@ afterEach(runCleanups)
 const ORIGIN = 'git@github.com:me/app.git'
 
 async function rig() {
-  const machine = await machineHost({ mail: true, origin: ORIGIN })
+  const machine = await machineHost({ mail: true, origin: ORIGIN, ownTurns: true })
   const hub = await hubHost(machine.port, { mail: true, origin: ORIGIN })
   await hub.mgr.setProjectTrusted('p-hub', true)
   await eventually(() => hub.machine().status === 'connected')

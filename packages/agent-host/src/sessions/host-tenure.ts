@@ -191,7 +191,7 @@ export class HostTenure {
 
   private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
-    // What an update's wake not answered yet stopped is listed again below (#2264 review): read before the engine lets its wakes go. Its turn is listed as any (`cutTurns`)
+    // An update's wake not answered yet is listed again below, as it was woken (#2264 review): read before the engine lets its wakes go
     const woken = this.stoppingForUpdate ? this.host.turnContinue.unanswered() : []
     // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's. A stop's wait is stored, for the next host (#1415)
     this.host.turnContinue.stopAll()
@@ -204,7 +204,7 @@ export class HostTenure {
      * continues it by. A list of its own, beside any an earlier stop left (turns this host had not continued yet)
      */
     const sessions = this.stoppingForUpdate && this.host.keeperOpts.updateResume ? this.host.listSessions() : []
-    const cut = cutTurns({ sessions, terminals: 0, commandRuns: 0 })
+    const cut = cutTurns({ sessions, terminals: 0, commandRuns: 0 }, woken.filter((w) => w.turn).map((w) => w.sessionId))
     /*
      * And what else the stop ends in them (#1902): the background tasks their processes hold, with the command of the call that
      * started each, and the cards that wait for the person. Read here, before the processes go: the tool reports each task gone
@@ -298,7 +298,7 @@ export class HostTenure {
        * holds because every listed session leaves this start with a row past the mark: the Continue's line, or the stopped
        * mark below (`turnLostInSwap` for one that cannot be continued)
        */
-      // One that reads at rest only by a `woken` entry, which a build before #2312 wrote for a woken turn a second update stopped before its first answer
+      // One that reads at rest only by a `woken` entry (`cutTurns`): a woken turn a second update stopped before its first answer
       const goesOn = s.state !== 'error' && !!lists?.cut(s.id, s.lastSeq, !cut)
       const stale = cut && !goesOn
       /*

@@ -173,11 +173,6 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly contextAtRequest = true
   /** `shouldQuery: false` (sdk.d.ts, measured on the Mac 2026-10-20: no turn, merged into the next message) */
   readonly quietInput = true
-  /**
-   * Measured with Claude Code 2.1.296 on a real host swap: about 2 s after the first input, before that input's turn, when the update's stop ended a
-   * background task of the session; a cut turn that ran in the foreground only resumed with none (`ANSWERED`, turn-continue.ts)
-   */
-  readonly resumeEndsOwnTurn = true
   readonly cacheBilling = 'anthropic' as const
   /** What Claude Code offers against what this adapter limits (#270) */
   readonly surface = CLAUDE_SURFACE

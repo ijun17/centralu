@@ -133,8 +133,6 @@ export class SessionEvents {
     }
     // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693, turn-continue.ts)
     if (e.type === 'error') e = this.host.turnContinue.hold(e)
-    // A process an update's wake resumed ends a turn of its own before the note's (#2312): not the continued turn's end, nor any turn's
-    if (this.host.turnContinue.holdOwnEnd(e)) return
     if (e.sessionId) this.host.turnContinue.observe(e)
     const unborn = e.sessionId && !this.host.meta.has(e.sessionId) ? this.host.record.unborn.get(e.sessionId) : undefined
     if (unborn) {
@@ -193,6 +191,9 @@ export class SessionEvents {
         // A turn starts (#1377): a first guess at whose it is, from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           continues = this.host.selfCompaction.stepOpens(m.id)
+          // A turn runs: a settle waiting for one is over, and this turn's end answers (`ChildReports.settleAtRest`)
+          this.host.reports.stopSettling(m.id)
+          this.inputWaits.delete(m.id)
           this.host.children.turnStarted(m.id)
           // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
           this.host.children.noteTurnStart(m.id, m.lastSeq)
@@ -278,6 +279,25 @@ export class SessionEvents {
     const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
     const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken) : undefined
+    /*
+     * A turn the tool ran on its own (it names none of the inputs given it) while an input given it still waits to run (#2318): Claude Code's turn for
+     * a background task's notification, run before the input that came with it, or its end of its own as it resumes after an update (#2312). Not the
+     * work's end: that input's turn carries the work on, and its end answers. Read as the end, it answered a task with the notification's words, and
+     * the real end found it settled
+     */
+    const ownTurn = endedTurn && e.type === 'turn_complete' && !!e.sessionId && Array.isArray(taken) && taken.length === 0 && (this.host.handles.get(e.sessionId)?.queuedInputs?.() ?? 0) > 0
+    if (ownTurn && e.sessionId) {
+      console.error(`[agent-host] ${e.sessionId.slice(0, 8)}: its tool ended a turn of its own while an input waits to run: not the work's end (#2318)`)
+      // An update's cut stays the next turn's to tell (#1966); if the input never runs, the session settles at rest and answers then (`settleAtRest`)
+      if (owned?.cut) this.host.children.noteContinuedCut(e.sessionId)
+      this.host.reports.settleAtRest(e.sessionId)
+      this.inputWaits.add(e.sessionId)
+    }
+    // Its process went before the waiting input's turn began: that input's turn is lost, and the work stops as a turn's would (`ownTurn` above)
+    if (processWent && !endedTurn && e.sessionId && this.inputWaits.delete(e.sessionId)) {
+      this.host.reports.turnStopped(e.sessionId)
+      this.host.mailStopped(e.sessionId, 'error', this.stopTold(e.sessionId, false, undefined))
+    }
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
@@ -299,7 +319,7 @@ export class SessionEvents {
      */
     // The mail given into the turn that it did not take waits in the tool for a turn after, and is not this turn's (§10.6.3); one whose process went took all with it
     if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken })
-    const workEnded = endedTurn && !!e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId)
+    const workEnded = endedTurn && !ownTurn && !!e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId)
     // The end of a turn an update cut, before its Continue is in, is not the work's stop: the continued turn's end answers
     const stopWhy = workEnded && e.sessionId && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
     if (stopWhy && e.sessionId) {
@@ -317,7 +337,7 @@ export class SessionEvents {
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if ((endedTurn || e.type === 'question_resolved' || e.type === 'approval_resolved') && e.sessionId) this.host.cards.cardsEnded(e.sessionId)
     // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
-    if (endedTurn && e.sessionId) this.endHubAsk(e.sessionId)
+    if (endedTurn && !ownTurn && e.sessionId) this.endHubAsk(e.sessionId)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.host.hostCards.raiseHostAsks(e.sessionId)
@@ -354,6 +374,9 @@ export class SessionEvents {
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
   /** Who already knows of this stop: a call still waiting, which read the end itself (`told`); and the session that gave the turn or started it */
+  /** Sessions whose tool ended a turn of its own while an input waits to run, until that input's turn begins (#2318, `ownTurn`) */
+  private readonly inputWaits = new Set<string>()
+
   private stopTold(id: string, waited: boolean, caller: string | undefined): StopTold {
     const asker = caller ?? this.host.meta.get(id)?.askedBy ?? undefined
     if (!asker || !this.host.meta.has(asker)) return { starter: null }

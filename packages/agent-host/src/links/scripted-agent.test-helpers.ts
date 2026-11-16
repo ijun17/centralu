@@ -7,10 +7,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  *
  *   a message containing "approve"   asks to run `echo linked`, then says "approved"/"denied"
  *   a message containing "long job"  starts a turn that does not end while its process lives, until `finish`; so does
- *                                    the Continue a long job cut by a stopped host is sent. As the first input of a resumed
- *                                    process, a Continue that says the update stopped background tasks is preceded by a turn
- *                                    end of the process's own with no request, as Claude Code's is (measured,
- *                                    sessions/turn-continue.ts `ANSWERED`)
+ *                                    the Continue a long job cut by a stopped host is sent
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
  *
@@ -23,6 +20,10 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  * A message sent in the gap between that turn's end and the next one's start is held behind it and says the session is
  * working at once, as Claude Code's does (its turn is opened already, so the held one's own start says nothing). With
  * `holdNext` the first held message waits for `release()` there, so a test sends in the gap rather than racing it.
+ *
+ * `ownTurns`: like Claude Code, it names the inputs each turn ran (`turnInputs`, `turnStartInputs`) and counts the ones waiting to run (`queuedInputs`), and
+ * runs turns of its own that name none (#2318, measured with 2.1.296): one for a background task's notification before the next input's turn
+ * (`notifyNext`), and one as a resumed process's first input is the Continue of an update that stopped a background task (#2312).
  */
 class ScriptedHandle implements SessionHandle {
   readonly externalId: string
@@ -43,8 +44,12 @@ class ScriptedHandle implements SessionHandle {
   private gate: (() => void) | null = null
   /** The next answer to a question is said once this resolves, not a moment later (`ScriptedAdapter.holdAnswer`) */
   private answerGate: Promise<void> | null = null
-  /** The process resumed a conversation and has taken no input yet: a Continue now first ends a turn of its own (`turn`) */
+  /** The process resumed a conversation and has taken no input yet: a Continue now first ends a turn of its own (`turn`, `ownTurns`) */
   private resumedFresh: boolean
+  /** The inputs sent whose turn has not run yet (`ownTurns`) */
+  private readonly pending: string[] = []
+  /** A background task's notification waits: the next input's turn is preceded by a turn of the tool's own (`ownTurns`); `'drop'`: that input never runs */
+  notifyNext: boolean | 'drop' = false
 
   constructor(
     readonly sessionId: string,
@@ -56,18 +61,21 @@ class ScriptedHandle implements SessionHandle {
     private readonly queueBehind = false,
     holdNext = false,
     resumed = false,
+    private readonly ownTurns = false,
   ) {
     this.externalId = `scripted-${sessionId}`
     this.hold = holdNext
     this.resumedFresh = resumed
-    if (queueBehind) {
+    if (queueBehind || ownTurns) {
       this.turnInputs = () => this.ending
       this.turnStartInputs = () => this.starting
     }
+    if (ownTurns) this.queuedInputs = () => this.pending.length
   }
 
   turnInputs?(): readonly string[] | null
   turnStartInputs?(): readonly string[] | null
+  queuedInputs?(): number
 
   /** The next answer to a question goes on only when the returned function is called: a test orders the turn's end after what it does first */
   holdAnswer(): () => void {
@@ -94,20 +102,47 @@ class ScriptedHandle implements SessionHandle {
     }
     if (this.queueBehind) this.taking = opts?.id ? [opts.id] : []
     else this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-    if (this.immediate) return this.turn(text)
-    setTimeout(() => this.turn(text), 20)
+    const input = opts?.id ?? `${this.sessionId.slice(0, 8)}-input-${++this.seq}`
+    if (this.ownTurns) this.pending.push(input)
+    if (this.immediate) return this.turn(text, input)
+    setTimeout(() => this.turn(text, input), 20)
   }
 
-  private turn(text: string): void {
+  private turn(text: string, input: string): void {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
     const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
     const resumed = this.resumedFresh
     this.resumedFresh = false
-    // A resumed process's own turn end before the Continue's turn, with no request, when the stop ended a background task (Claude Code 2.1.296, turn-continue.ts `ANSWERED`)
-    if (resumed && said.includes('Continue where you stopped') && said.includes('The update stopped these background tasks')) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    if (this.ownTurns) {
+      const echo = resumed && said.includes('Continue where you stopped') && said.includes('The update stopped these background tasks')
+      const dropped = this.notifyNext === 'drop'
+      if (this.notifyNext || echo) this.ownTurn(this.notifyNext ? 'The background command finished.' : null)
+      // The tool lost the input: it waits for good (`queuedInputs`), and no turn runs it
+      if (dropped) return this.ran(said)
+      // The input's own turn: named as it opens
+      this.pending.splice(this.pending.indexOf(input), 1)
+      this.taking = [input]
+      this.starting = [input]
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+      this.starting = null
+    }
     this.answer(id, said, text)
     this.ran(said)
+  }
+
+  /** A turn of the tool's own, before the waiting input's: it names no input, and says `words` (none: no request) */
+  private ownTurn(words: string | null): void {
+    this.notifyNext = false
+    if (words !== null) {
+      this.starting = []
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+      this.starting = null
+      this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: words })
+    }
+    this.ending = []
+    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    this.ending = null
   }
 
   private answer(id: string, said: string, text: string): void {
@@ -159,7 +194,7 @@ class ScriptedHandle implements SessionHandle {
           this.starting = null
         }
         this.announced = false
-        this.turn(next.text)
+        this.turn(next.text, next.id ?? `${this.sessionId.slice(0, 8)}-input-${++this.seq}`)
       }
       if (this.hold) {
         this.hold = false
@@ -202,8 +237,6 @@ export class ScriptedAdapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
-  /** As Claude Code's: a resumed process's Continue after a stop that ended a background task is preceded by a turn end of its own (`ScriptedHandle.turn`, #2312) */
-  readonly resumeEndsOwnTurn = true
   /** The inputs each session's turns ran, in order, once what each said at once was said */
   readonly ran = new Map<string, string[]>()
   private readonly handles = new Map<string, ScriptedHandle>()
@@ -213,6 +246,7 @@ export class ScriptedAdapter implements AgentAdapter {
     private readonly immediate = false,
     private readonly queueBehind = false,
     private readonly holdNext = false,
+    private readonly ownTurns = false,
   ) {
     this.capabilities = {
       approvals: true,
@@ -236,9 +270,16 @@ export class ScriptedAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     this.created.push(opts.sessionId)
     const ran = (text: string) => this.ran.set(opts.sessionId, [...(this.ran.get(opts.sessionId) ?? []), text])
-    const handle = new ScriptedHandle(opts.sessionId, emit, ran, this.immediate, this.queueBehind, this.holdNext, !!opts.resumeExternalId)
+    const handle = new ScriptedHandle(opts.sessionId, emit, ran, this.immediate, this.queueBehind, this.holdNext, !!opts.resumeExternalId, this.ownTurns)
     this.handles.set(opts.sessionId, handle)
     return handle
+  }
+
+  /** A background task of the session ended: its next input's turn is preceded by the tool's own turn for the notification (`ownTurns`) */
+  notifyNext(sessionId: string, how: true | 'drop' = true): void {
+    const handle = this.handles.get(sessionId)
+    if (!handle) throw new Error(`no scripted session ${sessionId}`)
+    handle.notifyNext = how
   }
 
   /** Holds the session's next answer to a question until the returned function is called (`ScriptedHandle.holdAnswer`) */
@@ -268,9 +309,9 @@ export class ScriptedAdapter implements AgentAdapter {
   }
 }
 
-export function scriptedAdapters(o: { immediate?: boolean; queueBehind?: boolean; holdNext?: boolean } = {}): Map<ToolName, AgentAdapter> {
+export function scriptedAdapters(o: { immediate?: boolean; queueBehind?: boolean; holdNext?: boolean; ownTurns?: boolean } = {}): Map<ToolName, AgentAdapter> {
   return new Map<ToolName, AgentAdapter>([
-    ['claude', new ScriptedAdapter('claude', o.immediate, o.queueBehind, o.holdNext)],
-    ['codex', new ScriptedAdapter('codex', o.immediate, o.queueBehind, o.holdNext)],
+    ['claude', new ScriptedAdapter('claude', o.immediate, o.queueBehind, o.holdNext, o.ownTurns)],
+    ['codex', new ScriptedAdapter('codex', o.immediate, o.queueBehind, o.holdNext, o.ownTurns)],
   ])
 }

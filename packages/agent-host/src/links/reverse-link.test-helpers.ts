@@ -88,7 +88,7 @@ function projectFolder(name: string, origin?: string): string {
  */
 /** `apps`: an app runtime wired as main.ts wires it (#1938); `'before'`, as a build from before `host.apps` (its offer's answer says nothing of apps) */
 export async function machineHost(
-  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; askHoldMaxMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before' } = {},
+  o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; askHoldMaxMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean | 'delivered'; origin?: string; apps?: true | 'before'; ownTurns?: true } = {},
 ) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: projectFolder('remote-project', o.origin), name: 'remote-project' })
@@ -99,7 +99,8 @@ export async function machineHost(
   const updateResume = memoryUpdateFolder()
   /** One host on the machine's store, wired as main.ts wires it: the first, and each one an update swaps in (`swapForUpdate`) */
   const boot = () => {
-    const adapters = scriptedAdapters()
+    // `ownTurns`: its agent runs turns of its own as Claude Code does (#2318)
+    const adapters = scriptedAdapters(o.ownTurns ? { ownTurns: true } : {})
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, { updateResume })
     const hubs = new LinkedHubs({
       call: (client, method, params, opts) => server.call(client, method, params, opts),
