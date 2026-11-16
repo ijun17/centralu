@@ -13,7 +13,7 @@ the person's Continue would.
   put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
   (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
   the processes are down and their last output written, the host writes those turns as a list of its own,
-  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq, woken? }], stopped: [...] }`, lifecycle/update-resume.ts), each with the last
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq, woken? }], stopped: [...] }`, lifecycle/update-resume.ts; `woken` only read now, see below), each with the last
   row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
   nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
   folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
@@ -112,13 +112,15 @@ the person's Continue would.
   as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). The first bare turn end is not one:
   measured with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the
   note goes in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. That end is held
-  (`TurnContinue.holdsOwnEnd`, #2312): it is no end of any turn of the session's, so it is not recorded or sent, the session stays in its
+  (`TurnContinue.holdOwnEnd`, #2312): it is no end of any turn of the session's, so it is not recorded or sent, the session stays in its
   turn, and nothing answers the turn's tasks or tells a stop. Read as the turn's end, it answered the continued turn's tasks (a linked
   hub's start_agent task too) with the cut turn's words, left the session at rest while the note's turn ran, and the real end found
   nothing to answer. Only the first is held: a second one with no answer between, or one after any answer, is the turn's end. A woken
   session that has said nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its
   wake going on, so a request that hangs does not keep the rest from waking; one whose own end was held and that is still in its turn
-  ran nothing after it, so that end is said then, as the turn's (accepted: a first request silent for 2 minutes ends its turn there). The burst is the first request: after a restart each one re-reads the whole
+  ran nothing after it, so that end is said then, as the turn's. Accepted: a first request silent for 2 minutes ends its turn there (no
+  tool says whether its turn still runs). Any tool's first end in a wake is held so, measured for Claude Code only: a tool that ended
+  the note's turn with no answer at all would read working until the slot runs out. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
   its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;

@@ -183,7 +183,7 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     const e = engine(UPDATE_WAKES_AT_ONCE + 1)
     await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
     // Claude Code ends a turn of its own right after a resume, before the note's request (measured): held, no end of any turn (#2312)
-    expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
+    expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
     expect(e.sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
     // Its first answer is
     e.engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
@@ -194,8 +194,8 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     const e = engine(UPDATE_WAKES_AT_ONCE + 1)
     await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
     const end = { type: 'turn_complete' as const, sessionId: 's0' }
-    expect(e.engine.holdsOwnEnd(end)).toBe(true)
-    expect(e.engine.holdsOwnEnd(end)).toBe(false)
+    expect(e.engine.holdOwnEnd(end)).toBe(true)
+    expect(e.engine.holdOwnEnd(end)).toBe(false)
     e.engine.observe(end)
     expect(e.sent).toEqual(e.ids)
   })
@@ -204,7 +204,7 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     const e = engine(UPDATE_WAKES_AT_ONCE)
     await eventually(() => e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
     e.engine.observe({ type: 'message_delta', sessionId: 's0', role: 'assistant', text: 'on it' })
-    expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
+    expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
   })
 
   it('says the held turn end once the slot runs out with nothing run, the session still in its turn: none is left working (engine, #2312)', async () => {
@@ -215,14 +215,14 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
       // s0 held its process's own end and ran nothing more; s1 held one but went to rest meanwhile; s2 held none
       e.meta.set('s0', { ...e.meta.get('s0')!, state: 'working' })
       e.meta.set('s2', { ...e.meta.get('s2')!, state: 'working' })
-      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
-      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's1' })).toBe(true)
+      expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
+      expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: 's1' })).toBe(true)
       await vi.advanceTimersByTimeAsync(UPDATE_SLOT_MS - 1)
       expect(e.notes).toEqual([])
       await vi.advanceTimersByTimeAsync(1)
       expect(e.notes).toEqual([{ type: 'turn_complete', sessionId: 's0' }])
       // Said once: the wake is over, so that end is not held again
-      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
+      expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
     } finally {
       vi.useRealTimers()
     }

@@ -88,7 +88,7 @@ export const UPDATE_SLOT_MS = 120_000
 export type UpdateCut = { sessionId: string; turn: boolean; stopped: Stopped | null }
 /**
  * Where an update's wake is: waiting for a slot, being sent, or handed and waiting for the session's first answer. `ownEnd`: the resumed process's
- * own turn end came and was held (`holdsOwnEnd`)
+ * own turn end came and was held (`holdOwnEnd`)
  */
 type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?: boolean; slot?: ReturnType<typeof setTimeout>; ownEnd?: true }
 /**
@@ -100,7 +100,7 @@ export type UpdateStep = 'going' | 'sent' | 'dropped' | 'failed' | 'left'
 /**
  * The events that say a woken session's first request was answered, or that its wake ended some other way. Measured with Claude Code 2.1.296, a
  * resumed process ends a turn of its own with no model request (about 2 s after the note went in), then runs the note's turn: that first
- * `turn_complete` is held (`holdsOwnEnd`) and never reaches here; a later one is the turn's end. A process that goes away (`session_live` false) or
+ * `turn_complete` is held (`holdOwnEnd`) and never reaches here; a later one is the turn's end. A process that goes away (`session_live` false) or
  * a state other than working ends it too
  */
 const ANSWERED = new Set<NormalizedEvent['type']>(['message_delta', 'reasoning_delta', 'tool_call', 'usage_update', 'approval_request', 'question_request', 'error', 'limit_reached', 'session_deleted'])
@@ -255,12 +255,13 @@ export class TurnContinue {
   }
 
   /**
-   * Whether `e` is the turn end a process resumed by an update's wake says of its own before the note's turn (`ANSWERED`): the first `turn_complete`
-   * once the wake is in (`waking`), nothing having answered it. Held here: it ends no turn of the session's (#2312). Read as one, it answered the
-   * continued turn's tasks with the cut turn's words and left the session at rest while the note's turn ran, so the real end reported nothing. A
-   * second one is the turn's end. Held, it is said after all if the wake ends with nothing run (`endUpdate`)
+   * Holds `e` when it is the turn end a process resumed by an update's wake says of its own before the note's turn (`ANSWERED`), and says whether it
+   * did: the first `turn_complete` once the wake is in (`waking`), nothing having answered it. It ends no turn of the session's (#2312). Read as one, it
+   * answered the continued turn's tasks with the cut turn's words and left the session at rest while the note's turn ran, so the real end reported
+   * nothing. A second one is the turn's end. Held, it is said after all when the slot runs out with nothing run (`slotOver`). Any tool's first end is
+   * held so, measured for Claude Code only: a tool whose note's turn ended with no answer at all would read working until the slot runs out
    */
-  holdsOwnEnd(e: NormalizedEvent): boolean {
+  holdOwnEnd(e: NormalizedEvent): boolean {
     const w = e.type === 'turn_complete' ? this.updates.get(e.sessionId) : undefined
     if (w?.phase !== 'waking' || w.ownEnd) return false
     w.ownEnd = true
@@ -564,7 +565,7 @@ export class TurnContinue {
   }
 
   /**
-   * A woken session said nothing for `UPDATE_SLOT_MS`: its slot goes to the next. One whose resumed process's turn end was held (`holdsOwnEnd`) and
+   * A woken session said nothing for `UPDATE_SLOT_MS`: its slot goes to the next. One whose resumed process's turn end was held (`holdOwnEnd`) and
    * that is still in its turn ran nothing after it: that end was the turn's, and is said now, so the session is not left working with no turn
    */
   private slotOver(id: string, w: UpdateWait): void {

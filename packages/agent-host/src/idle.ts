@@ -108,7 +108,7 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
 /**
  * Whether stopping the host now ends this session's turn (#1618): it is in a turn, working or waiting on an approval or a
  * question. The next host's start finds it so with no process and resets it (`SessionManager`'s start). Background work alone
- * is not a turn: nothing continues it, so it is not listed. What a stop lists is `cutTurns`
+ * is not a turn: nothing continues it, so it is not listed. What a stop lists is `cutTurns`.
  */
 export function turnCut(s: IdleActivity): boolean {
   return inTurn(s.state)
@@ -117,7 +117,7 @@ export function turnCut(s: IdleActivity): boolean {
 /**
  * The turns stopping the host now ends, the one definition of what an update's stop lists for the next host (#1618): the sessions in a turn
  * (`turnCut`). A woken turn that has not answered yet (`TurnContinue.unanswered`, #1913) is among them: the turn end its resumed process says of
- * its own is held (`TurnContinue.holdsOwnEnd`, #2312), so it stays in its turn. It used to read at rest then and was listed apart, `woken`, which
+ * its own is held (`TurnContinue.holdOwnEnd`, #2312), so it stays in its turn. It used to read at rest then and was listed apart, `woken`, which
  * the next start still reads in a list an older build wrote (`UpdateResumeLists.cut`)
  */
 export function cutTurns(s: ActivitySnapshot): { id: string }[] {
