@@ -57,7 +57,6 @@ function personOf(mgr: SessionManager, mail: HostMail): MailPerson {
       const s = mgr.sessionInfo(id)
       return s ? { name: s.name, state: s.state } : undefined
     }, mail),
-    legacyChain: () => [],
     projectLabel: (p) => mail.reach.projectLabel(p),
     untrusted: (p) => mail.reach.untrusted(p),
     turnOn: () => undefined,
