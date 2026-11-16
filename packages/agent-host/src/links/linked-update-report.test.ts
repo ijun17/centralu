@@ -45,13 +45,16 @@ describe("a linked child's turn an update continued (#2312)", { timeout: 30_000 
       return machine.mgr.listSessions().find((s) => s.id === local)?.state === 'working'
     })
     const reports = () => hub.store.mailbox.reportsOn(task.id)
+    // It waits on CI in a background task of its turn, which the stop ends: then Claude Code's resumed process ends a turn of its own first
+    machine.mgr.events.onEvent({ type: 'background_tasks', sessionId: local, live: [{ id: 't1', kind: 'shell', description: 'gh pr checks --watch', status: 'running' }] })
+    await eventually(() => machine.mgr.listSessions().find((s) => s.id === local)?.backgroundTasks.some((t) => t.status === 'running') === true)
 
     // The hub updates the machine mid-turn: its host stops for the update and the next one continues the turn
     await machine.swapForUpdate()
     deliver(machine)
     await eventually(() => hub.machine().status === 'connected')
-    // The next host resumes it with the Continue; the resumed process first ends a turn of its own, then runs the Continue's (Claude Code)
-    await eventually(() => machine.agent().ran.get(local)?.some((t) => t.includes('Continue where you stopped')) === true)
+    // The next host resumes it with the Continue, which names the stopped task; the resumed process first ends a turn of its own, then runs the Continue's (Claude Code)
+    await eventually(() => machine.agent().ran.get(local)?.some((t) => t.includes('Continue where you stopped') && t.includes('gh pr checks --watch')) === true)
     // That end is no end of the work, nor is the cut: the session is in its turn, and nothing answered the task there
     expect(machine.mgr.listSessions().find((s) => s.id === local)?.state).toBe('working')
     expect(machine.store.mailbox.recipient(task.id, at.machine(local))?.settled).toBeNull()

@@ -8,8 +8,9 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  *   a message containing "approve"   asks to run `echo linked`, then says "approved"/"denied"
  *   a message containing "long job"  starts a turn that does not end while its process lives, until `finish`; so does
  *                                    the Continue a long job cut by a stopped host is sent. As the first input of a resumed
- *                                    process, that Continue is preceded by a turn end of the process's own with no request,
- *                                    as Claude Code's is (measured, sessions/turn-continue.ts `ANSWERED`)
+ *                                    process, a Continue that says the update stopped background tasks is preceded by a turn
+ *                                    end of the process's own with no request, as Claude Code's is (measured,
+ *                                    sessions/turn-continue.ts `ANSWERED`)
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
  *
@@ -103,8 +104,8 @@ class ScriptedHandle implements SessionHandle {
     const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
     const resumed = this.resumedFresh
     this.resumedFresh = false
-    // A resumed process's own turn end before the Continue's turn, with no request (Claude Code 2.1.296, turn-continue.ts `ANSWERED`)
-    if (resumed && said.includes('Continue where you stopped')) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    // A resumed process's own turn end before the Continue's turn, with no request, when the stop ended a background task (Claude Code 2.1.296, turn-continue.ts `ANSWERED`)
+    if (resumed && said.includes('Continue where you stopped') && said.includes('The update stopped these background tasks')) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
     this.answer(id, said, text)
     this.ran(said)
   }
@@ -201,7 +202,7 @@ export class ScriptedAdapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
-  /** As Claude Code's: a resumed process's Continue is preceded by a turn end of its own (`ScriptedHandle.turn`, #2312) */
+  /** As Claude Code's: a resumed process's Continue after a stop that ended a background task is preceded by a turn end of its own (`ScriptedHandle.turn`, #2312) */
   readonly resumeEndsOwnTurn = true
   /** The inputs each session's turns ran, in order, once what each said at once was said */
   readonly ran = new Map<string, string[]>()

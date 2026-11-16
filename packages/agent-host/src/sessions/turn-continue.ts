@@ -88,9 +88,9 @@ export const UPDATE_SLOT_MS = 120_000
 export type UpdateCut = { sessionId: string; turn: boolean; stopped: Stopped | null }
 /**
  * Where an update's wake is: waiting for a slot, being sent, or handed and waiting for the session's first answer. `ownEnd`: the resumed process's
- * own turn end came and was held (`holdOwnEnd`)
+ * own turn end came and was held (`holdOwnEnd`); `running`: after it, the tool said it is busy on the note's turn (an `activity`: a retry, a compaction)
  */
-type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?: boolean; slot?: ReturnType<typeof setTimeout>; ownEnd?: true }
+type UpdateWait = UpdateCut & { phase: 'queued' | 'sending' | 'waking'; settled?: boolean; slot?: ReturnType<typeof setTimeout>; ownEnd?: true; running?: true }
 /**
  * How an update's wake went, for its owner (`HostTenure.updateStep`): `going` right before it is sent, `sent` once the tool took it, `dropped` when
  * it no longer stood (gone, stopped, its turn over), `failed` when it could not be sent, `left` when it failed as this host was leaving
@@ -99,7 +99,8 @@ export type UpdateStep = 'going' | 'sent' | 'dropped' | 'failed' | 'left'
 
 /**
  * The events that say a woken session's first request was answered, or that its wake ended some other way. Measured with Claude Code 2.1.296, a
- * resumed process ends a turn of its own with no model request (about 2 s after the note went in), then runs the note's turn: that first
+ * resumed process whose background task the update's stop ended ends a turn of its own with no model request (about 2 s after the note went in;
+ * one whose cut turn ran in the foreground only did not, #2312 deep review), then runs the note's turn: that first
  * `turn_complete` is held (`holdOwnEnd`) and never reaches here; a later one is the turn's end. A process that goes away (`session_live` false) or
  * a state other than working ends it too
  */
@@ -267,6 +268,7 @@ export class TurnContinue {
     const w = e.type === 'turn_complete' ? this.updates.get(e.sessionId) : undefined
     if (w?.phase !== 'waking' || w.ownEnd || !this.host.resumeEndsOwnTurn(w.sessionId)) return false
     w.ownEnd = true
+    console.error(`[agent-host] ${w.sessionId.slice(0, 8)}: held the turn end its resumed process said of its own before the update's note (#2312)`)
     return true
   }
 
@@ -277,6 +279,8 @@ export class TurnContinue {
     const u = this.updates.get(id)
     // A woken session answered, or its wake ended: the next one wakes. One deleted before its wake goes with it
     if (u?.phase === 'waking' && wakeEnded(e)) this.endUpdate(id, u, null)
+    // Busy on the note's turn with no answer yet (an overload's retry, a compaction): the held end was not the turn's (`slotOver`)
+    else if (u?.phase === 'waking' && u.ownEnd && e.type === 'activity' && e.activity !== null) u.running = true
     else if (u && e.type === 'session_deleted') this.endUpdate(id, u, 'dropped')
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancelHeld(id)
     if (e.type === 'session_deleted') this.dropStop(id, false)
@@ -567,13 +571,16 @@ export class TurnContinue {
   }
 
   /**
-   * A woken session said nothing for `UPDATE_SLOT_MS`: its slot goes to the next. One whose resumed process's turn end was held (`holdOwnEnd`) and
-   * that is still in its turn ran nothing after it: that end was the turn's, and is said now, so the session is not left working with no turn
+   * A woken session said nothing for `UPDATE_SLOT_MS`: its slot goes to the next. One whose resumed process's turn end was held (`holdOwnEnd`), that
+   * is still in its turn and whose tool said nothing of being busy since (`running`) ran nothing after it: that end was the turn's, and is said now,
+   * so the session is not left working with no turn
    */
   private slotOver(id: string, w: UpdateWait): void {
     this.endUpdate(id, w, null)
     const m = this.host.meta.get(id)
-    if (w.ownEnd && m && inTurn(m.state) && !this.host.leaving()) this.host.note({ type: 'turn_complete', sessionId: id })
+    if (!w.ownEnd || w.running || !m || !inTurn(m.state) || this.host.leaving()) return
+    console.error(`[agent-host] ${id.slice(0, 8)}: nothing ran after the turn end held for ${UPDATE_SLOT_MS / 1000} s, so it ends the turn (#2312)`)
+    this.host.note({ type: 'turn_complete', sessionId: id })
   }
 
   /** An update's wake is over (answered, or `step`): its slot goes to the next */

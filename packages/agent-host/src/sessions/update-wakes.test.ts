@@ -252,6 +252,25 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     }
   })
 
+  it('says no held turn end when the tool said it is busy on the note since, a retry or a compaction: its turn runs (engine, #2312 review)', async () => {
+    vi.useFakeTimers()
+    try {
+      const e = engine(2)
+      await vi.advanceTimersByTimeAsync(0)
+      for (const id of ['s0', 's1']) {
+        e.meta.set(id, { ...e.meta.get(id)!, state: 'working' })
+        expect(e.engine.holdOwnEnd({ type: 'turn_complete', sessionId: id })).toBe(true)
+      }
+      // An overload's retry (Claude Code's api_retry) and an automatic compaction: no answer yet, the request goes on
+      e.engine.observe({ type: 'activity', sessionId: 's0', activity: 'retrying' })
+      e.engine.observe({ type: 'activity', sessionId: 's1', activity: 'compacting' })
+      await vi.advanceTimersByTimeAsync(UPDATE_SLOT_MS)
+      expect(e.notes).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('counts the slots again when a wake ends at once inside the pump: a session gone first does not let a fourth in (engine)', async () => {
     const e = engine(UPDATE_WAKES_AT_ONCE + 2)
     e.meta.delete('s0')

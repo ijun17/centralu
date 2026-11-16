@@ -110,16 +110,18 @@ the person's Continue would.
   the sessions at rest woken for their tasks, until every one is woken. A slot is held from the send until the woken session's first
   answer (any output of its first model request), or any other end of that wake (an error or a limit, a state other than working such
   as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). The first bare turn end is not one:
-  measured with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the
-  note goes in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. That end is held
+  measured with Claude Code 2.1.296 on a real host swap, a resumed process whose background task the stop ended (a cut turn that ran in
+  the foreground only did not, #2312 deep review) ends a turn of its own with no request about 2 s after the note goes in, then runs
+  the note's turn; counted, it let a fourth wake start before the first had answered. That end is held
   (`TurnContinue.holdOwnEnd`, #2312): it is no end of any turn of the session's, so it is not recorded or sent, the session stays in its
   turn, and nothing answers the turn's tasks or tells a stop. Read as the turn's end, it answered the continued turn's tasks (a linked
   hub's start_agent task too) with the cut turn's words, left the session at rest while the note's turn ran, and the real end found
   nothing to answer. Only the first is held: a second one with no answer between, or one after any answer, is the turn's end. A woken
   session that has said nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its
   wake going on, so a request that hangs does not keep the rest from waking; one whose own end was held and that is still in its turn
-  ran nothing after it, so that end is said then, as the turn's. Accepted: a first request silent for 2 minutes ends its turn there (no
-  tool says whether its turn still runs). Only a tool whose adapter says it ends such a turn has it held
+  ran nothing after it, so that end is said then, as the turn's, unless the tool said since that it is busy on the note's turn (an
+  `activity`: an overload's retry, Claude Code's `api_retry`, or a compaction; #2312 deep review). Both are logged in host.log, the hold and
+  that end. Accepted: a first request silent for 2 minutes with no such word ends its turn there (no tool says whether its turn still runs). Only a tool whose adapter says it ends such a turn has it held
   (`AgentAdapter.resumeEndsOwnTurn`: Claude's, from that measurement); another tool's first end is the turn's. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
