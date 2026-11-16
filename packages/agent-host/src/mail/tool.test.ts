@@ -240,7 +240,10 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
     const w = world()
     const message = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F07' }
     const thread = { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F07' }
-    movedThread(w, { id: thread.id, at: w.clock.t }, [{ id: message.id, sender: A, kind: 'question', body: 'still open?', to: [{ recipient: B }] }])
+    movedThread(w, { id: thread.id, at: w.clock.t }, [
+      { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F06', sender: A, kind: 'question', body: 'an earlier one', to: [{ recipient: B }] },
+      { id: message.id, sender: A, kind: 'question', body: 'still open?', to: [{ recipient: B }] },
+    ])
     w.clock.t += 10
     w.run('b', { action: 'reply', thread: thread.id, text: 'yes' })
     expect(w.store.mailbox.feedOf(B, { limit: 1 })[0]).toMatchObject({ replyTo: message.id })

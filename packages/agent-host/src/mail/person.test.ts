@@ -67,6 +67,13 @@ describe("the person's old mail, moved from an old thread (store step v75), in t
     expect(person.list().threads.find((t) => t.id === mid(2))?.unread).toBe(0)
   })
 
+  it('a moved message keeps the word its thread gave it: an answer whose question was not moved is still an answer', () => {
+    const w = hostWorld()
+    movedThread(w, { id: tid(1), at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'answer', body: 'It is main.', to: [{ recipient: PERSON }] }])
+    const { person } = ready(w)
+    expect(person.thread(mid(2), { tail: 100 }).messages.map((m) => [m.body, m.kind])).toEqual([['It is main.', 'answer']])
+  })
+
   it('what the person writes in the window after ready goes out at once, as an answer to the moved question', async () => {
     const w = hostWorld()
     movedThread(w, { id: tid(1), at: w.clock.t - 1_000 }, [{ id: mid(2), sender: A, kind: 'question', body: 'Which branch?', to: [{ recipient: PERSON }] }])
