@@ -207,7 +207,6 @@ describe('the person closing a chain whose work is going, over the real manager 
         const s = w.mgr.sessionInfo(id)
         return s ? { name: s.name, state: s.state } : undefined
       },
-      legacyChain: () => [],
       projectLabel: (id) => id,
       untrusted: () => false,
       turnOn: (id) => {

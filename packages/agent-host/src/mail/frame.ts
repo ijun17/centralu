@@ -129,40 +129,36 @@ export type MessageFrameItem = {
   maybeRepeated?: boolean
 }
 
-/** The calls a wake names, written for the receiver's tool version and form */
+/** The calls a wake or the tool's answer names, written in the receiver's form */
 export type MessageCalls = {
   read(id?: string): string
   answer(id: string): string
   done(id: string): string
   inbox(): string
-  sessions(): string
   close(id: string): string
 }
 
 /**
- * The calls in the form a receiver makes them (§11.3): `version` is the tool schema its process was started with (2: `send` and `done` by `id`; 1: `reply`
- * and `handled` by `thread`), `form` the tool itself or `centralu_run` for the Assistant, which cannot call a command bare (#850). Version 1 has no
- * `sessions` action; it is told the version-2 call
+ * The calls in the form a receiver makes them, `reply`, `handled`, `read` and `close` by `thread`: `form` is the tool itself, or `centralu_run` for the
+ * Assistant, which cannot call a command bare (#850)
  */
-export function mailCalls(version: 1 | 2, form: 'plain' | 'command'): MessageCalls {
+export function mailCalls(form: 'plain' | 'command'): MessageCalls {
   const call = (action: string, fields: Record<string, string> = {}): string => {
     const entries = Object.entries(fields)
     return form === 'plain'
       ? `mail(action="${action}"${entries.map(([k, v]) => `, ${k}="${v}"`).join('')})`
       : `centralu_run(command="mail", args={action: "${action}"${entries.map(([k, v]) => `, ${k}: "${v}"`).join('')}})`
   }
-  const target = version === 2 ? 'id' : 'thread'
   return {
-    read: (id) => call('read', id === undefined ? {} : { [target]: id }),
-    answer: (id) => call(version === 2 ? 'send' : 'reply', { [target]: id, text: '…' }),
-    done: (id) => call(version === 2 ? 'done' : 'handled', { [target]: id }),
+    read: (id) => call('read', id === undefined ? {} : { thread: id }),
+    answer: (id) => call('reply', { thread: id, text: '…' }),
+    done: (id) => call('handled', { thread: id }),
     inbox: () => call('inbox'),
-    sessions: () => call('sessions'),
     close: (id) => call('close', { thread: id }),
   }
 }
 
-const PLAIN_MESSAGE_CALLS = mailCalls(2, 'plain')
+const PLAIN_MESSAGE_CALLS = mailCalls('plain')
 
 /** The header of the Assistant's words (#2258): it acts for the person, so they are the person's request; a task's end is reported by itself */
 const FOR_PERSON = {

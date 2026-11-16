@@ -396,7 +396,7 @@ depends on a turn owner:
 
 | Data | Where | Stop reading | Stop writing | Drop |
 |---|---|---|---|---|
-| `report_marks` (v49) | table | P4 (M8) | one release after P4 ships (`writeLegacyMarks` both ways, mailbox M8) | contract step, with M7 |
+| `report_marks` (v49) | table | P4 (M8) | one release after P4 ships (`writeLegacyMarks` both ways, mailbox M8) | store step 76 (mailbox M7) |
 | `delegated_turns` (v51) | table | P5 | P5 + one release | same |
 | `queued_requests` | table | P8 | P8 + one release | same |
 | `report_turn:<s>` | `app_settings` | P6 | P7 | delete keys in the contract step |
@@ -429,8 +429,9 @@ after the last of P4, P5, P8 shipped, together with mailbox M7, so `min_reader_v
 `queued_requests` at its start, so the tables cannot go yet. Step 74 instead raises the floor to 70, the first build
 (beta.58) with #1948 steps 2 to 4: the builds it keeps out are the only ones that write held requests, delegated turns
 or the key families, or need a mark to report. It turns what they left into mail tasks with its own statements and
-deletes it; this build reads none of the four and deletes at each start the marks a build of v70 to v73 still leaves
-as it goes. Dropping the three tables waits for a later step, once the floor is at or above 74.
+deletes it; this build reads none of the four. The builds of v70 to v73 still leave marks as they go, so step 75 (the
+last move of thread mail, mailbox M7) raises the floor to 74, and no live code names the three tables. Step 76 drops them,
+one release after step 75 has shipped.
 
 ## 7. The audit, item by item
 

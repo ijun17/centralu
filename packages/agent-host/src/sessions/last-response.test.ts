@@ -1,7 +1,7 @@
 /**
  * Reports become replies and last responses (docs/plans/mailbox.md §10.6.3, #1948 step 3), over the real manager: a task is answered by its reply,
  * or by the session's last response once it is at rest, one report per request; tasks from several senders join one turn and each gets its answer;
- * a stop goes through the stop notice; a restart neither loses nor repeats an answer; an earlier build's report marks become tasks.
+ * a stop goes through the stop notice; a restart neither loses nor repeats an answer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
@@ -325,15 +325,5 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     m.afterReady()
     await vi.advanceTimersByTimeAsync(61_000)
     expect(reports(task)).toHaveLength(1)
-  })
-})
-
-describe("an earlier build's rows (§10.6.3)", () => {
-  it('the report marks a build of v70 to v73 left as it went are deleted at the start, and make no task', async () => {
-    const { parent, child, task } = await childInTurn()
-    const drop = vi.spyOn(w.store.children, 'dropReportMarks')
-    m.afterReady()
-    expect(drop).toHaveBeenCalledOnce()
-    expect(read.tasks(addr(parent), child).map((t) => t.id)).toEqual([task])
   })
 })

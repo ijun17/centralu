@@ -1,7 +1,6 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, isPerson, parseAddress } from './address.js'
-import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { CITE_MS, SUBJECT_CHARS, type MessageService, type ReadItem, type SendResult } from './messages.js'
@@ -21,8 +20,8 @@ const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => strin
 }
 
 /**
- * The arguments of the `mail` tool a session calls, as the version-1 schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts, unchanged in
- * M3a: docs/plans/mailbox.md §11.3). This is what the tool reads once they are checked.
+ * The arguments of the `mail` tool a session calls, as its schema advertises them (`MAIL_TOOLS`, sessions/tool-definitions.ts). This is what the tool
+ * reads once they are checked.
  */
 export type MailToolArgs = {
   action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'close' | 'find' | 'watch'
@@ -65,8 +64,6 @@ export type MailToolHost = {
   askerOf(sessionId: string): AskerFacts | undefined
   /** The words of a message the person typed in a session (a request's checked citation, docs/plans/cited-requests.md §3), or null when it is gone */
   personMessage(sessionId: string, seq: number): string | null
-  /** What `reader` was shown of an old thread before a message moved from it, read-only (§6.3, `Store.legacyChainFor`) */
-  legacyChain(threadId: string, messageId: string, reader: string): MessageRow[]
   /**
    * Mail across linked machines (#2067 items 2 and 3, `MailAcross`): a send to a session on another computer, which that
    * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
@@ -80,7 +77,7 @@ export type MailToolHost = {
 }
 
 /**
- * A session's mailbox through the version-1 tool (§11.3, `mapV1`): every old action runs on the message service. `reply {thread}` answers a message
+ * A session's mailbox through the `mail` tool (docs/plans/mailbox.md §11.3): every action runs on the message service. `reply {thread}` answers a message
  * (`needsReply` false unless `kind: "question"`; a task only with `kind: "answer"`, docs/plans/mailbox.md §10.6.3), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
  * (`needsReply` true unless `kind: "note"`), `watch` sets a watch (§18.2) and `close` cancels one: threads, which it closed before, are gone. `thread`
  * names a message id, or a legacy thread id, which means the newest message of that thread sent to the caller. The address a session acts as is the host's, never one the call names (§7.1).
@@ -103,7 +100,7 @@ export class MailTool {
     try {
       const me = this.host.caller(sessionId)
       if (!me) throw refuse('gone', 'this session is not here')
-      return { text: this.dispatch(sessionId, me, args, mailCalls(1, this.host.form(sessionId))) }
+      return { text: this.dispatch(sessionId, me, args, mailCalls(this.host.form(sessionId))) }
     } catch (e) {
       return failed(e)
     }
@@ -123,7 +120,7 @@ export class MailTool {
       const pr = args.action === 'watch' ? prNumberOf(args.to ?? '') : null
       if (pr !== null) {
         const watches = this.watchArgs(args)
-        return { text: await watches.registerPr(me.address, pr, args.text?.trim() ?? '', (id) => mailCalls(1, this.host.form(sessionId)).close(id), signal) }
+        return { text: await watches.registerPr(me.address, pr, args.text?.trim() ?? '', (id) => mailCalls(this.host.form(sessionId)).close(id), signal) }
       }
       if (args.action === 'find') {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
@@ -414,24 +411,10 @@ export class MailTool {
     const chain = id === undefined ? v.items : v.items.slice(0, -1)
     if (base && chain.length > 0) out.push('Earlier in this chain:')
     for (const item of chain) out.push(this.shown(me, item))
-    if (base) {
-      const legacy = base.message.legacyThread
-      if (legacy && !base.phantom && chain.length === 0) out.unshift(...this.legacy(me, legacy, base.message.id))
-      out.push(this.shown(me, base))
-    }
+    if (base) out.push(this.shown(me, base))
     if (v.older) out.push(`Older messages in this chain: ${calls.read(v.older)}.`)
     if (id === undefined && v.items.length > 0) out.push(`There may be more: ${calls.read()}.`)
     return out.join('\n')
-  }
-
-  /** The earlier messages of the thread a moved message came from, read-only (§6.3), each quoted under its sender */
-  private legacy(me: string, threadId: string, moved: string): string[] {
-    const earlier = this.host.legacyChain(threadId, moved, me)
-    if (earlier.length === 0) return []
-    return [
-      `Earlier, in thread ${threadId} (kept from before Centralu's mail had no threads):`,
-      ...earlier.map((m) => `[${m.id}] ${m.kind} from ${m.sender === me ? 'you' : this.name(m.sender)}:\n${quoted(escapeFrameTags(m.body))}`),
-    ]
   }
 
   /** One message under Centralu's header (S5); a phantom is one line without words */

@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
-import type { MessageKind } from '../dev-services/store/mail-types.js'
 import type { MailKind, MailRow } from '../dev-services/store/mailbox.js'
 import { isPerson, senderKind } from './address.js'
 
@@ -94,20 +93,6 @@ export const ASKS_PER_HOUR = 5
 
 /** The same words from the same sender in the same thread within this long are one post (§7.9) */
 export const REPEAT_WINDOW_MS = 10 * 60_000
-
-/**
- * Whether a message wakes a receiver at rest (§3.2, §9.5). Mail from a session, the person or Centralu does; an app's notice does
- * not unless the app marked it `needsOwner` (or asked for it), and an app can ask for no wake at all. An `event` is never mail
- */
-export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' | 'no' | null; needsOwner: boolean }): boolean {
-  if (m.kind === 'event') return false
-  // Centralu's own report of a pause that is not the first of its thread (§6): recorded, read at the next turn, starts none
-  if (sender === 'centralu' && m.wake === 'no') return false
-  if (sender !== 'app') return true
-  if (m.wake === 'no') return false
-  if (m.kind === 'notice') return m.needsOwner || m.wake === 'yes'
-  return true
-}
 
 /**
  * Whether a message needs its receiver even when the host has been off a long while (§7.9): the person's words, a task, a report, a

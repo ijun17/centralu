@@ -16,7 +16,7 @@ import {
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, isPerson, parseAddress, senderKind, sessionAddress } from './address.js'
-import { buildMessageFrame, deliveryLine, mailCalls, type MessageCalls, type MessageFrameItem } from './frame.js'
+import { buildMessageFrame, deliveryLine, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
 import type { TurnReport } from './turn-report.js'
 import { answerAtRest, type LastResponse } from './last-response.js'
@@ -202,7 +202,7 @@ export class MessageService {
       ids?: UlidMaker
       /** `MailTurns.current`: the session's turn now (§8.2 step 6) */
       turn?: (sessionAddress: string) => TurnNow | null
-      /** How a wake names its calls to this session; the tool at the version-2 schema when absent */
+      /** How a wake names its calls to this session; the tool itself when absent (`buildMessageFrame`) */
       calls?: (sessionAddress: string) => MessageCalls
       /** The newest message the person typed in this session (`MessageRecords.newestPersonMessage`); none cites anything when absent */
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
@@ -636,8 +636,7 @@ export class MessageService {
       relations.add(relation)
       items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row.lastError === 'maybe_repeated'))
     }
-    const calls = this.opts.calls?.(recipient) ?? mailCalls(2, 'plain')
-    const frame = buildMessageFrame(items, calls)
+    const frame = buildMessageFrame(items, this.opts.calls?.(recipient))
     return {
       text: frame.text,
       messageIds: frame.shown,

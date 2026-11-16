@@ -452,7 +452,6 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
     const s = mgr.sessionInfo(id)
     return s ? { name: s.name, state: s.state } : undefined
   }, hostMailbox),
-  legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
   projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
   untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
   // A session's turn on a chain, from the turn records while the session is in a turn: the session Mark done and Drop tell, though they stop nothing (C12)

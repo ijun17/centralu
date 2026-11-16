@@ -1,7 +1,8 @@
 /**
  * Step 74 (#2258 item 1, docs/plans/mailbox.md M7, M8): the task rows become the one record of owed work. What a build before v70 kept beside
  * them (requests held for a busy session, report marks, delegated turns, whose a turn is) becomes mail once and goes, and the store's floor
- * goes to 70: the builds of v70 on (beta.58 on) write none of it but the marks they leave as they go, which this build deletes at every start.
+ * goes to 70: the builds of v70 on (beta.58 on) write none of it but the marks they leave as they go, which stay in a table no build reads after this
+ * step: store step v75 raises the store's floor to v74, and a later step drops the table.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -10,13 +11,14 @@ import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { Store, StoreTooNewError } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
 
-const LATEST = new Store().latestKnownVersion
+/** The step these tests are about: a later step is its own file's to check */
+const STEP = 74
 const HOST = 'hub-0000abcd'
 const at = (id: string) => sessionAddress(HOST, id)
 const ADOPTED = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
 
 /** The newest step the next store knows */
-let newest = LATEST
+let newest = STEP
 
 /** The store as the build of `newest` opens it */
 class Build extends Store {
@@ -34,7 +36,7 @@ function open(version: number, file: string): Build {
   try {
     return new Build(file)
   } finally {
-    newest = LATEST
+    newest = STEP
   }
 }
 
@@ -113,7 +115,7 @@ function v69Store(): string {
 describe('step 74: one record of owed work (#2258)', () => {
   it("turns a v69 build's held requests and task-less marks into tasks, then deletes every old row", () => {
     const file = v69Store()
-    const s = open(LATEST, file)
+    const s = open(STEP, file)
     try {
       const tasks = s.raw
         .prepare(`SELECT m.sender, r.recipient, m.body, m.origin, m.sender_project AS project, r.delivered_at AS delivered, r.read_at AS readAt, r.due_at - m.created_at AS dueIn FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.kind = 'task' ORDER BY m.id`)
@@ -144,7 +146,7 @@ describe('step 74: one record of owed work (#2258)', () => {
     } finally {
       s.close()
     }
-    const again = new Store(file)
+    const again = open(STEP, file)
     try {
       expect(again.migrationsRun).toBe(0)
     } finally {
@@ -157,7 +159,7 @@ describe('step 74: one record of owed work (#2258)', () => {
     as(69, file, (db) => {
       db.exec(`DELETE FROM mail_recipients; DELETE FROM mail; DELETE FROM queued_requests; DELETE FROM report_marks WHERE session_id <> 'w'; DELETE FROM app_settings WHERE key = 'hub.selfId'`)
     })
-    const s = open(LATEST, file)
+    const s = open(STEP, file)
     try {
       const host = setting(s.raw, 'hub.selfId')
       expect(host).toMatch(/^hub-[0-9a-f]{8}$/)
@@ -169,8 +171,8 @@ describe('step 74: one record of owed work (#2258)', () => {
 
   it('raises the floor to 70: the builds of v70 and v72 open the store, the build of v69 is refused and changes nothing', () => {
     const file = v69Store()
-    new Store(file).close()
-    expect(as(LATEST, file, (db) => setting(db, 'min_reader_version'))).toBe('70')
+    open(STEP, file).close()
+    expect(as(STEP, file, (db) => setting(db, 'min_reader_version'))).toBe('70')
     for (const version of [70, 72]) {
       const older = open(version, file)
       expect(older.migrationsRun).toBe(0)
@@ -178,21 +180,6 @@ describe('step 74: one record of owed work (#2258)', () => {
     }
     expect(() => open(69, file)).toThrow(StoreTooNewError)
     expect(() => open(69, file)).toThrow(/can be read from store version 70 on; this Centralu knows store versions up to 69/)
-    as(LATEST, file, (db) => expect([db.pragma('user_version', { simple: true }), setting(db, 'min_reader_version')]).toEqual([LATEST, '70']))
-  })
-
-  it('forward and back with a build of v70 to v73: the table it still writes its marks to stays, and the marks are deleted unread', () => {
-    const file = v69Store()
-    new Store(file).close()
-    // The v72 build serves the store and leaves a mark for w, in a turn as it goes: the table it writes is still there
-    as(72, file, (db) => db.prepare(`INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES ('w', 'a', 9)`).run())
-    const s = open(LATEST, file)
-    try {
-      const before = count(s.raw, 'mail')
-      s.children.dropReportMarks()
-      expect([count(s.raw, 'report_marks'), count(s.raw, 'mail')]).toEqual([0, before])
-    } finally {
-      s.close()
-    }
+    as(STEP, file, (db) => expect([db.pragma('user_version', { simple: true }), setting(db, 'min_reader_version')]).toEqual([STEP, '70']))
   })
 })

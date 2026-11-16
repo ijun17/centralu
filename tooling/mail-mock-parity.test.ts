@@ -46,7 +46,6 @@ function hostDriver(): Driver {
   stops.push(w.stop)
   const person = new MailPerson(w.service, w.store.mailbox, w.delivery, {
     session: (id) => ({ name: id, state: 'idle' }),
-    legacyChain: (threadId) => w.store.legacyChain(threadId, undefined, 100),
     projectLabel: (projectId) => w.reach.projectLabel(projectId),
     untrusted: (projectId) => w.reach.untrusted(projectId),
     turnOn: () => undefined,

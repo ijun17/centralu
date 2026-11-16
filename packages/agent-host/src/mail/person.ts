@@ -1,5 +1,4 @@
 import { errorMessage, mailAsk, plainLine, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailTaskRow, type MailThreadRow, type MailThreadView } from '@cc/protocol'
-import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
@@ -11,8 +10,6 @@ import { REFUSAL_TEXT, refuse, refuseAcross } from './rules.js'
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
 export type PersonHost = {
   session(sessionId: string): { name: string; state: string | null } | undefined
-  /** The last messages of an old thread, read-only: the history of a message moved from it (§6.3, `Store.legacyChain`) */
-  legacyChain(threadId: string): MessageRow[]
   /** A project's name as the person knows it (`MailReach.projectLabel`) */
   projectLabel(projectId: string): string
   /** Whether the project is not trusted (`MailReach.untrusted`, §7.2) */
@@ -183,14 +180,11 @@ export class MailPerson {
     if (!lookIn) this.readFor(page)
     const first = page[0]?.seq
     const last = page.at(-1)?.seq
-    const legacy = this.legacyOf(all[0]?.m)
-    const fromStart = first === undefined || first === all[0]?.seq
-    const messages = [...(fromStart ? legacy : []).map((m, i) => legacyMessage(m, i - legacy.length + 1, (a) => this.party(a))), ...page.map((s) => this.message(s))]
     return {
       thread: this.row(root, this.heldIn(root)) ?? this.lookInRow(root),
       parties: this.partiesOf(all.map((s) => s.m)),
       blockers: [],
-      messages,
+      messages: page.map((s) => this.message(s)),
       more: last !== undefined && all.some((s) => s.seq > last),
       older: first !== undefined && all.some((s) => s.seq < first),
       follows: [],
@@ -475,18 +469,6 @@ export class MailPerson {
     return this.records.recipients(m.id).some((r) => r.recipient === PERSON || isPersonHold(r.held))
   }
 
-  /** An old thread's messages before the first one moved from it: the chain's history, read-only (§6.3) */
-  private legacyOf(first: MailRow | undefined): MessageRow[] {
-    if (!first?.legacyThread) return []
-    const moved = new Set(this.records.byRoot(first.rootId, { limit: CHAIN_CAP }).map((m) => m.id))
-    const earlier: MessageRow[] = []
-    for (const m of this.host.legacyChain(first.legacyThread)) {
-      if (m.id === first.id || moved.has(m.id)) break
-      earlier.push(m)
-    }
-    return earlier
-  }
-
   private heldIn(root: string): number {
     return this.records.heldRows().filter((r) => this.records.message(r.messageId)?.rootId === root).length
   }
@@ -692,11 +674,6 @@ function taskState(m: MailRow, r: RecipientRow, on: { closed: boolean; here: boo
  */
 function hasTask(m: MailRow, r: RecipientRow): boolean {
   return m.kind === 'task' && parseAddress(r.recipient)?.kind === 'session' && r.settled === null && r.releasedAt === null
-}
-
-/** An old thread's message, numbered before the chain's first (0, -1, …): history the window shows above it */
-function legacyMessage(m: MessageRow, seq: number, party: (address: string) => MailParty): MailMessage {
-  return { id: m.id, seq, sender: party(m.sender), kind: m.kind, urgent: m.urgent, body: m.body, facts: { ...m.facts }, createdAt: m.createdAt }
 }
 
 function isPersonHold(held: string | null): boolean {

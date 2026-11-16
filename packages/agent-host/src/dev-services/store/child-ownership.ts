@@ -5,14 +5,6 @@ import { parseJson } from './json.js'
 export class ChildOwnershipRecords {
   constructor(private readonly db: Database.Database) {}
 
-  /**
-   * The report marks a build of v70 to v73 leaves as it goes (`report_marks`, #646), deleted unread at every start: this build owes nothing by
-   * them (docs/plans/mailbox.md §10.6.3), and that build, after a rollback, would make a task of one this build's tasks have since settled
-   */
-  dropReportMarks(): void {
-    this.db.prepare(`DELETE FROM report_marks`).run()
-  }
-
   // ── start_agent requests waiting for the person (#673) — see migration v50 ──
 
   listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {

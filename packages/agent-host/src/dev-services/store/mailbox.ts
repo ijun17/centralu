@@ -5,7 +5,7 @@ import { isObj } from '../../json-value.js'
 import { parseAddress } from '../../mail/address.js'
 import { parseJson } from './json.js'
 import { MailFacts, RELEASE_WHY, type ReleaseWhy } from './mail-facts.js'
-import { oneRow, updateRecipientRows } from './rows.js'
+import { oneRow } from './rows.js'
 
 /*
  * Mail without threads (#1684, docs/plans/mailbox.md §5, §6, store step v65): messages addressed to parties, and each
@@ -191,7 +191,7 @@ const ROLE_VIAS = `(${ROLE_VIA_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
 export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as const
-/** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
+/** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...` */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
@@ -1274,9 +1274,14 @@ export class MailboxRecords {
     )
   }
 
-  /** `UPDATE ... SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <ids>`; returns the rows changed */
+  /**
+   * `UPDATE mail_recipients SET <set> WHERE recipient = ? [AND <also>] AND message_id IN <ids>`, the ids passed as one JSON parameter read with
+   * `json_each`; `setArgs` fill the `?` of `set`. Returns the rows changed
+   */
   private update(set: string, setArgs: readonly (string | number | null)[], recipient: string, ids: readonly string[], also?: string): number {
-    return updateRecipientRows(this.db, 'mail_recipients', set, setArgs, recipient, ids, also)
+    return this.db
+      .prepare(`UPDATE mail_recipients SET ${set} WHERE recipient = ?${also ? ` AND ${also}` : ''} AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(...setArgs, recipient, JSON.stringify(ids)).changes
   }
 
   private count(sql: string, ...args: unknown[]): number {
