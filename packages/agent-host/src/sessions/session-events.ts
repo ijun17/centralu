@@ -133,6 +133,8 @@ export class SessionEvents {
     }
     // A turn the provider ended because its servers are at capacity is not ended yet: a retry is waited for (#1693, turn-continue.ts)
     if (e.type === 'error') e = this.host.turnContinue.hold(e)
+    // A process an update's wake resumed ends a turn of its own before the note's (#2312): not the continued turn's end, nor any turn's
+    if (this.host.turnContinue.holdsOwnEnd(e)) return
     if (e.sessionId) this.host.turnContinue.observe(e)
     const unborn = e.sessionId && !this.host.meta.has(e.sessionId) ? this.host.record.unborn.get(e.sessionId) : undefined
     if (unborn) {

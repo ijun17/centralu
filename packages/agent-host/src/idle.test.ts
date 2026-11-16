@@ -38,8 +38,6 @@ describe('activityCounts (host.activity, for the "Update <machine>" prompt)', ()
     }
     // Background work alone is no turn to continue; a session waking (no process yet) is in one all the same
     expect(cutTurns(s)).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'e' }])
-    // A woken turn not answered yet (#1913): listed `woken` when it reads at rest, as any other when it is in its turn
-    expect(cutTurns(s, ['a', 'd'])).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'e' }, { id: 'd', woken: true }])
   })
 
   it('counts a question as a question though it blocks the session as an approval does (#428)', () => {

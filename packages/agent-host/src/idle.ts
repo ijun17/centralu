@@ -108,7 +108,7 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
 /**
  * Whether stopping the host now ends this session's turn (#1618): it is in a turn, working or waiting on an approval or a
  * question. The next host's start finds it so with no process and resets it (`SessionManager`'s start). Background work alone
- * is not a turn: nothing continues it, so it is not listed. What a stop lists is `cutTurns`: these, and the woken turns besides
+ * is not a turn: nothing continues it, so it is not listed. What a stop lists is `cutTurns`
  */
 export function turnCut(s: IdleActivity): boolean {
   return inTurn(s.state)
@@ -116,13 +116,12 @@ export function turnCut(s: IdleActivity): boolean {
 
 /**
  * The turns stopping the host now ends, the one definition of what an update's stop lists for the next host (#1618): the sessions in a turn
- * (`turnCut`), and `woken`, the cut turns an update's start continued that have not answered yet (`TurnContinue.unanswered`, #1913). A resumed
- * process ends a turn of its own before the note's request, so one of those can read at rest: it is listed `woken`, the one entry the next start
- * takes up at rest. Not any other session at rest: a Stop writes no row, so a mark alone cannot tell the person's Stop from a woken turn's gap
+ * (`turnCut`). A woken turn that has not answered yet (`TurnContinue.unanswered`, #1913) is among them: the turn end its resumed process says of
+ * its own is held (`TurnContinue.holdsOwnEnd`, #2312), so it stays in its turn. It used to read at rest then and was listed apart, `woken`, which
+ * the next start still reads in a list an older build wrote (`UpdateResumeLists.cut`)
  */
-export function cutTurns(s: ActivitySnapshot, woken: readonly string[] = []): { id: string; woken?: true }[] {
-  const inTurnNow = s.sessions.flatMap((x) => (x.id !== undefined && turnCut(x) ? [{ id: x.id }] : []))
-  return [...inTurnNow, ...woken.filter((id) => !inTurnNow.some((t) => t.id === id)).map((id) => ({ id, woken: true as const }))]
+export function cutTurns(s: ActivitySnapshot): { id: string }[] {
+  return s.sessions.flatMap((x) => (x.id !== undefined && turnCut(x) ? [{ id: x.id }] : []))
 }
 
 /**

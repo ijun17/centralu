@@ -128,9 +128,11 @@ function engine(n: number) {
   const meta = new Map<string, SessionInfo>()
   const sent: string[] = []
   const steps: string[] = []
+  /** The events the engine said of a session, as if its tool had */
+  const notes: NormalizedEvent[] = []
   const engine = new TurnContinue({
     meta, leaving: () => false, compactTurn: () => false, running: () => true, settings: () => ({ network: true, limit: true }), reachable: async () => true,
-    note: () => {}, changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
+    note: (e) => void notes.push(e), changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
     send: async (id, _note, gate) => {
       sent.push(id)
       if (gate.live()) gate.handed()
@@ -139,7 +141,7 @@ function engine(n: number) {
   const ids = Array.from({ length: n }, (_, i) => `s${i}`)
   for (const id of ids) meta.set(id, { id, state: 'idle' } as SessionInfo)
   engine.wakeAfterUpdate(ids.map((sessionId) => ({ sessionId, turn: false, stopped: null })))
-  return { engine, meta, sent, steps, ids }
+  return { engine, meta, sent, steps, ids, notes }
 }
 
 // Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264 review)
@@ -177,15 +179,53 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     await eventually(() => all.every((id) => (b.adapter.handles.get(id)?.sent.length ?? 0) === 1))
   })
 
-  it("keeps the slot over a resumed process's own turn end with no request: the burst is the note's request (engine)", async () => {
+  it("holds a resumed process's own turn end with no request and keeps the slot: the burst is the note's request (engine)", async () => {
     const e = engine(UPDATE_WAKES_AT_ONCE + 1)
     await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
-    // Claude Code ends a turn of its own right after a resume, before the note's request (measured): not the wake's answer
-    e.engine.observe({ type: 'turn_complete', sessionId: 's0' })
+    // Claude Code ends a turn of its own right after a resume, before the note's request (measured): held, no end of any turn (#2312)
+    expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
     expect(e.sent).toHaveLength(UPDATE_WAKES_AT_ONCE)
     // Its first answer is
     e.engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
     expect(e.sent).toEqual(e.ids)
+  })
+
+  it("holds only the first turn end: a second one with no answer is the turn's end, and frees the slot (engine, #2312)", async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE + 1)
+    await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
+    const end = { type: 'turn_complete' as const, sessionId: 's0' }
+    expect(e.engine.holdsOwnEnd(end)).toBe(true)
+    expect(e.engine.holdsOwnEnd(end)).toBe(false)
+    e.engine.observe(end)
+    expect(e.sent).toEqual(e.ids)
+  })
+
+  it("holds no turn end after an answer: the wake is over, and that end is the turn's (engine, #2312)", async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE)
+    await eventually(() => e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
+    e.engine.observe({ type: 'message_delta', sessionId: 's0', role: 'assistant', text: 'on it' })
+    expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
+  })
+
+  it('says the held turn end once the slot runs out with nothing run, the session still in its turn: none is left working (engine, #2312)', async () => {
+    vi.useFakeTimers()
+    try {
+      const e = engine(3)
+      await vi.advanceTimersByTimeAsync(0)
+      // s0 held its process's own end and ran nothing more; s1 held one but went to rest meanwhile; s2 held none
+      e.meta.set('s0', { ...e.meta.get('s0')!, state: 'working' })
+      e.meta.set('s2', { ...e.meta.get('s2')!, state: 'working' })
+      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(true)
+      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's1' })).toBe(true)
+      await vi.advanceTimersByTimeAsync(UPDATE_SLOT_MS - 1)
+      expect(e.notes).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(e.notes).toEqual([{ type: 'turn_complete', sessionId: 's0' }])
+      // Said once: the wake is over, so that end is not held again
+      expect(e.engine.holdsOwnEnd({ type: 'turn_complete', sessionId: 's0' })).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('counts the slots again when a wake ends at once inside the pump: a session gone first does not let a fourth in (engine)', async () => {
@@ -254,15 +294,17 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     const { store, folder, ids, all } = await updated(1, 1)
     const b = host(store, folder)
     await eventually(() => waking(b, new Set()).length === 2)
-    // The resumed process ends a turn of its own before the note's request (measured): the session reads at rest, its list entry gone
+    // The resumed process ends a turn of its own before the note's request (measured): held (#2312), so the session stays in its turn
     for (const h of waking(b, new Set())) h.finish()
-    await eventually(() => all.every((id) => b.session(id).state !== 'working'))
+    expect(all.map((id) => b.session(id).state)).toEqual(['working', 'working'])
     b.mgr.tenure.stopForUpdate()
     await b.mgr.tenure.disposeAll()
     const c = host(store, folder)
     await eventually(() => all.every((id) => c.adapter.handles.get(id)?.sent.length === 1))
     expect(c.adapter.handles.get(ids.cut[0]!)!.sent[0]).toContain('was updated while your turn was running')
-    expect(c.adapter.handles.get(ids.idle[0]!)!.sent[0]).toContain('the update stopped the background work')
+    // The one woken for its note alone was in the note's turn when the second update cut it: continued as a turn, what the first stopped still told
+    expect(c.adapter.handles.get(ids.idle[0]!)!.sent[0]).toContain('was updated while your turn was running')
+    expect(c.adapter.handles.get(ids.idle[0]!)!.sent[0]).toContain('The update stopped these background tasks')
     for (const id of all) c.adapter.handles.get(id)!.answer()
     await eventually(() => folder.files.size === 0)
     for (const id of all) expect(c.adapter.handles.get(id)!.sent).toHaveLength(1)
