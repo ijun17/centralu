@@ -444,6 +444,20 @@ describe('step 75: the last move of thread mail', () => {
     expect([s.mailbox.recipient(earlier, S1)?.held, s.mailbox.recipient(now, S1)?.held]).toEqual(['policy', 'dismissed'])
   })
 
+  it('a row already there beside a receipt not handled is not the step’s: its hold stays, and its receipt is handled', () => {
+    const s = v64()
+    thread(s.raw, WORK, { owner: S3 })
+    const there = post(s.raw, 'm_there', { thread: WORK, sender: S3, kind: 'note', to: [S1] })
+    s.upgrade(74)
+    // No build leaves this (its move wrote both sides at once): the copy is written and held, the receipt still pending
+    s.raw.prepare(`INSERT INTO mail (id, sender, sender_project, kind, needs_reply, root_id, body, origin, legacy_thread, created_at) VALUES (?, ?, 'p1', 'message', 0, ?, 'note', 'mail', ?, ?)`).run(there, S3, there, WORK, AT)
+    s.raw.prepare(`INSERT INTO mail_recipients (message_id, recipient, due_at, held, settled, settled_at) VALUES (?, ?, ?, 'policy', 'legacy', ?)`).run(there, S1, AT, AT)
+    s.upgrade()
+    // The step's insert is ignored, so the row is none it wrote: judged, a note within one project would be dismissed
+    expect(moved(s.raw)).toEqual([expect.objectContaining({ message_id: there, held: 'policy' })])
+    expect(receipts(s.raw)).toEqual([expect.objectContaining({ message_id: there, handled_at: NOW })])
+  })
+
   it('a step that fails midway leaves both sides as they were, and the next start moves everything', () => {
     const s = v64()
     fixture(s.raw)
@@ -503,11 +517,12 @@ describe('step 75 and the builds before it', () => {
     first.upgrade()
     const after = moved(first.raw)
     expect(after).not.toEqual([])
+    // A receipt the step would move if it ran again (nothing writes one): S3's of the note, handled before the step, pending now
+    receipt(first.raw, `${HOST}.m_0n`, S3, 'handled_at = NULL')
+    expect(pendingForV74(first.raw)).toHaveLength(1)
     first.close()
     const again = open(STEP, path)
     stores.push(again)
-    // A receipt that looks pending now (nothing writes one) is not moved by a start
-    again.raw.prepare(`UPDATE mail_receipts SET handled_at = NULL WHERE message_id = ?`).run(`${HOST}.m_old`)
     expect([again.migrationsRun, moved(again.raw)]).toEqual([0, after])
   })
 })
