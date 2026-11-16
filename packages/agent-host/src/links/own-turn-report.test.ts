@@ -3,6 +3,8 @@ import { OWN_WORK_SETTLE_MS } from '../sessions/child-ownership.js'
 import { sessionAddress } from '../mail/address.js'
 import { cleanups, runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
+import { folder } from './links-world.test-helpers.js'
+import { namedFolder } from '../temp-dir.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -91,9 +93,10 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     await eventually(() => running(machine, 'w2') === 'waiting_input')
     machine.agent().notifyNext('w2', 'drop')
     const task = machine.mail!.service.task(at('w1'), at('w2'), { text: 'a long job', origin: 'agent_session', delivered: false })
-    // The settle's bound, and only it, is short here: the rest runs on real time
+    // The settle's bound, and only it (its call site, not every timer of that length), is short here: the rest runs on real time
     const realTimeout = globalThis.setTimeout
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => realTimeout(fn, ms === OWN_WORK_SETTLE_MS ? 500 : ms)) as typeof setTimeout)
+    const settle = (ms?: number) => ms === OWN_WORK_SETTLE_MS && (new Error().stack ?? '').includes('settleAtRest')
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => realTimeout(fn, settle(ms) ? 500 : ms)) as typeof setTimeout)
     machine.mail!.delivery.start()
     cleanups.push(() => machine.mail!.delivery.stop())
     // Its own turn ended and the input waits for good: nothing answered then
@@ -123,5 +126,24 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     machine.mgr.events.onEvent({ type: 'error', sessionId: 'w2', error: { code: 'adapter_crashed', message: 'the process exited', retryable: true } })
     await eventually(() => (machine.store.mailbox.recipient(task.id, at('w2'))?.releasedAt ?? null) !== null)
     expect(machine.store.mailbox.reportsOn(task.id)).toEqual([])
+  })
+
+  it("ends a call waiting on the turn with the input's turn, not the notification turn: ask_project", async () => {
+    const machine = await machineHost({ mail: true, sessions: ['w1'], ownTurns: true })
+    const other = await machine.mgr.projectCreation.addProject(namedFolder(folder(), 'other-project'))
+    await machine.mgr.setProjectTrusted(other.id, true)
+    machine.store.permissions.setProjectConsent(other.id, 'p-remote', 'delegate')
+    machine.store.permissions.setProjectConsent('p-remote', other.id, 'delegate')
+    const target = (await machine.mgr.createSession({ projectId: other.id, cwd: other.path, tool: 'claude', permissionPreset: 'normal' })).id
+    await machine.mgr.inputs.send(target, 'hello')
+    await eventually(() => running(machine, target) === 'waiting_input')
+    machine.agent().notifyNext(target)
+    let answered = false
+    const asking = machine.mgr.askProject('w1', { project: other.id, session: target, task: 'a long job' }).finally(() => (answered = true))
+    await eventually(() => machine.agent().ran.get(target)?.some((t) => t.includes('a long job')) === true)
+    // The notification turn ended: the call still waits, on the input's turn
+    expect(answered).toBe(false)
+    machine.agent().finish(target, 'all done')
+    expect(JSON.stringify(await asking)).toContain('all done')
   })
 })

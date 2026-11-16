@@ -269,35 +269,44 @@ export class SessionEvents {
      */
     const delegation = runOpen ? [...this.host.children.delegations.values()].find((d) => d.wait === run) : undefined
     const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
-    run?.onEvent(e)
-    if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
+    // The process went with the turn (a crash, a lost conversation): it runs none of the messages given it after. Any other error or limit leaves it, and a message it holds queued can still run (#1604)
+    const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
+    const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
+    /*
+     * A turn the tool ran on its own (it names none of the inputs given it) while an input given it still waits to run (#2318): Claude Code's turn for
+     * a background task's notification, run before the input that came with it, or its end of its own as it resumes after an update (#2312). Not the
+     * work's end: that input's turn carries the work on, and its end answers. Read as the end, it answered a task, or a call waiting on the turn, with
+     * the notification's words, and the real end found it settled
+     */
+    const ownTurn = endedTurn && e.type === 'turn_complete' && !!e.sessionId && Array.isArray(taken) && taken.length === 0 && (this.host.handles.get(e.sessionId)?.queuedInputs?.() ?? 0) > 0
+    // A call waiting on the turn reads its end from the input's turn, not this one
+    if (!ownTurn) {
+      run?.onEvent(e)
+      if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
+    }
     /*
      * Whose the turn was (#1377), read once as it ends, from the rows of what the tool says it took in: said on the event that ends
      * it, so a hub that follows this host reads it rather than guessing (`LinkedReports`). The person's own turn is reported to nobody
      */
-    // The process went with the turn (a crash, a lost conversation): it runs none of the messages given it after. Any other error or limit leaves it, and a message it holds queued can still run (#1604)
-    const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
-    const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken) : undefined
-    /*
-     * A turn the tool ran on its own (it names none of the inputs given it) while an input given it still waits to run (#2318): Claude Code's turn for
-     * a background task's notification, run before the input that came with it, or its end of its own as it resumes after an update (#2312). Not the
-     * work's end: that input's turn carries the work on, and its end answers. Read as the end, it answered a task with the notification's words, and
-     * the real end found it settled
-     */
-    const ownTurn = endedTurn && e.type === 'turn_complete' && !!e.sessionId && Array.isArray(taken) && taken.length === 0 && (this.host.handles.get(e.sessionId)?.queuedInputs?.() ?? 0) > 0
     if (ownTurn && e.sessionId) {
       console.error(`[agent-host] ${e.sessionId.slice(0, 8)}: its tool ended a turn of its own while an input waits to run: not the work's end (#2318)`)
-      // An update's cut stays the next turn's to tell (#1966); if the input never runs, the session settles at rest and answers then (`settleAtRest`)
-      if (owned?.cut) this.host.children.noteContinuedCut(e.sessionId)
+      // An update's cut stays the next turn's to tell (#1966), and the settle's if that turn never runs: then the session settles at rest and answers
+      if (owned?.cut) {
+        this.host.children.noteContinuedCut(e.sessionId)
+        this.host.reports.noteCut(e.sessionId)
+      }
       this.host.reports.settleAtRest(e.sessionId)
       this.inputWaits.add(e.sessionId)
     }
     // Its process went before the waiting input's turn began: that input's turn is lost, and the work stops as a turn's would (`ownTurn` above)
     if (processWent && !endedTurn && e.sessionId && this.inputWaits.delete(e.sessionId)) {
+      this.host.children.dropContinuedCut(e.sessionId)
+      this.host.reports.stopSettling(e.sessionId)
       this.host.reports.turnStopped(e.sessionId)
       this.host.mailStopped(e.sessionId, 'error', this.stopTold(e.sessionId, false, undefined))
     }
+    if (e.type === 'session_deleted') this.inputWaits.delete(e.sessionId)
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
@@ -374,14 +383,14 @@ export class SessionEvents {
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
   /** Who already knows of this stop: a call still waiting, which read the end itself (`told`); and the session that gave the turn or started it */
-  /** Sessions whose tool ended a turn of its own while an input waits to run, until that input's turn begins (#2318, `ownTurn`) */
-  private readonly inputWaits = new Set<string>()
-
   private stopTold(id: string, waited: boolean, caller: string | undefined): StopTold {
     const asker = caller ?? this.host.meta.get(id)?.askedBy ?? undefined
     if (!asker || !this.host.meta.has(asker)) return { starter: null }
     return { ...(waited ? { told: [asker] } : {}), starter: asker }
   }
+
+  /** Sessions whose tool ended a turn of its own while an input waits to run, until that input's turn begins (#2318, `ownTurn`) */
+  private readonly inputWaits = new Set<string>()
 
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
     const m = this.host.meta.get(e.sessionId)

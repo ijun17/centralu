@@ -81,6 +81,11 @@ export class ChildReports {
     this.answerAtRest(sessionId, true)
   }
 
+  /** An update cut the turn and Centralu continued it (#1966), and the turn's end is a later one's (#2318): the answer that follows says so */
+  noteCut(sessionId: string): void {
+    this.cutsUntold.add(sessionId)
+  }
+
   /** A turn stopped: its stop notice releases what the session owed, so a cut kept from a turn before is no later answer's to tell (#1966) */
   turnStopped(sessionId: string): void {
     this.cutsUntold.delete(sessionId)
