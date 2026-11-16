@@ -87,6 +87,12 @@ export class InputReceipts {
 
   get size(): number { return this.pending.size }
   get ids(): string[] { return [...this.pending.keys()] }
+  /** How many wait for the tool to take them: not taken by a turn, and not among `except` (the ones the turn ending now took) */
+  untaken(except: readonly string[]): number {
+    let n = 0
+    for (const [id, p] of this.pending) if (!p.accepted && !except.includes(id)) n++
+    return n
+  }
 
   /** The tool took the input (once): the observer is told before the turn is recorded */
   accept(id: string): void {

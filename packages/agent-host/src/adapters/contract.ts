@@ -354,7 +354,8 @@ export interface SessionHandle {
   nudge?(text: string): boolean | Promise<boolean>
   /**
    * How many inputs the host handed to the tool that no turn has answered yet and that are not the turn that just ended: queued behind a running turn, or
-   * written and not yet started. Asked when a turn ends, to send a note of the host's own (`compact_self`'s `then`) after them and not beside them. Absent: the tool cannot say
+   * written and not yet started. Asked when a turn ends, to send a note of the host's own (`compact_self`'s `then`) after them and not beside them, and to
+   * tell a turn the tool ran on its own while one of them waits from the work's end (#2318). Absent: the tool cannot say
    */
   queuedInputs?(): number
   /**
@@ -472,12 +473,6 @@ export interface AgentAdapter {
   readonly contextAtRequest?: boolean
   /** Whether a live session takes a `quiet` input (see `SessionHandle.send`): the mailbox sends mail that must not wake only to such a tool */
   readonly quietInput?: boolean
-  /**
-   * A process that resumed a conversation may end a turn of its own with no request before it runs its first input (#2312; Claude Code does when
-   * the stop that cut the conversation ended a background task of it): an update's wake holds that end (`TurnContinue.holdOwnEnd`), never read as
-   * the continued turn's. Absent: every turn end is the turn's
-   */
-  readonly resumeEndsOwnTurn?: boolean
   readonly capabilities: AdapterCapabilities
   /**
    * For a tool whose reported context window is the smaller of the model's and the compaction point it was started with

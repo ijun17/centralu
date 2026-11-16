@@ -7,10 +7,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  *
  *   a message containing "approve"   asks to run `echo linked`, then says "approved"/"denied"
  *   a message containing "long job"  starts a turn that does not end while its process lives, until `finish`; so does
- *                                    the Continue a long job cut by a stopped host is sent. As the first input of a resumed
- *                                    process, a Continue that says the update stopped background tasks is preceded by a turn
- *                                    end of the process's own with no request, as Claude Code's is (measured,
- *                                    sessions/turn-continue.ts `ANSWERED`)
+ *                                    the Continue a long job cut by a stopped host is sent
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
  *
@@ -43,23 +40,17 @@ class ScriptedHandle implements SessionHandle {
   private gate: (() => void) | null = null
   /** The next answer to a question is said once this resolves, not a moment later (`ScriptedAdapter.holdAnswer`) */
   private answerGate: Promise<void> | null = null
-  /** The process resumed a conversation and has taken no input yet: a Continue now first ends a turn of its own (`turn`) */
-  private resumedFresh: boolean
 
   constructor(
     readonly sessionId: string,
     private readonly emit: EventSink,
-    /** Told each input as its turn runs, after what it said at once (`ScriptedAdapter.ran`) */
-    private readonly ran: (text: string) => void,
     /** Answers inside `send` rather than a moment later, as a tool that refuses at once does */
     private readonly immediate = false,
     private readonly queueBehind = false,
     holdNext = false,
-    resumed = false,
   ) {
     this.externalId = `scripted-${sessionId}`
     this.hold = holdNext
-    this.resumedFresh = resumed
     if (queueBehind) {
       this.turnInputs = () => this.ending
       this.turnStartInputs = () => this.starting
@@ -102,15 +93,6 @@ class ScriptedHandle implements SessionHandle {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
     const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
-    const resumed = this.resumedFresh
-    this.resumedFresh = false
-    // A resumed process's own turn end before the Continue's turn, with no request, when the stop ended a background task (Claude Code 2.1.296, turn-continue.ts `ANSWERED`)
-    if (resumed && said.includes('Continue where you stopped') && said.includes('The update stopped these background tasks')) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
-    this.answer(id, said, text)
-    this.ran(said)
-  }
-
-  private answer(id: string, said: string, text: string): void {
     if (/approve/i.test(said)) {
       this.approvals.add(id)
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })
@@ -202,10 +184,6 @@ export class ScriptedAdapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
-  /** As Claude Code's: a resumed process's Continue after a stop that ended a background task is preceded by a turn end of its own (`ScriptedHandle.turn`, #2312) */
-  readonly resumeEndsOwnTurn = true
-  /** The inputs each session's turns ran, in order, once what each said at once was said */
-  readonly ran = new Map<string, string[]>()
   private readonly handles = new Map<string, ScriptedHandle>()
 
   constructor(
@@ -235,8 +213,7 @@ export class ScriptedAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     this.created.push(opts.sessionId)
-    const ran = (text: string) => this.ran.set(opts.sessionId, [...(this.ran.get(opts.sessionId) ?? []), text])
-    const handle = new ScriptedHandle(opts.sessionId, emit, ran, this.immediate, this.queueBehind, this.holdNext, !!opts.resumeExternalId)
+    const handle = new ScriptedHandle(opts.sessionId, emit, this.immediate, this.queueBehind, this.holdNext)
     this.handles.set(opts.sessionId, handle)
     return handle
   }
