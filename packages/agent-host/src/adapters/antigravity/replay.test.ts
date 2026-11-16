@@ -33,8 +33,10 @@ function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
   if (opts.signedIn !== false) fakeSignIn(temp.home)
   const { spawn, state, peers } = replaySpawner(rec)
   const sent: Record<string, unknown>[][] = []
+  const specs: Parameters<typeof spawn>[0][] = []
   const notes: number[] = []
   const spawnNoted = (spec: Parameters<typeof spawn>[0]): AgentProcess => {
+    specs.push(spec)
     const p = spawn(spec)
     sent.push(sentFrames(p))
     Object.assign(p, { noteTree: async () => void notes.push(Date.now()) })
@@ -48,7 +50,7 @@ function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
    * test's timeout (#2068, as `drive` does for the other tools)
    */
   const orMismatch = <T>(p: Promise<T>): Promise<T> => Promise.race([p, state.failed])
-  return { adapter, profile, state, peers, sent, notes, ...d, event: (pick: Parameters<typeof d.event>[0]) => orMismatch(d.event(pick)), orMismatch }
+  return { adapter, profile, state, peers, sent, specs, notes, ...d, event: (pick: Parameters<typeof d.event>[0]) => orMismatch(d.event(pick)), orMismatch }
 }
 
 /** One turn: every card answered `decide`, until the turn ends */
@@ -139,6 +141,15 @@ describe('Antigravity 1.4.3, replayed', () => {
     // Every answer is Allow once: `allow_always` (which the agent would keep as its own rule) is never sent
     const answers = frames.filter((f) => f.method === undefined).map((f) => JSON.stringify(f.result))
     expect(answers.every((a) => a.includes('"optionId":"allow"'))).toBe(true)
+  })
+
+  it("its server runs in Centralu's folder and is given the project through ACP alone, so what it writes beside itself stays out of the project (#2320)", async () => {
+    const w = world(recording('permissions'))
+    const handle = await open(w)
+    await handle.dispose()
+    expect(w.specs[0]!.cwd).toBe(w.profile.home.root)
+    const created = w.sent[0]!.find((f) => f.method === 'session/new') as { params: { cwd: string } }
+    expect(created.params.cwd).toBe('/work')
   })
 
   it('deny: a denied command ends not ok, and the turn goes on to its end', async () => {
