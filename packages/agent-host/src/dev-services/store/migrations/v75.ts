@@ -21,8 +21,9 @@ export class StepsV75 extends MigrationRange {
          * own id, its rows settled `legacy` (never awaited), and each old receipt is marked handled, delivered and read. A row to the Assistant in
          * a session's request (the old thread's assignee, the Assistant or a trashed one) is sent to the role (`via`), so the next Assistant
          * takes it; a task to a trashed session is settled `gone`. A row the person released is never held again (`releasedTo`). A hold an
-         * earlier build set stays only if today's gate would hold the mail now, as step 72 judged the rows moved before it (`endOldHolds`);
-         * only the rows this step writes are judged, since a row moved at an earlier start may be held by the delivery's own judgement.
+         * earlier build set stays only if today's gate would hold the mail now, as step 72 judged the rows moved before it (`endOldHolds`).
+         * A `policy` hold is judged on the rows this step writes only, since a row moved at an earlier start may be held by the delivery's own
+         * judgement; a `budget` hold, which no delivery sets, ends on whatever row carries it.
          *
          * **A frozen copy of the move the host ran (`movePendingThreadMail`) and of what it called, on purpose**: a step runs once on every
          * store and must not call code that may change. Only the address shape is imported (mail/address.ts), as the stored shape it is. One
@@ -32,7 +33,7 @@ export class StepsV75 extends MigrationRange {
          * **Breaks the builds of v70 to v73 (beta.58 to beta.69): the floor goes to 74.** Those builds leave a report mark for every session in
          * a turn as they go, and make a task of each mark at their next start. This build deleted the marks at every start, so that one left
          * during a rollback never became a task for work settled since; it no longer names `report_marks`, so those builds are refused instead
-         * (`StoreTooNewError`). The build of v74 (beta.70, beta.71) writes no mark, and its own move at every start finds each receipt handled:
+         * (`StoreTooNewError`). The build of v74 (beta.70 to beta.72) writes no mark, and its own move at every start finds each receipt handled:
          * it opens the store and serves it as before. The tables stay for it, unread by this build, and go in the next step.
          */
         run: () => this.moveThreadMail(),
@@ -116,6 +117,8 @@ export class StepsV75 extends MigrationRange {
         settled: kind === 'task' && to?.trashed === 1 ? 'gone' : 'legacy',
         now,
       })
+      // A row already there is not this step's to judge, and an ignored insert's `lastInsertRowid` is an earlier insert's. No build leaves
+      // one beside a receipt not handled (the move at a start wrote both sides in one transaction): a store edited by hand could
       if (row.changes === 1) moved.push(Number(row.lastInsertRowid))
       handled.run({ now, id: p.id, recipient: p.recipient })
     }

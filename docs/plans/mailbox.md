@@ -3485,7 +3485,7 @@ the final one. A swap during the pause: the final report still comes once. On Co
   `delegated_turns`, `queued_requests` and `sessions.mail_args` left live code: only migration steps name them. The
   step breaks the builds of v70 to v73 (beta.58 to beta.69), which still leave report marks as they go and make tasks
   of them at their next start: the store refuses them at start, untouched (`StoreTooNewError`). The build of v74
-  (beta.70, beta.71) writes no mark and finds every receipt handled, so it still opens the store, and the tables stay
+  (beta.70 to beta.72) writes no mark and finds every receipt handled, so it still opens the store, and the tables stay
   one step more for it.
 - **No history is copied** (item 1's 30 days): §6.3 "History" says why.
 - **Step 76, owed** (`breaksOlderReaders: true`, `minReader: 75`), is item 3's drop and the column

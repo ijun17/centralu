@@ -411,8 +411,12 @@ class OldWorkTasks {
 
 /**
  * Step 72's judgement of the holds an earlier build set (its comment says what is mirrored and what is not): every `budget` hold ends, and a
- * `policy` hold ends unless today's gate would hold the mail now. Step 72 judges the rows settled `legacy`, all of them moved by then; step 75
- * judges the rows it moves (`moved`, their rowids), whatever they are settled as, and leaves a row moved before it to the delivery that may hold it
+ * `policy` hold ends unless today's gate would hold the mail now.
+ *
+ * Which rows: a `policy` hold is judged by step 72 on the rows settled `legacy`, all of them moved by then, and by step 75 on the rows it moves
+ * (`moved`, their rowids), whatever they are settled as: a row moved before step 75 is left to the delivery that may hold it. A `budget` hold
+ * ends on every row at both steps: the delivery never sets the word (the token guard that did is gone), so a row that carries it, moved by
+ * the step or before it, holds nothing the delivery judged
  */
 export function endOldHolds(db: Database.Database, moved?: readonly number[]): void {
   db.prepare(
