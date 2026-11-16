@@ -44,6 +44,8 @@
    Antigravity's are made by `scripts/frames-record.mts antigravity` against the installed `agy acp` (a data folder, `--gemini-dir`
    and home of its own, with a copy of the sign-in token alone), and a version the adapter does not yet pin is kept beside the pinned
    one ([plans/antigravity-acp.md](../../plans/antigravity-acp.md) §10.1).
+   A recording run fails when the tool leaves a folder in its working folder that the scenario did not seed (#2320): scenarios
+   ask for files only, so such a folder is the tool writing its own files into the person's project.
    A scenario
    that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
    tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.

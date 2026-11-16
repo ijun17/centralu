@@ -96,13 +96,14 @@ async function main(): Promise<number> {
       const sessionId = `record-${scenario.name}`
       let bridge: BridgeHost | null = null
       const outside: string[] = []
+      const seeded: string[] = []
       try {
         const run: { preset?: string } = runAs(tool, scenario.drive)
         // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
         const given = ACP_TOOLS.includes(tool) ? scenario.drive.session?.() : undefined
         if (given?.centraluTools) bridge = await startBridgeHost(given.centraluTools, given.toolProfile ?? 'reader')
         const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { centraluBridge: { url: bridge.url, token: bridge.token } } : {}) }
-        const events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
+        const events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => (seeded.push(...Object.keys(files)), outside.push(...seedFiles(cwd, files))), tool, session })
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
@@ -113,6 +114,8 @@ async function main(): Promise<number> {
         const header = { header: { tool, version, model: modelOf(tool), scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
         writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...bridgeAsPlaceholders(scrub(frames, cwd))].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] ${tool} ${scenario.name}: ${frames.length} frames, ${events.length} events -> ${dir}`)
+        const left = foldersLeft(cwd, seeded)
+        if (left.length > 0) throw new Error(`the tool left folders in the working folder that the scenario did not ask for: ${left.join(', ')} (#2320; the recording is kept)`)
       } catch (e) {
         failed++
         console.error(`[record] ${tool} ${scenario.name}: ${(e as Error).message}`)
@@ -193,6 +196,15 @@ function seedFiles(cwd: string, files: Record<string, string | Buffer>): string[
     if (name.startsWith('..')) outside.push(dirname(join(cwd, name)))
   }
   return outside
+}
+
+/**
+ * Folders a run left in its working folder that the scenario did not seed (#2320: Antigravity's built-in skills as
+ * `skills/system/`). Scenarios ask for files only, so a folder there is the tool writing its own files into the person's project
+ */
+function foldersLeft(cwd: string, seeded: string[]): string[] {
+  const asked = new Set(seeded.map((name) => name.split(/[\\/]/)[0]))
+  return readdirSync(cwd, { withFileTypes: true }).flatMap((e) => (e.isDirectory() && !asked.has(e.name) ? [e.name] : []))
 }
 
 function adapterFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): AgentAdapter {

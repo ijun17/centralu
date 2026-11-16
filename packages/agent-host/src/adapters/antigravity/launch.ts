@@ -15,7 +15,13 @@ export function agyEnv(home: AgyHome, browser: string): Record<string, string> {
   return { GEMINI_HOME: home.geminiHome, BROWSER: browser }
 }
 
-/** How the installed server starts: the registry's command and arguments, in its own folder's isolation */
-export function agyLaunch(home: AgyHome, archive: AgyArchive, browser: string): { command: string; args: string[]; env: Record<string, string> } {
-  return { command: agyProgram(home, archive), args: [...archive.args], env: agyEnv(home, browser) }
+/**
+ * How the installed server starts: the registry's command and arguments, in its own folder's isolation, and in Centralu's
+ * folder for it (`home.root`) for every process, a session's too. A session's project is given only through ACP
+ * (`session/new`, `session/load`, `session/list` carry `cwd`), which is where the agent reads, edits and runs commands;
+ * whatever the server writes relative to its own directory lands in Centralu's folder, never the person's (#2320: its
+ * built-in skills were left as `skills/system/` in a project it ran in)
+ */
+export function agyLaunch(home: AgyHome, archive: AgyArchive, browser: string): { command: string; args: string[]; cwd: string; env: Record<string, string> } {
+  return { command: agyProgram(home, archive), args: [...archive.args], cwd: home.root, env: agyEnv(home, browser) }
 }

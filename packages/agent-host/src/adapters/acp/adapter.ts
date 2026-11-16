@@ -52,7 +52,7 @@ export abstract class AcpAdapter implements AgentAdapter {
     const label = this.profile.descriptor.label
     const launch = await this.profile.launch(opts)
     if (!launch) throw toolNotInstalled(label, this.profile.descriptor.install)
-    const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
+    const spec = { command: launch.command, args: launch.args, cwd: launch.cwd ?? opts.cwd, env: { ...process.env, ...launch.env } }
     const source = opts.processSource
     const shape = this.profile.shape
     // The sign-in watch the launch made goes with a start that fails before the session owns it
