@@ -5,6 +5,7 @@ import { RemoteClient } from './remote-client.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { PERSON, sessionAddress } from '../mail/address.js'
 import { MailAcross } from '../mail/across.js'
+import { MAILBOX_RETENTION } from '../dev-services/store/mailbox.js'
 import type { AcrossPeers } from '../mail/across-core.js'
 import { HOST, W, addr, world } from '../mail/messages.test-helpers.js'
 import { mailReach } from '../mail/reach.js'
@@ -458,6 +459,111 @@ describe('a report on a task across, while its hub is away (#1948 step 6)', () =
     const told = () => machine.store.mailbox.unreadFor(PERSON).map((p) => p.message).filter((m) => m.facts.uncrossed)
     await eventually(() => told().length === 1)
     expect(told()[0]!.body).toBe('[Centralu] w1 finished work that h1 on Hub mac gave it, but Hub mac is no longer linked to this computer, so its report cannot be delivered. The answer is in w1.')
+  })
+})
+
+const DAY = 24 * 60 * 60 * 1000
+
+describe('a task whose answer was lost (#2289)', () => {
+  /** Tasks the machine never writes: their `host.mail` is held there, and the link drops under them, so the hub's answers are lost and the copies kept */
+  async function lostTasks(n = 1) {
+    const r = await rig()
+    let release = () => {}
+    r.machine.holdMethod('host.mail', new Promise<void>((resolve) => (release = resolve)))
+    cleanups.push(() => release())
+    const sending = Array.from({ length: n }, (_, i) => r.across.sendTask('h1', at(r.hub, 'm1.w1'), `review branch ${i}`, { origin: 'start_agent' }))
+    const tasks = () => r.hub.store.mailbox.feedOf(at(r.hub, 'h1'), { limit: 50 }).filter((m) => m.kind === 'task')
+    await eventually(() => tasks().length === n)
+    const ids = tasks().map((m) => m.id).sort()
+    // A send under way is not asked about: the machine may be writing it now
+    expect(r.across.openTasksTo('m1')).toEqual([])
+    await r.hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    for (const s of await Promise.all(sending)) expect(s).toMatchObject({ ok: false, why: 'link_down' })
+    expect(r.across.openTasksTo('m1').sort()).toEqual(ids)
+    return { ...r, ids, id: ids[0]! }
+  }
+  const told = (hub: Awaited<ReturnType<typeof rig>>['hub']) => hub.store.mailbox.feedOf(at(hub, 'h1'), { limit: 20 }).filter((m) => m.facts.notArrived !== undefined)
+
+  it('is deleted at the next connect when the machine never got it, and its sender told once', async () => {
+    const { machine, hub, id } = await lostTasks()
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.store.mailbox.message(id) === undefined)
+    expect(machine.store.mailbox.message(id)).toBeUndefined()
+    expect(told(hub)).toHaveLength(1)
+    expect(told(hub)[0]).toMatchObject({
+      body: '[Centralu] Your task to w1 on Remote box did not arrive: the link failed while it was being sent, and nobody is working on it. Give it again if it is still needed.',
+      facts: { notArrived: { messages: [id] } },
+    })
+    // Once: the next connect asks about it no more
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.links.get('m1')?.takesTasks === true)
+    expect(told(hub)).toHaveLength(1)
+  })
+
+  it('several lost at once are told to their sender in one notice', async () => {
+    const { hub, ids } = await lostTasks(3)
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => ids.every((id) => hub.store.mailbox.message(id) === undefined))
+    expect(told(hub)).toHaveLength(1)
+    expect(told(hub)[0]!.facts).toMatchObject({ notArrived: { messages: expect.arrayContaining(ids) } })
+    expect(told(hub)[0]!.body).toMatch(/^\[Centralu\] 3 of your tasks did not arrive: \S+ to w1 on Remote box, \S+ to w1 on Remote box, \S+ to w1 on Remote box\. The link failed while they were being sent, and nobody is working on them\. Give them again if they are still needed\.$/)
+    for (const id of ids) expect(told(hub)[0]!.body).toContain(id)
+  })
+
+  it('names ten of them in that notice and counts the rest', async () => {
+    const { hub, ids } = await lostTasks(11)
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => told(hub).length === 1)
+    const body = told(hub)[0]!.body
+    expect(body).toMatch(/^\[Centralu\] 11 of your tasks did not arrive: .*, and 1 more\. The link failed/)
+    expect(ids.filter((id) => body.includes(id))).toHaveLength(10)
+  })
+
+  it('is kept when the machine has it: only the tasks it lacks are settled', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    expect(across.openTasksTo('m1')).toEqual([id])
+    let offers = 0
+    const there = machine.mail!.across
+    const offer = vi.spyOn(there, 'lacking').mockImplementation((hubId, ids) => (offers++, MailAcross.prototype.lacking.call(there, hubId, ids)))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => offers === 1 && hub.links.get('m1')?.takesTasks === true)
+    expect(offer).toHaveBeenCalledWith(hub.id, [id])
+    expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
+    expect(told(hub)).toEqual([])
+  })
+
+  it('is asked about only while the machine would still keep it settled: an older copy it swept would read as never arrived', async () => {
+    const { hub, across, id } = await lostTasks()
+    const asked = vi.spyOn(hub.store.mailbox, 'openTasksToward')
+    expect(across.openTasksTo('m1')).toEqual([id])
+    const since = asked.mock.calls[0]![1]
+    expect(Math.abs(since - (Date.now() - MAILBOX_RETENTION.settledMs + DAY))).toBeLessThan(60_000)
+    // A copy from before `since` is not listed
+    expect(hub.store.mailbox.openTasksToward(at(hub, 'm1.'), Date.now() + 1000, 500)).toEqual([])
+  })
+
+  it('that lands on the machine after it said the task never arrived is refused there, and nothing is written', async () => {
+    const { machine, hub, id } = await lostTasks()
+    const there = machine.mail!.across
+    expect(there.lacking(hub.id, [id])).toEqual([id])
+    // The same send, late, on a link the hub already counted as dead
+    const late = there.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, 'h1'), name: 'h1 on Hub mac', to: 'w1', text: 'review the branch', id, task: { origin: 'start_agent' } })
+    expect(late).toMatchObject({ ok: false, why: 'not_allowed' })
+    expect(machine.store.mailbox.message(id)).toBeUndefined()
+  })
+
+  it("is answered only to the hub whose id it is: another hub's offer names nothing and has no task of this hub refused", async () => {
+    const { machine, hub, id } = await lostTasks()
+    const there = machine.mail!.across
+    expect(there.lacking('hub-0000000c', [id])).toEqual([])
+    // The hub's task, coming late, is written: no other hub's offer counted it as never arrived
+    const late = there.fromHub({ id: hub.id, name: hub.name }, { from: at(hub, 'h1'), name: 'h1 on Hub mac', to: 'w1', text: 'review the branch', id, task: { origin: 'start_agent' } })
+    expect(late).toMatchObject({ ok: true, messageId: id })
+    expect(machine.store.mailbox.message(id)).toMatchObject({ kind: 'task' })
   })
 })
 

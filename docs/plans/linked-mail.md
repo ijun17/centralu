@@ -374,7 +374,22 @@ words into the machine's session (`host.send`) and followed its turns over the l
   hub's copy is a task too, so receipts, a withdrawal and a reply go as for any message that crossed. Unlike other mail
   (§6) it is written before the task leaves, so the report finds it whenever it comes, after a restart of the hub too, when
   nothing of the send is remembered; the machine's refusal deletes it, and a send whose answer was lost keeps it, as the task
-  it may be. A machine not connected is not sent to, and nothing is written.
+  it may be. At every connect the hub's offer lists its open tasks there (`open`, oldest first, at most 500; the rest are
+  asked at a later connect), leaving out any whose send is under way, and the machine answers those it never received
+  (`lacks`, #2289). The hub deletes each such copy, as a refusal does, and tells each sender in one notice, woken once as for
+  a stop: `Your task to <name> on <machine> did not arrive: the link failed while it was being sent, and nobody is working on
+  it. Give it again if it is still needed.`, or for several `<n> of your tasks did not arrive: <id> to <name> on <machine>, …`
+  (ten named, the rest counted). Only copies younger than what a machine keeps a settled task (`MAILBOX_RETENTION.settledMs`,
+  less a day for clocks that differ) are listed: a task the machine had, settled and swept has no record there and would
+  read as never arrived. The machine answers only ids its offering hub minted (`<hub id>.m_…`), so another hub that links it
+  learns nothing of what it stores and cannot have this hub's task refused; it remembers, per hub, what it said it lacks and
+  refuses such a task from that hub that comes later (a send on a link the hub already counted as dead can still land): in
+  memory, since no connection outlives the process. One case reads wrongly: a session sent to the trash releases its open
+  tasks `gone` ([mailbox.md](mailbox.md) §10.6.1) and the release crosses as a receipt (§6); if the trash is emptied
+  before that release reached the hub, the machine keeps no record of the task, so the hub tells its sender it did not
+  arrive. Nobody works on it either way, and giving it again is still the
+  remedy; the machine does not keep a record of every purged task to tell the two apart. A machine from before it answers
+  no `lacks`, and the hub keeps every copy, as before. A machine not connected is not sent to, and nothing is written.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
   included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
   `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,

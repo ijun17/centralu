@@ -124,7 +124,7 @@ export type RpcServices = {
    * Mail across linked machines (#2067 item 2, mail/across.ts): `host.mail` and `host.mailRows` from the hub that offered
    * on the connection they came in on, and from no other. Without it both are refused, as a build from before them
    */
-  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows' | 'moveFromHub'>
+  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows' | 'moveFromHub' | 'lacking'>
   /**
    * This host's project apps used by the hub's sessions (#1938, docs/plans/remote-hub.md §13): `host.apps`, `host.appCall`
    * and `host.appCancel` from the hub that offered apps on the connection they came in on, and from no other; and a hub's
@@ -927,7 +927,9 @@ export function createRpcHandler(
       const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
       // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2); its tasks come as mail (#1948 step 6)
-      return { ok: true as const, ...(mailAcross && hubs ? { mail: true, tasks: true } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
+      // The hub's open tasks that never arrived here (#2289): it deletes its copies of them
+      const lacks = mailAcross && hubs && offer.open?.length ? mailAcross.lacking(offer.hub.id, offer.open) : []
+      return { ok: true as const, ...(mailAcross && hubs ? { mail: true, tasks: true } : {}), ...(lacks.length ? { lacks } : {}), ...(appsAcross && hubs?.appsOn ? { apps: true } : {}) }
     },
     'host.mail': async (p, ctx) => {
       const hub = ctx ? hubs?.on?.(ctx.client) : undefined

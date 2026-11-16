@@ -22,6 +22,12 @@ export const HubOffer = z.object({
   you: MachineId.optional(),
   /** The hub answers `hub.apps` and `hub.appCall` (#1938, docs/plans/remote-hub.md §13.6). Additive */
   apps: z.boolean().optional(),
+  /**
+   * The open tasks the hub gave this machine's sessions, by id, oldest first (#2289, docs/plans/linked-mail.md §10): the machine answers which it
+   * lacks (`lacks`), and the hub deletes those copies, as tasks that never arrived. Additive: a machine from before it answers no `lacks`, and the hub
+   * keeps every copy
+   */
+  open: z.array(z.string().min(1).max(200)).max(500).optional(),
 })
 export type HubOffer = z.infer<typeof HubOffer>
 /** One of a hub's projects as a machine's session may name it (#550, `hub.projects`) */

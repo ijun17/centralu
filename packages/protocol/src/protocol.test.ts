@@ -827,6 +827,18 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
     }
   })
 
+  it("asks a machine at connect which of the hub's open tasks it lacks, and an older peer on either side reads the other (#2289)", () => {
+    const offer = { hub: { id: 'hub-0000000a', name: 'Hub mac' }, on: false, mail: true, you: 'm1', open: ['hub-0000000a.m_01JX0000000000000000000000'] }
+    expect(RpcMethods['host.hubOffer'].params.parse(offer).open).toEqual(offer.open)
+    // A machine from before it: the offer as its schema stood still parses, without the list
+    const before = z.object({ hub: z.object({ id: z.string(), name: z.string() }), on: z.boolean(), mail: z.boolean().optional(), you: z.string().optional(), apps: z.boolean().optional() })
+    expect(before.parse(offer)).not.toHaveProperty('open')
+    const answer = RpcMethods['host.hubOffer'].result
+    expect(answer.parse({ ok: true, mail: true, tasks: true, lacks: offer.open }).lacks).toEqual(offer.open)
+    // …and its answer names none, which the hub reads as none lacking: every copy is kept
+    expect(answer.parse({ ok: true, mail: true, tasks: true }).lacks).toBeUndefined()
+  })
+
   it('reads an update phase a newer host invented as under way, keeping its words (#844)', () => {
     const e = parseEventLenient({
       type: 'update_status',
