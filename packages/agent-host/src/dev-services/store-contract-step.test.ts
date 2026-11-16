@@ -502,6 +502,7 @@ describe('step 75 and the builds before it', () => {
     fixture(first.raw)
     first.upgrade()
     const after = moved(first.raw)
+    expect(after).not.toEqual([])
     first.close()
     const again = open(STEP, path)
     stores.push(again)
