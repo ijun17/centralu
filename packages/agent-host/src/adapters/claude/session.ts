@@ -531,11 +531,11 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * Inputs that will run as a turn and have not: waiting in the queue the CLI reads, or read and not named by a finished turn's result (`personInputs`). Quiet
-   * inputs start no turn and a local note is no message, so neither counts
+   * Inputs that will run as a turn and have not: waiting in the queue the CLI reads, or read and not named by a finished turn's result (`personInputs`),
+   * and the tracked ones (mail, an update's Continue, a parent's note) no turn took yet, which the ledger counts (#2318 review). Quiet inputs start no turn
    */
   queuedInputs(): number {
-    return this.queue.filter((input) => !input.quiet && !input.parentNote).length + this.personInputs.size
+    return this.queue.filter((input) => !input.quiet && !input.parentNote).length + this.personInputs.size + this.ledger.untaken
   }
 
   /** A note read with the next message or at the running turn's next tool round, starting nothing (#1492): quiet input, stamped as Centralu's */

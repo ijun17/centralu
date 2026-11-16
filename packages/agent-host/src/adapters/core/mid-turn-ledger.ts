@@ -102,6 +102,8 @@ export class MidTurnLedger {
   accept(id: string): void { this.receipts.accept(id) }
   /** How many tracked inputs wait for their end */
   get tracking(): number { return this.receipts.size }
+  /** How many tracked inputs the tool has not taken yet: not the turn that is running, nor the one whose end is being said (`endingInputs`) */
+  get untaken(): number { return this.receipts.untaken(this.ending ?? []) }
 
   /** Every tracked input fails, and nothing is stopped (the turn already failed): the ids that did */
   failTracked(reason: Error): string[] {

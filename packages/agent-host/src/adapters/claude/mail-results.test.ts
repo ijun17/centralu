@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import type { SessionHandle } from '../contract.js'
 
 /**
  * What the Claude adapter makes of the CLI's answers to the mailbox's inputs (#1347, docs/plans/mailbox.md §7.1; docs/agent-host/lifecycle/turn-endings-and-mail.md "The mailbox's delivery in the host"):
@@ -198,7 +199,7 @@ describe('the inputs the CLI holds (`queuedInputs`, #2036)', () => {
     await handle.dispose()
   })
 
-  it('counts only the messages in the adapter’s own queue, not a quiet note or a parent note waiting there while the CLI is not reading', async () => {
+  it('counts the messages in the adapter’s queue and a tracked input not yet taken, never a quiet note, while the CLI is not reading (#2318 review)', async () => {
     const events: NormalizedEvent[] = []
     const handle = await session(events)
     wire.say(result([uuidOfLast()]))
@@ -212,9 +213,41 @@ describe('the inputs the CLI holds (`queuedInputs`, #2036)', () => {
     void handle.sendTracked?.('a parent note', undefined)
     handle.send('waiting for a turn', { origin: { kind: 'human' } })
     await tick()
-    expect(handle.queuedInputs?.()).toBe(2)
+    expect(handle.queuedInputs?.()).toBe(3)
     wire.hold = null
     release()
+    await handle.dispose()
+  })
+
+  it("counts a tracked input at the end of a turn the CLI ran on its own before it, and not once that input's turn named it (#2318 review)", async () => {
+    // What the host reads as each turn ends, while it handles the end
+    const seen: { inputs: readonly string[] | null | undefined; queued: number | undefined }[] = []
+    wire.written.length = 0
+    const handle: SessionHandle = await new ClaudeAdapter().createSession({ sessionId: 'm1', cwd: '/tmp', permissionPreset: 'normal' }, (e) => {
+      if (e.type === 'turn_complete') seen.push({ inputs: handle.turnInputs?.(), queued: handle.queuedInputs?.() })
+    })
+    handle.send('start', {})
+    await tick()
+    wire.say(init)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    seen.length = 0
+    // Mail goes in tracked; before its turn the CLI runs one of its own for a background task's notification, which names no input
+    void handle.sendTracked!('a task', undefined, { origin: { kind: 'channel', server: 'centralu' } })
+    await tick()
+    const task = uuidOfLast()
+    wire.say(init)
+    wire.say({ type: 'assistant', message: { id: 'n1', role: 'assistant', content: [{ type: 'text', text: 'The background command finished.' }] } })
+    wire.say(result([]))
+    await tick()
+    expect(seen).toEqual([{ inputs: [], queued: 1 }])
+    // The task's own turn: named as it opens and as it ends
+    wire.say({ type: 'assistant', user_message_uuid: task, message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'on it' }] } })
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(0)
+    wire.say(result([task]))
+    await tick()
+    expect(seen.at(-1)).toEqual({ inputs: [task], queued: 0 })
     await handle.dispose()
   })
 
