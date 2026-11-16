@@ -472,6 +472,12 @@ export interface AgentAdapter {
   readonly contextAtRequest?: boolean
   /** Whether a live session takes a `quiet` input (see `SessionHandle.send`): the mailbox sends mail that must not wake only to such a tool */
   readonly quietInput?: boolean
+  /**
+   * A process that resumed a conversation may end a turn of its own with no request before it runs its first input (#2312; Claude Code does when
+   * the stop that cut the conversation ended a background task of it): an update's wake holds that end (`TurnContinue.holdOwnEnd`), never read as
+   * the continued turn's. Absent: every turn end is the turn's
+   */
+  readonly resumeEndsOwnTurn?: boolean
   readonly capabilities: AdapterCapabilities
   /**
    * For a tool whose reported context window is the smaller of the model's and the compaction point it was started with

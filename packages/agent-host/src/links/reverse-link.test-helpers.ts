@@ -21,6 +21,7 @@ import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
 import { recordStartingHub, startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
 import { appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './apps-across.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { hostApps } from './apps-across.test-helpers.js'
 
 /**
@@ -93,27 +94,34 @@ export async function machineHost(
   store.projects.addProject({ id: 'p-remote', path: projectFolder('remote-project', o.origin), name: 'remote-project' })
   for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
   for (const id of o.fromHub ?? []) store.settings.setAppSetting(startedFromHubKey(id), 'true')
-  const adapters = scriptedAdapters()
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const hubs = new LinkedHubs({
-    call: (client, method, params, opts) => server.call(client, method, params, opts),
-    lookupMs: 2000,
-    record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
-    settings: store.settings,
-    ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}),
-    ...(o.askHoldMaxMs ? { askHoldMaxMs: o.askHoldMaxMs } : {}),
-    ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}),
-  })
-  mgr.useLinkedHubs(hubs)
   const id = hubSelfId(store)
-  const mail: HostMail | null = o.mail ? delivering(wireHostMail(mgr, store, { hostId: id, ...(o.mail === 'delivered' ? { delivery: LIVE } : {}) }), o.mail === 'delivered') : null
-  mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
-  const apps = o.apps ? hostApps(store, mgr) : null
-  apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }))
-  if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
-  const appsAcross =
-    apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
-  const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across, mail: personOf(mgr, mail) } : {}), ...appsAcross }), o.without ?? [])
+  /** The machine's data folder's lists of the turns an update cut (#1618), which each host there reads and writes */
+  const updateResume = memoryUpdateFolder()
+  /** One host on the machine's store, wired as main.ts wires it: the first, and each one an update swaps in (`swapForUpdate`) */
+  const boot = () => {
+    const adapters = scriptedAdapters()
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, { updateResume })
+    const hubs = new LinkedHubs({
+      call: (client, method, params, opts) => server.call(client, method, params, opts),
+      lookupMs: 2000,
+      record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+      settings: store.settings,
+      ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}),
+      ...(o.askHoldMaxMs ? { askHoldMaxMs: o.askHoldMaxMs } : {}),
+      ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}),
+    })
+    mgr.useLinkedHubs(hubs)
+    const mail: HostMail | null = o.mail ? delivering(wireHostMail(mgr, store, { hostId: id, ...(o.mail === 'delivered' ? { delivery: LIVE } : {}) }), o.mail === 'delivered') : null
+    mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
+    const apps = o.apps ? hostApps(store, mgr) : null
+    apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }))
+    if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
+    const appsAcross =
+      apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
+    const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across, mail: personOf(mgr, mail) } : {}), ...appsAcross }), o.without ?? [])
+    return { adapters, mgr, hubs, mail, apps, handler }
+  }
+  let host = boot()
   /** What its answer to a hub's offer waits for, when a test holds it (`holdOffer`) */
   let held: Promise<void> | undefined
   /** What its answers to other methods wait for, when a test holds them (`holdMethod`) */
@@ -124,23 +132,23 @@ export async function machineHost(
       token: TOKEN,
       onRpc: (method, ...rest) => {
         const wait = method === 'host.hubOffer' ? held : heldMethods.get(method)
-        return wait ? wait.then(() => handler(method, ...rest)) : handler(method, ...rest)
+        return wait ? wait.then(() => host.handler(method, ...rest)) : host.handler(method, ...rest)
       },
-      onClientGone: (client) => hubs.gone(client),
+      onClientGone: (client) => host.hubs.gone(client),
       build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
     })
   let server: HostServer = serve(0)
   const port = await server.listen()
-  await mgr.setProjectTrusted('p-remote', true)
+  await host.mgr.setProjectTrusted('p-remote', true)
   let closed = false
   const close = async () => {
     if (closed) return
     closed = true
-    await mgr.tenure.disposeAll()
+    await host.mgr.tenure.disposeAll()
     await server.close()
   }
   cleanups.push(close)
-  const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
+  const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => host.mgr.askProject('w1', opts, signal)
   /** Its answers to a hub's offers from now on wait for `until` */
   const holdOffer = (until: Promise<void>) => void (held = until)
   /** Its answers to `method` from now on wait for `until` */
@@ -152,7 +160,38 @@ export async function machineHost(
     server = serve(port)
     await server.listen()
   }
-  return { store, mgr, get server() { return server }, hubs, port, close, ask, mail, id, apps, bounce, holdOffer, holdMethod }
+  /**
+   * A linked hub's update swaps its host (#1618): this one stops for the update, listing the turns it cuts, and a new host on the same store and
+   * data folder comes up on the same port and continues them, as the machine's next host does
+   */
+  const swapForUpdate = async () => {
+    host.mgr.tenure.stopForUpdate()
+    await host.mgr.tenure.disposeAll()
+    host.mail?.delivery.stop()
+    await server.close()
+    host = boot()
+    server = serve(port)
+    await server.listen()
+  }
+  /** The scripted agent of the current host (`ScriptedAdapter`), by tool */
+  const agent = (tool: 'claude' | 'codex' = 'claude') => host.adapters.get(tool) as ScriptedAdapter
+  return {
+    store,
+    get mgr() { return host.mgr },
+    get server() { return server },
+    get hubs() { return host.hubs },
+    port,
+    close,
+    ask,
+    get mail() { return host.mail },
+    id,
+    get apps() { return host.apps },
+    bounce,
+    holdOffer,
+    holdMethod,
+    swapForUpdate,
+    agent,
+  }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */

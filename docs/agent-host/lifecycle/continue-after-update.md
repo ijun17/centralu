@@ -13,7 +13,7 @@ the person's Continue would.
   put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
   (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
   the processes are down and their last output written, the host writes those turns as a list of its own,
-  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq, woken? }], stopped: [...] }`, lifecycle/update-resume.ts), each with the last
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq, woken? }], stopped: [...] }`, lifecycle/update-resume.ts; `woken` only read now, see below), each with the last
   row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
   nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
   folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
@@ -109,28 +109,35 @@ the person's Continue would.
 - **A few at a time** (#1913, owner 2026-11-12 and 11-14). The wakes go `UPDATE_WAKES_AT_ONCE` (3) at a time, cut turns first and then
   the sessions at rest woken for their tasks, until every one is woken. A slot is held from the send until the woken session's first
   answer (any output of its first model request), or any other end of that wake (an error or a limit, a state other than working such
-  as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). A bare turn end is not one: measured
-  with Claude Code 2.1.296 on a real host swap, a resumed process ends a turn of its own with no request about 2 s after the note goes
-  in, then runs the note's turn; counted, it let a fourth wake start before the first had answered. A woken session that has said
-  nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its wake going on, so a
-  request that hangs does not keep the rest from waking. The burst is the first request: after a restart each one re-reads the whole
+  as the person's Stop, its process gone, deleted, the note could not be sent or no longer stood). The first bare turn end is not one:
+  measured with Claude Code 2.1.296 on a real host swap, a resumed process whose background task the stop ended (a cut turn that ran in
+  the foreground only did not, #2312 deep review) ends a turn of its own with no request about 2 s after the note goes in, then runs
+  the note's turn; counted, it let a fourth wake start before the first had answered. That end is held
+  (`TurnContinue.holdOwnEnd`, #2312): it is no end of any turn of the session's, so it is not recorded or sent, the session stays in its
+  turn, and nothing answers the turn's tasks or tells a stop. Read as the turn's end, it answered the continued turn's tasks (a linked
+  hub's start_agent task too) with the cut turn's words, left the session at rest while the note's turn ran, and the real end found
+  nothing to answer. Only the first is held: a second one with no answer between, or one after any answer, is the turn's end. A woken
+  session that has said nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its
+  wake going on, so a request that hangs does not keep the rest from waking; one whose own end was held and that is still in its turn
+  ran nothing after it, so that end is said then, as the turn's, unless the tool said since that it is busy on the note's turn (an
+  `activity`: an overload's retry, Claude Code's `api_retry`, or a compaction; #2312 deep review). Both are logged in host.log, the hold and
+  that end. Accepted: a first request silent for 2 minutes with no such word ends its turn there (no tool says whether its turn still runs). Only a tool whose adapter says it ends such a turn has it held
+  (`AgentAdapter.resumeEndsOwnTurn`: Claude's, from that measurement); another tool's first end is the turn's. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
   its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;
   a session at rest keeps its queued note, and a Stop on it while it has no process does nothing);
   a message of the person's sends the note at once, outside the queue, since the message does not say what the stop ended. A host that
   leaves before the queue drains leaves the rest listed, and the host after it wakes them (a session woken meanwhile and in its wake turn
-  is a turn that stop cuts, and is continued as one). A woken session that has not answered yet is listed again by that stop, as it was
-  woken (`TurnContinue.unanswered`, #2264 review): its entry left the list when its note went in, and between the resumed process's own
-  turn end and its first answer it reads at rest, so the stop would not list it and its note would be lost. A woken cut turn is listed
-  `woken: true` (`cutTurns`, idle.ts), and that is the one entry the next start takes up while the session reads at rest: any other
-  listed turn that reads at rest was stopped by the person, which a mark cannot tell since a Stop writes no row. That is also why a Stop
-  on a queued cut turn deals with its entry at once. An older build reads `id` and `seq` alone and does not continue a `woken` one. A wake
-  silent for `UPDATE_SLOT_MS` has given its slot up and is no longer "not answered yet": a stop after that does not list it again, and its
-  note is not sent again (accepted: a request that hung that long). Nor is a session in `error`. Accepted too: the person's Stop on a woken
-  turn that reads at rest (between the process's own turn end and its first answer) ends nothing where the tool says nothing at rest, so
-  that wake stays unanswered and a stop then lists it `woken` again. There is no setting and no wait in the header: Centralu cut these turns, the person
-  did not stop them.
+  is a turn that stop cuts, and is continued as one). A woken session that has not answered yet is in its turn (its own end held, above),
+  so that stop lists it as any cut turn, with what the stop before it ended (`TurnContinue.unanswered`, #2264 review): its entry left the
+  list when its note went in. One woken for its note alone is continued as the turn it was in. Builds from #2264 to before #2312 read
+  such a session at rest and listed it `woken: true`; the next start still takes up a `woken` entry of their lists while the session reads
+  at rest (`UpdateResumeLists.cut`): any other listed turn that reads at rest was stopped by the person, which a mark cannot tell since a
+  Stop writes no row. That is also why a Stop on a queued cut turn deals with its entry at once. An older build reads `id` and `seq` alone
+  and does not continue a `woken` one. A wake silent for `UPDATE_SLOT_MS` has given its slot up and is no longer "not answered yet": a
+  stop after that does not list it again, and its note is not sent again (accepted: a request that hung that long). Nor is a session in
+  `error`. There is no setting and no wait in the header: Centralu cut these turns, the person did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that

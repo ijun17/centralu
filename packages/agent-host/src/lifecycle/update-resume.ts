@@ -48,7 +48,8 @@ const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
 /**
  * A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done. `woken`: a turn an update's
- * start continued that had not answered yet, which may read at rest (`cutTurns`); an older build reads `id` and `seq` alone, and so does not continue it
+ * start continued that had not answered yet, which may read at rest; written by the builds from #2264 to before #2312 (`cutTurns`), read for their
+ * lists. An older build reads `id` and `seq` alone, and so does not continue it
  */
 export type CutTurn = { id: string; seq: number; woken?: true }
 

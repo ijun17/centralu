@@ -393,6 +393,10 @@ export class SessionManager {
       },
       waitEnded: (id, cause, end) => this.mail.mailWaitEnded(id, cause, this.meta.get(id)?.askedBy ?? null, end),
       updateStep: (cut, step, err) => this.tenure.updateStep(cut, step, err),
+      resumeEndsOwnTurn: (id) => {
+        const tool = this.meta.get(id)?.tool
+        return !!tool && this.adapters.get(tool)?.resumeEndsOwnTurn === true
+      },
       // Through Centralu's channel: sent only while the wait still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
       send: (id, note, gate) => {
         const skipLine = () => !note.line || (note.cause === 'update' && this.tenure.leavingForUpdate())
