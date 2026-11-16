@@ -154,6 +154,8 @@ export type TurnContinueHost = {
   waitEnded(sessionId: string, cause: StopCause, end: WaitEnd): void
   /** An update's wake moved (`UpdateStep`): its owner keeps the list and tells whoever is owed */
   updateStep(cut: UpdateCut, step: UpdateStep, err?: unknown): void
+  /** Whether the session's tool ends a turn of its own when its process resumes (`AgentAdapter.resumeEndsOwnTurn`) */
+  resumeEndsOwnTurn(sessionId: string): boolean
 }
 
 /** What a send is given: whether the wait still stands, and the word that the tool is being handed the note (from then on the turn is the tool's) */
@@ -258,12 +260,12 @@ export class TurnContinue {
    * Holds `e` when it is the turn end a process resumed by an update's wake says of its own before the note's turn (`ANSWERED`), and says whether it
    * did: the first `turn_complete` once the wake is in (`waking`), nothing having answered it. It ends no turn of the session's (#2312). Read as one, it
    * answered the continued turn's tasks with the cut turn's words and left the session at rest while the note's turn ran, so the real end reported
-   * nothing. A second one is the turn's end. Held, it is said after all when the slot runs out with nothing run (`slotOver`). Any tool's first end is
-   * held so, measured for Claude Code only: a tool whose note's turn ended with no answer at all would read working until the slot runs out
+   * nothing. A second one is the turn's end. Held, it is said after all when the slot runs out with nothing run (`slotOver`). Only for a tool that
+   * says it ends such a turn (`AgentAdapter.resumeEndsOwnTurn`): another's first end is the turn's
    */
   holdOwnEnd(e: NormalizedEvent): boolean {
     const w = e.type === 'turn_complete' ? this.updates.get(e.sessionId) : undefined
-    if (w?.phase !== 'waking' || w.ownEnd) return false
+    if (w?.phase !== 'waking' || w.ownEnd || !this.host.resumeEndsOwnTurn(w.sessionId)) return false
     w.ownEnd = true
     return true
   }

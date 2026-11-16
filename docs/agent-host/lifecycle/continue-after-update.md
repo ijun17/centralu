@@ -119,8 +119,8 @@ the person's Continue would.
   session that has said nothing for `UPDATE_SLOT_MS` (2 minutes; first answers came 2 to 4 s after the note) gives its slot up, its
   wake going on, so a request that hangs does not keep the rest from waking; one whose own end was held and that is still in its turn
   ran nothing after it, so that end is said then, as the turn's. Accepted: a first request silent for 2 minutes ends its turn there (no
-  tool says whether its turn still runs). Any tool's first end in a wake is held so, measured for Claude Code only: a tool that ended
-  the note's turn with no answer at all would read working until the slot runs out. The burst is the first request: after a restart each one re-reads the whole
+  tool says whether its turn still runs). Only a tool whose adapter says it ends such a turn has it held
+  (`AgentAdapter.resumeEndsOwnTurn`: Claude's, from that measurement); another tool's first end is the turn's. The burst is the first request: after a restart each one re-reads the whole
   conversation uncached, and forty sessions woke as forty such requests at once. Holding a slot for a whole turn would leave the sessions
   at rest waiting behind long jobs for hours. Owner 11-06: no usage cap, so this bounds a burst, not a budget. While a cut turn waits for
   its slot it reads `working` with no process: the person's Stop ends the wait and the turn (it is not continued, and its list entry goes;

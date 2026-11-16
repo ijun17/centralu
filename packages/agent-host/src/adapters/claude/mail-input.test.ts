@@ -77,4 +77,8 @@ describe('mail written to the CLI', () => {
   it('the adapter says it takes quiet input; a tool that does not say so does not', () => {
     expect(new ClaudeAdapter().quietInput).toBe(true)
   })
+
+  it('the adapter says a resumed process ends a turn of its own before its first input (#2312, measured with 2.1.296)', () => {
+    expect(new ClaudeAdapter().resumeEndsOwnTurn).toBe(true)
+  })
 })

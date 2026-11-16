@@ -201,6 +201,8 @@ export class ScriptedAdapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
+  /** As Claude Code's: a resumed process's Continue is preceded by a turn end of its own (`ScriptedHandle.turn`, #2312) */
+  readonly resumeEndsOwnTurn = true
   /** The inputs each session's turns ran, in order, once what each said at once was said */
   readonly ran = new Map<string, string[]>()
   private readonly handles = new Map<string, ScriptedHandle>()

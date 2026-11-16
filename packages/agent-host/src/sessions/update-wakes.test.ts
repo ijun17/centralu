@@ -56,6 +56,8 @@ class Adapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true, sleep: true,
   }
   readonly handles = new Map<string, Handle>()
+  /** As Claude Code's: a resumed process ends a turn of its own before its first input's (#2312); `false`, a tool that does not say so */
+  constructor(readonly resumeEndsOwnTurn = true) {}
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
@@ -85,8 +87,8 @@ afterEach(async () => {
   for (const d of dirs.splice(0)) await removeTree(d)
 })
 
-function host(store: Store, folder: UpdateResumeFolder) {
-  const adapter = new Adapter()
+function host(store: Store, folder: UpdateResumeFolder, o: { resumeEndsOwnTurn?: boolean } = {}) {
+  const adapter = new Adapter(o.resumeEndsOwnTurn)
   const events: NormalizedEvent[] = []
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, dir('wakes-data-'), { updateResume: folder })
@@ -123,8 +125,8 @@ async function updated(cut: number, idle: number) {
 /** The sessions of host `b` whose note went in and that have not answered yet */
 const waking = (b: ReturnType<typeof host>, answered: Set<string>) => [...b.adapter.handles.values()].filter((h) => h.sent.length > 0 && !answered.has(h.sessionId))
 
-/** The engine alone, on a host of plain maps: `n` sessions at rest that an update's stop left, each send handed at once */
-function engine(n: number) {
+/** The engine alone, on a host of plain maps: `n` sessions at rest that an update's stop left, each send handed at once; `ownTurn`: their tool's `resumeEndsOwnTurn` */
+function engine(n: number, ownTurn = true) {
   const meta = new Map<string, SessionInfo>()
   const sent: string[] = []
   const steps: string[] = []
@@ -132,6 +134,7 @@ function engine(n: number) {
   const notes: NormalizedEvent[] = []
   const engine = new TurnContinue({
     meta, leaving: () => false, compactTurn: () => false, running: () => true, settings: () => ({ network: true, limit: true }), reachable: async () => true,
+    resumeEndsOwnTurn: () => ownTurn,
     note: (e) => void notes.push(e), changed: () => {}, waitEnded: () => {}, updateStep: (c, step) => void steps.push(`${c.sessionId}:${step}`),
     send: async (id, _note, gate) => {
       sent.push(id)
@@ -188,6 +191,27 @@ describe('the sessions an update stopped wake a few at a time (#1913)', { timeou
     // Its first answer is
     e.engine.observe({ type: 'usage_update', sessionId: 's0', tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
     expect(e.sent).toEqual(e.ids)
+  })
+
+  it("holds no turn end of a tool that does not say a resume ends a turn of its own: its first end is the turn's (engine, #2312)", async () => {
+    const e = engine(UPDATE_WAKES_AT_ONCE + 1, false)
+    await eventually(() => e.sent.length === UPDATE_WAKES_AT_ONCE && e.steps.filter((x) => x.endsWith(':sent')).length === UPDATE_WAKES_AT_ONCE)
+    const end = { type: 'turn_complete' as const, sessionId: 's0' }
+    expect(e.engine.holdOwnEnd(end)).toBe(false)
+    e.engine.observe(end)
+    expect(e.sent).toEqual(e.ids)
+  })
+
+  it("holds a woken turn's first end by its tool's word: kept in its turn where the tool says a resume ends one, ended where it does not (#2312)", async () => {
+    const firstEnd = async (resumeEndsOwnTurn: boolean) => {
+      const { store, folder, ids } = await updated(1, 0)
+      const b = host(store, folder, { resumeEndsOwnTurn })
+      await eventually(() => waking(b, new Set()).length === 1)
+      waking(b, new Set())[0]!.finish()
+      return b.session(ids.cut[0]!).state
+    }
+    expect(await firstEnd(true)).toBe('working')
+    expect(await firstEnd(false)).not.toBe('working')
   })
 
   it("holds only the first turn end: a second one with no answer is the turn's end, and frees the slot (engine, #2312)", async () => {
