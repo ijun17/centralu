@@ -1,4 +1,4 @@
-import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailTaskRow, type MailThreadRow, type MailThreadView, type WatchView } from '@cc/protocol/client'
+import { mailAsk, type MailHeldRow, type MailMessage, type MailParty, type MailTaskRow, type MailThreadRow, type MailThreadView, type UnreachedMachine, type WatchView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -42,6 +42,8 @@ export class MailMock {
   private taskRows: MailTaskRow[] = []
   /** A host with more open work than it lists says how many it listed (#1577); a test sets it */
   tasksCapped: number | null = null
+  /** A hub names the linked machines whose tasks it could not read (#2268); a test sets them */
+  tasksUnreached: UnreachedMachine[] = []
   /** False stands in for a host older than Tasks: `mail.tasks` is unknown to it */
   knowsTasks = true
 
@@ -189,7 +191,7 @@ export class MailMock {
     }),
     tasks: async () => {
       if (!this.knowsTasks) throw mockError('Unknown method: mail.tasks. This Centralu host does not have it; the window may be from another build.')
-      return { tasks: this.taskRows.map((t) => ({ ...t })), capped: this.tasksCapped }
+      return { tasks: this.taskRows.map((t) => ({ ...t })), capped: this.tasksCapped, unreached: this.tasksUnreached.map((m) => ({ ...m })) }
     },
     thread: async (threadId, opts) => {
       const t = this.must(threadId)

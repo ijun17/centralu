@@ -79,6 +79,17 @@ export function parseAddress(address: string): Party | null {
   return null
 }
 
+/**
+ * An address a machine holds, as the hub `hub` names it (docs/plans/linked-mail.md §6): the hub's person is its `person`, and a session of the
+ * machine (`machine.host` its id in mail, `machine.id` its id at that hub) is `session:<hub>/<machine id>.<id>`. What is on the hub's side already,
+ * or on any other host, stays as it is
+ */
+export function inHubTerms(address: string, hub: string, machine?: { host: string; id: string }): string {
+  if (address === sessionAddress(hub, PERSON_ID)) return PERSON
+  const p = parseAddress(address)
+  return machine && p?.kind === 'session' && p.host === machine.host && !p.sessionId.includes('.') ? sessionAddress(hub, `${machine.id}.${p.sessionId}`) : address
+}
+
 function checked(address: string): string {
   if (!parseAddress(address)) throw new Error(`Not a mail address: ${JSON.stringify(address)}`)
   return address

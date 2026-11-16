@@ -374,7 +374,22 @@ words into the machine's session (`host.send`) and followed its turns over the l
   hub's copy is a task too, so receipts, a withdrawal and a reply go as for any message that crossed. Unlike other mail
   (§6) it is written before the task leaves, so the report finds it whenever it comes, after a restart of the hub too, when
   nothing of the send is remembered; the machine's refusal deletes it, and a send whose answer was lost keeps it, as the task
-  it may be. A machine not connected is not sent to, and nothing is written.
+  it may be. At every connect the hub's offer lists its open tasks there (`open`, oldest first, at most 500; the rest are
+  asked at a later connect), leaving out any whose send is under way, and the machine answers those it never received
+  (`lacks`, #2289). The hub deletes each such copy, as a refusal does, and tells each sender in one notice, woken once as for
+  a stop: `Your task to <name> on <machine> did not arrive: the link failed while it was being sent, and nobody is working on
+  it. Give it again if it is still needed.`, or for several `<n> of your tasks did not arrive: <id> to <name> on <machine>, …`
+  (ten named, the rest counted). Only copies younger than what a machine keeps a settled task (`MAILBOX_RETENTION.settledMs`,
+  less a day for clocks that differ) are listed: a task the machine had, settled and swept has no record there and would
+  read as never arrived. The machine answers only ids its offering hub minted (`<hub id>.m_…`), so another hub that links it
+  learns nothing of what it stores and cannot have this hub's task refused; it remembers, per hub, what it said it lacks and
+  refuses such a task from that hub that comes later (a send on a link the hub already counted as dead can still land): in
+  memory, since no connection outlives the process. One case reads wrongly: a session sent to the trash releases its open
+  tasks `gone` ([mailbox.md](mailbox.md) §10.6.1) and the release crosses as a receipt (§6); if the trash is emptied
+  before that release reached the hub, the machine keeps no record of the task, so the hub tells its sender it did not
+  arrive. Nobody works on it either way, and giving it again is still the
+  remedy; the machine does not keep a record of every purged task to tell the two apart. A machine from before it answers
+  no `lacks`, and the hub keeps every copy, as before. A machine not connected is not sent to, and nothing is written.
 - **The report.** The machine's own engine reports the task's turn, pauses on background work and waits on a card
   included ([mailbox.md](mailbox.md) §9.3, §10.6.3). Its report, Centralu's message to the hub's session, goes back by
   `hub.mail` with `report` (the outcome and its facts). The hub words it from those facts in its own sentences (`reportWords`,
@@ -420,3 +435,49 @@ words into the machine's session (`host.send`) and followed its turns over the l
 - **At the update.** A hub record of a child whose report the old path still owed (`owed`) is lost with that path: its
   caller is told once, in one notice for all its children, that the report no longer comes, and how to read where the child stands. Notes the old hub held for
   a busy child (`queued`) are not sent by the new one; their caller is told once too.
+
+## 11. Tasks across machines (#2268)
+
+The person sees every linked machine as one place (owner, 2026-11-09), so the hub's Inbox Tasks lists the linked
+machines' open work beside its own, and a row from a machine opens there.
+
+- **One list.** `mail.tasks` is a merge on the hub (`links/routes.ts`, `router.ts`): the hub's rows, then each reachable
+  machine's, read in the hub's terms. A machine's parties are named as the hub's mail names them (§6, `inHubTerms`): its
+  own session is `session:<hub id>/<machine id>.<id>`, named `<name> on <machine>` as §7a names one; the hub's person,
+  which the machine names `session:<hub id>/person`, is `person`; its app's project is qualified. What the machine names
+  on the hub's side already, the person and Centralu stay as they are. The hub learns the machine's own id in mail
+  addresses from its answer to the offer (`host.hubOffer` answered with `host`, an addition): nothing else the hub hears
+  from a machine says it, and a machine linked by two hubs holds the other hub's sessions under an id of the same shape.
+  A machine from before it says none, and its own sessions keep its terms until it is updated.
+- **One row per message and recipient.** Mail that crossed is stored on both hosts under one id (§6), so two hosts list
+  it. The rows are matched by the message id and the recipient's address in the hub's terms. The hub's own row is kept:
+  it opens on the hub, where the person answers or closes it as before. It takes `state`, `outcome` and `updatedAt` from
+  the row of the machine its recipient is on, which is the authority on that row (§6, Receipts) and alone knows
+  `running`. Mail between two machines, which the hub passes on and keeps no copy of, keeps the row of the machine its
+  recipient is on. A row's `id` (the message) stays as it is, being every host's; its `root` is `<machine id>.<root>`.
+  Which host a row comes from is read off its `root`, the hub's own never reading as a machine's (below).
+- **Not the machine's own Inbox.** A machine's row its own person gave or has (`person` in the machine's terms: the
+  machine's own window, not the hub's person, who is `session:<hub id>/person` there), and one held there for that
+  person to act on, are left out. The hub shows nothing else of that computer's Inbox: its `mail.list` and `mail.held`
+  are the hub's own, so such a row could be neither answered, closed nor released here, and would stand in the hub's
+  Needs you as the hub's person's own. That person sees them in the machine's own window, as before.
+- **Read-only opening.** `mail.thread` goes to the machine its `threadId`'s prefix names when what follows the prefix is
+  itself a mail id (`<host>.m_…`, or an old `<host>.t_…`). A hub's own ids start with its host id, `hub-` and 8 hex
+  digits, which is shaped as a machine id too: `hub-<8 hex>.m_…` is never read as a machine's chain, since `m_…` is no
+  mail id. The hub asks it with `lookIn: true` (an addition, default false), so the machine reads nothing in it for its
+  own person: read-only writes nothing. A machine from before it drops the field and reads what is its person's there,
+  as opening it in its own window would. The machine's answer is named as the rows are and comes back with
+  `lookIn: true` and `canReply: false`, so the Inbox offers neither reply nor close: the person's reply and Mark done
+  are the hub's mailbox's (`mail.reply` and `mail.close` stay on the hub).
+- **News.** A machine's `mail_changed` reaches the hub's windows with its `threadId` qualified, `toPerson: false` and no
+  `arrived`: the window reads Tasks and its list again (each read coalesced) and the machine's chain if one is open, and
+  raises no notification. What the machine's own Inbox holds is not news for the hub's person; mail to them reaches the
+  hub's mailbox, which tells them itself (§7a).
+- **A machine not reached is named.** A machine that is not reachable, or whose `mail.tasks` fails, is named in the
+  answer's `unreached` (`{ machineId, name }[]`, an addition whose default is none), as `trash.list` names one, and the
+  Inbox says under the list `Not listed: the tasks on <A>, <B>, which could not be reached just now.` `capped` is null
+  unless a host capped its list; then it is how many open rows the merged list shows, counted once de-duplicated, as
+  the window counts its rows.
+- **An older machine is left out, unnamed.** A machine that answers `mail.tasks` "Unknown method" (a build from before
+  Tasks) has none to list and is not named. Machines follow the hub's update, so such a machine is a passing state of an
+  update, not one the person acts on; naming it as not reached would say it is down when it is not.

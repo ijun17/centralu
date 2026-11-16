@@ -313,6 +313,7 @@ export function Inbox() {
                   groups={tasks}
                   loaded={mailTasks !== null}
                   capped={mailTasks?.capped ?? null}
+                  unreached={mailTasks?.unreached ?? []}
                   cursor={taskPlaced.key}
                   doneOpen={doneOpen}
                   onToggleDone={() => setDoneOpen((o) => !o)}

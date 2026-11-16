@@ -167,6 +167,9 @@ type RecipientSql = {
   told_at: number | null
 }
 
+/** A `LIKE … ESCAPE '\'` pattern for what starts with `prefix` */
+const likePrefix = (prefix: string) => `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+
 /** A row watched for an answer: of a needsReply message or a task (§4). `m` is the message, `r` the row */
 const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
 /** A row that may be delivered: not read, not held (or let go by the person), and not withdrawn or gone (§8.2 step 1) */
@@ -732,12 +735,26 @@ export class MailboxRecords {
 
   /** Whether `sender` ever sent a message to an address that starts with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`) */
   sentToward(sender: string, prefix: string): boolean {
-    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
     return (
       this.db
         .prepare<[string, string], { one: number }>(`SELECT 1 AS one FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.sender = ? AND r.recipient LIKE ? ESCAPE '\\' LIMIT 1`)
-        .get(sender, like) !== undefined
+        .get(sender, likePrefix(prefix)) !== undefined
     )
+  }
+
+  /**
+   * The open tasks given after `since` to addresses that start with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`), oldest first,
+   * at most `limit` (#2289)
+   */
+  openTasksToward(prefix: string, since: number, limit: number): string[] {
+    return this.db
+      .prepare<[string, number, number], { id: string }>(
+        `SELECT m.id FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND m.created_at > ?
+          ORDER BY m.created_at, m.id LIMIT ?`,
+      )
+      .all(likePrefix(prefix), since, limit)
+      .map((r) => r.id)
   }
 
   /**

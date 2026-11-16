@@ -8,6 +8,7 @@ import { entryOf, type FoundEntry } from '../mail/find.js'
 import { startingHub } from '../sessions/hub-preset.js'
 import { awaySentence, settleForCall, TAIL } from './machine-reach.js'
 import type { LinkedHubs } from './linked-hubs.js'
+import { onMachine } from './qualifier.js'
 
 /**
  * What mail across linked machines reaches (#2067 items 2 and 3, `MailAcross.usePeers`), wired one way for main.ts and
@@ -76,7 +77,7 @@ export function mailPeers(o: {
           machineSession: (machineId: string, sessionId: string) => {
             const m = machines.get(machineId)
             const row = mirrored(machineId, sessionId)
-            return m && row && typeof row.name === 'string' ? `${row.name} on ${m.name}` : undefined
+            return m && row && typeof row.name === 'string' ? onMachine(row.name, m.name) : undefined
           },
           machineState: (machineId: string, sessionId: string) => {
             const state = mirrored(machineId, sessionId)?.state

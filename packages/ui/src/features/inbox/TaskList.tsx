@@ -1,6 +1,7 @@
 import { taskKey, type TaskGroups } from '@cc/core'
-import type { MailTaskRow } from '@cc/protocol/client'
+import type { MailTaskRow, UnreachedMachine } from '@cc/protocol/client'
 import { Badge } from '../../components/Badge.jsx'
+import { Unreached } from '../../components/Unreached.jsx'
 import { FoldedGroup } from './FoldedGroup.jsx'
 import { ListRow, People, RowEnd, RowSubject } from './MailRows.jsx'
 import { taskStateLabel } from './mailLabels.js'
@@ -8,12 +9,14 @@ import { taskStateLabel } from './mailLabels.js'
 /**
  * The Inbox's Tasks (#1577, owner 2026-11-14): the host's work grouped by who acts next (`groupTasks`), a group drawn only while it has a row, Done
  * folded. A row opens its chain in the Inbox's thread view; one between sessions opens read-only (`MailThreadView.lookIn`). The keys walk the rows
- * as they walk Waiting's (`Inbox`), so the row under the cursor is named by `cursor`.
+ * as they walk Waiting's (`Inbox`), so the row under the cursor is named by `cursor`. On a hub it lists the linked machines' work too, and names a
+ * machine whose work could not be read (#2268).
  */
 export function TaskList({
   groups: g,
   loaded,
   capped,
+  unreached,
   cursor,
   doneOpen,
   onToggleDone,
@@ -24,6 +27,8 @@ export function TaskList({
   loaded: boolean
   /** How many open tasks the host listed when more are open (`mail.tasks`), else null */
   capped: number | null
+  /** The linked machines whose tasks are not in the list (`mail.tasks`) */
+  unreached: readonly UnreachedMachine[]
   cursor: string | null
   doneOpen: boolean
   onToggleDone: () => void
@@ -38,9 +43,12 @@ export function TaskList({
   if (!loaded) return null
   if (parts.length === 0 && g.done.length === 0) {
     return (
-      <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-tasks-empty">
-        No tasks
-      </p>
+      <>
+        <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-tasks-empty">
+          No tasks
+        </p>
+        <Unreached what="the tasks" unreached={unreached} className="px-4 py-2" testId="tasks-unreached" />
+      </>
     )
   }
   return (
@@ -70,6 +78,7 @@ export function TaskList({
           Showing the newest {capped.toLocaleString('en-US')} open tasks.
         </p>
       )}
+      <Unreached what="the tasks" unreached={unreached} className="px-4 py-2" testId="tasks-unreached" />
     </div>
   )
 }

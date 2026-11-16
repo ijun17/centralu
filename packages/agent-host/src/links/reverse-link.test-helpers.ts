@@ -16,6 +16,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import { fixtureGit, namedFolder } from '../temp-dir.test-helpers.js'
 import { mailPeers } from './mail-peers.js'
 import type { HostMail } from '../mail/host-mail.js'
+import { MailPerson, personSessions } from '../mail/person.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
 import { recordStartingHub, startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
@@ -47,6 +48,23 @@ function delivering(mail: HostMail, live: boolean): HostMail {
     cleanups.push(() => mail.delivery.stop())
   }
   return mail
+}
+
+/** The person's side of a host's mailbox (`mail.*` of the window), as main.ts wires it, for a host whose sessions run no turn */
+function personOf(mgr: SessionManager, mail: HostMail): MailPerson {
+  return new MailPerson(mail.service, mail.records, mail.delivery, {
+    session: personSessions((id) => {
+      const s = mgr.sessionInfo(id)
+      return s ? { name: s.name, state: s.state } : undefined
+    }, mail),
+    legacyChain: () => [],
+    projectLabel: (p) => mail.reach.projectLabel(p),
+    untrusted: (p) => mail.reach.untrusted(p),
+    turnOn: () => undefined,
+    tellsNow: () => false,
+    tell: async () => undefined,
+    across: mail.across,
+  })
 }
 
 /**
@@ -96,7 +114,7 @@ export async function machineHost(
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
   const appsAcross =
     apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
-  const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}), ...appsAcross }), o.without ?? [])
+  const handler = without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across, mail: personOf(mgr, mail) } : {}), ...appsAcross }), o.without ?? [])
   /** What its answer to a hub's offer waits for, when a test holds it (`holdOffer`) */
   let held: Promise<void> | undefined
   /** What its answers to other methods wait for, when a test holds them (`holdMethod`) */
@@ -203,7 +221,7 @@ export async function hubHost(
           }),
           ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across ? { onOfferAnswered: () => across.changed() } : {}),
+          ...(across ? { onOfferAnswered: (id: string, lacks: readonly string[]) => across.offerAnswered(id, lacks), openTasks: (id: string) => across.openTasksTo(id) } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
@@ -221,7 +239,7 @@ export async function hubHost(
     ...reverse,
     ...o.deps,
   })
-  const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
+  const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links, ...(mail ? { mail: personOf(mgr, mail) } : {}) }), machines: () => links.all() })
   apps?.linked.usePeers(appsPeers({ machines: links }))
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ machines: links }))
   // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it

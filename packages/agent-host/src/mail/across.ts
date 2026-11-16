@@ -7,6 +7,7 @@ import { bodyLimit, refusalReason, tooLongText } from './rules.js'
 import { reportWords } from './last-response.js'
 import { older, unreachable, type AcrossMachine, type AcrossSent, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
+import { MAILBOX_RETENTION } from '../dev-services/store/mailbox.js'
 
 /**
  * Mail across linked machines (#2067 items 2 and 3, docs/plans/linked-mail.md §5 to §8): every session reaches every
@@ -44,7 +45,24 @@ export const FIND_MS = 4000
 /** How long a send by name waits for a hub when a session here has that name already: what a reachable hub answers in */
 export const NAMED_HERE_MS = 600
 
+/** The most open tasks one offer asks a machine about (`HubOffer.open`): the oldest; the rest are asked at a later connect */
+const OPEN_ASKED = 500
+/**
+ * How old a copy an offer still asks about may be: younger than what a machine keeps a settled task (`MAILBOX_RETENTION.settledMs`), less a day for
+ * clocks that differ. A task the machine had, settled and swept would read there as never arrived, and its sender would be told so wrongly
+ */
+const ASKED_WITHIN = MAILBOX_RETENTION.settledMs - 24 * 60 * 60 * 1000
+/** The most task ids a machine remembers as never arrived from one hub (`lacking`), the oldest forgotten first */
+const LACKED_MAX = 5000
+/** The most tasks one notice that they did not arrive names; the rest are counted */
+const NAMED_MAX = 10
+
 export class MailAcross extends AcrossReceipts {
+  /** On a hub: tasks whose `host.mail` is under way now, which an offer neither asks about nor deletes */
+  private readonly sending = new Set<string>()
+  /** On a machine: tasks it told a hub never arrived (`lacking`), by hub, so one hub's many cannot push another's out under `LACKED_MAX` */
+  private readonly lacked = new Map<string, Set<string>>()
+
   // ── Sending from here ──
 
   /**
@@ -93,7 +111,8 @@ export class MailAcross extends AcrossReceipts {
         return { ok: false, why: 'failed', text: `this computer could not keep its copy of the task, so nothing was sent: ${oneLineText(errorMessage(e), 500)}` }
       }
     }
-    const r = this.settle(id, await this.ask(m, 'host.mail', params))
+    this.sending.add(id)
+    const r = this.settle(id, await this.ask(m, 'host.mail', params).finally(() => this.sending.delete(id)))
     if (!r.ok) {
       // Refused there: nothing there answers the copy. One that may have arrived keeps it, as the task it may be
       if (!r.maybe) this.d.records.deleteRows([{ messageId: id, recipient: to }])
@@ -101,6 +120,55 @@ export class MailAcross extends AcrossReceipts {
     }
     this.names.set(to, `${r.to} on ${m.name}`)
     return { ok: true, messageId: id, to: r.to, address: to, computer: m.name }
+  }
+
+  /**
+   * On a hub: the open tasks given to `machineId`'s sessions within `ASKED_WITHIN`, oldest first, that no send has under way: what its offer asks it
+   * about (`HubOffer.open`)
+   */
+  openTasksTo(machineId: string): string[] {
+    const since = this.now() - ASKED_WITHIN
+    return this.d.records.openTasksToward(sessionAddress(this.d.hostId, `${machineId}.`), since, OPEN_ASKED).filter((id) => !this.sending.has(id))
+  }
+
+  /**
+   * On a hub: `machineId` answered this connection's offer, and `lacks` are the tasks it says never arrived there (#2289): sends whose answer was lost
+   * before the machine wrote them. Nothing there will ever report on one, so each copy still open and in no send now is deleted, as a refusal deletes
+   * one, and each sender is told in one notice and woken once, as for a stop. Then what is owed to the machine goes (`changed`)
+   */
+  offerAnswered(machineId: string, lacks: readonly string[]): void {
+    const lost = new Map<string, { id: string; name: string }[]>()
+    for (const id of lacks) {
+      const m = this.sending.has(id) ? undefined : this.d.records.message(id)
+      const row = m?.kind === 'task' ? this.d.records.recipients(id)[0] : undefined
+      const r = row && this.route(row.recipient)
+      if (!m || !row || r?.kind !== 'machine' || r.machineId !== machineId || row.settled !== null || row.releasedAt !== null) continue
+      const name = this.foreignName(row.recipient)?.name ?? row.recipient
+      this.d.records.deleteRows([{ messageId: id, recipient: row.recipient }])
+      this.unsure.delete(id)
+      lost.set(m.sender, [...(lost.get(m.sender) ?? []), { id, name: oneLineText(name, 200) }])
+      this.d.log?.(`[mail] ${id} never reached ${r.machineId}: its copy is deleted, and its sender told`)
+    }
+    for (const [sender, tasks] of lost) this.d.service.notice(sender, notArrived(tasks))
+    this.changed()
+  }
+
+  /**
+   * On a machine: which of the tasks hub `hubId`'s offer asks about (`HubOffer.open`) never arrived here. Only that hub's own ids (`<hubId>.m_…`) are
+   * answered: another hub learns nothing of what is stored here, and cannot have a hub's later task refused. Each is remembered for that hub, and a
+   * late one from it is refused (`taskFrom`): a send on a link the hub already counted as dead can still land after this answer. Memory is enough, as
+   * no connection outlives this process: after a restart nothing sent before it can arrive
+   */
+  lacking(hubId: string, ids: readonly string[]): string[] {
+    const lacks = ids.filter((id) => id.startsWith(`${hubId}.`) && !id.startsWith(`${this.d.hostId}.`) && FOREIGN_ID.test(id) && !this.d.records.message(id))
+    const lacked = this.lacked.get(hubId) ?? new Set<string>()
+    for (const id of lacks) lacked.add(id)
+    for (const old of lacked) {
+      if (lacked.size <= LACKED_MAX) break
+      lacked.delete(old)
+    }
+    if (lacked.size) this.lacked.set(hubId, lacked)
+    return lacks
   }
 
   /** Why a task to `to` cannot go now (`sendTask` says the same), or null: not a linked machine's session, no such machine, or one that takes no tasks yet or at all */
@@ -308,6 +376,7 @@ export class MailAcross extends AcrossReceipts {
     const role = this.d.ownEntries().find((e) => e.address === to)?.role
     if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${this.label(to)}` }
     if (p.id === undefined || !FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: 'a task from another computer comes with the id it gave it.' }
+    if (this.lacked.get(hub.id)?.has(p.id)) return { ok: false, why: 'not_allowed', text: `${this.selfName()} told ${hub.name} when the link came back that this task never arrived, so it was not written now. Give it again.` }
     const had = this.d.records.message(p.id)
     if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
     // A session gone from here has no name left here: the sender knows which it gave the work to
@@ -496,3 +565,17 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
 
 const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`
 
+/**
+ * The notice to a sender whose tasks never reached a machine (#2289, docs/plans/linked-mail.md §10): one per sender and connect, so many lost at once
+ * wake it once. Several are each named by id and recipient, the first `NAMED_MAX` of them; their copies are gone, so none is ever told again
+ */
+function notArrived(tasks: readonly { id: string; name: string }[]): { body: string; facts: { notArrived: { messages: string[] } }; dedupeKey: string } {
+  const ids = tasks.map((t) => t.id)
+  const named = tasks.slice(0, NAMED_MAX).map((t) => `${t.id} to ${t.name}`)
+  const more = tasks.length > NAMED_MAX ? `, and ${tasks.length - NAMED_MAX} more` : ''
+  const body =
+    tasks.length === 1
+      ? `[Centralu] Your task to ${tasks[0]?.name} did not arrive: the link failed while it was being sent, and nobody is working on it. Give it again if it is still needed.`
+      : `[Centralu] ${tasks.length} of your tasks did not arrive: ${named.join(', ')}${more}. The link failed while they were being sent, and nobody is working on them. Give them again if they are still needed.`
+  return { body, facts: { notArrived: { messages: ids } }, dedupeKey: `not-arrived:${ids[0]}` }
+}

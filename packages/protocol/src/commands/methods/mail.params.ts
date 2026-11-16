@@ -14,6 +14,11 @@ export const mailParams = {
     /** The last this many messages (at most 100), and the thread is read to its end; with `before`, the last this many before that `seq`, read already */
     tail: z.number().int().min(1).max(100).optional(),
     before: z.number().int().min(1).optional(),
+    /**
+     * Read it as a look in (#2268): nothing in it is read for anyone. A hub sends it for a linked machine's chain it opens from its Tasks, which it shows
+     * read-only. Absent: false. A host from before it drops it and reads what is the person's there for them, as before
+     */
+    lookIn: z.boolean().default(false),
   }),
   /** The person writes in a thread: their words, whatever the thread's other parties are (§7.1) */
   'mail.reply': z.object({

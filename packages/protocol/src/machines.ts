@@ -14,6 +14,10 @@ export const MACHINE_ID_RE = /^[a-z][a-z0-9-]{0,31}$/
 export const MachineId = z.string().regex(MACHINE_ID_RE, 'Not a machine id')
 export type MachineId = z.infer<typeof MachineId>
 
+/** A linked machine a hub's merged answer could not read just now, by its id and the name the person gave it (`trash.list`, `mail.tasks`) */
+export const UnreachedMachine = z.object({ machineId: z.string(), name: z.string() })
+export type UnreachedMachine = z.infer<typeof UnreachedMachine>
+
 /**
  * Where a link stands.
  *

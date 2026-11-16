@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, WatchView } from '../../entities/mail.js'
+import { UnreachedMachine } from '../../machines.js'
 
 /** The results of the `mail` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./mail.params.ts */
 export const mailResults = {
@@ -13,6 +14,8 @@ export const mailResults = {
     tasks: z.array(MailTaskRow).default([]),
     /** How many open tasks are listed when more are open than the host lists (the oldest left out); null when every open one is. Absent from an older host */
     capped: z.number().nullable().default(null),
+    /** On a hub: the linked machines whose tasks are not in the list, as they could not be read just now (#2268). Absent from an older host */
+    unreached: z.array(UnreachedMachine).default([]),
   }),
   'mail.thread': MailThreadView,
   'mail.reply': MailThreadView,

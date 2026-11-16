@@ -750,11 +750,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     let note: string | null = null
     // Not known on this connection until the machine answers (#1948 step 6): a start before it waits for the connect, never reads as an older machine
     if (this.client === client) this.tasksBack = undefined
+    // The open tasks given there: the machine names the ones that never arrived (#2289); an older one names none
+    const open = this.deps.hubMail ? (this.deps.openTasks?.(this.id) ?? []) : []
+    let lacks: string[] = []
     try {
-      const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
+      const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(open.length ? { open } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
+      if (isObj(answer) && Array.isArray(answer.lacks)) lacks = answer.lacks.filter((id): id is string => typeof id === 'string')
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
       if (this.client === client) this.tasksBack = isObj(answer) && answer.tasks === true
+      // How its mail names its own sessions, which the hub's Tasks reads in its own terms (#2268)
+      if (this.client === client) this.q.mail = { hub: self.id, own: isObj(answer) && typeof answer.host === 'string' ? answer.host : null, computer: () => this.name }
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false
@@ -765,7 +771,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     }
     if (this.client !== client) return
     // Whatever it said: mail owed to it goes now, or is settled by its answer (one that takes no mail drops a notice), never left for a later change
-    this.deps.onOfferAnswered?.(this.id)
+    this.deps.onOfferAnswered?.(this.id, lacks)
     const changed = note !== this.asksNote
     this.asksNote = note
     if (changed) this.deps.broadcast({ type: 'machine_status', machine: this.info() })

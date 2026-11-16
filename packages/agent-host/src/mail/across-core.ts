@@ -1,7 +1,7 @@
 import { HubMailResult, errorMessage, oneLineText } from '@cc/protocol'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
-import { PERSON, PERSON_ID, parseAddress, sessionAddress } from './address.js'
+import { PERSON, PERSON_ID, inHubTerms, parseAddress, sessionAddress } from './address.js'
 import type { FoundEntry } from './find.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
@@ -118,6 +118,11 @@ export class AcrossCore {
     this.now = d.now ?? Date.now
   }
 
+  /** This host's id in mail addresses: a hub that links it reads its mail in the hub's terms by it (`host.hubOffer`'s answer, #2268) */
+  get hostId(): string {
+    return this.d.hostId
+  }
+
   // ── Addresses ──
 
   protected route(address: string): Route | null {
@@ -165,10 +170,8 @@ export class AcrossCore {
 
   /** On a machine, its own session as the hub `hubId` names it */
   protected asHubNames(hubId: string, address: string): string {
-    if (address === sessionAddress(hubId, PERSON_ID)) return PERSON
     const you = this.peers?.hub?.(hubId)?.you
-    const p = parseAddress(address)
-    return you && p?.kind === 'session' && p.host === this.d.hostId && !p.sessionId.includes('.') ? sessionAddress(hubId, `${you}.${p.sessionId}`) : address
+    return inHubTerms(address, hubId, you ? { host: this.d.hostId, id: you } : undefined)
   }
 
   /** On a machine, an address as the hub `hubId` names it, as this host names it (its own sessions are its own again) */

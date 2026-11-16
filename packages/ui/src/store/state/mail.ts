@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, WatchView } from '@cc/protocol/client'
+import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
 
 /** The person's mailbox (#1347): the threads the Inbox lists among its rows and the thread open in it. */
 export type MailSlice = {
@@ -10,9 +10,10 @@ export type MailSlice = {
   mail: { threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number } | null
   /**
    * The host's open and recently settled work (#1577), as `mail.tasks` last listed it for the Inbox's Tasks: read when the Inbox opens and again on
-   * `mail_changed` while it is open. Null until the host answers, and again when the window comes back to a host; an older host's answer is an empty list
+   * `mail_changed` while it is open. Null until the host answers, and again when the window comes back to a host; an older host's answer is an empty list.
+   * On a hub it lists the linked machines' work too, and `unreached` names the machines whose work is not in it (#2268)
    */
-  mailTasks: { tasks: MailTaskRow[]; capped: number | null } | null
+  mailTasks: { tasks: MailTaskRow[]; capped: number | null; unreached: UnreachedMachine[] } | null
   /** Reads the tasks again; keeps the last list on a failure */
   loadTasks: () => Promise<void>
   /** The thread open in the Inbox, with the messages read so far (`mail.thread`); null when the list shows */
