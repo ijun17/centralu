@@ -46,17 +46,7 @@ export class StepsV75 extends MigrationRange {
     // Earlier steps made every one of these in a real store: a partial schema (a test's) has nothing to move
     if (!['mail_threads', 'mail_messages', 'mail_receipts', 'mail', 'mail_recipients', 'sessions', 'projects'].every(has)) return
     const now = Date.now()
-    const pending = this.db
-      .prepare<[number], PendingReceipt>(
-        `SELECT m.id, m.thread_id, m.seq, m.sender, m.kind, m.urgent, m.needs_owner, m.wake, m.reply_to, m.body, m.facts, m.created_at,
-                r.recipient, r.due_at, r.attempt_at, r.delivered_at, r.read_at, r.held, r.attempts, r.last_error,
-                t.project_id AS t_project_id, t.owner AS t_owner, t.assignee AS t_assignee, t.origin AS t_origin
-           FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id JOIN mail_threads t ON t.id = m.thread_id
-          WHERE r.handled_at IS NULL AND COALESCE(r.held, '') <> 'dismissed' AND m.created_at >= ?
-            AND (r.delivered_at IS NULL OR r.read_at IS NULL OR m.kind = 'question')
-          ORDER BY m.thread_id, m.seq, r.recipient`,
-      )
-      .all(now - MOVE_WITHIN_MS)
+    const pending = this.pendingReceipts(now)
     if (pending.length === 0) return
     const rootOf = this.db.prepare<[string], { root_id: string }>(`SELECT root_id FROM mail WHERE id = ?`)
     const insertMail = this.db.prepare(
@@ -130,6 +120,21 @@ export class StepsV75 extends MigrationRange {
       handled.run({ now, id: p.id, recipient: p.recipient })
     }
     endOldHolds(this.db, moved)
+  }
+
+  /** The receipts still pending at `now`, each with its message and what the move reads of its thread, in each thread's own order */
+  private pendingReceipts(now: number): PendingReceipt[] {
+    return this.db
+      .prepare<[number], PendingReceipt>(
+        `SELECT m.id, m.thread_id, m.seq, m.sender, m.kind, m.urgent, m.needs_owner, m.wake, m.reply_to, m.body, m.facts, m.created_at,
+                r.recipient, r.due_at, r.attempt_at, r.delivered_at, r.read_at, r.held, r.attempts, r.last_error,
+                t.project_id AS t_project_id, t.owner AS t_owner, t.assignee AS t_assignee, t.origin AS t_origin
+           FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id JOIN mail_threads t ON t.id = m.thread_id
+          WHERE r.handled_at IS NULL AND COALESCE(r.held, '') <> 'dismissed' AND m.created_at >= ?
+            AND (r.delivered_at IS NULL OR r.read_at IS NULL OR m.kind = 'question')
+          ORDER BY m.thread_id, m.seq, r.recipient`,
+      )
+      .all(now - MOVE_WITHIN_MS)
   }
 }
 
