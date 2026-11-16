@@ -114,10 +114,10 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => realTimeout(fn, settle(ms) ? 500 : ms)) as typeof setTimeout)
     machine.mail!.delivery.start()
     cleanups.push(() => machine.mail!.delivery.stop())
-    // Its own turn ended and the input waits for good: nothing answered then
+    // Its own turn ended, as the host heard (the session at rest), and the input waits for good: nothing answered then
     await eventually(async () => {
       await machine.mail!.delivery.process(at('w2'))
-      return claudeCli.ran('a long job')
+      return claudeCli.ran('a long job') && running(machine, 'w2') === 'waiting_input'
     })
     expect(machine.store.mailbox.recipient(task.id, at('w2'))?.deliveredAt).not.toBeNull()
     expect(machine.store.mailbox.reportsOn(task.id)).toEqual([])
@@ -130,9 +130,10 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     const task = machine.mail!.service.task(at('w1'), at('w2'), { text: 'a long job', origin: 'agent_session', delivered: false })
     machine.mail!.delivery.start()
     cleanups.push(() => machine.mail!.delivery.stop())
+    // Its own turn ended, as the host heard (the session at rest)
     await eventually(async () => {
       await machine.mail!.delivery.process(at('w2'))
-      return claudeCli.ran('a long job')
+      return claudeCli.ran('a long job') && running(machine, 'w2') === 'waiting_input'
     })
     expect(machine.store.mailbox.recipient(task.id, at('w2'))?.releasedAt ?? null).toBeNull()
     machine.mgr.events.onEvent({ type: 'error', sessionId: 'w2', error: { code: 'adapter_crashed', message: 'the process exited', retryable: true } })

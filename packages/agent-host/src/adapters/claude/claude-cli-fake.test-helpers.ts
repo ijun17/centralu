@@ -12,7 +12,8 @@ import type { AgentAdapter } from '../contract.js'
  *     before the turn of the input that came with it (`notifyNext`)
  *   - quiet input (`shouldQuery: false`) is answered by a result naming it, with no turn
  *
- * An input whose words hold "long job", or an update's Continue, starts a turn that ends at `finish`; any other is answered at once
+ * An input whose words hold "long job", or an update's Continue, starts a turn that ends at `finish`; any other is answered at once. Not modelled:
+ * a Stop's `cancel_queued` (an interrupt ends the open turn and cancels nothing queued), tool rounds, and inputs folded into a running turn
  */
 type Frame = Record<string, unknown>
 type Input = { uuid: string; text: string }
@@ -108,7 +109,11 @@ class FakeClaudeProcess {
       // The notification's turn: no input begins it, and its result names none
       this.say(this.init(), this.assistant('The background command finished.'), result([]))
       // The CLI lost the input: no turn runs it
-      if (notified.how === 'drop') return void this.ran.push(this.read.shift()!.text)
+      if (notified.how === 'drop') {
+        this.ran.push(this.read.shift()!.text)
+        this.busy = false
+        return
+      }
       // A moment later, as the CLI reads the next input after its own turn
       setTimeout(() => this.turn(this.read.shift()!), 20)
     })
