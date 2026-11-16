@@ -2504,6 +2504,9 @@ The reminder on a linked machine is that machine's host's job (row 35). A hub se
 is reminded as any other until linked work writes mail rows here (row 26). `LinkedReports`, `endOwed` and `reportGate` go in
 that slice, once both sides run it. Listing a linked machine's sessions in `mail sessions` belongs here (§1.6).
 
+The hub's Inbox Tasks lists the linked machines' work beside its own, one row per message and recipient, and a machine's
+row opens there read-only ([linked-mail.md](linked-mail.md) §11, #2268).
+
 ## 15. What the agent sees: every sentence
 
 `<id>`, `<relation>`, `<name>`, `<project>` and `<address>` are host fields, quoted with `frameField` where they are

@@ -160,7 +160,10 @@ export class MailPerson {
    * sight. Where nothing of theirs is left to read (a chain they are not in, or one whose only message to them was withdrawn) they look in on it:
    * nothing is read, answered, closed or changed for anyone (§5.5)
    */
-  thread(threadId: string, opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined } = {}): MailThreadView {
+  thread(
+    threadId: string,
+    opts: { after?: number | undefined; all?: boolean | undefined; tail?: number | undefined; before?: number | undefined; lookIn?: boolean | undefined } = {},
+  ): MailThreadView {
     // An old thread's id opens the newest chain moved from it
     const root = this.rootsOf(threadId)[0]
     if (root === undefined) throw refuse('unknown_message', `There is no mail ${threadId} kept.`)
@@ -168,7 +171,8 @@ export class MailPerson {
       .numbered(root, CHAIN_CAP)
       .map(({ m, n }) => ({ m, seq: n }))
       .filter((s) => this.readable(s.m) || !this.involves(s.m))
-    const lookIn = !all.some((s) => this.readable(s.m))
+    // `opts.lookIn`: a hub shows this chain read-only (#2268), so nothing of it is the person's to read here either
+    const lookIn = opts.lookIn === true || !all.some((s) => this.readable(s.m))
     let page: Shown[]
     if (opts.after !== undefined) page = all.filter((s) => s.seq > (opts.after ?? 0)).slice(0, opts.all ? undefined : THREAD_PAGE)
     else if (opts.tail !== undefined || !opts.all) {
@@ -176,7 +180,7 @@ export class MailPerson {
       page = upTo.slice(-Math.min(opts.tail ?? THREAD_PAGE, THREAD_PAGE))
     } else page = all
     // Read for the person: every window's list hears it. Only their own rows are read: nothing of a look in, and nobody else's message in the chain
-    this.readFor(page)
+    if (!lookIn) this.readFor(page)
     const first = page[0]?.seq
     const last = page.at(-1)?.seq
     const legacy = this.legacyOf(all[0]?.m)

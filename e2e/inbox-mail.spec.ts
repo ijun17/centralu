@@ -691,3 +691,33 @@ test('Tasks: a host older than Tasks lists none, and Waiting works as before', a
   await page.getByTestId('inbox-tab-tasks').click()
   await expect(page.getByTestId('inbox-tasks-empty')).toHaveText('No tasks')
 })
+
+// #2268: on a hub, a linked machine whose tasks could not be read is named under the list, folding in and out (design-system §9)
+test('Tasks: a machine that could not be reached is named under the list, and the line folds in and out', async ({ page }) => {
+  await setup(page)
+  type Mock = { __mock: { seedTask(s: Record<string, unknown>): string; mockMail: { tasksUnreached: { machineId: string; name: string }[] } } }
+  const LEAD = { ...PARSER, sessionId: 's9', name: 'Lead', address: 'session:mock/s9' }
+  const seedTask = (subject: string) => page.evaluate((s) => (window as unknown as Mock).__mock.seedTask(s), { subject, owner: LEAD, assignee: PARSER, state: 'running' })
+  const unreached = (machines: { machineId: string; name: string }[]) =>
+    page.evaluate((m) => ((window as unknown as Mock).__mock.mockMail.tasksUnreached = m), machines)
+  await seedTask('Port the docs')
+  await page.getByTestId('counter').click()
+  await page.getByTestId('inbox-tab-tasks').click()
+  await expect(page.getByTestId('inbox-tasks').locator('[data-testid^="task-subject-"]')).toHaveCount(1)
+  await expect(page.getByTestId('tasks-unreached')).toHaveCount(0)
+
+  // The next read names the machine: the line folds in and settles open
+  await unreached([{ machineId: 'm1', name: 'Build box' }])
+  await seedTask('Cache headers')
+  const line = page.getByTestId('tasks-unreached')
+  await expect(line).toHaveText('Not listed: the tasks on Build box, which could not be reached just now.')
+  const fold = line.locator('xpath=ancestor::div[contains(@class, "cc-fold")][1]')
+  await expect(fold).toHaveAttribute('data-fold', 'open')
+
+  // Read again with every machine answering: it folds out, keeping its words while it leaves, and is gone
+  await unreached([])
+  await seedTask('Sidebar fold')
+  await expect(fold).toHaveAttribute('data-fold', 'closing')
+  await expect(line).toHaveText('Not listed: the tasks on Build box, which could not be reached just now.')
+  await expect(page.getByTestId('tasks-unreached')).toHaveCount(0)
+})

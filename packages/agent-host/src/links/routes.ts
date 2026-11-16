@@ -24,6 +24,8 @@ import type { Qualifier } from './qualifier.js'
  *              since a view is open on one machine and reaches only what is there (plan §11)
  *   noRemote   Routed like `session`/`project`, but refused for a remote one: the answer is a path
  *              for this computer's OS (reveal in Finder)
+ *   chain      The machine named by `threadId`'s prefix when what follows it is a mail id (a linked machine's chain,
+ *              #2268); the hub's own otherwise. A hub's own id starts with its host id, shaped as a machine id too
  *
  * `params` turns the hub's parameters into the remote's (the routing key is always stripped);
  * `result` turns the remote's answer into the hub's terms, field by field through `fields` and `each`.
@@ -44,6 +46,7 @@ export type Route =
   | { kind: 'machine'; result?: ResultFix; sharesAccount?: boolean }
   | { kind: 'view'; keys: readonly string[]; result?: ResultFix; orMachine?: boolean }
   | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
+  | { kind: 'chain'; result?: ResultFix; params?: ParamsFix }
 
 const session = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'session', result, params })
 const project = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'project', result, params })
@@ -324,9 +327,17 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'workspace.load': HUB,
   // The mailbox is the hub's: a linked machine's mail reaches it there (slice 4 of #1347)
   'mail.list': HUB,
-  // This host's tasks only: a linked machine's are not listed yet, and its chains do not open from the hub (mail.thread is the hub's)
-  'mail.tasks': HUB,
-  'mail.thread': HUB,
+  // Every machine's open work in one list (#2268, router.ts); a machine's chain opens there, to read only: reply and close are the hub's mailbox's,
+  // and the machine reads nothing in it for its own person (`lookIn`)
+  'mail.tasks': MERGE,
+  'mail.thread': {
+    kind: 'chain',
+    params: (p) => ({ ...p, lookIn: true }),
+    result: (r, q) => {
+      const v = q.mailThread(r)
+      return isObj(v) ? { ...v, lookIn: true, canReply: false } : v
+    },
+  },
   'mail.reply': HUB,
   'mail.close': HUB,
   'mail.held': HUB,

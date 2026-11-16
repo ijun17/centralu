@@ -1,6 +1,7 @@
 import { ApprovalDetail, isUnknownCard } from '@cc/protocol'
 import { qualify } from './machine-ids.js'
 import { isObj, type Obj } from '../json-value.js'
+import { PERSON, appAddress, inHubTerms, parseAddress } from '../mail/address.js'
 
 /**
  * Rewrites what one linked machine says into the hub's terms, and the hub's terms back into the
@@ -18,6 +19,15 @@ import { isObj, type Obj } from '../json-value.js'
  * reads it tolerantly (#339). Values are read as `unknown` on purpose: the remote is another build,
  * and the UI parses the result again through the method's schema.
  */
+
+/** A session of a linked machine as the hub's mail and Inbox name it (docs/plans/linked-mail.md §7a) */
+export const onMachine = (name: string, machine: string): string => `${name} on ${machine}`
+
+/**
+ * How a machine's mail reads in the hub's terms (#2268): the hub's own id in mail addresses, the machine's (`own`, from its answer to the hub's offer;
+ * null for a machine from before it, whose own sessions then stay in its terms), and the machine's name as the person gave it
+ */
+export type MailTerms = { hub: string; own: string | null; computer: () => string }
 
 export class CrossMachineError extends Error {
   readonly code = 'internal'
@@ -40,6 +50,9 @@ export class Qualifier {
   ) {}
 
   private readonly prefix = (): string => `${this.machine}.`
+
+  /** Set once the machine answered this connection's offer (`LinkedMachineConnection.offerAsks`); null until then, and for a hub with no mail */
+  mail: MailTerms | null = null
 
   /**
    * This machine's approval cards the hub could not read (#844), by the machine's own session id and the request id.
@@ -278,6 +291,54 @@ export class Qualifier {
     return isObj(d) ? { ...d, projectId: this.maybeId(d.projectId) } : d
   }
 
+  /**
+   * A `MailParty` of this machine's mail in the hub's terms (#2268, `inHubTerms`): its own session is `session:<hub>/<machine>.<id>`, named
+   * `<name> on <machine>`; the hub's person is `person`; its own app's project is qualified. The hub's side, `person` and `centralu` stay
+   */
+  mailParty(p: unknown): unknown {
+    const t = this.mail
+    if (!isObj(p) || typeof p.address !== 'string' || !t) return p
+    const address = inHubTerms(p.address, t.hub, t.own === null ? undefined : { host: t.own, id: this.machine })
+    if (address === PERSON) return { ...p, address, kind: 'person', sessionId: null, name: null, state: null }
+    const named = parseAddress(address)
+    if (address !== p.address && named?.kind === 'session') {
+      return { ...p, address, sessionId: named.sessionId, name: typeof p.name === 'string' ? onMachine(p.name, t.computer()) : p.name }
+    }
+    const app = parseAddress(p.address)
+    return app?.kind === 'app' && app.host === t.own ? { ...p, address: appAddress(t.hub, this.id(app.projectId), app.appId) } : p
+  }
+
+  /** A `mail.tasks` row: its parties in the hub's terms, and its chain qualified so the row opens there (`mail.thread`). The message id is every host's */
+  taskRow(t: unknown): unknown {
+    return isObj(t) ? { ...t, root: this.maybeId(t.root), owner: this.mailParty(t.owner), assignee: this.mailParty(t.assignee) } : t
+  }
+
+  /**
+   * A `mail.tasks` answer's rows in the hub's terms (`taskRow`), but for the items of this machine's own Inbox: a row its own person gave or has, and one
+   * held there for them to act on. The hub shows nothing of that Inbox (`mail.list` and `mail.held` are the hub's own), so such a row could be neither
+   * answered, closed nor released here, and would stand in the hub's Needs you as the hub's person's own
+   */
+  taskRows(rows: unknown): unknown[] {
+    const own = (p: unknown) => isObj(p) && p.address === PERSON
+    return (Array.isArray(rows) ? rows : []).flatMap((t: unknown) => (isObj(t) && (own(t.owner) || own(t.assignee) || t.state === 'held') ? [] : [this.taskRow(t)]))
+  }
+
+  /** A `MailThreadView` of this machine: its chain and the chains it follows qualified, every party in the hub's terms. Message ids are every host's */
+  mailThread(v: unknown): unknown {
+    if (!isObj(v)) return v
+    const party = (x: unknown) => this.mailParty(x)
+    const sent = (x: unknown) => (isObj(x) ? { ...x, sender: party(x.sender) } : x)
+    const list = (x: unknown, f: (y: Obj) => unknown) => (Array.isArray(x) ? x.map((y: unknown) => (isObj(y) ? f(y) : y)) : x)
+    const t = v.thread
+    return {
+      ...v,
+      thread: isObj(t) ? { ...t, id: this.maybeId(t.id), projectId: this.maybeId(t.projectId), owner: party(t.owner), assignee: party(t.assignee), ask: sent(t.ask), last: sent(t.last) } : t,
+      parties: list(v.parties, (x) => ({ ...x, party: party(x.party) })),
+      messages: list(v.messages, (m) => ({ ...m, sender: party(m.sender), ...('receipts' in m ? { receipts: list(m.receipts, (r) => ({ ...r, recipient: party(r.recipient) })) } : {}) })),
+      follows: list(v.follows, (f) => ({ ...f, id: this.maybeId(f.id) })),
+    }
+  }
+
   // ── Events ──────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -302,13 +363,20 @@ export class Qualifier {
       case 'prefs_changed':
       case 'app_state_changed':
       case 'agent_versions':
-      case 'mail_changed':
       case 'external_app_questions_changed':
       case 'orchestrator_proposals_changed':
       case 'assistant_proposals_changed':
         return null
       case 'error':
         return sid === undefined ? null : base
+      /*
+       * Its mail moved (#2268): the hub's windows read Tasks again, and the machine's chain if one is open. Never as news for the person: what that
+       * machine's own Inbox holds is not the hub's person's to be told of, and a message to them reaches the hub's mailbox, which tells them itself
+       */
+      case 'mail_changed': {
+        const { arrived: _arrived, ...rest } = base
+        return { ...rest, threadId: this.maybeId(e.threadId), toPerson: false }
+      }
       case 'session_created':
         return { ...base, session: this.session(e.session) }
       case 'user_message': {

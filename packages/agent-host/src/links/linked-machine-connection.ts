@@ -759,6 +759,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true
       if (this.client === client) this.tasksBack = isObj(answer) && answer.tasks === true
+      // How its mail names its own sessions, which the hub's Tasks reads in its own terms (#2268)
+      if (this.client === client) this.q.mail = { hub: self.id, own: isObj(answer) && typeof answer.host === 'string' ? answer.host : null, computer: () => this.name }
     } catch (err) {
       // This connection was not told: neither side calls the other's mail or apps on it
       if (this.client === client) this.appsBack = false

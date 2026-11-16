@@ -12,6 +12,7 @@ import {
   UsageSnapshot,
 } from '../../entities.js'
 import { MessageImage } from '../files.js'
+import { UnreachedMachine } from '../../machines.js'
 import { CommandInfo, ProjectInfo } from '../projects.js'
 import {
   SessionInfo,
@@ -187,7 +188,7 @@ export const sessionsResults = {
     sessions: z.array(TrashedSession),
     runs: z.array(TrashedRun).default([]),
     bytes: z.number(),
-    unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+    unreached: z.array(UnreachedMachine).optional(),
     /**
      * The subagent steps moved to the trash without their session (#418), most recently moved first. Their bytes
      * are in `bytes`. `trash.empty` leaves them: the window deletes each one it listed (`trash.purgeSubagentSteps`).
@@ -207,7 +208,7 @@ export const sessionsResults = {
   'trash.purge': z.object({ ok: z.literal(true) }),
   'subagents.usage': z.object({
     sessions: z.array(SubagentStepsHeld),
-    unreached: z.array(z.object({ machineId: z.string(), name: z.string() })).optional(),
+    unreached: z.array(UnreachedMachine).optional(),
   }),
   'subagents.trash': z.object({ steps: z.number(), bytes: z.number() }),
   'trash.restoreSubagentSteps': z.object({ ok: z.literal(true) }),

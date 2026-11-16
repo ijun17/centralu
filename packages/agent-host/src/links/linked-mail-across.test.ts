@@ -3,7 +3,7 @@ import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
-import { sessionAddress } from '../mail/address.js'
+import { PERSON, sessionAddress } from '../mail/address.js'
 import { FIND_MS, MailAcross, NAMED_HERE_MS } from '../mail/across.js'
 import { mailPeers } from './mail-peers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -87,6 +87,41 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const later = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'and the other PR?' }))
     expect((await tool(hub, 'h1', { action: 'handled', thread: later })).text).toMatch(/^Withdrawn: /)
     await eventually(() => machine.store.mailbox.recipient(later, at(machine, 'w1'))?.settled === 'withdrawn')
+  })
+
+  it("the hub's Tasks lists the machine's work beside its own, mail that crossed once, and a machine's chain opens there to read (#2268)", async () => {
+    const { machine, hub } = await rig()
+    const between = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'which branch?' }))
+    const crossed = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'are you free for a review?' }))
+    type Tasks = { tasks: { id: string; root: string; owner: { address: string; name: string | null }; assignee: { address: string } }[]; unreached: unknown }
+    const tasks = async () => (await hub.router.handle('mail.tasks', {})) as Tasks
+    await eventually(async () => (await tasks()).tasks.some((t) => t.id === between))
+    const listed = await tasks()
+    // Between two of the machine's sessions, named as the hub names them, opening on the machine
+    expect(listed.tasks.filter((t) => t.id === between)).toEqual([
+      expect.objectContaining({ root: `m1.${between}`, owner: expect.objectContaining({ address: at(hub, 'm1.w1'), name: 'w1 on Remote box' }), assignee: expect.objectContaining({ address: at(hub, 'm1.c1') }) }),
+    ])
+    // Stored on both computers, listed once: the hub's own row, which opens here
+    expect(listed.tasks.filter((t) => t.id === crossed)).toEqual([expect.objectContaining({ root: crossed, assignee: expect.objectContaining({ address: at(hub, 'm1.w1') }) })])
+    expect(listed.unreached).toEqual([])
+    const chain = (await hub.router.handle('mail.thread', { threadId: `m1.${between}`, tail: 100 })) as { thread: { id: string }; lookIn: boolean; canReply: boolean; messages: { body: string }[] }
+    expect(chain).toMatchObject({ thread: { id: `m1.${between}` }, lookIn: true, canReply: false, messages: [{ body: 'which branch?' }] })
+  })
+
+  it("the hub's Tasks leaves out the machine's own Inbox, and opening a chain of it from the hub reads nothing there (#2268)", async () => {
+    const { machine, hub } = await rig()
+    // The machine's own person asks its session in that computer's window, and the session answers there
+    const asked = machine.mail!.service.send(PERSON, { to: [at(machine, 'w1')], text: 'which branch?', needsReply: true }).message
+    const answer = idOf(await tool(machine, 'w1', { action: 'reply', thread: asked.id, text: 'main' }))
+    expect(machine.store.mailbox.recipient(answer, PERSON)?.readAt).toBeNull()
+    const between = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'and the docs?' }))
+    type Tasks = { tasks: { id: string }[] }
+    const ids = async () => ((await hub.router.handle('mail.tasks', {})) as Tasks).tasks.map((t) => t.id)
+    await eventually(async () => (await ids()).includes(between))
+    expect(await ids()).not.toContain(asked.id)
+    const chain = await hub.router.handle('mail.thread', { threadId: `m1.${asked.id}`, tail: 100 })
+    expect(chain).toMatchObject({ lookIn: true, messages: [{ body: 'which branch?' }, { body: 'main' }] })
+    expect(machine.store.mailbox.recipient(answer, PERSON)?.readAt).toBeNull()
   })
 
   it("a machine's session reaches a hub session by its name, and a name on both computers is refused with both", async () => {

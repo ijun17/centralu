@@ -164,6 +164,7 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A tool's setup (install, sign in, the terminal hint) | `ToolSetupLine` (`features/tools/`): one piece in the new-session dialog, the first-run card, the new-app dialog and under the empty session's tool capsule, where the tool being set up takes the capsule's fill until it is ready or the session's own tool is picked again (for Antigravity the first-run card and the new-app dialog show its refusal, with no action, until it takes role text); a button that halts work in progress (the install, the sign-in) reads **Stop**, never Cancel, which belongs to the dialog (*owner, 2026-10-28*) |
 | A bar for work with a known end | `ProgressBar` (`value` 0 to 1; null breathes) |
 | A list that failed to load | `LoadFailed` (what could not be read, why, Retry), never an empty list |
+| A hub's merged list that a linked machine could not add to | `Unreached` ("Not listed: <what> on <machines>, which could not be reached just now."), folding in and out under the list: the session archive, the Inbox's Tasks |
 | Still loading | `SkeletonLines`, `ChatSkeleton` (invisible for 150ms, then fade in) |
 | A scroller with its bar over the content | `OverlayScrollbar` |
 | Time since | `RelativeAge` |
