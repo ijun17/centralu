@@ -52,7 +52,7 @@ export class StepsV75 extends MigrationRange {
          * One release after step 75, whose build was the first to name none of these (rule 2 above `migrationSteps`). `schema.sql` creates
          * none of them, so a new store and a migrated one end with the same tables.
          *
-         * **Breaks the build of v74 (beta.70, beta.71): the floor goes to 75.** That build reads the thread tables at every start and for the
+         * **Breaks the build of v74 (beta.70 to beta.72): the floor goes to 75.** That build reads the thread tables at every start and for the
          * lines before a moved message, deletes from `report_marks` at every start and from two of the thread tables when a session is
          * purged; it is refused (`StoreTooNewError`). The build of v75 opens the store as it is. No release read or wrote `sessions.mail_args`:
          * the second version of the mail tool it was added for was not built (M3b).
