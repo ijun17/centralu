@@ -3,6 +3,9 @@
  * tables becomes mail once, in the step, and from this build on only a migration step names those tables. The floor goes to 74: the builds of
  * v70 to v73 are refused, and the build of v74 opens the store and finds nothing left to move.
  *
+ * Step 76, one release later, drops those tables and the rest that only migration steps name. The floor goes to 75: the build of v74, which
+ * still reads them, is refused.
+ *
  * The build of v64 is this build's `Store` with the steps after 64 left out, and its thread mail is written in plain SQL, as its `MailRecords`
  * wrote it. Only the clock's date is set, so the step's `Date.now()` is `NOW`.
  */
@@ -481,14 +484,15 @@ describe('step 75: the last move of thread mail', () => {
   })
 })
 
-describe('step 75 and the builds before it', () => {
-  function file(): string {
-    const d = tempRoot('cc-contract-step-')
-    dirs.push(d)
-    return `${d}/store.db`
-  }
-  const floor = (db: Database.Database) => rows<{ value: string }>(db, `SELECT value FROM app_settings WHERE key = 'min_reader_version'`)[0]?.value
+/** A store file of this test's own */
+function file(): string {
+  const d = tempRoot('cc-contract-step-')
+  dirs.push(d)
+  return `${d}/store.db`
+}
+const floor = (db: Database.Database) => rows<{ value: string }>(db, `SELECT value FROM app_settings WHERE key = 'min_reader_version'`)[0]?.value
 
+describe('step 75 and the builds before it', () => {
   it('raises the floor to 74: the builds of v70 to v73 are refused and change nothing, and the build of v74 opens it with nothing left to move', () => {
     const path = file()
     const first = v64(path)
@@ -524,6 +528,65 @@ describe('step 75 and the builds before it', () => {
     const again = open(STEP, path)
     stores.push(again)
     expect([again.migrationsRun, moved(again.raw)]).toEqual([0, after])
+  })
+})
+
+describe('step 76: what only migration steps name goes', () => {
+  const DROPPED = ['delegated_turns', 'mail_blockers', 'mail_messages', 'mail_participants', 'mail_receipts', 'mail_threads', 'queued_requests', 'report_marks']
+  /** What is left of the dropped tables, their indexes and the open-turn index, and whether `sessions` still has the column */
+  const left = (db: Database.Database) => ({
+    names: rows<{ name: string }>(db, `SELECT name FROM sqlite_master WHERE tbl_name IN (${DROPPED.map(() => '?').join(', ')}) OR name = 'mail_turns_open' ORDER BY name`, ...DROPPED).map((r) => r.name),
+    mailArgs: rows<{ name: string }>(db, `PRAGMA table_info(sessions)`).some((c) => c.name === 'mail_args'),
+  })
+  const turns = (db: Database.Database) => rows(db, `SELECT session_id, turn_seq, thread_id, ended_at FROM mail_turns`)
+
+  /** A store at v75 with the fixture moved, an open turn that names an old thread, and a value in the column */
+  function v75(path?: string): Build {
+    const s = v64(path)
+    fixture(s.raw)
+    s.upgrade()
+    s.raw.prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, started_by, started_at) VALUES ('s1', 1, ?, 'mail', ?)`).run(WORK, AT)
+    s.raw.exec(`UPDATE sessions SET mail_args = 1 WHERE id = 's1'`)
+    return s
+  }
+
+  it('drops the old tables with their indexes, the open-turn index and sessions.mail_args, and keeps the moved mail and the turns', () => {
+    const s = v75()
+    const was = { moved: moved(s.raw), threads: rows(s.raw, `SELECT id, legacy_thread FROM mail ORDER BY id`), turns: turns(s.raw) }
+    expect(left(s.raw).names).toEqual(expect.arrayContaining([...DROPPED, 'mail_turns_open']))
+    expect([left(s.raw).mailArgs, was.moved.length, was.turns.length]).toEqual([true, 8, 1])
+    s.upgrade(76)
+    expect([s.schemaVersion, left(s.raw)]).toEqual([76, { names: [], mailArgs: false }])
+    expect({ moved: moved(s.raw), threads: rows(s.raw, `SELECT id, legacy_thread FROM mail ORDER BY id`), turns: turns(s.raw) }).toEqual(was)
+  })
+
+  it('raises the floor to 75: the build of v74 is refused and changes nothing, and the build of v75 opens it and works on it', async () => {
+    const path = file()
+    const first = v75(path)
+    first.raw.exec(`UPDATE sessions SET deleted_at = 5 WHERE id = 's3'`)
+    first.upgrade(76)
+    const after = moved(first.raw)
+    expect([first.schemaVersion, floor(first.raw)]).toEqual([76, '75'])
+    first.close()
+    expect(() => open(74, path)).toThrow(StoreTooNewError)
+    expect(() => open(74, path)).toThrow(/can be read from store version 75 on; this Centralu knows store versions up to 74/)
+    const build = open(STEP, path)
+    stores.push(build)
+    expect([build.migrationsRun, build.schemaVersion, floor(build.raw), moved(build.raw)]).toEqual([0, 76, '75', after])
+    // What that build reads at a start, and what it deletes when a session leaves the trash
+    expect(build.sessions.listSessions().map((x) => x.id)).toEqual(['s1', 's2'])
+    expect(build.mailbox.openTurns().map((t) => [t.sessionId, t.turnSeq])).toEqual([['s1', 1]])
+    expect(await build.trash.purgeSession('s3')).toBe(true)
+    expect(build.trash.isTrashed('s3')).toBe(false)
+  })
+
+  it('leaves a store that has none of them alone: run again, it changes nothing', () => {
+    const s = v75()
+    s.upgrade(76)
+    const was = rows(s.raw, `SELECT type, name, sql FROM sqlite_master ORDER BY name`)
+    s.raw.pragma('user_version = 75')
+    s.upgrade(76)
+    expect([s.schemaVersion, rows(s.raw, `SELECT type, name, sql FROM sqlite_master ORDER BY name`)]).toEqual([76, was])
   })
 })
 

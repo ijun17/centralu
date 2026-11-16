@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 75, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 76, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -136,13 +136,6 @@ erDiagram
     TEXT session_id
     INTEGER ts
   }
-  delegated_turns {
-    TEXT session_id PK
-    TEXT caller_session_id
-    INTEGER started_at
-    TEXT told_cards
-    TEXT turn_id
-  }
   grid_layout {
     TEXT panel_key PK
     TEXT kind
@@ -207,53 +200,9 @@ erDiagram
     TEXT choices
     TEXT subject
   }
-  mail_blockers {
-    TEXT thread_id PK
-    INTEGER n PK
-    TEXT kind
-    TEXT ref
-    TEXT text
-    INTEGER resolved_at
-  }
-  mail_messages {
-    TEXT id PK
-    TEXT thread_id
-    INTEGER seq
-    INTEGER home_seq
-    TEXT sender
-    TEXT kind
-    INTEGER urgent
-    INTEGER needs_owner
-    TEXT wake
-    TEXT reply_to
-    TEXT body
-    TEXT facts
-    TEXT dedupe_key
-    INTEGER created_at
-  }
   mail_numbers {
     INTEGER n PK
     TEXT message_id
-  }
-  mail_participants {
-    TEXT thread_id PK
-    TEXT address PK
-    TEXT role
-    INTEGER joined_at
-    INTEGER left_at
-    INTEGER read_seq
-  }
-  mail_receipts {
-    TEXT message_id PK
-    TEXT recipient PK
-    INTEGER due_at
-    INTEGER attempt_at
-    INTEGER delivered_at
-    INTEGER read_at
-    INTEGER handled_at
-    TEXT held
-    INTEGER attempts
-    TEXT last_error
   }
   mail_recipients {
     TEXT message_id PK
@@ -276,28 +225,6 @@ erDiagram
     INTEGER released_at
     TEXT released_why
     INTEGER told_at
-  }
-  mail_threads {
-    TEXT id PK
-    TEXT home
-    TEXT project_id
-    TEXT subject
-    TEXT origin
-    INTEGER depth
-    TEXT parent_id
-    TEXT follows
-    TEXT state
-    TEXT outcome
-    TEXT owner
-    TEXT assignee
-    TEXT next_step
-    TEXT links
-    INTEGER rev
-    INTEGER pinned_at
-    INTEGER created_at
-    INTEGER updated_at
-    INTEGER state_since
-    INTEGER done_at
   }
   mail_turns {
     TEXT session_id PK
@@ -359,21 +286,6 @@ erDiagram
     TEXT worktree_manager
     INTEGER trusted
   }
-  queued_requests {
-    TEXT id PK
-    TEXT session_id
-    TEXT caller_session_id
-    TEXT via
-    TEXT text
-    INTEGER queued_at
-    INTEGER delivering_at
-    INTEGER opened_by_auto
-  }
-  report_marks {
-    TEXT session_id PK
-    TEXT caller_session_id
-    INTEGER marked_at
-  }
   sessions {
     TEXT id PK
     TEXT project_id FK
@@ -410,7 +322,6 @@ erDiagram
     TEXT asked_by_session_id
     TEXT forked_from_session_id
     TEXT interruption
-    INTEGER mail_args
     INTEGER is_assistant
   }
   subagent_messages {
@@ -635,18 +546,6 @@ Added in schema.sql.
 | `session_id` | TEXT | no |  |  | schema.sql |
 | `ts` | INTEGER | no |  |  | schema.sql |
 
-### `delegated_turns`
-
-Added in v51.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `session_id` | TEXT | yes |  | PK | v51 |
-| `caller_session_id` | TEXT | no |  |  | v51 |
-| `started_at` | INTEGER | no |  |  | v51 |
-| `told_cards` | TEXT | no | `''` |  | v51 |
-| `turn_id` | TEXT | no | `''` |  | v51 |
-
 ### `grid_layout`
 
 Added in v42.
@@ -749,44 +648,6 @@ Indexes:
 - `mail_root`: `root_id`, `created_at`
 - `mail_sender`: `sender`, `created_at`
 
-### `mail_blockers`
-
-Added in v61.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `thread_id` | TEXT | no |  | PK 1 | v61 |
-| `n` | INTEGER | no |  | PK 2 | v61 |
-| `kind` | TEXT | no |  |  | v61 |
-| `ref` | TEXT | yes |  |  | v61 |
-| `text` | TEXT | no |  |  | v61 |
-| `resolved_at` | INTEGER | yes |  |  | v61 |
-
-### `mail_messages`
-
-Added in v61.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `id` | TEXT | yes |  | PK | v61 |
-| `thread_id` | TEXT | no |  |  | v61 |
-| `seq` | INTEGER | no |  |  | v61 |
-| `home_seq` | INTEGER | yes |  |  | v61 |
-| `sender` | TEXT | no |  |  | v61 |
-| `kind` | TEXT | no |  |  | v61 |
-| `urgent` | INTEGER | no | `0` |  | v61 |
-| `needs_owner` | INTEGER | no | `0` |  | v61 |
-| `wake` | TEXT | yes |  |  | v61 |
-| `reply_to` | TEXT | yes |  |  | v61 |
-| `body` | TEXT | no |  |  | v61 |
-| `facts` | TEXT | no | `'{}'` |  | v61 |
-| `dedupe_key` | TEXT | yes |  |  | v61 |
-| `created_at` | INTEGER | no |  |  | v61 |
-
-Indexes:
-
-- `mail_messages_dedupe`: `sender`, `dedupe_key`
-
 ### `mail_numbers`
 
 Added in v67.
@@ -795,44 +656,6 @@ Added in v67.
 |---|---|---|---|---|---|
 | `n` | INTEGER | yes |  | PK | v67 |
 | `message_id` | TEXT | no |  |  | v67 |
-
-### `mail_participants`
-
-Added in v61.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `thread_id` | TEXT | no |  | PK 1 | v61 |
-| `address` | TEXT | no |  | PK 2 | v61 |
-| `role` | TEXT | no |  |  | v61 |
-| `joined_at` | INTEGER | no |  |  | v61 |
-| `left_at` | INTEGER | yes |  |  | v61 |
-| `read_seq` | INTEGER | no | `0` |  | v61 |
-
-Indexes:
-
-- `mail_participants_address`: `address`
-
-### `mail_receipts`
-
-Added in v61.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `message_id` | TEXT | no |  | PK 1 | v61 |
-| `recipient` | TEXT | no |  | PK 2 | v61 |
-| `due_at` | INTEGER | no |  |  | v61 |
-| `attempt_at` | INTEGER | yes |  |  | v61 |
-| `delivered_at` | INTEGER | yes |  |  | v61 |
-| `read_at` | INTEGER | yes |  |  | v61 |
-| `handled_at` | INTEGER | yes |  |  | v61 |
-| `held` | TEXT | yes |  |  | v61 |
-| `attempts` | INTEGER | no | `0` |  | v61 |
-| `last_error` | TEXT | yes |  |  | v61 |
-
-Indexes:
-
-- `mail_receipts_pending`: `recipient`, `due_at`
 
 ### `mail_recipients`
 
@@ -869,37 +692,6 @@ Indexes:
 - `mail_recipients_pending`: `recipient`, `due_at`
 - `mail_recipients_untold`: `released_at`
 
-### `mail_threads`
-
-Added in v61.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `id` | TEXT | yes |  | PK | v61 |
-| `home` | TEXT | no |  |  | v61 |
-| `project_id` | TEXT | yes |  |  | v61 |
-| `subject` | TEXT | no |  |  | v61 |
-| `origin` | TEXT | no |  |  | v61 |
-| `depth` | INTEGER | no | `0` |  | v61 |
-| `parent_id` | TEXT | yes |  |  | v61 |
-| `follows` | TEXT | yes |  |  | v61 |
-| `state` | TEXT | no |  |  | v61 |
-| `outcome` | TEXT | yes |  |  | v61 |
-| `owner` | TEXT | no |  |  | v61 |
-| `assignee` | TEXT | yes |  |  | v61 |
-| `next_step` | TEXT | yes |  |  | v61 |
-| `links` | TEXT | no | `'{}'` |  | v61 |
-| `rev` | INTEGER | no | `0` |  | v61 |
-| `pinned_at` | INTEGER | yes |  |  | v61 |
-| `created_at` | INTEGER | no |  |  | v61 |
-| `updated_at` | INTEGER | no |  |  | v61 |
-| `state_since` | INTEGER | no |  |  | v61 |
-| `done_at` | INTEGER | yes |  |  | v61 |
-
-Indexes:
-
-- `mail_threads_state`: `state`, `updated_at`
-
 ### `mail_turns`
 
 Added in v61.
@@ -916,10 +708,6 @@ Added in v61.
 | `message_id` | TEXT | yes |  |  | v65 |
 | `starter_id` | TEXT | yes |  |  | v65 |
 | `ended_how` | TEXT | yes |  |  | v65 |
-
-Indexes:
-
-- `mail_turns_open`: `thread_id`
 
 ### `mail_watches`
 
@@ -999,31 +787,6 @@ Added in schema.sql.
 | `worktree_manager` | TEXT | yes |  |  | v27 |
 | `trusted` | INTEGER | no | `0` |  | v33 |
 
-### `queued_requests`
-
-Added in v52.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `id` | TEXT | yes |  | PK | v52 |
-| `session_id` | TEXT | no |  |  | v52 |
-| `caller_session_id` | TEXT | no |  |  | v52 |
-| `via` | TEXT | no |  |  | v52 |
-| `text` | TEXT | no |  |  | v52 |
-| `queued_at` | INTEGER | no |  |  | v52 |
-| `delivering_at` | INTEGER | yes |  |  | v52 |
-| `opened_by_auto` | INTEGER | yes |  |  | v54 |
-
-### `report_marks`
-
-Added in v49.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `session_id` | TEXT | yes |  | PK | v49 |
-| `caller_session_id` | TEXT | no |  |  | v49 |
-| `marked_at` | INTEGER | no |  |  | v49 |
-
 ### `sessions`
 
 Added in schema.sql.
@@ -1065,7 +828,6 @@ Added in schema.sql.
 | `asked_by_session_id` | TEXT | yes |  |  | v45 |
 | `forked_from_session_id` | TEXT | yes |  |  | v52 |
 | `interruption` | TEXT | yes |  |  | v53 |
-| `mail_args` | INTEGER | yes |  |  | v65 |
 | `is_assistant` | INTEGER | no | `0` |  | v68 |
 
 Indexes:

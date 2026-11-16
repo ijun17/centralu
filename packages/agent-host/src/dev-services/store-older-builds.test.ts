@@ -116,7 +116,7 @@ describe('a store written before a question’s choices had a column (v69, #1630
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(6) // v70, then v71 (#2229), v72 (#2243), v73 (#1324), v74 and v75 (#2258)
+    expect(second.migrationsRun).toBe(7) // v70, then v71 (#2229), v72 (#2243), v73 (#1324), v74, v75 and v76 (#2258)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v69 writes: its own column list, none of ours
@@ -142,7 +142,7 @@ describe('a store written before a chain’s subject had a column (v70, #2229)',
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(5) // v71, then v72 (#2243), v73 (#1324), v74 and v75 (#2258)
+    expect(second.migrationsRun).toBe(6) // v71, then v72 (#2243), v73 (#1324), v74, v75 and v76 (#2258)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?', subject: null })
     const db = (second as unknown as { db: Database.Database }).db
     // What a build of v70 writes: its own column list, none of ours
@@ -193,7 +193,7 @@ describe('a store holding mail an earlier build held (v71, #2243)', () => {
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(4) // v72, then v73 (#1324), v74 and v75 (#2258)
+    expect(second.migrationsRun).toBe(5) // v72, then v73 (#1324), v74, v75 and v76 (#2258)
     // Waiting lists what today's gate holds (an untrusted project's message to a session of another project), and the holds nothing here judged
     const waiting = second.mailbox.heldRows().map((r) => `${r.messageId.slice(3)}:${r.held}`)
     expect(waiting.sort()).toEqual(['m_failed:failed', 'm_loop:loop', 'm_new_policy:policy', 'm_uncertain:uncertain', 'm_untrusted:policy'])
@@ -225,7 +225,7 @@ describe('a store written before watches had a table (v71, #1324)', () => {
     written.close()
 
     const second = new Store(file)
-    expect(second.migrationsRun).toBe(4) // v72 (#2243), then v73, v74 and v75 (#2258)
+    expect(second.migrationsRun).toBe(5) // v72 (#2243), then v73, v74, v75 and v76 (#2258)
     expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Ship it?' })
     expect(second.mailbox.activeWatches()).toEqual([])
     const watch = { id: 'h1.w_1', owner: 'session:h1/a', source: 'time', target: 'in 30m', spec: '{"kind":"in","slotMs":1}', note: '', state: 'active', lastKey: null, firedCount: 0, createdAt: at, expiresAt: at, nextAt: at, endedAt: null, endedBy: null }
