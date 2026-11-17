@@ -849,21 +849,21 @@ describe('theme files and the models for started agents (#1978)', () => {
   // #2214: a file never takes a preset's id, so the preset and the file are both there and each is picked by its own id
   it('a theme file named like a preset is filed under another id, and picked by that id in the same call; the preset stays pickable', async () => {
     const orc = await mgr.assistant()
-    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Graphite', base: 'dark', tokens: {} }, theme: 'graphite-2' })
+    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Dark', base: 'dark', tokens: {} }, theme: 'dark-2' })
     expect(made.isError).toBeFalsy()
-    expect(made.text).toContain('Wrote the theme file "Graphite" [graphite-2]')
-    expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
-    expect((await run(orc.id, 'set_preferences', { theme: 'graphite' })).isError).toBeFalsy()
-    expect(await prefs()).toMatchObject({ themeDark: 'graphite' })
+    expect(made.text).toContain('Wrote the theme file "Dark" [dark-2]')
+    expect(await prefs()).toMatchObject({ themeDark: 'dark-2' })
+    expect((await run(orc.id, 'set_preferences', { theme: 'dark' })).isError).toBeFalsy()
+    expect(await prefs()).toMatchObject({ themeDark: 'dark' })
   })
 
   // #2214: the name of the file made in the call is that file's, not the same-named preset's (the id lookup finds the preset first)
   it('a theme file and its own name in one call picks the new file, not the preset of that name', async () => {
     const orc = await mgr.assistant()
-    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Graphite', base: 'dark', tokens: {} }, theme: 'Graphite' })
+    const made = await run(orc.id, 'set_preferences', { themeFile: { name: 'Dark', base: 'dark', tokens: {} }, theme: 'Dark' })
     expect(made.isError).toBeFalsy()
-    expect(made.text).toContain('[graphite-2]')
-    expect(await prefs()).toMatchObject({ themeDark: 'graphite-2' })
+    expect(made.text).toContain('[dark-2]')
+    expect(await prefs()).toMatchObject({ themeDark: 'dark-2' })
   })
 
   // The one way the pick after a write can fail: the file is gone again when it is looked up. The write stands, the rest is applied, the pick is reported
@@ -883,10 +883,10 @@ describe('theme files and the models for started agents (#1978)', () => {
   // #2214: an explicit id writes to that file, so a preset's id would hide the preset; one already stored there is still edited
   it('a preset id is not taken by an explicit id; a file already stored under it is edited in place', async () => {
     const orc = await mgr.assistant()
-    const refused = await run(orc.id, 'set_preferences', { themeFile: { id: 'graphite', name: 'Mine', base: 'dark', tokens: {} } })
+    const refused = await run(orc.id, 'set_preferences', { themeFile: { id: 'hc-dark', name: 'Mine', base: 'dark', tokens: {} } })
     expect(refused.isError).toBe(true)
-    expect(refused.text).toContain("graphite is a preset's id")
-    expect(readdirSync(themesDir())).not.toContain('graphite.json')
+    expect(refused.text).toContain("hc-dark is a preset's id")
+    expect(readdirSync(themesDir())).not.toContain('hc-dark.json')
     writeFileSync(join(themesDir(), 'light.json'), JSON.stringify({ name: 'My light', base: 'light', tokens: {} }))
     const edited = await run(orc.id, 'set_preferences', { themeFile: { id: 'light', name: 'My light', base: 'light', tokens: { 'surface-floor': '#101820' } } })
     expect(edited.isError).toBeFalsy()

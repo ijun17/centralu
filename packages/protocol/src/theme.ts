@@ -169,13 +169,16 @@ export type ThemePreset = { id: string; name: string; base: 'dark' | 'light' }
  * The presets the stylesheet defines (`packages/ui/src/styles/index.css`), here so the host can name them too: the
  * Assistant's `set_preferences` picks a theme by id or name (#1219), and the screen reads this same list
  * (`THEME_PRESETS` in app/theme.ts). The first preset of each base is that side's default.
+ *
+ * Graphite (`graphite`, #2208) left the list when Dark took its values (#2335). A choice saved under its id names nothing
+ * now, so it resolves the way any such id does, to its side's default, Dark (app/theme.ts `resolveSide`), and the first
+ * paint, given no floor for it, paints Dark's: nothing stored is rewritten.
  */
 export const THEME_PRESETS: readonly ThemePreset[] = [
   { id: 'dark', name: 'Dark', base: 'dark' },
   { id: 'light', name: 'Light', base: 'light' },
   { id: 'hc-dark', name: 'High contrast dark', base: 'dark' },
   { id: 'hc-light', name: 'High contrast light', base: 'light' },
-  { id: 'graphite', name: 'Graphite', base: 'dark' },
 ]
 
 /** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
@@ -205,7 +208,7 @@ export function presetIdRefusal(id: string): string {
  * host's `themes.save` and import, the Assistant's `set_preferences` (which names the id before the file exists) and the mock.
  *
  * Never a preset's id (#2214): a theme file shadows a preset of the same id (the window looks for a file first), so a custom
- * theme named "Graphite" or "Dark" would have made the preset impossible to pick. It gets `graphite-2` and keeps its name.
+ * theme named "Dark" or "Light" would have made the preset impossible to pick. It gets `dark-2` and keeps its name.
  */
 export function freeThemeId(name: string, isTaken: (id: string) => boolean): string {
   const base = themeSlug(name)

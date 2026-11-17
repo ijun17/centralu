@@ -23,7 +23,7 @@ Picking a theme sets `themeMode` to its side and that side's field to its id; th
 last theme. **The app never follows the OS**: Dark is the default and nothing switches it behind the
 person's back (`prefers-color-scheme` is not read, at first paint or after). There is no accent either:
 Settings stopped offering it, and an `accent` an older build stored is not applied. A theme file can
-still set `focus` and `selection` itself. An id that names nothing (a deleted file) falls back to that
+still set `focus` and `selection` itself. An id that names nothing (a deleted file, or `graphite` since that preset left, #2335) falls back to that
 side's preset.
 
 **Presets** live in the stylesheet: the `@theme` values are the Dark preset, and the others are
@@ -35,7 +35,6 @@ side's preset.
 | Light | `light` | light (the default) |
 | High contrast dark | `hc-dark` | dark |
 | High contrast light | `hc-light` | light |
-| Graphite | `graphite` | dark |
 
 Every preset puts the conversation on the floor, with what rests on it (the composer, tool cards,
 approval and question cards) on the raised step and drawn with a hairline border, the way the
@@ -45,20 +44,12 @@ view is told the steps the conversation uses ([apps/view-theme-layout-drag.md](a
 `surface-reading` and `surface-reading-raised` still exist, so a custom theme can give the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
-Dark is a warm dark floor (`#120e0a`) with raised boxes (`#282320`, ΔL* 10.0 above the floor). Since 2026-11-05
-(the owner's decision) its greys carry a faint warm tint, the colours of the "Dark Warm" custom theme, with the lightness steps
-the neutral Dark had (floor `#0f0f0f`, raised `#242424`, ΔL* 9.9) within 0.1 and the same contrast. The
-sidebar and the top bar are the floor's own `#120e0a` (the owner's ask, 2026-10-27), so only the edge line (`#45403c`, the sidebar's `line-chrome`, as the top bar's line is since #2207)
-parts them from the conversation. They were `#181818` (ΔL* 3.9, at the owner's ask of 2026-10-20) and `#1d1d1d` (6.5) before: a reader once saw
-the two as "the same colour" at three steps apart with the line between them, and the owner chose to let the line do it alone. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
-`#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
-with the inks widened to match (16.4:1, 8.1:1 and 3.9:1 on the floor, as they still are). The inks are now body `#f0ecea`, secondary `#aca7a3`
-and background `#756f6b`. A custom theme whose `base` is `dark` inherits these warm values for every token its file leaves out. Light and the high-contrast presets did not change.
+Dark is the owner's "Dark Graphite" custom theme (since 2026-11-17, the owner's decision, [#2335](https://github.com/ijun17/centralu/issues/2335)): neutral greys in the style of macOS, each a step or two bluer than neutral, with no warm tint. The floor is `#1d1d1d`, the sidebar and the top bar `#28282a` (ΔL* 5.4 above the floor, with the edge line `#4a4a4c`, `line-chrome`, between them) and raised boxes `#2c2c2e` (ΔL* 7.3). The inks are body `#f5f5f7`, secondary `#b0b0b5` and background `#8e8e93`, under the pure white signal; against the floor / the sidebar / a raised surface they measure 15.5 / 13.5 / 12.8, 7.8 / 6.8 / 6.5 and 5.2 / 4.5 / 4.3:1, and the signal 16.9 / 14.7 / 13.9:1, so the urgency order holds on all three. Apple's system colours draw the focus ring (`#409cff`), the selection (`#0a84ff` at 30%), the diff and danger, and the terminal, none of which states urgency. Every value is the file's own but its `line`, one step lighter (`#3a3a3c`, from `#38383a`) to meet the hairline rule in [The lines](#the-lines). What the file does not set (the scrims, the signal's glow, the scrollbar's track and shape, and every shadow) kept Dark's earlier values. A custom theme whose `base` is `dark` inherits these values for every token its file leaves out.
 
-**Graphite** (`graphite`, the owner's "Dark Graphite" custom theme made a preset, [#2208](https://github.com/ijun17/centralu/issues/2208)) is the dark theme without the warm tint: neutral greys in the style of macOS (floor `#1d1d1d`, sidebar `#28282a`, raised `#2c2c2e`; ink `#f5f5f7`, `#b0b0b5` and `#8e8e93`), with Apple's system colours for the focus ring, the selection and the terminal. Dark stays the dark side's default: Graphite is the second dark preset, chosen in the list like any other. Every value is the file's own but its `line`, one step lighter (`#3a3a3c`, from `#38383a`) to meet the hairline rule in [The lines](#the-lines); the comment above its block in `index.css` records the inks' measurements on every reading surface, and [The lines](#the-lines) the lines'. A person who already has the custom theme file keeps it as it is: the file is a theme of its own beside the preset, shows by its own name in the list, and nothing migrates or deletes it, so the two look the same until they edit one.
+How Dark got here. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised `#1d1d1d`) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)): floor `#0f0f0f`, raised `#242424`. On 2026-11-05 its greys took a faint warm tint (the "Dark Warm" custom theme: floor `#120e0a`, raised `#282320`, inks `#f0ecea`, `#aca7a3`, `#756f6b`), with the sidebar on the floor's own value from 2026-10-27, so the edge line alone parted it from the conversation (it was `#181818` and `#1d1d1d` before). The owner's "Dark Graphite" file was first a second dark preset, Graphite (`graphite`, [#2208](https://github.com/ijun17/centralu/issues/2208)), beside the warm Dark; on 2026-11-17 Dark took its values and the Graphite preset was removed, the way Light took "Light New". A choice saved as `graphite` names no theme now and resolves the way any such id does, to the dark side's default, Dark, which shows the same colours: nothing stored is rewritten, and the first paint, which has no floor for `graphite`, paints Dark's. A person who already has the custom theme file keeps it as it is, a theme of its own in the list.
 
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
-is waiting for you, and raised surfaces step toward the floor's own white. Since 2026-11-12 (the owner's decision) it is the owner's "Light New" custom theme, the way Graphite is "Dark Graphite": macOS-style greys a step or two
+is waiting for you, and raised surfaces step toward the floor's own white. Since 2026-11-12 (the owner's decision) it is the owner's "Light New" custom theme, the way Dark is "Dark Graphite": macOS-style greys a step or two
 bluer than neutral, a white floor (`#ffffff`), raised `#f7f7f8` and the sidebar a recess at `#efefef`. The signal is
 `#000000` and the body ink `#1d1d1f`; the focus ring and the terminal's selection are the system blue (`#0066d6`,
 `#cfe3ff`). It replaced the earlier Light (floor `#f0f0f0`, raised `#f9f9f9`, sidebar `#e0e0e0`, signal `#111111`, ink
@@ -83,7 +74,7 @@ that must stand out. (There is no accent setting any more; see [Choosing](#choos
 
 Each custom theme is one file: `<data>/themes/<id>.json`, where `<data>` is `~/.centralu`
 (`~/.centralu-dev` for a development build, `CC_DATA_DIR` in tests). The id is the file name:
-lowercase letters, digits and hyphens. A theme the app files by its name never takes a preset's id (a custom "Graphite" is `graphite-2`, keeping its name), so both can be picked; a file you name `graphite.json` yourself takes the preset's place in the picker.
+lowercase letters, digits and hyphens. A theme the app files by its name never takes a preset's id (a custom "Dark" is `dark-2`, keeping its name), so both can be picked; a file you name `dark.json` yourself takes the preset's place in the picker. `graphite` is a preset's id no more (#2335), so a theme named "Graphite" is filed under it, and a dark side still saved as the old preset shows that file from then on.
 
 ```json
 {
@@ -168,15 +159,15 @@ A preset sets it to the value its mix gave, so the sidebar and the top bar did n
 | `line-answering` | the same frame while its session answers, with its half-pixel ring and glow | `ink-muted` |
 | `line-bubble-mine` | the person's own bubble | `line-strong` |
 
-The agent's bubble, a relayed message's and a tool call's card (a failed one keeps its dashed `line-strong`, a Centralu call its `line-strong`) draw the plain `line`. They had a token each, but they equalled `line` in every preset but Light, where they were 3 and 4 levels from it, so the tokens are gone. `line-panel` and `line-answering` equal `line-strong` and `ink-muted` in every preset but Light and stay so that a light theme's frames are not Light's greys; `line-bubble-mine` differs a little in every dark preset (Dark 8 levels from `line-strong`, Graphite 16).
+The agent's bubble, a relayed message's and a tool call's card (a failed one keeps its dashed `line-strong`, a Centralu call its `line-strong`) draw the plain `line`. They had a token each, but they equalled `line` in every preset but Light, where they were 3 and 4 levels from it, so the tokens are gone. `line-panel` and `line-answering` equal `line-strong` and `ink-muted` in every preset but Light and stay so that a light theme's frames are not Light's greys; `line-bubble-mine` differs a little in every dark preset (Dark 16 levels from `line-strong`).
 
 Light used to draw these in colours of its own that every light theme inherited (a resting panel `#d4d4d4`, answering `#9e9e9e`, the person's bubble `#cdcdcd`, and the agent's bubble `#e6e6e6` and a tool card `#e2e2e2`, which are the plain `line` now; owner 2026-10-19), so a custom light theme such as Pink had grey frames. Those values are the Light preset's tokens now; the dark presets set the colours these were drawn with (`line-strong`, `ink-muted`, and the person's bubble as `ink-faint` at 40% over `surface-hover`, written out as a solid colour). In the high-contrast presets the person's bubble is `line-strong`: it was `#616161` in high contrast dark, weaker than its own `line`, and `#a2a2a2` in high contrast light, 2.5:1 on white. A theme file that leaves one out follows the token in the table (`follows` in `THEME_TOKENS`; `resolveSide` writes the `var()`), so Pink's frames are its own `line` and `line-strong`.
 
-**No border is a part of a colour.** `border-line/60` and its kind (43 uses, and `border-danger/40`, `/70` and `ring-ink-muted/70` in eight more) drew `line` at 60 or 70% over the ground, so the line was a blend with whatever lay under it: 1.06 to 1.27:1 in Dark, Light and Graphite (the floor below is 1.1:1) and 2.1 to 2.6:1 in the high-contrast presets (under their 3:1). They are the solid `line` now (or `line-strong` for the selected chip's and the attachment's edge, which were `ink-faint` or `ink-muted` at 40 to 50%), and `tooling/styles.test.ts` fails on a border, divider, ring or outline class with an opacity on any colour token. A danger notice's edge is the solid `danger` (it was `danger` at 40%, 1.7 to 2.3:1 on its fill); a danger button's is `line-strong`, and `danger` under the pointer. Where one wanted to be lighter than `line`, it is not: `line` already is the quiet hairline, and the rule puts the floor at 1.1:1.
+**No border is a part of a colour.** `border-line/60` and its kind (43 uses, and `border-danger/40`, `/70` and `ring-ink-muted/70` in eight more) drew `line` at 60 or 70% over the ground, so the line was a blend with whatever lay under it: 1.06 to 1.27:1 in the Dark, Light and Graphite of the time (the floor below is 1.1:1) and 2.1 to 2.6:1 in the high-contrast presets (under their 3:1). They are the solid `line` now (or `line-strong` for the selected chip's and the attachment's edge, which were `ink-faint` or `ink-muted` at 40 to 50%), and `tooling/styles.test.ts` fails on a border, divider, ring or outline class with an opacity on any colour token. A danger notice's edge is the solid `danger` (it was `danger` at 40%, 1.7 to 2.3:1 on its fill); a danger button's is `line-strong`, and `danger` under the pointer. Where one wanted to be lighter than `line`, it is not: `line` already is the quiet hairline, and the rule puts the floor at 1.1:1.
 
 **The rule** (owner, 2026-11-12), measured as WCAG contrast of the line against each of the three grounds a line is drawn on (the floor, the sidebar, a raised surface), on each of them:
 
-- `line` is at least **1.1:1**. A floor, not a target: below it a line is lost. The top bar's `line` was 1.10:1 on Light's sidebar and was changed for that (#2207), and a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone, so 1.1 sits just over what was found to vanish. The presets draw more: Dark's lowest is 1.28:1 (on raised), Graphite's 1.23:1, Light's 1.11:1 (the owner's `#e3e3e6` on the sidebar).
+- `line` is at least **1.1:1**. A floor, not a target: below it a line is lost. The top bar's `line` was 1.10:1 on Light's sidebar and was changed for that (#2207), and a custom `line` `#232326` on a `#252528` sidebar, 1.03:1, was gone, so 1.1 sits just over what was found to vanish. The presets draw more: Dark's lowest is 1.23:1 (on raised; the warm Dark's was 1.28:1), Light's 1.11:1 (the owner's `#e3e3e6` on the sidebar).
 - `line-strong` is stronger than `line-chrome`, which is stronger than `line`, strictly, by contrast. There is no number for the step: the order is the rule. (An earlier draft asked 1.2, 1.4 and 1.7:1 and a step of 0.25; the owner's Light New file did not meet it and he kept the file.)
 
 The high-contrast presets keep every line at 3:1 or more on every reading surface (`line`, `line-chrome`, `line-strong`), and each frame edge (`line-panel`, `line-answering`, `line-bubble-mine`) must clear 3:1 too. `e2e/fixtures/theme.ts` checks all of this for every preset, in a test apart from the urgency order, so a preset cannot drift back and the line decision does not turn the urgency test red. The presets other than Light already met the earlier, stricter numbers, and none of their values was loosened for the new floor.
@@ -185,13 +176,13 @@ What changed, per preset (contrast on the floor / the sidebar / a raised surface
 
 | Preset | `line` | `line-chrome` | `line-strong` |
 |---|---|---|---|
-| Dark (unchanged) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
+| Dark, warm (unchanged by the rule; replaced by #2335) | `#3a3531` 1.59 / 1.59 / 1.28 | `#45403c` 1.88 / 1.88 / 1.52 | `#514c48` 2.27 / 2.27 / 1.83 |
 | Light, before (the earlier Light) | `#cbcbcb` 1.42 / 1.23 / 1.54 | `#bababa` 1.70 / 1.47 / 1.84 | `#aaaaaa` 2.04 / 1.76 / 2.21 |
 | Light, now (Light New, the owner's `line` and `line-strong`; `line-chrome` chosen) | `#e3e3e6` 1.28 / 1.11 / 1.20 | `#d4d4d8` 1.48 / 1.29 / 1.38 | `#c6c6cb` 1.70 / 1.48 / 1.59 |
 | High contrast dark (unchanged) | `#707070` 4.24 / 4.24 / 3.87 | `#797979` 4.82 / 4.82 / 4.40 | `#a8a8a8` 8.83 / 8.83 / 8.06 |
 | High contrast light (unchanged) | `#767676` 4.54 on all | `#707070` 4.95 on all | `#4a4a4a` 8.86 on all |
-| Graphite, before | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
-| Graphite, after | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 (unchanged) |
+| Graphite, before (the owner's file) | `#38383a` 1.44 / 1.26 / 1.19 | `#48484b` 1.85 / 1.61 / 1.53 | `#545456` 2.23 / 1.95 / 1.84 |
+| Dark, now (Graphite after the rule, Dark since #2335) | `#3a3a3c` 1.49 / 1.30 / 1.23 | `#4a4a4c` 1.91 / 1.66 / 1.58 | `#545456` 2.23 / 1.95 / 1.84 |
 
 - **Light** is the owner's "Light New" and keeps his values as they are (owner, 2026-11-12): `line` `#e3e3e6` and `line-strong` `#c6c6cb`, and the rest of the file. His file sets no `line-chrome`, so the preset's is chosen: `#d4d4d8`, the middle of the two (it was `#ceced1`, a mix of `line` and `ink-faint`, before). Against the floor / the sidebar / a raised surface, with the old value beside it:
 
@@ -201,9 +192,9 @@ What changed, per preset (contrast on the floor / the sidebar / a raised surface
   | `line-chrome` | `#d4d4d8` | 1.48 / 1.29 / 1.38 | `#ceced1` 1.57 / 1.37 / 1.47 |
   | `line-strong` | `#c6c6cb` | 1.70 / 1.48 / 1.59 | the same |
 
-  The order holds on all three grounds and `line` clears 1.1:1 on all of them, so Light meets the rule. Every ink keeps the urgency order and clears 7 / 4.5 / 3:1 on every reading surface (body 14.6 on the sidebar, secondary 5.2, background 3.6). The sidebar's lines and the top bar's are a little lighter than the first Light New draft drew them. A person who already has the "Light New" file keeps it as it is, as with Graphite; with no `line-chrome` in it, its window line is its `line`.
-- **Graphite** is the owner's file and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the 1.2:1 the rule asked at the time, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. It stays, although `#38383a` would pass the 1.1:1 floor.
-- **Dark and the high-contrast presets** already kept the rule (and the stricter one before it), so the three lines did not change. The top bar's and the shell banner's line in Dark is `line-chrome`, as the sidebar's always was.
+  The order holds on all three grounds and `line` clears 1.1:1 on all of them, so Light meets the rule. Every ink keeps the urgency order and clears 7 / 4.5 / 3:1 on every reading surface (body 14.6 on the sidebar, secondary 5.2, background 3.6). The sidebar's lines and the top bar's are a little lighter than the first Light New draft drew them. A person who already has the "Light New" file keeps it as it is, as with "Dark Graphite"; with no `line-chrome` in it, its window line is its `line`.
+- **Dark** is the owner's "Dark Graphite" file (the Graphite preset until #2335) and kept every value but one: `line` `#38383a` was 1.19:1 on raised, under the 1.2:1 the rule asked at the time, and `#3a3a3c` (the step above, also its `surface-selected`) is 1.23:1. It stays, although `#38383a` would pass the 1.1:1 floor. The warm Dark before it already kept the rule. The top bar's and the shell banner's line in Dark is `line-chrome`, as the sidebar's always was.
+- **The high-contrast presets** already kept the rule (and the stricter one before it), so the three lines did not change.
 - The evidence panel's edge and header and the overlay header draw `line-chrome` too, so they meet the sidebar's lines (they drew `line` before; in Light that lifts them from 1.11:1 to 1.29:1 on the sidebar's ground). The other panels on that ground keep `line`.
 
 ## How it is applied
@@ -223,7 +214,7 @@ longer forced to Dark, WKWebView painted its own default until the bundle loaded
 default is white. `main.tsx` runs only after the bundle, so a small inline script in `index.html` (desktop and web, the
 same text) runs before any stylesheet or module: it reads the same `cc-theme` cache, picks the side the same way, and
 sets `background-color` and `color-scheme` on `<html>` to that theme's floor (a custom theme's own floor token, else its
-preset's). Nothing cached paints the stylesheet's Dark, `#120e0a`. `applyTheme` removes the two inline values, because
+preset's). Nothing cached paints the stylesheet's Dark, `#1d1d1d`, and so does a cached preset this build does not have (Graphite's, since #2335). `applyTheme` removes the two inline values, because
 from then on the stylesheet owns them, and a leftover inline `color-scheme` would outrank `html[data-theme-base]`
 after a switch.
 

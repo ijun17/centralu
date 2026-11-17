@@ -68,12 +68,11 @@ describe('the themes folder (#312)', () => {
 
   // #2214: a file under a preset's id shadows the preset in the window, so a new theme never takes one
   it('never files a new theme under a preset id: a theme named like a preset keeps its name and gets a number, and a file already under one still works', async () => {
-    const graphite = await files.save(null, { name: 'Graphite', base: 'dark', tokens: {} })
-    expect(graphite).toMatchObject({ id: 'graphite-2', name: 'Graphite' })
-    expect((await files.save(null, { name: 'Dark', base: 'dark', tokens: {} })).id).toBe('dark-2')
+    const dark = await files.save(null, { name: 'Dark', base: 'dark', tokens: {} })
+    expect(dark).toMatchObject({ id: 'dark-2', name: 'Dark' })
     expect((await files.save(null, { name: 'High contrast light', base: 'light', tokens: {} })).id).toBe('high-contrast-light')
     expect((await files.save(null, { name: 'hc-dark', base: 'dark', tokens: {} })).id).toBe('hc-dark-2')
-    expect(readdirSync(dir)).not.toContain('graphite.json')
+    expect(readdirSync(dir)).not.toContain('dark.json')
     // A file stored under a preset id before this rule keeps working as the custom theme it is, and is saved in place
     writeFileSync(join(dir, 'light.json'), JSON.stringify({ name: 'My light', base: 'light', tokens: { 'surface-floor': '#101820' } }))
     expect(await files.list()).toContainEqual(expect.objectContaining({ id: 'light', name: 'My light', broken: false, tokens: { 'surface-floor': '#101820' } }))
@@ -82,8 +81,8 @@ describe('the themes folder (#312)', () => {
   })
 
   it('refuses an explicit id that is a preset id unless a file is stored under it already (#2214)', async () => {
-    await expect(files.save('graphite', { name: 'Mine', base: 'dark', tokens: {} })).rejects.toThrow("graphite is a preset's id")
-    expect(readdirSync(dir)).not.toContain('graphite.json')
+    await expect(files.save('hc-dark', { name: 'Mine', base: 'dark', tokens: {} })).rejects.toThrow("hc-dark is a preset's id")
+    expect(readdirSync(dir)).not.toContain('hc-dark.json')
   })
 
   it('a file imported under a preset name gets its own id too', async () => {

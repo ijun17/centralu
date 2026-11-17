@@ -113,10 +113,11 @@ describe('the built CSS actually contains styles', () => {
    * overlap with the brightness hierarchy — but the fact that it is outside this check's scope
    * still has to be known.
    *
-   *   - Dark's warm tints (the owner, 2026-11-05): every neutral of the Dark preset (floor, steps, lines, inks, scrollbar,
-   *     keycap, terminal greys) leans a little toward orange, at a chroma around 0.01, so Dark reads warm and not
-   *     cold. It adds no hue to the chrome: brightness still ranks everything, and the surfaces and inks of Light and the
-   *     high-contrast presets stay R=G=B. A tint is listed here by value, so a stray coloured grey still fails the build.
+   *   - Dark's and Light's tints (the owner's "Dark Graphite" and "Light New" files, 2026-11-17 and 2026-11-12): every neutral
+   *     of the two (floor, steps, lines, inks, scrollbar, keycap, terminal greys) is a step or two bluer than neutral, at a
+   *     chroma under 0.01, as macOS's are. It adds no hue to the chrome: brightness still ranks everything, and the surfaces
+   *     and inks of the high-contrast presets stay R=G=B. A tint is listed here by value, so a stray coloured grey still
+   *     fails the build. Dark leaned warm (toward orange) from 2026-11-05 until #2335.
    *   - diff addition/deletion (diff-add/diff-del): judging an approval is something done at a glance,
    *     and green and red go past a learned convention into something close to reflex. In
    *     exchange, they never leave the body of a diff.
@@ -134,15 +135,20 @@ describe('the built CSS actually contains styles', () => {
    * and fill, in grey and white). This list is both a record of what is allowed and **a list
    * of things to revisit.**
    */
-  it('the palette is monochrome (R=G=B) outside the allowed exceptions, the warm Dark tints among them', () => {
+  it('the palette is monochrome (R=G=B) outside the allowed exceptions, the bluish Dark greys among them', () => {
     const ALLOWED = new Set([
-      // Dark: the warm tints of the surfaces, lines, inks and terminal greys
-      '120e0a', '282320', '393430', '46413d', '2f2a27', '3a3531', '45403c', '514c48', '59534f',
-      'f0ecea', 'aca7a3', '756f6b', 'a8a39f', 'b8b3af', '403b37',
-      '2e2926', '1b1815', '0e0905', '201c1a', '37322e', 'd8d5d2', '5b5551', 'f1edeb',
-      'b1f085', '192e16', // Dark: diff addition
-      'fb9e86', '371816', // Dark: diff deletion, and danger
-      // The terminal's ANSI palette (xterm's defaults, see --color-term-* in index.css)
+      /*
+       * Dark (since #2335 the owner's "Dark Graphite" file, which was the Graphite preset, #2208): macOS's greys, each a step or
+       * two bluer than neutral (a chroma of 0.003 to 0.007), and Apple's system colours for the diff, danger, the focus ring, the
+       * selection and the terminal. The greys add no hue to the chrome, and the focus ring and selection are the interaction
+       * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
+       * brightness alone (`ink-signal` is pure white). Listed by value.
+       */
+      '28282a', '2c2c2e', '3a3a3c', '48484a', '4a4a4c', '646467', '232325', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
+      '30d158', '163322', 'ff9f97', '3a1d1b', // Dark: diff, and danger
+      '409cff', '0a84ff', // Dark: the focus ring, and the selection with the terminal's blue
+      'ff453a', 'ffd60a', 'bf5af2', '64d2ff', 'ff6961', '4ae070', 'ffe36b', 'da8fff', '8de1ff', // Dark: the terminal
+      // The terminal's ANSI palette in high contrast dark (xterm's defaults, see --color-term-* in index.css)
       'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a',
       'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2',
       // high contrast dark keeps xterm's own greys
@@ -155,7 +161,7 @@ describe('the built CSS actually contains styles', () => {
        */
       /*
        * Light (the owner's "Light New" file made the preset): macOS-style greys a step or two bluer than neutral, a chroma of
-       * about 0.003 to 0.006, and the system blue for the focus ring and the terminal's selection. As Graphite's, none of it
+       * about 0.003 to 0.006, and the system blue for the focus ring and the terminal's selection. As Dark's, none of it
        * reaches a state or urgency, which the inks rank by brightness alone (`ink-signal` is pure black).
        */
       'f7f7f8', 'e0e0e5', 'e7e7ea', 'f2f2f4', 'e3e3e6', 'd4d4d8', 'c6c6cb', '1d1d1f', '636368', '7c7c81', '5b5b60', 'c9c9ce', 'aeaeb2',
@@ -175,17 +181,6 @@ describe('the built CSS actually contains styles', () => {
        * ours, so it stays out of the brightness hierarchy; it is shown only while hovered.
        */
       'c42b1c',
-      /*
-       * Graphite (#2208, the owner's "Dark Graphite" file made a preset): macOS's greys, each a step or two bluer than
-       * neutral (a chroma of 0.003 to 0.007), and Apple's system colours for the diff, danger, the focus ring, the selection
-       * and the terminal. The greys add no hue to the chrome, and the focus ring and selection are the interaction
-       * colours a theme may set (themes.md "Choosing"); none of them reaches a state or urgency, which the inks rank by
-       * brightness alone (`ink-signal` is pure white). Listed by value, as Dark's tints are.
-       */
-      '28282a', '2c2c2e', '3a3a3c', '48484a', '4a4a4c', '646467', '232325', '545456', 'f5f5f7', 'b0b0b5', '8e8e93', 'a1a1a6', '636366', 'd1d1d6',
-      '30d158', '163322', 'ff9f97', '3a1d1b', // Graphite: diff, and danger
-      '409cff', '0a84ff', // Graphite: the focus ring, and the selection with the terminal's blue
-      'ff453a', 'ffd60a', 'bf5af2', '64d2ff', 'ff6961', '4ae070', 'ffe36b', 'da8fff', '8de1ff', // Graphite: the terminal
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
     const chromatic = hexes.filter((h) => {
@@ -539,7 +534,7 @@ describe('icon script', () => {
 
 /**
  * A border is a colour the theme sets, never a blend of one with whatever lies under it (owner, 2026-11-12): `border-line/60` was
- * `line` at 60% over the ground, 1.06:1 to 1.27:1 in Dark, Light and Graphite and half the high-contrast hairline, under the line rule
+ * `line` at 60% over the ground, 1.06:1 to 1.27:1 in the Dark, Light and Graphite of the time and half the high-contrast hairline, under the line rule
  * in themes.md "The lines". A source file that draws a border, a divider, a ring or an outline with any colour token at a part of its
  * opacity fails here, written `/40` or `/[0.4]` (`border-danger/40` and `ring-ink-muted/70` were two more).
  */

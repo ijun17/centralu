@@ -57,14 +57,15 @@
  * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
  * run time, which is what lets a theme switch by changing variables alone.
  *
- * **These values are the Dark preset.** Light, the two high-contrast presets and Graphite are
+ * **These values are the Dark preset.** Light and the two high-contrast presets are
  * `[data-theme='…']` blocks below that set the same names; a custom theme is the person's copy of a preset, written as inline
  * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
  * too, or themes cannot reach it (a unit test checks the two lists agree).
  *
- * The default theme's chrome is a warm near-neutral: every surface, line and ink leans a little
- * toward orange (chroma around 0.01) and none carries a hue of its own, so hierarchy
- * is built entirely by brightness. So the rule holds literally:
+ * The default theme's chrome is macOS's dark greys (the owner's "Dark Graphite" file, Dark since 2026-11-17, #2335): every
+ * surface, line and ink is a step or two bluer than neutral (chroma 0.003 to 0.007) and none carries a hue of its own, so
+ * hierarchy is built entirely by brightness. Apple's system colours are kept for the focus ring, the selection, the diff,
+ * danger and the terminal, none of which states urgency. So the rule holds literally:
  *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
  *
  * Urgency is told by brightness, kind by shape (reads the same for color-blind viewers and on a
@@ -77,11 +78,11 @@
    * Surfaces — what things sit on, named by position. In the default theme they climb in
    * brightness from the floor up.
    */
-  --color-surface-floor: #120e0a; /* the app floor */
-  --color-surface-side: #120e0a; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone (`line-chrome`, #45403c) parts them from the conversation */
-  --color-surface-raised: #282320; /* what floats: cards, menus, dialogs, inputs */
-  --color-surface-selected: #393430; /* a picked tab or option, and the quiet hover on a raised card */
-  --color-surface-hover: #46413d; /* hover and pressed; also my own message bubble */
+  --color-surface-floor: #1d1d1d; /* the app floor */
+  --color-surface-side: #28282a; /* the sidebar and the top bar, ΔL* 5.4 over the floor with the edge line (`line-chrome`) between (it was the floor's own value from 2026-10-27 until #2335) */
+  --color-surface-raised: #2c2c2e; /* what floats: cards, menus, dialogs, inputs */
+  --color-surface-selected: #3a3a3c; /* a picked tab or option, and the quiet hover on a raised card */
+  --color-surface-hover: #48484a; /* hover and pressed; also my own message bubble */
   /*
    * The control tower's floor — the plate the panels sit on.
    *
@@ -94,21 +95,21 @@
    * outside look the same, it's confusing"). What is actually visible is only the gaps between
    * panels and the edges, so it does not brighten a large area.
    */
-  --color-surface-deck: #2f2a27; /* the grid's and the project screen's floor */
+  --color-surface-deck: #232325; /* the grid's and the project screen's floor */
   /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
-  --color-surface-reading: #120e0a;
-  --color-surface-reading-raised: #282320;
+  --color-surface-reading: #1d1d1d;
+  --color-surface-reading-raised: #2c2c2e;
 
   /* Lines */
-  --color-line: #3a3531; /* hairline: borders, dividers, meter tracks */
+  --color-line: #3a3a3c; /* hairline: borders, dividers, meter tracks */
   /*
    * The window chrome's border: the sidebar's lines and edge, the top bar's and the shell banner's bottom line, the session panel's
    * header and dividers, and the evidence panel's edge. One colour a theme sets, a step over `line` on the sidebar's ground. A theme
    * file that leaves it out gets its own `line` (app/theme.ts `resolveSide`). The rule for the three lines, and what each preset
    * draws, is in themes.md "The lines"; e2e/fixtures/theme.ts holds every preset to it.
    */
-  --color-line-chrome: #45403c;
-  --color-line-strong: #514c48; /* a border that has to show: focused inputs, checkboxes, graph lanes */
+  --color-line-chrome: #4a4a4c;
+  --color-line-strong: #545456; /* a border that has to show: focused inputs, checkboxes, graph lanes */
   /*
    * The edges of the conversation's frames that are not the hairline, each a colour the theme sets: a resting panel's, the answering
    * ring's and your own bubble's. The agent's bubble and a tool call card draw the plain `line`. A theme file that leaves one out
@@ -116,17 +117,17 @@
    * values are what these were drawn with before (the ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`,
    * as a solid colour). The high-contrast presets hold all three to 3:1 (e2e/fixtures/theme.ts).
    */
-  --color-line-panel: #514c48;
-  --color-line-answering: #aca7a3;
-  --color-line-bubble-mine: #59534f;
+  --color-line-panel: #545456;
+  --color-line-answering: #b0b0b5;
+  --color-line-bubble-mine: #646467;
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
-  --color-ink: #f0ecea; /* body text */
-  --color-ink-muted: #aca7a3; /* secondary */
-  --color-ink-faint: #756f6b; /* background information */
-  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a8a39f`, light its inverse; the high-contrast presets take a fill the letter stays readable on */
-  --color-mark-waiting: #a8a39f;
+  --color-ink: #f5f5f7; /* body text */
+  --color-ink-muted: #b0b0b5; /* secondary */
+  --color-ink-faint: #8e8e93; /* background information */
+  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a1a1a6`, Light `#5b5b60`; the high-contrast presets take a fill the letter stays readable on */
+  --color-mark-waiting: #a1a1a6;
 
   /*
    * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
@@ -137,10 +138,10 @@
    * Instead, it never leaves the body of the diff — state and urgency are still spoken by
    * brightness alone.
    */
-  --color-diff-add: #b1f085;
-  --color-diff-add-bg: #192e16;
-  --color-diff-del: #fb9e86;
-  --color-diff-del-bg: #371816;
+  --color-diff-add: #30d158;
+  --color-diff-add-bg: #163322;
+  --color-diff-del: #ff9f97;
+  --color-diff-del-bg: #3a1d1b;
   /*
    * Danger — what is about to destroy something (deleting a project with its folder, purging
    * the trash) and an action that failed (a quit or a switch that did not go through). It
@@ -149,23 +150,23 @@
    * the two answer different questions: a theme may want the diff's red softer for reading while
    * keeping a warning loud.
    */
-  --color-danger: #fb9e86;
-  --color-danger-bg: #371816;
+  --color-danger: #ff9f97;
+  --color-danger-bg: #3a1d1b;
 
   /*
    * Interaction. Focus is the keyboard focus ring and the inset line that marks a drop target —
    * both say "this is where it goes". Selection is translucent, see ::selection below.
    */
-  --color-focus: #b8b3af;
-  --color-selection: rgb(240 236 234 / 0.24);
+  --color-focus: #409cff;
+  --color-selection: #0a84ff4d;
   /*
    * The scrollbar is part of the theme: its colours and its shape. The thumb is drawn inset from
    * its 10px track by a transparent border, which is what makes it read as a thin pill rather
    * than a bar.
    */
   --color-scrollbar-track: transparent;
-  --color-scrollbar-thumb: #403b37;
-  --color-scrollbar-thumb-hover: #514c48;
+  --color-scrollbar-thumb: #48484a;
+  --color-scrollbar-thumb-hover: #636366;
   --scrollbar-size: 10px;
   --scrollbar-thumb-inset: 3px;
   --scrollbar-radius: 999px;
@@ -178,9 +179,9 @@
   --color-scrim-thin: color-mix(in oklab, #000 50%, transparent);
 
   /* The keycap's face and rim, see .keycap */
-  --color-keycap-top: #2e2926;
-  --color-keycap-bottom: #1b1815;
-  --color-keycap-border: #0e0905;
+  --color-keycap-top: #3a3a3c;
+  --color-keycap-bottom: #2c2c2e;
+  --color-keycap-border: #0d0d0d;
   /* The light around the signal, see .signal */
   --color-signal-glow: rgb(255 255 255 / 0.45);
 
@@ -188,31 +189,31 @@
   /*
    * The terminal (xterm). xterm paints with its own theme object, read from these when a terminal
    * opens (components/terminalTheme.ts). The shell sits on the side surface with a visible cursor;
-   * a command's log sits on a raised surface. The 16 ANSI colours are xterm's own defaults (Dark warms its four greys), written
+   * a command's log sits on a raised surface. The 16 ANSI colours are Apple's (xterm's own defaults in the high-contrast dark preset), written
    * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
    * colour away from a program's output.
    */
-  --color-term-bg: #201c1a;
-  --color-term-log-bg: #282320;
-  --color-term-fg: #f0ecea;
-  --color-term-cursor: #f0ecea;
-  --color-term-selection: #46413d;
-  --color-term-black: #37322e;
-  --color-term-red: #cc0000;
-  --color-term-green: #4e9a06;
-  --color-term-yellow: #c4a000;
-  --color-term-blue: #3465a4;
-  --color-term-magenta: #75507b;
-  --color-term-cyan: #06989a;
-  --color-term-white: #d8d5d2;
-  --color-term-bright-black: #5b5551;
-  --color-term-bright-red: #ef2929;
-  --color-term-bright-green: #8ae234;
-  --color-term-bright-yellow: #fce94f;
-  --color-term-bright-blue: #729fcf;
-  --color-term-bright-magenta: #ad7fa8;
-  --color-term-bright-cyan: #34e2e2;
-  --color-term-bright-white: #f1edeb;
+  --color-term-bg: #232325;
+  --color-term-log-bg: #2c2c2e;
+  --color-term-fg: #f5f5f7;
+  --color-term-cursor: #f5f5f7;
+  --color-term-selection: #48484a;
+  --color-term-black: #3a3a3c;
+  --color-term-red: #ff453a;
+  --color-term-green: #30d158;
+  --color-term-yellow: #ffd60a;
+  --color-term-blue: #0a84ff;
+  --color-term-magenta: #bf5af2;
+  --color-term-cyan: #64d2ff;
+  --color-term-white: #d1d1d6;
+  --color-term-bright-black: #636366;
+  --color-term-bright-red: #ff6961;
+  --color-term-bright-green: #4ae070;
+  --color-term-bright-yellow: #ffe36b;
+  --color-term-bright-blue: #409cff;
+  --color-term-bright-magenta: #da8fff;
+  --color-term-bright-cyan: #8de1ff;
+  --color-term-bright-white: #ffffff;
 
   /*
    * Shadows. Used as `shadow-(--shadow-modal)`, not `shadow-modal`: Tailwind copies a theme
@@ -333,25 +334,24 @@
  *
  * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
  * what the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #120e0a, conversation #120e0a: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
- *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#45403c, `line-chrome`
- *          since #2207: the sidebar's own edge always was, and the top bar's now is) alone parts them now.
+ *   Dark   sidebar #28282a, conversation #1d1d1d: ΔL* 5.4, with the edge line (#4a4a4c, `line-chrome`) between them
+ *          (Graphite's values since #2335; the sidebar was the floor's own value from 2026-10-27, with the line alone).
  *   Light  sidebar #efefef, conversation #ffffff (the owner's "Light New" since 2026-11-12; it was #e0e0e0 and #f0f0f0): ΔL* 5.0, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 10.0 above the floor in Dark (#282320 on #120e0a) and 4.2 in Light
- * (#f4f4f4 on #e8e8e8). Dark's wider steps (#725) put it above what the lifted conversation gave
- * its cards (6.3), which is the point of the change: the composer and the cards read apart from
- * the conversation without leaning on their border. The card's `line` border (ΔL* 18.3 and 7.1
+ * signal. Raised sits ΔL* 7.3 above the floor in Dark (#2c2c2e on #1d1d1d) and 4.2 in Light
+ * (#f4f4f4 on #e8e8e8). That is above what the lifted conversation gave its cards (6.3), which
+ * was the point of the wider steps (#725): the composer and the cards read apart from
+ * the conversation without leaning on their border. The card's `line` border (ΔL* 13.7 and 7.1
  * off the floor) and its signal edge still carry the rest, as the board's borders do. The signal
  * ink keeps the highest contrast on every surface (app/theme.ts `urgencyBreaks`, checked for
  * every preset).
  *
- * Dark's inks measure against the floor #120e0a: body 16.4:1, muted 8.1:1, faint 3.9:1, and
- * the signal 19.2:1. On raised (#282320) the three are 13.2, 6.5 and 3.1:1. The order holds on
- * every surface, which is what the urgency test checks.
+ * Dark's inks measure against the floor #1d1d1d / the sidebar #28282a / raised #2c2c2e: signal 16.9 / 14.7 / 13.9:1,
+ * body 15.5 / 13.5 / 12.8, muted 7.8 / 6.8 / 6.5, faint 5.2 / 4.5 / 4.3. The order holds on every surface, which is
+ * what the urgency test checks.
  */
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
@@ -508,10 +508,22 @@
   --color-term-fg: #f0f0f0;
   --color-term-cursor: #ffffff;
   --color-term-selection: #4a4a4a;
-  /* The four ANSI greys Dark moved to its warm tones; this preset stays neutral */
+  /* xterm's own 16 ANSI colours, which Dark left for Apple's in 2026-11 (#2335); this preset keeps them */
   --color-term-black: #2e3436;
+  --color-term-red: #cc0000;
+  --color-term-green: #4e9a06;
+  --color-term-yellow: #c4a000;
+  --color-term-blue: #3465a4;
+  --color-term-magenta: #75507b;
+  --color-term-cyan: #06989a;
   --color-term-white: #d3d7cf;
   --color-term-bright-black: #555753;
+  --color-term-bright-red: #ef2929;
+  --color-term-bright-green: #8ae234;
+  --color-term-bright-yellow: #fce94f;
+  --color-term-bright-blue: #729fcf;
+  --color-term-bright-magenta: #ad7fa8;
+  --color-term-bright-cyan: #34e2e2;
   --color-term-bright-white: #eeeeec;
 }
 
@@ -589,81 +601,6 @@
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.16);
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 0 rgb(0 0 0 / 0.25);
   --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 -1px 2px rgb(0 0 0 / 0.1), 0 1px 0 rgb(0 0 0 / 0.2);
-}
-
-/*
- * Graphite (#2208): a neutral grey dark preset in the style of macOS, the owner's "Dark Graphite" custom theme made a
- * built-in. Greys a step bluer than neutral, with no warm tint, and Apple's system colours for the focus ring, the selection and the terminal.
- * Every value is the owner's file as it was, but one: `line` was #38383a, 1.19:1 on raised (it was under the 1.2:1 rule themes.md had then, which is a 1.1:1 floor now), and is
- * #3a3a3c (the next step, its `surface-selected`); it is kept. None broke the urgency order. It leaves what Dark already gives the
- * same value (the scrim, the glow, the scrollbar track and every shadow) to the `@theme` block.
- *
- * Steps (ΔL*): the sidebar #28282a is 5.4 above the floor #1d1d1d and raised #2c2c2e 7.3 (Dark: 0 and 10.0).
- * Contrast of each ink on the floor / the sidebar / raised, the urgency order holding on all three:
- *   signal #ffffff 16.9 / 14.7 / 13.9    body #f5f5f7 15.5 / 13.5 / 12.8
- *   muted  #b0b0b5  7.8 /  6.8 /  6.5    faint #8e8e93  5.2 /  4.5 /  4.3
- * What its lines measure, against the rule for them, is in themes.md "The lines".
- */
-[data-theme='graphite'] {
-  --color-surface-floor: #1d1d1d;
-  --color-surface-side: #28282a;
-  --color-surface-raised: #2c2c2e;
-  --color-surface-selected: #3a3a3c;
-  --color-surface-hover: #48484a;
-  --color-surface-deck: #232325;
-  --color-surface-reading: #1d1d1d;
-  --color-surface-reading-raised: #2c2c2e;
-
-  --color-line: #3a3a3c;
-  --color-line-chrome: #4a4a4c;
-  --color-line-strong: #545456;
-  --color-line-panel: #545456;
-  --color-line-answering: #b0b0b5;
-  --color-line-bubble-mine: #646467;
-
-  --color-ink-signal: #ffffff;
-  --color-ink: #f5f5f7;
-  --color-ink-muted: #b0b0b5;
-  --color-ink-faint: #8e8e93;
-  --color-mark-waiting: #a1a1a6;
-
-  --color-diff-add: #30d158;
-  --color-diff-add-bg: #163322;
-  --color-diff-del: #ff9f97;
-  --color-diff-del-bg: #3a1d1b;
-  --color-danger: #ff9f97;
-  --color-danger-bg: #3a1d1b;
-
-  --color-focus: #409cff;
-  --color-selection: #0a84ff4d;
-  --color-scrollbar-thumb: #48484a;
-  --color-scrollbar-thumb-hover: #636366;
-
-  --color-keycap-top: #3a3a3c;
-  --color-keycap-bottom: #2c2c2e;
-  --color-keycap-border: #0d0d0d;
-
-  --color-term-bg: #232325;
-  --color-term-log-bg: #2c2c2e;
-  --color-term-fg: #f5f5f7;
-  --color-term-cursor: #f5f5f7;
-  --color-term-selection: #48484a;
-  --color-term-black: #3a3a3c;
-  --color-term-red: #ff453a;
-  --color-term-green: #30d158;
-  --color-term-yellow: #ffd60a;
-  --color-term-blue: #0a84ff;
-  --color-term-magenta: #bf5af2;
-  --color-term-cyan: #64d2ff;
-  --color-term-white: #d1d1d6;
-  --color-term-bright-black: #636366;
-  --color-term-bright-red: #ff6961;
-  --color-term-bright-green: #4ae070;
-  --color-term-bright-yellow: #ffe36b;
-  --color-term-bright-blue: #409cff;
-  --color-term-bright-magenta: #da8fff;
-  --color-term-bright-cyan: #8de1ff;
-  --color-term-bright-white: #ffffff;
 }
 
 @layer base {
@@ -859,8 +796,8 @@
    *
    * Bright text on a dark background, but the sidebar background (surface-side) and the chip
    * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
-   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, and is the same value
-   * since 2026-10-27), so a single border did not separate them well.
+   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, the same value from 2026-10-27,
+   * and is #28282a on #1d1d1d since #2335), so a single border did not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any

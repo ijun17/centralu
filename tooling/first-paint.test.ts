@@ -70,10 +70,10 @@ describe('the first paint (#340)', () => {
   })
 
   it('paints the dark floor when nothing is cached, or the cache is unreadable', () => {
-    expect(firstPaint(null)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
-    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
+    expect(firstPaint(null)).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
+    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
     // Nothing cached is the stylesheet's Dark even on a light OS: no theme has been chosen yet
-    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
+    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
   })
 
   it('paints the light floor for a cached light theme', () => {
@@ -81,14 +81,15 @@ describe('the first paint (#340)', () => {
   })
 
   it('does not follow the OS: a System mode an older build cached is the dark side, on a light OS or a dark one', () => {
-    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
-    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#120e0a', colorScheme: 'dark' })
+    expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
+    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
     // And a held Light stays Light under a dark OS
     expect(firstPaint(choice('light'), true)).toEqual({ backgroundColor: '#ffffff', colorScheme: 'light' })
   })
 
-  it("paints a high-contrast or Graphite preset's floor and a custom theme's own floor", () => {
+  it("paints a high-contrast preset's floor, Dark's for a cached Graphite, and a custom theme's own floor", () => {
     expect(firstPaint(choice('dark', side('hc-dark', 'dark')))).toEqual({ backgroundColor: '#000000', colorScheme: 'dark' })
+    // Graphite left the presets when Dark took its values (#2335): a window that last showed it opens on Dark's floor, the same colour
     expect(firstPaint(choice('dark', side('graphite', 'dark')))).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
     const custom = { ...side('mine', 'light', { '--color-surface-floor': '#fdf6e3' }), preset: 'light' }
     expect(firstPaint(choice('light', undefined, custom))).toEqual({ backgroundColor: '#fdf6e3', colorScheme: 'light' })

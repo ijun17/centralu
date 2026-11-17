@@ -98,9 +98,9 @@ export const ChatRow = memo(function ChatRow({
         {/*
           Contrast against the background (surface-floor) is what makes "something I said" visible.
           surface-raised plus line was only two steps apart (#1d1d1d and #292929 then; Dark's wider
-          steps, #725, make them #282320 and #3a3531 now, ΔL* 8.4 apart), and was effectively invisible
-          in a dark room (found in dogfooding). This lifts it to surface-hover (#46413d on a #120e0a
-          floor, ΔL* 23.7), the same as the hover background, and gives the border one step more
+          steps, #725, made them #282320 and #3a3531, ΔL* 8.4 apart; #2c2c2e and #3a3a3c, 6.4, since #2335), and was effectively invisible
+          in a dark room (found in dogfooding). This lifts it to surface-hover (#48484a on a #1d1d1d
+          floor, ΔL* 19.9), the same as the hover background, and gives the border one step more
           brightness.
         */}
         {/*

@@ -18,7 +18,7 @@ const TEMPLATE = new URL('../../packages/agent-host/app-template/', import.meta.
 const BOARD = new URL('../../.centralu/apps/project-board/', import.meta.url)
 
 /** Dark and Light values from styles/index.css, as the browser computes them */
-const DARK = { floor: '#120e0a', ink: 'rgb(240, 236, 234)', signal: 'rgb(255, 255, 255)', danger: 'rgb(251, 158, 134)', thumb: 'rgb(64, 59, 55)' }
+const DARK = { floor: '#1d1d1d', ink: 'rgb(245, 245, 247)', signal: 'rgb(255, 255, 255)', danger: 'rgb(255, 159, 151)', thumb: 'rgb(72, 72, 74)' }
 const LIGHT = { floor: '#ffffff', ink: 'rgb(29, 29, 31)', signal: 'rgb(0, 0, 0)', danger: 'rgb(207, 34, 46)', thumb: 'rgb(201, 201, 206)' }
 
 /** A board with more cards than its column can show, so the column scrolls */
@@ -184,14 +184,14 @@ export function appThemeTests() {
     expect(Object.keys(ctx.styles.variables)).toHaveLength(76)
     expect(ctx.styles.variables).toMatchObject({
       '--color-background-primary': DARK.floor,
-      '--color-text-primary': '#f0ecea',
+      '--color-text-primary': '#f5f5f7',
       // The signal colour, "waiting for you", is the standard's warning (#312 decision 5)
       '--color-text-warning': '#ffffff',
-      '--color-text-danger': '#fb9e86',
+      '--color-text-danger': '#ff9f97',
       '--font-text-md-size': '13px',
       '--border-radius-md': '4px',
     })
-    expect(ctx.centralu.variables).toMatchObject({ '--centralu-signal': '#ffffff', '--centralu-scrollbar-thumb': '#403b37', '--centralu-scrollbar-size': '10px' })
+    expect(ctx.centralu.variables).toMatchObject({ '--centralu-signal': '#ffffff', '--centralu-scrollbar-thumb': '#48484a', '--centralu-scrollbar-size': '10px' })
 
     await showTheme(page, 'light')
     await expect.poll(async () => (await entries(v, 'host-context-changed')).length).toBe(1)
