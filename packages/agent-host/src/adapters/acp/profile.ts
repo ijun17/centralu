@@ -33,12 +33,8 @@ export type AcpProfile = {
   readonly descriptor: ToolDescriptor
   readonly capabilities: AdapterCapabilities
   readonly surface: AdapterSurface
-  /**
-   * How to start this tool's ACP server for this session (its environment may carry the preset), or null when it is not
-   * installed here. `cwd`, when given, is where the process runs instead of the session's folder, which then reaches the
-   * agent through ACP alone
-   */
-  launch(opts: CreateSessionOpts): Promise<(Pick<AgentSpawnSpec, 'command' | 'args'> & { cwd?: string; env?: Record<string, string>; signInWanted?: SignInWanted }) | null>
+  /** How to start this tool's ACP server for this session (its environment may carry the preset), or null when it is not installed here */
+  launch(opts: CreateSessionOpts): Promise<(Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string>; signInWanted?: SignInWanted }) | null>
   detect(): Promise<DetectResult>
   installedVersion(): Promise<string | null>
   /**
