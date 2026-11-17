@@ -321,7 +321,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
         >
           {stickySource !== null && (
             <>
-              {stickySource} <FromArrowIcon size={13} />{' '}
+              {stickySource} <FromArrowIcon />{' '}
             </>
           )}
           {stickyText}
@@ -348,7 +348,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
           >
             {stickySource !== null && (
               <>
-                {stickySource} <FromArrowIcon size={13} />{' '}
+                {stickySource} <FromArrowIcon />{' '}
               </>
             )}
             {stickyText}

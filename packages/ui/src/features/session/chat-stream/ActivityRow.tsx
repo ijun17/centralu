@@ -80,14 +80,12 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
           {plan.map((step, i) => (
             <li
               key={i}
-              className={`flex items-start gap-1.5 text-xs ${step.status === 'inProgress' ? 'text-ink' : 'text-ink-faint'}`}
+              className={`flex items-baseline gap-1.5 text-xs ${step.status === 'inProgress' ? 'text-ink' : 'text-ink-faint'}`}
               data-testid={`plan-step-${i}`}
               data-status={step.status}
             >
-              {/* One line high, so the icon sits on the centre of the step's first line when the text wraps */}
-              <span className="flex h-lh shrink-0 items-center">
-                <PlanStepIcon status={step.status} />
-              </span>
+              {/* On the first line's baseline, so a step that wraps keeps its icon on its first line */}
+              <PlanStepIcon status={step.status} />
               <span className={step.status === 'completed' ? 'line-through opacity-60' : undefined}>
                 {step.text}
               </span>

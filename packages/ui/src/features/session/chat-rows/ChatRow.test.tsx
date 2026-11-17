@@ -64,7 +64,7 @@ describe('ChatRow: what the person sent', () => {
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from'])
     // The arrow after the source is an icon on the text's centre, not the font's ⤷ (#2332)
     expect(text).toBe('Manager Do the task')
-    expect(html).toMatch(/data-testid="msg-user-from">Manager <svg[^>]*align-middle/)
+    expect(html).toMatch(/data-testid="msg-user-from">Manager <svg[^>]*align-baseline/)
     expect(html).toContain('border-line bg-surface-raised text-ink')
     expect(html).not.toContain('border-dashed')
     expect(html).toContain('data-relayed')

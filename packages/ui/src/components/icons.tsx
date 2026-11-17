@@ -516,37 +516,38 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
- * below. It replaced the font's ⤷, which each face drew at its own height and which sat above the text (#2332). `align-middle`
- * puts its centre on the text's x-height centre, so it reads as part of the line in any face and size
+ * The size of an icon set in a line of text (#2332): Pretendard's cap height, 0.73em, so the icon follows the text's size. Drawn
+ * to fill its box and sitting on the baseline (an inline SVG's bottom edge, which a flex row aligned on baselines also takes),
+ * its top meets the capitals' and it reads as part of the line. Centring a box in the line instead put it 1–2px low, under
+ * the text's centre, since the face's line box is not symmetric about its capitals
  */
-export function FromArrowIcon({ size = 11 }: { size?: number }) {
+const CAP_BOX = 'inline-block size-[0.73em] shrink-0 align-baseline'
+
+/**
+ * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
+ * below. It replaced the font's ⤷, which sat above the text (#2332)
+ */
+export function FromArrowIcon() {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="inline-block shrink-0 align-middle">
-      <path
-        d="M4.5 2.5V8a2.5 2.5 0 0 0 2.5 2.5h6.5M10.5 7.5l3 3-3 3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg viewBox="0 0 10 10" fill="none" aria-hidden className={CAP_BOX}>
+      <path d="M1.75 0.75V4.75a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
 /**
- * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. Drawn to the cap height of
- * the step's text and centred on its first line, where the font glyphs (✓ ▸ ○) were each a different, smaller size (#2332)
+ * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. The text's cap height and
+ * on its baseline (`CAP_BOX`), where the font glyphs (✓ ▸ ○) were each a different, smaller size (#2332)
  */
-export function PlanStepIcon({ status, size = 12 }: { status: 'pending' | 'inProgress' | 'completed'; size?: number }) {
+export function PlanStepIcon({ status }: { status: 'pending' | 'inProgress' | 'completed' }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+    <svg viewBox="0 0 10 10" fill="none" aria-hidden className={CAP_BOX}>
       {status === 'completed' ? (
-        <path d="M2.5 8.5 6 12l7.5-8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M0.75 5.25 3.75 8.5 9.25 1.25" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       ) : status === 'inProgress' ? (
-        <path d="M5 2.75v10.5L12.5 8z" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+        <path d="M2 0.5v9L9.25 5z" fill="currentColor" />
       ) : (
-        <circle cx="8" cy="8" r="4.75" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="5" cy="5" r="4.4" stroke="currentColor" strokeWidth="1.1" />
       )}
     </svg>
   )
