@@ -214,6 +214,162 @@ test('Inbox: a question waiting on the person is a card above the rows, a pick a
   await expect(page.getByTestId('counter')).not.toHaveAttribute('data-edge', 'question')
 })
 
+test('Inbox: words written on a question card answer that question, as the card’s pick would, and the card leaves (#2327)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  const card = page.getByTestId(`mail-ask-${asked}`)
+  const field = page.getByTestId(`mail-ask-answer-${asked}`)
+  await expect(page.getByTestId(`mail-ask-send-${asked}`)).toBeDisabled()
+  // The host answers when told to: what the card does while the words are on their way
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__held = []
+    w.__calls = []
+    mail.reply = (...a: unknown[]) => {
+      w.__calls.push(a)
+      return new Promise((resolve) => w.__held.push(() => resolve(real(...a))))
+    }
+  })
+  // The question the card shows, as the host named it
+  const question = await page.evaluate((t) => (window as any).__store.getState().mail.threads.find((x: { id: string }) => x.id === t).ask.id as string, asked)
+  await field.fill('Neither: ask the owner, option ')
+  // A number typed in the field is a word, not a pick: the list's keys are off while a field has the keyboard
+  await field.press('2')
+  await expect(field).toHaveValue('Neither: ask the owner, option 2')
+  await expect(page.getByTestId(`mail-ask-choices-${asked}-label`)).toHaveText('Choose one')
+  expect(await page.evaluate(() => (window as any).__calls)).toEqual([])
+  await field.press('End')
+  await page.keyboard.type(' breaks the tests')
+  await field.press('Enter')
+  // One question, one answer: the choices lock and say so, and the words cannot be sent twice
+  await expect(page.getByTestId(`mail-ask-choices-${asked}-label`)).toHaveText('Answered')
+  await expect(page.getByTestId(`mail-ask-choices-${asked}-1`)).toBeDisabled()
+  await expect(page.getByTestId(`mail-ask-send-${asked}`)).toBeDisabled()
+  await field.press('Enter')
+  expect(await page.evaluate(() => (window as any).__calls)).toEqual([[asked, 'Neither: ask the owner, option 2 breaks the tests', 'answer', question]])
+  await page.evaluate(() => (window as any).__held.forEach((release: () => void) => release()))
+  await expect(card).toHaveCount(0)
+  await expect(page.getByTestId('count-waiting')).toHaveText('0')
+  // In the thread the words are the answer to that question, not a new message
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await page.getByTestId(`mail-thread-${asked}`).click()
+  await expect(page.getByTestId('mail-message-2')).toContainText('Neither: ask the owner')
+  await expect(page.getByTestId('mail-message-2')).toContainText('You · answer')
+  await expect(page.getByTestId('mail-choices-1-label')).toHaveText('Answered')
+  await expect(page.getByTestId('mail-choices-1-2')).toHaveAttribute('aria-pressed', 'false')
+})
+
+test('Inbox: a question card without choices takes the answer in words alone, and a refused answer keeps them with the host’s words (#2327)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Commit message', from: PARSER, body: 'Should it say what changed, or why?' })
+  await page.getByTestId('counter').click()
+  const card = page.getByTestId(`mail-ask-${asked}`)
+  await expect(page.getByTestId(`mail-ask-choices-${asked}`)).toHaveCount(0)
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__fail = true
+    mail.reply = (...a: unknown[]) => (w.__fail ? Promise.reject(new Error('the link is down')) : real(...a))
+  })
+  const field = page.getByTestId(`mail-ask-answer-${asked}`)
+  await field.fill('Why, in one line')
+  await page.getByTestId(`mail-ask-send-${asked}`).click()
+  await expect(page.getByTestId('toast')).toContainText('the link is down')
+  await expect(field).toHaveValue('Why, in one line')
+  await expect(field).not.toHaveAttribute('readonly')
+  await expect(card).toBeVisible()
+  await page.evaluate(() => ((window as any).__fail = false))
+  await page.getByTestId(`mail-ask-send-${asked}`).click()
+  await expect(card).toHaveCount(0)
+  await page.getByTestId('inbox-earlier-toggle').click()
+  await page.getByTestId(`mail-thread-${asked}`).click()
+  await expect(page.getByTestId('mail-message-2')).toContainText('Why, in one line')
+  await expect(page.getByTestId('mail-message-2')).toContainText('You · answer')
+})
+
+test('Inbox: the Enter that finishes a syllable in a question card’s field does not send the answer (#2327)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Commit message', from: PARSER, body: 'Should it say what changed, or why?' })
+  await page.getByTestId('counter').click()
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__calls = 0
+    mail.reply = (...a: unknown[]) => {
+      w.__calls++
+      return real(...a)
+    }
+  })
+  const field = page.getByTestId(`mail-ask-answer-${asked}`)
+  await field.fill('안녕')
+  // The keystroke that commits a composition carries `isComposing`: it is the input method's (composition.spec.ts)
+  await page.evaluate(async (id) => {
+    const el = document.querySelector(`[data-testid="mail-ask-answer-${CSS.escape(id)}"]`) as HTMLInputElement
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }))
+    await new Promise((done) => requestAnimationFrame(() => setTimeout(done)))
+  }, asked)
+  expect(await page.evaluate(() => (window as any).__calls)).toBe(0)
+  await expect(field).toHaveValue('안녕')
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toBeVisible()
+  // The Enter after the composition sends
+  await field.press('Enter')
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__calls)).toBe(1)
+})
+
+test('Inbox: while a pick on a card is on its way, its words wait: the field takes no answer of its own (#2327)', async ({ page }) => {
+  await setup(page)
+  const asked = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__held = []
+    w.__calls = 0
+    mail.reply = (...a: unknown[]) => {
+      w.__calls++
+      return new Promise((resolve) => w.__held.push(() => resolve(real(...a))))
+    }
+  })
+  const field = page.getByTestId(`mail-ask-answer-${asked}`)
+  await field.fill('words of my own')
+  await page.getByTestId(`mail-ask-choices-${asked}-2`).click()
+  await expect(page.getByTestId(`mail-ask-choices-${asked}-label`)).toHaveText('You chose')
+  await expect(page.getByTestId(`mail-ask-send-${asked}`)).toBeDisabled()
+  await field.press('Enter')
+  expect(await page.evaluate(() => (window as any).__calls)).toBe(1)
+  await page.evaluate(() => (window as any).__held.forEach((release: () => void) => release()))
+  await expect(page.getByTestId(`mail-ask-${asked}`)).toHaveCount(0)
+})
+
+test('Inbox: words typed on a card belong to its question: answered from elsewhere, the thread’s next question takes the card with an empty field (#2327)', async ({ page }) => {
+  await setup(page)
+  const other = { ...PARSER, address: 'session:mock/s2', sessionId: 's2', name: 'Builder' }
+  const id = await seed(page, { subject: 'Two questions', from: PARSER, body: 'Which branch?', choices: ['main', 'release'] })
+  await page.evaluate(([thread, from]) => (window as any).__mock.seedMailMessage(thread, { from, body: 'Keep the old format?', choices: ['Keep it', 'Switch now'] }), [id, other] as const)
+  await page.getByTestId('counter').click()
+  const card = page.getByTestId(`mail-ask-${id}`)
+  await expect(card).toContainText('Keep the old format?')
+  const field = page.getByTestId(`mail-ask-answer-${id}`)
+  await field.fill('Keep it until the release')
+  // Another window answers the question on the card
+  await page.evaluate(async (thread) => {
+    const st = (window as any).__store.getState()
+    const ask = st.mail.threads.find((t: { id: string }) => t.id === thread).ask.id
+    await st.platform.mail.reply(thread, 'Switch now', 'answer', ask)
+    await st.loadMail()
+  }, id)
+  await expect(card).toContainText('Which branch?')
+  await expect(field).toHaveValue('')
+  await expect(page.getByTestId(`mail-ask-send-${id}`)).toBeDisabled()
+})
+
 test('Inbox: the number keys pick a choice on the card the keyboard is on, never on the one under the pointer (#2229)', async ({ page }) => {
   await setup(page)
   const under = await seed(page, { subject: 'Older question', from: PARSER, body: 'Ship it?', choices: ['Yes', 'No'] })
@@ -254,6 +410,7 @@ test('Inbox: a question read but not answered stays a card, and a second questio
   const card = page.getByTestId(`mail-ask-${id}`)
   await expect(card).toContainText('Keep the old format?')
   await expect(card).toContainText('1 other waiting in this thread')
+  await expect(page.getByTestId(`mail-ask-others-${id}`)).toHaveAttribute('data-fold', 'open')
   // Opened and left again: read, and still waiting on an answer, so still a card above the rows, never under Earlier
   await page.getByTestId(`mail-thread-${id}`).click()
   await page.getByTestId('mail-back').click()
@@ -263,6 +420,8 @@ test('Inbox: a question read but not answered stays a card, and a second questio
   // A click answers the newest; the card then shows the first question, with its choices to press
   await page.getByTestId(`mail-ask-choices-${id}-2`).click()
   await expect(card).toContainText('Which branch?')
+  // Nothing else waits in the thread: the line saying so folds away (#2327), and is gone once it has
+  await expect(page.getByTestId(`mail-ask-others-${id}`)).toHaveCount(0)
   await expect(page.getByTestId(`mail-ask-choices-${id}-1`)).toBeEnabled()
   await expect(page.getByTestId(`mail-ask-choices-${id}-2`)).toBeEnabled()
   // And so does a key

@@ -2,32 +2,44 @@ import { useState } from 'react'
 import type { MailThreadRow } from '@cc/protocol/client'
 import { Button } from '../../components/Button.js'
 import { ChoiceList } from '../../components/ChoiceList.js'
+import { Fold } from '../../components/Fold.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
+import { TextInput } from '../../components/TextField.js'
+import { useSendKey } from '../session/useSendKey.js'
 import { useStore } from '../../store/store.js'
 import { choicesLabel, threadStateLabel } from './mailLabels.js'
 import { PartyName } from './PartyName.js'
 
 /**
  * A thread that waits on the person's answer, drawn as a card like the mail held for them (#2229, owner 2026-11-12): its subject in `ink`, who asks, the
- * first lines of the question (four at most, the rest is under Open) and, when it offers any, its choices as buttons, so a pick answers without opening
- * the thread. Open is for words of one's own. The ordinary threads of the list stay rows (`MailThreadItem`).
+ * first lines of the question (four at most, the rest is under Open), its choices as buttons when it offers any, and a field for an answer in the
+ * person's own words (#2327, owner 2026-11-17), so a question is answered without opening the thread. Open shows the whole thread. The ordinary threads of
+ * the list stay rows (`MailThreadItem`).
  *
- * A press is the answer: it is sent at once, the picked choice stays lit with "You chose" while the host takes it, and the card fades out (`leaving`,
- * `useLeavingCards`) once the list no longer has it. There is no undo: the session has the answer, and a question is answered once. What the person
- * meant to add goes in the thread, which the session reads as the next message.
+ * A press or the field's Send is the answer, and both go the one way, `replyMail(words, 'answer', question, thread)`: it is sent at once, the card says
+ * what it was while the host takes it (the picked choice lit with "You chose", or "Answered"), and the card fades out (`leaving`, `useLeavingCards`) once
+ * the list no longer has it. One question takes one answer: while either is on its way the other is locked. A refused answer unlocks both, keeps what was
+ * typed, and the host's words are in a toast. There is no undo: the session has the answer, and a question is answered once. What the person meant to
+ * add goes in the thread, which the session reads as the next message.
  */
 export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThreadRow; ask: NonNullable<MailThreadRow['ask']>; active?: boolean; leaving?: boolean }) {
   const open = useStore((s) => s.openMailThread)
   const reply = useStore((s) => s.replyMail)
-  // The choice pressed, while its answer is on its way: one press is one answer to one question, and the list says which it was. It is the question's, not the thread's:
-  // once this one is answered the thread's next question shows on the same card, unpressed
-  const [press, setPress] = useState<{ ask: string; index: number } | null>(null)
-  const picked = press?.ask === ask.id ? press.index : null
-  const pick = async (choice: string, index: number) => {
-    if (picked !== null) return
-    setPress({ ask: ask.id, index })
-    // A refused answer leaves the choices to press again, with the host's words in a toast
-    if (!(await reply(choice, 'answer', ask.id, t.id))) setPress((p) => (p?.ask === ask.id ? null : p))
+  const sendKey = useSendKey()
+  // The answer on its way: the index of the choice pressed, or null for words. It is the question's, not the thread's: once this one is answered the
+  // thread's next question shows on the same card, unpressed
+  const [sending, setSending] = useState<{ ask: string; picked: number | null } | null>(null)
+  // The words typed, the question's too: words written to one question never go to the next one unseen
+  const [draft, setDraft] = useState<{ ask: string; text: string } | null>(null)
+  const busy = sending?.ask === ask.id ? sending : null
+  const text = draft?.ask === ask.id ? draft.text : ''
+  const wrote = busy?.picked === null
+  const answer = async (words: string, picked: number | null) => {
+    if (busy || !words) return
+    const question = ask.id
+    setSending({ ask: question, picked })
+    // A refused answer leaves the card to answer again, with the host's words in a toast
+    if (!(await reply(words, 'answer', question, t.id))) setSending((p) => (p?.ask === question ? null : p))
   }
   return (
     <li
@@ -56,20 +68,40 @@ export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThrea
       {ask.choices && (
         <ChoiceList
           choices={ask.choices}
-          label={choicesLabel(false, picked !== null, true)}
-          picked={picked}
-          locked={picked !== null}
-          onPick={(c) => void pick(c, ask.choices?.indexOf(c) ?? 0)}
+          label={choicesLabel(wrote, busy?.picked != null, true)}
+          picked={busy?.picked ?? null}
+          locked={busy !== null}
+          onPick={(c) => void answer(c, ask.choices?.indexOf(c) ?? 0)}
           testId={`mail-ask-choices-${t.id}`}
         />
       )}
-      <div className="flex items-center gap-1.5">
-        {ask.open.length > 1 && <span className="text-xs text-ink-faint">{ask.open.length - 1} other waiting in this thread</span>}
-        {/* A button, not the row's plain word: the row's "Open" is the state it is in, this one is what to press for words of one's own */}
-        <Button size="sm" variant="quiet" className="ml-auto" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
+      {/* The person's own words, one line: a longer answer is written in the thread, under Open */}
+      <div className="flex items-center gap-1.5 pt-1">
+        <TextInput
+          size="sm"
+          text="sm"
+          surface="raised"
+          className="min-w-0 flex-1"
+          value={text}
+          readOnly={busy !== null}
+          onChange={(e) => setDraft({ ask: ask.id, text: e.target.value })}
+          onKeyDown={(e) => sendKey(e) && void answer(text.trim(), null)}
+          placeholder="Your answer"
+          aria-label="Your answer"
+          data-testid={`mail-ask-answer-${t.id}`}
+        />
+        <Button size="sm" disabled={!text.trim() || busy !== null} busy={wrote} onClick={() => void answer(text.trim(), null)} data-testid={`mail-ask-send-${t.id}`}>
+          Send
+        </Button>
+        {/* A button, not the row's plain word: the row's "Open" is the state it is in, this one is what to press for the whole thread */}
+        <Button size="sm" variant="quiet" onClick={() => void open(t.id)} data-testid={`mail-thread-${t.id}`}>
           Open
         </Button>
       </div>
+      {/* Folds in and out as the thread's questions come and go (docs/design-system.md §9); on its way out it still says the one it counted last */}
+      <Fold open={ask.open.length > 1} className="text-xs text-ink-faint" testId={`mail-ask-others-${t.id}`}>
+        {Math.max(ask.open.length - 1, 1)} other waiting in this thread
+      </Fold>
     </li>
   )
 }

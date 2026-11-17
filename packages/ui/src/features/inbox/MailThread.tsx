@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MailMessage } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
-import { composingKey } from '../../app/keys.js'
 import { bubbleLook } from '../../components/bubble.js'
 import { Button } from '../../components/Button.js'
 import { IconButton } from '../../components/IconButton.js'
@@ -11,7 +10,7 @@ import { Fold } from '../../components/Fold.js'
 import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
-import { isComposerSendKey } from '../session/composerKeys.js'
+import { useSendKey } from '../session/useSendKey.js'
 import { Markdown } from '../session/Markdown.js'
 import { AnsweringPicker } from './AnsweringPicker.js'
 import { answerTo, answeringTarget, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
@@ -204,7 +203,7 @@ function scriptOf(m: MailMessage): string | undefined {
 function Reply({ blocked }: { blocked: boolean }) {
   const view = useStore((s) => s.mailThread)
   const reply = useStore((s) => s.replyMail)
-  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const sendKey = useSendKey()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   // Which question the words answer, once the person has named one (#2191): else the newest, as it was before
@@ -231,13 +230,7 @@ function Reply({ blocked }: { blocked: boolean }) {
           rows={2}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey(e.nativeEvent) }
-            if (isComposerSendKey(key, sendWithModifierEnter)) {
-              e.preventDefault()
-              void send()
-            }
-          }}
+          onKeyDown={(e) => sendKey(e) && void send()}
           placeholder="Reply"
           aria-label="Your reply"
           className="max-h-40 min-w-0 flex-1 resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
