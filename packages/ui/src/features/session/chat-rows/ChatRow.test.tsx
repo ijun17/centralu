@@ -201,6 +201,13 @@ describe('ChatRow: approvals and marks', () => {
     expect(testIds(mail.html)).toEqual(['msg-mark', 'notice-summary'])
     expect(mail.text).toBe('1 message from Centralu')
     expect(mail.html).toMatch(/rounded-full border[^"]*border-line/)
+    // It names no messages (an older host's line), so nothing folds (#2333)
+    expect(mail.html).not.toContain('aria-expanded')
+
+    // One that names its messages folds open to them, closed at first
+    const folds = row({ kind: 'mark', seq: 7, text: '1 message from Centralu', mark: 'notice', notice: { head: '', body: '1 message from Centralu', from: 'Centralu', mail: true, delivered: [{ threadId: 't1', messageId: 'm1' }] } })
+    expect(testIds(folds.html)).toEqual(['msg-mark', 'mark-toggle', 'notice-summary'])
+    expect(folds.html).toContain('aria-expanded="false"')
   })
 
   it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {

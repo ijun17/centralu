@@ -1860,7 +1860,7 @@ it (a gone sender's mail does not go), as its queue was dropped; step 5 re-point
 
 **What the person sees (owner, option B, recorded on #1948).** A task from a delegation tool (`agent_session` send, `ask_project`, the
 Assistant's `send_to_session`, and that tool's note, #2258) that the mailbox gives shows in the receiver's conversation as its sender's message, "from <sender>" with
-the words, as its direct send does; other mail keeps the one line ("1 message from …"). One function decides it,
+the words, as its direct send does; other mail keeps the one line ("1 message from …"), which folds open to the messages it delivered (#2333). One function decides it,
 `SessionEvents.deliverMail`, from `MailInput.task` (the wake's work message when it is such a task, a wake carries one, D17; else a note it carries). The agent
 reads only the mail frame (the words inline under Centralu's header, with the message id): the row is written for the screen and never
 sent. A wake that carries other mail with the task writes the line too. A sender no longer here to be named leaves the line alone. The

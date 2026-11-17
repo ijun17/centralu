@@ -74,8 +74,34 @@ describe('a session at rest is woken by mail', () => {
     expect(stored(worker.id).filter((m) => m.role === 'user')).toHaveLength(userRowsBefore)
     expect(mailLines(worker.id)).toHaveLength(1)
     expect(mailLines(worker.id)[0]!.payload).toMatchObject({ type: 'notice', level: 'info', from: 'Centralu', label: 'mail', text: '1 message from a session of your project' })
+    // The line names the message it stands for and its chain, so the window can fold it open to it (#2333)
+    expect(mailLines(worker.id)[0]!.payload).toMatchObject({ mail: [{ threadId: sent.id, messageId: sent.id }] })
     expect(w.events.some((e: NormalizedEvent) => e.type === 'user_message' && e.sessionId === worker.id)).toBe(false)
     expect(read.row(sent.id, addressOf(worker.id))!.deliveredAt).not.toBeNull()
+  })
+
+  it("a delegated task shown as its sender's message is not in the line's messages too; the mail beside it is (#2333 review)", async () => {
+    const giver = await create()
+    const worker = await create()
+    const task = m.service.task(addressOf(giver.id), addressOf(worker.id), { text: 'land the branch', origin: 'agent_session', delivered: false })
+    const note = send(addressOf(giver.id), worker.id, 'and the docs')
+    await due(worker.id)
+    // The task stands in the conversation as the giver's message
+    expect(stored(worker.id).filter((r) => r.role === 'user').map((r) => (r.payload as { text: string }).text)).toEqual(['land the branch'])
+    // The line counts what it opens to: the note, not the task shown above it
+    const line = mailLines(worker.id)[0]!.payload as { text: string; mail?: { messageId: string }[] }
+    expect(line.text).toBe('1 message from a session of your project')
+    expect(line.mail?.map((d) => d.messageId)).toEqual([note.id])
+    expect(line.mail?.map((d) => d.messageId)).not.toContain(task.id)
+  })
+
+  it("a delegated task shown alone leaves no mail line: the giver's message is the whole of it (#2333 review)", async () => {
+    const giver = await create()
+    const worker = await create()
+    m.service.task(addressOf(giver.id), addressOf(worker.id), { text: 'land the branch', origin: 'agent_session', delivered: false })
+    await due(worker.id)
+    expect(stored(worker.id).filter((r) => r.role === 'user').map((r) => (r.payload as { text: string }).text)).toEqual(['land the branch'])
+    expect(mailLines(worker.id)).toEqual([])
   })
 
   // The fake tool gives every session the same conversation id, so a test that wakes a session uses one session and the person to give it work

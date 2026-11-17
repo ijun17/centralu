@@ -86,6 +86,10 @@ export const STOP_NOT_CONFIRMED_LABEL = 'stop not confirmed'
  * causes the event to fail validation, an open screen would never receive its update again. All
  * the receiving side actually reads is `view`'s `instanceId`.
  */
+/** One message a mail delivery's line stands for (#2333): its id, and the chain it is in (`mail.thread`'s `threadId`, the chain's root) */
+export const MailDelivered = z.object({ threadId: z.string(), messageId: z.string() })
+export type MailDelivered = z.infer<typeof MailDelivered>
+
 export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.string().optional() })
 export type AppChangeCause = z.infer<typeof AppChangeCause>
 
@@ -577,6 +581,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     items: z.array(z.string()).optional(),
     /** What would make the notice go away, or that nothing needs doing */
     hint: z.string().optional(),
+    /**
+     * A mail delivery's line (`label: 'mail'`, #2333): the messages it delivered, each with the chain it is in (`mail.thread`'s `threadId`), so the
+     * window can fold the line open to show them. Absent from an older host, from a row stored before it and from the mailbox's other lines: the line
+     * then does not fold. Malformed, it reads as absent
+     */
+    mail: z.array(MailDelivered).optional().catch(undefined),
   }),
   /**
    * This session was born from a handoff, and the predecessor's note is pinned here (#102).

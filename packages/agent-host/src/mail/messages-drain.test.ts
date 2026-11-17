@@ -193,6 +193,8 @@ describe('what one wake carries', () => {
     expect(d.heldBack).toEqual([])
     expect(d.messageIds).toEqual([kept.id])
     expect(d.line).toBe('1 message from a session of your project')
+    // What the line stands for is what the frame names, the skipped one not (#2333)
+    expect(d.listed).toEqual([{ threadId: kept.rootId, messageId: kept.id, relation: 'a session of your project' }])
   })
 
   it('the one hold is the only hold: a message an earlier build wrote 5 hops deep goes, and an untrusted project’s is held policy until it is trusted', () => {

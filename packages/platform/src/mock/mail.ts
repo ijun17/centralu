@@ -207,6 +207,8 @@ export class MailMock {
       }
       const after = opts?.all ? 0 : (opts?.after ?? t.read)
       const messages = t.messages.filter((m) => m.seq > after)
+      // A look in reads nothing for anyone, as the host's does (a mail line folded open in a conversation, #2333)
+      if (opts?.lookIn === true) return { ...this.view(t, messages), lookIn: true }
       t.read = Math.max(t.read, messages.at(-1)?.seq ?? 0)
       t.row.unread = 0
       return this.view(t, messages)

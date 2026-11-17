@@ -2,6 +2,7 @@ import { formatCount } from '../app/format.js'
 import {
   subagentStepRow,
   type Attachment,
+  type MailDelivered,
   type NormalizedEvent,
   type StoredMessage,
   type SubagentStep,
@@ -493,13 +494,15 @@ export type NoticeLine = {
   from: string
   /** A line Centralu's mail left (a delivery, a note about one): drawn as the mail capsule, with no head (#2332) */
   mail?: true
+  /** The messages a delivery's line stands for, which it folds open to (#2333); absent from an older host's line and a row stored before */
+  delivered?: MailDelivered[]
 }
 
 /** A notice's readable parts, or null for one the host did not place (stored before #342): it reads as its text alone */
 function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
   if (!e.from) return null
   // A row stored before #2332 starts with the ✉ the host wrote then; the capsule's icon stands for it now (the old comma stays)
-  if (e.from === 'Centralu' && e.label === 'mail') return { head: '', from: e.from, body: e.text.replace(/^✉\s*/, ''), mail: true }
+  if (e.from === 'Centralu' && e.label === 'mail') return { head: '', from: e.from, body: e.text.replace(/^✉\s*/, ''), mail: true, ...(e.mail?.length ? { delivered: e.mail } : {}) }
   return {
     head: e.label ? `${e.from} · ${e.label}` : e.from,
     from: e.from,

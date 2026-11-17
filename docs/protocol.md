@@ -75,7 +75,8 @@ type NormalizedEvent =
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303); `after` moves a known context reading there as an estimate (#1282)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: the tool started a fresh conversation (Claude's /clear); a marker, and the gauge empties
   | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,
-      from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: text the tool wants read, one line; #342: made readable
+      from?, label?, audience?: 'you'|'centralu', summary?, items?, hint?,
+      mail?: { threadId, messageId }[] }  // #304: text the tool wants read, one line; #342: made readable; #2333: a mail line's messages
   // in-turn progress (display-only, never persisted)
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting, claude api_retry)
   | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated, claude's TodoWrite or task list (#843), a snapshot
@@ -185,6 +186,10 @@ reached nobody. Three shapes carry them:
   cannot tell), and for a notice the host recognizes, a plain explanation (`summary`, with `items` one per line and a
   `hint`) that the screen shows first, with `text` one click away (#342). All six are optional: a notice stored before
   #342, or one the host cannot place, is drawn from `text` alone. An unknown `audience` word reads as absent.
+- A mail delivery's line (`from: 'Centralu'`, `label: 'mail'`) names the messages it delivered in `mail`, each with its
+  chain (the `threadId` `mail.thread` takes, the chain's root), so the window folds the line open to them and reads them
+  with `mail.thread` and `lookIn: true`, which reads nothing for anyone (#2333). Optional, and malformed reads as absent:
+  an older host's line, a row stored before it and the mailbox's other lines name none, and the line does not fold.
 - `settings_changed` with `by: 'tool'` is a switch the tool made by itself — Claude Code's refusal fallback, another
   Codex client changing the thread. A notice in the conversation says what and why; the event updates the model shown.
 - Every saved `agents.updateSettings` is broadcast as `settings_changed` with the full snapshot, `permissionPreset` included (#659). The

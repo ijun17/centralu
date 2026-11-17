@@ -16,7 +16,7 @@ import {
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, isPerson, parseAddress, senderKind, sessionAddress } from './address.js'
-import { buildMessageFrame, deliveryLine, type MessageCalls, type MessageFrameItem } from './frame.js'
+import { buildMessageFrame, mailLine, type ListedMail, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
 import type { TurnReport } from './turn-report.js'
 import { answerAtRest, type LastResponse } from './last-response.js'
@@ -158,6 +158,8 @@ export type DrainResult = {
   /** Whether anything in it waits for an answer: it goes before the rest when many sessions are woken at once */
   needsReply: boolean
   line: string
+  /** The messages the line stands for, each with its chain (#2333): the ones the frame names, so the window can fold the line open to them, and the line counts them (`mailLine`) */
+  listed: ListedMail[]
   heldBack: { messageId: string; reason: HoldReason }[]
   /** The task (or, for the Assistant, the first request of its asker) a turn this delivery starts is the work of, or null */
   workMessage: string | null
@@ -624,7 +626,7 @@ export class MessageService {
     const workMessage = !turnStarts || opts.joining ? null : handedOn ?? (toAssistant ? (kept.find((c) => c.request)?.message.id ?? null) : picked)
 
     const items: MessageFrameItem[] = []
-    const relations = new Set<string>()
+    const given: ListedMail[] = []
     let wake = false
     let immediate = false
     let needsReply = false
@@ -633,10 +635,12 @@ export class MessageService {
       if (message.urgent || isPerson(message.sender)) immediate = true
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
-      relations.add(relation)
+      given.push({ threadId: message.rootId, messageId: message.id, relation })
       items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row.lastError === 'maybe_repeated'))
     }
     const frame = buildMessageFrame(items, this.opts.calls?.(recipient))
+    // What this delivery gives: the messages the frame names (one folded over its budget waits for the next), which the line counts and opens to
+    const listed = given.filter((l) => frame.shown.includes(l.messageId))
     return {
       text: frame.text,
       messageIds: frame.shown,
@@ -645,7 +649,8 @@ export class MessageService {
       wake,
       immediate,
       needsReply,
-      line: items.length === 0 ? '' : deliveryLine(items.length, relations),
+      line: mailLine(listed).line,
+      listed,
       heldBack,
       workMessage,
       asker: turnStarts && toAssistant ? picked : null,

@@ -1,7 +1,8 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronIcon, MailIcon, MarkIcon } from '../../components/icons.jsx'
+import { ChevronIcon, MarkIcon } from '../../components/icons.jsx'
 import { MarkLine } from '../../components/MarkLine.jsx'
+import { MailMark } from './MailMark.jsx'
 import { audienceText, type NoticeLine } from '../../store/store.js'
 
 /** `a \`b\` c` with the quoted part set apart, the way Codex and the host quote a file or a setting */
@@ -23,17 +24,8 @@ function quoted(text: string): ReactNode[] {
  * audience the host did not place starts open, as every notice used to be.
  */
 export function NoticeMark({ notice }: { notice: NoticeLine }) {
-  /*
-   * The line a mail delivery leaves in the receiver's conversation ("1 message from Centralu"): the mail icon and only how many
-   * and from whom (owner, 2026-11-17, #2332 option C). The capsule, not a head, says it is mail
-   */
-  if (notice.mail) {
-    return (
-      <MarkLine icon={<MailIcon size={12} />} data-mark="mail">
-        <span data-testid="notice-summary">{notice.body}</span>
-      </MarkLine>
-    )
-  }
+  // The line a mail delivery leaves, and the messages it opens to (#2332, #2333)
+  if (notice.mail) return <MailMark text={notice.body} delivered={notice.delivered} />
   return (
     <MarkLine
       icon={<MarkIcon kind="notice" />}

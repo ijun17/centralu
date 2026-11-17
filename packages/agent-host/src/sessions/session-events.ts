@@ -10,6 +10,7 @@ import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest, MailWithdrawn, type MailInput } from '../mail/delivery.js'
+import { mailLine } from '../mail/frame.js'
 import { takeInput } from './mail-accept.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import type { TurnInputs } from '../mail/delivery.js'
@@ -724,7 +725,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string },
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string; listed?: MailInput['listed'] },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -770,7 +771,13 @@ export class SessionEvents {
     // sender's message, as its direct send does (owner, #1948 option B), and a card's notice as from its session, as before mail (§10.6.4); the line
     // stays for the rest of the mail
     const shown = !input.quiet && input.shown !== undefined && this.showSent(sessionId, input.shown)
-    if (!shown || !input.shown?.alone) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
+    /*
+     * A delivery's line counts the messages it opens to, so the window can fold it open to them (#2333), one list for both (`mailLine`): not the
+     * one just shown as its sender's message, which would be counted and opened a second time; a delivery of that alone leaves no line (#2333
+     * review). An update's or a compaction's line stands for no messages
+     */
+    const { line, mail } = input.listed ? mailLine(input.listed, shown ? input.shown?.messageId : undefined) : { line: input.line, mail: [] }
+    if (line) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: line, ...(mail.length ? { mail } : {}) })
   }
 
   /**

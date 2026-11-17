@@ -657,13 +657,15 @@ describe('resets, notices and switches the tool made (#304)', () => {
 
   it("a mail line is drawn as the mail capsule with no head, and one stored before #2332 loses only its leading ✉", () => {
     const items = messagesToChat([
-      { sessionId: 'n-7', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'notice', sessionId: 'n-7', level: 'info', from: 'Centralu', label: 'mail', text: '2 messages from a session of your project and Centralu' } },
+      { sessionId: 'n-7', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'notice', sessionId: 'n-7', level: 'info', from: 'Centralu', label: 'mail', text: '2 messages from a session of your project and Centralu', mail: [{ threadId: 't1', messageId: 'm1' }] } },
       { sessionId: 'n-7', seq: 2, role: 'system', kind: 'marker', ts: 2, payload: { type: 'notice', sessionId: 'n-7', level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message, from Centralu' } },
     ])
     expect(items).toMatchObject([
-      { text: '2 messages from a session of your project and Centralu', notice: { head: '', body: '2 messages from a session of your project and Centralu', mail: true } },
+      { text: '2 messages from a session of your project and Centralu', notice: { head: '', body: '2 messages from a session of your project and Centralu', mail: true, delivered: [{ threadId: 't1', messageId: 'm1' }] } },
       { text: '1 message, from Centralu', notice: { head: '', body: '1 message, from Centralu', mail: true } },
     ])
+    // A row stored before #2333 names no messages, so its line does not fold
+    expect((items[1] as { notice?: { delivered?: unknown } }).notice?.delivered).toBeUndefined()
   })
 
   it('a model switch the tool made updates the model shown without a toast; the Assistant still raises one', async () => {

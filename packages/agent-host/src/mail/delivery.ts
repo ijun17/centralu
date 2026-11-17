@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { errorMessage, oneLineText } from '@cc/protocol'
+import type { ListedMail } from './frame.js'
 import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, isPerson, parseAddress, senderKind } from './address.js'
@@ -62,6 +63,11 @@ export type MailInput = {
   quiet: boolean
   /** The compact line the conversation keeps of it (§9.2), in Centralu's words */
   line: string
+  /**
+   * The messages a mail delivery gives (#2333), from which the line and what it opens to are made (`mailLine`), leaving out one the
+   * conversation shows as its sender's message; `line` is then only for a log. Absent for a line that stands for no messages (an update's note)
+   */
+  listed?: ListedMail[]
   /** Asked right before the send, with the other waits' checks: false when everything in it was withdrawn since (the send is then `MailWithdrawn`) */
   wanted?: () => boolean
   /** Joins the turn running (`ReceiverState.joins`); a receiver no longer in the state the delivery was planned for is `MailNotAtRest` */
@@ -69,9 +75,10 @@ export type MailInput = {
   /**
    * What the delivery carries that the receiver's conversation shows as a session's message (`SessionEvents.deliverMail`): a delegation tool's task
    * (mail to a child of the sender's, origin `agent_session`; `ask_project`, the Assistant's `send_to_session`, whose note too, #2258; docs/plans/mailbox.md §10.6.2), its sender and words, or the notice of a
-   * card in a session it gave work (§10.6.4), from that session. `alone`: the delivery carries nothing else. The agent reads the mail frame only
+   * card in a session it gave work (§10.6.4), from that session. `alone`: the delivery carries nothing else. `messageId`: the message it is, which the
+   * delivery's line then does not open to again (#2333 review). The agent reads the mail frame only
    */
-  shown?: { senderId: string; text: string; alone: boolean }
+  shown?: { senderId: string; text: string; alone: boolean; messageId: string }
   /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
   id?: string
   /** The agent depth a task from another computer's session gives the receiver while it works on it (`TaskInput.depth`, #838): the deepest it carries */
@@ -562,7 +569,7 @@ export class MailDelivery {
     const inputId = joins ? randomUUID() : undefined
     const depth = Math.max(0, ...drained.messageIds.map((id) => this.records.message(id)?.facts.agentDepth ?? 0))
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -636,11 +643,11 @@ export class MailDelivery {
   }
 
   /** The work a wake starts when a delegation tool sent it (`MailInput.task`): its task, else a send tool's note, which is no one's work (#2258) */
-  private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): { senderId: string; text: string } | undefined {
+  private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): { senderId: string; text: string; messageId: string } | undefined {
     const work = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
     const m = drained.workMessage === null ? drained.messageIds.map((id) => this.records.message(id)).find((n) => n !== undefined && isSendNote(n)) : work?.kind === 'task' && SEND_ORIGINS.has(work.origin ?? '') ? work : undefined
     const from = m && parseAddress(m.sender)
-    return m && from?.kind === 'session' ? { senderId: from.sessionId, text: m.body } : undefined
+    return m && from?.kind === 'session' ? { senderId: from.sessionId, text: m.body, messageId: m.id } : undefined
   }
 
   /** What the receiver's conversation shows as a session's message (`MailInput.shown`): the delegated task, else a card's notice, from its session */
@@ -651,7 +658,7 @@ export class MailDelivery {
     for (const id of drained.messageIds) {
       const m = this.records.message(id)
       const about = m?.facts.card ? parseAddress(m.facts.card.session) : undefined
-      if (m && about?.kind === 'session') return { senderId: about.sessionId, text: m.body, alone }
+      if (m && about?.kind === 'session') return { senderId: about.sessionId, text: m.body, alone, messageId: id }
     }
     return undefined
   }
