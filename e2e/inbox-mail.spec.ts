@@ -880,3 +880,54 @@ test('Tasks: a machine that could not be reached is named under the list, and th
   await expect(line).toHaveText('Not listed: the tasks on Build box, which could not be reached just now.')
   await expect(page.getByTestId('tasks-unreached')).toHaveCount(0)
 })
+
+test('A mail line in a conversation folds open to the messages it delivered, reads nothing, and leads to the chain in the Inbox (#2333)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
+  const thread = await seed(page, { subject: 'Release notes', from: boss, body: 'The draft is ready.\nPick Fixes or Changes for the theme fix.', kind: 'note' })
+  const unreadBefore = await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).row.unread as number, thread)
+  const message = await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).messages[0].id as string, thread)
+  await page.evaluate(
+    ([s, t, m]) =>
+      (window as any).__mock.emit({ type: 'notice', sessionId: s, level: 'info', from: 'Centralu', label: 'mail', text: '2 messages from a session of your project', mail: [{ threadId: t, messageId: m }, { threadId: t, messageId: 'mock.m_gone' }] }),
+    [sid, thread, message] as const,
+  )
+  // An older host's line, and a row stored before: no messages named, so it does not fold
+  await page.evaluate((s: string) => (window as any).__mock.emit({ type: 'notice', sessionId: s, level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message, from Centralu' }), sid)
+  await expect(page.getByText('1 message, from Centralu')).toBeVisible()
+  await expect(page.getByTestId('mark-toggle')).toHaveCount(1)
+  // Every read of a chain the window makes, to see the line reads once (#2333 review)
+  await page.evaluate(() => {
+    const mail = (window as any).__mock.mail
+    const thread = mail.thread.bind(mail)
+    ;(window as any).__threadReads = 0
+    mail.thread = (...a: unknown[]) => (((window as any).__threadReads += 1), thread(...a))
+  })
+
+  const toggle = page.locator('[data-mark="mail"]').getByTestId('mark-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('mark-folded')).toHaveAttribute('data-fold', 'open')
+  const shown = page.getByTestId('mail-line-message')
+  await expect(shown).toHaveCount(1)
+  await expect(shown).toContainText('Boss')
+  await expect(shown).toContainText('note · Release notes')
+  await expect(shown).toContainText('The draft is ready.')
+  await expect(page.getByTestId('mail-line-gone')).toHaveText('1 message is no longer kept')
+  // A look in: nothing was read for the person
+  expect(await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).row.unread as number, thread)).toBe(unreadBefore)
+
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('mark-folded')).toHaveCount(0)
+  // Opened again, it shows what it read: no second read
+  await toggle.click()
+  await expect(shown).toHaveCount(1)
+  expect(await page.evaluate(() => (window as any).__threadReads as number)).toBe(1)
+  await page.getByTestId('mail-line-inbox').click()
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+  await expect(page.getByTestId('mail-message-1')).toContainText('The draft is ready.')
+})

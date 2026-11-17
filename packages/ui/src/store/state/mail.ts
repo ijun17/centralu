@@ -1,4 +1,7 @@
-import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
+import type { MailDelivered, MailHeldRow, MailMessage, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
+
+/** What a mail line folded open shows (#2333): the delivered messages still kept, each with its chain's subject, and how many are not */
+export type DeliveredMail = { messages: { message: MailMessage; subject: string; threadId: string }[]; gone: number }
 
 /** The person's mailbox (#1347): the threads the Inbox lists among its rows and the thread open in it. */
 export type MailSlice = {
@@ -22,6 +25,11 @@ export type MailSlice = {
   loadMail: () => Promise<void>
   /** Opens a thread in the Inbox: reads it (which reads it for the person) and shows it */
   openMailThread: (threadId: string) => Promise<void>
+  /**
+   * The messages a mail line in a conversation stands for (#2333), read from their chains as a look in: nothing is read for anyone, since the line is
+   * the session's mail, not the person's. A chain the host no longer keeps counts its messages as gone; a read the link lost throws
+   */
+  readDeliveredMail: (delivered: MailDelivered[]) => Promise<DeliveredMail>
   /** Reads the page of messages before the first one held (a long thread opens at its end) */
   loadOlderMail: () => Promise<void>
   /** Back to the list */

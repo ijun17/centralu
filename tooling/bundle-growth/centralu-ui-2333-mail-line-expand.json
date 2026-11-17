@@ -1,0 +1,4 @@
+{
+  "bytes": 2720,
+  "reason": "A mail line folds open to the messages it delivered (#2333): the reader that draws each message as a relayed one (sender, arrow, kind and subject over a bubble cut at six lines, Open in Inbox, the count of messages no longer kept, the reading and failed lines) and keeps what it read above the fold, the store's readDeliveredMail (one look-in read per chain, gone and failed reads told apart), the notice's optional `mail` field in the protocol schema, and the mock's look-in read (the web build carries the mock). The capsule and its fold are MarkLine's (#2338), not markup of its own. Measured locally against main 965f92f: 1,959,450 B to 1,961,866 B (+2,416 B); the rest is a margin for the difference CI measured on this branch against a local build (about 290 B). No new dependency."
+}

@@ -19,9 +19,10 @@ export interface MailPort {
   tasks(): Promise<{ tasks: MailTaskRow[]; capped: number | null; unreached: UnreachedMachine[] }>
   /**
    * One thread from where the person last read (or `after`, or from the start with `all`), read for them. With `tail`, its last that many
-   * messages (at most 100), read to the end; with `before` as well, the earlier page of them, whose `older` says whether there is more
+   * messages (at most 100), read to the end; with `before` as well, the earlier page of them, whose `older` says whether there is more. With `lookIn`,
+   * read as a look in: nothing in it is read for anyone (a mail line folded open in a conversation, #2333)
    */
-  thread(threadId: string, opts?: { after?: number; all?: boolean; tail?: number; before?: number }): Promise<MailThreadView>
+  thread(threadId: string, opts?: { after?: number; all?: boolean; tail?: number; before?: number; lookIn?: boolean }): Promise<MailThreadView>
   /** The person's words in a thread; answers the new message */
   /** `answers`: the question whose choice `text` is (a pick); the answer goes to that question, and a question answered already refuses it */
   reply(threadId: string, text: string, kind?: 'note' | 'answer' | 'question', answers?: string): Promise<MailThreadView>

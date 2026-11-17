@@ -175,7 +175,13 @@ export class Qualifier {
     // A stored `app_view` open: the window reads only that a view stood there, but the id stays in the hub's terms
     if (typeof p.instanceId === 'string') out.instanceId = this.id(p.instanceId)
     if (isObj(p.detail)) out.detail = this.approvalDetail(p.detail)
+    if (p.type === 'notice' && 'mail' in p) out.mail = this.delivered(p.mail)
     return out
+  }
+
+  /** A mail line's messages (#2333): each chain qualified, so the line opens it on the machine it is on (`mail.thread`). The message id is every host's */
+  private delivered(mail: unknown): unknown {
+    return Array.isArray(mail) ? mail.map((d: unknown) => (isObj(d) ? { ...d, threadId: this.maybeId(d.threadId) } : d)) : mail
   }
 
   /** `ApprovalDetail`: the kinds that name a project */
@@ -393,6 +399,9 @@ export class Qualifier {
       }
       case 'handoff':
         return { ...base, fromSessionId: this.maybeId(e.fromSessionId) }
+      // A mail line live, as `payload` qualifies it stored
+      case 'notice':
+        return 'mail' in e ? { ...base, mail: this.delivered(e.mail) } : base
       case 'session_owner':
         return { ...base, askedBy: (sid !== undefined ? this.ownerOf?.(sid) : undefined) ?? this.maybeId(e.askedBy), parentSessionId: this.maybeId(e.parentSessionId) }
       case 'approval_request':

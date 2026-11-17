@@ -1,4 +1,4 @@
-import { frameField } from '@cc/protocol'
+import { frameField, type MailDelivered } from '@cc/protocol'
 import { parseAddress } from './address.js'
 import { parseMailId } from './ids.js'
 import { MAIL_KINDS, type MailKind } from '../dev-services/store/mailbox.js'
@@ -239,4 +239,20 @@ export function deliveryLine(messages: number, relations: ReadonlySet<string>): 
   const parties = [...relations]
   const from = parties.length > 1 ? `${parties.slice(0, -1).join(', ')} and ${parties.at(-1)}` : (parties[0] ?? '')
   return `${messages} ${messages === 1 ? 'message' : 'messages'} from ${from}`
+}
+
+/** A message a delivery gives, with its chain and who it is from in the line's words (`deliveryLine`) */
+export type ListedMail = MailDelivered & { relation: string }
+
+/**
+ * A delivery's line and the messages it opens to (#2333), from one list so the two never differ (#2333 review): what the line counts is what
+ * it opens to. `leaveOut`: the message the conversation shows as its sender's message instead (a delegated task), which is in neither; a
+ * delivery of that message alone leaves no line
+ */
+export function mailLine(listed: readonly ListedMail[], leaveOut?: string): { line: string; mail: MailDelivered[] } {
+  const rest = listed.filter((l) => l.messageId !== leaveOut)
+  return {
+    line: rest.length === 0 ? '' : deliveryLine(rest.length, new Set(rest.map((l) => l.relation))),
+    mail: rest.map(({ threadId, messageId }) => ({ threadId, messageId })),
+  }
 }

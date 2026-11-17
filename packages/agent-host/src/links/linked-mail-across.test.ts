@@ -108,6 +108,21 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(chain).toMatchObject({ thread: { id: `m1.${between}` }, lookIn: true, canReply: false, messages: [{ body: 'which branch?' }] })
   })
 
+  it("a mail line in a machine's session opens its messages from the hub: the stored line names the machine's chain (#2333 review)", async () => {
+    const machine = await machineHost({ sessions: ['w1', 'c1'], mail: 'delivered' })
+    const hub = await hubHost(machine.port, { mail: true })
+    await eventually(() => hub.machine().status === 'connected')
+    const sent = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'which branch?' }))
+    type Row = { kind: string; payload: { type?: string; label?: string; mail?: { threadId: string; messageId: string }[] } }
+    const line = async () => ((await hub.router.handle('messages.load', { sessionId: 'm1.c1', limit: 100 })) as Row[]).find((r) => r.payload.label === 'mail')
+    await eventually(async () => (await line()) !== undefined)
+    const root = machine.store.mailbox.message(sent)!.rootId
+    expect((await line())!.payload.mail).toEqual([{ threadId: `m1.${root}`, messageId: sent }])
+    // The id the window passes to `mail.thread` reaches the machine's chain, as a look in
+    const chain = await hub.router.handle('mail.thread', { threadId: `m1.${root}`, all: true, lookIn: true })
+    expect(chain).toMatchObject({ lookIn: true, messages: [{ id: sent, body: 'which branch?' }] })
+  })
+
   it("the hub's Tasks leaves out the machine's own Inbox, and opening a chain of it from the hub reads nothing there (#2268)", async () => {
     const { machine, hub } = await rig()
     // The machine's own person asks its session in that computer's window, and the session answers there

@@ -285,6 +285,26 @@ describe('a thread in the Inbox', () => {
   })
 })
 
+describe('a mail line folded open in a conversation (#2333)', () => {
+  it('reads the delivered messages as a look in, with their subject, counts the ones not kept, and reads nothing for the person', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'Release notes', from: worker, body: 'The draft is ready.', kind: 'note' })
+    const spy = vi.spyOn(platform.mail, 'thread')
+    const message = (await platform.mail.thread(id, { all: true, lookIn: true })).messages[0]!.id
+    const before = (await platform.mail.list()).threads.find((t) => t.id === id)?.unread
+    const read = await useStore.getState().readDeliveredMail([
+      { threadId: id, messageId: message },
+      { threadId: id, messageId: 'mock.m_swept' },
+      { threadId: 'mock.t_swept', messageId: 'mock.m_other' },
+    ])
+    expect(read.messages.map((m) => [m.message.body, m.subject, m.threadId])).toEqual([['The draft is ready.', 'Release notes', id]])
+    expect(read.gone).toBe(2)
+    // One read per chain, as a look in, and the person's unread count is as it was
+    expect(spy.mock.calls.filter(([, o]) => o?.lookIn === true).map(([t]) => t).sort()).toEqual([id, id, 'mock.t_swept'].sort())
+    expect((await platform.mail.list()).threads.find((t) => t.id === id)?.unread).toBe(before)
+  })
+})
+
 describe('mail held for the person', () => {
   it('goes now on Release, is let go on Dismiss, and a pause is lifted on Resume', async () => {
     const platform = attached()

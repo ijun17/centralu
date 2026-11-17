@@ -475,6 +475,19 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     items: ['a.b'],
     hint: 'Codex already runs without it; removing it from the file only silences this notice.',
   },
+  // A mail delivery's line with the messages it delivered (#2333), which the window folds open
+  {
+    type: 'notice',
+    sessionId: 's1',
+    level: 'info',
+    from: 'Centralu',
+    label: 'mail',
+    text: '2 messages from a session of your project and Centralu',
+    mail: [
+      { threadId: 'm_root1', messageId: 'm_1' },
+      { threadId: 'm_root2', messageId: 'm_2' },
+    ],
+  },
   // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
   { type: 'handoff', sessionId: 's1', from: 'Mea' },
   { type: 'history_synced', sessionId: 's1', added: 2 },

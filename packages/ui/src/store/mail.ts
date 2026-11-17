@@ -20,7 +20,7 @@ const hostAnswered = (e: unknown): boolean => e instanceof Error && 'code' in e 
 
 type MailActions = Pick<
   AppState,
-  'loadMail' | 'loadTasks' | 'openMailThread' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
+  'loadMail' | 'loadTasks' | 'openMailThread' | 'readDeliveredMail' | 'loadOlderMail' | 'closeMailThread' | 'replyMail' | 'closeMail' | 'heldMail' | 'resumeMail' | 'wakeMail' | 'loadWatches' | 'cancelWatch'
 >
 
 /** How many messages of a thread the Inbox reads at once (the host's page) */
@@ -88,6 +88,21 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       } catch (e) {
         set({ toast: `Could not open this mail: ${errorMessage(e)}` })
       }
+    },
+
+    async readDeliveredMail(delivered) {
+      const platform = get().platform
+      if (!platform) throw new Error('Centralu is not connected')
+      const threads = [...new Set(delivered.map((d) => d.threadId))]
+      const read = await Promise.allSettled(threads.map((t) => platform.mail.thread(t, { all: true, lookIn: true })))
+      // The host's refusal (a chain swept by retention) leaves its messages gone; a link that failed is the reader's to say
+      const lost = read.find((r): r is PromiseRejectedResult => r.status === 'rejected' && !hostAnswered(r.reason))
+      if (lost) throw lost.reason instanceof Error ? lost.reason : new Error(errorMessage(lost.reason))
+      const kept = new Map(
+        read.flatMap((r) => (r.status === 'fulfilled' ? r.value.messages.map((m) => [m.id, { message: m, subject: r.value.thread.subject, threadId: r.value.thread.id }] as const) : [])),
+      )
+      const messages = delivered.flatMap((d) => kept.get(d.messageId) ?? [])
+      return { messages, gone: delivered.length - messages.length }
     },
 
     async loadOlderMail() {

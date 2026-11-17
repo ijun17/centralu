@@ -14,7 +14,8 @@ const WIDE = 'max-w-[34rem]'
  * everywhere (§1), and a box tells it from the capsules around it.
  *
  * With `folded`, what it explains opens under it: the capsule is then a button with the chevron, and the explanation comes and
- * goes as a `Fold`. `open` is how it starts. `after` stands beside the capsule (a button the line offers).
+ * goes as a `Fold`. `open` is how it starts, and `onOpen` is told each time it opens (a line that reads what it shows when first
+ * opened, the mail line). `after` stands beside the capsule (a button the line offers).
  */
 export function MarkLine({
   icon,
@@ -22,6 +23,7 @@ export function MarkLine({
   children,
   folded,
   open: startOpen = false,
+  onOpen,
   after,
   ...data
 }: {
@@ -30,6 +32,7 @@ export function MarkLine({
   children: ReactNode
   folded?: ReactNode
   open?: boolean
+  onOpen?: () => void
   after?: ReactNode
 } & Record<`data-${string}`, string>) {
   const [open, setOpen] = useState(startOpen)
@@ -54,7 +57,10 @@ export function MarkLine({
             size="line"
             tone="faint"
             className={WIDE}
-            {...(folded ? { onClick: () => setOpen((o) => !o), 'aria-expanded': open, 'aria-controls': id, 'data-testid': 'mark-toggle' } : {})}
+            {...(folded ? { onClick: () => {
+                  if (!open) onOpen?.()
+                  setOpen(!open)
+                }, 'aria-expanded': open, 'aria-controls': id, 'data-testid': 'mark-toggle' } : {})}
           >
             {words}
           </Pill>
