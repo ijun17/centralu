@@ -65,6 +65,15 @@ export interface HeadersMirror {
   forget(machine: string): void
 }
 
+/** One delete the hub owes a machine (pending-project-deletes.ts): the project by the machine's own id, its name for the log, and when it was asked */
+export type PendingProjectDelete = { machine: string; projectId: string; name: string; at: number }
+
+/** Where the hub keeps them, every machine's in one list (stored.ts) */
+export interface PendingProjectDeleteList {
+  read(): PendingProjectDelete[]
+  write(list: readonly PendingProjectDelete[]): void
+}
+
 export type LinkDeps = {
   hub: MachineSide
   /** Into the hub's own event log, under the hub's sequence numbers */
@@ -74,6 +83,8 @@ export type LinkDeps = {
   mirror: HeadersMirror
   registry: MachineRegistry
   tunnelFor: (record: MachineRecord) => Tunnel
+  /** The deletes of projects the hub owes machines that were away (#2330). Absent (tests): kept for this run only */
+  projectDeletes?: PendingProjectDeleteList
   log?: (line: string) => void
   /**
    * The hub's session a linked machine's session is a child of (#1038, `LinkedHost.remoteAgentParent`), by its

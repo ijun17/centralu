@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
 import type { SshTunnel } from './tunnel.js'
-import { hubSelfId, linkDepsFor, storeMirror, storeProjectOrder, storeRegistry, tunnelsFor } from './stored.js'
+import { hubSelfId, linkDepsFor, storeMirror, storeProjectDeletes, storeProjectOrder, storeRegistry, tunnelsFor } from './stored.js'
 
 /** The linked machines and the headers mirror in the hub's store (#82, store v46) */
 
@@ -158,6 +158,40 @@ describe('the project order across machines in the store (#734)', () => {
     expect(storeProjectOrder(store).read()).toEqual(['m1.b', 'h2', 'm1.a'])
     store.settings.setAppSetting('hub.projectOrder', '{oops')
     expect(order.read()).toEqual([])
+  })
+})
+
+describe('the deletes the hub owes machines that were away, in the store (#2330)', () => {
+  const owed = (machine: string, projectId: string) => ({ machine, projectId, name: `Project ${projectId}`, at: 5 })
+
+  it('reads back what was written, from another host on the store too, and keeps no row once nothing is owed', () => {
+    const store = new Store()
+    const list = storeProjectDeletes(store)
+    expect(list.read()).toEqual([])
+    list.write([owed('m1', 'p1'), owed('m2', 'p1')])
+    expect(storeProjectDeletes(store).read()).toEqual([owed('m1', 'p1'), owed('m2', 'p1')])
+    list.write([])
+    expect(store.settings.appSetting('hub.pendingProjectDeletes')).toBeNull()
+    store.close()
+  })
+
+  it('applies no entry it cannot read, and keeps it for the build that wrote it', () => {
+    const store = new Store()
+    const newer = { machine: 'm1', project: { id: 'p9' }, at: 7 }
+    store.settings.setAppSetting('hub.pendingProjectDeletes', JSON.stringify([newer, owed('m1', 'p1'), { machine: 'm1', projectId: 4, name: 'x', at: 1 }]))
+    const list = storeProjectDeletes(store)
+    expect(list.read()).toEqual([owed('m1', 'p1')])
+    list.write([owed('m1', 'p2')])
+    expect(JSON.parse(store.settings.appSetting('hub.pendingProjectDeletes')!)).toEqual([owed('m1', 'p2'), newer, { machine: 'm1', projectId: 4, name: 'x', at: 1 }])
+    store.close()
+  })
+
+  it('is what main.ts links with: a delete kept through its deps is read by the next host on the store', () => {
+    const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }) }
+    const store = new Store()
+    linkDepsFor(store, rest).projectDeletes!.write([owed('m1', 'p1')])
+    expect(linkDepsFor(store, rest).projectDeletes!.read()).toEqual([owed('m1', 'p1')])
+    store.close()
   })
 })
 

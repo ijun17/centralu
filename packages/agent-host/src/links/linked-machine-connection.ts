@@ -20,6 +20,7 @@ import {
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
 import { nodeFloor } from './install.js'
+import { heldProjectDeletes, PendingProjectDeletes } from './pending-project-deletes.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
@@ -128,6 +129,8 @@ const CALL_RETRIES: ReadonlySet<MachineStatus> = new Set(['unreachable', 'away',
 
 export abstract class LinkedMachineConnection implements RoutedMachine {
   readonly q: Qualifier
+  /** The projects the person deleted while this machine could not be asked, deleted there at its next hello (#2330) */
+  readonly pendingDeletes: PendingProjectDeletes
   protected status: MachineStatus = 'connecting'
   private error: string | null = null
   protected versions: MachineVersions | null = null
@@ -298,6 +301,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     protected readonly deps: LinkDeps,
   ) {
     this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
+    this.pendingDeletes = new PendingProjectDeletes({
+      machine: this,
+      list: deps.projectDeletes ?? heldProjectDeletes(),
+      mirror: deps.mirror,
+      heard: (event) => this.onEvent(event),
+      log: (line) => deps.log?.(line),
+    })
     for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
     // When it was last up, kept across restarts (#1398)
     this.lastConnectedAt = record.lastConnectedAt ?? null
@@ -1411,21 +1421,29 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       const v = this.check({ version: h.build.version ?? this.versions?.remote.version ?? 'unknown', protocolVersion: h.build.protocolVersion, dev: h.build.commit === 'dev' })
       if (!mayConnect(v)) return
     }
-    try {
-      /*
-       * Each list is written as soon as its own answer comes (#2288 review): events after that answer reach the mirror on
-       * top of it (`followState`). Written only once both had answered, a turn that ended while the projects were still
-       * being read was undone by the older sessions list
-       */
-      await Promise.all(
-        (['sessions', 'projects'] as const).map(async (kind) => {
-          const list = await client.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})
-          if (Array.isArray(list)) this.observe(kind, list)
-        }),
-      )
-    } catch (err) {
-      this.deps.log?.(`[links] ${this.name}: could not read its lists after connecting: ${(err as Error).message}`)
-    }
+    /*
+     * What the person deleted here while it was away goes first (#2330), so the lists read after are without it; and again
+     * when a delete was kept while they were being read. Nothing awaits between the lists and `connected` below, so
+     * nothing is owed to a machine that can be asked
+     */
+    do {
+      await this.pendingDeletes.apply((method, params) => client.call(method, params), () => client.connected)
+      try {
+        /*
+         * Each list is written as soon as its own answer comes (#2288 review): events after that answer reach the mirror on
+         * top of it (`followState`). Written only once both had answered, a turn that ended while the projects were still
+         * being read was undone by the older sessions list
+         */
+        await Promise.all(
+          (['sessions', 'projects'] as const).map(async (kind) => {
+            const list = await client.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})
+            if (Array.isArray(list)) this.observe(kind, list)
+          }),
+        )
+      } catch (err) {
+        this.deps.log?.(`[links] ${this.name}: could not read its lists after connecting: ${(err as Error).message}`)
+      }
+    } while (this.client === client && client.connected && this.pendingDeletes.any)
     if (this.client !== client) return
     /*
      * The backoff starts over once this host has stayed up a while (#1143), not at its hello: a host that answers and

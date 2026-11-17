@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { APP_VERSION } from '../../packages/protocol/src/brand.js'
 import { Relay } from './real-host.js'
-import { LINKED_RELAY_PORT, MACHINE, restartRemote, startPair, type LinkedPair } from './linked-hosts.js'
+import { LINKED_RELAY_PORT, MACHINE, restartRemote, startLinkedHost, startPair, type LinkedPair } from './linked-hosts.js'
 import { hubCall } from './linked-hosts-scenarios.js'
 import { dragRowToGrid } from './grid-apps.js'
 
@@ -429,6 +429,74 @@ export function linkedHostsUiTests(): void {
         // The remote host restarted: the live one's process is gone and is asked for again; the dormant one stays as it was
         await expect.poll(() => calls.filter((c) => c.method === 'agents.resumeSession').map((c) => c.params.sessionId)).toEqual([live.id])
         await expect(page.getByTestId('away-note')).toHaveCount(0)
+      })
+    })
+  })
+
+  test('a project of a machine that is not connected is deleted from here: it leaves the list at once, stays gone when the hub starts again, and is deleted there when the machine is back (#2330)', async ({ page }) => {
+    test.setTimeout(150_000)
+    await withPair({}, async (pair) => {
+      const connected = () => expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
+      await connected()
+      const ids = async (port: number, method: 'projects.list' | 'sessions.list') => ((await hubCall(port, method, {})) as { id: string }[]).map((x) => x.id)
+      const project = ((await hubCall(pair.hub.port, 'projects.list', {})) as { id: string; path: string; machine?: string }[]).find((p) => p.machine === MACHINE)!
+      const session = (await hubCall(pair.hub.port, 'agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude' })) as { id: string }
+      const openDialog = async () => {
+        await page.getByTestId('project-menu-remote-project').click()
+        await page.getByTestId('delete-project-remote-project').click()
+        await expect(page.getByTestId('delete-project-note')).toContainText('Its sessions go to Centralu’s session archive')
+      }
+      await page.goto('/')
+      await expect(page.getByTestId(`session-row-${session.id}`)).toBeVisible()
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
+
+      await test.step('while the machine is connected the dialog says nothing about when', async () => {
+        await openDialog()
+        await expect(page.getByTestId('delete-project-away-note')).toHaveCount(0)
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('delete-project-dialog')).toHaveCount(0)
+      })
+
+      await test.step('the machine stops: the dialog says what happens now and what later, and the delete takes the project off the list', async () => {
+        await pair.remote.kill('SIGKILL')
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'unreachable', { timeout: 15_000 })
+        await openDialog()
+        await expect(page.getByTestId('delete-project-away-note')).toHaveText(
+          'Not connected to Remote box, so the project only leaves the list now. The rest happens on Remote box when it is connected again.',
+        )
+        await page.getByTestId('delete-project-name-input').fill('remote-project')
+        await page.getByTestId('delete-project-confirm').click()
+        await expect(page.getByTestId('delete-project-dialog')).toHaveCount(0)
+        await expect(page.getByTestId('project-remote-project')).toHaveCount(0)
+        await expect(page.getByTestId(`session-row-${session.id}`)).toHaveCount(0)
+        expect(await listed(page)).toEqual(['hub-project'])
+        expect(await ids(pair.hub.port, 'projects.list')).toEqual(['p-hub'])
+        expect(await ids(pair.hub.port, 'sessions.list')).toEqual([])
+      })
+
+      await test.step('the hub starts again on its own store: the project is still not listed, here or in a window opened then', async () => {
+        await pair.hub.kill()
+        pair.hub = await startLinkedHost(pair.hubSide, pair.hub.port, { port: pair.remotePort })
+        expect(await ids(pair.hub.port, 'projects.list')).toEqual(['p-hub'])
+        expect(await ids(pair.hub.port, 'sessions.list')).toEqual([])
+        await page.reload()
+        await expect(page.getByTestId('project-hub-project')).toBeVisible()
+        expect(await listed(page)).toEqual(['hub-project'])
+      })
+
+      await test.step('the machine is back: the project is deleted there, its session is in that machine’s archive, its folder stays', async () => {
+        await restartRemote(pair)
+        // Connected is said after the machine was asked for the delete and its lists were read
+        await connected()
+        expect(await ids(pair.remotePort, 'projects.list')).toEqual([])
+        const archive = (await hubCall(pair.remotePort, 'trash.list', {})) as { sessions: { id: string }[] }
+        expect(archive.sessions.map((s) => s.id)).toEqual([session.id.slice(`${MACHINE}.`.length)])
+        expect(existsSync(pair.remoteSide.project)).toBe(true)
+        expect(await ids(pair.hub.port, 'projects.list')).toEqual(['p-hub'])
+        expect(await ids(pair.hub.port, 'sessions.list')).toEqual([])
+        expect(await listed(page)).toEqual(['hub-project'])
+        // And the hub's log says where the delete was done
+        expect(pair.hub.stderr()).toContain('[links] Remote box: deleted project "remote-project", as asked here while it was away')
       })
     })
   })

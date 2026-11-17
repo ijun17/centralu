@@ -141,6 +141,26 @@ and the tooltip read the same `machineAway`), and a machine whose resync was not
 mark while it is connected, is read again at the next word the hub says about it, not on a timer. The hub's answers are
 unchanged, so an older window keeps what it had, and an older hub needs nothing.
 
+**A project deleted while its machine cannot be asked (#2330, owner).** The person sees every machine as one place, so
+`projects.delete` for a project of a machine that is not reachable is not refused: the hub answers it at once. The
+machine's host stays the only writer of its store (§1), so the hub deletes nothing there. It keeps the delete in its own
+store (`app_settings` `hub.pendingProjectDeletes`: the machine, the machine's own project id, the project's name, when),
+takes the project and its sessions out of the headers mirror of point 1, and tells its windows as the machine would have
+(`session_deleted` for each mirrored session, then `projects_changed`). Every list of an away machine is read from the
+mirror, so no reader filters anything, on the hub or in a window. At the machine's next hello, before its lists are read,
+the hub asks the machine's own `projects.delete` for each delete it owes, oldest first: the sessions go to the session
+archive there, where they can be restored, and the folder stays, as for a delete while it was connected. A session the
+machine got in the project meanwhile goes with the others.
+
+A delete is owed only until the machine was asked over a link that held. Deleted (a project the machine no longer has
+answers the same), refused or failed, the entry is dropped and the lists read right after say what is there: a project a
+machine refused to delete (a build from before the method) is listed again, and the hub's log says why. Only a link that
+went before the answer keeps the entry for the next hello. A hub started again still owes its entries and still does not
+list the project, because both are in its store; removing the machine from the hub drops them. An agent's delete goes
+the same way once its wait for the machine ran out (`reachForCall`), and a limited credential's after the hub's card.
+Every other call to a machine that is away is refused as before. Another hub linked to the same machine hears of the
+delete from the machine itself: a host says `projects_changed` when it deletes a project.
+
 ## 6. What is tied to a machine
 
 | Thing | Phase 1 | Later |

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { errorMessage, type ProjectInfo } from '@cc/protocol/client'
+import { isAway } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
 import { TextInput } from '../../components/TextField.jsx'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { folderNote, type DeleteOutlook } from './deleteNote.js'
+import { awayNote, folderNote, type DeleteOutlook } from './deleteNote.js'
 
 /** How long the dialog waits for the host's answer about the folder before it goes by the list's mark */
 const OUTLOOK_WAIT_MS = 3000
@@ -57,6 +59,13 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
       clearTimeout(gaveUp)
     }
   }, [platform, project.id])
+  /*
+   * A project on a linked machine that is not connected (#2330): the hub keeps the delete and the machine does it when it
+   * is connected again, so the dialog says that before the person confirms. The call above is refused at once for such a
+   * machine, which leaves the list's mark deciding the folder's sentence
+   */
+  const away = useStore((s) => isAway(project, s.machines))
+  const machineName = useMachineName(project.machine)
   // Only whitespace is trimmed off; it must match exactly, including case — a similarly named project may sit right next to it
   const armed = typed.trim() === project.name
 
@@ -112,6 +121,12 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             <span className="text-ink" data-testid="delete-project-folder-note">
               {folderNote(project, outlook)}
             </span>
+            {away && machineName && (
+              <span className="text-ink" data-testid="delete-project-away-note">
+                {' '}
+                {awayNote(machineName)}
+              </span>
+            )}
           </p>
         )}
 

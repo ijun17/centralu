@@ -250,6 +250,7 @@ export class Links {
     await m.stop()
     this.deps.registry.remove(id)
     this.deps.mirror.forget(id)
+    m.pendingDeletes.forget()
     // Its sessions and projects leave the UI's lists
     this.deps.broadcast({ type: 'machine_resync', machineId: id })
   }

@@ -10,7 +10,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { reverseCalls } from './reverse-calls.js'
 import { Router } from './router.js'
 import { DirectTunnel } from './tunnel.js'
-import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
+import { hubSelfId, storeMirror, storeProjectDeletes, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -201,16 +201,19 @@ export async function machineHost(
 /**
  * `mail`: the hub's mail is wired (`wireHostMail`), and it takes mail from the sessions it started on the machine (#2067):
  * `true` as this build, `'before'` as a build from before `hub.mail` (asks only, no `mail` in its offer). `origin`: its
- * project is a checkout of that repository, so with the machine's of the same one start_agent can start a child there
+ * project is a checkout of that repository, so with the machine's of the same one start_agent can start a child there.
+ * `store`: the store of a hub that ran before, for one started again on it: its project, session and machine are there already
  */
 export async function hubHost(
   machinePort: number,
-  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before' | 'delivered'; children?: readonly RemoteAgent[]; origin?: string; apps?: true; deps?: Partial<LinkDeps> } = {},
+  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before' | 'delivered'; children?: readonly RemoteAgent[]; origin?: string; apps?: true; deps?: Partial<LinkDeps>; store?: Store } = {},
 ) {
-  const store = new Store()
+  const store = o.store ?? new Store()
   const projectName = o.project ?? 'hub-project'
-  store.projects.addProject({ id: 'p-hub', path: projectFolder(projectName, o.origin), name: projectName })
-  seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
+  if (!o.store) {
+    store.projects.addProject({ id: 'p-hub', path: projectFolder(projectName, o.origin), name: projectName })
+    seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
+  }
   // The children start_agent started on the machine, as the hub's record keeps them (read once, when the manager first asks)
   if (o.children) store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify(o.children))
   const adapters = scriptedAdapters()
@@ -224,7 +227,7 @@ export async function hubHost(
   // A project's app used from another machine (#1938), as main.ts wires it
   const apps = o.apps ? hostApps(store, mgr) : null
   const registry = storeRegistry(store)
-  registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+  if (!o.store) registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
   const reverse: Partial<LinkDeps> =
     o.reverse === false
       ? {}
@@ -273,6 +276,7 @@ export async function hubHost(
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
     registry,
+    projectDeletes: storeProjectDeletes(store),
     tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },

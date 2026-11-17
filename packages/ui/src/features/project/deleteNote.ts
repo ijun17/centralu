@@ -8,6 +8,15 @@ const LEFT_ALONE = 'The folder on disk is left alone.'
 /** Said while the host's answer is on its way: the dialog cannot be confirmed on a guess */
 export const CHECKING = 'Checking what happens to the folder…'
 
+/**
+ * What the dialog adds for a project whose machine is not connected (#2330): the delete is taken now and done there once
+ * the machine is connected again, so everything the sentences before it say happens then, on that machine. The lead is
+ * the project tooltip's for the same state (`ProjectDetail`).
+ */
+export function awayNote(machineName: string): string {
+  return `Not connected to ${machineName}, so the project only leaves the list now. The rest happens on ${machineName} when it is connected again.`
+}
+
 /** What coming back is, the same in the sentences below */
 const COMING_BACK =
   'Nothing is deleted: put it back into the apps folder under its app id and it is the app again, as a new project with its ' +

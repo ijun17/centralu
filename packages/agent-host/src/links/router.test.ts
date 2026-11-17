@@ -564,6 +564,70 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(m1.calls).toEqual([])
   })
 
+  describe('the delete of a project on a machine that cannot be asked (#2330)', () => {
+    const window = { client: 1, rights: 'full', window: true } as const
+    /** m1 is down, and keeps the deletes it is owed */
+    const down = () => {
+      const r = rig()
+      const kept: string[] = []
+      let tried = 0
+      r.m1.reachable = false
+      Object.assign(r.m1, { pendingDeletes: { keep: (id: string) => void kept.push(id) }, reachForCall: async () => void tried++ })
+      return { ...r, kept, tried: () => tried }
+    }
+
+    it('is kept for the machine under its own id and answered as done, without asking the machine', async () => {
+      const { router, m1, kept, tried } = down()
+      expect(await router.handle('projects.delete', { projectId: 'm1.p1' }, window)).toEqual({ ok: true })
+      expect(kept).toEqual(['p1'])
+      expect(m1.calls).toEqual([])
+      // The window's own call is never an attempt to connect
+      expect(tried()).toBe(0)
+    })
+
+    it('is kept for an agent too, once the machine did not come back for its call', async () => {
+      const { router, kept, tried } = down()
+      expect(await router.handle('projects.delete', { projectId: 'm1.p1' })).toEqual({ ok: true })
+      expect(tried()).toBe(1)
+      expect(kept).toEqual(['p1'])
+    })
+
+    it('goes to the machine itself when the agent’s call brought it back', async () => {
+      const { router, m1, kept } = down()
+      Object.assign(m1, { reachForCall: async () => void (m1.reachable = true) })
+      await router.handle('projects.delete', { projectId: 'm1.p1' })
+      expect(m1.calls).toEqual([{ method: 'projects.delete', params: { projectId: 'p1' } }])
+      expect(kept).toEqual([])
+    })
+
+    it('goes to a machine that can be asked, and keeps nothing', async () => {
+      const { router, m1, kept } = down()
+      m1.reachable = true
+      await router.handle('projects.delete', { projectId: 'm1.p1' }, window)
+      expect(m1.calls).toEqual([{ method: 'projects.delete', params: { projectId: 'p1' } }])
+      expect(kept).toEqual([])
+    })
+
+    it('is the one call kept: every other one to the machine is refused as before', async () => {
+      const { router, kept } = down()
+      for (const [method, params] of [
+        ['projects.setTrusted', { projectId: 'm1.p1', trusted: true }],
+        ['sessions.rename', { sessionId: 'm1.s1', name: 'x' }],
+        // What the dialog reads before it asks: of a machine that is away it is not known
+        ['projects.deleteOutlook', { projectId: 'm1.p1' }],
+      ] as const) {
+        await expect(router.handle(method, params, window), method).rejects.toMatchObject({ data: { machine: 'm1', reason: 'unreachable' } })
+      }
+      expect(kept).toEqual([])
+    })
+
+    it('is refused like any other call for a machine that keeps none', async () => {
+      const { router, m1 } = rig()
+      m1.reachable = false
+      await expect(router.handle('projects.delete', { projectId: 'm1.p1' }, window)).rejects.toMatchObject({ data: { machine: 'm1', reason: 'unreachable' } })
+    })
+  })
+
   describe('merges', () => {
     it('lists every machine’s sessions after the hub’s own, qualified, without the remote assistant and coordinators', async () => {
       const { router, localAnswers, m1, m2 } = rig()

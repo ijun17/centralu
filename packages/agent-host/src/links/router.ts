@@ -65,6 +65,11 @@ export interface RoutedMachine {
   continuesCutTurns?(): boolean
   /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
+  /**
+   * Keeps the delete of one of its projects (its own id) while it cannot be asked (#2330, pending-project-deletes.ts):
+   * the project and its sessions leave `lastKnown` at once. Absent: such a delete is refused like any other call
+   */
+  readonly pendingDeletes?: { keep(projectId: string): void }
 }
 
 /**
@@ -179,7 +184,14 @@ export class Router {
      * screen, and the person has Connect for it. Only the person's own window is told where Connect is (`RpcContext.window`)
      */
     if (!m.reachable && ctx === undefined) await m.reachForCall?.()
-    if (!m.reachable) throw new MachineUnreachableError(m, ctx?.window === true)
+    if (!m.reachable) {
+      // The one call that does not need the machine now (#2330): the delete of a project there is kept, and done at its next hello
+      if (method === 'projects.delete' && m.pendingDeletes && isObj(params) && typeof params.projectId === 'string') {
+        m.pendingDeletes.keep(params.projectId)
+        return { ok: true }
+      }
+      throw new MachineUnreachableError(m, ctx?.window === true)
+    }
     return callOn(m, method, params, ctx)
   }
 

@@ -10,7 +10,7 @@ import { HostServer } from '../../packages/agent-host/src/transport/server.js'
 import { Links } from '../../packages/agent-host/src/links/links.js'
 import { Router } from '../../packages/agent-host/src/links/router.js'
 import { DirectTunnel, SshTunnel, type RemoteSpec } from '../../packages/agent-host/src/links/tunnel.js'
-import { storeMirror, storeProjectOrder, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
+import { storeMirror, storeProjectDeletes, storeProjectOrder, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
 import { scriptedAdapters } from '../../packages/agent-host/src/links/scripted-agent.test-helpers.js'
 import { replayAdapters } from '../../packages/agent-host/src/adapters/frames/replay-agent.test-helpers.js'
 import { projectsHome } from '../../packages/agent-host/src/dev-services/project-folder.js'
@@ -93,6 +93,8 @@ const links = new Links({
   broadcast: (e) => server.broadcast(e),
   terminal: (f) => server.pushTerminal(f),
   mirror: storeMirror(store),
+  // Kept in this host's store, as `main.ts` keeps them: a hub started again still owes them (#2330)
+  projectDeletes: storeProjectDeletes(store),
   registry,
   tunnelFor: (record) => {
     const ssh = sshLinks.find((l) => l.id === record.id)
