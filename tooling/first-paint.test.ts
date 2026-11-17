@@ -89,8 +89,8 @@ describe('the first paint (#340)', () => {
 
   it("paints a high-contrast preset's floor, Dark's for a cached Graphite, and a custom theme's own floor", () => {
     expect(firstPaint(choice('dark', side('hc-dark', 'dark')))).toEqual({ backgroundColor: '#000000', colorScheme: 'dark' })
-    // Graphite left the presets when Dark took its values (#2335): a window that last showed it opens on Dark's floor, the same colour
-    expect(firstPaint(choice('dark', side('graphite', 'dark')))).toEqual({ backgroundColor: '#1d1d1d', colorScheme: 'dark' })
+    // Graphite left the presets when Dark took its values (#2335): a window that last showed it opens exactly as Dark does
+    expect(firstPaint(choice('dark', side('graphite', 'dark')))).toEqual(firstPaint(choice('dark')))
     const custom = { ...side('mine', 'light', { '--color-surface-floor': '#fdf6e3' }), preset: 'light' }
     expect(firstPaint(choice('light', undefined, custom))).toEqual({ backgroundColor: '#fdf6e3', colorScheme: 'light' })
     // A value the browser cannot use falls back to the preset's floor
