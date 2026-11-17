@@ -114,8 +114,9 @@ export class PendingProjectDeletes {
           continue
         }
         log(`[links] ${name}: could not delete project "${d.name}", as asked here while it was away: ${why}. The project is listed again`)
+        // The reason is the machine's own words (a store error): in the log above only
         this.host.tell(
-          `Could not delete project "${d.name}" on ${name}: ${why}. It was deleted here while ${name} was not connected, and it is listed again. ${older(err) ? `Update Centralu on ${name}, then delete it again.` : 'Delete it again to try once more.'}`,
+          `Couldn't delete "${d.name}" on ${name}, so it's back in the list. ${older(err) ? `Update Centralu on ${name}, then delete it again.` : 'Delete it again to try once more.'}`,
           `project-delete:${d.machine}:${d.projectId}:${d.at}`,
         )
       }

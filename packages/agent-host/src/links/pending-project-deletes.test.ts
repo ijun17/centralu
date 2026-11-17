@@ -155,7 +155,8 @@ describe('the deletes a hub owes a linked machine (#2330)', () => {
     expect(owed()).toEqual([])
     expect(m1.told).toEqual([
       {
-        text: 'Could not delete project "Shop" on Desk: database is locked. It was deleted here while Desk was not connected, and it is listed again. Delete it again to try once more.',
+        // The machine's reason is in the log line only
+        text: `Couldn't delete "Shop" on Desk, so it's back in the list. Delete it again to try once more.`,
         key: `project-delete:m1:p1:${at}`,
       },
     ])
@@ -188,7 +189,7 @@ describe('the deletes a hub owes a linked machine (#2330)', () => {
     expect(owed()).toEqual([])
     expect(m1.lines[2]).toBe('[links] Desk: could not delete project "Shop", as asked here while it was away: Desk runs an older Centralu, which cannot do this. The project is listed again')
     expect(m1.told.map((t) => t.text)).toEqual([
-      'Could not delete project "Shop" on Desk: Desk runs an older Centralu, which cannot do this. It was deleted here while Desk was not connected, and it is listed again. Update Centralu on Desk, then delete it again.',
+      `Couldn't delete "Shop" on Desk, so it's back in the list. Update Centralu on Desk, then delete it again.`,
     ])
   })
 

@@ -162,7 +162,8 @@ and counts as no try. The hub gives up in two cases, and only then is the entry 
 the hub (`TRIES`; the count is in memory, so a hub started again tries five times more). An answer that refuses the
 call's shape cannot be told from another failure (both are `internal` on the wire), so it ends under the same bound.
 The person is then told by Centralu's notice in their Inbox, once per delete (keyed by the entry's `at`): what could
-not be deleted, the machine's reason, that the project is listed again, and what to do. Between a failed try and the
+not be deleted, that it is back in the list, and what to do. The machine's reason is its own words (a store error),
+so it is in the hub's log only. Between a failed try and the
 next the project is listed again too: the lists of a machine that answers are the machine's own, and the hub hides
 nothing in them, so there is one place a project is hidden (the mirror) and none for a connected machine.
 

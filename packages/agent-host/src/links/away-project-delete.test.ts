@@ -197,7 +197,7 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     await machine.bounce()
     await eventually(() => told.length > 0)
     expect(told).toEqual([
-      'Could not delete project "remote-project" on Remote box: database is locked. It was deleted here while Remote box was not connected, and it is listed again. Delete it again to try once more.',
+      `Couldn't delete "remote-project" on Remote box, so it's back in the list. Delete it again to try once more.`,
     ])
     expect(tries).toHaveBeenCalledTimes(TRIES)
     expect(view(hub).owed()).toEqual([])
@@ -219,7 +219,7 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     expect(view(hub).owed()).toEqual([])
     expect(lines.filter((l) => l.includes('could not delete project "remote-project"'))).toHaveLength(1)
     expect(told).toEqual([
-      'Could not delete project "remote-project" on Remote box: Remote box runs an older Centralu, which cannot do this. It was deleted here while Remote box was not connected, and it is listed again. Update Centralu on Remote box, then delete it again.',
+      `Couldn't delete "remote-project" on Remote box, so it's back in the list. Update Centralu on Remote box, then delete it again.`,
     ])
   })
 
