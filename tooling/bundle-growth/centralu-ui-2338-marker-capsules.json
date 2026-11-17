@@ -1,0 +1,4 @@
+{
+  "bytes": 1000,
+  "reason": "Every conversation line a capsule (#2338, owner's option 1): one shared MarkLine for all of them (the rules, the capsule or a failure's dashed box, a notice's fold on the shared Fold and chevron), MarkIcon's five kind icons on one SVG (the handoff's reuses the relayed message's arrow path), and the line's kind taken in the store from its event. The mail line and the tool notice now draw through MarkLine instead of markup of their own. Measured locally against main 4223a5a8e: 1,958,517 B to 1,959,450 B (+933 B); the rest is a margin for the difference CI measured on #2342 against a local build. No new dependency."
+}

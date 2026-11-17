@@ -171,30 +171,43 @@ describe('ChatRow: approvals and marks', () => {
   })
 
   it('draws a divider label, and a notice through NoticeMark', () => {
-    const divider = row({ kind: 'mark', seq: 5, text: 'conversation compacted here' })
+    const divider = row({ kind: 'mark', seq: 5, text: 'conversation compacted here', mark: 'compaction' })
     expect(testIds(divider.html)).toEqual(['msg-mark'])
     expect(divider.text).toBe('conversation compacted here')
+    // Every line is a capsule with its kind (#2338), a failure a dashed box, the kind taken from the row, not its words
+    expect(divider.html).toContain('data-mark="compaction"')
+    expect(divider.html).toMatch(/rounded-full border[^"]*border-line/)
+    const failed = row({ kind: 'mark', seq: 5, text: 'conversation compacted here', mark: 'failed' })
+    expect(failed.html).toContain('data-mark="failed"')
+    expect(failed.html).toMatch(/rounded-field border border-dashed/)
+    expect(failed.html).not.toContain('rounded-full')
 
-    const notice = row({ kind: 'mark', seq: 5, text: 'ignored', notice: { head: 'Codex · config warning', audience: 'you', body: 'the key is unknown', from: 'Codex' } })
-    expect(testIds(notice.html)).toEqual(['msg-mark', 'notice-head', 'notice-audience', 'notice-summary'])
+    // A notice for the person starts open: the capsule says who and what, the explanation is under it
+    const notice = row({ kind: 'mark', seq: 5, text: 'ignored', mark: 'notice', notice: { head: 'Codex · config warning', audience: 'you', body: 'the key is unknown', from: 'Codex' } })
+    expect(testIds(notice.html)).toEqual(['msg-mark', 'mark-toggle', 'notice-head', 'notice-audience', 'mark-folded', 'notice-summary'])
+    expect(notice.html).toContain('aria-expanded="true"')
     expect(notice.text).not.toContain('ignored')
     expect(notice.text).toContain('Codex · config warning')
+    // One for Centralu starts closed: the capsule only
+    const theirs = row({ kind: 'mark', seq: 5, text: 'ignored', mark: 'notice', notice: { head: 'Codex · deprecation', audience: 'centralu', body: 'loads history the old way', from: 'Codex' } })
+    expect(testIds(theirs.html)).toEqual(['msg-mark', 'mark-toggle', 'notice-head', 'notice-audience'])
+    expect(theirs.html).toContain('aria-expanded="false"')
     // Centralu's own sentence, so the UI face, not the code face (#2332)
     expect(notice.html).not.toContain('readout')
     expect(divider.html).not.toContain('readout')
 
     // A mail line is the capsule with the mail icon, and no head (#2332)
-    const mail = row({ kind: 'mark', seq: 6, text: '1 message from Centralu', notice: { head: '', body: '1 message from Centralu', from: 'Centralu', mail: true } })
+    const mail = row({ kind: 'mark', seq: 6, text: '1 message from Centralu', mark: 'notice', notice: { head: '', body: '1 message from Centralu', from: 'Centralu', mail: true } })
     expect(testIds(mail.html)).toEqual(['msg-mark', 'notice-summary'])
     expect(mail.text).toBe('1 message from Centralu')
     expect(mail.html).toMatch(/rounded-full border[^"]*border-line/)
   })
 
   it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {
-    const refused = row({ kind: 'mark', seq: 5, text: 'The agent could not finish this turn — … Pick another model for this session to continue.', pickModel: true })
+    const refused = row({ kind: 'mark', seq: 5, text: 'The agent could not finish this turn — … Pick another model for this session to continue.', mark: 'failed', pickModel: true })
     expect(testIds(refused.html)).toEqual(['msg-mark', 'msg-mark-pick-model'])
     expect(refused.text).toContain('Pick another model')
-    expect(testIds(row({ kind: 'mark', seq: 5, text: 'conversation compacted here' }).html)).toEqual(['msg-mark'])
+    expect(testIds(row({ kind: 'mark', seq: 5, text: 'conversation compacted here', mark: 'compaction' }).html)).toEqual(['msg-mark'])
   })
 })
 

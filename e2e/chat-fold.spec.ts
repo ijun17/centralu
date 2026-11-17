@@ -126,7 +126,7 @@ test('a decided approval, a marker, an image and an app view stay on the page an
     tool(2),
     { kind: 'approval', seq: 3, storedSeq: 3, requestId: 'r1', summary: 'Bash: rm -rf build', decision: 'deny' },
     tool(4),
-    { kind: 'mark', seq: 5, storedSeq: 5, text: 'The turn failed: usage limit' },
+    { kind: 'mark', seq: 5, storedSeq: 5, text: 'The turn failed: usage limit', mark: 'failed' },
     thought(6),
     { kind: 'image', seq: 7, storedSeq: 7, mime: 'image/png', data: '', note: 'the file is gone' },
     tool(8, { callId: 'c7', title: 'viewer call' }),
