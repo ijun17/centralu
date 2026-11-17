@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { MailThreadRow } from '@cc/protocol/client'
 import { Button } from '../../components/Button.js'
 import { ChoiceList } from '../../components/ChoiceList.js'
+import { Fold } from '../../components/Fold.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { TextInput } from '../../components/TextField.js'
 import { useSendKey } from '../session/useSendKey.js'
@@ -97,7 +98,10 @@ export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThrea
           Open
         </Button>
       </div>
-      {ask.open.length > 1 && <span className="text-xs text-ink-faint">{ask.open.length - 1} other waiting in this thread</span>}
+      {/* Folds in and out as the thread's questions come and go (docs/design-system.md §9); on its way out it still says the one it counted last */}
+      <Fold open={ask.open.length > 1} className="text-xs text-ink-faint" testId={`mail-ask-others-${t.id}`}>
+        {Math.max(ask.open.length - 1, 1)} other waiting in this thread
+      </Fold>
     </li>
   )
 }
