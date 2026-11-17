@@ -77,12 +77,18 @@ step against:
      declares it, also when every older build would still read what is left. There is no separate "drops data" field:
      no step would set it today, and a field nothing sets is a branch nobody runs. A step that must delete without
      breaking adds its own trigger to `MigrationStep` in the pull request that adds the step.
-   - **One copy an open, one copy kept.** A store that crosses several breaking steps in one open keeps the copy
-     from before the first: that is the store the build the person had could read. A new copy replaces the earlier
-     one, and only once it is whole. A new store (version 0) and a store in memory get none. This holds for one
-     open, which is a known limit: a host stopped after the first breaking step committed and before a later one
-     did starts again with a store past the first, copies it before the later step and deletes the earlier copy,
-     so the copy that is left is one the build the person had cannot read.
+   - **One copy an open, and a later copy leaves the earlier ones.** A store that crosses several breaking steps in
+     one open keeps the copy from before the first: that is the store the build the person had could read. A new
+     store (version 0) and a store in memory get none. An open that copies again deletes nothing: each copy leaves
+     by its age alone (below), so more than one can be beside the store, and
+     [Getting the copy back](#getting-the-copy-back) says which to take. This differs from the decision recorded
+     on #2304, which kept only the newest copy and deleted the earlier one when the next breaking step made a new
+     one. The reason is the update that is stopped partway: a host stopped after the first breaking step committed
+     and before a later one did starts again with a store past the first and copies it before the later step.
+     That newer copy already lacks what the first step removed, so deleting the earlier one for it would delete
+     the only copy of the store as it was before the update. Nothing in the store says which build the person
+     would go back to, so no rule could pick the copy to delete; keeping each for its 14 days needs none, and
+     costs disk space (below).
    - **A snapshot through the store's own connection.** `VACUUM INTO` writes the copy from one read transaction, with
      what is still in the WAL, while the host holds the data folder's lock, so no other host writes meanwhile. It
      runs before the step's transaction, since it cannot run inside one. A plain file copy would have to fold the WAL
@@ -121,7 +127,8 @@ step against:
      [security-boundaries/local-data-and-transport.md](../security-boundaries/local-data-and-transport.md)), since
      it holds every conversation the store holds. On Windows the profile folder's ACL covers it, as it does the store.
    - **Kept 14 days.** A host start deletes a copy older than that, by the file's time; there is no timer, so a host
-     that runs for weeks keeps the copy until its next start. Only names of the form `store.before-<digits>.db`, with
+     that runs for weeks keeps the copy until its next start. Its age is the only thing a whole copy is deleted
+     for. Only names of the form `store.before-<digits>.db`, with
      or without `.partial` or `.partial-journal`, are ever deleted: a file a person put beside the store under
      another name is left alone.
    - **Skipped when the disk is short or the copy fails.** With less free space than twice the store's size (the
@@ -131,7 +138,13 @@ step against:
      of a copy leaves the person with nothing, and the person is told twice: a `[store] no copy before step …` line
      in host.log, and one notice from Centralu in the Inbox saying that this update ran without a copy and cannot be
      undone (`WARNING_TEXT.noStoreCopy`, `facts.storeCopySkipped`, once per step).
-   - **What it costs.** A file the size of the store, once per breaking step. Measured on 2026-11-17 on a 972 MB
+   - **What it costs.** A file the size of the store for each open that copies, for 14 days: one for an update,
+     one more for each further update with a breaking step inside those 14 days, and one more when an update was
+     stopped between two breaking steps. The free-space rule above is about the copy being written only. It still
+     counts right with earlier copies there, since the space they take is already out of what the disk says is
+     free; but "twice the store" is then not the most the copies take together, which is one store size each.
+     What ends it is the same rule: a disk with less than twice the store free gets no further copy. Measured on
+     2026-11-17 on a 972 MB
      store (Windows 11, NVMe, warm cache): `VACUUM INTO` 1.8 to 2.0 s, the sync 2 ms; in a host started on that
      store, 1.8 to 2.6 s for the copy. The window shows "Starting the
      agent host…" meanwhile, and host.log says that the copy started and how long it took. A copy and step that
@@ -169,13 +182,21 @@ Windows, or the folder `CC_DATA_DIR` names. Its name carries the step it was mad
 `store.before-76.db`. It is there for 14 days after the update, unless host.log and a notice in the Inbox said that
 the update ran without one.
 
+More than one copy can be there: each update with a breaking step leaves its own for 14 days, and an update that
+was stopped partway and finished at a later start can leave two. Take the one the build you go back to can open,
+which is the copy with the lowest number above that build's store version. For the build you had just before an
+update, that is the lowest-numbered copy among those written at that update (the files' dates say which those
+are). A copy with a higher number holds a store that an earlier breaking step had already changed: the older build
+refuses it at start, or opens it without what that step removed. A wrong pick loses nothing, since the other
+copies stay where they are: quit again, move that store aside and take the lower one.
+
 1. Quit Centralu with "Quit completely", and stop `centralu serve` (`centralu serve --stop`) if it runs on this
    computer. The store must have no host: with "Keep agents running after Centralu quits" on, a plain "Quit" leaves
    one running, which keeps writing to the files the next step moves (Windows refuses the move).
 2. Install the Centralu you had before the update. The newer one would run the step again on the copy.
 3. In the data folder, move `store.db`, `store.db-wal` and `store.db-shm` somewhere else (the last two may not be
    there). Keep them until the old build has started.
-4. Rename `store.before-<step>.db` to `store.db`.
+4. Rename the copy you chose, `store.before-<step>.db`, to `store.db`. Leave any other copy where it is.
 5. Start Centralu.
 
 What is not in the copy: conversations, sessions, mail and settings from after the update. Files outside the store

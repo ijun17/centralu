@@ -30,9 +30,10 @@ export type CopySkipped = { step: number; reason: 'low_disk'; free: number; need
 /**
  * The copy of the store kept before a step that breaks older readers (#2304): a step is the one change a person cannot
  * undo by installing the build they had, so the store as it was stays beside it, `store.before-<step>.db` next to
- * `store.db`, with the store's permissions. One copy at most, for 14 days. Nothing reads it: getting it back is the
- * person's own step (docs/agent-host/store-migrations.md "Getting the copy back"). The runner says when
- * (store/migrate-runner.ts).
+ * `store.db`, with the store's permissions. Each copy stays for 14 days and leaves by its age alone: a later copy
+ * does not delete it, because the earlier one may be the only one from before an update's first breaking step.
+ * Nothing reads a copy: getting it back is the person's own step
+ * (docs/agent-host/store-migrations.md "Getting the copy back"). The runner says when (store/migrate-runner.ts).
  *
  * A file under a copy's name is always a whole copy: it is written as `.partial`, reaches the disk, and is renamed
  * only then, so a host stopped while writing leaves a `.partial` (and SQLite's journal of it) the next open deletes.
@@ -79,7 +80,7 @@ export class StoreCopies {
    * the host's lock, so no other writer runs: `VACUUM INTO` reads one snapshot, the WAL's commits included.
    *
    * A copy that cannot be made never keeps the host from starting: the step runs without one, and what is returned
-   * says so. An earlier copy is deleted only once this one is whole.
+   * says so.
    */
   copyBefore(step: number): CopySkipped | null {
     const name = `${this.prefix}${step}.db`
@@ -100,7 +101,6 @@ export class StoreCopies {
       // The copy is whole and under its name, so this is not a step without a copy
       console.error(`[store] the name of ${name} could not be synced to the disk, so a power cut now could lose the copy: ${errorMessage(err)}`)
     }
-    for (const other of this.names()) if (other !== name) this.remove(other, 'a newer copy replaced it')
     return null
   }
 

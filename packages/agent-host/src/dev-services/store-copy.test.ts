@@ -491,7 +491,7 @@ describe('the copy’s name reaches the disk', () => {
   })
 })
 
-describe('the copy is kept for 14 days and there is one', () => {
+describe('a copy is kept for 14 days, whatever comes after it', () => {
   /** A store the next build copied and closed, and when the copy was written, by the file's own time */
   function copied(): { file: string; writtenAt: number } {
     const file = storeFile()
@@ -514,14 +514,24 @@ describe('the copy is kept for 14 days and there is one', () => {
     expect(logged().includes(`[store] deleted store.before-${STEP}.db: it is older than 14 days`)).toBe(!kept)
   })
 
-  it('the next step’s copy replaces it, and no file of another name is touched', () => {
+  it('the next step’s copy leaves it there, the one the build before can read, and it goes at 14 days of its own', () => {
     const { file, writtenAt } = copied()
     const others = ['store.before-upgrade.db', `store.before-${STEP}.db.bak`, 'store.db.bak', 'host.log']
     for (const name of others) files.writeFileSync(join(file, '..', name), 'not a copy Centralu made')
 
-    openNext(file, [breaking(STEP), breaking(STEP + 1)], osWith({}, () => writtenAt + 1))
+    openNext(file, [breaking(STEP), breaking(STEP + 1)], osWith({}, () => writtenAt + 1)).close()
+    stores.length = 0
+
+    expect(beside(file)).toEqual([...others, `store.before-${STEP}.db`, `store.before-${STEP + 1}.db`].sort())
+    expect(read(copyOf(file))).toMatchObject({ version: LATEST, projects: ['p1'] })
+    expect(read(copyOf(file, STEP + 1), STEP)).toMatchObject({ version: STEP, projects: [] })
+
+    // Each with a time of its own, a minute apart (reading them above moved it): an open a millisecond past the earlier one's 14 days
+    files.utimesSync(copyOf(file), 1_800_000_000, 1_800_000_000)
+    files.utimesSync(copyOf(file, STEP + 1), 1_800_000_060, 1_800_000_060)
+    openNext(file, [breaking(STEP), breaking(STEP + 1)], osWith({}, () => writtenAt + COPY_KEPT_MS + 1))
 
     expect(beside(file)).toEqual([...others, `store.before-${STEP + 1}.db`].sort())
-    expect(read(copyOf(file, STEP + 1), STEP)).toMatchObject({ version: STEP, projects: [] })
+    expect(logged().includes(`[store] deleted store.before-${STEP}.db: it is older than 14 days`)).toBe(true)
   })
 })
