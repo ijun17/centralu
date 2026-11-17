@@ -19,7 +19,7 @@ type Mock = {
   windowAppearance: { scheme: 'dark' | 'light' | null; background: string } | null
 }
 
-const DARK_FLOOR = '#120e0a'
+const DARK_FLOOR = '#1d1d1d'
 /**
  * The rule for the three lines (docs/themes.md "The lines"), checked on the floor, the sidebar and a raised surface, the three
  * grounds a line is drawn on: `line` is at least this much against each, and `line-strong` is stronger than `line-chrome`, which
@@ -145,7 +145,7 @@ export function presetTests() {
 
     // A `system` an older build stored, with a light theme chosen for the light side: still Dark, and the window is held to Dark (not handed back to the OS)
     await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'system', themeLight: 'hc-light' }))
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(18, 14, 10)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(29, 29, 29)' })
     expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
 
     // Picking the light theme is what sets the light side
@@ -185,38 +185,38 @@ export function presetTests() {
     await expect(frames(page)[1][0]).toHaveCSS('border-top-color', 'rgb(241, 205, 219)')
   })
 
-  test('Graphite is in the theme list as a dark theme, and picking it shows its floor and keeps Dark the default (#2208)', async ({ page }) => {
+  test('Dark has the values Graphite had, Graphite is not in the list, and a saved Graphite shows Dark (#2335)', async ({ page }) => {
     await openDemo(page)
     expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
+    expect(await token(page, '--color-surface-side')).toBe('#28282a')
+    await page.evaluate(() => (window as any).__store.getState().setPrefs({ themeMode: 'dark', themeDark: 'graphite' }))
     await openAppearance(page)
     const pick = page.getByTestId('settings-theme-pick')
-    await expect(pick.locator('option[value="graphite"]')).toHaveText('Graphite')
-    await pickTheme(page, 'graphite')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
-    expect(await token(page, '--color-surface-side')).toBe('#28282a')
-    expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'graphite' })
-    expect(await page.evaluate(() => document.documentElement.dataset.themeBase)).toBe('dark')
+    await expect(pick.locator('option[value="graphite"]')).toHaveCount(0)
+    await expect(pick).toHaveValue('dark')
+    expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+    expect(await token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
   })
 
   // #2214 (owner, 2026-11-12): a custom theme's id is made from its name, and never a preset's, so both stay selectable
   test('a custom theme named like a preset gets its own id; both are in the picker, and each applies its own tokens (#2214)', async ({ page }) => {
     await openDemo(page)
     const saved = await page.evaluate(() =>
-      (window as any).__store.getState().platform.themes.save(null, { name: 'Graphite', base: 'dark', tokens: { 'surface-floor': '#223344' } }),
+      (window as any).__store.getState().platform.themes.save(null, { name: 'Dark', base: 'dark', tokens: { 'surface-floor': '#223344' } }),
     )
-    expect(saved.id).toBe('graphite-2')
+    expect(saved.id).toBe('dark-2')
     await openAppearance(page)
     const pick = page.getByTestId('settings-theme-pick')
-    await expect(pick.locator('option[value="graphite"]')).toHaveText('Graphite')
-    await expect(pick.locator('option[value="graphite-2"]')).toHaveText('Graphite')
+    await expect(pick.locator('option[value="dark"]')).toHaveText('Dark')
+    await expect(pick.locator('option[value="dark-2"]')).toHaveText('Dark')
 
-    await pickTheme(page, 'graphite')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
-    await pickTheme(page, 'graphite-2')
+    await pickTheme(page, 'dark')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
+    await pickTheme(page, 'dark-2')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe('#223344')
-    expect(await prefsOf(page)).toMatchObject({ themeDark: 'graphite-2' })
-    await pickTheme(page, 'graphite')
-    await expect.poll(() => token(page, '--color-surface-floor')).toBe('#1d1d1d')
+    expect(await prefsOf(page)).toMatchObject({ themeDark: 'dark-2' })
+    await pickTheme(page, 'dark')
+    await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
   })
 
   test('a theme file stored under a preset id before then keeps working, listed once as the custom theme it is (#2214)', async ({ page }) => {
@@ -341,7 +341,7 @@ export function themeTests() {
     await expect(problems).toContainText('Unknown token "glitter" is ignored.')
     await expect(problems).toContainText('"blue-ish" is not a usable value for ink')
     // The unusable ink is not applied: the Dark ink stays
-    expect(await token(page, '--color-ink')).toBe('#f0ecea')
+    expect(await token(page, '--color-ink')).toBe('#f5f5f7')
   })
 
   test('the theme choice and the file survive a reload, and the last theme is cached for the first frame', async ({ page }) => {
@@ -395,7 +395,7 @@ export function themeTests() {
     // Picked back to Dark, the window is told so (and its own background is the floor); the light side keeps its theme
     await pickTheme(page, 'dark')
     await expect.poll(() => token(page, '--color-surface-floor')).toBe(DARK_FLOOR)
-    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(18, 14, 10)' })
+    await expect.poll(() => windowAppearance(page)).toEqual({ scheme: 'dark', background: 'rgb(29, 29, 29)' })
     expect(await prefsOf(page)).toMatchObject({ themeMode: 'dark', themeDark: 'dark', themeLight: 'paper' })
   })
 

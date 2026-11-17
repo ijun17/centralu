@@ -33,7 +33,7 @@ describe('resolving a side', () => {
     expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: { line: '#aa0000' } })]).tokens).toMatchObject({ '--color-line': '#aa0000', '--color-line-chrome': 'var(--color-line)' })
     expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: {} })]).tokens).toMatchObject({ '--color-line-chrome': 'var(--color-line)' })
     expect(resolveSide('dark', 'mine', [file({ base: 'dark', tokens: { line: '#aa0000', 'line-chrome': '#00aa00' } })]).tokens['--color-line-chrome']).toBe('#00aa00')
-    expect(resolveSide('dark', 'graphite', []).tokens).toEqual({})
+    expect(resolveSide('dark', 'hc-dark', []).tokens).toEqual({})
   })
 
   it('has every border a file leaves out follow the token THEME_TOKENS names, and a file that sets one keeps it', () => {
@@ -49,8 +49,13 @@ describe('resolving a side', () => {
     expect(resolveSide('dark', 'gone', [])).toMatchObject({ id: 'dark', preset: 'dark', tokens: {} })
     expect(resolveSide('light', 'gone', [])).toMatchObject({ id: 'light', preset: 'light', base: 'light' })
     expect(resolveSide('dark', 'hc-dark', [])).toMatchObject({ preset: 'hc-dark', base: 'dark' })
-    // Graphite is a dark preset of its own, and Dark stays what the dark side falls back to (#2208)
-    expect(resolveSide('dark', 'graphite', [])).toMatchObject({ id: 'graphite', preset: 'graphite', base: 'dark', tokens: {} })
+  })
+
+  it('lands a saved Graphite on Dark, which took its values, and leaves a theme file under that id as it is (#2335)', () => {
+    expect(resolveSide('dark', 'graphite', [])).toEqual({ id: 'dark', name: 'Dark', base: 'dark', preset: 'dark', tokens: {} })
+    expect(pickableThemes([]).map((c) => c.id)).not.toContain('graphite')
+    const own = file({ id: 'graphite', name: 'Dark Graphite', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    expect(resolveSide('dark', 'graphite', [own])).toMatchObject({ id: 'graphite', name: 'Dark Graphite', preset: 'dark', tokens: { '--color-surface-floor': '#101820' } })
   })
 
   it('does not apply a broken file (the store hands over its last clean version instead)', () => {
@@ -63,23 +68,23 @@ describe('resolving a side', () => {
  * on as text, so a colour this window cannot use is caught here, alone. It is never applied, and Settings says which.
  */
 describe('a custom theme named like a preset (#2214)', () => {
-  const custom = file({ id: 'graphite-2', name: 'Graphite', base: 'dark', tokens: { 'surface-floor': '#223344' } })
+  const custom = file({ id: 'hc-dark-2', name: 'High contrast dark', base: 'dark', tokens: { 'surface-floor': '#223344' } })
 
   it('is listed beside the preset, and each applies its own tokens', () => {
-    expect(pickableThemes([custom]).filter((c) => c.name === 'Graphite').map((c) => c.id)).toEqual(['graphite', 'graphite-2'])
-    expect(resolveSide('dark', 'graphite', [custom])).toMatchObject({ id: 'graphite', preset: 'graphite', tokens: {} })
-    expect(resolveSide('dark', 'graphite-2', [custom])).toMatchObject({ id: 'graphite-2', name: 'Graphite', tokens: { '--color-surface-floor': '#223344' } })
+    expect(pickableThemes([custom]).filter((c) => c.name === 'High contrast dark').map((c) => c.id)).toEqual(['hc-dark', 'hc-dark-2'])
+    expect(resolveSide('dark', 'hc-dark', [custom])).toMatchObject({ id: 'hc-dark', preset: 'hc-dark', tokens: {} })
+    expect(resolveSide('dark', 'hc-dark-2', [custom])).toMatchObject({ id: 'hc-dark-2', name: 'High contrast dark', tokens: { '--color-surface-floor': '#223344' } })
   })
 
   it('a file stored under the preset id before keeps shadowing it, and is listed once, where the preset was', () => {
-    const old = file({ id: 'graphite', name: 'My graphite', base: 'dark', tokens: { 'surface-floor': '#101820' } })
-    expect(pickableThemes([old]).filter((c) => c.id === 'graphite')).toEqual([{ id: 'graphite', name: 'My graphite', base: 'dark', file: true }])
-    expect(resolveSide('dark', 'graphite', [old])).toMatchObject({ name: 'My graphite', tokens: { '--color-surface-floor': '#101820' } })
+    const old = file({ id: 'hc-dark', name: 'My contrast', base: 'dark', tokens: { 'surface-floor': '#101820' } })
+    expect(pickableThemes([old]).filter((c) => c.id === 'hc-dark')).toEqual([{ id: 'hc-dark', name: 'My contrast', base: 'dark', file: true }])
+    expect(resolveSide('dark', 'hc-dark', [old])).toMatchObject({ name: 'My contrast', tokens: { '--color-surface-floor': '#101820' } })
   })
 
   it('a file that does not read is not offered and hides no preset, as the window does not apply it', () => {
-    const broken = file({ id: 'graphite', name: 'graphite', base: 'dark', broken: true })
-    expect(pickableThemes([broken]).filter((c) => c.id === 'graphite')).toEqual([{ id: 'graphite', name: 'Graphite', base: 'dark', file: false }])
+    const broken = file({ id: 'hc-dark', name: 'hc-dark', base: 'dark', broken: true })
+    expect(pickableThemes([broken]).filter((c) => c.id === 'hc-dark')).toEqual([{ id: 'hc-dark', name: 'High contrast dark', base: 'dark', file: false }])
   })
 })
 
@@ -106,11 +111,11 @@ describe('a value a theme file holds that this window cannot use', () => {
 
 describe('the urgency order (contrast is urgency)', () => {
   const dark: Record<string, Rgba> = {
-    '--color-surface-floor': [18, 14, 10, 1],
+    '--color-surface-floor': [29, 29, 29, 1],
     '--color-ink-signal': [255, 255, 255, 1],
-    '--color-ink': [240, 236, 234, 1],
-    '--color-ink-muted': [172, 167, 163, 1],
-    '--color-ink-faint': [117, 111, 107, 1],
+    '--color-ink': [245, 245, 247, 1],
+    '--color-ink-muted': [176, 176, 181, 1],
+    '--color-ink-faint': [142, 142, 147, 1],
   }
 
   it('holds for the Dark values', () => {

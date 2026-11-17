@@ -511,7 +511,7 @@ export function SessionPane({
                      * The shadow's job is **to separate the card from the text it covers.**
                      * It covers the most while raised, so it is cast far (25px). Its darkness
                      * was tuned with a ruler (it bottoms out at 12 over the pane's floor then,
-                     * #1d1d1d; the floor is #120e0a since, and the shadow was not re-tuned). At rest
+                     * #1d1d1d; the floor was #120e0a from 2026-11-05 and is #1d1d1d again since #2335, and the shadow was not re-tuned). At rest
                      * the card is out of sight and casts none.
                      */
                     'translate-y-0 shadow-(--shadow-dock-raised)'
