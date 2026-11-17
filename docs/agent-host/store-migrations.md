@@ -77,10 +77,10 @@ step against:
      declares it, also when every older build would still read what is left. There is no separate "drops data" field:
      no step would set it today, and a field nothing sets is a branch nobody runs. A step that must delete without
      breaking adds its own trigger to `MigrationStep` in the pull request that adds the step.
-   - **One copy an open, and a later copy leaves the earlier ones.** A store that crosses several breaking steps in
+   - **One copy an open, and a later copy keeps the earlier ones.** A store that crosses several breaking steps in
      one open keeps the copy from before the first: that is the store the build the person had could read. A new
-     store (version 0) and a store in memory get none. An open that copies again deletes nothing: each copy leaves
-     by its age alone (below), so more than one can be beside the store, and
+     store (version 0) and a store in memory get none. An open that copies again deletes nothing: each copy is
+     deleted for its age alone (below), so more than one can be beside the store, and
      [Getting the copy back](#getting-the-copy-back) says which to take. This differs from the decision recorded
      on #2304, which kept only the newest copy and deleted the earlier one when the next breaking step made a new
      one. The reason is the update that is stopped partway: a host stopped after the first breaking step committed
@@ -128,9 +128,8 @@ step against:
      it holds every conversation the store holds. On Windows the profile folder's ACL covers it, as it does the store.
    - **Kept 14 days.** A host start deletes a copy older than that, by the file's time; there is no timer, so a host
      that runs for weeks keeps the copy until its next start. Its age is the only thing a whole copy is deleted
-     for. Only names of the form `store.before-<digits>.db`, with
-     or without `.partial` or `.partial-journal`, are ever deleted: a file a person put beside the store under
-     another name is left alone.
+     for. Only names of the form `store.before-<digits>.db`, with or without `.partial` or `.partial-journal`,
+     are ever deleted: a file a person put beside the store under another name is left alone.
    - **Skipped when the disk is short or the copy fails.** With less free space than twice the store's size (the
      file and its WAL; read through `OsFiles.freeBytesSync`), no copy is made: the copy takes up to the store's size,
      and the step that follows needs room for its own writes. A disk that does not say how much is free is tried. A
@@ -139,16 +138,16 @@ step against:
      in host.log, and one notice from Centralu in the Inbox saying that this update ran without a copy and cannot be
      undone (`WARNING_TEXT.noStoreCopy`, `facts.storeCopySkipped`, once per step).
    - **What it costs.** A file the size of the store for each open that copies, for 14 days: one for an update,
-     one more for each further update with a breaking step inside those 14 days, and one more when an update was
-     stopped between two breaking steps. The free-space rule above is about the copy being written only. It still
-     counts right with earlier copies there, since the space they take is already out of what the disk says is
-     free; but "twice the store" is then not the most the copies take together, which is one store size each.
-     What ends it is the same rule: a disk with less than twice the store free gets no further copy. Measured on
-     2026-11-17 on a 972 MB
-     store (Windows 11, NVMe, warm cache): `VACUUM INTO` 1.8 to 2.0 s, the sync 2 ms; in a host started on that
-     store, 1.8 to 2.6 s for the copy. The window shows "Starting the
-     agent host…" meanwhile, and host.log says that the copy started and how long it took. A copy and step that
-     together take over 30 s show "Could not start the agent host" though the host is fine (#2334).
+     one more for each further update with a breaking step inside those 14 days, and one more for each later start
+     that copied to finish an update stopped between two breaking steps. The copies add up, one store size each,
+     until the disk has less than twice the store free: the free-space rule above then gives the next breaking
+     step no copy and the person the notice, though part of what fills the disk is Centralu's own earlier copies.
+     The rule itself counts as before: it is about the copy being written, and the space earlier copies take is
+     already out of what the disk says is free. Measured on 2026-11-17 on a 972 MB store (Windows 11, NVMe, warm
+     cache): `VACUUM INTO` 1.8 to 2.0 s, the sync 2 ms; in a host started on that store, 1.8 to 2.6 s for the
+     copy. The window shows "Starting the agent host…" meanwhile, and host.log says that the copy started and how
+     long it took. A copy and step that together take over 30 s show "Could not start the agent host" though the
+     host is fine (#2334).
 
 | Steps | What they do | Older build |
 |---|---|---|
@@ -182,13 +181,27 @@ Windows, or the folder `CC_DATA_DIR` names. Its name carries the step it was mad
 `store.before-76.db`. It is there for 14 days after the update, unless host.log and a notice in the Inbox said that
 the update ran without one.
 
-More than one copy can be there: each update with a breaking step leaves its own for 14 days, and an update that
-was stopped partway and finished at a later start can leave two. Take the one the build you go back to can open,
-which is the copy with the lowest number above that build's store version. For the build you had just before an
-update, that is the lowest-numbered copy among those written at that update (the files' dates say which those
-are). A copy with a higher number holds a store that an earlier breaking step had already changed: the older build
-refuses it at start, or opens it without what that step removed. A wrong pick loses nothing, since the other
-copies stay where they are: quit again, move that store aside and take the lower one.
+More than one copy can be there. Each update with a breaking step leaves its own for 14 days, and an update that
+was stopped partway leaves one more for each later start that copied before a further breaking step. Take the
+oldest copy among those written at or after the update you are undoing, by the files' dates; it is also the one
+with the lowest number among them. In numbers, that is the copy with the lowest number above the store version of
+the build you go back to, which that build says when it refuses a store ("this Centralu knows store versions up
+to …").
+
+A pick can be wrong in two ways. Neither loses anything, since the other copies stay where they are: quit again,
+move that store aside and take the right copy.
+
+- A copy with too high a number holds a store that an earlier breaking step had already changed. The older build
+  refuses it at start ("This data was written by a newer Centralu") and changes nothing, or opens it without what
+  that step removed.
+- A copy from an earlier update (an older date, and a number at or below that build's store version) is opened
+  like any older store: the build runs its steps on it and shows the data as it was before that earlier update.
+
+The right copy can be missing: it was older than 14 days, or it was never written, which host.log says with the
+step's number (`[store] no copy before step …`). The lowest copy there is then from after the update's first
+breaking step, and the build from before the update refuses it or opens it without what that step removed. The
+notice that an update ran without a copy is about the step that got none: a copy an earlier start of the same
+update wrote is still there.
 
 1. Quit Centralu with "Quit completely", and stop `centralu serve` (`centralu serve --stop`) if it runs on this
    computer. The store must have no host: with "Keep agents running after Centralu quits" on, a plain "Quit" leaves

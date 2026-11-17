@@ -526,7 +526,7 @@ describe('a copy is kept for 14 days, whatever comes after it', () => {
     expect(read(copyOf(file))).toMatchObject({ version: LATEST, projects: ['p1'] })
     expect(read(copyOf(file, STEP + 1), STEP)).toMatchObject({ version: STEP, projects: [] })
 
-    // Each with a time of its own, a minute apart (reading them above moved it): an open a millisecond past the earlier one's 14 days
+    // Times of their own, a minute apart (the later copy has the real clock's, and reading the two above moved them), then an open a millisecond past the earlier one's 14 days
     files.utimesSync(copyOf(file), 1_800_000_000, 1_800_000_000)
     files.utimesSync(copyOf(file, STEP + 1), 1_800_000_060, 1_800_000_060)
     openNext(file, [breaking(STEP), breaking(STEP + 1)], osWith({}, () => writtenAt + COPY_KEPT_MS + 1))
