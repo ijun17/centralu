@@ -133,7 +133,7 @@ export class StoreCopies {
 
   /**
    * Whether the WAL holds a commit, copied back to the store or not. Asked with a checkpoint that waits for nobody,
-   * the one way SQLite says it: what it copies back is in the store either way.
+   * which says it without reading the WAL's frames here: what it copies back is in the store either way.
    */
   private walHoldsCommits(): boolean {
     const answer: unknown = this.db.pragma('wal_checkpoint(PASSIVE)')
