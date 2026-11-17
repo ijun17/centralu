@@ -55,7 +55,7 @@ const SAY_HI = [
 ]
 
 describe('claude history — who wrote a user line (#2323)', () => {
-  it("drops the CLI's task notification from the person's words, by what the transcript says of the line", async () => {
+  it("drops the CLI's recorded task notifications from the person's words, of 2.1.296 and of 2.1.263", async () => {
     expect(await readClaudeHistory(SESSIONS['2.1.296'], cwd, 100)).toEqual(SAY_HI)
     // 2.1.263 wrote the notification as an SDK prompt: its origin is what says it is the CLI's
     expect(await readClaudeHistory(SESSIONS['2.1.263'], cwd, 100)).toEqual([{ role: 'user', text: 'Reply OK. Use no tools.' }])
@@ -73,7 +73,8 @@ describe('claude history — who wrote a user line (#2323)', () => {
           return { text: text.slice(0, 40), cli: writtenByTheCli(e) }
         }),
     )
-    expect(verdicts.length).toBe(15)
+    // Both kinds are there, so neither verdict can pass by being the only one
+    expect(new Set(verdicts.map((v) => v.cli))).toEqual(new Set([true, false]))
     for (const { text, cli } of verdicts) {
       const expected = ![...person, ...unsaid].some((p) => text.startsWith(p))
       expect({ text, cli }).toEqual({ text, cli: expected })

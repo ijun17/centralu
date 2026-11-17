@@ -138,7 +138,7 @@ export async function readClaudeHistory(
    * conversation began, and a catch-up of one over 600 rows never found our last message and never attached anything
    * again. It also counted every row, a tool result's included. The lines are kept as Codex keeps them (`lastLines`).
    */
-  const { rows, entries } = await readTranscript(sdk, externalId, cwd)
+  const { rows, byTheCli } = await readTranscript(sdk, externalId, cwd)
   if (!Array.isArray(rows)) return []
   const out: HistoryMessage[] = []
   const agents = new Set<string>()
@@ -152,8 +152,7 @@ export async function readClaudeHistory(
       const message = readableMessage(r?.message)
       if (r?.type === 'assistant') out.push(...assistantLines(message, agents))
       else if (r?.type === 'user') {
-        const entry = typeof r.uuid === 'string' ? entries.get(r.uuid) : undefined
-        out.push(...userLines(message, agents, isCentraluInputId(r.uuid), entry !== undefined && writtenByTheCli(entry)))
+        out.push(...userLines(message, agents, isCentraluInputId(r.uuid), typeof r.uuid === 'string' && byTheCli.has(r.uuid)))
       }
     } catch (err) {
       console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)
@@ -163,34 +162,37 @@ export async function readClaudeHistory(
 }
 
 /**
- * The conversation's rows as `getSessionMessages` gives them, and the transcript's own entries by uuid (#2323). The rows
+ * The conversation's rows as `getSessionMessages` gives them, and the uuids of the user entries the CLI wrote (#2323). The rows
  * keep only `type`, `uuid` and `message` (SDK 0.3.263 and 0.3.326, measured), so they cannot say who wrote a user turn: a
  * task notification the CLI injected read as the person's words. The entry the CLI wrote does say it, and the SDK's
  * `importSessionToStore` (@alpha) hands every entry to a store of ours, which `getSessionMessages` then reads its rows
  * from: one read of the file, the rows the same as a read from disk (measured, 801 rows, CLI 2.1.296). An SDK without
- * it, or an import that fails, leaves the rows read from disk and no entries: the text rules alone then decide.
+ * it, or an import that fails, leaves the rows read from disk and no uuids: the text rules alone then decide.
  */
 async function readTranscript(
   sdk: SessionApi,
   externalId: string,
   cwd: string,
-): Promise<{ rows: SdkSessionMessage[]; entries: ReadonlyMap<string, TranscriptEntry> }> {
+): Promise<{ rows: SdkSessionMessage[]; byTheCli: ReadonlySet<string> }> {
   if (!sdk.getSessionMessages) throw new Error(UNSUPPORTED)
   if (sdk.importSessionToStore) {
     const kept: TranscriptEntry[] = []
-    // Only the main transcript is imported (includeSubagents: false), so whatever key the SDK asks for is this one
-    const store: TranscriptStore = { append: async (_key, batch) => void kept.push(...batch), load: async () => kept }
+    // Only the main transcript is imported (includeSubagents: false): a subagent's key (`subpath`) has nothing here
+    const store: TranscriptStore = {
+      append: async (_key, batch) => void kept.push(...batch),
+      load: async (key) => (isObj(key) && key.subpath !== undefined ? null : kept),
+    }
     try {
       await sdk.importSessionToStore(externalId, store, { dir: cwd, includeSubagents: false })
       const rows = await sdk.getSessionMessages(externalId, { dir: cwd, sessionStore: store })
-      const entries = new Map<string, TranscriptEntry>()
-      for (const e of kept) if (isObj(e) && typeof e.uuid === 'string') entries.set(e.uuid, e)
-      return { rows, entries }
+      const byTheCli = new Set<string>()
+      for (const e of kept) if (isObj(e) && e.type === 'user' && typeof e.uuid === 'string' && writtenByTheCli(e)) byTheCli.add(e.uuid)
+      return { rows, byTheCli }
     } catch (err) {
       console.error(`[claude] the transcript's own entries could not be read, so who wrote a line is judged by its text: ${errorMessage(err)}`)
     }
   }
-  return { rows: await sdk.getSessionMessages(externalId, { dir: cwd }), entries: new Map() }
+  return { rows: await sdk.getSessionMessages(externalId, { dir: cwd }), byTheCli: new Set() }
 }
 
 /**
