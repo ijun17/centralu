@@ -11,6 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
+import { realOs } from '../os/real.js'
 import { sessionAddress } from '../mail/address.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { Store, StoreTooNewError } from './store.js'
@@ -578,6 +579,31 @@ describe('step 76: what only migration steps name goes', () => {
     expect(build.mailbox.openTurns().map((t) => [t.sessionId, t.turnSeq])).toEqual([['s1', 1]])
     expect(await build.trash.purgeSession('s3')).toBe(true)
     expect(build.trash.isTrashed('s3')).toBe(false)
+  })
+
+  it('a store left at v74 crosses steps 75 and 76 in one open: the pending mail is moved before the tables go, and the one copy is the store before step 75', () => {
+    const path = file()
+    const first = v64(path)
+    fixture(first.raw)
+    first.upgrade(74)
+    const old = rows<{ n: number }>(first.raw, `SELECT count(*) AS n FROM mail_messages`)[0]?.n
+    expect([first.schemaVersion, moved(first.raw)]).toEqual([74, []])
+    first.close()
+    const s = open(76, path)
+    stores.push(s)
+    expect([s.migrationsRun, s.schemaVersion, floor(s.raw), left(s.raw)]).toEqual([2, 76, '75', { names: [], mailArgs: false }])
+    expect(moved(s.raw)).toHaveLength(8)
+    // One copy an open, named after its first breaking step (rule 7): the old thread mail is in that one, and no `store.before-76.db` is made
+    const { files, paths, sqlite } = realOs()
+    const beside = files.readdirSync(paths.path.dirname(path))
+    expect([beside.includes('store.before-75.db'), beside.includes('store.before-76.db')]).toEqual([true, false])
+    const copy = sqlite.open(paths.path.join(paths.path.dirname(path), 'store.before-75.db'), { readonly: true, fileMustExist: true })
+    try {
+      expect([copy.pragma('user_version', { simple: true }), rows<{ n: number }>(copy, `SELECT count(*) AS n FROM mail_messages`)[0]?.n]).toEqual([74, old])
+      expect(old).toBeGreaterThan(0)
+    } finally {
+      copy.close()
+    }
   })
 
   it('leaves a store that has none of them alone: run again, it changes nothing', () => {
