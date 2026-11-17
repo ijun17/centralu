@@ -61,7 +61,8 @@ export function pillClass({
   const fill = size === 'bar' && edge !== 'dashed' ? 'bg-surface-hover/30' : ''
   return [
     // A capsule never breaks its words: in a narrow card the text beside it wraps instead (owner, 2026-10-19). A line is the text, so it wraps
-    size === 'line' ? 'inline-flex min-w-0 items-center break-words rounded-full border transition-colors' : 'flex shrink-0 items-center whitespace-nowrap rounded-full border transition-colors',
+    'items-center rounded-full border transition-colors',
+    size === 'line' ? 'inline-flex min-w-0 break-words' : 'flex shrink-0 whitespace-nowrap',
     SIZE[size],
     EDGE[edge],
     fill,

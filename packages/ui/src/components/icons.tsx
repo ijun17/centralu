@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 /**
  * Icons.
  *
@@ -523,15 +525,24 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
  */
 const CAP_BOX = 'inline-block size-[0.73em] shrink-0 align-baseline'
 
+/** An icon in a line of text, on a 10-unit grid: drawn to fill its cap-height box (`CAP_BOX`) */
+function CapIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={CAP_BOX}>
+      {children}
+    </svg>
+  )
+}
+
 /**
  * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
  * below. It replaced the font's ⤷, which sat above the text (#2332)
  */
 export function FromArrowIcon() {
   return (
-    <svg viewBox="0 0 10 10" fill="none" aria-hidden className={CAP_BOX}>
-      <path d="M1.75 0.75V4.75a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <CapIcon>
+      <path d="M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25" strokeWidth="1.2" />
+    </CapIcon>
   )
 }
 
@@ -541,14 +552,14 @@ export function FromArrowIcon() {
  */
 export function PlanStepIcon({ status }: { status: 'pending' | 'inProgress' | 'completed' }) {
   return (
-    <svg viewBox="0 0 10 10" fill="none" aria-hidden className={CAP_BOX}>
+    <CapIcon>
       {status === 'completed' ? (
-        <path d="M0.75 5.25 3.75 8.5 9.25 1.25" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M.75 5.25 3.75 8.5 9.25 1.25" strokeWidth="1.3" />
       ) : status === 'inProgress' ? (
-        <path d="M2 0.5v9L9.25 5z" fill="currentColor" />
+        <path d="M2 .5v9L9.25 5z" fill="currentColor" stroke="none" />
       ) : (
-        <circle cx="5" cy="5" r="4.4" stroke="currentColor" strokeWidth="1.1" />
+        <circle cx="5" cy="5" r="4.4" strokeWidth="1.1" />
       )}
-    </svg>
+    </CapIcon>
   )
 }

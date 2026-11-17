@@ -233,6 +233,15 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
   const { stickyText, stickySource, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning, stickyFolded } =
     sticky
   if (stickyText === null) return null
+  // A relayed message's copy names who sent it before the text, with the source line's arrow
+  const said =
+    stickySource === null ? (
+      stickyText
+    ) : (
+      <>
+        {stickySource} <FromArrowIcon /> {stickyText}
+      </>
+    )
   return (
     /*
       A negative offset, not `top-0`.
@@ -319,12 +328,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
           {...mineBubbleAttrs(stickyRelayed)}
           className={`w-full cursor-pointer truncate rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
         >
-          {stickySource !== null && (
-            <>
-              {stickySource} <FromArrowIcon />{' '}
-            </>
-          )}
-          {stickyText}
+          {said}
         </button>
         {/*
           Expanding is a **cover**, not flow. If the banner grew taller in the document
@@ -346,12 +350,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
             {...mineBubbleAttrs(stickyRelayed)}
             className={`absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
           >
-            {stickySource !== null && (
-              <>
-                {stickySource} <FromArrowIcon />{' '}
-              </>
-            )}
-            {stickyText}
+            {said}
           </button>
         )}
       </div>
