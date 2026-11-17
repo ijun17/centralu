@@ -1,4 +1,4 @@
-import { launchesSubagent, type NormalizedEvent } from '@cc/protocol'
+import { errorMessage, launchesSubagent, type NormalizedEvent } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { asObj, finite, isObj, trimmed } from '../../json-value.js'
 import { HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
@@ -11,7 +11,7 @@ import { isCentraluInputId, isCentraluNote } from '../input-receipts.js'
 /**
  * Reads past sessions Claude Code has kept.
  *
- * **Only the official SDK API is used** (`listSessions` / `getSessionMessages`).
+ * **Only the official SDK API is used** (`listSessions` / `getSessionMessages` / `importSessionToStore`).
  * `~/.claude/projects/**\/*.jsonl` is never parsed directly — that file format is not a
  * documented contract, so an update to the tool can break it silently, and there would be no
  * way to know the parsing broke. The SDK reads the transcripts its own version wrote, so version
@@ -37,9 +37,13 @@ type SdkSessionInfo = {
   gitBranch?: unknown
 }
 type SdkSessionMessage = { type?: unknown; uuid?: unknown; message?: unknown }
+/** A transcript line as the SDK hands it to a session store: the CLI's own record, every field it wrote */
+export type TranscriptEntry = Record<string, unknown>
+type TranscriptStore = { append: (key: unknown, entries: TranscriptEntry[]) => Promise<void>; load: (key: unknown) => Promise<TranscriptEntry[] | null> }
 type SessionApi = {
   listSessions?: (o?: Record<string, unknown>) => Promise<SdkSessionInfo[]>
   getSessionMessages?: (id: string, o?: Record<string, unknown>) => Promise<SdkSessionMessage[]>
+  importSessionToStore?: (id: string, store: TranscriptStore, o?: Record<string, unknown>) => Promise<void>
   deleteSession?: (id: string, o?: Record<string, unknown>) => Promise<void>
   forkSession?: (id: string, o?: Record<string, unknown>) => Promise<{ sessionId?: unknown }>
 }
@@ -134,7 +138,7 @@ export async function readClaudeHistory(
    * conversation began, and a catch-up of one over 600 rows never found our last message and never attached anything
    * again. It also counted every row, a tool result's included. The lines are kept as Codex keeps them (`lastLines`).
    */
-  const rows = await sdk.getSessionMessages(externalId, { dir: cwd })
+  const { rows, entries } = await readTranscript(sdk, externalId, cwd)
   if (!Array.isArray(rows)) return []
   const out: HistoryMessage[] = []
   const agents = new Set<string>()
@@ -147,12 +151,59 @@ export async function readClaudeHistory(
     try {
       const message = readableMessage(r?.message)
       if (r?.type === 'assistant') out.push(...assistantLines(message, agents))
-      else if (r?.type === 'user') out.push(...userLines(message, agents, isCentraluInputId(r.uuid)))
+      else if (r?.type === 'user') {
+        const entry = typeof r.uuid === 'string' ? entries.get(r.uuid) : undefined
+        out.push(...userLines(message, agents, isCentraluInputId(r.uuid), entry !== undefined && writtenByTheCli(entry)))
+      }
     } catch (err) {
       console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)
     }
   }
   return lastLines(out, limit)
+}
+
+/**
+ * The conversation's rows as `getSessionMessages` gives them, and the transcript's own entries by uuid (#2323). The rows
+ * keep only `type`, `uuid` and `message` (SDK 0.3.263 and 0.3.326, measured), so they cannot say who wrote a user turn: a
+ * task notification the CLI injected read as the person's words. The entry the CLI wrote does say it, and the SDK's
+ * `importSessionToStore` (@alpha) hands every entry to a store of ours, which `getSessionMessages` then reads its rows
+ * from: one read of the file, the rows the same as a read from disk (measured, 801 rows, CLI 2.1.296). An SDK without
+ * it, or an import that fails, leaves the rows read from disk and no entries: the text rules alone then decide.
+ */
+async function readTranscript(
+  sdk: SessionApi & Required<Pick<SessionApi, 'getSessionMessages'>>,
+  externalId: string,
+  cwd: string,
+): Promise<{ rows: unknown; entries: ReadonlyMap<string, TranscriptEntry> }> {
+  if (sdk.importSessionToStore) {
+    const kept: TranscriptEntry[] = []
+    // Only the main transcript is imported (includeSubagents: false), so whatever key the SDK asks for is this one
+    const store: TranscriptStore = { append: async (_key, batch) => void kept.push(...batch), load: async () => kept }
+    try {
+      await sdk.importSessionToStore(externalId, store, { dir: cwd, includeSubagents: false })
+      const rows = await sdk.getSessionMessages(externalId, { dir: cwd, sessionStore: store })
+      const entries = new Map<string, TranscriptEntry>()
+      for (const e of kept) if (isObj(e) && typeof e.uuid === 'string') entries.set(e.uuid, e)
+      return { rows, entries }
+    } catch (err) {
+      console.error(`[claude] the transcript's own entries could not be read, so who wrote a line is judged by its text: ${errorMessage(err)}`)
+    }
+  }
+  return { rows: await sdk.getSessionMessages(externalId, { dir: cwd }), entries: new Map() }
+}
+
+/**
+ * Whether the CLI, not the person, wrote a user entry, by what the entry says of itself (#2323). Measured over the
+ * transcripts of CLI 2.1.263 to 2.1.299: the person's words are `promptSource: "sdk"` with no `origin` or `origin.kind:
+ * "human"`; a task notification is `origin.kind: "task-notification"` (with `promptSource: "system"` from 2.1.296, `"sdk"`
+ * on 2.1.263), a cross-session message `"peer"`, a timer's prompt and a delivery notice `promptSource: "system"`, and a
+ * skill's body or a command's caveat `isMeta`. The SDK documents the kinds (`SDKMessageOrigin`); any kind but `human` is
+ * not the person, so a kind the CLI adds later is not either. An entry saying none of this (a slash command's lines, an
+ * older CLI's) is left to the text rules (`stripInjectedBlocks`).
+ */
+export function writtenByTheCli(entry: TranscriptEntry): boolean {
+  if (entry.isMeta === true || entry.promptSource === 'system') return true
+  return isObj(entry.origin) && entry.origin.kind !== 'human'
 }
 
 /**
@@ -216,12 +267,13 @@ const INTERRUPT_LINE = /^\[Request interrupted by user( for tool use)?\]$/
 /**
  * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
  * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843). `sent`:
- * the row's id is one Centralu gave an input it wrote (`centraluInputId`), so its words are marked as Centralu's.
+ * the row's id is one Centralu gave an input it wrote (`centraluInputId`), so its words are marked as Centralu's. `cli`:
+ * the transcript says the CLI wrote the row (`writtenByTheCli`), so none of its words are the person's.
  */
-function userLines(message: AssistantBody, agents: ReadonlySet<string>, sent: boolean): HistoryMessage[] {
+function userLines(message: AssistantBody, agents: ReadonlySet<string>, sent: boolean, cli: boolean): HistoryMessage[] {
   const raw = userText(message)
   if (COMPACT_SUMMARY.test(raw)) return [{ role: 'system', event: { type: 'compaction', sessionId: HISTORY_SESSION, failed: false } }]
-  const text = INTERRUPT_LINE.test(raw) ? '' : stripInjectedBlocks(raw)
+  const text = cli || INTERRUPT_LINE.test(raw) ? '' : stripInjectedBlocks(raw)
   /*
    * Centralu's own Continue note is known by its exact text too, where the line lacks the id (another CLI version, a
    * transcript a crash left without it): never the person's message (#1626 review). The log says why it is known by its text

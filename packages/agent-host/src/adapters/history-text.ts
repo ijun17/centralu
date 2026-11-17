@@ -24,6 +24,11 @@ const INJECTED_TAGS = [
   'local-command-stdout',
   'local-command-stderr',
   'user-prompt-submit-hook',
+  /*
+   * Claude Code's notice that a background task ended (#2323). A Claude transcript says who wrote such a line
+   * (claude/history.ts `writtenByTheCli`); the tag is for a line read without that, from an SDK or CLI that does not give it
+   */
+  'task-notification',
 ]
 
 const BLOCK = new RegExp(`<(${INJECTED_TAGS.join('|')})\\b[^>]*>[\\s\\S]*?</\\1>`, 'gi')
