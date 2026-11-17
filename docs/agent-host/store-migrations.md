@@ -87,7 +87,20 @@ step against:
    - **A file under a copy's name is always whole.** The copy is written as `store.before-<step>.db.partial`, synced
      to disk (SQLite does not sync the target of `VACUUM INTO`) and then renamed. A host stopped during the copy
      leaves only the `.partial` file and the `.partial-journal` SQLite keeps beside the file it writes, which the
-     next open deletes before it copies again: the step had not run.
+     next open deletes before it copies again: the step had not run. After the rename the store's folder is synced
+     too (`OsFiles.fsyncDirSync`; nothing on Windows, which has no sync of a folder): a rename is in the folder, so
+     without it a power cut could undo the name while the step's commit stays. A folder that cannot be synced is
+     said in host.log (`[store] the name of … could not be synced to the disk`) and is not a step without a copy:
+     the copy is whole and under its name.
+   - **A copy a stopped host left for the same step is kept.** A host stopped after the rename and before its step
+     committed leaves `store.before-<step>.db` beside a store still below that step. The next open keeps that file
+     as the copy, says so in host.log (`[store] … is kept as the copy before step …`) and writes none, when the
+     store has not been written since: the copy's time is not before `store.db`'s, nor before the WAL's when the
+     WAL holds anything (a commit reaches the WAL first; an empty WAL is made new by every open and holds none).
+     Writing it again would add nothing but a rename over the first copy, which Windows refuses while a backup or a
+     scanner holds that file, and the person would read "no copy" beside a whole one. A store written since is
+     copied again: its step failed, the person went on with the build they had, and the first copy lacks that
+     work. A time that wrongly reads as written since costs one more copy; a folder under the name is not a copy.
    - **The copy takes the store's permissions**: it is created with the store's mode (`0600` in the data folder,
      [security-boundaries/local-data-and-transport.md](../security-boundaries/local-data-and-transport.md)), since
      it holds every conversation the store holds. On Windows the profile folder's ACL covers it, as it does the store.
