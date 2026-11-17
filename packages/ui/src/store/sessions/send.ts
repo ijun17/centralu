@@ -327,7 +327,7 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
         attachments?.map(({ data: _, ...a }) => a),
       )
       if (dropped.length) {
-        const mark: ChatItem = { kind: 'mark', seq: nextChatKey(), text: droppedQuestionsText(dropped) }
+        const mark: ChatItem = { kind: 'mark', seq: nextChatKey(), text: droppedQuestionsText(dropped), mark: 'notice' }
         set((s) => {
           const items = s.chat[sessionId] ?? []
           const at = items.findIndex((i) => i.seq === seq)

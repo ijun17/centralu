@@ -33,7 +33,7 @@ describe('foldRuns: which rows fold', () => {
   })
 
   it('never folds a marker: an error line, a usage limit, a stop cut, compaction, a handoff', () => {
-    const chat = [tool(), row({ kind: 'mark', text: 'The turn failed' }), thought(), row({ kind: 'mark', text: 'compacted' }), tool()]
+    const chat = [tool(), row({ kind: 'mark', text: 'The turn failed', mark: 'failed' }), thought(), row({ kind: 'mark', text: 'compacted', mark: 'compaction' }), tool()]
     expect(foldRuns(chat, none).runs.map((r) => [r.first, r.last])).toEqual([[0, 0], [2, 2], [4, 4]])
   })
 

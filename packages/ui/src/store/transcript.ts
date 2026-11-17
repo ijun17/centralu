@@ -86,8 +86,9 @@ export type ChatItem =
     /**
      * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
      * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
+     * `mark` is what kind of line it is, from the event that left it (#2338), so the row never guesses it from the words.
      */
-    | { kind: 'mark'; seq: number; text: string; notice?: NoticeLine; pickModel?: true }
+    | { kind: 'mark'; seq: number; text: string; mark: MarkKind; notice?: NoticeLine; pickModel?: true }
   ) & {
     /**
      * The **number within the session** the host assigned when it stored this row (the store's
@@ -375,11 +376,11 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // Only the model's own context was folded — our record stays intact. Where it was folded must
       // be shown so someone can read back past that point
       if (holds(items, e.seq)) return items
-      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: compactionText(e) }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     case 'handoff':
       // Where this session came from (#102). The note's full text lives only in the stored payload — this is a single line
       if (holds(items, e.seq)) return items
-      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), text: handoffText(e) }]
+      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     // A fresh conversation inside the session (#304) and what the tool wanted read (#304): one quiet line each
     case 'conversation_reset':
     case 'notice':
@@ -515,17 +516,31 @@ export function audienceText(a: 'you' | 'centralu'): string {
   return a === 'you' ? 'for you' : 'for Centralu'
 }
 
-/** A marker's text, and for a readable notice its parts — the live and restored paths build the row the same way */
+/**
+ * What kind of line a marker is (#2338), for its icon: a failure (a turn that failed, a compaction that did, a conversation
+ * that could not open) is drawn as a dashed box, every other kind as a capsule. `notice` is also a line the window adds itself
+ * (a question a message dropped).
+ */
+export type MarkKind = 'compaction' | 'handoff' | 'reset' | 'notice' | 'failed'
+
+function markKind(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): MarkKind {
+  if (e.type === 'error' || (e.type === 'compaction' && e.failed)) return 'failed'
+  return e.type === 'conversation_reset' ? 'reset' : e.type
+}
+
+/** A marker's text, its kind, and for a readable notice its parts — the live and restored paths build the row the same way */
 function markerParts(
   e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
 ): {
   text: string
+  mark: MarkKind
   notice?: NoticeLine
   pickModel?: true
 } {
   const notice = e.type === 'notice' ? noticeLine(e) : null
-  if (e.type === 'error' && refusedModel(e)) return { text: markerText(e), pickModel: true }
-  return notice ? { text: markerText(e), notice } : { text: markerText(e) }
+  const line = { text: markerText(e), mark: markKind(e) }
+  if (e.type === 'error' && refusedModel(e)) return { ...line, pickModel: true }
+  return notice ? { ...line, notice } : line
 }
 
 /** The model the provider refused, when this error is that failure (#1369) — the host marks it in `error.data`; other errors carry none */

@@ -2,7 +2,8 @@ import { memo, useMemo, useState } from 'react'
 import { splitRunTogetherHeadings } from '@cc/core'
 import { centraluCallOf, launchesSubagent } from '@cc/protocol/client'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
-import { ChevronIcon, FromArrowIcon } from '../../../components/icons.jsx'
+import { ChevronIcon, FromArrowIcon, MarkIcon } from '../../../components/icons.jsx'
+import { MarkLine } from '../../../components/MarkLine.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
 import { FileLink, Markdown } from '../Markdown.jsx'
 import { titlePieces } from '../filePath.js'
@@ -185,23 +186,28 @@ export const ChatRow = memo(function ChatRow({
      */
     // A tool's notice the host made readable (#342): who, what kind, whose to act on, the tool's words on demand
     if (item.notice) return <NoticeMark notice={item.notice} />
+    // Every other line is its sentence in a capsule with its kind's icon; a failure is a dashed box (#2338 option 1)
     return (
-      <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
-        <span className="h-px flex-1 bg-line" />
-        <span className="min-w-0 break-words text-center text-2xs text-ink-faint">{item.text}</span>
-        {item.pickModel && (
-          // The provider refused this session's model (#1369): the model menu below the composer, one click away
-          <Button
-            size="xs"
-            className="shrink-0"
-            data-testid="msg-mark-pick-model"
-            onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
-          >
-            Pick another model
-          </Button>
-        )}
-        <span className="h-px flex-1 bg-line" />
-      </div>
+      <MarkLine
+        icon={<MarkIcon kind={item.mark} />}
+        failed={item.mark === 'failed'}
+        data-mark={item.mark}
+        after={
+          item.pickModel && (
+            // The provider refused this session's model (#1369): the model menu below the composer, one click away
+            <Button
+              size="xs"
+              className="shrink-0"
+              data-testid="msg-mark-pick-model"
+              onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
+            >
+              Pick another model
+            </Button>
+          )
+        }
+      >
+        {item.text}
+      </MarkLine>
     )
   }
   if (item.kind === 'image') {

@@ -419,7 +419,7 @@ describe('a failed turn reaches the screen (#107)', () => {
       },
     ])
     expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({ kind: 'mark', seq: 4 })
+    expect(items[0]).toMatchObject({ kind: 'mark', seq: 4, mark: 'failed' })
     expect((items[0] as { text: string }).text).toContain('400 invalid_request_error')
   })
 })

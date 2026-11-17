@@ -125,6 +125,8 @@ export function agentNoticesTests(): void {
 
       await expect(config.getByTestId('notice-head')).toHaveText('Codex · config warning')
       await expect(config.getByTestId('notice-audience')).toHaveText('for you')
+      // A notice for the person starts open (#2338), its explanation under the capsule
+      await expect(config.getByTestId('mark-toggle')).toHaveAttribute('aria-expanded', 'true')
       await expect(config.getByTestId('notice-summary')).toHaveText('Codex ignored 2 settings in ~/.codex/config.toml')
       // One setting per line
       const items = config.getByTestId('notice-items').locator('li')
@@ -144,12 +146,19 @@ export function agentNoticesTests(): void {
 
       await expect(hydration.getByTestId('notice-head')).toHaveText('Codex · deprecation')
       await expect(hydration.getByTestId('notice-audience')).toHaveText('for Centralu')
+      // One for Centralu starts closed: the capsule alone, the explanation one press away (#2338)
+      const hydrationToggle = hydration.getByTestId('mark-toggle')
+      await expect(hydrationToggle).toHaveAttribute('aria-expanded', 'false')
+      await expect(hydration.getByTestId('notice-summary')).toHaveCount(0)
+      await hydrationToggle.press('Enter')
+      await expect(hydrationToggle).toHaveAttribute('aria-expanded', 'true')
       await expect(hydration.getByTestId('notice-summary')).toHaveText('Codex says Centralu loads thread history in an outdated way')
       await expect(hydration.getByTestId('notice-hint')).toHaveText('Nothing to do on your side; Centralu will switch to the paginated API (#342).')
       await expect(hydration).not.toContainText('excludeTurns')
 
-      // A notice Centralu does not know: Codex's text as it is, with the kind label, nothing to open
-      await expect(unknown).toHaveText('Codex · warning: Exceeded skills context budget.')
+      // A notice Centralu does not know: Codex's text as it is under the kind label, open, with no words of Codex's to open
+      await expect(unknown.getByTestId('notice-head')).toHaveText('Codex · warning')
+      await expect(unknown.getByTestId('notice-summary')).toHaveText('Exceeded skills context budget.')
       await expect(unknown.getByTestId('notice-original-toggle')).toHaveCount(0)
 
       // Quiet: no toast, nothing wider than the conversation

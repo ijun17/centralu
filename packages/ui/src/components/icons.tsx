@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { MarkKind } from '../store/transcript.js'
 
 /**
  * Icons.
@@ -538,11 +539,34 @@ function CapIcon({ children }: { children: ReactNode }) {
  * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
  * below. It replaced the font's ⤷, which sat above the text (#2332)
  */
+const FROM_ARROW = 'M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25'
+
 export function FromArrowIcon() {
   return (
     <CapIcon>
-      <path d="M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25" strokeWidth="1.2" />
+      <path d={FROM_ARROW} strokeWidth="1.2" />
     </CapIcon>
+  )
+}
+
+/**
+ * A line between messages, by its kind (#2338): a compaction (two rules pressed together), where this session came from (the
+ * "from" arrow), a fresh conversation (a turn back to the start), a notice (a warning triangle), a failure (a stop). Drawn on
+ * the 10-unit grid of `CapIcon` and set like the mail line's `MailIcon size={12}` beside it: 12px, the glyph about 9px
+ */
+const MARK_PATH: Record<MarkKind, string> = {
+  compaction: 'M1 1.5h8M1 8.5h8M5 2.75v2.5M3.5 4 5 5.25 6.5 4',
+  handoff: FROM_ARROW,
+  reset: 'M8.75 5a3.75 3.75 0 1 1-1.1-2.65M5.6 2.35h2.05V.3',
+  notice: 'M5 .75 9.5 9.25h-9zM5 3.75v2.5M5 7.6v.1',
+  failed: 'M5 2.6v3M5 7.3v.1M9.4 5a4.4 4.4 0 1 1-8.8 0 4.4 4.4 0 0 1 8.8 0',
+}
+
+export function MarkIcon({ kind }: { kind: MarkKind }) {
+  return (
+    <svg width={12} height={12} viewBox="-1.5 -1.5 13 13" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+      <path d={MARK_PATH[kind]} strokeWidth="1.1" />
+    </svg>
   )
 }
 

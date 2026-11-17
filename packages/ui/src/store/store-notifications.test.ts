@@ -561,6 +561,27 @@ describe('resets, notices and switches the tool made (#304)', () => {
     ])
   })
 
+  it("a line's kind comes from its event, live and restored alike, never from its words (#2338)", async () => {
+    const events: NormalizedEvent[] = [
+      { type: 'compaction', sessionId: 'n-6', failed: false },
+      // A failed compaction is a failure, though its words would not say "could not finish"
+      { type: 'compaction', sessionId: 'n-6', failed: true, reason: 'the tool timed out' },
+      { type: 'handoff', sessionId: 'n-6', from: 'Earlier', note: 'n' },
+      { type: 'conversation_reset', sessionId: 'n-6', trigger: 'clear' },
+      { type: 'notice', sessionId: 'n-6', level: 'warning', text: 'The agent could not finish this turn' },
+      { type: 'error', sessionId: 'n-6', error: { code: 'internal', message: 'compacted', retryable: false } },
+    ]
+    const kinds = ['compaction', 'failed', 'handoff', 'reset', 'notice', 'failed']
+    const mock = new MockPlatform()
+    mock.sessions.set('n-6', sessionInfo('n-6'))
+    await useStore.getState().attach(mock)
+    events.forEach((e) => mock.emit(e))
+    const live = (useStore.getState().chat['n-6'] ?? []).filter((i) => i.kind === 'mark')
+    expect(live.map((i) => i.mark)).toEqual(kinds)
+    const restored = messagesToChat(events.map((payload, k) => ({ sessionId: 'n-6', seq: k + 1, role: 'system', kind: 'marker', ts: k, payload })))
+    expect(restored.map((i) => (i.kind === 'mark' ? i.mark : i.kind))).toEqual(kinds)
+  })
+
   it('a marker kind this build does not know is left out, not drawn as a compaction', () => {
     const items = messagesToChat([
       { sessionId: 'n-4', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'from_a_newer_host', text: 'x' } },

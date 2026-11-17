@@ -1,0 +1,72 @@
+import { useId, useState, type ReactNode } from 'react'
+import { ChevronIcon } from './icons.jsx'
+import { Fold } from './Fold.jsx'
+import { Pill } from './Pill.jsx'
+
+const Rule = () => <span className="h-px flex-1 bg-line" />
+/** A long line wraps before the rules are gone, so it still reads as a line between messages, not a box of text */
+const WIDE = 'max-w-[34rem]'
+
+/**
+ * A line of the conversation that is not a message (a compaction, a notice, a delivery of mail): a capsule between two rules,
+ * its icon and its words (owner, 2026-11-17, #2332 option C, #2338 option 1). Quiet like a divider: a `line` edge, `ink-faint`
+ * words, no fill. A failure is a dashed box instead, in the brighter `ink-muted`: the dash is the shape a failure has
+ * everywhere (§1), and a box tells it from the capsules around it.
+ *
+ * With `folded`, what it explains opens under it: the capsule is then a button with the chevron, and the explanation comes and
+ * goes as a `Fold`. `open` is how it starts. `after` stands beside the capsule (a button the line offers).
+ */
+export function MarkLine({
+  icon,
+  failed,
+  children,
+  folded,
+  open: startOpen = false,
+  after,
+  ...data
+}: {
+  icon: ReactNode
+  failed?: boolean
+  children: ReactNode
+  folded?: ReactNode
+  open?: boolean
+  after?: ReactNode
+} & Record<`data-${string}`, string>) {
+  const [open, setOpen] = useState(startOpen)
+  const id = useId()
+  const words = (
+    <>
+      {folded && <ChevronIcon open={open} size={10} />}
+      {icon}
+      <span className="min-w-0">{children}</span>
+    </>
+  )
+  return (
+    <div className="py-1" data-testid="msg-mark" {...data}>
+      <div className="flex items-center gap-2">
+        <Rule />
+        {failed ? (
+          <span className={`${WIDE} inline-flex min-w-0 items-center gap-1.5 break-words rounded-field border border-dashed border-line-strong px-2.5 py-0.5 text-2xs text-ink-muted`}>
+            {words}
+          </span>
+        ) : (
+          <Pill
+            size="line"
+            tone="faint"
+            className={WIDE}
+            {...(folded ? { onClick: () => setOpen((o) => !o), 'aria-expanded': open, 'aria-controls': id, 'data-testid': 'mark-toggle' } : {})}
+          >
+            {words}
+          </Pill>
+        )}
+        {after}
+        <Rule />
+      </div>
+      {folded && (
+        <Fold open={open} testId="mark-folded">
+          <div id={id}>{folded}</div>
+        </Fold>
+      )}
+    </div>
+  )
+}

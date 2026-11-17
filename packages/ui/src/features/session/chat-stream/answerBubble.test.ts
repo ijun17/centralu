@@ -14,7 +14,7 @@ const said = (at?: number): ChatItem => ({ kind: 'assistant', seq: ++key, text: 
 const thought = (): ChatItem => ({ kind: 'reasoning', seq: ++key, text: 'thinking' })
 const call = (at?: number): ChatItem => ({ kind: 'tool', seq: ++key, tool: 'Bash', title: 'ls', ...(at === undefined ? {} : { at }) })
 const image = (): ChatItem => ({ kind: 'image', seq: ++key, mime: 'image/png', data: 'AAAA' })
-const mark = (): ChatItem => ({ kind: 'mark', seq: ++key, text: 'compacted' })
+const mark = (): ChatItem => ({ kind: 'mark', seq: ++key, text: 'compacted', mark: 'compaction' })
 
 const parts = (chat: ChatItem[]) => chat.map((_, i) => bubbleOf(chat, i))
 
