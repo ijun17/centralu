@@ -131,7 +131,7 @@ export async function readClaudeHistory(
   limit: number,
 ): Promise<HistoryMessage[]> {
   const sdk = await sessionApi()
-  if (!sdk?.getSessionMessages) throw new Error(UNSUPPORTED)
+  if (!sdk) throw new Error(UNSUPPORTED)
   /*
    * Read whole, and the newest lines kept (#1006). The SDK's `limit` counts rows from the start (it reads the whole
    * transcript, then slices `offset..offset + limit`), so passing it gave the oldest rows: an import showed how a long
@@ -171,10 +171,11 @@ export async function readClaudeHistory(
  * it, or an import that fails, leaves the rows read from disk and no entries: the text rules alone then decide.
  */
 async function readTranscript(
-  sdk: SessionApi & Required<Pick<SessionApi, 'getSessionMessages'>>,
+  sdk: SessionApi,
   externalId: string,
   cwd: string,
-): Promise<{ rows: unknown; entries: ReadonlyMap<string, TranscriptEntry> }> {
+): Promise<{ rows: SdkSessionMessage[]; entries: ReadonlyMap<string, TranscriptEntry> }> {
+  if (!sdk.getSessionMessages) throw new Error(UNSUPPORTED)
   if (sdk.importSessionToStore) {
     const kept: TranscriptEntry[] = []
     // Only the main transcript is imported (includeSubagents: false), so whatever key the SDK asks for is this one

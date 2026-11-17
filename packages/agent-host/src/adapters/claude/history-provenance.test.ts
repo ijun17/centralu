@@ -1,8 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isObj } from '../../json-value.js'
+import { realOs } from '../../os/real.js'
+import { namedFolder, removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { __setSessionApiForTest, readClaudeHistory, writtenByTheCli, type TranscriptEntry } from './history.js'
 
 /**
@@ -11,32 +10,33 @@ import { __setSessionApiForTest, readClaudeHistory, writtenByTheCli, type Transc
  * from a configuration folder of the test's own, so what the SDK keeps and drops of each line is measured, not assumed.
  */
 
-const TRANSCRIPTS = `${import.meta.dirname}/transcripts`
+const { files, paths } = realOs()
+const join = paths.path.join
+const TRANSCRIPTS = join(import.meta.dirname, 'transcripts')
 const SESSIONS = { '2.1.296': '7a1d2c3e-0000-4000-8000-000000002296', '2.1.263': '7a1d2c3e-0000-4000-8000-000000002263' } as const
 type Version = keyof typeof SESSIONS
 
 const fixture = (v: Version): string => join(TRANSCRIPTS, `claude-code-${v}`, 'provenance.jsonl')
 const entries = (v: Version): TranscriptEntry[] =>
-  readFileSync(fixture(v), 'utf8').split('\n').filter(Boolean).map((l): unknown => JSON.parse(l)).filter(isObj)
+  files.readFileSync(fixture(v), 'utf8').split('\n').filter(Boolean).map((l): unknown => JSON.parse(l)).filter(isObj)
 
 let root = ''
 let cwd = ''
-const configDir = process.env.CLAUDE_CONFIG_DIR
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'cc-claude-provenance-'))
-  cwd = realpathSync(mkdtempSync(join(root, 'project-')))
+  root = tempRoot('cc-claude-provenance-')
+  cwd = namedFolder(root, 'project')
   // Where the CLI keeps a folder's transcripts: its path with every other character a dash
   const dir = join(root, 'config', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
-  mkdirSync(dir, { recursive: true })
-  for (const v of Object.keys(SESSIONS) as Version[]) copyFileSync(fixture(v), join(dir, `${SESSIONS[v]}.jsonl`))
-  process.env.CLAUDE_CONFIG_DIR = join(root, 'config')
+  files.mkdirSync(dir, { recursive: true })
+  for (const v of ['2.1.296', '2.1.263'] as const) files.copyFileSync(fixture(v), join(dir, `${SESSIONS[v]}.jsonl`))
 })
 
-afterAll(() => {
-  if (configDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
-  else process.env.CLAUDE_CONFIG_DIR = configDir
-  rmSync(root, { recursive: true, force: true })
+// The SDK finds the transcripts under the CLI's configuration folder; the configuration lets a stub last one test
+beforeEach(() => vi.stubEnv('CLAUDE_CONFIG_DIR', join(root, 'config')))
+
+afterAll(async () => {
+  await removeTree(root)
 })
 
 afterEach(() => __setSessionApiForTest(undefined))
