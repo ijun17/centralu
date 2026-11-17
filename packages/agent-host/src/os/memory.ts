@@ -87,9 +87,13 @@ import { runChild } from './run.js'
  *
  * Not modeled: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares (UNC),
  * `\\?\` paths, permissions beyond the mode bits (and on Windows the read-only bit), hard links to folders, file
- * locking between processes, a program's file read through a link, PTYs, an `'overlapped'` fd 3 (refused), and SQLite
- * (`sqlite.open` is `ENOSYS`).
+ * locking between processes, a program's file read through a link, PTYs, an `'overlapped'` fd 3 (refused), SQLite
+ * (`sqlite.open` is `ENOSYS`), and a disk's size (`freeBytesSync` answers `FREE_BYTES` wherever something is, and no
+ * write is ever refused for room).
  */
+
+/** The free space every disk in memory reports: 1 TiB, more than anything a test writes */
+const FREE_BYTES = 2 ** 40
 
 export type ProgramContext = {
   readonly args: readonly string[]
@@ -1120,7 +1124,17 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     writeSync: writeFd,
     fstatSync: fstat,
     fchmodSync: fchmod,
+    // Nothing here is ever unwritten: only the descriptor is checked
+    fsyncSync: (fd) => void fdOf(fd, 'fsync'),
     closeSync: closeFd,
+    freeBytesSync: (p) => {
+      try {
+        existing(p, true, 'statfs')
+        return FREE_BYTES
+      } catch {
+        return null
+      }
+    },
     createReadStream,
     watch,
     promises,

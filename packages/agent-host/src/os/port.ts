@@ -185,7 +185,14 @@ export interface OsFiles {
   writeSync(fd: number, data: string | Uint8Array): number
   fstatSync(fd: number): OsStats
   fchmodSync(fd: number, mode: number): void
+  /** What was written to the file `fd` is open on reaches the disk before this answers: a rename after it names a whole file, a power cut or not */
+  fsyncSync(fd: number): void
   closeSync(fd: number): void
+  /**
+   * The bytes this process may still write on the disk `path` is on, or null when the OS cannot say (nothing at `path`,
+   * a file system that does not answer). Not Node's shape: its `statfsSync` answers blocks, and throws.
+   */
+  freeBytesSync(path: HostPath): number | null
   /** A file read as a stream (a record file too large to read whole) */
   createReadStream(path: HostPath, options?: { encoding?: 'utf8'; start?: number; end?: number }): Readable
   /**

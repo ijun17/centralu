@@ -42,6 +42,8 @@ export const MailFacts = z.looseObject({
   watch: z.object({ id: z.string(), source: z.string(), change: z.string(), late: z.boolean().optional() }).optional(),
   /** On Centralu's warning to the person (#1684): a send a guard refused (`repeat`, `rate_limited`, `ask_rate`), and whose */
   guardRefused: z.object({ sender: z.string(), reason: z.string() }).optional(),
+  /** On Centralu's notice to the person (#2304): the store step that broke older readers and ran without a copy of the store before it, and why (`low_disk`, `failed`) */
+  storeCopySkipped: z.object({ step: z.number(), reason: z.string() }).optional(),
   answerHeld: z.object({ question: z.string(), answer: z.string() }).optional(),
   refused: z.object({ tool: z.string(), target: z.string(), firstLine: z.string(), projectId: z.string() }).optional(),
   trusted: z.object({ project: z.string(), refused: z.array(z.string()) }).optional(),

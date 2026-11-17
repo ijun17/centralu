@@ -234,7 +234,17 @@ const files: OsFiles = {
   writeSync: (fd, data) => (typeof data === 'string' ? fs.writeSync(fd, data) : fs.writeSync(fd, data)),
   fstatSync: (fd) => toStats(fs.fstatSync(fd, { bigint: true })),
   fchmodSync: (fd, mode) => fs.fchmodSync(fd, mode),
+  fsyncSync: (fd) => fs.fsyncSync(fd),
   closeSync: (fd) => fs.closeSync(fd),
+  freeBytesSync: (p) => {
+    try {
+      // What an account without special rights may write (`bavail`), not everything free (`bfree`)
+      const s = fs.statfsSync(p)
+      return s.bavail * s.bsize
+    } catch {
+      return null
+    }
+  },
   createReadStream: (p, o) => fs.createReadStream(p, o),
   watch: (p, o, listener: WatchListener) =>
     fs.watch(p, { recursive: o.recursive }, (event, name) =>

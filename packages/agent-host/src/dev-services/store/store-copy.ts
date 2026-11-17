@@ -1,0 +1,158 @@
+import type Database from 'better-sqlite3'
+import { errorMessage } from '@cc/protocol'
+import { bytesText } from '../../bytes-text.js'
+import type { Os } from '../../os/port.js'
+
+/**
+ * How long a copy is kept (#2304, the owner's decision): long enough to notice what an update broke and go back, short
+ * enough that a file the size of the store does not stay for good.
+ */
+export const COPY_KEPT_MS = 14 * 24 * 60 * 60 * 1000
+
+/** The free space a copy is made with, in store sizes: the copy itself and as much again for the store to keep working */
+const FREE_STORE_SIZES = 2
+
+/** What a copy is written under until it is whole */
+const PARTIAL = '.partial'
+/**
+ * What a copy that was not finished leaves: the partial file, and the journal SQLite keeps beside the file it is
+ * writing. A host killed in `VACUUM INTO` leaves both (seen with a real host stopped 220 MB into a copy).
+ */
+const UNFINISHED = new RegExp(`\\${PARTIAL}(-journal)?$`)
+
+/**
+ * A step that breaks older readers ran without a copy (#2304), and why: the disk had less than the copy is made with
+ * (`free` of the `needed` bytes), or writing it failed. The person is told (mail/host-mail.ts `afterReady`).
+ */
+export type CopySkipped = { step: number; reason: 'low_disk'; free: number; needed: number } | { step: number; reason: 'failed' }
+
+/**
+ * The copy of the store kept before a step that breaks older readers (#2304): a step is the one change a person cannot
+ * undo by installing the build they had, so the store as it was stays beside it, `store.before-<step>.db` next to
+ * `store.db`, with the store's permissions. One copy at most, for 14 days. Nothing reads it: getting it back is the
+ * person's own step (docs/agent-host/store-migrations.md "Getting the copy back"). The runner says when
+ * (store/migrate-runner.ts).
+ *
+ * A file under a copy's name is always a whole copy: it is written as `.partial`, reaches the disk, and is renamed
+ * only then, so a host stopped at any point leaves a `.partial` (and SQLite's journal of it) the next open deletes.
+ */
+export class StoreCopies {
+  private readonly dir: string
+  /** `store.before-` for `store.db`: what every copy's name starts with */
+  private readonly prefix: string
+
+  constructor(
+    private readonly os: Os,
+    private readonly db: Database.Database,
+    private readonly dbPath: string,
+  ) {
+    const { path } = os.paths
+    this.dir = path.dirname(dbPath)
+    this.prefix = `${path.basename(dbPath, path.extname(dbPath))}.before-`
+  }
+
+  /** Every open: what a stopped host left half written goes, and so does a copy older than 14 days */
+  sweep(): void {
+    const now = this.os.clock.now()
+    for (const name of this.names()) {
+      if (UNFINISHED.test(name)) {
+        this.remove(name, 'a host stopped while writing it')
+        continue
+      }
+      if (now - this.writtenAt(name) > COPY_KEPT_MS) this.remove(name, 'it is older than 14 days')
+    }
+  }
+
+  /** When the copy was written, by the file's own time; now for one that cannot be read, which is left */
+  private writtenAt(name: string): number {
+    try {
+      return this.os.files.statSync(this.at(name)).mtimeMs
+    } catch {
+      return this.os.clock.now()
+    }
+  }
+
+  /**
+   * Copies the store as it is now, before `step` runs. Called outside a transaction (`VACUUM` refuses one) and under
+   * the host's lock, so no other writer runs: `VACUUM INTO` reads one snapshot, the WAL's commits included.
+   *
+   * A copy that cannot be made never keeps the host from starting: the step runs without one, and what is returned
+   * says so. An earlier copy is deleted only once this one is whole.
+   */
+  copyBefore(step: number): CopySkipped | null {
+    const { files, clock } = this.os
+    const name = `${this.prefix}${step}.db`
+    const partial = this.at(name + PARTIAL)
+    const t0 = clock.now()
+    try {
+      const store = files.statSync(this.dbPath)
+      const size = store.size + (files.statSync(`${this.dbPath}-wal`, { throwIfNoEntry: false })?.size ?? 0)
+      const needed = FREE_STORE_SIZES * size
+      // A disk that does not say how much is free is tried: a copy that does not fit fails below and is cleaned up
+      const free = files.freeBytesSync(this.dir)
+      if (free !== null && free < needed) {
+        console.error(
+          `[store] no copy before step ${step}: the disk has ${bytesText(free)} free and the copy is made with ${bytesText(needed)} (twice the store); the step runs without one`,
+        )
+        return { step, reason: 'low_disk', free, needed }
+      }
+      console.error(`[store] copying the store (${bytesText(size)}) to ${this.at(name)} before step ${step}, which an older Centralu cannot read past`)
+      /*
+       * Made here, empty, with the store's own permissions, and filled by SQLite, which would make it as wide as the
+       * umask allows. Where modes guard nothing (Windows) the file takes the data folder's access list, as the store did.
+       */
+      const mode = store.mode & 0o777
+      const made = files.openSync(partial, 'wx', mode)
+      try {
+        if (this.os.traits.modesGuardFiles) files.fchmodSync(made, mode)
+      } finally {
+        files.closeSync(made)
+      }
+      this.db.prepare('VACUUM INTO ?').run(partial)
+      // SQLite does not sync what `VACUUM INTO` wrote: without this a power cut after the rename could leave a whole name on half a file
+      const written = files.openSync(partial, 'r+')
+      try {
+        files.fsyncSync(written)
+      } finally {
+        files.closeSync(written)
+      }
+      files.renameSync(partial, this.at(name))
+    } catch (err) {
+      console.error(`[store] no copy before step ${step}: ${errorMessage(err)}; the step runs without one`)
+      // The open swept what earlier hosts left, so what is unfinished now is this copy's
+      for (const left of this.names()) if (UNFINISHED.test(left)) this.remove(left, 'the copy failed')
+      return { step, reason: 'failed' }
+    }
+    console.error(`[store] copied in ${clock.now() - t0}ms; the copy is deleted after 14 days`)
+    for (const other of this.names()) if (other !== name) this.remove(other, 'a newer copy replaced it')
+    return null
+  }
+
+  private at(name: string): string {
+    return this.os.paths.path.join(this.dir, name)
+  }
+
+  /** The copies beside the store, whole and unfinished: `<prefix><step>.db` with a step number and nothing else */
+  private names(): string[] {
+    try {
+      return this.os.files.readdirSync(this.dir).filter((name) => {
+        const whole = name.replace(UNFINISHED, '')
+        return whole.startsWith(this.prefix) && /^\d+\.db$/.test(whole.slice(this.prefix.length))
+      })
+    } catch (err) {
+      console.error(`[store] could not look for copies of the store in ${this.dir}: ${errorMessage(err)}`)
+      return []
+    }
+  }
+
+  /** A copy that cannot be deleted is said and left: the next open tries again */
+  private remove(name: string, why: string): void {
+    try {
+      if (!this.os.files.existsSync(this.at(name))) return
+      this.os.files.rmSync(this.at(name), { force: true })
+      console.error(`[store] deleted ${name}: ${why}`)
+    } catch (err) {
+      console.error(`[store] could not delete ${name} (${why}): ${errorMessage(err)}`)
+    }
+  }
+}

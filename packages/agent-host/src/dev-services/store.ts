@@ -3,6 +3,8 @@ import { isObj } from '../json-value.js'
 import { pragmaNumber } from './store/rows.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import type { Os } from '../os/port.js'
+import { realOs } from '../os/real.js'
 import { AppRunRecords } from './store/app-runs.js'
 import { KeptRuns } from './store/kept-runs.js'
 import { ChildOwnershipRecords } from './store/child-ownership.js'
@@ -80,7 +82,10 @@ export class Store extends MigrationRunner {
   /** User-folder apps registered as projects in place (#1141) */
   readonly adoption: UserAppAdoptionRecords
 
-  constructor(protected readonly dbPath = ':memory:') {
+  constructor(
+    protected readonly dbPath = ':memory:',
+    protected readonly os: Os = realOs(),
+  ) {
     super()
     const path = dbPath
     this.db = new Database(path)

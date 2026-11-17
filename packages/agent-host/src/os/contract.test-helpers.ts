@@ -1348,4 +1348,31 @@ export const CONTRACT: Contract[] = [
       return moved
     },
   },
+  {
+    name: 'free space is a number where something is and null where nothing is',
+    want: both({ folder: true, file: true, missing: null }),
+    run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      f.writeFileSync(join(root, 'file'), 'x')
+      const room = (path: string) => {
+        const free = f.freeBytesSync(path)
+        return free === null ? null : Number.isSafeInteger(free) && free > 0
+      }
+      return { folder: room(root), file: room(join(root, 'file')), missing: room(join(root, 'none', 'below')) }
+    },
+  },
+  {
+    name: 'fsync answers for a file open for writing and refuses a closed descriptor',
+    want: both({ open: 'synced', closed: { error: 'EBADF' } }),
+    async run(os, root) {
+      const f = os.files
+      const fd = f.openSync(os.paths.path.join(root, 'file'), 'w')
+      f.writeSync(fd, 'x')
+      const sync = () => (f.fsyncSync(fd), 'synced')
+      const open = await outcome(sync)
+      f.closeSync(fd)
+      return { open, closed: await outcome(sync) }
+    },
+  },
 ]

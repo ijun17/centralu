@@ -36,6 +36,10 @@ import { StepsV75 } from './v75.js'
  *    opens it and runs nothing it does not know.
  * 4. **Heavy steps are marked `heavy: true`**: a step that rewrites or re-indexes every message, or `VACUUM`s. On the
  *    real store these take seconds (v40: 1.9s on 137,722 messages), which the host's start says in its log.
+ * 5. **The store is copied before a breaking step runs (#2304)**: `breaksOlderReaders: true` is what makes the copy
+ *    (store/store-copy.ts), and nothing else does. So a step that deletes a person's data declares it, also when every
+ *    older build would still read what is left; a step that must delete without breaking adds its own trigger to
+ *    `MigrationStep` in the pull request that adds the step.
  *
  * **What a swap left (#280 step 3, gone since #1895).** A host of an earlier build that took over in a swap left every
  * heavy or breaking step for after it (`deferred_migrations`), with `user_version` already past them. A store that

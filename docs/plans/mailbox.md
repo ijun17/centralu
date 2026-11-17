@@ -807,6 +807,7 @@ task is never reminded: its report settles it.
 | `hostCap` | notice | the host's mail-started turns in the hour passed 120 (D32; an earlier build's notice of its cap); for the person only |
 | `compactCycles` | notice | `{ session, count }`: the session went through more than 6 compact_self cycles with a next step in the hour (D32, S20); for the person only |
 | `guardRefused` | notice | `{ sender, reason }`: a send `repeat`, `rate_limited` or `ask_rate` refused (§7.5, S21); for the person only |
+| `storeCopySkipped` | notice | `{ step, reason }`: a store step that breaks older readers ran without the copy kept before it, `low_disk` or `failed` (#2304, [agent-host/store-migrations.md](../agent-host/store-migrations.md#migration-steps-expand-then-contract-292) rule 7; key `storecopy:<step>`); for the person only |
 | `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S18); for the person only |
 | `watch` | notice | `{ id, source, change, late? }`: a watch's notice to the session that set it (§18.5): what changed (`turn_ended`, `asked`, `stopped`, `gone`, a time's `due`) or how it ended (`expired`, `cancelled`, both quiet); `late` when the host was not there at its time |
 | `watchWakes` | notice | `{ session, count }`: a session's watches woke it more than 6 times in the hour (§18.7); for the person only |

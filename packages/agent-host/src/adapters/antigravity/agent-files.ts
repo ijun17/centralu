@@ -1,7 +1,7 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, stat, statfs, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
@@ -165,14 +165,7 @@ export const realInstallIo: InstallIo = {
     if (!res.ok || !res.body) throw new InstallFailure('network', `The download answered ${res.status} ${res.statusText}`.trim())
     return { total: decodedLength(res.headers), chunks: chunksOf(res.body) }
   },
-  async freeBytes(dir) {
-    try {
-      const s = await statfs(dir)
-      return s.bavail * s.bsize
-    } catch {
-      return null
-    }
-  },
+  freeBytes: (dir) => Promise.resolve(realOs().files.freeBytesSync(dir)),
 }
 
 /**
