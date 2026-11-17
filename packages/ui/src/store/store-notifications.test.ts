@@ -586,6 +586,8 @@ describe('resets, notices and switches the tool made (#304)', () => {
     const items = messagesToChat([
       { sessionId: 'n-4', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'from_a_newer_host', text: 'x' } },
       { sessionId: 'n-4', seq: 2, role: 'system', kind: 'marker', ts: 2, payload: { type: 'compaction', failed: false } },
+      // A payload with no kind it could name has no line kind either (#2338 review)
+      { sessionId: 'n-4', seq: 3, role: 'system', kind: 'marker', ts: 3, payload: { type: 7, text: 'x' } },
     ])
     expect(items.map((i) => (i as { text: string }).text)).toEqual(['Earlier messages were compacted here'])
   })

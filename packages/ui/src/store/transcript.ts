@@ -621,7 +621,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
        * compaction, the only marker there was at first — so a #304 notice read back by an older window would have said
        * "Earlier messages were compacted here".
        */
-      if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) return
+      if (typeof e.type !== 'string' || !KNOWN_MARKERS.has(e.type)) return
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
       const e = m.payload as {
