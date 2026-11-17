@@ -393,6 +393,28 @@ uxTask({
 })
 
 uxTask({
+  id: 'answer-mailed-question-in-words.mouse',
+  task: 'Answer a question an agent mailed, in your own words',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The Inbox count in the top bar opens the list, and the question card takes the words under its choices (#2327); before, the words took Open and the thread’s reply box. The seeded mail stands for a session asking by mail'],
+  start: async (page) => {
+    await demo(page)
+    await page.evaluate(() => {
+      const from = { address: 'session:mock/s1', kind: 'session', sessionId: 's1', name: 'Parser', state: 'idle' }
+      ;(window as any).__mock.seedMail({ subject: 'Settings file format', from, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+    })
+  },
+  run: async (u, page) => {
+    await u.click(page.getByTestId('counter'))
+    await u.fill(page.locator('[data-testid^="mail-ask-answer-"]').first(), 'Neither: ask the owner')
+    await u.click(page.locator('[data-testid^="mail-ask-send-"]').first())
+  },
+  goal: async (page) => expect(page.locator('[data-testid^="mail-ask-"]')).toHaveCount(0),
+  budget: { operators: 38, M: 2, seconds: 15.0 },
+})
+
+uxTask({
   id: 'handoff.mouse',
   task: 'Continue a session in the other tool (hand off from Codex to Claude Code)',
   path: 'mouse',

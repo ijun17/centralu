@@ -26,8 +26,8 @@ const STARTUP_SPEC = /startup\.spec\.ts/
  */
 const RECOVERY_PORT = 5177
 const RECOVERY_URL = `http://127.0.0.1:${RECOVERY_PORT}`
-// The older-host suite (#280) runs the same way: the real web platform, a real host, the relay on 5178
-const RECOVERY_SPEC = /(recovery|older-host)\.spec\.ts/
+// The older-host suite (#280) and the question card against a real host (#2327) run the same way: the real web platform, a real host, the relay on 5178
+const RECOVERY_SPEC = /(recovery|older-host|ask-card-host)\.spec\.ts/
 
 /**
  * The linked-hosts suite (#82) runs the real web platform against two real hosts linked to each
