@@ -47,7 +47,8 @@ export class StepsV75 extends MigrationRange {
          * `mail_blockers`, `mail_messages`, `mail_receipts`), the index that found a thread's open turn (`mail_turns_open`), the three tables
          * of owed work from before mail (`report_marks`, `delegated_turns`, `queued_requests`) and `sessions.mail_args`. Step 74 made tasks of
          * the owed work and step 75 moved the pending thread mail, so what is deleted here is history: thread messages that were handled, or
-         * were older than step 75's 180 days, are not kept anywhere.
+         * were older than step 75's 180 days, are kept only in the copy of the store made before this step, for its 14 days (rule 5 above
+         * `migrationSteps`).
          *
          * One release after step 75, whose build was the first to name none of these (rule 2 above `migrationSteps`). `schema.sql` creates
          * none of them, so a new store and a migrated one end with the same tables.
