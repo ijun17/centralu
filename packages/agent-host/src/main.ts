@@ -20,6 +20,7 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailPerson, personSessions } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
+import { PERSON } from './mail/address.js'
 import { mailPeers } from './links/mail-peers.js'
 import { recordStartingHub } from './sessions/hub-preset.js'
 import { MemoryGate } from './sessions/memory-gate.js'
@@ -695,6 +696,8 @@ const links = new Links(linkDepsFor(store, {
   // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review); the tasks it says never arrived are settled (#2289)
   onOfferAnswered: (machineId, lacks) => hostMailbox.across.offerAnswered(machineId, lacks),
   openTasks: (machineId) => hostMailbox.across.openTasksTo(machineId),
+  // What the person asked for here and a machine did not do (#2330) reaches them as Centralu's notice in the Inbox
+  tellPerson: (body, dedupeKey) => void hostMailbox.service.notice(PERSON, { body, facts: {}, dedupeKey }),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop

@@ -70,8 +70,11 @@ wait stands through those.
 
 One call is not refused while its machine is away (#2330): `projects.delete`. The hub keeps the delete, lists the project and its
 sessions no more, and asks the machine for it at the next hello, before it reads the machine's lists
-(`links/pending-project-deletes.ts`; [plans/remote-hub.md](../../plans/remote-hub.md) §5 "Recovery"). An agent's delete waits for the
-machine first, as its other calls do, and is kept when the wait ran out.
+(`links/pending-project-deletes.ts`; [plans/remote-hub.md](../../plans/remote-hub.md) §5 "Recovery"). A delete the machine failed
+stays owed: it is asked again every 15 s while the link holds (`readLists`) and at the next hello, and the project is listed meanwhile,
+as the machine says. After five failures in a row, or at once when the machine's build has no `projects.delete`, the hub gives up and
+Centralu's notice in the person's Inbox says so. An agent's delete waits for the machine first, as its other calls do, and is kept when
+the wait ran out.
 
 Its sessions keep running there meanwhile; on the next connect the window re-reads that machine (`machine_resync`) and
 with it what they said. The row's Disconnect closes any link without unlinking the machine and tries none until Connect or

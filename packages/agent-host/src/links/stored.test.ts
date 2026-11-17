@@ -187,10 +187,10 @@ describe('the deletes the hub owes machines that were away, in the store (#2330)
   })
 
   it('is what main.ts links with: a delete kept through its deps is read by the next host on the store', () => {
-    const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }) }
+    const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }), tellPerson: () => {} }
     const store = new Store()
-    linkDepsFor(store, rest).projectDeletes!.write([owed('m1', 'p1')])
-    expect(linkDepsFor(store, rest).projectDeletes!.read()).toEqual([owed('m1', 'p1')])
+    linkDepsFor(store, rest).projectDeletes.write([owed('m1', 'p1')])
+    expect(linkDepsFor(store, rest).projectDeletes.read()).toEqual([owed('m1', 'p1')])
     store.close()
   })
 })
@@ -247,7 +247,7 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
    */
   it("makes the tunnel main.ts links with from the store: it pairs as the store's hub id, and main.ts has no tunnel of its own to give", () => {
     const record = { id: 'm1', name: 'box', sshTarget: 'box', remote: { shell: 'posix' as const }, slot: 1, addedAt: 0, acceptedVersions: null }
-    const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }) }
+    const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }), tellPerson: () => {} }
     const store = new Store()
     try {
       const deps = linkDepsFor(store, rest)
@@ -266,7 +266,7 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
     const lines: string[] = []
     const store = new Store()
     try {
-      const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }), log: (l: string) => void lines.push(l) }
+      const rest = { hub: { version: '0', protocolVersion: 1, dev: true }, broadcast: () => {}, terminal: () => {}, installer: {} as never, hubSelf: () => ({ id: 'x', name: 'x' }), tellPerson: () => {}, log: (l: string) => void lines.push(l) }
       linkDepsFor(store, rest).log!('[links] box: hello')
       expect(lines).toHaveLength(1)
       expect(lines[0]).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z \[links\] box: hello$/)

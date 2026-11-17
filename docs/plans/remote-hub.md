@@ -153,12 +153,24 @@ archive there, where they can be restored, and the folder stays, as for a delete
 machine got in the project meanwhile goes with the others, and so does a project brought back there meanwhile by
 restoring one of its sessions (its id is the same): the hub cannot order the two, and the archive there still holds them.
 
-A delete is owed only until the machine was asked over a link that held. Deleted (a project the machine no longer has
-answers the same), refused, failed or not answered in time, the entry is dropped and the lists read right after say what is there: a project a
-machine refused to delete (a build from before the method) is listed again, and the hub's log says why. Only a link that
-went before the answer keeps the entry for the next hello. A hub started again still owes its entries and still does not
-list the project, because both are in its store (the entry is written first: a hub that stopped between the two writes
-lists the project until the hello that deletes it); removing the machine from the hub drops them. An agent's delete goes
+A delete is owed until the machine did it (a project the machine no longer has answers the same). One the machine
+failed or did not answer in time stays owed (#2331 review: one busy store at the hello dropped the delete, and the
+project came back for good with a log line only): it is asked again every 15 s while the link holds, the lists read
+again after each try, and at every later hello. A link that went before the answer keeps the entry for the next hello
+and counts as no try. The hub gives up in two cases, and only then is the entry gone: the machine's build has no
+`projects.delete` (its "Unknown method" answer, which no later try changes), and five failures in a row in one run of
+the hub (`TRIES`; the count is in memory, so a hub started again tries five times more). An answer that refuses the
+call's shape cannot be told from another failure (both are `internal` on the wire), so it ends under the same bound.
+The person is then told by Centralu's notice in their Inbox, once per delete (keyed by the entry's `at`): what could
+not be deleted, the machine's reason, that the project is listed again, and what to do. Between a failed try and the
+next the project is listed again too: the lists of a machine that answers are the machine's own, and the hub hides
+nothing in them, so there is one place a project is hidden (the mirror) and none for a connected machine.
+
+A hub started again still owes its entries and still does not list the project, because both are in its store (the
+entry is written first: a hub that stopped between the two writes lists the project until the hello that deletes it);
+removing the machine from the hub drops them. The delete applies whatever the machine did with the project meanwhile,
+also when the entry is older than the project's last activity there (an entry that waited through a rollback of the hub
+to a build from before it): the person said delete, and the archive there holds the sessions. An agent's delete goes
 the same way once its wait for the machine ran out (`reachForCall`), and a limited credential's after the hub's card.
 Every other call to a machine that is away is refused as before. Another hub linked to the same machine hears of the
 delete from the machine itself: a host says `projects_changed` when it deletes a project.

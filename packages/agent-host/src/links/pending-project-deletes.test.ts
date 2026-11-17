@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HeadersMirror, PendingProjectDelete } from './link-deps.js'
-import { heldProjectDeletes, PendingProjectDeletes } from './pending-project-deletes.js'
+import { heldProjectDeletes } from './links-world.test-helpers.js'
+import { PendingProjectDeletes, TRIES } from './pending-project-deletes.js'
 
 /**
  * The deletes a hub owes one linked machine (#2330), on their own: what is kept, what the hub's lists lose at once, and
@@ -35,6 +36,7 @@ function world() {
   const role = (id: 'm1' | 'm2') => {
     const heard: unknown[] = []
     const lines: string[] = []
+    const told: { text: string; key: string }[] = []
     const machine = { id, name: id === 'm1' ? 'Desk' : 'Laptop' }
     const deletes = new PendingProjectDeletes({
       machine,
@@ -45,9 +47,10 @@ function world() {
         if (e.type === 'session_deleted') mirror.removeSession(id, e.sessionId)
         heard.push(e)
       },
+      tell: (text, key) => void told.push({ text, key }),
       log: (line) => void lines.push(line),
     })
-    return { deletes, heard, lines, machine }
+    return { deletes, heard, lines, told, machine }
   }
   const owed = () => list.read().map((d: PendingProjectDelete) => `${d.machine}.${d.projectId}`)
   return { lists, list, m1: role('m1'), m2: role('m2'), owed }
@@ -105,19 +108,88 @@ describe('the deletes a hub owes a linked machine (#2330)', () => {
     ])
   })
 
-  it('drops a delete the machine refused over a link that held, says so, and goes on to the next', async () => {
+  /** Asks the machine once: `answer` throws what the machine answered a project's delete with */
+  const ask = (m: ReturnType<typeof world>['m1'], answer: (projectId: string) => void, linkUp = true) => {
+    const asked: string[] = []
+    return m.deletes
+      .apply(async (_method, params) => {
+        const { projectId } = params as { projectId: string }
+        asked.push(projectId)
+        answer(projectId)
+      }, () => linkUp)
+      .then(() => asked)
+  }
+  const busy = () => {
+    throw new Error('database is locked')
+  }
+
+  it('keeps a delete the machine failed, goes on to the next, and asks it again: done then, the windows read the projects again', async () => {
     const { m1, owed } = world()
     m1.deletes.keep('p1')
     m1.deletes.keep('p2')
-    const asked: string[] = []
-    await m1.deletes.apply(async (_method, params) => {
-      const { projectId } = params as { projectId: string }
-      asked.push(projectId)
-      if (projectId === 'p1') throw new Error('Unknown method: projects.delete')
-    }, () => true)
-    expect(asked).toEqual(['p1', 'p2'])
+    expect(await ask(m1, (id) => (id === 'p1' ? busy() : undefined))).toEqual(['p1', 'p2'])
+    expect(owed()).toEqual(['m1.p1'])
+    expect(m1.deletes.any).toBe(true)
+    // Asked and failed: the next try is after a pause, not at once (`readLists`)
+    expect(m1.deletes.unasked).toBe(false)
+    expect(m1.lines[2]).toBe('[links] Desk: could not delete project "Shop", as asked here while it was away: database is locked. It is asked again')
+    expect(m1.told).toEqual([])
+    const heard = m1.heard.length
+    expect(await ask(m1, () => {})).toEqual(['p1'])
     expect(owed()).toEqual([])
-    expect(m1.lines[2]).toBe('[links] Desk: could not delete project "Shop", as asked here while it was away: Unknown method: projects.delete. The project is listed again')
+    // The machine's lists had it again meanwhile
+    expect(m1.heard.slice(heard)).toEqual([{ type: 'projects_changed' }])
+    expect(m1.lines.at(-1)).toBe('[links] Desk: deleted project "Shop", as asked here while it was away')
+  })
+
+  it(`gives up a delete the machine failed ${TRIES} times in a row, and tells the person once`, async () => {
+    const { list, m1, owed } = world()
+    m1.deletes.keep('p1')
+    const { at } = list.read()[0]!
+    for (let i = 1; i < TRIES; i++) await ask(m1, busy)
+    // A link that went before the answer is no try
+    await ask(m1, busy, false)
+    expect(owed()).toEqual(['m1.p1'])
+    expect(m1.told).toEqual([])
+    await ask(m1, busy)
+    expect(owed()).toEqual([])
+    expect(m1.told).toEqual([
+      {
+        text: 'Could not delete project "Shop" on Desk: database is locked. It was deleted here while Desk was not connected, and it is listed again. Delete it again to try once more.',
+        key: `project-delete:m1:p1:${at}`,
+      },
+    ])
+    expect(m1.lines.at(-1)).toBe('[links] Desk: could not delete project "Shop", as asked here while it was away: database is locked. The project is listed again')
+    // Deleted again later, it has its tries again
+    m1.deletes.keep('p1')
+    await ask(m1, busy)
+    expect(owed()).toEqual(['m1.p1'])
+  })
+
+  it('starts the count over once the machine did a delete: the tries are in a row', async () => {
+    const { m1, owed } = world()
+    m1.deletes.keep('p1')
+    for (let i = 1; i < TRIES; i++) await ask(m1, busy)
+    await ask(m1, () => {})
+    m1.deletes.keep('p1')
+    for (let i = 1; i < TRIES; i++) await ask(m1, busy)
+    expect(owed()).toEqual(['m1.p1'])
+    expect(m1.told).toEqual([])
+  })
+
+  it('gives up at once a delete the machine’s build cannot do, tells the person, and goes on to the next', async () => {
+    const { m1, owed } = world()
+    m1.deletes.keep('p1')
+    m1.deletes.keep('p2')
+    const unknown = () => {
+      throw new Error('Unknown method: projects.delete. This Centralu host does not have it; the window may be from another build.')
+    }
+    expect(await ask(m1, (id) => (id === 'p1' ? unknown() : undefined))).toEqual(['p1', 'p2'])
+    expect(owed()).toEqual([])
+    expect(m1.lines[2]).toBe('[links] Desk: could not delete project "Shop", as asked here while it was away: Desk runs an older Centralu, which cannot do this. The project is listed again')
+    expect(m1.told.map((t) => t.text)).toEqual([
+      'Could not delete project "Shop" on Desk: Desk runs an older Centralu, which cannot do this. It was deleted here while Desk was not connected, and it is listed again. Update Centralu on Desk, then delete it again.',
+    ])
   })
 
   it('keeps a delete whose answer the link went before, with the ones after it, for the next hello', async () => {
@@ -151,6 +223,7 @@ describe('the deletes a hub owes a linked machine (#2330)', () => {
     }, () => true)
     expect(asked).toEqual(['p1'])
     expect(owed()).toEqual(['m1.p2'])
-    expect(m1.deletes.any).toBe(true)
+    // The lists are read again at once for it (`readLists`)
+    expect(m1.deletes.unasked).toBe(true)
   })
 })

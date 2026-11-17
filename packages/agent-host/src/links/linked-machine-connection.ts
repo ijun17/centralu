@@ -20,7 +20,7 @@ import {
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
 import { nodeFloor } from './install.js'
-import { heldProjectDeletes, PendingProjectDeletes } from './pending-project-deletes.js'
+import { PendingProjectDeletes } from './pending-project-deletes.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
@@ -72,6 +72,9 @@ const LINK_REDIALS = 5
  * every 10 s for good
  */
 const STABLE_MS = 60_000
+
+/** How long after a delete a machine failed it is asked again (#2330): past a store that was busy, and five of them (`TRIES`) within about a minute */
+const DELETE_RETRY_MS = 15_000
 
 /**
  * At most this many hosts started there by the link alone within `windowMs` (#1143); past it the row says `stopped`
@@ -194,6 +197,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private attempt = 0
   /** Starts the backoff over once the host that last said hello has stayed up `STABLE_MS` */
   private stableTimer: ReturnType<typeof setTimeout> | undefined
+  /** The next try of a delete the machine failed (`readLists`) */
+  private deleteRetryTimer: ReturnType<typeof setTimeout> | undefined
   /** When the link started a host there by itself, within the last `RESTARTS.windowMs` (#1143) */
   private autoStarts: number[] = []
   /**
@@ -303,9 +308,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
     this.pendingDeletes = new PendingProjectDeletes({
       machine: this,
-      list: deps.projectDeletes ?? heldProjectDeletes(),
+      list: deps.projectDeletes,
       mirror: deps.mirror,
       heard: (event) => this.onEvent(event),
+      tell: deps.tellPerson,
       log: (line) => deps.log?.(line),
     })
     for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
@@ -1414,18 +1420,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     client.connect()
   }
 
-  private async onHello(client: RemoteClient, h: RemoteHello): Promise<void> {
-    if (this.client !== client) return
-    // The host that answered may not be the one the connection line described (restarted since)
-    if (h.build) {
-      const v = this.check({ version: h.build.version ?? this.versions?.remote.version ?? 'unknown', protocolVersion: h.build.protocolVersion, dev: h.build.commit === 'dev' })
-      if (!mayConnect(v)) return
-    }
-    /*
-     * What the person deleted here while it was away goes first (#2330), so the lists read after are without it; and again
-     * when a delete was kept while they were being read. Nothing awaits between the lists and `connected` below, so
-     * nothing is owed to a machine that can be asked
-     */
+  /**
+   * The machine's lists, into the mirror. What the person deleted here while it was away goes first (#2330), so the lists
+   * read after are without it; and again at once when a delete was kept while they were being read. Nothing awaits
+   * between the lists and `connected` (`onHello`), so no delete waits unasked for a machine that can be asked. A delete the
+   * machine failed stays owed (pending-project-deletes.ts): it is asked again, and the lists read again, after a pause
+   * for as long as this link holds; the next hello asks it otherwise
+   */
+  private async readLists(client: RemoteClient): Promise<void> {
+    // One reader at a time: a hello on this link while a try waits takes its place
+    clearTimeout(this.deleteRetryTimer)
     do {
       await this.pendingDeletes.apply((method, params) => client.call(method, params), () => client.connected)
       try {
@@ -1443,7 +1447,23 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       } catch (err) {
         this.deps.log?.(`[links] ${this.name}: could not read its lists after connecting: ${(err as Error).message}`)
       }
-    } while (this.client === client && client.connected && this.pendingDeletes.any)
+    } while (this.client === client && client.connected && this.pendingDeletes.unasked)
+    if (this.client !== client || !client.connected || !this.pendingDeletes.any) return
+    clearTimeout(this.deleteRetryTimer)
+    this.deleteRetryTimer = setTimeout(() => {
+      if (this.client === client && client.connected) void this.readLists(client)
+    }, this.deps.deleteRetryMs ?? DELETE_RETRY_MS)
+    this.deleteRetryTimer.unref?.()
+  }
+
+  private async onHello(client: RemoteClient, h: RemoteHello): Promise<void> {
+    if (this.client !== client) return
+    // The host that answered may not be the one the connection line described (restarted since)
+    if (h.build) {
+      const v = this.check({ version: h.build.version ?? this.versions?.remote.version ?? 'unknown', protocolVersion: h.build.protocolVersion, dev: h.build.commit === 'dev' })
+      if (!mayConnect(v)) return
+    }
+    await this.readLists(client)
     if (this.client !== client) return
     /*
      * The backoff starts over once this host has stayed up a while (#1143), not at its hello: a host that answers and

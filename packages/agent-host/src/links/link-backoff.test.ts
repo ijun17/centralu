@@ -3,6 +3,7 @@ import { APP_VERSION, PROTOCOL_VERSION } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { Links } from './links.js'
 import { storeMirror, storeRegistry } from './stored.js'
+import { nothingOwed } from './links-world.test-helpers.js'
 import type { Tunnel } from './tunnel.js'
 
 /**
@@ -39,6 +40,7 @@ describe('a linked machine that cannot be reached (#1134)', () => {
       broadcast: () => {},
       terminal: () => {},
       mirror: storeMirror(store),
+      ...nothingOwed(),
       registry,
       tunnelFor: () => awayTunnel(at),
     })

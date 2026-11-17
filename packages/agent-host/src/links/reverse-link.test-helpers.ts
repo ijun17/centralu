@@ -277,6 +277,7 @@ export async function hubHost(
     mirror: storeMirror(store),
     registry,
     projectDeletes: storeProjectDeletes(store),
+    tellPerson: () => {},
     tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },

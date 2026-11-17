@@ -95,6 +95,8 @@ const links = new Links({
   mirror: storeMirror(store),
   // Kept in this host's store, as `main.ts` keeps them: a hub started again still owes them (#2330)
   projectDeletes: storeProjectDeletes(store),
+  // This host has no mailbox: what `main.ts` writes to the person's Inbox is a line of its log here
+  tellPerson: (text) => console.error(`[links] to the person: ${text}`),
   registry,
   tunnelFor: (record) => {
     const ssh = sshLinks.find((l) => l.id === record.id)

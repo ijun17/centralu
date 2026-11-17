@@ -4,6 +4,7 @@ import { cleanups, folder, runCleanups, seedSession } from './links-world.test-h
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { storeProjectDeletes } from './stored.js'
+import { TRIES } from './pending-project-deletes.js'
 import { Store } from '../dev-services/store.js'
 import { realOs } from '../os/real.js'
 import { SessionManager } from '../sessions/manager.js'
@@ -37,7 +38,9 @@ const connected = (hub: Hub) => eventually(() => hub.machine().status === 'conne
 async function rig(o: { without?: readonly string[]; deps?: Partial<LinkDeps> } = {}) {
   const machine = await machineHost({ without: o.without })
   const lines: string[] = []
-  const hub = await hubHost(machine.port, { deps: { log: (line) => void lines.push(line), ...o.deps } })
+  /** What Centralu wrote to the person's Inbox */
+  const told: string[] = []
+  const hub = await hubHost(machine.port, { deps: { log: (line) => void lines.push(line), tellPerson: (text) => void told.push(text), ...o.deps } })
   await connected(hub)
   expect(await view(hub).projects()).toContain('m1.p-remote')
   expect(await view(hub).sessions()).toContain('m1.w1')
@@ -50,7 +53,13 @@ async function rig(o: { without?: readonly string[]; deps?: Partial<LinkDeps> } 
     await machine.server.close()
     await away(hub)
   }
-  return { machine, hub, lines, folder, there, stopMachine }
+  /** The machine's store is busy for its next `n` deletes of a project: its sessions are in the archive by then, the project's row stays */
+  const busy = (n: number) => {
+    const spy = vi.spyOn(machine.store.trash, 'deleteProject')
+    for (let i = 0; i < n; i++) spy.mockImplementationOnce(() => { throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' }) })
+    return spy
+  }
+  return { machine, hub, lines, told, folder, there, stopMachine, busy }
 }
 
 describe('deleting a project of a linked machine that is away (#2330)', () => {
@@ -141,9 +150,64 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     expect(await view(hub).projects()).toEqual(['p-hub'])
   })
 
-  it('lists the project again when the machine refused the delete, and does not ask it again', async () => {
-    // A build from before `projects.delete`, or one that refuses it: the project is there, so the hub shows it
-    const { machine, hub, lines, there, stopMachine } = await rig({ without: ['projects.delete'] })
+  it('asks again for a delete the machine failed, while the link holds, and the project is deleted', async () => {
+    const { machine, hub, lines, told, there, stopMachine, busy } = await rig({ deps: { deleteRetryMs: 20 } })
+    await stopMachine()
+    await hub.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)
+    const tries = busy(1)
+    const heard = vi.spyOn(hub.server, 'broadcast')
+    await machine.bounce()
+    await eventually(() => there.projects().length === 0)
+    expect(tries).toHaveBeenCalledTimes(2)
+    await eventually(() => view(hub).owed().length === 0)
+    expect(lines).toContain('[links] Remote box: could not delete project "remote-project", as asked here while it was away: database is locked. It is asked again')
+    expect(lines).toContain('[links] Remote box: deleted project "remote-project", as asked here while it was away')
+    expect(told).toEqual([])
+    // The windows listed it again after the try that failed: they are told to read the projects once more
+    await eventually(() => heard.mock.calls.some(([e]) => e.type === 'projects_changed'))
+    expect(await view(hub).projects()).toEqual(['p-hub'])
+    expect(await view(hub).sessions()).toEqual(['h1'])
+  })
+
+  it('still owes a delete the machine failed after the hub is started again, and lists the project meanwhile: the machine has it', async () => {
+    const { machine, hub, told, there, stopMachine, busy } = await rig()
+    await stopMachine()
+    await hub.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)
+    busy(1)
+    await machine.bounce()
+    await connected(hub)
+    expect(there.projects()).toEqual(['p-remote'])
+    expect(view(hub).owed()).toEqual(['m1.p-remote'])
+    // The hub hides nothing a machine that answers says it has
+    expect(await view(hub).projects()).toContain('m1.p-remote')
+    await hub.stop()
+    const again = await hubHost(machine.port, { store: hub.store })
+    await connected(again)
+    expect(there.projects()).toEqual([])
+    expect(view(again).owed()).toEqual([])
+    expect(await view(again).projects()).toEqual(['p-hub'])
+    expect(told).toEqual([])
+  })
+
+  it('gives up a delete the machine keeps failing, tells the person in the Inbox, and lists the project', async () => {
+    const { machine, hub, told, there, stopMachine, busy } = await rig({ deps: { deleteRetryMs: 10 } })
+    await stopMachine()
+    await hub.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)
+    const tries = busy(TRIES + 1)
+    await machine.bounce()
+    await eventually(() => told.length > 0)
+    expect(told).toEqual([
+      'Could not delete project "remote-project" on Remote box: database is locked. It was deleted here while Remote box was not connected, and it is listed again. Delete it again to try once more.',
+    ])
+    expect(tries).toHaveBeenCalledTimes(TRIES)
+    expect(view(hub).owed()).toEqual([])
+    expect(there.projects()).toEqual(['p-remote'])
+    expect(await view(hub).projects()).toContain('m1.p-remote')
+  })
+
+  it('gives up at once a delete the machine’s build cannot do, tells the person in the Inbox, and lists the project', async () => {
+    // A build from before `projects.delete`: no later try changes its answer
+    const { machine, hub, lines, told, there, stopMachine } = await rig({ without: ['projects.delete'] })
     await stopMachine()
     await hub.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)
     expect(await view(hub).projects()).toEqual(['p-hub'])
@@ -154,6 +218,9 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     expect(await view(hub).sessions()).toContain('m1.w1')
     expect(view(hub).owed()).toEqual([])
     expect(lines.filter((l) => l.includes('could not delete project "remote-project"'))).toHaveLength(1)
+    expect(told).toEqual([
+      'Could not delete project "remote-project" on Remote box: Remote box runs an older Centralu, which cannot do this. It was deleted here while Remote box was not connected, and it is listed again. Update Centralu on Remote box, then delete it again.',
+    ])
   })
 
   it('deletes in the same hello a project deleted while the hello was reading the lists', async () => {
@@ -167,7 +234,7 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     expect(await hub.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)).toEqual({ ok: true })
     release()
     await connected(hub)
-    // Connected means nothing is owed: the machine was asked before the hub said so
+    // The machine was asked before the hub said it is connected
     expect(view(hub).owed()).toEqual([])
     expect(machine.store.projects.listProjects()).toEqual([])
     expect(await view(hub).projects()).toEqual(['p-hub'])
