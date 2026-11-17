@@ -5,7 +5,8 @@ import { StickyUser, type StickyUserState } from './StickyUser.jsx'
 
 function pinned(over: Partial<StickyUserState>): string {
   const sticky = {
-    stickyText: 'Manager ⤷ Run the tests',
+    stickyText: 'Run the tests',
+    stickySource: 'Manager',
     stickyRelayed: false,
     stickyRef: createRef<HTMLDivElement>(),
     stickyOpen: true,

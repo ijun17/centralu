@@ -189,7 +189,7 @@ test('the view\'s ui/message asks before sending it to this conversation, and th
   expect(await logged(v, 'msg-result', 1)).toEqual({})
   // It shows in the conversation as sent by the app — not as a human speech bubble
   const said = page.getByTestId('msg-user').filter({ hasText: 'hello from the view' })
-  await expect(said.getByTestId('msg-user-from-app')).toHaveText('Viewer app ⤷')
+  await expect(said.getByTestId('msg-user-from-app')).toHaveText('Viewer app')
 })
 
 test('Pin opens that app\'s pinned view', async ({ page }) => {

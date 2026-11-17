@@ -29,7 +29,7 @@ ext-apps examples here, from their published npm packages, with a minimal manife
   only "Open app", the pinned view.
 - **Pin** opens the app's pinned view.
 - **`ui/message`** from an inline view asks first (*<app> wants to send this to this conversation*,
-  Cancel or Send). Sent text goes only to that conversation, is shown as "<app> app ⤷", and reaches
+  Cancel or Send). Sent text goes only to that conversation, is shown under "<app> app" and the arrow of a relayed message, and reaches
   the agent framed as the app's text (security-boundaries/untrusted-text.md "Text an app sends").
 
 ## Pinned, in the main area (Centralu's way, within the standard)

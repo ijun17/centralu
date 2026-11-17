@@ -53,7 +53,7 @@ having taken it, because sending it again could run the work twice. If that tool
 queued, a rejected `turn/start`), the delivery makes the mail unread and undelivered again and holds it `failed` for the person (Inbox:
 Retry): a failure told that late does not prove the tool never ran it, so nothing sends it again by itself. A failure after the tool
 took it is not acted on. The tool keeps the wake in its own record as a user turn; the host writes no user row for it, so the catch-up and the import
-that read the record back leave the wake out (`mail/wake-text.ts`, used by `stripInjectedBlocks`): the `✉` line the delivery
+that read the record back leave the wake out (`mail/wake-text.ts`, used by `stripInjectedBlocks`): the mail line the delivery
 wrote is its only trace in the conversation, and `read_session` and `recall` never show it as the person's message.
 
 **Mail without threads (M3a, #1684, docs/plans/mailbox.md §7 to §9).** The host's mail is messages in `mail` and `mail_recipients`, wired

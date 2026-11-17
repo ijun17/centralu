@@ -73,7 +73,7 @@ describe('a session at rest is woken by mail', () => {
     // The conversation keeps a compact line from Centralu's record, and no user row: nothing reads as the person
     expect(stored(worker.id).filter((m) => m.role === 'user')).toHaveLength(userRowsBefore)
     expect(mailLines(worker.id)).toHaveLength(1)
-    expect(mailLines(worker.id)[0]!.payload).toMatchObject({ type: 'notice', level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message, from a session of your project' })
+    expect(mailLines(worker.id)[0]!.payload).toMatchObject({ type: 'notice', level: 'info', from: 'Centralu', label: 'mail', text: '1 message from a session of your project' })
     expect(w.events.some((e: NormalizedEvent) => e.type === 'user_message' && e.sessionId === worker.id)).toBe(false)
     expect(read.row(sent.id, addressOf(worker.id))!.deliveredAt).not.toBeNull()
   })

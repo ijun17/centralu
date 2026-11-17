@@ -439,7 +439,7 @@ export class MailDelivery {
     const party = parseAddress(recipient)
     if (held > 0 && party?.kind === 'session') {
       const n = held === 1 ? 'A delivery' : `${held} deliveries`
-      this.sessions.note(party.sessionId, `✉ ${n} may have reached you although the tool reported a failure, and was not sent again: the Inbox has Resend and Dismiss`)
+      this.sessions.note(party.sessionId, `${n} may have reached you although the tool reported a failure, and was not sent again: the Inbox has Resend and Dismiss`)
     }
   }
 
@@ -450,7 +450,7 @@ export class MailDelivery {
         const party = parseAddress(recipient)
         if (held > 0 && party?.kind === 'session') {
           const n = held === 1 ? 'A delivery' : `${held} deliveries`
-          this.sessions.note(party.sessionId, `✉ ${n} may not have arrived when Centralu restarted, and was not sent again: the Inbox has Resend and Dismiss`)
+          this.sessions.note(party.sessionId, `${n} may not have arrived when Centralu restarted, and was not sent again: the Inbox has Resend and Dismiss`)
         }
       }
     } catch (e) {

@@ -514,3 +514,40 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
     </svg>
   )
 }
+
+/**
+ * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
+ * below. It replaced the font's ⤷, which each face drew at its own height and which sat above the text (#2332). `align-middle`
+ * puts its centre on the text's x-height centre, so it reads as part of the line in any face and size
+ */
+export function FromArrowIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="inline-block shrink-0 align-middle">
+      <path
+        d="M4.5 2.5V8a2.5 2.5 0 0 0 2.5 2.5h6.5M10.5 7.5l3 3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/**
+ * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. Drawn to the cap height of
+ * the step's text and centred on its first line, where the font glyphs (✓ ▸ ○) were each a different, smaller size (#2332)
+ */
+export function PlanStepIcon({ status, size = 12 }: { status: 'pending' | 'inProgress' | 'completed'; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      {status === 'completed' ? (
+        <path d="M2.5 8.5 6 12l7.5-8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      ) : status === 'inProgress' ? (
+        <path d="M5 2.75v10.5L12.5 8z" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+      ) : (
+        <circle cx="8" cy="8" r="4.75" stroke="currentColor" strokeWidth="1.5" />
+      )}
+    </svg>
+  )
+}

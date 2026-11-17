@@ -231,7 +231,12 @@ export function buildMessageFrame(
   })
 }
 
-/** The compact line the conversation keeps of a delivery: how many, from whom, in Centralu's words and with no name another party wrote */
+/**
+ * The compact line the conversation keeps of a delivery: how many, from whom, in Centralu's words and with no name another party wrote.
+ * "2 messages from a session of your project and a session of another project": no glyph, the window draws the mail icon (#2332)
+ */
 export function deliveryLine(messages: number, relations: ReadonlySet<string>): string {
-  return `✉ ${messages} ${messages === 1 ? 'message' : 'messages'}, from ${[...relations].join(', ')}`
+  const parties = [...relations]
+  const from = parties.length > 1 ? `${parties.slice(0, -1).join(', ')} and ${parties.at(-1)}` : (parties[0] ?? '')
+  return `${messages} ${messages === 1 ? 'message' : 'messages'} from ${from}`
 }

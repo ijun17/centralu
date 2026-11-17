@@ -786,7 +786,7 @@ test.describe('B-4: a pinned view\'s ui/message', () => {
     // It shows in the conversation as sent by the app — not as a human speech bubble
     await page.getByTestId(`session-row-${sid}`).click()
     const said = page.getByTestId('msg-user').filter({ hasText: 'hello from the view' })
-    await expect(said.getByTestId('msg-user-from-app')).toHaveText('Slider app ⤷')
+    await expect(said.getByTestId('msg-user-from-app')).toHaveText('Slider app')
   })
 })
 
