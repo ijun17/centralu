@@ -1,0 +1,4 @@
+{
+  "bytes": 400,
+  "reason": "The delete dialog's sentence for a project whose machine is not connected (#2330): one string and the two store reads that decide it (isAway, the machine's name). CI measured 1,957,145 B against main's 1,956,840 B (a4014497), +305 B, 145 B over the ceiling main sat 160 B under. Plain code, no dependency."
+}
