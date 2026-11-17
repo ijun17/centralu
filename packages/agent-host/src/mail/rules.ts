@@ -216,6 +216,13 @@ export const WARNING_TEXT = {
   repeat: (sender: string, to: string) => `Centralu refused mail from ${sender} to ${to}: the same text again within ${durationText(REPEAT_WINDOW_MS)}. ${sender} was told; nothing else was stopped.`,
   rate_limited: (sender: string, limit: number) => `Centralu refused mail from ${sender}: more than ${limit} messages in a minute. ${sender} was told to wait; nothing else was stopped.`,
   ask_rate: (sender: string) => `Centralu refused a request from ${sender} to the Assistant: its project's sessions asked ${ASKS_PER_HOUR} times in the last hour. ${sender} was told to wait or write to you.`,
+  /**
+   * An update changed the store past what an older build reads without the copy kept before it (#2304): the disk was
+   * `short` of the room a copy is made with, or (null) the copy could not be written, which the log explains. Said
+   * plainly, since nothing brings back what the change removed
+   */
+  noStoreCopy: (short: { free: string; needed: string } | null) =>
+    `This update changed Centralu's data on this computer without keeping a copy first: ${short ? `the disk has ${short.free} free, and the copy is made only when ${short.needed} is free (twice the size of the data)` : 'the copy could not be written'}. The change cannot be undone, and there is no copy to go back to. Centralu works as usual.`,
 } as const
 
 

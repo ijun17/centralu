@@ -1,5 +1,6 @@
 import { prChecks } from '../dev-services/git-pr.js'
 import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
+import { bytesText } from '../bytes-text.js'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
 import { labelOf } from '../sessions/transcript-view.js'
@@ -429,6 +430,16 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         service.stops.sessionsStopped(stops)
       } catch (e) {
         console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
+      }
+      try {
+        // A step that breaks older readers ran at this start without the copy kept before it (#2304): the person hears of it once
+        const skipped = store.copySkipped
+        if (skipped) {
+          const short = skipped.reason === 'low_disk' ? { free: bytesText(skipped.free), needed: bytesText(skipped.needed) } : null
+          service.notice(PERSON, { body: WARNING_TEXT.noStoreCopy(short), facts: { storeCopySkipped: { step: skipped.step, reason: skipped.reason } }, dedupeKey: `storecopy:${skipped.step}` })
+        }
+      } catch (e) {
+        console.error(`[mail] telling the person that the store was changed without a copy failed: ${errorMessage(e)}`)
       }
       delivery.start()
       // No process outlives its host: a session the last host left at rest after a turn that ended as turns do, with tasks it did not answer,

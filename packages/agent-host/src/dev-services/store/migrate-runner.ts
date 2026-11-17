@@ -1,7 +1,9 @@
 import { z } from 'zod'
+import type { Os } from '../../os/port.js'
 import { parseJson, readJsonList } from './json.js'
 import { type MigrationStep } from './migrations/context.js'
 import { ReaderGate } from './reader-gate.js'
+import { type CopySkipped, StoreCopies } from './store-copy.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
 
@@ -31,6 +33,12 @@ export abstract class MigrationRunner extends ReaderGate {
    * cost quietly grows, and nobody notices. Counting it lets a test ask.
    */
   migrationsRun = 0
+
+  /** The files of the store's folder, through the OS layer: where the copy before a breaking step goes */
+  protected abstract readonly os: Os
+
+  /** A step that breaks older readers ran at this open without a copy of the store before it (#2304), and why; null otherwise */
+  copySkipped: CopySkipped | null = null
 
   /**
    * The migration runner (E-0).
@@ -83,9 +91,21 @@ export abstract class MigrationRunner extends ReaderGate {
     const deferred = new Set(this.storedDeferred())
     const owed = steps.filter((s) => s.to <= current && deferred.has(s.to)).map((s) => s.to)
     this.sayUnreadableDeferred()
+    /*
+     * The store is copied before the first step that breaks older readers (#2304, store/store-copy.ts): once an open,
+     * so a store that crosses several keeps the one from before the first. Not a store that is new (version 0: every
+     * open ends at the newest step, so one that holds a person's data is never there) or in memory.
+     */
+    const copies = current > 0 && this.dbPath !== ':memory:' ? new StoreCopies(this.os, this.db, this.dbPath) : null
+    copies?.sweep()
+    let copied = false
     for (const step of steps) {
       const due = current < step.to || deferred.has(step.to)
       if (!due) continue
+      if (copies && step.breaksOlderReaders && !copied) {
+        this.copySkipped = copies.copyBefore(step.to)
+        copied = true
+      }
       floor = this.runStep(step, floor, () => {
         if (step.to > this.schemaVersion) this.db.pragma(`user_version = ${step.to}`)
         // A step an earlier swap left for later is crossed off in its own commit

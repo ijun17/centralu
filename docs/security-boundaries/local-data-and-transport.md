@@ -9,6 +9,12 @@ the folder `0700`, and `store.db`, its WAL and SHM files and the host's logs `06
 `host.log` is created `0600`. Only what the owner owns and what is not a link is changed, only for the data folder
 itself (a `--db` elsewhere is left alone), and not on Windows, whose profile folder's ACL is already per user.
 
+The copy of the store kept before a breaking step (`store.before-<step>.db`, #2304,
+[agent-host/store-migrations.md](../agent-host/store-migrations.md#migration-steps-expand-then-contract-292) rule 7)
+holds what the store holds, so it is created with the store's own mode, `0600` here, and never wider for a moment:
+the file is opened with that mode before SQLite writes into it. It is not in the list the start narrows, because it
+is never made wider than the store, and it is deleted after 14 days.
+
 The folder's own mode is what protects the rest: a file written later with the default mode (an older build serving
 during a swap, an app's data, SQLite) is still behind a folder only its owner can enter, and an older build never
 widens the folder again. The host's `umask` is not changed: it is every agent's and every terminal's, and the files
