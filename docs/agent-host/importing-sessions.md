@@ -12,7 +12,7 @@ breaks silently when the tool is upgraded, and you end up showing the wrong conv
 
 | | List | Read the conversation |
 |---|---|---|
-| Claude Code | SDK `listSessions({ dir })` | SDK `getSessionMessages(id, { dir })` |
+| Claude Code | SDK `listSessions({ dir })` | SDK `importSessionToStore(id, store, { dir })`, then `getSessionMessages(id, { dir, sessionStore })` from that store; `getSessionMessages(id, { dir })` on an SDK without it |
 | Codex | app-server `thread/list { cwd }` | app-server `thread/turns/list { threadId, sortDirection: 'desc', itemsView: 'full' }`, page by page; `thread/read { threadId, includeTurns }` on a Codex without it |
 
 Responsibility for version compatibility sits with the tool — each API reads the storage format its own version wrote.
@@ -62,6 +62,22 @@ and the first conversation as `<ide_opened_file>…`.
 `adapters/history-text.ts` strips only these blocks — it does not throw the whole thing away,
 because real user speech often follows an injected block.
 Only when nothing is left after stripping is the line dropped.
+**Who wrote a Claude user line is the transcript's word, not the text's**
+([#2323](https://github.com/ijun17/centralu/issues/2323)). A background task's `<task-notification>` that arrived while
+the host restarted came back from the catch-up as a message of the person's: the tag list did not have it, and a tag
+list misses each kind of line the CLI adds next. `getSessionMessages` keeps only a row's `type`, `uuid` and `message`
+(SDK 0.3.263 and 0.3.326), but the entry the CLI wrote says who made it, and the SDK's `importSessionToStore` (@alpha)
+hands every entry to a store of ours that `getSessionMessages` then reads its rows from, so the file is read once. A
+user line is the CLI's (`writtenByTheCli`) when its entry is `isMeta`, has `promptSource: "system"`, or has an
+`origin` whose kind is not `human` (`SDKMessageOrigin`; measured over CLI 2.1.263 to 2.1.299: a task notification is
+`origin.kind: "task-notification"`, with `promptSource: "sdk"` on 2.1.263). Its tool results are still read; its words are
+not shown. A line with the id Centralu gave its input stays Centralu's whatever its entry says (a nudge is stamped
+`origin.kind: "channel"`). The person's words are `promptSource: "sdk"` with no origin or `origin.kind: "human"`, and keep the stripping
+above, since a mail wake rides in them. A slash command's lines, the interrupt line and the compaction summary carry no
+such field (2.1.296), so the text rules stay theirs. `getSessionMessages` already leaves out `isMeta` lines (a skill's
+body, a command's caveat, a cut-off notice, a timer's prompt, a cross-session message), measured on the recorded
+transcripts in `adapters/claude/transcripts/`. An SDK without the export, or an import that fails, reads the rows from
+disk as before, and `task-notification` is in the tag list for that case.
 **Tool calls come back as they were shown live** ([#843](https://github.com/ijun17/centralu/issues/843)). Everything in
 a record but the words is read by the adapter's live normalizer (a Claude message's body by `assistantEvents` and
 `userEvents`, once `readableMessage` has checked it into the shape they read, #1339;

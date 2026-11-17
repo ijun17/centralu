@@ -57,6 +57,7 @@ const EXPORTS = [
   'tool', // centralu-mcp.ts
   'listSessions', // history.ts — feature-detected there; this makes its loss loud instead
   'getSessionMessages', // history.ts
+  'importSessionToStore', // history.ts — @alpha: the raw transcript entries, for who wrote a user row (#2323); feature-detected there
 ]
 
 /** Names that must appear in the shipped .d.ts. Grouped by where the adapter reads them. */
@@ -93,6 +94,12 @@ const TYPED = [
   'firstPrompt',
   'lastModified',
   'gitBranch',
+  // reading a transcript once, raw entries and the SDK's own chain (history.ts, #2323): the store options, and the
+  // documented provenance a user row's origin carries. The transcript's promptSource and isMeta are not SDK names:
+  // the fixtures under claude/transcripts hold them
+  'sessionStore',
+  'includeSubagents',
+  'SDKMessageOrigin',
   // supportedModels / supportedCommands row fields (models.ts, index.ts)
   'displayName',
   'supportsEffort',
