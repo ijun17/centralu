@@ -1375,4 +1375,16 @@ export const CONTRACT: Contract[] = [
       return { open, closed: await outcome(sync) }
     },
   },
+  {
+    name: 'a folder is synced where the OS has that, and a missing one is refused only there',
+    want: { windows: { folder: 'synced', missing: 'synced' }, posix: { folder: 'synced', missing: err('ENOENT') } },
+    async run(os, root) {
+      const f = os.files
+      const { join } = os.paths.path
+      f.writeFileSync(join(root, 'part'), 'x')
+      f.renameSync(join(root, 'part'), join(root, 'whole'))
+      const sync = (path: string) => outcome(() => (f.fsyncDirSync(path), 'synced'))
+      return { folder: await sync(root), missing: await sync(join(root, 'none')) }
+    },
+  },
 ]

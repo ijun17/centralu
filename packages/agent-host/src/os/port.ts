@@ -187,6 +187,11 @@ export interface OsFiles {
   fchmodSync(fd: number, mode: number): void
   /** What was written to the file `fd` is open on reaches the disk before this answers: a rename after it names a whole file, a power cut or not */
   fsyncSync(fd: number): void
+  /**
+   * The names in the folder at `path` (a file made in it, a rename into it) reach the disk before this answers. Does
+   * nothing where the OS has no sync of a folder (Windows, which does not open one as a file), a missing folder included.
+   */
+  fsyncDirSync(path: HostPath): void
   closeSync(fd: number): void
   /**
    * The bytes this process may still write on the disk `path` is on, or null when the OS cannot say (nothing at `path`,

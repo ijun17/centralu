@@ -34,7 +34,8 @@ export type CopySkipped = { step: number; reason: 'low_disk'; free: number; need
  * (store/migrate-runner.ts).
  *
  * A file under a copy's name is always a whole copy: it is written as `.partial`, reaches the disk, and is renamed
- * only then, so a host stopped at any point leaves a `.partial` (and SQLite's journal of it) the next open deletes.
+ * only then, so a host stopped while writing leaves a `.partial` (and SQLite's journal of it) the next open deletes.
+ * One stopped after the rename and before its step leaves the copy itself, which the next open keeps.
  */
 export class StoreCopies {
   private readonly dir: string
@@ -73,15 +74,61 @@ export class StoreCopies {
   }
 
   /**
-   * Copies the store as it is now, before `step` runs. Called outside a transaction (`VACUUM` refuses one) and under
+   * Keeps the store as it is now, before `step` runs. Called outside a transaction (`VACUUM` refuses one) and under
    * the host's lock, so no other writer runs: `VACUUM INTO` reads one snapshot, the WAL's commits included.
    *
    * A copy that cannot be made never keeps the host from starting: the step runs without one, and what is returned
    * says so. An earlier copy is deleted only once this one is whole.
    */
   copyBefore(step: number): CopySkipped | null {
-    const { files, clock } = this.os
     const name = `${this.prefix}${step}.db`
+    if (this.holdsTheStoreAsItIs(name)) {
+      console.error(`[store] ${name} is kept as the copy before step ${step}: a host stopped after writing it, and the store has not changed since`)
+    } else {
+      const skipped = this.write(name, step)
+      if (skipped) return skipped
+    }
+    try {
+      /*
+       * A rename is in the folder, not in the file: without this a power cut could undo it while the step's commit
+       * stays, and the next open would delete a whole `.partial`. For a kept copy too: the host that renamed it may
+       * have stopped before this.
+       */
+      this.os.files.fsyncDirSync(this.dir)
+    } catch (err) {
+      // The copy is whole and under its name, so this is not a step without a copy
+      console.error(`[store] the name of ${name} could not be synced to the disk, so a power cut now could lose the copy: ${errorMessage(err)}`)
+    }
+    for (const other of this.names()) if (other !== name) this.remove(other, 'a newer copy replaced it')
+    return null
+  }
+
+  /**
+   * Whether this step's copy is there already and the store has not been written since: a host wrote it and stopped
+   * before the step committed (the store is still below the step). It is the copy then, and writing it again would
+   * only add a rename over it that can be refused (Windows, while a backup or a scanner holds the file), with a notice
+   * that says there is no copy beside a whole one.
+   *
+   * By the files' own times, the WAL's included, since a commit reaches the WAL first; an empty WAL holds none, and
+   * is made new by every open. A store written since is copied again: its step failed and the person went on with the
+   * build they had, and the earlier copy lacks that work. A time that wrongly reads as written since costs one more copy.
+   */
+  private holdsTheStoreAsItIs(name: string): boolean {
+    const stat = (path: string) => this.os.files.statSync(path, { throwIfNoEntry: false })
+    try {
+      const copy = stat(this.at(name))
+      const wal = stat(`${this.dbPath}-wal`)
+      const written = Math.max(stat(this.dbPath)?.mtimeMs ?? Infinity, wal?.size ? wal.mtimeMs : 0)
+      return copy !== undefined && copy.isFile() && copy.mtimeMs >= written
+    } catch {
+      // What cannot be read is not kept: the copy is written, and what fails there is said
+      return false
+    }
+  }
+
+  /** Writes the copy `name` from the store's own connection, or says why not, with nothing unfinished left behind */
+  private write(name: string, step: number): CopySkipped | null {
+    const { files, clock } = this.os
     const partial = this.at(name + PARTIAL)
     const t0 = clock.now()
     try {
@@ -124,7 +171,6 @@ export class StoreCopies {
       return { step, reason: 'failed' }
     }
     console.error(`[store] copied in ${clock.now() - t0}ms; the copy is deleted after 14 days`)
-    for (const other of this.names()) if (other !== name) this.remove(other, 'a newer copy replaced it')
     return null
   }
 

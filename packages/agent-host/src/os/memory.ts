@@ -1126,6 +1126,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     fchmodSync: fchmod,
     // Nothing here is ever unwritten: only the descriptor is checked
     fsyncSync: (fd) => void fdOf(fd, 'fsync'),
+    // As above, so only what the real one opens is checked: nothing on Windows, which has no sync of a folder
+    fsyncDirSync: (p) => {
+      if (!windows) existing(p, true, 'open')
+    },
     closeSync: closeFd,
     freeBytesSync: (p) => {
       try {

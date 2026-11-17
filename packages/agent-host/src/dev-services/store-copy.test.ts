@@ -266,29 +266,29 @@ describe('a copy that cannot be written', () => {
 
 /*
  * The stop is a real one: a separate process opens the store as the next build and SIGKILLs itself once SQLite has
- * written the copy and before it is renamed. Where in the writing it stops does not change what is asked: no file
- * under the copy's name.
+ * written the copy, before it is renamed or right after. Where in the writing it stops does not change what is asked
+ * of the first: no file under the copy's name.
  */
-describe('a host stopped while it writes the copy', () => {
-  const storeModule = new URL('./store.ts', import.meta.url).href
-  const osModule = new URL('../os/real.ts', import.meta.url).href
-  const root = paths.fromFileUrl(new URL('../../../../', import.meta.url))
+const storeModule = new URL('./store.ts', import.meta.url).href
+const osModule = new URL('../os/real.ts', import.meta.url).href
+const root = paths.fromFileUrl(new URL('../../../../', import.meta.url))
 
-  async function openAndDieBeforeTheRename(file: string): Promise<void> {
-    const script = join(file, '..', 'die-in-the-copy.mts')
-    files.writeFileSync(
-      script,
-      `const { Store } = await import(${JSON.stringify(storeModule)})
+async function openAndDie(file: string, when: 'before the rename' | 'after the rename'): Promise<void> {
+  const script = join(file, '..', 'die-in-the-copy.mts')
+  files.writeFileSync(
+    script,
+    `const { Store } = await import(${JSON.stringify(storeModule)})
 const { realOs } = await import(${JSON.stringify(osModule)})
 const real = realOs()
+const die = () => {
+  real.files.writeSync(1, 'killed ${when}\\n')
+  process.kill(process.pid, 'SIGKILL')
+}
 const os = {
   ...real,
   files: {
     ...real.files,
-    fsyncSync: () => {
-      real.files.writeSync(1, 'killed in the copy\\n')
-      process.kill(process.pid, 'SIGKILL')
-    },
+    ${when === 'before the rename' ? 'fsyncSync: die' : 'renameSync: (from, to) => (real.files.renameSync(from, to), die())'},
   },
 }
 class NextBuild extends Store {
@@ -299,16 +299,17 @@ class NextBuild extends Store {
 new NextBuild(${JSON.stringify(file)}, os)
 real.files.writeSync(1, 'survived\\n')
 `,
-    )
-    // Not `runSync`: a synchronous wait holds the worker, which answers nothing meanwhile (#368)
-    const ran = await processes.run(env.execPath, ['--import', 'tsx', script], { cwd: root, timeoutMs: 60_000 * SLOW })
-    expect(ran.stdout.toString()).toBe('killed in the copy\n')
-  }
+  )
+  // Not `runSync`: a synchronous wait holds the worker, which answers nothing meanwhile (#368)
+  const ran = await processes.run(env.execPath, ['--import', 'tsx', script], { cwd: root, timeoutMs: 60_000 * SLOW })
+  expect(ran.stdout.toString()).toBe(`killed ${when}\n`)
+}
 
+describe('a host stopped while it writes the copy', () => {
   // A Node with tsx started, and a store opened in it: seconds on a loaded Windows runner
   it('leaves nothing under the copy’s name, and the next open deletes what it left and copies again', { timeout: 60_000 * SLOW }, async () => {
     const file = storeFile()
-    await openAndDieBeforeTheRename(file)
+    await openAndDie(file, 'before the rename')
     // What the stopped host wrote is not a copy. That its step did not run is in the copy the next open makes: of a store still at this build's version
     expect(beside(file)).toEqual(['die-in-the-copy.mts', `store.before-${STEP}.db.partial`])
 
@@ -332,6 +333,133 @@ real.files.writeSync(1, 'survived\\n')
 
     expect(beside(file)).toEqual(kept.sort())
     expect(logged()).toEqual(expect.arrayContaining(left.map((name) => `[store] deleted ${name}: a host stopped while writing it`)))
+  })
+})
+
+describe('a copy of this step that is there already', () => {
+  // The same real stop, one call later: the copy has its name, and the step has not run
+  it('a host stopped between the rename and the step: the next open keeps its copy, held by another program or not, and tells nobody there is none', { timeout: 60_000 * SLOW }, async () => {
+    const file = storeFile()
+    await openAndDie(file, 'after the rename')
+    expect(beside(file)).toEqual(['die-in-the-copy.mts', `store.before-${STEP}.db`])
+    // A backup or a scanner reading the copy: Windows refuses a rename over a file held like this
+    const holder = realOs().sqlite.open(copyOf(file), { readonly: true })
+
+    try {
+      const s = openNext(file, [breaking(STEP)])
+
+      expect(s.schemaVersion).toBe(STEP)
+      expect(s.projects.listProjects()).toEqual([])
+      expect(s.copySkipped).toBeNull()
+    } finally {
+      holder.close()
+    }
+    expect(beside(file)).toEqual(['die-in-the-copy.mts', `store.before-${STEP}.db`])
+    expect(read(copyOf(file))).toEqual({ version: LATEST, projects: ['p1'], check: 'ok' })
+    expect(logged().some((line) => line.includes('copying the store'))).toBe(false)
+    expect(logged()).toContain(
+      `[store] store.before-${STEP}.db is kept as the copy before step ${STEP}: a host stopped after writing it, and the store has not changed since`,
+    )
+  })
+
+  /**
+   * A store with p1 and p2 and, beside it, a file under this step's copy name that holds p1 alone: which projects the
+   * copy holds after the open says whether it was kept or written again. Times are whole seconds, which every file
+   * system keeps as given.
+   */
+  function withCopyWrittenAt(seconds: number): string {
+    const file = storeFile()
+    files.copyFileSync(file, copyOf(file))
+    const s = new Store(file)
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.close()
+    files.utimesSync(copyOf(file), seconds, seconds)
+    return file
+  }
+  // An hour ago: a copy the open does not yet delete for its age
+  const COPIED = Math.floor(Date.now() / 1000) - 3600
+
+  it.each([
+    { name: 'the store last written when the copy was: kept', later: 0, kept: true },
+    { name: 'the store written a second after the copy: copied again, with what was written since', later: 1, kept: false },
+  ])('$name', ({ later, kept }) => {
+    const file = withCopyWrittenAt(COPIED)
+    files.utimesSync(file, COPIED + later, COPIED + later)
+
+    const s = openNext(file, [breaking(STEP)])
+
+    expect(s.copySkipped).toBeNull()
+    expect(read(copyOf(file)).projects).toEqual(kept ? ['p1'] : ['p1', 'p2'])
+  })
+
+  it('a commit that is still in the WAL counts as written since', () => {
+    const file = withCopyWrittenAt(COPIED)
+    files.utimesSync(file, COPIED, COPIED)
+    // The build the person went back to, stopped without closing: its commit is in the WAL, and store.db has its old time
+    const went = new Store(file)
+    stores.push(went)
+    went.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    expect(files.statSync(file).mtimeMs).toBe(COPIED * 1000)
+
+    openNext(file, [breaking(STEP)])
+
+    expect(read(copyOf(file)).projects).toEqual(['p1', 'p2', 'p3'])
+  })
+
+  it('a folder under the copy’s name is not a copy: the step runs without one and the person is told', () => {
+    const file = storeFile()
+    files.mkdirSync(copyOf(file))
+    files.utimesSync(copyOf(file), 4_000_000_000, 4_000_000_000)
+
+    const s = openNext(file, [breaking(STEP)])
+
+    expect(s.schemaVersion).toBe(STEP)
+    expect(s.copySkipped).toEqual({ step: STEP, reason: 'failed' })
+  })
+})
+
+describe('the copy’s name reaches the disk', () => {
+  it('the store’s folder is synced once the copy has its name', () => {
+    const file = storeFile()
+    const real = realOs().files
+    const did: string[] = []
+    const os = osWith({
+      renameSync: (from, to) => {
+        real.renameSync(from, to)
+        did.push(`renamed to ${to}`)
+      },
+      fsyncDirSync: (path) => void did.push(`synced ${path}`),
+    })
+
+    openNext(file, [breaking(STEP)], os)
+
+    expect(did).toEqual([`renamed to ${copyOf(file)}`, `synced ${join(file, '..')}`])
+  })
+
+  it('a folder that cannot be synced is said, and the copy is one all the same', () => {
+    const file = storeFile()
+    const os = osWith({
+      fsyncDirSync: () => {
+        throw new Error('EINVAL: this disk syncs no folder')
+      },
+    })
+
+    const s = openNext(file, [breaking(STEP)], os)
+
+    expect(s.copySkipped).toBeNull()
+    expect(read(copyOf(file))).toEqual({ version: LATEST, projects: ['p1'], check: 'ok' })
+    expect(logged()).toContain(
+      `[store] the name of store.before-${STEP}.db could not be synced to the disk, so a power cut now could lose the copy: EINVAL: this disk syncs no folder`,
+    )
+  })
+
+  it('no copy, nothing to sync', () => {
+    const file = storeFile()
+    const synced: string[] = []
+
+    openNext(file, [breaking(STEP)], osWith({ freeBytesSync: () => 0, fsyncDirSync: (path) => void synced.push(path) }))
+
+    expect(synced).toEqual([])
   })
 })
 

@@ -235,6 +235,15 @@ const files: OsFiles = {
   fstatSync: (fd) => toStats(fs.fstatSync(fd, { bigint: true })),
   fchmodSync: (fd, mode) => fs.fchmodSync(fd, mode),
   fsyncSync: (fd) => fs.fsyncSync(fd),
+  fsyncDirSync: (p) => {
+    if (HOST_FAMILY === 'windows') return
+    const fd = fs.openSync(p, 'r')
+    try {
+      fs.fsyncSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+  },
   closeSync: (fd) => fs.closeSync(fd),
   freeBytesSync: (p) => {
     try {
@@ -558,8 +567,8 @@ const realOsValue: Os = {
   },
   clock,
   sqlite: {
-    open: (path, o = {}) =>
-      new Database(path, { readonly: o.readonly, fileMustExist: o.fileMustExist, timeout: o.timeout }),
+    // The options as given: better-sqlite3 refuses one that is named and undefined
+    open: (path, o = {}) => new Database(path, o),
   },
   traits,
 }
