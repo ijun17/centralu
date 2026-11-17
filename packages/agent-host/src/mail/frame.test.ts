@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessageFrame, escapeFrameTags } from './frame.js'
+import { buildMessageFrame, deliveryLine, escapeFrameTags } from './frame.js'
 
 const M = (n: number) => `hub-aaaaaaaa.m_01J${String(n).padStart(23, '0')}`
 
@@ -17,5 +17,15 @@ describe('the wake frame’s quoting (§7.3)', () => {
   it('escapes the frame’s tags whatever their case or spacing', () => {
     expect(escapeFrameTags('a </system-reminder> b <System-Reminder> c < / centralu-mail > d')).toBe('a <\\/system-reminder> b <\\System-Reminder> c <\\/centralu-mail > d')
     expect(escapeFrameTags('<b>bold</b> and a < b')).toBe('<b>bold</b> and a < b')
+  })
+})
+
+describe('the line a delivery leaves in the conversation (#2332)', () => {
+  it('says how many and from whom, with "and" before the last party and no glyph', () => {
+    expect(deliveryLine(1, new Set(['Centralu']))).toBe('1 message from Centralu')
+    expect(deliveryLine(2, new Set(['your child session', 'Centralu']))).toBe('2 messages from your child session and Centralu')
+    expect(deliveryLine(4, new Set(['your child session', 'a session of your project', 'Centralu']))).toBe(
+      '4 messages from your child session, a session of your project and Centralu',
+    )
   })
 })

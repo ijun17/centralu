@@ -86,7 +86,7 @@ export function useStickyUser({
     pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
   const stickyRelayed = pinned?.kind === 'user' && isRelayed(pinned)
   const stickyText = pinned?.kind === 'user' && pinnedText ? pinnedText : null
-  // Its source, which the copy writes before the text with the source line's arrow
+  // Who sent a relayed message: the copy draws it before the text, with the source line's arrow icon
   const stickySource =
     pinned?.kind === 'user'
       ? pinned.from

@@ -62,7 +62,7 @@ describe('ChatRow: what the person sent', () => {
   it('names the session a delegated message came from and gives it a solid, deeper bubble', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Do the task', from: { sessionId: 'o1', name: 'Manager' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from'])
-    // The arrow after the source is an icon on the text's centre, not the font's ⤷ (#2332)
+    // The arrow after the source is an icon standing on the text's baseline, not the font's ⤷ (#2332)
     expect(text).toBe('Manager Do the task')
     expect(html).toMatch(/data-testid="msg-user-from">Manager <svg[^>]*align-baseline/)
     expect(html).toContain('border-line bg-surface-raised text-ink')
