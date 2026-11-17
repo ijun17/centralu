@@ -131,7 +131,7 @@ export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: Abor
     openUrl(url)
   }
   const launch = agyLaunch(home, archive, folder.browser)
-  const spec: AgentSpawnSpec = { ...launch, env: { ...process.env, ...launch.env } }
+  const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }
   const proc = startToolProcess(spec, deps.spawn ? { spawn: deps.spawn } : {})
   const lines = lineSplitter((line) => {
     const m = URL_LINE.exec(line)
