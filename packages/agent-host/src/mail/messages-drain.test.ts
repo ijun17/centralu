@@ -192,7 +192,7 @@ describe('what one wake carries', () => {
     const d = w.mail.drain(B, { skip: (m) => m.id === skipped.id })
     expect(d.heldBack).toEqual([])
     expect(d.messageIds).toEqual([kept.id])
-    expect(d.line).toBe('✉ 1 message, from a session of your project')
+    expect(d.line).toBe('1 message from a session of your project')
   })
 
   it('the one hold is the only hold: a message an earlier build wrote 5 hops deep goes, and an untrusted project’s is held policy until it is trusted', () => {

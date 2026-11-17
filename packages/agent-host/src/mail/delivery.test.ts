@@ -30,7 +30,7 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     expect(w.delivered).toEqual([])
     await w.advance(2_000)
     expect(w.to('b')).toHaveLength(1)
-    expect(w.to('b')[0]!.input).toMatchObject({ quiet: false, line: '✉ 1 message, from a session of your project' })
+    expect(w.to('b')[0]!.input).toMatchObject({ quiet: false, line: '1 message from a session of your project' })
     expect(w.to('b')[0]!.input.text).toContain(`id="${message.id}"`)
     const row = w.rowOf(message.id, B)
     expect(row).toMatchObject({ deliveredAt: w.clock.t, attempts: 1, turnSeq: 1 })
@@ -64,7 +64,7 @@ describe('delivery to a receiver at rest (§8.1)', () => {
     await w.advance(2_000)
     await w.advance(60_000)
     expect(w.to('b')).toHaveLength(1)
-    expect(w.to('b')[0]!.input.line).toBe('✉ 2 messages, from a session of your project, a session of another project')
+    expect(w.to('b')[0]!.input.line).toBe('2 messages from a session of your project and a session of another project')
   })
 
   it('mail for a receiver in a turn, on a card, or at its limit waits and goes when it is poked; for one that is gone it stays', async () => {

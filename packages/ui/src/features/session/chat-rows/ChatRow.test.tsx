@@ -62,7 +62,9 @@ describe('ChatRow: what the person sent', () => {
   it('names the session a delegated message came from and gives it a solid, deeper bubble', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Do the task', from: { sessionId: 'o1', name: 'Manager' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from'])
-    expect(text).toBe('Manager ⤷ Do the task')
+    // The arrow after the source is an icon standing on the text's baseline, not the font's ⤷ (#2332)
+    expect(text).toBe('Manager Do the task')
+    expect(html).toMatch(/data-testid="msg-user-from">Manager <svg[^>]*align-baseline/)
     expect(html).toContain('border-line bg-surface-raised text-ink')
     expect(html).not.toContain('border-dashed')
     expect(html).toContain('data-relayed')
@@ -71,7 +73,7 @@ describe('ChatRow: what the person sent', () => {
   it('names the app that wrote a message', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Open #12', fromApp: { appId: 'board', projectId: 'p1', name: 'Board' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from-app'])
-    expect(text).toBe('Board app ⤷ Open #12')
+    expect(text).toBe('Board app Open #12')
     expect(html).toContain('bg-surface-raised')
     expect(html).not.toContain('border-dashed')
   })
@@ -79,7 +81,7 @@ describe('ChatRow: what the person sent', () => {
   it('names the script that wrote a first message, in a deeper bubble: it is not the person’s (§8.1)', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Triage the build', fromScript: { credential: 'ci runner' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from-script'])
-    expect(text).toBe('script ci runner ⤷ Triage the build')
+    expect(text).toBe('script ci runner Triage the build')
     expect(html).toContain('border-line bg-surface-raised text-ink')
     expect(html).not.toContain('border-dashed')
     expect(html).toContain('data-relayed')
@@ -177,6 +179,15 @@ describe('ChatRow: approvals and marks', () => {
     expect(testIds(notice.html)).toEqual(['msg-mark', 'notice-head', 'notice-audience', 'notice-summary'])
     expect(notice.text).not.toContain('ignored')
     expect(notice.text).toContain('Codex · config warning')
+    // Centralu's own sentence, so the UI face, not the code face (#2332)
+    expect(notice.html).not.toContain('readout')
+    expect(divider.html).not.toContain('readout')
+
+    // A mail line is the capsule with the mail icon, and no head (#2332)
+    const mail = row({ kind: 'mark', seq: 6, text: '1 message from Centralu', notice: { head: '', body: '1 message from Centralu', from: 'Centralu', mail: true } })
+    expect(testIds(mail.html)).toEqual(['msg-mark', 'notice-summary'])
+    expect(mail.text).toBe('1 message from Centralu')
+    expect(mail.html).toMatch(/rounded-full border[^"]*border-line/)
   })
 
   it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {

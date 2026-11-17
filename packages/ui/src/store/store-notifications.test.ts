@@ -587,7 +587,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
       hint: 'Codex already runs without them; removing them from the file only silences this notice.',
     }
     const expected = {
-      text: 'Codex · config warning · for you — Codex ignored 2 settings in `~/.codex/config.toml`',
+      text: 'Codex · config warning · for you: Codex ignored 2 settings in `~/.codex/config.toml`',
       notice: {
         head: 'Codex · config warning',
         from: 'Codex',
@@ -622,14 +622,25 @@ describe('resets, notices and switches the tool made (#304)', () => {
       { sessionId: 'n-6', seq: 3, role: 'system', kind: 'marker', ts: 3, payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: HOOK } },
     ])
     expect(items.map((i) => (i as { text: string }).text)).toEqual([
-      'Codex · warning — Exceeded skills context budget.',
-      'Codex · deprecation · for Centralu — Full-history hydration is deprecated.',
+      'Codex · warning: Exceeded skills context budget.',
+      'Codex · deprecation · for Centralu: Full-history hydration is deprecated.',
       HOOK,
     ])
     // No summary: the text is the line itself, so there is nothing to show on demand
     expect(items[0]).toMatchObject({ notice: { head: 'Codex · warning', from: 'Codex' } })
     expect((items[0] as { notice?: { original?: string } }).notice?.original).toBeUndefined()
     expect((items[2] as { notice?: unknown }).notice).toBeUndefined()
+  })
+
+  it("a mail line is drawn as the mail capsule with no head, and one stored before #2332 loses only its leading ✉", () => {
+    const items = messagesToChat([
+      { sessionId: 'n-7', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'notice', sessionId: 'n-7', level: 'info', from: 'Centralu', label: 'mail', text: '2 messages from a session of your project and Centralu' } },
+      { sessionId: 'n-7', seq: 2, role: 'system', kind: 'marker', ts: 2, payload: { type: 'notice', sessionId: 'n-7', level: 'info', from: 'Centralu', label: 'mail', text: '✉ 1 message, from Centralu' } },
+    ])
+    expect(items).toMatchObject([
+      { text: '2 messages from a session of your project and Centralu', notice: { head: '', body: '2 messages from a session of your project and Centralu', mail: true } },
+      { text: '1 message, from Centralu', notice: { head: '', body: '1 message, from Centralu', mail: true } },
+    ])
   })
 
   it('a model switch the tool made updates the model shown without a toast; the Assistant still raises one', async () => {

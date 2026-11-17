@@ -6,6 +6,8 @@ import type { HTMLAttributes, MouseEventHandler, ReactNode } from 'react'
  *
  * - `bar`: 28px tall on a translucent hover fill, the top bar's shape (the update line beside the inbox count).
  * - `label`: a card's kind written in a capsule at its top left ("Awaiting approval", "Agent is asking"), no fill.
+ * - `line`: a line of the conversation drawn as a capsule between two rules (the mail line, #2332), no fill. The one size whose
+ *   words wrap: it is a sentence in a pane that may be narrow, and a capsule that did not wrap would push the conversation wide.
  *
  * The border is what it says, in the order of the brightness hierarchy (docs/design-system.md §1):
  *
@@ -22,7 +24,7 @@ import type { HTMLAttributes, MouseEventHandler, ReactNode } from 'react'
  */
 export type PillEdge = 'quiet' | 'live' | 'solid' | 'dashed'
 export type PillTone = 'signal' | 'bright' | 'ink' | 'muted' | 'faint'
-export type PillSize = 'bar' | 'label'
+export type PillSize = 'bar' | 'label' | 'line'
 
 const EDGE: Record<PillEdge, string> = {
   quiet: 'border-solid border-line',
@@ -46,6 +48,7 @@ const TONE: Record<PillTone, string> = {
 const SIZE: Record<PillSize, string> = {
   bar: 'h-7 gap-1.5 px-2.5 text-xs leading-none',
   label: 'px-2 py-px text-2xs font-medium',
+  line: 'gap-1.5 px-2.5 py-0.5 text-2xs',
 }
 
 export function pillClass({
@@ -57,8 +60,9 @@ export function pillClass({
   // The bar's translucent fill, except on a failure, which stands on the bar's own ground (the update line's)
   const fill = size === 'bar' && edge !== 'dashed' ? 'bg-surface-hover/30' : ''
   return [
-    // A capsule never breaks its words: in a narrow card the text beside it wraps instead (owner, 2026-10-19)
-    'flex shrink-0 items-center whitespace-nowrap rounded-full border transition-colors',
+    // A capsule never breaks its words: in a narrow card the text beside it wraps instead (owner, 2026-10-19). A line is the text, so it wraps
+    'items-center rounded-full border transition-colors',
+    size === 'line' ? 'inline-flex min-w-0 break-words' : 'flex shrink-0 whitespace-nowrap',
     SIZE[size],
     EDGE[edge],
     fill,

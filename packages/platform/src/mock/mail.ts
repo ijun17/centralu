@@ -234,7 +234,7 @@ export class MailMock {
       if (t.lookIn) throw mockError('You are not in this mail: you can read it, not close it.', 'refused')
       // As the host does (C12): the session whose turn is on the thread is told in Centralu's words without a wake, and its turn goes on
       const helper = t.row.working ? t.row.assignee?.sessionId : null
-      if (helper) this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it the person closed its work' })
+      if (helper) this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: 'Centralu told it the person closed its work' })
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
       t.row.working = false

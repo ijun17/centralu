@@ -1860,7 +1860,7 @@ it (a gone sender's mail does not go), as its queue was dropped; step 5 re-point
 
 **What the person sees (owner, option B, recorded on #1948).** A task from a delegation tool (`agent_session` send, `ask_project`, the
 Assistant's `send_to_session`, and that tool's note, #2258) that the mailbox gives shows in the receiver's conversation as its sender's message, "from <sender>" with
-the words, as its direct send does; other mail keeps the one line ("✉ 1 message, from …"). One function decides it,
+the words, as its direct send does; other mail keeps the one line ("1 message from …"). One function decides it,
 `SessionEvents.deliverMail`, from `MailInput.task` (the wake's work message when it is such a task, a wake carries one, D17; else a note it carries). The agent
 reads only the mail frame (the words inline under Centralu's header, with the message id): the row is written for the screen and never
 sent. A wake that carries other mail with the task writes the line too. A sender no longer here to be named leaves the line alone. The
@@ -2472,9 +2472,9 @@ you". The other layouts of round 1 (A by counterpart, C by chain) are in git his
 
 | Where | Today | Proposed |
 |---|---|---|
-| The compact line of a delivery in the conversation (`deliveryLine`, `service.ts:1990`) | `✉ 3 messages in 2 threads, from …` | `✉ 3 messages, from your child session and a session of another project` |
-| The compact line of a reminder | — | `✉ Centralu reminded it of 2 unanswered messages (1 of 2)` |
-| The line when a sender is told (D25) | — | `✉ Centralu told it that "api" has not answered (after 2 reminders)` |
+| The compact line of a delivery in the conversation (`deliveryLine`, `service.ts:1990`) | `✉ 3 messages in 2 threads, from …` | `3 messages from your child session and a session of another project` (no glyph and no comma since #2332: the window draws the mail icon) |
+| The compact line of a reminder | — | `Centralu reminded it of 2 unanswered messages (1 of 2)` |
+| The line when a sender is told (D25) | — | `Centralu told it that "api" has not answered (after 2 reminders)` |
 | The guidance for held mail (§7.4) | per-message held rows | `<project> is not trusted: <n> messages from its sessions wait (to <names>). Trusting the project lets them through, in order.` Actions `Trust project…` (opens `TrustCard`) and `Dismiss` (`Dismissing drops these messages; their senders are told.` as its confirm line) |
 | A feed row for a released row | — | `"api" has not answered "docs" for 2 h; it is busy with its own work` / `… after two reminders` / `… it stopped with an error` |
 | The "needs a reply" mark and the person's toggle | — | `needs a reply` beside a message; the toggle under the box, on by default for a new message and off for an answer (D3) |
@@ -2951,7 +2951,7 @@ or overruled by the orchestrator or the owner)
 | Q-M2-8 | S9 says `rate: as today`; today's reason word is `rate_limited` | `rate_limited` stays; no new word |
 | Q-M2-9 | §7.5 does not say who `pair_rate` counts | non-reply messages from a session to a session (the orchestrator too), not to the person and not from an app. A clarification is a non-reply and counts |
 | Q-M2-10 | A send to several recipients where one is refused | the whole send is refused, nothing is written. The thread era skipped members that could not be reached |
-| Q-M2-11 | `DrainResult.line` and the inline header have no sentence in §15 (today's say "in N threads") | the line is `✉ <n> message(s), from <relation words>`; the inline header is today's without the thread: `Message <id> from <relation> (<kind>); the person wrote it:` |
+| Q-M2-11 | `DrainResult.line` and the inline header have no sentence in §15 (today's say "in N threads") | the line is `<n> message(s) from <relation words>` (#2332; `✉ <n> message(s), from …` before it); the inline header is today's without the thread: `Message <id> from <relation> (<kind>); the person wrote it:` |
 | Q-M2-12 | The `handedOver` notice (§5.4, §6.5) has no body in §15 | one quiet notice for a whole handoff or role move (not one per row): "A message addressed to the previous holder was moved to you.", or "<n> messages addressed to the previous holder were moved to you." for several, posted when it brought a session rows it did not have. The owner's wording is needed |
 | Q-M2-13 | `task()` with a text over the body limit: the old record cut it with a sentence that §15 does not have | cut as the old record cut it: trimmed, and ended with the same cut line at the limit (`cutTask`, which `recordDelegation` uses too). The delegation tool has started the child before `task()` runs, so a refusal would leave a running child with no task row |
 | Q-M2-14 | `wakesMessage(m)` "(`facts.quiet` and the kind)": v61's `wakes()` depended on the kind and the app's flags | M1's adoption already folds `wakes()` into `facts.quiet`, so `wakesMessage` is `!facts.quiet` and takes only `facts`; the apps slice sets `quiet` on the posts that must not wake (a kind rule here would hold back an adopted app notice that was waking) |

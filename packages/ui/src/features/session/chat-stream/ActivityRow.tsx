@@ -3,6 +3,7 @@ import { interruptNotice, type SessionSummary } from '@cc/core'
 import { formatCount } from '../../../app/format.js'
 import { useStore } from '../../../store/store.js'
 import { Button } from '../../../components/Button.jsx'
+import { PlanStepIcon } from '../../../components/icons.jsx'
 import { formatElapsed, useElapsedNow } from '../elapsed.js'
 
 /**
@@ -83,9 +84,8 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
               data-testid={`plan-step-${i}`}
               data-status={step.status}
             >
-              <span className="readout shrink-0" aria-hidden>
-                {step.status === 'completed' ? '✓' : step.status === 'inProgress' ? '▸' : '○'}
-              </span>
+              {/* On the first line's baseline, so a step that wraps keeps its icon on its first line */}
+              <PlanStepIcon status={step.status} />
               <span className={step.status === 'completed' ? 'line-through opacity-60' : undefined}>
                 {step.text}
               </span>

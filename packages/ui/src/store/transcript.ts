@@ -462,10 +462,8 @@ function markerText(
     case 'notice': {
       const line = noticeLine(e)
       if (!line) return e.text
-      return (
-        [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') +
-        ` — ${line.body}`
-      )
+      if (line.mail) return line.body
+      return [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') + `: ${line.body}`
     }
     default:
       return compactionText(e)
@@ -492,11 +490,15 @@ export type NoticeLine = {
   original?: string
   /** Who said `original`, for the control that shows it */
   from: string
+  /** A line Centralu's mail left (a delivery, a note about one): drawn as the mail capsule, with no head (#2332) */
+  mail?: true
 }
 
 /** A notice's readable parts, or null for one the host did not place (stored before #342): it reads as its text alone */
 function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
   if (!e.from) return null
+  // A row stored before #2332 starts with the ✉ the host wrote then; the capsule's icon stands for it now (the old comma stays)
+  if (e.from === 'Centralu' && e.label === 'mail') return { head: '', from: e.from, body: e.text.replace(/^✉\s*/, ''), mail: true }
   return {
     head: e.label ? `${e.from} · ${e.label}` : e.from,
     from: e.from,

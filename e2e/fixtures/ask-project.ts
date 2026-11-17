@@ -141,7 +141,7 @@ export function askProjectTests(): void {
       await card.getByTestId('ask-project-open').click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('delegated-1')
       await expect(page.getByText('Export sprites', { exact: false })).toBeVisible()
-      await expect(page.getByTestId('msg-user-from')).toHaveText('consumer session ⤷')
+      await expect(page.getByTestId('msg-user-from')).toHaveText('consumer session')
       await expect(page.getByTestId('session-more')).toHaveCount(0)
       await page.evaluate((id) => (window as any).__store.getState().focusSession(id), caller)
 

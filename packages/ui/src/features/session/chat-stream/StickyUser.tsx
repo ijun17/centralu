@@ -3,6 +3,7 @@ import type { RefObject } from 'react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import type { ChatItem } from '../../../store/store.js'
 import { isRelayed, mineBubbleAttrs, mineBubbleLook } from '../chat-rows/bubbleLook.js'
+import { FromArrowIcon } from '../../../components/icons.jsx'
 
 /*
  * The banner that pins the person's latest message once it scrolls off the top (#428): which
@@ -84,15 +85,17 @@ export function useStickyUser({
   const pinnedText =
     pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
   const stickyRelayed = pinned?.kind === 'user' && isRelayed(pinned)
-  const stickyText =
-    pinned?.kind === 'user' && pinnedText
+  const stickyText = pinned?.kind === 'user' && pinnedText ? pinnedText : null
+  // Who sent a relayed message: the copy draws it before the text, with the source line's arrow icon
+  const stickySource =
+    pinned?.kind === 'user'
       ? pinned.from
-        ? `${pinned.from.name} ⤷ ${pinnedText}`
+        ? pinned.from.name
         : pinned.fromApp
-          ? `${pinned.fromApp.name} app ⤷ ${pinnedText}`
+          ? `${pinned.fromApp.name} app`
           : pinned.fromScript
-            ? `script ${pinned.fromScript.credential} ⤷ ${pinnedText}`
-            : pinnedText
+            ? `script ${pinned.fromScript.credential}`
+            : null
       : null
 
   // Collapsed by default — moving to a different turn does not carry the expanded state along
@@ -210,6 +213,7 @@ export function useStickyUser({
   return {
     stickyIndex,
     stickyText,
+    stickySource,
     stickyRelayed,
     syncSticky,
     scheduleStickyOverlap,
@@ -226,9 +230,18 @@ export function useStickyUser({
 export type StickyUserState = ReturnType<typeof useStickyUser>
 
 export function StickyUser({ sticky }: { sticky: StickyUserState }) {
-  const { stickyText, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning, stickyFolded } =
+  const { stickyText, stickySource, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning, stickyFolded } =
     sticky
   if (stickyText === null) return null
+  // A relayed message's copy names who sent it before the text, with the source line's arrow
+  const said =
+    stickySource === null ? (
+      stickyText
+    ) : (
+      <>
+        {stickySource} <FromArrowIcon /> {stickyText}
+      </>
+    )
   return (
     /*
       A negative offset, not `top-0`.
@@ -315,7 +328,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
           {...mineBubbleAttrs(stickyRelayed)}
           className={`w-full cursor-pointer truncate rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
         >
-          {stickyText}
+          {said}
         </button>
         {/*
           Expanding is a **cover**, not flow. If the banner grew taller in the document
@@ -337,7 +350,7 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
             {...mineBubbleAttrs(stickyRelayed)}
             className={`absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
           >
-            {stickyText}
+            {said}
           </button>
         )}
       </div>

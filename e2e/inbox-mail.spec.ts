@@ -469,7 +469,7 @@ test('Mail: Drop and Mark done close at once while the helper is working, tell i
   expect(await page.evaluate(() => (window as any).__mock.mockMail.calls as string[])).toEqual([])
   expect(await page.evaluate((s: string) => (window as any).__store.getState().sessions[s].state as string, sid)).toBe('working')
   await page.getByTestId(`mail-open-${sid}`).click()
-  await expect(page.getByText('✉ Centralu told it the person closed its work')).toBeVisible()
+  await expect(page.getByText('Centralu told it the person closed its work')).toBeVisible()
 })
 
 test('Mail: a chain of mail between sessions that is only held for the person has no reply box, and keeps Mark done and Drop', async ({ page }) => {

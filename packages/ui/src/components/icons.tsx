@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 /**
  * Icons.
  *
@@ -512,5 +514,52 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
       <rect x="2" y="2.8" width="12" height="3.2" rx="0.8" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
       <path d="M3.2 6v6.4c0 .6.4 1 1 1h7.6c.6 0 1-.4 1-1V6M6.4 9h3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  )
+}
+
+/**
+ * The size of an icon set in a line of text (#2332): Pretendard's cap height, 0.73em, so the icon follows the text's size. Drawn
+ * to fill its box and sitting on the baseline (an inline SVG's bottom edge, which a flex row aligned on baselines also takes),
+ * its top meets the capitals' and it reads as part of the line. Centring a box in the line instead put it 1–2px low, under
+ * the text's centre, since the face's line box is not symmetric about its capitals
+ */
+const CAP_BOX = 'inline-block size-[0.73em] shrink-0 align-baseline'
+
+/** An icon in a line of text, on a 10-unit grid: drawn to fill its cap-height box (`CAP_BOX`) */
+function CapIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={CAP_BOX}>
+      {children}
+    </svg>
+  )
+}
+
+/**
+ * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
+ * below. It replaced the font's ⤷, which sat above the text (#2332)
+ */
+export function FromArrowIcon() {
+  return (
+    <CapIcon>
+      <path d="M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25" strokeWidth="1.2" />
+    </CapIcon>
+  )
+}
+
+/**
+ * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. The text's cap height and
+ * on its baseline (`CAP_BOX`), where the font glyphs (✓ ▸ ○) were each a different, smaller size (#2332)
+ */
+export function PlanStepIcon({ status }: { status: 'pending' | 'inProgress' | 'completed' }) {
+  return (
+    <CapIcon>
+      {status === 'completed' ? (
+        <path d="M.75 5.25 3.75 8.5 9.25 1.25" strokeWidth="1.3" />
+      ) : status === 'inProgress' ? (
+        <path d="M2 .5v9L9.25 5z" fill="currentColor" stroke="none" />
+      ) : (
+        <circle cx="5" cy="5" r="4.4" strokeWidth="1.1" />
+      )}
+    </CapIcon>
   )
 }

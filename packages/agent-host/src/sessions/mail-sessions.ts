@@ -245,7 +245,7 @@ export class MailSessionsView {
   /** Puts a notice from Centralu into the session's process, quietly (`tellsMailNow`). It stops nothing: the person's close tells a session its work is not wanted, and the session decides */
   async tellMailNow(sessionId: string, text: string): Promise<void> {
     try {
-      await this.host.events.deliverMail(sessionId, { text: `[Centralu] ${text}`, quiet: true, line: '✉ Centralu told it the person closed its work' })
+      await this.host.events.deliverMail(sessionId, { text: `[Centralu] ${text}`, quiet: true, line: 'Centralu told it the person closed its work' })
     } catch (e) {
       console.error(`[mail] could not tell ${sessionId.slice(0, 8)} that the person closed its work (${errorMessage(e)}); the notice goes with its next mail`)
       throw e

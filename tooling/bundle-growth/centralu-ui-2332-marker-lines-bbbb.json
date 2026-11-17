@@ -1,0 +1,4 @@
+{
+  "bytes": 1200,
+  "reason": "Conversation marker lines (#2332, #2336, #2337): the mail line's capsule (MailMark, Pill's line size), the store reading a mail row (no head, an old row's leading glyph dropped), and two icons drawn to the text's cap height that replace font glyphs (the relayed message's arrow in its row and its pinned copy, the plan list's three step marks) on one shared SVG wrapper. Measured locally against main: 1,957,145 B to 1,958,273 B (+1,128 B) after taking out what was duplicated (the pinned copy's source markup, Pill's base classes, the icons' SVG attributes; -200 B). The merge queue measured 1,958,761 B against the 1,957,400 B ceiling before those cuts. No new dependency."
+}

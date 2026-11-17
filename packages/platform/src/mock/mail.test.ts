@@ -68,7 +68,7 @@ describe('the mock mailbox', () => {
     const busy = p.seedMail({ subject: 'w', from: mockSessionParty('s0', 'Boss'), body: 'do it', kind: 'assign', state: 'running', assignee: worker, working: true })
     expect(await p.mail.close(busy, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped', working: false })
     expect(p.mockMail.calls).toEqual([])
-    expect(events).toEqual([expect.objectContaining({ type: 'notice', sessionId: 's1', from: 'Centralu', text: '✉ Centralu told it the person closed its work' })])
+    expect(events).toEqual([expect.objectContaining({ type: 'notice', sessionId: 's1', from: 'Centralu', text: 'Centralu told it the person closed its work' })])
     const idle = p.seedMail({ subject: 'q', from: worker, body: 'b' })
     await p.mail.close(idle, 'finished')
     expect(events).toHaveLength(1)

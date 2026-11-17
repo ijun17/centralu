@@ -149,7 +149,7 @@ export function agentNoticesTests(): void {
       await expect(hydration).not.toContainText('excludeTurns')
 
       // A notice Centralu does not know: Codex's text as it is, with the kind label, nothing to open
-      await expect(unknown).toHaveText('Codex · warning — Exceeded skills context budget.')
+      await expect(unknown).toHaveText('Codex · warning: Exceeded skills context budget.')
       await expect(unknown.getByTestId('notice-original-toggle')).toHaveCount(0)
 
       // Quiet: no toast, nothing wider than the conversation

@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { splitRunTogetherHeadings } from '@cc/core'
 import { centraluCallOf, launchesSubagent } from '@cc/protocol/client'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
-import { ChevronIcon } from '../../../components/icons.jsx'
+import { ChevronIcon, FromArrowIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
 import { FileLink, Markdown } from '../Markdown.jsx'
 import { titlePieces } from '../filePath.js'
@@ -70,7 +70,7 @@ export const ChatRow = memo(function ChatRow({
         */}
         {item.from && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from">
-            {item.from.name} ⤷
+            {item.from.name} <FromArrowIcon />
           </div>
         )}
         {/*
@@ -80,13 +80,13 @@ export const ChatRow = memo(function ChatRow({
         */}
         {item.fromApp && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-app">
-            {item.fromApp.name} app ⤷
+            {item.fromApp.name} app <FromArrowIcon />
           </div>
         )}
         {/* A first message a script wrote (§8.1): the person set the script up, but did not type this */}
         {item.fromScript && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-script">
-            script {item.fromScript.credential} ⤷
+            script {item.fromScript.credential} <FromArrowIcon />
           </div>
         )}
         {/*
@@ -188,7 +188,7 @@ export const ChatRow = memo(function ChatRow({
     return (
       <div className="flex items-center gap-2 py-1" data-testid="msg-mark">
         <span className="h-px flex-1 bg-line" />
-        <span className="readout min-w-0 break-words text-center text-2xs text-ink-faint">{item.text}</span>
+        <span className="min-w-0 break-words text-center text-2xs text-ink-faint">{item.text}</span>
         {item.pickModel && (
           // The provider refused this session's model (#1369): the model menu below the composer, one click away
           <Button

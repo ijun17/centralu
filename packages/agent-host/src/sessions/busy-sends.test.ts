@@ -147,7 +147,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
     // The person sees the sender's words as its message, as for its direct send, and no mail line
     const task = shown(since)
     expect(task.filter((row) => row.role === 'user').map((row) => row.payload)).toEqual([expect.objectContaining({ text: 'use Chromium', from: { sessionId: parent, name: w.mgr.sessionInfo(parent)!.name } })])
-    expect(JSON.stringify(task)).not.toContain('✉')
+    expect(JSON.stringify(task)).not.toContain('1 message from')
     // Other mail: the line, and no message of the sender's
     handleOf(child).answer('Done.')
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
@@ -156,7 +156,7 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
     await wakeDue(child)
     const other = shown(since)
     expect(other.filter((row) => row.role === 'user')).toEqual([])
-    expect(JSON.stringify(other)).toContain('✉ 1 message')
+    expect(JSON.stringify(other)).toContain('1 message from')
   })
 
   it('ask_project to a session the person is working in answers mailed at once, with no choice', async () => {
