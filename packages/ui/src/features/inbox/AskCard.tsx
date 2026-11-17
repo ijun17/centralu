@@ -4,8 +4,7 @@ import { Button } from '../../components/Button.js'
 import { ChoiceList } from '../../components/ChoiceList.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { TextInput } from '../../components/TextField.js'
-import { composingKey } from '../../app/keys.js'
-import { isComposerSendKey } from '../session/composerKeys.js'
+import { useSendKey } from '../session/useSendKey.js'
 import { useStore } from '../../store/store.js'
 import { choicesLabel, threadStateLabel } from './mailLabels.js'
 import { PartyName } from './PartyName.js'
@@ -25,7 +24,7 @@ import { PartyName } from './PartyName.js'
 export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThreadRow; ask: NonNullable<MailThreadRow['ask']>; active?: boolean; leaving?: boolean }) {
   const open = useStore((s) => s.openMailThread)
   const reply = useStore((s) => s.replyMail)
-  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const sendKey = useSendKey()
   // The answer on its way: the index of the choice pressed, or null for words. It is the question's, not the thread's: once this one is answered the
   // thread's next question shows on the same card, unpressed
   const [sending, setSending] = useState<{ ask: string; picked: number | null } | null>(null)
@@ -85,12 +84,7 @@ export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThrea
           value={text}
           readOnly={busy !== null}
           onChange={(e) => setDraft({ ask: ask.id, text: e.target.value })}
-          onKeyDown={(e) => {
-            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing: composingKey(e.nativeEvent) }
-            if (!isComposerSendKey(key, sendWithModifierEnter)) return
-            e.preventDefault()
-            void answer(text.trim(), null)
-          }}
+          onKeyDown={(e) => sendKey(e) && void answer(text.trim(), null)}
           placeholder="Your answer"
           aria-label="Your answer"
           data-testid={`mail-ask-answer-${t.id}`}

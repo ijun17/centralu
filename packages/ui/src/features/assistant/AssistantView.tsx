@@ -3,9 +3,8 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SessionPane } from '../session/SessionView.jsx'
-import { composingKey } from '../../app/keys.js'
 import { fitComposerHeight } from '../session/composerFit.js'
-import { isComposerSendKey } from '../session/composerKeys.js'
+import { useSendKey } from '../session/useSendKey.js'
 import { guiCommandFor } from '../session/guiCommands.js'
 
 /**
@@ -244,7 +243,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
 function AssistantEmpty() {
   const askAssistant = useStore((s) => s.askAssistant)
   const waking = useStore((s) => s.assistantWaking)
-  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const sendKey = useSendKey()
   const [text, setText] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // The box grows with its text, as the session's composer does (#1143 U17)
@@ -286,15 +285,8 @@ function AssistantEmpty() {
           value={text}
           disabled={waking}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            // The same rule as the session composer (#180) — for someone who turned on ⌘Enter to send, plain Enter is a newline, and Enter mid-composition never sends
-            const composing = composingKey(e.nativeEvent)
-            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
-            if (isComposerSendKey(key, sendWithModifierEnter)) {
-              e.preventDefault()
-              submit()
-            }
-          }}
+          // The same rule as the session composer (#180): for someone who turned on ⌘Enter to send, plain Enter is a newline, and Enter mid-composition never sends
+          onKeyDown={(e) => sendKey(e) && submit()}
           placeholder="Ask the Assistant anything…"
           className="max-h-40 w-full resize-none rounded-lg border border-line bg-surface-raised px-3 py-2.5 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
           data-testid="assistant-input"

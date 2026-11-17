@@ -1,13 +1,12 @@
 import { errorMessage } from '@cc/protocol/client'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { useStore, type ChatAttachment, type PinnedView } from '../../store/store.js'
-import { isComposerSendKey } from '../session/composerKeys.js'
+import { useSendKey } from '../session/useSendKey.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
 /** The limit the input row grows to — about four lines. Beyond that it scrolls within its own box (it does not push the view down) */
@@ -45,7 +44,7 @@ export function FixBar({
 }) {
   const platform = usePlatform()
   const attachFile = useStore((s) => s.attachFile)
-  const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
+  const sendKey = useSendKey()
   const builderName = useStore((s) => (builder.id ? s.sessions[builder.id]?.name : undefined))
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
@@ -164,14 +163,7 @@ export function FixBar({
             setText(e.target.value)
             setSent(null)
           }}
-          onKeyDown={(e) => {
-            const composing = composingKey(e.nativeEvent)
-            const key = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
-            if (isComposerSendKey(key, sendWithModifierEnter)) {
-              e.preventDefault()
-              e.currentTarget.form?.requestSubmit()
-            }
-          }}
+          onKeyDown={(e) => sendKey(e) && e.currentTarget.form?.requestSubmit()}
           onPaste={(e) => {
             const files = Array.from(e.clipboardData.files)
             if (files.length === 0) return
