@@ -9,7 +9,7 @@ import { Router } from './router.js'
 import { DirectTunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
-import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor, nothingOwed, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -56,6 +56,7 @@ async function hubHost(machinePort: number) {
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
+    ...nothingOwed(),
     registry,
     tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
     retryMs: [50, 200],

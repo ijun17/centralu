@@ -65,6 +65,15 @@ export interface HeadersMirror {
   forget(machine: string): void
 }
 
+/** One delete the hub owes a machine (pending-project-deletes.ts): the project by the machine's own id, its name for the log and the notice, and when it was asked, which tells one delete of a project from a later one of the same */
+export type PendingProjectDelete = { machine: string; projectId: string; name: string; at: number }
+
+/** Where the hub keeps them, every machine's in one list (stored.ts) */
+export interface PendingProjectDeleteList {
+  read(): PendingProjectDelete[]
+  write(list: readonly PendingProjectDelete[]): void
+}
+
 export type LinkDeps = {
   hub: MachineSide
   /** Into the hub's own event log, under the hub's sequence numbers */
@@ -74,6 +83,13 @@ export type LinkDeps = {
   mirror: HeadersMirror
   registry: MachineRegistry
   tunnelFor: (record: MachineRecord) => Tunnel
+  /** The deletes of projects the hub owes machines that were away (#2330) */
+  projectDeletes: PendingProjectDeleteList
+  /**
+   * A notice from Centralu in the person's Inbox (`MessageService.notice`), written once per `key`: what the person asked
+   * for here and a machine did not do, so that it is not only in the log (#2330, a delete the hub gave up on)
+   */
+  tellPerson: (text: string, key: string) => void
   log?: (line: string) => void
   /**
    * The hub's session a linked machine's session is a child of (#1038, `LinkedHost.remoteAgentParent`), by its
@@ -115,6 +131,8 @@ export type LinkDeps = {
    * by itself (#1508, `LinkedMachine.followsHub`). Without it no machine follows, and every `machines.update` asks
    */
   autoUpdate?: () => boolean
+  /** For tests: how long after a delete a machine failed the hub asks for it again (15 s when absent, #2330) */
+  deleteRetryMs?: number
   /** For tests: how long after a failed update of its own the hub tries once more (10 minutes when absent, #1508) */
   followRetryMs?: number
   /** For tests: the client's options beyond url and token */

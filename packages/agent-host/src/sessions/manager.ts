@@ -577,8 +577,11 @@ export class SessionManager {
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
     for (const s of leavesFirst) await this.trash.trashSession(s.id).catch(() => {})
-    const root = this.projectRegistry.projectRow(projectId)?.path
+    const row = this.projectRegistry.projectRow(projectId)
+    const root = row?.path
     this.store.trash.deleteProject(projectId)
+    // Every window but the caller's reads the projects again, and so does a hub this machine is linked to (#2330): it kept the row
+    if (row) this.emit({ type: 'projects_changed' })
     // Its apps' secrets too, as their grants above (#1141): a project id is never reused, so nobody could read them again
     this.apps.appsHub?.rt.forgetProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index

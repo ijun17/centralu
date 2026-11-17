@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CHECKING, folderNote } from './deleteNote.js'
+import { awayNote, CHECKING, folderNote } from './deleteNote.js'
 
 const LEFT_ALONE = 'The folder on disk is left alone.'
 
@@ -67,5 +67,11 @@ describe('the Delete project dialog\'s sentence about the folder', () => {
   it('the host\'s answer outranks the mark: a marked project the host says stays gets the ordinary sentence, an unmarked one that may move does not', () => {
     expect(folderNote({ fromUserFolder: true }, 'stays')).toBe(LEFT_ALONE)
     expect(folderNote({}, 'may_move')).toContain('app-trash/')
+  })
+})
+
+describe('the Delete project dialog’s sentence for a project on a machine that is not connected (#2330)', () => {
+  it('names the machine, says the project only leaves the list now, and that the rest happens there once it is connected again', () => {
+    expect(awayNote('Laptop')).toBe('Not connected to Laptop, so the project only leaves the list now. The rest happens on Laptop when it is connected again.')
   })
 })

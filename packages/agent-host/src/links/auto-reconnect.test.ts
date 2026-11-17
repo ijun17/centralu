@@ -14,7 +14,7 @@ import { Qualifier } from './qualifier.js'
 import type { ConnectionLine, Endpoint, Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
-import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor, nothingOwed, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -112,6 +112,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
+    ...nothingOwed(),
     registry,
     tunnelFor: () => {
       const t = o.tunnel ? o.tunnel(line) : new ControlledTunnel(line)

@@ -3,10 +3,11 @@ import type { Store } from '../dev-services/store.js'
 import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
-import type { LinkDeps } from './link-deps.js'
+import type { LinkDeps, PendingProjectDelete, PendingProjectDeleteList } from './link-deps.js'
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
+import { listSetting } from '../dev-services/store/settings.js'
 import { HUB_SELF_KEY } from '../dev-services/store/store-keys.js'
 import { hubKeyOf, SshTunnel } from './tunnel.js'
 
@@ -60,14 +61,15 @@ export function tunnelsFor(store: Store, log: (line: string) => void): (record: 
 
 /**
  * What `new Links(...)` is given (main.ts), with everything the hub's own store decides made here: the registry, the
- * headers mirror and the tunnel (`tunnelsFor`). main.ts cannot hand any of the three in (the type leaves them out), so
+ * headers mirror, the tunnel (`tunnelsFor`) and the deletes owed to machines that were away (`storeProjectDeletes`).
+ * main.ts cannot hand any of them in (the type leaves them out), so
  * the key a tunnel pairs under cannot be drawn from anything but the store's id again, and a test drives this very
  * function (#1405 review)
  */
-export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor'>): LinkDeps {
+export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor' | 'projectDeletes'>): LinkDeps {
   // Every `[links]` and `[ssh]` line carries its time (#1784): a link that drops and returns is placed against the other logs by it
   const log = (line: string) => rest.log?.(stamped(line))
-  return { ...rest, log, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, log) }
+  return { ...rest, log, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, log), projectDeletes: storeProjectDeletes(store) }
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')
@@ -102,4 +104,20 @@ export function storeProjectOrder(store: Store): ProjectOrder {
     read: () => readJsonList(store.settings.appSetting(PROJECT_ORDER_KEY), z.string()),
     write: (orderedIds) => store.settings.setAppSetting(PROJECT_ORDER_KEY, JSON.stringify(orderedIds)),
   }
+}
+
+/**
+ * The deletes of projects the hub owes machines that were away (#2330, pending-project-deletes.ts), as one setting: a
+ * key the previous build never reads, so a host swap needs no migration, and a delete kept by this build waits there
+ * until a build that knows it runs again. An entry this build cannot read is not applied and stays in the row
+ * (`listSetting`).
+ */
+const PENDING_PROJECT_DELETES_KEY = 'hub.pendingProjectDeletes'
+
+export function storeProjectDeletes(store: Store): PendingProjectDeleteList {
+  return listSetting<PendingProjectDelete>(
+    store.settings,
+    PENDING_PROJECT_DELETES_KEY,
+    (x) => typeof x.machine === 'string' && typeof x.projectId === 'string' && typeof x.name === 'string' && typeof x.at === 'number',
+  )
 }

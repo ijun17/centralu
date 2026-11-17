@@ -24,7 +24,7 @@ import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
-import { TOKEN, cleanups, folder, lineFor as worldLine, runCleanups, seedSession } from './links-world.test-helpers.js'
+import { TOKEN, cleanups, folder, lineFor as worldLine, nothingOwed, runCleanups, seedSession } from './links-world.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { LinkedHubs } from './linked-hubs.js'
 import { hubSelfId } from './stored.js'
@@ -201,6 +201,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
+    ...nothingOwed(),
     registry,
     tunnelFor: () => new DirectTunnel(line),
     retryMs: [50, 200],
@@ -666,6 +667,7 @@ describe('a hub linked to another host (#82)', () => {
       broadcast: () => {},
       terminal: () => {},
       mirror: storeMirror(store),
+      ...nothingOwed(),
       registry,
       tunnelFor: () => tunnel,
     })
@@ -706,6 +708,7 @@ describe('a hub linked to another host (#82)', () => {
         },
         terminal: () => {},
         mirror: storeMirror(store),
+        ...nothingOwed(),
         registry,
         tunnelFor: () => tunnel,
         log: (l) => void logs.push(l),
@@ -826,6 +829,7 @@ describe('a hub linked to another host (#82)', () => {
         },
         terminal: () => {},
         mirror: storeMirror(store),
+        ...nothingOwed(),
         registry,
         tunnelFor: () => tunnel,
         retryMs: [50, 200],
@@ -904,6 +908,7 @@ describe('a hub linked to another host (#82)', () => {
         },
         terminal: () => {},
         mirror: storeMirror(store),
+        ...nothingOwed(),
         registry,
         tunnelFor: () => tunnel,
         log: (l) => void (l.includes('asking the machine again') && gaveUp.push(performance.now())),
@@ -1181,6 +1186,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
       broadcast: () => {},
       terminal: () => {},
       mirror: storeMirror(store),
+      ...nothingOwed(),
       registry: storeRegistry(store),
       tunnelFor: () => tunnel,
       log: (l) => void logs.push(l),

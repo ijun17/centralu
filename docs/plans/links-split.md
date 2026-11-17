@@ -142,6 +142,8 @@ small host type of what it reads, getters never copies (the `parts()` rule of `s
 
 **What is done of it** is smaller (§4, decision D1): the deletions of §2 (measured: -6 lines in #2110, not the -250 the first estimate gave; see below), and the two roles cross-machine mail
 needs as modules (`session-mirror`, `call-reach`). The text readers out of `tunnel.ts` were built (#2120) and stopped: +9 lines.
+A role added since is a module from its first line, in the same shape: `pending-project-deletes` (#2330, the deletes owed to a
+machine that was away; `remote-hub.md` §5 "Recovery").
 Each module adds about 25 lines of its own (host type and imports), so a move that ends no smaller and serves no feature
 is not made; the rest stays a map.
 
