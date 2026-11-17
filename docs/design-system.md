@@ -20,7 +20,7 @@ were made on the screen and are recorded in the code comments at the place named
 | **No other hues.** Dark's and Light's greys lean a step bluer than neutral, which adds no hue of their own. The only colours are the diff's green and red (inside a diff only), `danger` (what destroys something, or failed to go through), the focus ring and the selection (the system blue in Dark and Light, which never states urgency), the terminal's ANSI palette, file-kind icons, and Windows' own close-button red under the pointer | Green and red in a diff are near-reflex where an approval is judged; everything else would compete with brightness | `tooling/styles.test.ts` fails on any chromatic hex not listed there with its reason |
 
 Surfaces climb from the floor up: `surface-floor` (the conversation), `surface-side` (sidebar, top
-bar; in Dark the same value as the floor, so the edge line alone parts them), `surface-raised` (what rests on the floor: composer, cards, menus, inputs), `surface-selected`
+bar; in Dark a step above the floor, ΔL* 5.4, with the edge line between them), `surface-raised` (what rests on the floor: composer, cards, menus, inputs), `surface-selected`
 (a picked option), `surface-hover` (hover and pressed; the person's bubble). Values and the measured
 distances between them are in [themes.md](themes.md#choosing).
 
