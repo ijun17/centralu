@@ -187,7 +187,7 @@ describe('ChatRow: approvals and marks', () => {
     const mail = row({ kind: 'mark', seq: 6, text: '1 message from Centralu', notice: { head: '', body: '1 message from Centralu', from: 'Centralu', mail: true } })
     expect(testIds(mail.html)).toEqual(['msg-mark', 'notice-summary'])
     expect(mail.text).toBe('1 message from Centralu')
-    expect(mail.html).toContain('rounded-full border border-line')
+    expect(mail.html).toMatch(/rounded-full border[^"]*border-line/)
   })
 
   it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {

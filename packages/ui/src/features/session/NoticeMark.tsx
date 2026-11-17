@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronIcon, MailIcon } from '../../components/icons.jsx'
+import { Pill } from '../../components/Pill.jsx'
 import { audienceText, type NoticeLine } from '../../store/store.js'
 
 /** `a \`b\` c` with the quoted part set apart, the way Codex and the host quote a file or a setting */
@@ -35,12 +36,12 @@ function MailMark({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-2 py-1" data-testid="msg-mark" data-mark="mail">
       <span className="h-px flex-1 bg-line" />
-      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-2xs text-ink-faint">
+      <Pill size="line" tone="faint">
         <MailIcon size={12} />
-        <span className="min-w-0 break-words" data-testid="notice-summary">
+        <span className="min-w-0" data-testid="notice-summary">
           {text}
         </span>
-      </span>
+      </Pill>
       <span className="h-px flex-1 bg-line" />
     </div>
   )
