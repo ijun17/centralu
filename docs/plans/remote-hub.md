@@ -150,13 +150,15 @@ takes the project and its sessions out of the headers mirror of point 1, and tel
 mirror, so no reader filters anything, on the hub or in a window. At the machine's next hello, before its lists are read,
 the hub asks the machine's own `projects.delete` for each delete it owes, oldest first: the sessions go to the session
 archive there, where they can be restored, and the folder stays, as for a delete while it was connected. A session the
-machine got in the project meanwhile goes with the others.
+machine got in the project meanwhile goes with the others, and so does a project brought back there meanwhile by
+restoring one of its sessions (its id is the same): the hub cannot order the two, and the archive there still holds them.
 
 A delete is owed only until the machine was asked over a link that held. Deleted (a project the machine no longer has
-answers the same), refused or failed, the entry is dropped and the lists read right after say what is there: a project a
+answers the same), refused, failed or not answered in time, the entry is dropped and the lists read right after say what is there: a project a
 machine refused to delete (a build from before the method) is listed again, and the hub's log says why. Only a link that
 went before the answer keeps the entry for the next hello. A hub started again still owes its entries and still does not
-list the project, because both are in its store; removing the machine from the hub drops them. An agent's delete goes
+list the project, because both are in its store (the entry is written first: a hub that stopped between the two writes
+lists the project until the hello that deletes it); removing the machine from the hub drops them. An agent's delete goes
 the same way once its wait for the machine ran out (`reachForCall`), and a limited credential's after the hub's card.
 Every other call to a machine that is away is refused as before. Another hub linked to the same machine hears of the
 delete from the machine itself: a host says `projects_changed` when it deletes a project.

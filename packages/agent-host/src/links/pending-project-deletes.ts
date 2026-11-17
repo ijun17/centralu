@@ -63,9 +63,11 @@ export class PendingProjectDeletes {
     const id = machine.id
     const projects = mirror.read(id, 'projects') ?? []
     const project = projects.find((p) => isObj(p) && p.id === projectId)
-    const name = isObj(project) && typeof project.name === 'string' ? project.name : projectId
+    const owed = this.owed().find((d) => d.projectId === projectId)
+    // Asked again, the hub lists it no more: the name is the one it was kept under
+    const name = owed?.name ?? (isObj(project) && typeof project.name === 'string' ? project.name : projectId)
     // Written first: a hub that stops right after still deletes it there, and its windows read the lists again at its start
-    if (!this.owed().some((d) => d.projectId === projectId)) this.host.list.write([...this.host.list.read(), { machine: id, projectId, name, at: Date.now() }])
+    if (!owed) this.host.list.write([...this.host.list.read(), { machine: id, projectId, name, at: Date.now() }])
     for (const s of mirror.read(id, 'sessions') ?? []) {
       if (isObj(s) && s.projectId === projectId && typeof s.id === 'string') this.host.heard({ type: 'session_deleted', sessionId: s.id })
     }

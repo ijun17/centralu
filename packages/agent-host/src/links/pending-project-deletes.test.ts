@@ -75,8 +75,9 @@ describe('the deletes a hub owes a linked machine (#2330)', () => {
     m1.deletes.keep('p2')
     m1.deletes.keep('p1')
     expect(owed()).toEqual(['m1.p1', 'm2.p1', 'm1.p2'])
-    // The second ask found the project gone from the hub's list already: the entry keeps the name it was deleted under
+    // The second ask found the project gone from the hub's list already: the entry and the log keep the name it was deleted under
     expect(list.read()[0]).toMatchObject({ name: 'Shop' })
+    expect(m1.lines.at(-1)).toBe('[links] Desk: project "Shop" was deleted here while it is away; it is deleted there when the link is back')
     m1.deletes.forget()
     expect(owed()).toEqual(['m2.p1'])
     expect(m2.deletes.any).toBe(true)

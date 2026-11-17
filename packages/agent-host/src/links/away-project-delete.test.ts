@@ -99,6 +99,21 @@ describe('deleting a project of a linked machine that is away (#2330)', () => {
     expect(await view(again).projects()).toEqual(['p-hub'])
   })
 
+  it('lists its sessions no more either when the hub was started again before the delete, the machine still away', async () => {
+    const { machine, hub, stopMachine } = await rig()
+    await stopMachine()
+    await hub.stop()
+    // This run never heard the machine: what it lists of it is what the hub before it kept
+    const again = await hubHost(machine.port, { store: hub.store })
+    expect(again.links.get('m1')!.reachable).toBe(false)
+    expect(await view(again).sessions()).toEqual(['h1', 'm1.w1'])
+    const told = vi.spyOn(again.server, 'broadcast')
+    await again.router.handle('projects.delete', { projectId: 'm1.p-remote' }, WINDOW)
+    expect(told.mock.calls.map(([e]) => e)).toEqual([{ type: 'session_deleted', sessionId: 'm1.w1' }, { type: 'projects_changed' }])
+    expect(await view(again).projects()).toEqual(['p-hub'])
+    expect(await view(again).sessions()).toEqual(['h1'])
+  })
+
   it('takes a session the machine got in the project meanwhile to its archive too', async () => {
     const { machine, hub, there, stopMachine } = await rig()
     await stopMachine()
