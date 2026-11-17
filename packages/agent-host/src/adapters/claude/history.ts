@@ -152,7 +152,12 @@ export async function readClaudeHistory(
       const message = readableMessage(r?.message)
       if (r?.type === 'assistant') out.push(...assistantLines(message, agents))
       else if (r?.type === 'user') {
-        out.push(...userLines(message, agents, isCentraluInputId(r.uuid), typeof r.uuid === 'string' && byTheCli.has(r.uuid)))
+        /*
+         * A line with the id Centralu gave its input is Centralu's whatever its entry says: a nudge is stamped
+         * `origin.kind: "channel"`, which `writtenByTheCli` reads as not the person, but the CLI did not write it either
+         */
+        const sent = isCentraluInputId(r.uuid)
+        out.push(...userLines(message, agents, sent, !sent && typeof r.uuid === 'string' && byTheCli.has(r.uuid)))
       }
     } catch (err) {
       console.error(`[claude] a transcript row was skipped on read-back: ${(err as Error).message}`)

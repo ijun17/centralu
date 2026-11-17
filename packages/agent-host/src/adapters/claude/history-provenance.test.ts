@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isObj } from '../../json-value.js'
+import { centraluInputId } from '../input-receipts.js'
 import { realOs } from '../../os/real.js'
 import { namedFolder, removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { __setSessionApiForTest, readClaudeHistory, writtenByTheCli, type TranscriptEntry } from './history.js'
@@ -96,6 +97,18 @@ describe('claude history — who wrote a user line (#2323)', () => {
       importSessionToStore: async (_id, store) => store.append({}, [{ type: 'user', uuid, promptSource: 'system', origin: { kind: 'a-later-kind' } }]),
     })
     expect(await readClaudeHistory('s', cwd, 100)).toEqual([{ role: 'user', text: 'say hi' }])
+  })
+
+  // Hand-written: no recorded transcript keeps the channel origin Centralu stamps on a nudge (0 of 2,968 lines with a
+  // Centralu input id, CLI 2.1.263 to 2.1.299), so only a written entry shows what a CLI that kept it would give
+  it("keeps Centralu's own input as Centralu's when its entry names an origin other than the person (#2326 review)", async () => {
+    const nudge = centraluInputId()
+    __setSessionApiForTest({
+      getSessionMessages: async () => [{ type: 'user', uuid: nudge, message: { content: 'Mail arrived for this session' } }],
+      importSessionToStore: async (_id, store) =>
+        store.append({}, [{ type: 'user', uuid: nudge, promptSource: 'sdk', origin: { kind: 'channel', server: 'centralu' } }]),
+    })
+    expect(await readClaudeHistory('s', cwd, 100)).toEqual([{ role: 'user', text: 'Mail arrived for this session', sent: true }])
   })
 
   it('falls back to the text rules when the SDK cannot hand over the entries, and says why when it fails', async () => {

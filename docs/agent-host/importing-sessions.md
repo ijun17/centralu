@@ -71,7 +71,8 @@ hands every entry to a store of ours that `getSessionMessages` then reads its ro
 user line is the CLI's (`writtenByTheCli`) when its entry is `isMeta`, has `promptSource: "system"`, or has an
 `origin` whose kind is not `human` (`SDKMessageOrigin`; measured over CLI 2.1.263 to 2.1.299: a task notification is
 `origin.kind: "task-notification"`, with `promptSource: "sdk"` on 2.1.263). Its tool results are still read; its words are
-not shown. The person's words are `promptSource: "sdk"` with no origin or `origin.kind: "human"`, and keep the stripping
+not shown. A line with the id Centralu gave its input stays Centralu's whatever its entry says (a nudge is stamped
+`origin.kind: "channel"`). The person's words are `promptSource: "sdk"` with no origin or `origin.kind: "human"`, and keep the stripping
 above, since a mail wake rides in them. A slash command's lines, the interrupt line and the compaction summary carry no
 such field (2.1.296), so the text rules stay theirs. `getSessionMessages` already leaves out `isMeta` lines (a skill's
 body, a command's caveat, a cut-off notice, a timer's prompt, a cross-session message), measured on the recorded
