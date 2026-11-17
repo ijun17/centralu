@@ -88,19 +88,24 @@ step against:
      to disk (SQLite does not sync the target of `VACUUM INTO`) and then renamed. A host stopped during the copy
      leaves only the `.partial` file and the `.partial-journal` SQLite keeps beside the file it writes, which the
      next open deletes before it copies again: the step had not run. After the rename the store's folder is synced
-     too (`OsFiles.fsyncDirSync`; nothing on Windows, which has no sync of a folder): a rename is in the folder, so
-     without it a power cut could undo the name while the step's commit stays. A folder that cannot be synced is
+     too (`OsFiles.fsyncDirSync`; nothing on Windows, where Node cannot open a folder to sync it): a rename is in
+     the folder, so without it a power cut could undo the name while the step's commit stays. A folder that cannot be synced is
      said in host.log (`[store] the name of … could not be synced to the disk`) and is not a step without a copy:
      the copy is whole and under its name.
-   - **A copy a stopped host left for the same step is kept.** A host stopped after the rename and before its step
-     committed leaves `store.before-<step>.db` beside a store still below that step. The next open keeps that file
-     as the copy, says so in host.log (`[store] … is kept as the copy before step …`) and writes none, when the
-     store has not been written since: the copy's time is not before `store.db`'s, nor before the WAL's when the
-     WAL holds anything (a commit reaches the WAL first; an empty WAL is made new by every open and holds none).
-     Writing it again would add nothing but a rename over the first copy, which Windows refuses while a backup or a
-     scanner holds that file, and the person would read "no copy" beside a whole one. A store written since is
-     copied again: its step failed, the person went on with the build they had, and the first copy lacks that
-     work. A time that wrongly reads as written since costs one more copy; a folder under the name is not a copy.
+   - **A copy an earlier start left for the same step is kept.** A host whose step did not commit (stopped after
+     the rename, stopped in the step, or the step failed) leaves `store.before-<step>.db` beside a store still below
+     that step. The next open keeps that file as the copy, says so in host.log (`[store] … is kept as the copy
+     before step …`) and writes none, when nothing was committed to the store since: the copy's time is not before
+     `store.db`'s, nor before the WAL's when the WAL holds a commit. A commit reaches the WAL first, so its time
+     counts; but an open makes an empty WAL new, and a step stopped before its commit leaves in it the part that
+     outgrew SQLite's memory (16 MB), which SQLite drops, so a WAL newer than the copy is asked whether it holds a
+     commit at all (`PRAGMA wal_checkpoint(PASSIVE)`, the one way SQLite says it). Writing the copy again would add
+     nothing but its time at every start of a host that stops in a long step, and a rename over the first copy,
+     which Windows refuses while a backup or a scanner holds that file: the person would read "no copy" beside a
+     whole one. A store written since is copied again: its step failed, the person went on with the build they had,
+     and the first copy lacks that work. A time that wrongly reads as written since costs one more copy. One that
+     wrongly reads as not written since keeps a copy without that work, and takes the clock set back, or a
+     `store.db` put back from a backup with a time older than the copy. A folder under the name is not a copy.
    - **The copy takes the store's permissions**: it is created with the store's mode (`0600` in the data folder,
      [security-boundaries/local-data-and-transport.md](../security-boundaries/local-data-and-transport.md)), since
      it holds every conversation the store holds. On Windows the profile folder's ACL covers it, as it does the store.

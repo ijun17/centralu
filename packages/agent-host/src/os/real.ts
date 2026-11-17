@@ -567,8 +567,13 @@ const realOsValue: Os = {
   },
   clock,
   sqlite: {
-    // The options as given: better-sqlite3 refuses one that is named and undefined
-    open: (path, o = {}) => new Database(path, o),
+    // The port's three and only those that are set: better-sqlite3 refuses one that is named and undefined
+    open: (path, { readonly, fileMustExist, timeout } = {}) =>
+      new Database(path, {
+        ...(readonly !== undefined && { readonly }),
+        ...(fileMustExist !== undefined && { fileMustExist }),
+        ...(timeout !== undefined && { timeout }),
+      }),
   },
   traits,
 }

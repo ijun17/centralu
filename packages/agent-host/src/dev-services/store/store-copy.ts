@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { errorMessage } from '@cc/protocol'
 import { bytesText } from '../../bytes-text.js'
+import { isObj } from '../../json-value.js'
 import type { Os } from '../../os/port.js'
 
 /**
@@ -35,7 +36,7 @@ export type CopySkipped = { step: number; reason: 'low_disk'; free: number; need
  *
  * A file under a copy's name is always a whole copy: it is written as `.partial`, reaches the disk, and is renamed
  * only then, so a host stopped while writing leaves a `.partial` (and SQLite's journal of it) the next open deletes.
- * One stopped after the rename and before its step leaves the copy itself, which the next open keeps.
+ * One stopped after the rename and before its step committed leaves the copy itself, which the next open keeps.
  */
 export class StoreCopies {
   private readonly dir: string
@@ -83,7 +84,7 @@ export class StoreCopies {
   copyBefore(step: number): CopySkipped | null {
     const name = `${this.prefix}${step}.db`
     if (this.holdsTheStoreAsItIs(name)) {
-      console.error(`[store] ${name} is kept as the copy before step ${step}: a host stopped after writing it, and the store has not changed since`)
+      console.error(`[store] ${name} is kept as the copy before step ${step}: an earlier start wrote it, and the store has not changed since`)
     } else {
       const skipped = this.write(name, step)
       if (skipped) return skipped
@@ -104,26 +105,40 @@ export class StoreCopies {
   }
 
   /**
-   * Whether this step's copy is there already and the store has not been written since: a host wrote it and stopped
-   * before the step committed (the store is still below the step). It is the copy then, and writing it again would
-   * only add a rename over it that can be refused (Windows, while a backup or a scanner holds the file), with a notice
-   * that says there is no copy beside a whole one.
+   * Whether this step's copy is there already and nothing was committed to the store since: a host wrote it and its
+   * step did not commit (the store is still below the step), stopped before the step, in it, or by the step's own
+   * error. It is the copy then, and writing it again would only add a rename over it that can be refused (Windows,
+   * while a backup or a scanner holds the file), with a notice that says there is no copy beside a whole one, and
+   * the copy's time again at every start of a host that stops in a long step.
    *
-   * By the files' own times, the WAL's included, since a commit reaches the WAL first; an empty WAL holds none, and
-   * is made new by every open. A store written since is copied again: its step failed and the person went on with the
-   * build they had, and the earlier copy lacks that work. A time that wrongly reads as written since costs one more copy.
+   * By the files' own times, the WAL's included, since a commit reaches the WAL first. A WAL written after the copy
+   * counts only for the commits in it: an open makes an empty one new, and a step stopped before its commit leaves the
+   * part that outgrew SQLite's memory, which SQLite drops. A store written since is copied again: its step failed and
+   * the person went on with the build they had, and the earlier copy lacks that work. A time that wrongly reads as
+   * written since costs one more copy; one that wrongly reads as not (a clock set back, a store put back from a backup
+   * with its old time) keeps a copy without the work since.
    */
   private holdsTheStoreAsItIs(name: string): boolean {
     const stat = (path: string) => this.os.files.statSync(path, { throwIfNoEntry: false })
     try {
       const copy = stat(this.at(name))
+      if (!copy?.isFile() || (stat(this.dbPath)?.mtimeMs ?? Infinity) > copy.mtimeMs) return false
       const wal = stat(`${this.dbPath}-wal`)
-      const written = Math.max(stat(this.dbPath)?.mtimeMs ?? Infinity, wal?.size ? wal.mtimeMs : 0)
-      return copy !== undefined && copy.isFile() && copy.mtimeMs >= written
+      return !wal?.size || wal.mtimeMs <= copy.mtimeMs || !this.walHoldsCommits()
     } catch {
       // What cannot be read is not kept: the copy is written, and what fails there is said
       return false
     }
+  }
+
+  /**
+   * Whether the WAL holds a commit, copied back to the store or not. Asked with a checkpoint that waits for nobody,
+   * the one way SQLite says it: what it copies back is in the store either way.
+   */
+  private walHoldsCommits(): boolean {
+    const answer: unknown = this.db.pragma('wal_checkpoint(PASSIVE)')
+    const row: unknown = Array.isArray(answer) ? answer[0] : undefined
+    return !(isObj(row) && row.log === 0)
   }
 
   /** Writes the copy `name` from the store's own connection, or says why not, with nothing unfinished left behind */

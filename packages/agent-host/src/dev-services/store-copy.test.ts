@@ -266,14 +266,22 @@ describe('a copy that cannot be written', () => {
 
 /*
  * The stop is a real one: a separate process opens the store as the next build and SIGKILLs itself once SQLite has
- * written the copy, before it is renamed or right after. Where in the writing it stops does not change what is asked
- * of the first: no file under the copy's name.
+ * written the copy, before it is renamed or right after, or in its step. Where in the writing it stops does not change
+ * what is asked of the first: no file under the copy's name.
  */
+type Stop = 'before the rename' | 'after the rename' | 'in the step'
+/** More than SQLite holds in memory (16 MB as better-sqlite3 is built), so part of the step is in the WAL before it commits */
+const SPILLS = 'CREATE TABLE spilled (x); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO spilled SELECT randomblob(16384) FROM n'
 const storeModule = new URL('./store.ts', import.meta.url).href
 const osModule = new URL('../os/real.ts', import.meta.url).href
 const root = paths.fromFileUrl(new URL('../../../../', import.meta.url))
 
-async function openAndDie(file: string, when: 'before the rename' | 'after the rename'): Promise<void> {
+async function openAndDie(file: string, when: Stop): Promise<void> {
+  const inFiles: Record<Stop, string> = {
+    'before the rename': 'fsyncSync: die',
+    'after the rename': 'renameSync: (from, to) => (real.files.renameSync(from, to), die())',
+    'in the step': '',
+  }
   const script = join(file, '..', 'die-in-the-copy.mts')
   files.writeFileSync(
     script,
@@ -288,12 +296,12 @@ const os = {
   ...real,
   files: {
     ...real.files,
-    ${when === 'before the rename' ? 'fsyncSync: die' : 'renameSync: (from, to) => (real.files.renameSync(from, to), die())'},
+    ${inFiles[when]}
   },
 }
 class NextBuild extends Store {
   migrationSteps() {
-    return [...super.migrationSteps(), { to: ${STEP}, breaksOlderReaders: true, run: () => this.db.exec('DELETE FROM projects') }]
+    return [...super.migrationSteps(), { to: ${STEP}, breaksOlderReaders: true, run: () => { this.db.exec('DELETE FROM projects')${when === 'in the step' ? `; this.db.exec(${JSON.stringify(SPILLS)}); die()` : ''} } }]
   }
 }
 new NextBuild(${JSON.stringify(file)}, os)
@@ -337,6 +345,8 @@ describe('a host stopped while it writes the copy', () => {
 })
 
 describe('a copy of this step that is there already', () => {
+  const KEPT = `[store] store.before-${STEP}.db is kept as the copy before step ${STEP}: an earlier start wrote it, and the store has not changed since`
+
   // The same real stop, one call later: the copy has its name, and the step has not run
   it('a host stopped between the rename and the step: the next open keeps its copy, held by another program or not, and tells nobody there is none', { timeout: 60_000 * SLOW }, async () => {
     const file = storeFile()
@@ -357,15 +367,30 @@ describe('a copy of this step that is there already', () => {
     expect(beside(file)).toEqual(['die-in-the-copy.mts', `store.before-${STEP}.db`])
     expect(read(copyOf(file))).toEqual({ version: LATEST, projects: ['p1'], check: 'ok' })
     expect(logged().some((line) => line.includes('copying the store'))).toBe(false)
-    expect(logged()).toContain(
-      `[store] store.before-${STEP}.db is kept as the copy before step ${STEP}: a host stopped after writing it, and the store has not changed since`,
-    )
+    expect(logged()).toContain(KEPT)
+  })
+
+  it('a host stopped in its step, part of it in the WAL and none of it committed: the next open keeps its copy', { timeout: 60_000 * SLOW }, async () => {
+    const file = storeFile()
+    await openAndDie(file, 'in the step')
+    // Written after the copy, and not the store: SQLite drops it at the next open
+    expect(files.statSync(`${file}-wal`).size).toBeGreaterThan(0)
+    expect(files.statSync(`${file}-wal`).mtimeMs).toBeGreaterThan(files.statSync(copyOf(file)).mtimeMs)
+
+    const s = openNext(file, [breaking(STEP)])
+
+    expect(s.schemaVersion).toBe(STEP)
+    expect(s.projects.listProjects()).toEqual([])
+    expect(s.copySkipped).toBeNull()
+    expect(read(copyOf(file))).toEqual({ version: LATEST, projects: ['p1'], check: 'ok' })
+    expect(logged().some((line) => line.includes('copying the store'))).toBe(false)
+    expect(logged()).toContain(KEPT)
   })
 
   /**
    * A store with p1 and p2 and, beside it, a file under this step's copy name that holds p1 alone: which projects the
-   * copy holds after the open says whether it was kept or written again. Times are whole seconds, which every file
-   * system keeps as given.
+   * copy holds after the open says whether it was kept or written again. Times are whole seconds, which NTFS, APFS
+   * and ext4 keep as given.
    */
   function withCopyWrittenAt(seconds: number): string {
     const file = storeFile()
@@ -385,11 +410,14 @@ describe('a copy of this step that is there already', () => {
   ])('$name', ({ later, kept }) => {
     const file = withCopyWrittenAt(COPIED)
     files.utimesSync(file, COPIED + later, COPIED + later)
+    const synced: string[] = []
 
-    const s = openNext(file, [breaking(STEP)])
+    const s = openNext(file, [breaking(STEP)], osWith({ fsyncDirSync: (path) => void synced.push(path) }))
 
     expect(s.copySkipped).toBeNull()
     expect(read(copyOf(file)).projects).toEqual(kept ? ['p1'] : ['p1', 'p2'])
+    // Kept or written, its name reaches the disk: the host that left it may have stopped before that
+    expect(synced).toEqual([join(file, '..')])
   })
 
   it('a commit that is still in the WAL counts as written since', () => {
