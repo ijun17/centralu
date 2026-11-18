@@ -1911,8 +1911,9 @@ started reported nothing). The rest is unchanged:
 - the person's own work always gets its report (`asksAnswerTurnEnd`, by the giver's kind), since the person's Inbox thread reads In review from it
   and the wake this saves is a session's.
 
-Everything is read from the store, so the settle at a host's start finds the same answer as the turn's end did. A turn an update cut and Centralu
-continued may be a new `mail_turns` row. A question asked before the cut then does not count, and the report is sent: an extra report, never a lost one.
+Everything is read from the store, so the settle at a host's start finds the same answer as the turn's end did, and a turn an update cut and
+Centralu continued is still the turn the question was asked in (`handoff-mail.test.ts`, "survives a host restart between the handoff and the
+child's question"). A turn the host saw no start of reads the latest turn it recorded, so a question asked in that turn still holds the report.
 
 Why the question and not any message: a task left open after a turn has effects, and they are true only while the work really waits on its giver.
 The giver is kept from sleeping (`SessionProcesses.waitsOn`). It may not watch the session (`Watches`). It hears the session's cards

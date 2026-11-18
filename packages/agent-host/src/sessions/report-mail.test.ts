@@ -237,7 +237,7 @@ describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', 
     expect(oldReports(parent, child)).toHaveLength(1)
   })
 
-  it('two tasks it gave are two requests: each is told once', async () => {
+  it('two tasks it gave that one turn ran: one report covering both, told once (#2348)', async () => {
     const { parent, child } = await parentAndChild()
     scoped(parent)
     handleOf(child)!.acceptsAtOnce = true
@@ -245,10 +245,10 @@ describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', 
     await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'code and docs done')
-    await w.until(() => oldReports(parent, child).length === 2)
+    await w.until(() => oldReports(parent, child).length === 1)
     expect(tasksOf(parent, child).map((t) => read.taskRow(t.id, child)?.settled)).toEqual(['reported', 'reported'])
     await new Promise((r) => setTimeout(r, 20))
-    expect(oldReports(parent, child)).toHaveLength(2)
+    expect(oldReports(parent, child)).toHaveLength(1)
   })
 
   it('a notice that could not go in is kept for its next message: nothing else will tell it, and it is told once then', async () => {
