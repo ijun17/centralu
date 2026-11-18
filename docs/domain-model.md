@@ -68,8 +68,8 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Question | A choice the agent asks the person to make (AskUserQuestion), answered with `agents.answerQuestion`. Any number may wait. A session with Centralu's mail asks by a mail question instead, and the CLI's tool is off for it (#1630) | `Question`, `pendingQuestions`, `entities/sessions.ts` | prompt |
 | Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities/approvals.ts`; `project_consents` (store v44) | |
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants` (held by `manager.ts`, handed to `sessions/delegation-host.ts`), `readableGrants`, `ask-project.ts` | |
-| Report mark | What a build before #1948 step 3 kept for "you will be told when it ends": a session that owed a report of its work's end to the session that gave it work (#646, #1233). This build reads and keeps none: an open task is the record of an owed answer, answered by its reply or by the session's last response once it is at rest (plans/mailbox.md §10.6.3). Store step 74 turned each mark left by a build before v70 that had no open task into a delivered task, and raised the store's floor to 70; the builds of v70 to v73 still leave marks as they go, so step 75 raised the floor to 74 and the store refuses them (#2258) | `report_marks` (store v49), named by migration steps only | |
-| Delegated turn | Retired word (#1948 step 4): a turn belongs to no one, so no session owns the turn its work started. A card in a session goes to every giver of open work there, and one of them answers it only as the gate allows (plans/mailbox.md §10.6.4). `delegated_turns` (store v51) is neither read nor written; store step 74 deleted its rows (#2258) | `RoutedCards`, `sessions/routed-cards.ts`; `openTaskParties`, `mail/delegation.ts` | |
+| Report mark | What a build before #1948 step 3 kept for "you will be told when it ends": a session that owed a report of its work's end to the session that gave it work (#646, #1233). This build reads and keeps none: an open task is the record of an owed answer, answered by its reply or by the session's last response once it is at rest (plans/mailbox.md §10.6.3). Store step 74 turned each mark left by a build before v70 that had no open task into a delivered task, and raised the store's floor to 70; the builds of v70 to v73 still leave marks as they go, so step 75 raised the floor to 74 and the store refuses them (#2258) | `report_marks` (store v49), dropped by store step 76 | |
+| Delegated turn | Retired word (#1948 step 4): a turn belongs to no one, so no session owns the turn its work started. A card in a session goes to every giver of open work there, and one of them answers it only as the gate allows (plans/mailbox.md §10.6.4). Store step 74 deleted the rows of `delegated_turns` (store v51) and step 76 dropped the table (#2258) | `RoutedCards`, `sessions/routed-cards.ts`; `openTaskParties`, `mail/delegation.ts` | |
 | Mailed send | Work one session sends a session that cannot take it now (a `mail` send to a session the sender started, `ask_project`, `send_to_session`): a mail task from the sender, which reaches the session as a turn of its own once it is free, reported to the sender (#1948 step 2); the Assistant's `send_to_session` without `reportBack` writes a note instead, a message that needs no reply, at rest too (#2258). Replaced the queued request (#677): store step 74 turned each a build before v70 left in `queued_requests` into such a task and deleted the rows (#2258) | `MailSessionsView.takesSendNow` / `mailTask`; plans/mailbox.md §10.6.2 | Queued request |
 | Watch | A condition a session asks Centralu to keep for it: a time (`in 30m`, `at 16:30`, `every 30m`) or another session's change (its turn ended, it asked, it stopped, it is gone). When it changes, the session that set it gets one notice from Centralu as mail, which wakes it like any mail. Set with `mail(action="watch")`, cancelled with `close` by its id or by the person; a session's watches end after 24 hours, a time's at that time (#1324) | `Watches`, `mail/watches.ts`; `mail_watches` (store v73); plans/mailbox.md §18 | sleep loop, poll |
 | Fork | A sub-session started from a copy of a busy session's conversation for another session's request (`ifBusy: "fork"`): linked to the requester, hung under the original in the sidebar (#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id` (store v52) | |
@@ -278,10 +278,7 @@ Where it is stored:
 - `subagent_messages`: subagent steps, keyed by the tool call that launched them.
 - `approval_rules`: "always allow" command rules.
 - `project_consents`: one project's remembered consent to reach another.
-- `report_marks`: the report a session owed the session that gave it work, as a build before #1948 step 3 kept it; step 74 turned the rows into tasks, and step 75 keeps out the builds of v70 to v73, which still left some (#2258). No live code names it; step 76 drops it ([agent-host/store-migrations.md](agent-host/store-migrations.md#migration-steps-expand-then-contract-292), step 75).
 - `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673); or an allowed start waiting for memory (`allowed`), which the next host starts when memory recovers, without a card (#686).
-- `delegated_turns`: retired (#1948 step 4, plans/mailbox.md §10.6.4); no build the store's floor admits writes it, and step 74 deleted its rows. Step 76 drops it.
-- `queued_requests`: a request an older build held for a busy session; no build the store's floor admits writes it, and step 74 turned its rows into mail tasks (#2258). Step 76 drops it.
 - `usage_readings`: the limit windows' percentages and reset times over time, per tool and account; kept 90 days, on this computer only (agent-host/usage.md "Usage over time").
 - `usage_buckets`: the requests of each hour per session, project, tool and model: tokens, cache reads and writes, rebuilds by cause. Kept 90 days, on this computer only; a purged session's buckets go with it.
 - `usage_local_totals`: the last good totals of a tool that reports no limits (OpenCode's `opencode stats`) and when they were read, one row per tool, so a restart shows them at once. Counts only, on this computer only (agent-host/usage.md).
@@ -393,8 +390,8 @@ Where it is stored:
 The one durable channel for work and talk between sessions, apps and the person, designed in
 [plans/mailbox.md](plans/mailbox.md) (#1347, #1684). **Since M3a the host's mail is messages without threads (`mail`, `mail_recipients`): the message
 service (`mail/messages.ts`) stores and answers, `mail/reach.ts` says who may write to whom and what is held, the delivery engine (`mail/delivery.ts`)
-wakes the receiver, and the `mail` tool keeps its older schema, mapped onto the messages. The thread tables below, and Thread, Participant, Message and Receipt as the table
-gives them, are what the builds of store v61 to v64 kept: store step 75 moved the mail still pending in them, once (#2258), and no live code reads them. Apps, the task board and linked machines are later slices.**
+wakes the receiver, and the `mail` tool keeps its older schema, mapped onto the messages. Thread, Participant, Message and Receipt as the table
+gives them are what the builds of store v61 to v64 kept in tables of their own: store step 75 moved the mail still pending in them, once (#2258), and step 76 dropped the tables. Apps, the task board and linked machines are later slices.**
 
 | Concept | Meaning |
 |---|---|
@@ -407,13 +404,6 @@ gives them, are what the builds of store v61 to v64 kept: store step 75 moved th
 
 Where it is stored:
 
-- `mail_threads`: the threads of the builds of v61 to v64, with their task fields, pin and the host that owned them. This table and the four below
-  are named by migration steps only, and step 76 drops them one release after step 75 has shipped
-  ([agent-host/store-migrations.md](agent-host/store-migrations.md#migration-steps-expand-then-contract-292), step 75).
-- `mail_participants`: who was in a thread and in which role.
-- `mail_blockers`: what stood in a thread's way.
-- `mail_messages`: a thread's posts, with Centralu's `facts` and the key that kept a change from being posted twice.
-- `mail_receipts`: each recipient's progress with each post.
 - `mail_turns`: the thread each turn of a session belonged to. Since v65 also `message_id`, the turn's work message, and
   `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how` (written from M5).
   From M3a the host writes `message_id` and `starter_id` and leaves `thread_id` NULL; a turn continued after a restart

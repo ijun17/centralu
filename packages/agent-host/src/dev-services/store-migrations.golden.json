@@ -303,12 +303,17 @@
    "to": 75,
    "breaksOlderReaders": true,
    "minReader": 74
+  },
+  {
+   "to": 76,
+   "breaksOlderReaders": true,
+   "minReader": 75
   }
  ],
- "version": 75,
- "ran": 74,
+ "version": 76,
+ "ran": 75,
  "store": {
-  "userVersion": 75,
+  "userVersion": 76,
   "master": [
    {
     "type": "index",
@@ -360,24 +365,6 @@
    },
    {
     "type": "index",
-    "name": "mail_messages_dedupe",
-    "tbl_name": "mail_messages",
-    "sql": "CREATE INDEX mail_messages_dedupe ON mail_messages(sender, dedupe_key) WHERE dedupe_key IS NOT NULL"
-   },
-   {
-    "type": "index",
-    "name": "mail_participants_address",
-    "tbl_name": "mail_participants",
-    "sql": "CREATE INDEX mail_participants_address ON mail_participants(address)"
-   },
-   {
-    "type": "index",
-    "name": "mail_receipts_pending",
-    "tbl_name": "mail_receipts",
-    "sql": "CREATE INDEX mail_receipts_pending ON mail_receipts(recipient, due_at) WHERE delivered_at IS NULL"
-   },
-   {
-    "type": "index",
     "name": "mail_recipients_by",
     "tbl_name": "mail_recipients",
     "sql": "CREATE INDEX mail_recipients_by      ON mail_recipients(recipient, delivered_at)"
@@ -423,18 +410,6 @@
     "name": "mail_sender",
     "tbl_name": "mail",
     "sql": "CREATE INDEX mail_sender ON mail(sender, created_at)"
-   },
-   {
-    "type": "index",
-    "name": "mail_threads_state",
-    "tbl_name": "mail_threads",
-    "sql": "CREATE INDEX mail_threads_state ON mail_threads(state, updated_at)"
-   },
-   {
-    "type": "index",
-    "name": "mail_turns_open",
-    "tbl_name": "mail_turns",
-    "sql": "CREATE INDEX mail_turns_open ON mail_turns(thread_id) WHERE ended_at IS NULL"
    },
    {
     "type": "index",
@@ -510,12 +485,6 @@
    },
    {
     "type": "index",
-    "name": "sqlite_autoindex_delegated_turns_1",
-    "tbl_name": "delegated_turns",
-    "sql": null
-   },
-   {
-    "type": "index",
     "name": "sqlite_autoindex_grid_layout_1",
     "tbl_name": "grid_layout",
     "sql": null
@@ -564,56 +533,14 @@
    },
    {
     "type": "index",
-    "name": "sqlite_autoindex_mail_blockers_1",
-    "tbl_name": "mail_blockers",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_mail_messages_1",
-    "tbl_name": "mail_messages",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_mail_messages_2",
-    "tbl_name": "mail_messages",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_mail_messages_3",
-    "tbl_name": "mail_messages",
-    "sql": null
-   },
-   {
-    "type": "index",
     "name": "sqlite_autoindex_mail_numbers_1",
     "tbl_name": "mail_numbers",
     "sql": null
    },
    {
     "type": "index",
-    "name": "sqlite_autoindex_mail_participants_1",
-    "tbl_name": "mail_participants",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_mail_receipts_1",
-    "tbl_name": "mail_receipts",
-    "sql": null
-   },
-   {
-    "type": "index",
     "name": "sqlite_autoindex_mail_recipients_1",
     "tbl_name": "mail_recipients",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_mail_threads_1",
-    "tbl_name": "mail_threads",
     "sql": null
    },
    {
@@ -650,18 +577,6 @@
     "type": "index",
     "name": "sqlite_autoindex_projects_2",
     "tbl_name": "projects",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_queued_requests_1",
-    "tbl_name": "queued_requests",
-    "sql": null
-   },
-   {
-    "type": "index",
-    "name": "sqlite_autoindex_report_marks_1",
-    "tbl_name": "report_marks",
     "sql": null
    },
    {
@@ -768,12 +683,6 @@
    },
    {
     "type": "table",
-    "name": "delegated_turns",
-    "tbl_name": "delegated_turns",
-    "sql": "CREATE TABLE delegated_turns (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              started_at        INTEGER NOT NULL,\n              told_cards        TEXT NOT NULL DEFAULT '',\n              turn_id           TEXT NOT NULL DEFAULT ''\n            )"
-   },
-   {
-    "type": "table",
     "name": "grid_layout",
     "tbl_name": "grid_layout",
     "sql": "CREATE TABLE grid_layout (\n                panel_key  TEXT PRIMARY KEY,\n                kind       TEXT NOT NULL CHECK (kind IN ('session', 'app')),\n                session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,\n                project_id TEXT,\n                app_id     TEXT,\n                position   INTEGER NOT NULL\n              , span_cols INTEGER, span_rows INTEGER, remote_session_id TEXT, remote_app_id TEXT, app_machine TEXT)"
@@ -810,45 +719,15 @@
    },
    {
     "type": "table",
-    "name": "mail_blockers",
-    "tbl_name": "mail_blockers",
-    "sql": "CREATE TABLE mail_blockers (\n              thread_id   TEXT NOT NULL,\n              n           INTEGER NOT NULL,\n              kind        TEXT NOT NULL,\n              ref         TEXT,\n              text        TEXT NOT NULL,\n              resolved_at INTEGER,\n              PRIMARY KEY (thread_id, n)\n            )"
-   },
-   {
-    "type": "table",
-    "name": "mail_messages",
-    "tbl_name": "mail_messages",
-    "sql": "CREATE TABLE mail_messages (\n              id          TEXT PRIMARY KEY,\n              thread_id   TEXT NOT NULL,\n              seq         INTEGER NOT NULL,\n              home_seq    INTEGER,\n              sender      TEXT NOT NULL,\n              kind        TEXT NOT NULL,\n              urgent      INTEGER NOT NULL DEFAULT 0,\n              needs_owner INTEGER NOT NULL DEFAULT 0,\n              wake        TEXT,\n              reply_to    TEXT,\n              body        TEXT NOT NULL,\n              facts       TEXT NOT NULL DEFAULT '{}',\n              dedupe_key  TEXT,\n              created_at  INTEGER NOT NULL,\n              UNIQUE (thread_id, seq),\n              UNIQUE (thread_id, sender, dedupe_key)\n            )"
-   },
-   {
-    "type": "table",
     "name": "mail_numbers",
     "tbl_name": "mail_numbers",
     "sql": "CREATE TABLE mail_numbers (n INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL UNIQUE)"
    },
    {
     "type": "table",
-    "name": "mail_participants",
-    "tbl_name": "mail_participants",
-    "sql": "CREATE TABLE mail_participants (\n              thread_id TEXT NOT NULL,\n              address   TEXT NOT NULL,\n              role      TEXT NOT NULL,\n              joined_at INTEGER NOT NULL,\n              left_at   INTEGER,\n              read_seq  INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (thread_id, address)\n            )"
-   },
-   {
-    "type": "table",
-    "name": "mail_receipts",
-    "tbl_name": "mail_receipts",
-    "sql": "CREATE TABLE mail_receipts (\n              message_id   TEXT NOT NULL,\n              recipient    TEXT NOT NULL,\n              due_at       INTEGER NOT NULL,\n              attempt_at   INTEGER,\n              delivered_at INTEGER,\n              read_at      INTEGER,\n              handled_at   INTEGER,\n              held         TEXT,\n              attempts     INTEGER NOT NULL DEFAULT 0,\n              last_error   TEXT,\n              PRIMARY KEY (message_id, recipient)\n            )"
-   },
-   {
-    "type": "table",
     "name": "mail_recipients",
     "tbl_name": "mail_recipients",
     "sql": "CREATE TABLE mail_recipients (\n              message_id        TEXT NOT NULL,\n              recipient         TEXT NOT NULL,\n              recipient_project TEXT,\n              via               TEXT,\n              due_at            INTEGER NOT NULL,\n              attempt_at        INTEGER,\n              delivered_at      INTEGER,\n              read_at           INTEGER,\n              held              TEXT,\n              attempts          INTEGER NOT NULL DEFAULT 0,\n              last_error        TEXT,\n              turn_seq          INTEGER,\n              settled           TEXT,\n              settled_at        INTEGER,\n              answer_id         TEXT,\n              reminded          INTEGER NOT NULL DEFAULT 0,\n              reminded_at       INTEGER,\n              released_at       INTEGER,\n              released_why      TEXT,\n              told_at           INTEGER,\n              PRIMARY KEY (message_id, recipient)\n            )"
-   },
-   {
-    "type": "table",
-    "name": "mail_threads",
-    "tbl_name": "mail_threads",
-    "sql": "CREATE TABLE mail_threads (\n              id          TEXT PRIMARY KEY,\n              home        TEXT NOT NULL,\n              project_id  TEXT,\n              subject     TEXT NOT NULL,\n              origin      TEXT NOT NULL,\n              depth       INTEGER NOT NULL DEFAULT 0,\n              parent_id   TEXT,\n              follows     TEXT,\n              state       TEXT NOT NULL,\n              outcome     TEXT,\n              owner       TEXT NOT NULL,\n              assignee    TEXT,\n              next_step   TEXT,\n              links       TEXT NOT NULL DEFAULT '{}',\n              rev         INTEGER NOT NULL DEFAULT 0,\n              pinned_at   INTEGER,\n              created_at  INTEGER NOT NULL,\n              updated_at  INTEGER NOT NULL,\n              state_since INTEGER NOT NULL,\n              done_at     INTEGER\n            )"
    },
    {
     "type": "table",
@@ -918,21 +797,9 @@
    },
    {
     "type": "table",
-    "name": "queued_requests",
-    "tbl_name": "queued_requests",
-    "sql": "CREATE TABLE queued_requests (\n              id                TEXT PRIMARY KEY,\n              session_id        TEXT NOT NULL,\n              caller_session_id TEXT NOT NULL,\n              via               TEXT NOT NULL,\n              text              TEXT NOT NULL,\n              queued_at         INTEGER NOT NULL,\n              delivering_at     INTEGER\n            , opened_by_auto INTEGER)"
-   },
-   {
-    "type": "table",
-    "name": "report_marks",
-    "tbl_name": "report_marks",
-    "sql": "CREATE TABLE report_marks (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              marked_at         INTEGER NOT NULL\n            )"
-   },
-   {
-    "type": "table",
     "name": "sessions",
     "tbl_name": "sessions",
-    "sql": "CREATE TABLE \"sessions\" (\n              id            TEXT PRIMARY KEY,\n              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n              tool          TEXT NOT NULL,\n              external_id   TEXT,\n              name          TEXT NOT NULL,\n              auto_named    INTEGER NOT NULL DEFAULT 1,\n              state         TEXT NOT NULL DEFAULT 'idle',\n              is_orchestrator INTEGER NOT NULL DEFAULT 0,\n              last_read_seq INTEGER NOT NULL DEFAULT 0,\n              waiting_since INTEGER,\n              created_at    INTEGER NOT NULL,\n              touched_paths TEXT NOT NULL DEFAULT '[]',\n              model         TEXT,\n              effort        TEXT,\n              verbosity     TEXT,\n              permission_preset TEXT NOT NULL DEFAULT 'normal',\n              imported_from TEXT,\n              worktree_path TEXT,\n              worktree_branch TEXT,\n              sidebar_order INTEGER NOT NULL DEFAULT 0\n            , cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT, mail_args INTEGER, is_assistant INTEGER NOT NULL DEFAULT 0)"
+    "sql": "CREATE TABLE \"sessions\" (\n              id            TEXT PRIMARY KEY,\n              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n              tool          TEXT NOT NULL,\n              external_id   TEXT,\n              name          TEXT NOT NULL,\n              auto_named    INTEGER NOT NULL DEFAULT 1,\n              state         TEXT NOT NULL DEFAULT 'idle',\n              is_orchestrator INTEGER NOT NULL DEFAULT 0,\n              last_read_seq INTEGER NOT NULL DEFAULT 0,\n              waiting_since INTEGER,\n              created_at    INTEGER NOT NULL,\n              touched_paths TEXT NOT NULL DEFAULT '[]',\n              model         TEXT,\n              effort        TEXT,\n              verbosity     TEXT,\n              permission_preset TEXT NOT NULL DEFAULT 'normal',\n              imported_from TEXT,\n              worktree_path TEXT,\n              worktree_branch TEXT,\n              sidebar_order INTEGER NOT NULL DEFAULT 0\n            , cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT, is_assistant INTEGER NOT NULL DEFAULT 0)"
    },
    {
     "type": "table",
@@ -1073,46 +940,6 @@
     ]
    },
    {
-    "name": "mail_messages_dedupe",
-    "list": [
-     {
-      "seqno": 0,
-      "cid": 4,
-      "name": "sender"
-     },
-     {
-      "seqno": 1,
-      "cid": 12,
-      "name": "dedupe_key"
-     }
-    ]
-   },
-   {
-    "name": "mail_participants_address",
-    "list": [
-     {
-      "seqno": 0,
-      "cid": 1,
-      "name": "address"
-     }
-    ]
-   },
-   {
-    "name": "mail_receipts_pending",
-    "list": [
-     {
-      "seqno": 0,
-      "cid": 1,
-      "name": "recipient"
-     },
-     {
-      "seqno": 1,
-      "cid": 2,
-      "name": "due_at"
-     }
-    ]
-   },
-   {
     "name": "mail_recipients_by",
     "list": [
      {
@@ -1213,31 +1040,6 @@
     ]
    },
    {
-    "name": "mail_threads_state",
-    "list": [
-     {
-      "seqno": 0,
-      "cid": 8,
-      "name": "state"
-     },
-     {
-      "seqno": 1,
-      "cid": 17,
-      "name": "updated_at"
-     }
-    ]
-   },
-   {
-    "name": "mail_turns_open",
-    "list": [
-     {
-      "seqno": 0,
-      "cid": 2,
-      "name": "thread_id"
-     }
-    ]
-   },
-   {
     "name": "mail_watches_due",
     "list": [
      {
@@ -1300,7 +1102,6 @@
    "approval_rules": [],
    "command_cache": [],
    "commit_sessions": [],
-   "delegated_turns": [],
    "grid_layout": [
     {
      "id": 0,
@@ -1361,13 +1162,8 @@
     }
    ],
    "mail": [],
-   "mail_blockers": [],
-   "mail_messages": [],
    "mail_numbers": [],
-   "mail_participants": [],
-   "mail_receipts": [],
    "mail_recipients": [],
-   "mail_threads": [],
    "mail_turns": [],
    "mail_watches": [],
    "messages": [
@@ -1411,8 +1207,6 @@
     }
    ],
    "projects": [],
-   "queued_requests": [],
-   "report_marks": [],
    "sessions": [
     {
      "id": 0,
@@ -1553,7 +1347,7 @@
     "rows": [
      {
       "key": "min_reader_version",
-      "value": "74"
+      "value": "75"
      }
     ]
    },
@@ -1603,16 +1397,6 @@
      "sha TEXT notnull=1 default=null pk=2",
      "session_id TEXT notnull=1 default=null pk=0",
      "ts INTEGER notnull=1 default=null pk=0"
-    ],
-    "rows": []
-   },
-   "delegated_turns": {
-    "columns": [
-     "session_id TEXT notnull=0 default=null pk=1",
-     "caller_session_id TEXT notnull=1 default=null pk=0",
-     "started_at INTEGER notnull=1 default=null pk=0",
-     "told_cards TEXT notnull=1 default='' pk=0",
-     "turn_id TEXT notnull=1 default='' pk=0"
     ],
     "rows": []
    },
@@ -1698,66 +1482,10 @@
     ],
     "rows": []
    },
-   "mail_blockers": {
-    "columns": [
-     "thread_id TEXT notnull=1 default=null pk=1",
-     "n INTEGER notnull=1 default=null pk=2",
-     "kind TEXT notnull=1 default=null pk=0",
-     "ref TEXT notnull=0 default=null pk=0",
-     "text TEXT notnull=1 default=null pk=0",
-     "resolved_at INTEGER notnull=0 default=null pk=0"
-    ],
-    "rows": []
-   },
-   "mail_messages": {
-    "columns": [
-     "id TEXT notnull=0 default=null pk=1",
-     "thread_id TEXT notnull=1 default=null pk=0",
-     "seq INTEGER notnull=1 default=null pk=0",
-     "home_seq INTEGER notnull=0 default=null pk=0",
-     "sender TEXT notnull=1 default=null pk=0",
-     "kind TEXT notnull=1 default=null pk=0",
-     "urgent INTEGER notnull=1 default=0 pk=0",
-     "needs_owner INTEGER notnull=1 default=0 pk=0",
-     "wake TEXT notnull=0 default=null pk=0",
-     "reply_to TEXT notnull=0 default=null pk=0",
-     "body TEXT notnull=1 default=null pk=0",
-     "facts TEXT notnull=1 default='{}' pk=0",
-     "dedupe_key TEXT notnull=0 default=null pk=0",
-     "created_at INTEGER notnull=1 default=null pk=0"
-    ],
-    "rows": []
-   },
    "mail_numbers": {
     "columns": [
      "n INTEGER notnull=0 default=null pk=1",
      "message_id TEXT notnull=1 default=null pk=0"
-    ],
-    "rows": []
-   },
-   "mail_participants": {
-    "columns": [
-     "thread_id TEXT notnull=1 default=null pk=1",
-     "address TEXT notnull=1 default=null pk=2",
-     "role TEXT notnull=1 default=null pk=0",
-     "joined_at INTEGER notnull=1 default=null pk=0",
-     "left_at INTEGER notnull=0 default=null pk=0",
-     "read_seq INTEGER notnull=1 default=0 pk=0"
-    ],
-    "rows": []
-   },
-   "mail_receipts": {
-    "columns": [
-     "message_id TEXT notnull=1 default=null pk=1",
-     "recipient TEXT notnull=1 default=null pk=2",
-     "due_at INTEGER notnull=1 default=null pk=0",
-     "attempt_at INTEGER notnull=0 default=null pk=0",
-     "delivered_at INTEGER notnull=0 default=null pk=0",
-     "read_at INTEGER notnull=0 default=null pk=0",
-     "handled_at INTEGER notnull=0 default=null pk=0",
-     "held TEXT notnull=0 default=null pk=0",
-     "attempts INTEGER notnull=1 default=0 pk=0",
-     "last_error TEXT notnull=0 default=null pk=0"
     ],
     "rows": []
    },
@@ -1783,31 +1511,6 @@
      "released_at INTEGER notnull=0 default=null pk=0",
      "released_why TEXT notnull=0 default=null pk=0",
      "told_at INTEGER notnull=0 default=null pk=0"
-    ],
-    "rows": []
-   },
-   "mail_threads": {
-    "columns": [
-     "id TEXT notnull=0 default=null pk=1",
-     "home TEXT notnull=1 default=null pk=0",
-     "project_id TEXT notnull=0 default=null pk=0",
-     "subject TEXT notnull=1 default=null pk=0",
-     "origin TEXT notnull=1 default=null pk=0",
-     "depth INTEGER notnull=1 default=0 pk=0",
-     "parent_id TEXT notnull=0 default=null pk=0",
-     "follows TEXT notnull=0 default=null pk=0",
-     "state TEXT notnull=1 default=null pk=0",
-     "outcome TEXT notnull=0 default=null pk=0",
-     "owner TEXT notnull=1 default=null pk=0",
-     "assignee TEXT notnull=0 default=null pk=0",
-     "next_step TEXT notnull=0 default=null pk=0",
-     "links TEXT notnull=1 default='{}' pk=0",
-     "rev INTEGER notnull=1 default=0 pk=0",
-     "pinned_at INTEGER notnull=0 default=null pk=0",
-     "created_at INTEGER notnull=1 default=null pk=0",
-     "updated_at INTEGER notnull=1 default=null pk=0",
-     "state_since INTEGER notnull=1 default=null pk=0",
-     "done_at INTEGER notnull=0 default=null pk=0"
     ],
     "rows": []
    },
@@ -1996,27 +1699,6 @@
      }
     ]
    },
-   "queued_requests": {
-    "columns": [
-     "id TEXT notnull=0 default=null pk=1",
-     "session_id TEXT notnull=1 default=null pk=0",
-     "caller_session_id TEXT notnull=1 default=null pk=0",
-     "via TEXT notnull=1 default=null pk=0",
-     "text TEXT notnull=1 default=null pk=0",
-     "queued_at INTEGER notnull=1 default=null pk=0",
-     "delivering_at INTEGER notnull=0 default=null pk=0",
-     "opened_by_auto INTEGER notnull=0 default=null pk=0"
-    ],
-    "rows": []
-   },
-   "report_marks": {
-    "columns": [
-     "session_id TEXT notnull=0 default=null pk=1",
-     "caller_session_id TEXT notnull=1 default=null pk=0",
-     "marked_at INTEGER notnull=1 default=null pk=0"
-    ],
-    "rows": []
-   },
    "sessions": {
     "columns": [
      "id TEXT notnull=0 default=null pk=1",
@@ -2054,7 +1736,6 @@
      "asked_by_session_id TEXT notnull=0 default=null pk=0",
      "forked_from_session_id TEXT notnull=0 default=null pk=0",
      "interruption TEXT notnull=0 default=null pk=0",
-     "mail_args INTEGER notnull=0 default=null pk=0",
      "is_assistant INTEGER notnull=1 default=0 pk=0"
     ],
     "rows": [
@@ -2094,7 +1775,6 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null,
       "is_assistant": 0
      },
      {
@@ -2133,7 +1813,6 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null,
       "is_assistant": 0
      },
      {
@@ -2172,7 +1851,6 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null,
       "is_assistant": 0
      }
     ]

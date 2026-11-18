@@ -38,6 +38,36 @@ export class StepsV75 extends MigrationRange {
          */
         run: () => this.moveThreadMail(),
       },
+      {
+        to: 76,
+        breaksOlderReaders: true,
+        minReader: 75,
+        /**
+         * What nothing reads any more goes (#2258, docs/plans/mailbox.md M7): the thread tables of v61 (`mail_threads`, `mail_participants`,
+         * `mail_blockers`, `mail_messages`, `mail_receipts`), the index that found a thread's open turn (`mail_turns_open`), the three tables
+         * of owed work from before mail (`report_marks`, `delegated_turns`, `queued_requests`) and `sessions.mail_args`. Step 74 made tasks of
+         * the owed work and step 75 moved the pending thread mail, so what is deleted here is history: thread messages that were handled, or
+         * were older than step 75's 180 days, are kept only in the copy of the store the open that runs this step makes, for its 14 days,
+         * and nowhere when that copy could not be made (rule 5 above `migrationSteps`; the copy is named after that open's first breaking
+         * step, so `store.before-75.db` from version 74). No vacuum, so the step is not `heavy`: later writes reuse the pages the tables held.
+         *
+         * One release after step 75, whose build was the first to name none of these (rule 2 above `migrationSteps`). `schema.sql` creates
+         * none of them, so a new store and a migrated one end with the same tables.
+         *
+         * **Breaks the build of v74 (beta.70 to beta.72): the floor goes to 75.** That build reads the thread tables at every start and for the
+         * lines before a moved message, deletes from `report_marks` at every start and from two of the thread tables when a session is
+         * purged; it is refused (`StoreTooNewError`). The build of v75 opens the store as it is. No release read or wrote `sessions.mail_args`:
+         * the second version of the mail tool it was added for was not built (M3b).
+         */
+        run: () => {
+          for (const table of ['mail_blockers', 'mail_participants', 'mail_receipts', 'mail_messages', 'mail_threads', 'report_marks', 'delegated_turns', 'queued_requests']) {
+            this.db.exec(`DROP TABLE IF EXISTS ${table}`)
+          }
+          this.db.exec(`DROP INDEX IF EXISTS mail_turns_open`)
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
+          if (cols.some((c) => c.name === 'mail_args')) this.db.exec(`ALTER TABLE sessions DROP COLUMN mail_args`)
+        },
+      },
     ]
   }
 

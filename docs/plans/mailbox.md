@@ -3481,7 +3481,7 @@ the final one. A swap during the pause: the final report still comes once. On Co
 
 ### M7. Contract
 
-**As built (#2258): store steps 74 and 75, and step 76 owed.**
+**As built (#2258): store steps 74, 75 and 76.**
 
 - **Step 74** (floor 70) did item 2, and with it this build stopped writing marks (D18's note).
 - **Step 75** (`breaksOlderReaders: true`, `minReader: 74`) is item 1's final move, run once by the step on its own
@@ -3492,9 +3492,9 @@ the final one. A swap during the pause: the final report still comes once. On Co
   (beta.70 to beta.72) writes no mark and finds every receipt handled, so it still opens the store, and the tables stay
   one step more for it.
 - **No history is copied** (item 1's 30 days): §6.3 "History" says why.
-- **Step 76, owed** (`breaksOlderReaders: true`, `minReader: 75`), is item 3's drop and the column
-  `sessions.mail_args`, in a pull request of its own, merged only after a release with step 75 has shipped
-  (`docs/agent-host/store-migrations.md`, step 75). What stays for good: `mail_turns.thread_id` (item 4), and what moved
+- **Step 76** (`breaksOlderReaders: true`, `minReader: 75`) is item 3's drop and the column
+  `sessions.mail_args`, one release after step 75: the build of v74 (beta.70 to beta.72), which still reads the
+  tables, is refused (`docs/agent-host/store-migrations.md`, step 76). What stays for good: `mail_turns.thread_id` (item 4), and what moved
   mail is read by, `mail.legacy_thread`, `settled = 'legacy'`, `facts.legacyKind` and `facts.releasedTo`.
 - The window's old methods (`mail.list`, `mail.thread`, `mail.reply`, `mail.close`) were not turned into `removed`:
   built on the message tables (Q-M3a-20), they read no v61 table.
