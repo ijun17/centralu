@@ -370,10 +370,13 @@ export class AcrossReceipts extends AcrossCore {
 }
 
 /** The facts of a report that cross with it (`TaskReport`) */
-const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after'] as const
+const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after', 'covers'] as const
 
-/** A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says */
-const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : v)
+/**
+ * A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says; of
+ * the tasks it covers, the newest 100 (the rows of the rest cross settled all the same)
+ */
+const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : Array.isArray(v) ? v.slice(-100) : v)
 
 /** A report's facts as `TaskReport` takes them; one whose facts do not fit is a turn that ended */
 function reportOf(m: MailRow): TaskReport {

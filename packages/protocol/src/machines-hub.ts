@@ -82,6 +82,12 @@ export const TaskReport = z.object({
   waitingOn: z.number().int().min(0).max(10_000).optional(),
   personSince: z.literal(true).optional(),
   after: z.literal(true).optional(),
+  /**
+   * The same giver's other tasks to that session the report answers too (#2348, additive): one report per giver at a turn's end. Each id is the
+   * one the task has on both sides; the receiver settles only its own tasks from that giver to that session. An older hub drops it, and its copies
+   * of those tasks read as settled from the row they cross with, with no report on them
+   */
+  covers: z.array(z.string().min(1).max(200)).max(100).optional(),
 })
 export type TaskReport = z.infer<typeof TaskReport>
 /**

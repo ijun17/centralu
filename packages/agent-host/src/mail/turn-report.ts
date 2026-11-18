@@ -10,4 +10,9 @@ export type TurnReport = {
   /** On a last response (§10.6.3): the person wrote in the session after the task was given; the task arrived after the response was written */
   personSince?: boolean
   after?: boolean
+  /**
+   * The same sender's other open tasks to the same session that this report answers too (#2348, docs/plans/mailbox.md §10.6.3): one turn end, one
+   * report per giver. Each is settled `reported` with it; an id that is no such task is left alone
+   */
+  covers?: readonly string[]
 }

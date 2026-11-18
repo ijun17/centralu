@@ -97,6 +97,17 @@ describe('a script starts a session with a first message', () => {
     expect(threadState(s.id)).toBe('review')
   })
 
+  it('#2348: a session that asked the person something in the turn still reports on the person’s work: their thread reads In review from it', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const asked = await m.tool.call(s.id, { action: 'send', to: 'person', text: 'CSV or JSON?' })
+    expect(asked.isError).toBeFalsy()
+    expect(read.between(addressOf(s.id), PERSON, 'message').map((x) => x.needsReply)).toEqual([true])
+    handleOf(s.id)!.answer('Asked which format; exported CSV for now.')
+    await w.until(() => reportsOf(s.id).length === 1)
+    expect(settledOf(s.id)).toBe('reported')
+    expect(threadState(s.id)).toBe('review')
+  })
+
   it('a turn that wrote nothing still answers with the one line, and no answer', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.event({ type: 'turn_complete', sessionId: s.id })

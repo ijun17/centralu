@@ -797,7 +797,7 @@ task is never reminded: its report settles it.
 | `needsOwner` | notice | an app's post the receiver must see (v61 `needs_owner`), kept for the apps slice |
 | `card` | notice | `{ session, requestId, handle, kind }`: the card a session raised, told to a giver of its open work (§10.6.4); never the card's text |
 | `clarifies` | message | the task id this message is a clarification about (§9.7); set by Centralu at send |
-| `covers` | report | the ids of every task this report settled besides its `reply_to` (§9.3) |
+| `covers` | report | the ids of every task this report settled besides its `reply_to` (§9.3; one report per giver at a turn's end since #2348, §10.6.3) |
 | `reminder` | notice | 1 or 2: this notice is a reminder (§10) |
 | `of` | notice | the message ids a reminder is about (each one a watched row of the receiver), at most 10 |
 | `unanswered` | notice | `{ id, recipient, why }[]`: the sender's released rows this notice gathers (D25); `why` is `reminders`, `waited`, `working` (2 h passed while its receiver runs its own work), `waiting` (2 h passed while its receiver waits on a session or the person it asked, §10.3), `stopped`, `error`, `gone` or `lost` (the turn it was delivered in ended with no host to record it, #1916). A `why` this build does not know reads as null for that element alone (M1) |
@@ -1876,11 +1876,15 @@ Target 4 of #1948 and the owner's rule of 2026-11-05: an agent's turn belongs to
 that needs a reply), and the agent answers each in its own thread. Centralu keeps only the floor: the stop notice (§10.6.1) when a session
 cannot answer, and the last response below when it ends its turn without answering a task.
 
-**The last response (one owner, `MessageService.lastResponse`, `mail/last-response.ts`).** A report attaches to a request, never to a turn or
-a sender (the owner, 2026-11-05): when a session is at rest after a turn that ended as turns do, every task to it that is still open gets its
-own report, replying to it and settling it `reported`, with the response as `facts.answer` (600 characters) beside Centralu's words. Two tasks
-from one sender are two requests and get two reports; nothing covers another task (`covers` is gone, and with it F4/K3's sweep of a sender's
-older tasks). Which tasks: delivered, not settled, not held, from a session or the person (the person's own work, below), not held in
+**The last response (one owner, `MessageService.lastResponse`, `mail/last-response.ts`).** One report per giver at a turn's end (#2348, the
+owner's decision of 2026-11-18, which replaced 2026-11-05's "a report attaches to a request, never to a turn or a sender"): when a session is at
+rest after a turn that ended as turns do, the tasks to it that are still open are grouped by their sender, and each sender gets one report,
+replying to its newest open task (the thread the turn ended on), with the response as `facts.answer` (600 characters) beside Centralu's words.
+The report names the sender's other open tasks in `facts.covers`, and `MessageService.report` settles them all `reported` with it. It takes
+only that sender's tasks to that session, so a report from another computer cannot settle anyone else's. A reader that looks up a task's report
+(`MailboxRecords.reportsOn`: a waiting call, the relay to a seat that cannot read mail, a linked task's standing) finds the covering report on each
+task it covers. Why: a parent that gave a task and two follow-ups got three identical reports at one turn end. They cost it three wakes and three
+re-reads of its context. Two senders still get one report each. Which tasks: delivered, not settled, not held, from a session or the person (the person's own work, below), not held in
 the tool for a turn after (below), and with no task the session handed on in that work still open (`handedOn`: that work is not done; the turn
 that work's answer starts answers it). The response is the words of the session's latest turn (`ChildReports.turnWords`, the one definition a
 stop notice quotes too), never the run's: a turn that wrote nothing answers with none ("It wrote no response"), not the turn before's. The
@@ -1893,6 +1897,33 @@ sender (the reviewer's decision, #1948 step 3 review). One function decides it (
 for an untrusted project that the person's trust lets go (`trustChanged`, which reads the mark the send left on the task's row, `answerHeld`). The
 reply's tool result says which it was ("Task … stays open: reply with kind="answer" to answer it, or your last response will."). The mail tool's
 definition is unchanged (1,231 characters before and after): `kind` was already a free word, and the result teaches it where it is needed.
+
+**No report to a giver the session is waiting on** (#2348, the owner's decision of 2026-11-18). A turn whose session asked a giver something
+and ends waiting for the answer sends that giver no report: the question already reached it and woke it. The question is a message that needs
+a reply, sent to that giver in this turn (`created_at` at or after the start of the session's latest `mail_turns` row) and after the giver's newest
+open task was delivered, not held, and still unanswered and unsettled (`MailboxRecords.awaitsAnswerSince`). The tasks stay open, so the turn that
+the giver's answer starts answers them with its own last response (#2329: before this, the first turn's report settled the task and the turn the answer
+started reported nothing). The rest is unchanged:
+- a session that asks nothing (a plain message, an early "On it") still gets the report, as the reviewer's rule above promises;
+- an answer marked `kind: "answer"` still settles its task with no report;
+- a task given after the question is still reported;
+- a stop is still told by the stop notice (§10.6.1), which releases the open tasks;
+- the person's own work always gets its report (`asksAnswerTurnEnd`, by the giver's kind), since the person's Inbox thread reads In review from it
+  and the wake this saves is a session's.
+
+Everything is read from the store, so the settle at a host's start finds the same answer as the turn's end did. A turn an update cut and Centralu
+continued may be a new `mail_turns` row. A question asked before the cut then does not count, and the report is sent: an extra report, never a lost one.
+
+Why the question and not any message: a task left open after a turn has effects, and they are true only while the work really waits on its giver.
+The giver is kept from sleeping (`SessionProcesses.waitsOn`). It may not watch the session (`Watches`). It hears the session's cards
+(`cardGivers`). Archiving the session tells it "went to the trash before it answered" (`StopNotices.partyGone`). A plain message would leave all of
+these standing for work that was done.
+
+Accepted costs. A fresh `mail send` needs a reply by default (only `kind: "note"` does not). So a session that sends its final result as a new
+message to its giver, instead of replying `kind: "answer"` on the task's thread, keeps the task open until the giver answers or marks it handled,
+and the turn that answer starts reports. A question followed by a silent end leaves the task open, with the effects above, until the giver answers
+or the session stops or is archived. A linked machine's report crosses with `covers` (`TaskReport.covers`, protocol.md §3). A hub older than this
+drops it, and its copies of the covered tasks stay open: a row that crosses never settles a hub's copy `reported` (protocol.md §3.3).
 
 **A sender whose seat cannot read mail** (an older build's coordinator, a builder: no `mail` tool, `canReadMail`) is refused the report as mail
 (`no_mailbox`), so the last response is told to it as it was before step 3: the relayed report in its conversation, in the same words
@@ -1976,7 +2007,7 @@ when it could not go in. A linked machine's copy (`LinkedReports`) reports to a 
 | Paused reports of a caller (`pausedReports`, `report_paused`, `pauseReport`, `settlePausedReport`, `reportPauseUpdate`, `isPauseUpdate` here, `StoppedByUpdate`, `keptOverUpdateStop`, `reportStoppedByUpdate`) | nothing is sent while the session's own work runs; its last response answers once that work ended and it is at rest |
 | `reportBackIfAwaited`, `reportMailTurn`, the mail-turn bridge (`markMailTurn`, `takeMailTurn`, `MailInput.reportTo`) | the last response, per task; S12 by the turn's rows |
 | `reportRecorder`, `ReportDraft`, `ReportedAs`, `waitingOn`, `oldOwes`, `handedOnBySessions`, the `waiting` report | `answerAtRest`; work handed on keeps the task open (`handedOn`) |
-| A report covering a sender's other tasks (`facts.covers`, F4/K3), a pause's update in place (`update`, `personNote`, `updateInPlace`), `startedAt` on a report | one report per task; nothing is sent while the work runs |
+| A report covering a sender's other tasks (`facts.covers`, F4/K3), a pause's update in place (`update`, `personNote`, `updateInPlace`), `startedAt` on a report | one report per task; nothing is sent while the work runs. `covers` came back in #2348 (2026-11-18): one report per giver at a turn's end, covering that giver's other open tasks |
 | Adoption step 2 (tasks no mark owes, `settleReported`) | nothing: no older path owes anything |
 | The composer's choice: `ReportChoice`, `agents.reportOwed`, `SendIntent`, `user_message.intent`, `takeTurn`, `personTookOver`, `took_over`, `LinkedReports.choosing` | nothing: a person's message is a message |
 | The person's own report path: `reportToPersonIfOwed`, `personReportLine`, the person's paused report and `person_report_paused:`, `personReportRecorder`, `personOwes` | the last response and the stop notice, as for any task |

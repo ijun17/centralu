@@ -430,6 +430,14 @@ export class MessageService {
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
       const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
+      // Only the same sender's tasks to the same session: a report another computer sent names no task of anyone else's (#2348). One the rows that
+      // crossed settled already is still named, so its readers find this report (`reportsOn`); `settle` leaves a settled row as it is
+      const covers = pause
+        ? []
+        : [...new Set(input.covers ?? [])].filter((id) => {
+            const m = id === taskId ? undefined : this.records.message(id)
+            return m?.kind === 'task' && m.sender === task.sender && this.records.recipient(id, row.recipient) !== undefined
+          })
       const facts: MailFacts = {
         outcome: input.outcome,
         about: { session: row.recipient },
@@ -440,6 +448,7 @@ export class MessageService {
         ...(input.personSince ? { personSince: true } : {}),
         ...(input.after ? { after: true } : {}),
         ...(input.answer ? { answer: input.answer } : {}),
+        ...(covers.length > 0 ? { covers } : {}),
         ...(first ? {} : { quiet: true }),
       }
       const stored = this.centralu(task.sender, {
@@ -450,7 +459,7 @@ export class MessageService {
         dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}`,
       })
       if (!stored.duplicate && !pause) {
-        this.records.settle(taskId, row.recipient, 'reported', now)
+        for (const id of [taskId, ...covers]) this.records.settle(id, row.recipient, 'reported', now)
       }
       return { message: stored, duplicate: stored.duplicate, first }
     })

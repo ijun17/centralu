@@ -533,6 +533,32 @@ describe('reports (§9.3)', () => {
     expect(w.mail.report(t1.id, { outcome: 'finished', body: 'again' })).toEqual({ settledAlready: true })
   })
 
+  it('#2348: covers settles the same sender’s other tasks to that session and names them, never anyone else’s, nor a task to another session', () => {
+    const w = world()
+    const t1 = w.mail.task(A, W, { text: 'one', origin: 'start_agent', delivered: true })
+    w.clock.t += 5
+    const other = w.mail.task(B, W, { text: 'for someone else', origin: 'start_agent', delivered: true })
+    const elsewhere = w.mail.task(A, C, { text: 'to another session', origin: 'start_agent', delivered: true })
+    w.clock.t += 5
+    const t2 = w.mail.task(A, W, { text: 'two', origin: 'agent_session', delivered: true })
+    const out = w.mail.report(t2.id, { outcome: 'finished', body: '[Centralu] done', covers: [t1.id, other.id, elsewhere.id, t2.id, 'nope'] })
+    if (!('message' in out)) throw new Error('settled already')
+    expect(out.message.facts.covers).toEqual([t1.id])
+    expect([t1, t2].map((t) => w.rowOf(t.id, W).settled)).toEqual(['reported', 'reported'])
+    expect(w.rowOf(other.id, W).settled).toBeNull()
+    expect(w.rowOf(elsewhere.id, C).settled).toBeNull()
+    // Each covered task reads it as its report; the others have none
+    expect(w.records.reportsOn(t1.id).map((r) => r.id)).toEqual([out.message.id])
+    expect(w.records.reportsOn(other.id)).toEqual([])
+    // A pause covers nothing
+    const t3 = w.mail.task(A, W, { text: 'three', origin: 'agent_session', delivered: true })
+    const t4 = w.mail.task(A, W, { text: 'four', origin: 'agent_session', delivered: true })
+    const paused = w.mail.report(t4.id, { outcome: 'paused', body: 'paused', paused: 1, covers: [t3.id] })
+    if (!('message' in paused)) throw new Error('settled already')
+    expect(paused.message.facts.covers).toBeUndefined()
+    expect(w.rowOf(t3.id, W).settled).toBeNull()
+  })
+
   it('paused and waiting leave the task open; the first pause wakes and later ones are quiet; the same pause again is a duplicate', () => {
     const w = world()
     const t = w.mail.task(A, W, { text: 'work', origin: 'start_agent', delivered: true })

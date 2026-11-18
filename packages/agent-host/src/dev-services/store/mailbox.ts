@@ -383,9 +383,18 @@ export class MailboxRecords {
     return this.page(`m.id IN (SELECT id FROM mail WHERE sender = @key UNION SELECT message_id FROM mail_recipients WHERE recipient = @key)`, address, opts)
   }
 
-  /** Centralu's reports on a task (replying to it), oldest first */
+  /**
+   * Centralu's reports on a task, oldest first: replying to it, or replying to a later task of the same sender and covering it (`facts.covers`, one
+   * report per giver at a turn's end, #2348). The covering one is looked for among that sender's tasks since, by `mail_sender`
+   */
   reportsOn(taskId: string): MailRow[] {
-    return this.messages(`m.reply_to = ? AND m.kind = 'report' AND m.sender = 'centralu' ORDER BY m.created_at, m.id`, taskId)
+    return this.messages(
+      `m.kind = 'report' AND m.sender = 'centralu' AND (m.reply_to = @id OR (
+         m.reply_to IN (SELECT t.id FROM mail o JOIN mail t ON t.sender = o.sender AND t.created_at >= o.created_at WHERE o.id = @id AND t.kind = 'task' AND t.id <> o.id)
+         AND json_valid(m.facts) AND EXISTS (SELECT 1 FROM json_each(m.facts, '$.covers') c WHERE c.value = @id)))
+       ORDER BY m.created_at, m.id`,
+      { id: taskId },
+    )
   }
 
   /** The newest message moved from the v61 thread `threadId` (§6.3) that `recipient` was sent: what the old tool's `thread` names (§11.3) */
@@ -1175,6 +1184,33 @@ export class MailboxRecords {
    */
   mailStartedSince(since: number, session?: string): number {
     return this.count(`SELECT COUNT(*) AS n FROM (${MAIL_STARTED}) WHERE (@session IS NULL OR session_id = @session)`, { since, session: session ?? null })
+  }
+
+  /** When the session's latest turn began (a canceled delivery is no turn), or null when none is recorded */
+  latestTurnStart(sessionId: string): number | null {
+    return (
+      this.db
+        .prepare<[string], { at: number }>(`SELECT started_at AS at FROM mail_turns WHERE session_id = ? AND COALESCE(outcome, '') <> 'canceled' ORDER BY turn_seq DESC LIMIT 1`)
+        .get(sessionId)?.at ?? null
+    )
+  }
+
+  /**
+   * Whether `sender` asked `recipient` something at `since` or later that still waits for its answer: a message that needs a reply, not answered or
+   * settled, nor held from it for the person. What spares a turn's end its report to that giver (#2348, `answerAtRest`); a question answered within
+   * the turn does not, since the turn went on after it
+   */
+  awaitsAnswerSince(sender: string, recipient: string, since: number): boolean {
+    return (
+      this.count(
+        `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
+          WHERE m.sender = ? AND m.created_at >= ? AND m.kind = 'message' AND m.needs_reply = 1 AND r.recipient = ?
+            AND (r.held IS NULL OR r.held = 'released') AND r.settled IS NULL AND r.answer_id IS NULL`,
+        sender,
+        since,
+        recipient,
+      ) > 0
+    )
   }
 
   /** When the person last started a turn of the session (their word, §7.5's pair warning), or null */

@@ -1,5 +1,5 @@
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { senderKind } from './address.js'
+import { parseAddress, senderKind } from './address.js'
 import type { TurnReport } from './turn-report.js'
 
 /**
@@ -38,9 +38,12 @@ export function tasksAtRest(records: MailboxRecords, recipient: string, last: Pi
 }
 
 /**
- * Answers the open tasks of a session at rest with its last response (§10.6.3): each task is a request of its own and gets its own report, replying to
- * it and settling it `reported` (the owner's rule of 2026-11-05: a report attaches to a request, never to a turn or a sender). `report` writes one
- * (`MessageService.report`). Returns the tasks answered
+ * Answers the open tasks of a session at rest with its last response (§10.6.3): one report per giver at a turn's end (#2348, the owner's decision
+ * of 2026-11-18, which replaced 2026-11-05's report per task). The report replies to that giver's newest open task, the one the turn ended on, and
+ * covers the others (`facts.covers`), settling them all `reported`. `report` writes it (`MessageService.report`). Returns the tasks replied to.
+ *
+ * None goes to a giver the session asked something this turn and waits on (`awaitsAnswerSince`): its question is the sign the turn ended, and its tasks stay open, so the
+ * turn the giver's answer starts answers them (#2329). Only a session giver: the person's own work always gets its report (`asksAnswerTurnEnd`)
  */
 export function answerAtRest(
   records: MailboxRecords,
@@ -49,21 +52,39 @@ export function answerAtRest(
   report: (taskId: string, input: TurnReport) => unknown,
   personAt: number | undefined,
 ): string[] {
-  return tasksAtRest(records, recipient, last).map(({ row, sender }) => {
-    const given = row.deliveredAt ?? 0
-    // The person reads their own work's report: it is not told they wrote
-    const personSince = senderKind(sender) === 'session' && personAt !== undefined && personAt > given
+  const party = parseAddress(recipient)
+  const turnAt = party?.kind === 'session' ? records.latestTurnStart(party.sessionId) : null
+  const byGiver = new Map<string, { row: RecipientRow; sender: string }[]>()
+  for (const t of tasksAtRest(records, recipient, last)) byGiver.set(t.sender, [...(byGiver.get(t.sender) ?? []), t])
+  return [...byGiver].flatMap(([sender, tasks]) => {
+    const newest = tasks.at(-1)
+    if (!newest) return []
+    const given = newest.row.deliveredAt ?? 0
+    // Asked in this turn, after the giver's newest task came (a task given after the question still gets its answer), and still waiting for it
+    if (asksAnswerTurnEnd(sender) && turnAt !== null && records.awaitsAnswerSince(recipient, sender, Math.max(turnAt, given))) return []
+    // The person wrote after the first of these tasks was given (the person reads their own work's report: it is not told they wrote); the newest
+    // arrived after the response was written
+    const personSince = senderKind(sender) === 'session' && personAt !== undefined && personAt > (tasks[0]?.row.deliveredAt ?? given)
     const after = last.writtenAt !== undefined && last.writtenAt < given
     const lines = [last.body(sender), ...(personSince ? [PERSON_SINCE] : []), ...(after ? [AFTER] : [])]
-    report(row.messageId, {
+    report(newest.row.messageId, {
       outcome: 'finished',
       body: lines.join('\n'),
       ...(last.answer ? { answer: last.answer } : {}),
       ...(personSince ? { personSince: true } : {}),
       ...(after ? { after: true } : {}),
+      ...(tasks.length > 1 ? { covers: tasks.slice(0, -1).map((t) => t.row.messageId) } : {}),
     })
-    return row.messageId
+    return [newest.row.messageId]
   })
+}
+
+/**
+ * Whether a session's question to this giver in the turn stands for the turn's end (#2348): a session giver's yes, it reads its mail and the question
+ * wakes it. The person's no: their Inbox thread reads In review from the report, and the wake this saves is a session's
+ */
+function asksAnswerTurnEnd(giver: string): boolean {
+  return senderKind(giver) === 'session'
 }
 
 /**
