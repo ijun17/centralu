@@ -370,22 +370,25 @@ describe('a turn that ends waiting on its own question to the giver sends that g
     expect(read.taskRow(task, child)).toMatchObject({ settled: 'reported' })
   })
 
-  it('a question settled within the turn does not stand for its end: the turn went on, and its end reports', async () => {
+  it('only a question still waiting stands for the end: a note, or a question settled in the turn, keeps the report; one still waiting holds it', async () => {
     const { parent, child, task } = await childInTurn()
-    const question = await asks(child, parent, 'Which branch?')
-    // The parent marks it handled with no reply (a reply of its own child's giver is work, which the delivery bound already counts)
-    expect(m.service.done(addr(parent), question.id).how).toBe('done')
+    // A message that asks nothing keeps the report: the last response is the result (the reviewer's rule, #1948 step 3)
+    expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
+    const settled = await asks(child, parent, 'Which branch?')
+    // The parent marks it handled with no reply (its reply to its own child would be work, which the delivery bound already counts)
+    expect(m.service.done(addr(parent), settled.id).how).toBe('done')
     await turnEnds(child, 'Done on main.')
     await w.until(() => reports(task).length > 0)
     expect(reports(task).map((r) => r.facts.answer)).toEqual(['Done on main.'])
-  })
-
-  it('a message that asks nothing keeps the report: the last response is the result (the reviewer’s rule, #1948 step 3)', async () => {
-    const { parent, child, task } = await childInTurn()
-    expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
-    await turnEnds(child, 'Done: 3 files changed.')
-    await w.until(() => reports(task).length > 0)
-    expect(reports(task).map((r) => r.facts.answer)).toEqual(['Done: 3 files changed.'])
+    // More work, given without waiting: a question still waiting at its turn's end holds that report
+    expect((await m.tool.call(parent, { action: 'send', to: child, text: 'and the docs' })).isError).toBeFalsy()
+    const later = read.tasks(addr(parent), child).find((t) => t.id !== task)!
+    await deliverDue(child)
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+    await asks(child, parent, 'Docs in English only?')
+    await turnEnds(child, 'Asked about the docs.')
+    expect(reports(later.id)).toEqual([])
+    expect(read.taskRow(later.id, child)).toMatchObject({ settled: null })
   })
 
   it('a task the giver sent after the question gets its report, covering the first', async () => {
@@ -400,9 +403,15 @@ describe('a turn that ends waiting on its own question to the giver sends that g
     expect(reports(follow).map((x) => [x.replyTo, x.facts.covers])).toEqual([[follow, [task]]])
   })
 
-  it('a stop after the question is still told: the stop notice releases the task and tells the parent', async () => {
+  it('a stop of the turn after the question is still told: the stop notice releases the open task and tells the parent', async () => {
     const { parent, child, task } = await childInTurn()
-    await asks(child, parent)
+    const question = await asks(child, parent)
+    await turnEnds(child, 'Sent the design, waiting for the answer.')
+    expect(reports(task)).toEqual([])
+    // The answer starts the next turn, and that turn fails
+    expect((await m.tool.call(parent, { action: 'reply', thread: question.id, text: 'B.' })).isError).toBeFalsy()
+    await deliverDue(child)
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom', retryable: false } })
     await w.until(() => read.taskRow(task, child)?.releasedAt != null)
     expect(reports(task)).toEqual([])
@@ -421,13 +430,13 @@ describe('a turn that ends waiting on its own question to the giver sends that g
     expect(reports(task)).toEqual([])
   })
 
-  it('a child archived after it answered with kind="answer" leaves its parent no "before it answered" notice', async () => {
+  it('a child archived while its question waits: its open task is released and the parent told it went before it answered, as it did', async () => {
     const { parent, child, task } = await childInTurn()
-    expect((await m.tool.call(child, { action: 'reply', thread: task, text: 'PR #9 is up.', kind: 'answer' })).isError).toBeFalsy()
-    await turnEnds(child, 'Replied.')
+    await asks(child, parent)
+    await turnEnds(child, 'Sent the design, waiting for the answer.')
     expect(reports(task)).toEqual([])
     await w.mgr.trash.trashSession(child)
-    expect(read.taskRow(task, child)).toMatchObject({ settled: 'answered' })
-    expect(read.between('centralu', addr(parent), 'notice').filter((n) => n.facts.unanswered)).toEqual([])
+    expect(read.taskRow(task, child)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
+    expect(read.between('centralu', addr(parent), 'notice').some((n) => n.facts.unanswered?.some((u) => u.id === task && u.why === 'gone'))).toBe(true)
   })
 })

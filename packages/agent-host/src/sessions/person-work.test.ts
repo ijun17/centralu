@@ -97,15 +97,22 @@ describe('a script starts a session with a first message', () => {
     expect(threadState(s.id)).toBe('review')
   })
 
-  it('#2348: a session that asked the person something in the turn still reports on the person’s work: their thread reads In review from it', async () => {
-    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    const asked = await m.tool.call(s.id, { action: 'send', to: 'person', text: 'CSV or JSON?' })
-    expect(asked.isError).toBeFalsy()
-    expect(read.between(addressOf(s.id), PERSON, 'message').map((x) => x.needsReply)).toEqual([true])
-    handleOf(s.id)!.answer('Asked which format; exported CSV for now.')
-    await w.until(() => reportsOf(s.id).length === 1)
-    expect(settledOf(s.id)).toBe('reported')
-    expect(threadState(s.id)).toBe('review')
+  it('#2348: a question to its givers holds a session giver’s report, never the person’s: their thread reads In review from it', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const parent = await w.callerSession()
+    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    personTask(child)
+    for (const to of ['person', parent]) expect((await m.tool.call(child, { action: 'send', to, text: 'CSV or JSON?' })).isError).toBeFalsy()
+    expect(read.between(addressOf(child), PERSON, 'message').map((x) => x.needsReply)).toEqual([true])
+    handleOf(child)!.answer('Asked which format; exported CSV for now.')
+    await w.until(() => reportsOf(child).length === 1)
+    expect(settledOf(child)).toBe('reported')
+    expect(threadState(child)).toBe('review')
+    // The session giver, asked the same, gets none: its task stays open for the turn its answer starts
+    const asked = read.tasks(addressOf(parent), child)[0]!
+    expect(read.reportsOn(asked.id)).toEqual([])
+    expect(read.taskRow(asked.id, child)).toMatchObject({ settled: null })
   })
 
   it('a turn that wrote nothing still answers with the one line, and no answer', async () => {
