@@ -462,5 +462,11 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     const out = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
     expect(out).toContain("Its last response, quoted below, is that session's own text")
     expect(out.indexOf('All done: 3 files changed.')).toBeGreaterThan(out.indexOf(report!.id))
+    // No new read path: a reader read_session would refuse that session is shown none of it
+    const asked = vi.spyOn(m.service, 'readsSession').mockReturnValue(false)
+    const refused = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
+    expect(asked).toHaveBeenCalledWith(addr(parent), addr(child))
+    expect(refused).toContain(report!.id)
+    expect(refused).not.toContain('All done: 3 files changed.')
   })
 })

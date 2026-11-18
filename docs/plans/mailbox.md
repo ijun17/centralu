@@ -1932,7 +1932,8 @@ session stops or is archived. A linked machine's report crosses with `covers` (`
 it, and its copies of the covered tasks stay open: a row that crosses never settles a copy `reported` (protocol.md §3.3).
 
 **Reading a report shows the last response it kept.** A report's `facts.answer` is the session's own words, which Centralu's words never repeat (#120).
-`mail read` shows it under the report, quoted, as that session's text (`MailTool.shown`). The report's words say so: "reading this report shows it
+`mail read` shows it under the report, quoted, as that session's text, to a reader that `read_session` lets read that session
+(`MailTool.answerShown`; security-boundaries/inter-agent-content.md). The report's words say so: "reading this report shows it
 below". Before #2348's review it said the response was "the message above in this thread", where nothing showed it, so a reader had to call
 read_session for every report.
 

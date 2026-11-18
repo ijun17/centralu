@@ -516,6 +516,11 @@ export class MessageService {
     })
   }
 
+  /** Whether `reader` may read the session at `session` with read_session (that tool's own rule, `StopNoticeOptions.mayRead`); no when it is not known */
+  readsSession(reader: string, session: string): boolean {
+    return this.opts.mayRead?.(reader, session) === true
+  }
+
   /**
    * A question a session asked (`facts.question`) was settled with no answer that goes to it: marked handled here, or on the side it crossed to
    * (`MailAcross`). The report it held for that giver is owed now (#2348, `answerAtRest`): the session's last response gives it once it is at rest.
