@@ -383,16 +383,15 @@ describe('a question to the giver holds its report until it is answered or handl
     const { parent, child, task } = await childInTurn()
     // The reviewer's rule (#1948 step 3): a message that asks nothing leaves the last response the result
     expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
-    // A plain send needs a reply by default, but is no question: "Done" before the end holds nothing (the review of #2349)
-    expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })).isError).toBeFalsy()
+    // A plain send needs a reply by default, but is no question: "Done" before the end holds nothing (the review of #2349), and the send says so
+    const plain = await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })
+    expect(plain.text).toContain('It is not marked as a question, so your task is still reported when your turn ends; send with kind="question" when you wait for the answer.')
     const done = read.between(addr(child), addr(parent), 'message').at(-1)!
     expect(done).toMatchObject({ needsReply: true, facts: { clarifies: task } })
     expect(done.facts.question).toBeUndefined()
-    // The parent's "Thanks." to it is a plain message, not work: it costs the child no reported turn (§9.7)
-    expect((await m.tool.call(parent, { action: 'reply', thread: done.id, text: 'Thanks.' })).isError).toBeFalsy()
-    expect(read.tasks(addr(parent), child).map((t) => t.body)).not.toContain('Thanks.')
-    expect(read.between(addr(parent), addr(child), 'message').map((x) => x.body)).toContain('Thanks.')
-    const settled = await asks(child, parent, 'Which branch?')
+    const marked = await m.tool.call(child, { action: 'send', to: parent, text: 'Which branch?', kind: 'question' })
+    expect(marked.text).not.toContain('It is not marked as a question')
+    const settled = read.between(addr(child), addr(parent), 'message').at(-1)!
     expect(m.service.done(addr(parent), settled.id).how).toBe('done')
     // More work joins the turn, and a question after it still waits at the end: that holds the report on both
     const r = await sendWork(w.mgr, parent, child, 'and the docs')

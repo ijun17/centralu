@@ -1515,9 +1515,7 @@ never gets the result. The rule:
   was made the work of (§8.2 step 3), so T was open when the turn began; its state at send time does not matter.
 - A clarification is **not a request** (§7.6): no request card, no `ask_rate`, no one-asker grouping. It is a
   `needsReply` message by default (D3), and its depth is reckoned as any message's (D9).
-- **The owner's answer to a question is work.** Only a clarification C marked as a question (`facts.question`: `kind: "question"`, or `choices`,
-  #2348) makes the answer work; any other clarification (a "Done: PR #12" before the end) is answered as a plain message, which starts C's turn
-  as any message does but is no work, so a "Thanks." costs no reported turn. When O sends with `id` = such a clarification of its own task (and no `to`, or `to` = C),
+- **The owner's answer is work.** When O sends with `id` = a clarification of its own task (and no `to`, or `to` = C),
   `send` stores the answer as kind `task`, `reply_to` = the clarification, origin `mail`, the body as written. It
   settles O's row on the clarification `answered`. Its `needsReply` is ignored, as on any task (D3).
 - Nothing else changes: as a task it is a work candidate for C (§8.2 step 3), so the delivery sets `reportTo = O`
@@ -1531,7 +1529,9 @@ never gets the result. The rule:
 2. C's turn on T sends `mail send to=parent kind="question" text="Which branch?"`. Its cause is T, so it is stored with `facts.clarifies
    = T`, `facts.question`, `needs_reply = 1`, depth 0. It is not a request, so O (the orchestrator, say) gets it with no card. S4 tells C
    it waits for a reply.
-3. C's turn ends. The question waits for O's answer, so it holds T's report (#2348, §10.6.3): nothing is sent, and T stays open.
+3. C's turn ends. The question waits for O's answer, so it holds T's report (#2348, §10.6.3): nothing is sent, and T stays open. A
+   clarification C sent without `kind: "question"` holds nothing, and T is reported here, as before; it is still answered as work (the owner,
+   2026-11-18: a real question sent plainly must not lose its result), and S4 tells C so, with the kind that holds.
 4. O answers `mail send id=<clarification> text="main"`. `send` sees `clarifies = T`, T's sender is O and its
    recipient is the clarification's sender, so it stores a `task` from O to C, `reply_to` = the clarification. O's row
    on the clarification is `answered`. S4 tells O: "As an answer to a question about your task, it is given as work:
@@ -1913,6 +1913,12 @@ The hold ends where the question settles:
   turn's report settled the task and the turn the answer started reported nothing (#2329);
 - marked handled with no answer (`mail handled` by the giver, here or on the side it crossed to): the session answers at once with its last response
   when it is at rest (`MessageService.questionSettled`, `ChildReports.questionSettled`), else its turn's end or settle does.
+
+Where a session finds the mark, without words in every request: start_agent's frame says to ask the parent with `kind: "question"`
+(`PARENT_MAIL`, 23 characters more), ask_project's frame says it for the asker (45 more), and a send to the giver of the session's work that needs a
+reply but is not marked is told so, once, in its result: "It is not marked as a question, so your task is still reported when your turn ends;
+send with kind="question" when you wait for the answer." (`UNMARKED_TO_GIVER`; to the parent across a link too). A clarification sent plainly
+is still answered as work (§9.7, the owner, 2026-11-18): a real question asked without the mark must not lose its result.
 
 Any other message to the giver holds nothing:
 - a plain `send` needs a reply by default and still holds nothing. A child that sends "Done: PR #12" and ends gets its report as usual, as the reviewer's rule above promises;

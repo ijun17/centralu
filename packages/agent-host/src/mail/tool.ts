@@ -150,7 +150,10 @@ export class MailTool {
       const r = await across.send(sessionId, { to: far.address, text: this.need(args.text, 'text'), needsReply, ...(args.urgent ? { urgent: true } : {}), ...(far.replyTo ? { replyTo: far.replyTo } : {}), ...shown, ...(asks(args) ? { question: true } : {}) })
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
       const who = far.address === 'parent' ? `your parent ${JSON.stringify(r.to)}` : far.person ? 'the person' : `${JSON.stringify(r.to)}${r.address ? ` (${r.address})` : ''}`
-      const after = needsReply ? 'It waits for a reply; the reply will reach you as mail.' : far.replyTo ? 'It answers that message.' : 'It needs no reply.'
+      // To the parent that gave this session its work, not marked as a question: that work's end is still reported (#2348)
+      const after =
+        (needsReply ? 'It waits for a reply; the reply will reach you as mail.' : far.replyTo ? 'It answers that message.' : 'It needs no reply.') +
+        (needsReply && far.address === 'parent' && !asks(args) ? ` ${UNMARKED_TO_GIVER}` : '')
       return { text: `Sent ${r.messageId} to ${who} on ${r.computer}. ${after} What comes back arrives in your mailbox, and wakes you if you are at rest.` }
     } catch (e) {
       return failed(e)
@@ -365,6 +368,8 @@ export class MailTool {
     else if (r.quiet) lines.push(`It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`)
     else if (m.kind === 'message' && m.needsReply) lines.push(`It waits for a reply; the reply will reach you as mail.`)
     else if (m.kind === 'message' && !answered) lines.push('It needs no reply.')
+    // To the giver of the work its turn is on (a clarification, §9.7), not marked as a question: that work's end is still reported (#2348)
+    if (m.kind === 'message' && m.needsReply && typeof m.facts.clarifies === 'string' && !m.facts.question) lines.push(UNMARKED_TO_GIVER)
     if (r.held.length > 0) lines.push(this.heldLine(m.senderProject))
     if (r.held.length === 0 && !r.quiet) lines.push('What comes back arrives in your mailbox, and wakes you if you are at rest.')
     return lines.join(' ')
@@ -499,6 +504,12 @@ function failed(e: unknown): MailToolResult {
   const reason = refusalReason(e)
   return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }
 }
+
+/**
+ * Told a session that sent the giver of its work a message that needs a reply but is not marked as a question (#2348): only a question holds the
+ * report its turn's end owes that giver (mailbox.md §10.6.3)
+ */
+const UNMARKED_TO_GIVER = 'It is not marked as a question, so your task is still reported when your turn ends; send with kind="question" when you wait for the answer.'
 
 /** Whether the sender marks its message as a question (`facts.question`, #2348): `kind: "question"`, or answers offered to pick from */
 function asks(a: Pick<MailToolArgs, 'kind' | 'choices'>): boolean {

@@ -92,7 +92,8 @@ class ScriptedHandle implements SessionHandle {
   private turn(text: string): void {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
-    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    // What the task says, not Centralu's frame around it, which names the mail tool's `kind: "question"` (#2348)
+    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/kind: "question"/g, '')
     if (/approve/i.test(said)) {
       this.approvals.add(id)
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })
