@@ -118,7 +118,7 @@ describe('compact_self then across a restart (#2024)', () => {
       expect(woken.origins[0], until).toEqual({ kind: 'channel', server: 'centralu' })
       expect(store.settings.appSetting(`compact_notes:${id}`), until).toBeNull()
       expect(store.settings.appSetting(`compact_then:${id}`), until).toBeNull()
-      expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /changed hosts.*the agent was woken with its next step/.test(e.text)), until).toBe(true)
+      expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /restarted.*the agent was woken with its next step/.test(e.text)), until).toBe(true)
     }
   })
 })

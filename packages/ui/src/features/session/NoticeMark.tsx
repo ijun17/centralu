@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { ChevronIcon, MarkIcon } from '../../components/icons.jsx'
 import { MarkLine } from '../../components/MarkLine.jsx'
 import { MailMark } from './MailMark.jsx'
-import { audienceText, type NoticeLine } from '../../store/store.js'
+import { audienceShown, audienceText, type NoticeLine } from '../../store/store.js'
 
 /** `a \`b\` c` with the quoted part set apart, the way Codex and the host quote a file or a setting */
 function quoted(text: string): ReactNode[] {
@@ -23,11 +23,14 @@ function quoted(text: string): ReactNode[] {
  * `for Centralu` is fainter than `for you`: a notice the person cannot act on does not look like one they must. A notice whose
  * audience the host did not place starts open, as every notice used to be.
  * The host places the audience, not this rule from the notice's level: Centralu's lines about a compaction are placed for Centralu, so they start
- * closed with a head that says what happened (owner, 2026-11-18), while an `info` notice the host did not place keeps its words open.
+ * closed with a head that says what happened (owner, 2026-11-18), while an `info` notice the host did not place keeps its words open. A notice from
+ * Centralu that is for Centralu does not say `for Centralu` (`audienceShown`): the speaker is the one it is for, so the words add nothing and the head
+ * would read "Centralu · … · for Centralu". It still starts closed: the rule above reads the audience, not what is printed.
  */
 export function NoticeMark({ notice }: { notice: NoticeLine }) {
   // The line a mail delivery leaves, and the messages it opens to (#2332, #2333)
   if (notice.mail) return <MailMark text={notice.body} delivered={notice.delivered} />
+  const shown = audienceShown(notice)
   return (
     <MarkLine
       icon={<MarkIcon kind="notice" />}
@@ -39,11 +42,11 @@ export function NoticeMark({ notice }: { notice: NoticeLine }) {
       <span className="text-ink-muted" data-testid="notice-head">
         {notice.head}
       </span>
-      {notice.audience && (
+      {shown && (
         <>
           {' · '}
-          <span className={notice.audience === 'you' ? 'text-ink-muted' : 'text-ink-faint'} data-testid="notice-audience">
-            {audienceText(notice.audience)}
+          <span className={shown === 'you' ? 'text-ink-muted' : 'text-ink-faint'} data-testid="notice-audience">
+            {audienceText(shown)}
           </span>
         </>
       )}

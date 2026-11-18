@@ -465,7 +465,8 @@ function markerText(
       const line = noticeLine(e)
       if (!line) return e.text
       if (line.mail) return line.body
-      return [line.head, line.audience && audienceText(line.audience)].filter(Boolean).join(' · ') + `: ${line.body}`
+      const shown = audienceShown(line)
+      return [line.head, shown && audienceText(shown)].filter(Boolean).join(' · ') + `: ${line.body}`
     }
     default:
       return compactionText(e)
@@ -517,6 +518,15 @@ function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine
 /** Whose notice it is to act on, in the words the line uses (#342) */
 export function audienceText(a: 'you' | 'centralu'): string {
   return a === 'you' ? 'for you' : 'for Centralu'
+}
+
+/**
+ * The audience the line says after its head, or null when it says none: a notice from Centralu that is for Centralu says nothing more by "for Centralu"
+ * than its speaker does ("Centralu · next step after compaction", owner, 2026-11-18). The one place that decides, for the capsule and for the copied text
+ */
+export function audienceShown(n: Pick<NoticeLine, 'audience' | 'from'>): 'you' | 'centralu' | null {
+  if (!n.audience) return null
+  return n.audience === 'centralu' && n.from === 'Centralu' ? null : n.audience
 }
 
 /**

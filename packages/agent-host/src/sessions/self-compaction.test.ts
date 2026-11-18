@@ -479,9 +479,10 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens).toHaveLength(1)
     expect(w.thens[0]![1]).toMatch(/did not compact the conversation \(the tool reported the compaction failed: Not enough messages to compact\.\), so it is as it was/)
     expect(w.thens[0]![1]).not.toMatch(/The compaction you asked for with compact_self is done/)
-    expect(w.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted'])
-    expect(w.notices.map((n) => n[1])).toContainEqual(expect.stringMatching(/The compaction did not happen \(the tool reported the compaction failed/))
-    expect(w.noticeLabels).toEqual([COMPACT_LABELS.refusedStepGoes])
+    // One line for it: the step's, with the reason in its folded text; no notice first that says the same
+    expect(w.lines).toEqual([expect.stringMatching(/^Centralu sent the agent its next step: nothing was compacted \(the tool reported the compaction failed/)])
+    expect(w.notices).toEqual([])
+    expect(w.lineLabels).toEqual([COMPACT_LABELS.refusedStepGoes])
     // And it is kept as a refusal for a host that finds it
     const kept = world()
     asked(kept, undefined, 'next')
@@ -501,7 +502,8 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens[0]![1]).toMatch(/did not compact the conversation \(the context was 60k tokens, under the 100k floor\), so it is as it was/)
     expect(w.thens[0]![1]).toContain('Continue with step 3')
     expect(w.nudges).toEqual([])
-    expect(w.notices.map((n) => n[1])).toEqual([expect.stringMatching(/The compaction did not happen \(the context was 60k/)])
+    expect(w.lines).toEqual([expect.stringMatching(/^Centralu sent the agent its next step: nothing was compacted \(the context was 60k/)])
+    expect(w.notices).toEqual([])
     expect(w.settings.m.has('compact_then:s1')).toBe(false)
     // A request with no `then` says nothing
     const plain = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
@@ -749,7 +751,8 @@ describe('compact_self then (#2024)', () => {
     refused.c.request('s1', undefined, 'next')
     refused.endTurn(undefined, 'after')
     await settled()
-    expect(refused.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted'])
+    expect(refused.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted (the context was 60k tokens, under the 100k floor)'])
+    expect(refused.notices).toEqual([])
     expect(refused.lineLabels).toEqual(['nothing compacted, next step sent'])
 
     const old = world()
@@ -757,7 +760,7 @@ describe('compact_self then (#2024)', () => {
     const next = world({}, old.settings)
     next.c.recover()
     await vi.advanceTimersByTimeAsync(0)
-    expect(next.lines).toEqual(['Centralu told the agent to go on: it changed hosts while a compaction was asked for'])
+    expect(next.lines).toEqual(['Centralu told the agent to go on: it restarted while a compaction was asked for'])
     expect(next.lineLabels).toEqual(['went on after a restart'])
   })
 
@@ -988,7 +991,8 @@ describe('compact_self then (#2024)', () => {
     w.endTurn(undefined, 'after')
     await settled()
     expect(w.notices.map((n) => n[1])).toContainEqual('The compaction did not happen, but the next step the agent set could not be sent')
-    expect(w.noticeLabels).toEqual(['nothing compacted, next step sent', 'nothing compacted, next step not sent'])
+    // Only the outcome the step's line does not show: no notice for the refusal before it
+    expect(w.noticeLabels).toEqual(['nothing compacted, next step not sent'])
     err.mockRestore()
   })
 
@@ -1154,7 +1158,7 @@ describe('compact_self then (#2024)', () => {
         expect(next.thens[0]![1], stage).toMatch(/changed hosts/)
         expect(next.thens[0]![1], stage).toMatch(how)
         expect(next.nudges, stage).toEqual([])
-        expect(next.notices.map((n) => n[1]), stage).toEqual([expect.stringMatching(/changed hosts.*the agent was woken with its next step/)])
+        expect(next.notices.map((n) => n[1]), stage).toEqual([expect.stringMatching(/restarted.*the agent was woken with its next step/)])
         expect(next.noticeLabels, stage).toEqual(['restart during a compaction'])
         expect(stored(next), stage).toBeNull()
         expect(next.settings.m.has('compact_notes:s1'), stage).toBe(false)

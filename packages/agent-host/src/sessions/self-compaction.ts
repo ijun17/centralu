@@ -59,13 +59,13 @@ import { thenTurn, type StoredThen, type ThenKeep, type ThenStage } from './then
 
 /**
  * What the capsule of each line Centralu leaves about a compaction says after "Centralu ·" (owner, 2026-11-18): the capsule reads alone, so each
- * state has its own words, and the line under it is the fuller explanation. One wording per state: the notice that says a step goes on without
- * a compaction and the line of the turn that sends it share one. A line an older host left says `compaction`, which stays as it was.
+ * state has its own words, and the line under it is the fuller explanation. One line per event: a refused compaction whose step is sent
+ * leaves only the step's line, with the reason in its folded text; a notice stays for an outcome that line does not show. A line an older host left says `compaction`, which stays as it was.
  */
 export const COMPACT_LABELS = {
   /** The next step, sent once the compaction is done */
   stepAfter: 'next step after compaction',
-  /** A compaction that did not happen, and the next step that goes without it */
+  /** The step's turn after a compaction that did not happen (the reason is in its folded text) */
   refusedStepGoes: 'nothing compacted, next step sent',
   /** A compaction that did not happen, and a next step that was not sent (said once, whichever path found it) */
   refusedStepLost: 'nothing compacted, next step not sent',
@@ -369,10 +369,7 @@ export class SelfCompaction {
       // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own. A failed one is a refusal for the step: nothing was
       // compacted, and the step goes saying so, not "the compaction is done"
       mine.compacted = true
-      if (e.failed && mine.then) {
-        mine.refused = `the tool reported the compaction failed${e.reason ? `: ${e.reason}` : ''}`
-        this.host.notice(id, `The compaction did not happen (${mine.refused}): the next step the agent set goes on without it`, COMPACT_LABELS.refusedStepGoes)
-      }
+      if (e.failed && mine.then) mine.refused = `the tool reported the compaction failed${e.reason ? `: ${e.reason}` : ''}`
       this.stage(id, mine, mine.refused === null ? 'compacted' : 'refused')
     }
     // The size at the turn's end has come: a request that waited for it is decided now
@@ -552,7 +549,6 @@ export class SelfCompaction {
   /** A request that did not compact and has a step: it is held like the step of a compaction (`ended`, so a turn of someone else's that begins goes first) and goes as a turn that says why */
   private refuseRequest(id: string, then: string, why: string): void {
     const entry: Compacting = { sentAt: this.now(), started: true, compacted: true, ended: true, then, refused: why, focusAside: null, ahead: false }
-    this.host.notice(id, `The compaction did not happen (${why}): the next step the agent set goes on without it`, COMPACT_LABELS.refusedStepGoes)
     this.compacting.set(id, entry)
     this.stage(id, entry, 'refused')
     this.settleThen(id, entry)
@@ -564,7 +560,6 @@ export class SelfCompaction {
       this.compacting.delete(id)
       return
     }
-    this.host.notice(id, `The compaction did not happen (${why}): the next step the agent set goes on without it`, COMPACT_LABELS.refusedStepGoes)
     c.refused = why
     c.started = true
     c.compacted = true
@@ -641,7 +636,7 @@ export class SelfCompaction {
       await this.goOn(
         id,
         thenTurn(rec),
-        rec.why === null ? 'Centralu sent the agent its next step after the compaction' : 'Centralu sent the agent its next step: nothing was compacted',
+        rec.why === null ? 'Centralu sent the agent its next step after the compaction' : `Centralu sent the agent its next step: nothing was compacted (${rec.why})`,
         rec.why === null ? COMPACT_LABELS.stepAfter : COMPACT_LABELS.refusedStepGoes,
       )
       this.erase(id)
@@ -692,14 +687,14 @@ export class SelfCompaction {
     const text = `[Centralu] Centralu changed hosts while your compact_self request was pending (${how}), so it cannot tell whether the conversation was compacted or your \`then\` was sent. If you were not continued, go on with it yourself. It was: ${then}`
     const reached = await this.reach(id, text)
     const outcome = { turn: 'the agent was woken with its next step', note: 'the agent was told its next step', held: 'the agent is told its next step at its next input' }[reached]
-    this.host.notice(id, `Centralu changed hosts while a compaction was asked for (${how}): ${outcome}`, COMPACT_LABELS.restarted)
+    this.host.notice(id, `Centralu restarted while a compaction was asked for (${how}): ${outcome}`, COMPACT_LABELS.restarted)
   }
 
   /** A turn for the session when it can take one (it wakes), else a quiet note; `held` when neither could be given (kept for its next input) */
   private async reach(id: string, text: string): Promise<'turn' | 'note' | 'held'> {
     if (!this.stopped && this.host.ready(id)) {
       try {
-        await this.goOn(id, text, 'Centralu told the agent to go on: it changed hosts while a compaction was asked for', COMPACT_LABELS.wentOnAfterRestart)
+        await this.goOn(id, text, 'Centralu told the agent to go on: it restarted while a compaction was asked for', COMPACT_LABELS.wentOnAfterRestart)
         return 'turn'
       } catch {
         // The tool took no turn: the note below
