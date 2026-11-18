@@ -414,7 +414,8 @@ export class SessionManager {
       },
     })
     const compactSetting = () => autoCompactOf(this.prefs.uiPreferences())
-    const compactNotice = (id: string, text: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text })
+    // Centralu's own housekeeping, which asks nothing of the person: placed for Centralu, so the line starts closed and its capsule says what happened (#2338)
+    const compactNotice = (id: string, text: string, label: string) => this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label, audience: 'centralu', text })
     this.selfCompaction = new SelfCompaction({
       sessions: () => this.listSessions(),
       session: (id) => this.meta.get(id),
@@ -430,8 +431,8 @@ export class SessionManager {
       },
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
-      sendThen: (id, text, line) =>
-        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.tenure.disposing, atRest: () => this.mail.takesTurn(id) }),
+      sendThen: (id, text, line, label) =>
+        this.events.deliverMail(id, { text, quiet: false, line, label, audience: 'centralu' }, { leaving: () => this.tenure.disposing, atRest: () => this.mail.takesTurn(id) }),
       // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
       queued: (id) => {
         const held = this.handles.get(id)?.queuedInputs?.()

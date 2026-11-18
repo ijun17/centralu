@@ -69,7 +69,12 @@ function Delivered({ read }: { read: Read }) {
               {m.kind} · {subject}
             </span>
           </div>
-          <div className={`line-clamp-6 whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 text-md ${bubbleLook('theirs')}`}>{m.body}</div>
+          {/* The cut is on an inner element with no padding of its own: a clamp hides at the padding edge, so on the bubble the seventh line's top showed in its bottom padding */}
+          <div className={`rounded-bubble border px-3 py-2 text-md ${bubbleLook('theirs')}`}>
+            <div className="line-clamp-6 whitespace-pre-wrap break-words">
+              {m.body}
+            </div>
+          </div>
           {lastOfThread.get(threadId) === i && (
             <Button
               variant="ghost"

@@ -49,8 +49,11 @@
   (`sessions/self-compaction.ts`, `SelfCompaction`), because a long-lived session's whole context is rewritten into the cache after every
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:
   Claude `/compact [focus]`, Codex's `thread/compact/start` through its slash handling, which takes the bare command, so a focus line
-  reaches Claude only), with no user row, and the conversation gets a line from Centralu when the tool reports it done:
-  "Compacted by Centralu (reason)". **Only a tool that has the command:** the session's own `SessionHandle.compactCommand` decides first
+  reaches Claude only), with no user row, and the tool's own "Context compacted here" marker is the only line a compaction that
+  happened leaves. Centralu adds none: it said "Compacted by Centralu (reason)" under the marker until 2026-11-18, and the owner took it out as a
+  second line for one event (the marker already says the size before and after); the reason it compacted (the agent asked, or the session rested over its
+  share) was kept only for that line and is gone with it, so a compaction's cause is not written anywhere. A line stays only for what went wrong or
+  differently (below). **Only a tool that has the command:** the session's own `SessionHandle.compactCommand` decides first
   (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
   then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
   (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
@@ -68,7 +71,13 @@
     nothing asked). It is held with the compact Centralu sends and **goes when the compact turn has ended**, after the tool has reported the
     compaction in it (not at the report: the turn is still running then, and a message sent into it would join it): an ordinary turn of the session's own
     (`SessionEvents.deliverMail`: Centralu's channel, no user row, a conversation line that says what happened: "Centralu sent the agent its next step after the
-    compaction", or "... its next step: nothing was compacted" for a refused request, or that it was told to go on after a host change), so its end raises the done notice and is the work's. That turn **goes on with the work of the turn that asked** (#2164, `SelfCompaction.stepOpens`): in a child, the turn that asked is not at rest while the step is to go (`SelfCompaction.goesOn`), so the step's turn answers the tasks still open (plans/mailbox.md §10.6.3), and a send to it is mail, a turn of its own after it (plans/mailbox.md §10.6.2); the `state_change` that opens it says `continues: 'compaction'` for a hub that follows the machine. Memory only: after a restart between the two turns the step's turn is the session's own, as before.
+    compaction", or "... its next step: nothing was compacted" for a refused request, or that it was told to go on after a host change), so its end raises the done notice and is the work's. **Every line Centralu leaves about a compaction is placed for Centralu and says what happened in its capsule**
+    (owner, 2026-11-18): a notice with `audience: 'centralu'` starts closed (design-system.md §7), and the capsule reads alone, so the `label` is the state in plain words,
+    not the kind (`compaction`): "next step after compaction", "nothing compacted, next step sent", "nothing compacted, next step not sent", "next step not sent", "went on after a restart",
+    "restart during a compaction", and, for the note about the size, "context filling up" (`COMPACT_LABELS`, `self-compaction.ts`). One wording per state: the notice
+    that says a step goes on without a compaction and the line of the turn that sends it share a head. The sentence under the capsule is the fuller account. The
+    host places the audience, rather than the window closing every `info` notice that has none, because other `info` notices (a handoff that moved nothing, a clone in progress)
+    carry their only words in that sentence and must stay open. A line an older host left says `compaction` and stays open as it did; nothing reads the label. That turn **goes on with the work of the turn that asked** (#2164, `SelfCompaction.stepOpens`): in a child, the turn that asked is not at rest while the step is to go (`SelfCompaction.goesOn`), so the step's turn answers the tasks still open (plans/mailbox.md §10.6.3), and a send to it is mail, a turn of its own after it (plans/mailbox.md §10.6.2); the `state_change` that opens it says `continues: 'compaction'` for a hub that follows the machine. Memory only: after a restart between the two turns the step's turn is the session's own, as before.
     **Only to a session at rest, after what was queued has gone first.** The compact turn's end is not the moment: the person's message typed during it sits in
     the tool's queue and the mailbox delivers mail the moment the session rests, and a step sent beside either is folded into their turn (real run E2: the person's
     message ran inside the `then` turn and the "came first" line was missing). So the host **looks at what waits** (`SelfCompactionHost.queued`, from the manager) when the turn ends:

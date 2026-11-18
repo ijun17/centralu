@@ -931,3 +931,54 @@ test('A mail line in a conversation folds open to the messages it delivered, rea
   await expect(page.getByTestId('mail-thread')).toBeVisible()
   await expect(page.getByTestId('mail-message-1')).toContainText('The draft is ready.')
 })
+
+test('A mail line cuts a long body at six lines inside the bubble: the seventh line does not show in the padding under the sixth', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
+  // Ten lines, with a blank one among them, so the cut has more than six lines to hide
+  const body = Array.from({ length: 10 }, (_, i) => (i === 3 ? '' : `Line ${i + 1} of the draft`)).join('\n')
+  const thread = await seed(page, { subject: 'Long notes', from: boss, body, kind: 'note' })
+  const message = await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).messages[0].id as string, thread)
+  await page.evaluate(
+    ([s, t, m]) =>
+      (window as any).__mock.emit({ type: 'notice', sessionId: s, level: 'info', from: 'Centralu', label: 'mail', text: '1 message from a session of your project', mail: [{ threadId: t, messageId: m }] }),
+    [sid, thread, message] as const,
+  )
+  await page.locator('[data-mark="mail"]').getByTestId('mark-toggle').click()
+  await expect(page.getByTestId('mark-folded')).toHaveAttribute('data-fold', 'open')
+  const shown = page.getByTestId('mail-line-message')
+  await expect(shown).toContainText('Line 1 of the draft')
+
+  // Found by what it does (the element that clamps), not by its place, so a clamp put back on the padded bubble is the one measured
+  const measure = await shown.evaluate((root) => {
+    const clamped = [root, ...root.querySelectorAll('*')].find((el) => getComputedStyle(el).webkitLineClamp === '6')
+    if (!clamped) return null
+    const style = getComputedStyle(clamped)
+    const px = (v: string) => Number.parseFloat(v)
+    // The bubble: the nearest box around the text that has a border, which is the clamped element itself when it carries the look
+    let bubble: Element = clamped
+    while (bubble !== root && px(getComputedStyle(bubble).borderTopWidth) === 0) bubble = bubble.parentElement as Element
+    const b = getComputedStyle(bubble)
+    const inner = clamped.getBoundingClientRect()
+    const outer = bubble.getBoundingClientRect()
+    return {
+      overflowing: clamped.scrollHeight > clamped.clientHeight,
+      paddingY: px(style.paddingTop) + px(style.paddingBottom),
+      lineHeight: px(style.lineHeight),
+      shown: inner.height,
+      bubblePaddingBottom: px(b.paddingBottom),
+      // What is left under the clamped text inside the bubble, past its border
+      gapBelow: outer.bottom - px(b.borderBottomWidth) - inner.bottom,
+    }
+  })
+  expect(measure).not.toBeNull()
+  // The body is longer than six lines, so the clamp is cutting something
+  expect(measure!.overflowing).toBe(true)
+  // The clamp hides at its padding edge, so any padding of its own is where the next line shows
+  expect(measure!.paddingY).toBe(0)
+  expect(Math.abs(measure!.shown - 6 * measure!.lineHeight)).toBeLessThan(1)
+  // The bubble keeps its own padding under the text
+  expect(measure!.bubblePaddingBottom).toBeGreaterThan(0)
+  expect(Math.abs(measure!.gapBelow - measure!.bubblePaddingBottom)).toBeLessThan(1)
+})

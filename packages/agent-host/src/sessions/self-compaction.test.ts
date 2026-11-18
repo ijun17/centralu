@@ -4,7 +4,7 @@ import { DEFAULT_AUTO_COMPACT } from '@cc/protocol'
 import { inTurn, type SessionIdle } from '../idle.js'
 import { managerWorld, projectDirs } from './manager.test-helpers.js'
 import { settingThenKeep } from './then-keep.js'
-import { COMPACT_FLOOR_TOKENS, IDLE_COMPACT_MINUTES, SelfCompaction, THEN_KEEP_MS, THEN_QUEUE_MAX_MS, THEN_SETTLE_MS, WARN_COMPACT_CYCLES_PER_HOUR, type SelfCompactionHost } from './self-compaction.js'
+import { COMPACT_FLOOR_TOKENS, COMPACT_LABELS, IDLE_COMPACT_MINUTES, SelfCompaction, THEN_KEEP_MS, THEN_QUEUE_MAX_MS, THEN_SETTLE_MS, WARN_COMPACT_CYCLES_PER_HOUR, type SelfCompactionHost } from './self-compaction.js'
 
 /**
  * Compacting at a turn's end (#1451): the agent's compact_self, and a session at rest over the lower share. The first
@@ -33,6 +33,9 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
   const sessions = new Map<string, SessionInfo>([['s1', info(initial)]])
   const sent: [string, string][] = []
   const notices: [string, string][] = []
+  /** The head each of `notices` and each of `lines` was given, in order */
+  const noticeLabels: string[] = []
+  const lineLabels: string[] = []
   const thens: [string, string][] = []
   /** The conversation line each of `thens` was given, in order */
   const lines: string[] = []
@@ -55,11 +58,12 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
       sent.push([id, text])
     },
     queued: () => state.queued,
-    sendThen: async (id, text, line) => {
+    sendThen: async (id, text, line, label) => {
       if (state.thenGate) await state.thenGate
       if (state.failThen) throw new Error('no process')
       thens.push([id, text])
       lines.push(line)
+      lineLabels.push(label)
     },
     keep: settingThenKeep(settings),
     warnCycles: (id, count) => void warned.push([id, count]),
@@ -67,7 +71,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
       if (state.nudgeTaken) nudges.push(text)
       return state.nudgeTaken
     },
-    notice: (id, text) => void notices.push([id, text]),
+    notice: (id, text, label) => (notices.push([id, text]), void noticeLabels.push(label)),
     now: () => state.now,
   }
   const c = new SelfCompaction(host)
@@ -91,7 +95,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
     emit(e, true)
     if (reading === 'after' && m().context) read(m().context!.used)
   }
-  return { c, state, sent, thens, lines, nudges, notices, warned, m, emit, startTurn, endTurn, read, settings }
+  return { c, state, sent, thens, lines, lineLabels, nudges, notices, noticeLabels, warned, m, emit, startTurn, endTurn, read, settings }
 }
 
 describe('compact_self (#1451)', () => {
@@ -379,14 +383,14 @@ describe('compact_self (#1451)', () => {
     expect(known.sent).toEqual([])
   })
 
-  it('says “Compacted by Centralu” with the reason once the tool reports it, and nothing for a failed compaction', () => {
+  it('leaves no line of its own for a compaction that happened (the compaction marker is the line, owner 2026-11-18), nor for one that failed', () => {
     const w = world()
     w.startTurn()
     w.c.request('s1')
     w.endTurn()
     w.startTurn()
     w.emit({ type: 'compaction', sessionId: 's1', failed: false, before: 150_000, after: 9_000 })
-    expect(w.notices).toEqual([['s1', 'Compacted by Centralu (the agent asked to after finishing its turn)']])
+    expect(w.notices).toEqual([])
 
     const f = world()
     f.startTurn()
@@ -477,7 +481,7 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens[0]![1]).not.toMatch(/The compaction you asked for with compact_self is done/)
     expect(w.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted'])
     expect(w.notices.map((n) => n[1])).toContainEqual(expect.stringMatching(/The compaction did not happen \(the tool reported the compaction failed/))
-    expect(w.notices.map((n) => n[1])).not.toContainEqual(expect.stringMatching(/^Compacted by Centralu/))
+    expect(w.noticeLabels).toEqual([COMPACT_LABELS.refusedStepGoes])
     // And it is kept as a refusal for a host that finds it
     const kept = world()
     asked(kept, undefined, 'next')
@@ -581,6 +585,9 @@ describe('compact_self then (#2024)', () => {
     await settled()
     expect(during.thens).toEqual([])
     expect(during.nudges).toEqual([expect.stringMatching(/interrupted before the compaction/)])
+    // Nothing was compacted, and the capsule says so
+    expect(during.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen \(the turn was interrupted before the compaction\)/)])
+    expect(during.noticeLabels).toEqual(['nothing compacted, next step not sent'])
 
     // The compaction was reported and the person interrupted that same turn: they took control (#2024 review)
     const after = world()
@@ -588,6 +595,10 @@ describe('compact_self then (#2024)', () => {
     await compactTurn(after, interrupted)
     expect(after.thens).toEqual([])
     expect(after.nudges).toEqual([expect.stringMatching(/the compact turn was interrupted/)])
+    // The compaction happened, so neither the capsule nor the session is told it did not (the capsule is always in view)
+    expect(after.nudges[0]).not.toMatch(/did not compact/)
+    expect(after.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction is done, but the next step the agent set was not sent \(the compact turn was interrupted/)])
+    expect(after.noticeLabels).toEqual(['next step not sent'])
     expect(after.settings.m.has('compact_then:s1')).toBe(false)
   })
 
@@ -731,6 +742,7 @@ describe('compact_self then (#2024)', () => {
     asked(done, undefined, 'next')
     await compactTurn(done)
     expect(done.lines).toEqual(['Centralu sent the agent its next step after the compaction'])
+    expect(done.lineLabels).toEqual(['next step after compaction'])
 
     const refused = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
     refused.startTurn()
@@ -738,6 +750,7 @@ describe('compact_self then (#2024)', () => {
     refused.endTurn(undefined, 'after')
     await settled()
     expect(refused.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted'])
+    expect(refused.lineLabels).toEqual(['nothing compacted, next step sent'])
 
     const old = world()
     old.settings.m.set('compact_then:s1', JSON.stringify({ stage: 'sent', then: 'next', focusAside: null, ahead: false, why: null, at: 1_000_000 }))
@@ -745,6 +758,7 @@ describe('compact_self then (#2024)', () => {
     next.c.recover()
     await vi.advanceTimersByTimeAsync(0)
     expect(next.lines).toEqual(['Centralu told the agent to go on: it changed hosts while a compaction was asked for'])
+    expect(next.lineLabels).toEqual(['went on after a restart'])
   })
 
   describe('a request refused again at the same size (#2036 review)', () => {
@@ -960,7 +974,21 @@ describe('compact_self then (#2024)', () => {
     expect(w.nudges[0]).toMatch(/The compaction you asked for is done, but the session could not take your `then`/)
     expect(w.nudges[0]).not.toMatch(/did not compact/)
     expect(w.notices.map((n) => n[1])).toContainEqual('The compaction is done, but the next step the agent set could not be sent')
+    expect(w.noticeLabels).toContainEqual('next step not sent')
     expect(err).toHaveBeenCalledWith(expect.stringContaining('could not send the next step'))
+    err.mockRestore()
+  })
+
+  it('says in the capsule that nothing was compacted when the step of a refused request could not be sent either', async () => {
+    const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    w.state.failThen = true
+    w.startTurn()
+    w.c.request('s1', undefined, 'next')
+    w.endTurn(undefined, 'after')
+    await settled()
+    expect(w.notices.map((n) => n[1])).toContainEqual('The compaction did not happen, but the next step the agent set could not be sent')
+    expect(w.noticeLabels).toEqual(['nothing compacted, next step sent', 'nothing compacted, next step not sent'])
     err.mockRestore()
   })
 
@@ -1127,6 +1155,7 @@ describe('compact_self then (#2024)', () => {
         expect(next.thens[0]![1], stage).toMatch(how)
         expect(next.nudges, stage).toEqual([])
         expect(next.notices.map((n) => n[1]), stage).toEqual([expect.stringMatching(/changed hosts.*the agent was woken with its next step/)])
+        expect(next.noticeLabels, stage).toEqual(['restart during a compaction'])
         expect(stored(next), stage).toBeNull()
         expect(next.settings.m.has('compact_notes:s1'), stage).toBe(false)
         // Told once
@@ -1456,7 +1485,7 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.sent).toEqual([['s1', '/compact']])
     w.startTurn()
     w.emit({ type: 'compaction', sessionId: 's1', failed: false })
-    expect(w.notices).toEqual([['s1', 'Compacted by Centralu (at rest for 10 minutes, over 30% of the window)']])
+    expect(w.notices).toEqual([])
   })
 
   it('leaves a resting session of a tool with no compact command alone', () => {
@@ -1615,7 +1644,7 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.c.compactTurn('s1')).toBe(true)
     w.endTurn()
     expect(w.c.compactTurn('s1')).toBe(false)
-    expect(w.notices).toHaveLength(1)
+    expect(w.notices).toEqual([])
   })
 
   it('does not take the session’s next own turn for the compact’s when a compaction was reported with no turn seen to start', () => {
@@ -1674,7 +1703,7 @@ describe('a session at rest over the lower share (#1451)', () => {
     w.startTurn()
     w.emit({ type: 'compaction', sessionId: 's1', failed: false, trigger: 'manual' })
     expect(w.c.compactTurn('s1')).toBe(true)
-    expect(w.notices).toHaveLength(1)
+    expect(w.notices).toEqual([])
   })
 
   it('forgets the compact when its turn is interrupted before the compaction, so the person’s own /compact later is not Centralu’s', () => {
@@ -1738,10 +1767,11 @@ describe('on the session manager (#1451)', () => {
     // No user row: the person said nothing
     const rows = world.store.messages.loadMessages(id, 50)
     expect(JSON.stringify(rows.filter((r) => r.role === 'user'))).not.toContain('/compact')
-    // The tool reports it; the conversation says who did it
+    // The tool reports it; the compaction marker is the only line, with no notice of Centralu's under it
     world.events.length = 0
     h.emitEvent({ type: 'compaction', sessionId: id, failed: false, before: 150_000, after: 8_000 })
-    expect(world.events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: id, from: 'Centralu', text: 'Compacted by Centralu (the agent asked to after finishing its turn)' }))
+    expect(world.events.filter((e) => e.type === 'notice')).toEqual([])
+    expect(world.events).toContainEqual(expect.objectContaining({ type: 'compaction', sessionId: id, failed: false }))
   })
 
   it("goes by the session's own compact command first: none means no compaction and compact_self says it cannot", async () => {
@@ -1841,6 +1871,10 @@ describe('on the session manager (#1451)', () => {
     expect(h.compacts.at(-1)).toBe(false)
     const rows = world.store.messages.loadMessages(id, 50)
     expect(JSON.stringify(rows.filter((r) => r.role === 'user'))).not.toContain('Continue with step 3')
+    // Its line is Centralu's own, placed for Centralu (so it starts closed) and headed with what happened, not with "compaction"
+    expect(world.events).toContainEqual(
+      expect.objectContaining({ type: 'notice', sessionId: id, from: 'Centralu', label: 'next step after compaction', audience: 'centralu', text: 'Centralu sent the agent its next step after the compaction' }),
+    )
     // The turn it starts is the session's own: it ends with no compaction mark
     world.events.length = 0
     h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })

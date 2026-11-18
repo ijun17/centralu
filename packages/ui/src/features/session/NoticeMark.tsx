@@ -22,6 +22,8 @@ function quoted(text: string): ReactNode[] {
  * kind of problem. So a notice for the person starts open and one for Centralu starts closed (owner, 2026-11-17, #2338), and
  * `for Centralu` is fainter than `for you`: a notice the person cannot act on does not look like one they must. A notice whose
  * audience the host did not place starts open, as every notice used to be.
+ * The host places the audience, not this rule from the notice's level: Centralu's lines about a compaction are placed for Centralu, so they start
+ * closed with a head that says what happened (owner, 2026-11-18), while an `info` notice the host did not place keeps its words open.
  */
 export function NoticeMark({ notice }: { notice: NoticeLine }) {
   // The line a mail delivery leaves, and the messages it opens to (#2332, #2333)
