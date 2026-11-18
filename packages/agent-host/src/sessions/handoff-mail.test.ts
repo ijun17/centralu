@@ -529,3 +529,24 @@ describe('the re-check of the review fixes (#1580)', () => {
     )
   })
 })
+
+describe('a question that holds its giver’s report, and a handoff of the session that asked it (#2348)', () => {
+  it('a handoff that keeps the asking child leaves it its task and its question: the hold and its release stay with it, and the heir is given nothing', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'long work')
+    await eventually(() => h.mgr.sessionInfo(child)?.state === 'working')
+    const [task] = read.tasks(at(parent), child)
+    const question = h.m.service.send(at(child), { to: [at(parent)], text: 'Which branch?', needsReply: true, question: true }).message
+    h.claude.handles.get(child)!.answer('Asked which branch.')
+    await eventually(() => h.mgr.sessionInfo(child)?.state !== 'working')
+    expect(read.reportsOn(task!.id)).toEqual([])
+    const heir = await handOff(h, project, child, false)
+    expect(read.tasks(at(parent), heir)).toEqual([])
+    expect(read.row(question.id, at(parent))).toMatchObject({ settled: null })
+    // Handled with no answer: the hold ends, and the child at rest answers with its last response
+    expect(h.m.service.done(at(parent), question.id).how).toBe('done')
+    await eventually(() => read.reportsOn(task!.id).length === 1)
+    expect(read.reportsOn(task!.id)[0]!.facts.answer).toBe('Asked which branch.')
+  })
+})

@@ -9,7 +9,7 @@ import { inTurn } from '../idle.js'
 import { agentLook, errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind } from './error-kind.js'
 import { wentWithItsProcess } from './interruptions.js'
-import { PERSON_TURN_ENDED, TURN_ENDED } from '../mail/last-response.js'
+import { PERSON_TURN_ENDED, TURN_ENDED, lastResponseLine } from '../mail/last-response.js'
 import type { LastResponse } from '../mail/last-response.js'
 import type { StopWhy } from '../mail/stop-notices.js'
 import { asObj, str } from '../json-value.js'
@@ -184,9 +184,7 @@ export class ChildReports {
     const read = `read_session(sessionId="${childId}"${seq !== undefined ? `, around=${seq}` : ''})`
     return (
       `${TURN_ENDED}\nid: ${childId}\n${cut ? CUT_CONTINUED : ''}\n` +
-      (answered
-        ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.`
-        : `It wrote no response: ${read} shows its turn.`) +
+      lastResponseLine(read, answered) +
       this.cleanUpWords(receiverId, childId)
     )
   }

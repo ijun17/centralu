@@ -1515,7 +1515,9 @@ never gets the result. The rule:
   was made the work of (§8.2 step 3), so T was open when the turn began; its state at send time does not matter.
 - A clarification is **not a request** (§7.6): no request card, no `ask_rate`, no one-asker grouping. It is a
   `needsReply` message by default (D3), and its depth is reckoned as any message's (D9).
-- **The owner's answer is work.** When O sends with `id` = a clarification of its own task (and no `to`, or `to` = C),
+- **The owner's answer to a question is work.** Only a clarification C marked as a question (`facts.question`: `kind: "question"`, or `choices`,
+  #2348) makes the answer work; any other clarification (a "Done: PR #12" before the end) is answered as a plain message, which starts C's turn
+  as any message does but is no work, so a "Thanks." costs no reported turn. When O sends with `id` = such a clarification of its own task (and no `to`, or `to` = C),
   `send` stores the answer as kind `task`, `reply_to` = the clarification, origin `mail`, the body as written. It
   settles O's row on the clarification `answered`. Its `needsReply` is ignored, as on any task (D3).
 - Nothing else changes: as a task it is a work candidate for C (§8.2 step 3), so the delivery sets `reportTo = O`
@@ -1526,17 +1528,17 @@ never gets the result. The rule:
 **End to end:**
 
 1. O runs `start_agent` with T. The task row is written delivered; the old path marks the report owed (D18).
-2. C's turn on T sends `mail send to=parent text="Which branch?"`. Its cause is T, so it is stored with `facts.clarifies
-   = T`, `needs_reply = 1`, depth 0. It is not a request, so O (the orchestrator, say) gets it with no card. S4 tells C
+2. C's turn on T sends `mail send to=parent kind="question" text="Which branch?"`. Its cause is T, so it is stored with `facts.clarifies
+   = T`, `facts.question`, `needs_reply = 1`, depth 0. It is not a request, so O (the orchestrator, say) gets it with no card. S4 tells C
    it waits for a reply.
-3. C's turn ends. The old path reports T (`finished`, its answer "Which branch?"). The recorder settles T `reported`.
+3. C's turn ends. The question waits for O's answer, so it holds T's report (#2348, §10.6.3): nothing is sent, and T stays open.
 4. O answers `mail send id=<clarification> text="main"`. `send` sees `clarifies = T`, T's sender is O and its
    recipient is the clarification's sender, so it stores a `task` from O to C, `reply_to` = the clarification. O's row
    on the clarification is `answered`. S4 tells O: "As an answer to a question about your task, it is given as work:
    C's turn on it is reported to you."
 5. The delivery picks that task as C's work message and sets `reportTo = O`; the old path marks the report owed. C's
    turn does the work and ends.
-6. The old path reports; §9.2 finds the turn's task; the report replies to it and settles it. O gets the result.
+6. C's turn ends: one report to O replies to the answer's task and covers T (§10.6.3), settling both. O gets the result once.
 
 A clarification answered by the person in the Inbox is the same: `mail.send` with `id` stores a task from `person`,
 and its report goes to the person as script-started work does (§9.6).
@@ -1919,7 +1921,10 @@ Any other message to the giver holds nothing:
 - a stop is still told by the stop notice (§10.6.1), which releases the open tasks;
 - the person's own work always gets its report (`asksAnswerTurnEnd`, by the giver's kind), since the person's Inbox thread reads In review from it
   and the wake this saves is a session's.
-Everything is read from the store, so the settle at a host's start finds what the turn's end found.
+Everything is read from the store, so the settle at a host's start finds what the turn's end found. A handoff of the session that asked
+needs nothing of its own (§10.6.5): one that keeps the original leaves it its tasks and its question, so the hold and its release stay with
+it, and the heir is given neither; one that removes the original withdraws the original's open question when it goes to the archive, so
+nothing holds, and the heir's first turn end answers the tasks it was given (`handoff-mail.test.ts`).
 
 Why a question marked as one, and not any message that needs a reply: a task left open has effects, and they are true only while the work
 really waits on its giver. The giver is kept from sleeping (`SessionProcesses.waitsOn`). It may not watch the session (`Watches`). It hears the
@@ -1932,7 +1937,8 @@ session stops or is archived. A linked machine's report crosses with `covers` (`
 it, and its copies of the covered tasks stay open: a row that crosses never settles a copy `reported` (protocol.md §3.3).
 
 **Reading a report shows the last response it kept.** A report's `facts.answer` is the session's own words, which Centralu's words never repeat (#120).
-`mail read` shows it under the report, quoted, as that session's text, to a reader that `read_session` lets read that session
+`mail read` shows it under the report, quoted, as that session's text, to a reader that `read_session` lets read that session, a linked
+machine's included, by the seat's one read rule (`CentraluTools.readsAs`), and marked as read_session marks a project nobody trusted
 (`MailTool.answerShown`; security-boundaries/inter-agent-content.md). The report's words say so: "reading this report shows it
 below". Before #2348's review it said the response was "the message above in this thread", where nothing showed it, so a reader had to call
 read_session for every report.

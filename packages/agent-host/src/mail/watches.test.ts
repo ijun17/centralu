@@ -202,7 +202,7 @@ describe('a session watch (§18.3)', () => {
   })
 
   it('refuses itself, a session it cannot read, one it gave open work, one on another computer, `every 5m` and a 21st watch', () => {
-    const w = started({ readsSession: (reader, target) => !(reader === 'a' && target === 'c') })
+    const w = started({ readsSession: (reader, target) => (reader === 'a' && target === 'c' ? null : { untrusted: false }) })
     const refused = (id: string, to: string) => watch(w, id, to)
     expect(refused('a', 'a')).toEqual({ text: 'Refused (bad_value): a session does not watch itself.', isError: true })
     expect(refused('a', A)).toEqual({ text: 'Refused (bad_value): a session does not watch itself.', isError: true })

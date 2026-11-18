@@ -18,7 +18,7 @@ function stops(o: { noInputs?: boolean } = {}) {
     hostId: HOST,
     now: () => w.clock.t,
     stoppedWords: () => words.now,
-    mayRead: () => reads.ok,
+    readsAs: () => (reads.ok ? { untrusted: false } : null),
     ...(o.noInputs ? {} : { turnInputs: (id: string) => entered.get(id) ?? [] }),
   })
   /** `sender` asks `to` a question that starts `to`'s next turn (`own`), or is given into a turn the CLI started */

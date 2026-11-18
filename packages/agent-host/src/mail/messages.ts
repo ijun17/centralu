@@ -516,9 +516,9 @@ export class MessageService {
     })
   }
 
-  /** Whether `reader` may read the session at `session` with read_session (that tool's own rule, `StopNoticeOptions.mayRead`); no when it is not known */
-  readsSession(reader: string, session: string): boolean {
-    return this.opts.mayRead?.(reader, session) === true
+  /** Whether `reader` may read the session at `session` with read_session, and whether its lines are marked untrusted (`StopNoticeOptions.readsAs`); null when not */
+  readsSession(reader: string, session: string): { untrusted: boolean } | null {
+    return this.opts.readsAs?.(reader, session) ?? null
   }
 
   /**
@@ -1033,8 +1033,12 @@ export class MessageService {
     return m
   }
 
-  /** Whether `target` is a clarification of a task `owner` gave, and the answer goes to the one who asked (§9.7) */
+  /**
+   * Whether `target` is a clarification of a task `owner` gave that its sender marked as a question, and the answer goes to the one who asked (§9.7). A
+   * clarification that asks nothing (a "Done: PR #12" before the end) is answered as a plain message: a "Thanks." costs no turn and no report (#2348)
+   */
   private answersClarification(owner: string, target: MailRow, to: readonly string[]): boolean {
+    if (target.facts.question !== true) return false
     const task = typeof target.facts.clarifies === 'string' ? this.records.message(target.facts.clarifies) : undefined
     return task?.kind === 'task' && task.sender === owner && to.length === 1 && to[0] === target.sender
   }

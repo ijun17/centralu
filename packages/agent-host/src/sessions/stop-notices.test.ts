@@ -223,9 +223,9 @@ describe('a turn ends without finishing', () => {
     const { asker, child } = await askedOwnTurn(other)
     type Seat = { tools: { toolChoice(m: unknown): { tools(): { readSession(id: string): Promise<{ ok: boolean }> } } } }
     const reads = async () => (await (w.mgr as unknown as Seat).tools.toolChoice(w.mgr.sessionInfo(asker)).tools().readSession(child)).ok
-    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([true, true])
+    expect([w.mgr.mail.readsSession(asker, child) !== null, await reads()]).toEqual([true, true])
     await w.mgr.setProjectTrusted(w.caller.id, false)
-    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([false, false])
+    expect([w.mgr.mail.readsSession(asker, child) !== null, await reads()]).toEqual([false, false])
     says(child, 'The release branch is release/2026-11.')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)

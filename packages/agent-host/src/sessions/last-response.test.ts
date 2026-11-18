@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
 import { PERSON } from '../mail/address.js'
+import { UNTRUSTED_LINES } from '../mail/frame.js'
 import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
@@ -384,7 +385,13 @@ describe('a question to the giver holds its report until it is answered or handl
     expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
     // A plain send needs a reply by default, but is no question: "Done" before the end holds nothing (the review of #2349)
     expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })).isError).toBeFalsy()
-    expect(read.between(addr(child), addr(parent), 'message').at(-1)).toMatchObject({ needsReply: true, facts: {} })
+    const done = read.between(addr(child), addr(parent), 'message').at(-1)!
+    expect(done).toMatchObject({ needsReply: true, facts: { clarifies: task } })
+    expect(done.facts.question).toBeUndefined()
+    // The parent's "Thanks." to it is a plain message, not work: it costs the child no reported turn (§9.7)
+    expect((await m.tool.call(parent, { action: 'reply', thread: done.id, text: 'Thanks.' })).isError).toBeFalsy()
+    expect(read.tasks(addr(parent), child).map((t) => t.body)).not.toContain('Thanks.')
+    expect(read.between(addr(parent), addr(child), 'message').map((x) => x.body)).toContain('Thanks.')
     const settled = await asks(child, parent, 'Which branch?')
     expect(m.service.done(addr(parent), settled.id).how).toBe('done')
     // More work joins the turn, and a question after it still waits at the end: that holds the report on both
@@ -463,10 +470,13 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     expect(out).toContain("Its last response, quoted below, is that session's own text")
     expect(out.indexOf('All done: 3 files changed.')).toBeGreaterThan(out.indexOf(report!.id))
     // No new read path: a reader read_session would refuse that session is shown none of it
-    const asked = vi.spyOn(m.service, 'readsSession').mockReturnValue(false)
+    const asked = vi.spyOn(m.service, 'readsSession').mockReturnValue(null)
     const refused = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
     expect(asked).toHaveBeenCalledWith(addr(parent), addr(child))
     expect(refused).toContain(report!.id)
     expect(refused).not.toContain('All done: 3 files changed.')
+    // A session of a project nobody trusted is marked as read_session marks it
+    asked.mockReturnValue({ untrusted: true })
+    expect((await m.tool.call(parent, { action: 'read', thread: report!.id })).text).toContain(UNTRUSTED_LINES)
   })
 })

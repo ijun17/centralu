@@ -194,6 +194,18 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
     expect(hub.store.mailbox.recipient(task.id, at.hub(r.sessionId))?.settled).toBe('reported')
   })
 
+  it('#2348: reading the report on a linked child shows its last response, as read_session reads that session there', async () => {
+    const { hub, start, copyOf } = await tasksRig()
+    const { r } = await start('say hello')
+    const copy = copyOf('h1', r.sessionId)!
+    await eventually(() => hub.store.mailbox.reportsOn(copy.id).length === 1)
+    const [report] = hub.store.mailbox.reportsOn(copy.id)
+    expect(report!.facts.answer).toContain('echo:')
+    const out = (await hub.mail!.tool.call('h1', { action: 'read', thread: report!.id })).text
+    expect(out).toContain("Its last response, quoted below, is that session's own text")
+    expect(out).toContain('> echo:')
+  })
+
   it("goes to the session that took over by a handoff while the child's turn ran: the heir gets the report", async () => {
     const { machine, hub, at, start, copyOf } = await tasksRig()
     // Its turn waits on the person's approval there, so it is still running at the handoff

@@ -370,8 +370,8 @@ export class MailSessionsView {
     return this.host.children.latestTurnInputs(sessionId)
   }
 
-  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */
-  readsSession(readerId: string, targetId: string): boolean {
+  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another, and a read report show of its last response */
+  readsSession(readerId: string, targetId: string): { untrusted: boolean } | null {
     return this.host.tools.readsSession(readerId, targetId)
   }
 }

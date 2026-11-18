@@ -104,11 +104,9 @@ export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its t
  */
 export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean; answered?: boolean }): string {
   const read = `read_session(sessionId="${childId}")`
-  // Its answer is the report's fact, which reading the report shows below it (`MailTool`), never these words
-  const words = r.answered ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.` : `It wrote no response: ${read} shows its turn.`
   const lines =
     r.outcome === 'finished'
-      ? [`${TURN_ENDED}\nid: ${childId}\n\n${words}`]
+      ? [`${TURN_ENDED}\nid: ${childId}\n\n${lastResponseLine(read, r.answered === true)}`]
       : [
           `[Centralu] ${r.outcome === 'failed' ? 'The assigned work did not finish.' : 'The assigned work stopped before finishing.'}\nid: ${childId}\n\n` +
             `${r.kind ? `Its tool's error, by kind: ${r.kind}. ` : ''}Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
@@ -120,3 +118,11 @@ export function reportWords(childId: string, r: { outcome: TurnReport['outcome']
 const PERSON_SINCE = 'The person also wrote in this session after your task was given, so this last response may be an answer to them.'
 /** On a last response written before the task arrived (Q4) */
 const AFTER = 'Your task arrived after this response was written.'
+
+/**
+ * The line of a turn-ended report on where the session's last response is (`read`: the read_session call that shows its turn): its answer is the
+ * report's fact, which reading the report shows below it (`MailTool`), never these words (#120); or that it wrote none
+ */
+export function lastResponseLine(read: string, answered: boolean): string {
+  return answered ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.` : `It wrote no response: ${read} shows its turn.`
+}
