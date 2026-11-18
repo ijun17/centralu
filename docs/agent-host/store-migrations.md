@@ -81,10 +81,11 @@ step against:
      one open keeps the copy from before the first: that is the store the build the person had could read. A new
      store (version 0) and a store in memory get none. An open that copies again deletes nothing: each copy is
      deleted for its age alone (below), so more than one can be beside the store, and
-     [Getting the copy back](#getting-the-copy-back) says which to take. This differs from the decision recorded
-     on #2304, which kept only the newest copy and deleted the earlier one when the next breaking step made a new
-     one. The reason is the update that is stopped partway: a host stopped after the first breaking step committed
-     and before a later one did starts again with a store past the first and copies it before the later step.
+     [Getting the copy back](#getting-the-copy-back) says which to take. That is the decision on #2304: a newer
+     copy never deletes an earlier one, and only the sweep by age removes a copy. What was first recorded there
+     kept the newest copy alone; the reason it changed is the update that is stopped partway: a host stopped after
+     the first breaking step committed and before a later one did starts again with a store past the first and
+     copies it before the later step.
      That newer copy already lacks what the first step removed, so deleting the earlier one for it would delete
      the only copy of the store as it was before the update. Nothing in the store says which build the person
      would go back to, so no rule could pick the copy to delete; keeping each for its 14 days needs none, and
