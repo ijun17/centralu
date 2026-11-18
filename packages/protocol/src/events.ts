@@ -567,7 +567,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     oncePerSession: z.boolean().optional(),
     /** Who is speaking, as the person knows the tool: `Codex`, `Claude Code` */
     from: z.string().optional(),
-    /** What kind of notice, in a few words: `config warning`, `deprecation`, `warning` */
+    /** What kind of notice, in a few words: `config warning`, `deprecation`, `warning`; for Centralu's own lines, what happened (`next step after compaction`) */
     label: z.string().optional(),
     /**
      * Who has to act. `you`: the person's own setup (their `config.toml`, an MCP server they added). `centralu`: how

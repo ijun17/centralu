@@ -371,7 +371,7 @@ describe('on the session manager (#1492)', () => {
     expect(h.nudges[0]).toMatch(/about 33% full/)
     // Quiet: nothing was sent as a message, so no turn starts and none is interrupted; the conversation says what was told
     expect(h.sent).toEqual(['hello'])
-    expect(world.events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: id, from: 'Centralu', text: expect.stringContaining('33% full') }))
+    expect(world.events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: id, from: 'Centralu', label: 'context filling up', audience: 'centralu', text: expect.stringContaining('33% full') }))
     request(h, id, 400_000)
     request(h, id, 520_000)
     expect(h.nudges).toHaveLength(2)

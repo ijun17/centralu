@@ -15,7 +15,7 @@ import type {
 import { gridSessionIds, type ProjectArrangement } from '@cc/core'
 import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
-export { audienceText, messagesToChat } from './transcript.js'
+export { audienceShown, audienceText, messagesToChat } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
 import { type AppState, type InlineView, type Notice, type PinnedView, type StoreSet } from './state.js'
 export { EMPTY_DRAFT } from './state.js'

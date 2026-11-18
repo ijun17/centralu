@@ -724,8 +724,8 @@ export class SessionEvents {
    */
   async deliverMail(
     sessionId: string,
-    /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string; listed?: MailInput['listed'] },
+    /** `label`: the conversation line's head (`mail` when absent: its kind; a compaction's next step says what happened); an update's continued turn says `update` (#1618). `audience`: whose the line is to act on, when it is placed (a compaction's next step is Centralu's) */
+    input: { text: string; quiet: boolean; line: string; label?: string; audience?: 'you' | 'centralu'; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string; listed?: MailInput['listed'] },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -777,7 +777,7 @@ export class SessionEvents {
      * review). An update's or a compaction's line stands for no messages
      */
     const { line, mail } = input.listed ? mailLine(input.listed, shown ? input.shown?.messageId : undefined) : { line: input.line, mail: [] }
-    if (line) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: line, ...(mail.length ? { mail } : {}) })
+    if (line) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', ...(input.audience ? { audience: input.audience } : {}), text: line, ...(mail.length ? { mail } : {}) })
   }
 
   /**

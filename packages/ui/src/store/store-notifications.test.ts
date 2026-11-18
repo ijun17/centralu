@@ -643,11 +643,17 @@ describe('resets, notices and switches the tool made (#304)', () => {
         payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: 'Full-history hydration is deprecated.', from: 'Codex', label: 'deprecation', audience: 'centralu' },
       },
       { sessionId: 'n-6', seq: 3, role: 'system', kind: 'marker', ts: 3, payload: { type: 'notice', sessionId: 'n-6', level: 'warning', text: HOOK } },
+      {
+        sessionId: 'n-6', seq: 4, role: 'system', kind: 'marker', ts: 4,
+        payload: { type: 'notice', sessionId: 'n-6', level: 'info', text: 'Centralu sent the agent its next step after the compaction', from: 'Centralu', label: 'next step after compaction', audience: 'centralu' },
+      },
     ])
     expect(items.map((i) => (i as { text: string }).text)).toEqual([
       'Codex · warning: Exceeded skills context budget.',
       'Codex · deprecation · for Centralu: Full-history hydration is deprecated.',
       HOOK,
+      // Centralu speaking for Centralu: the audience adds nothing, and the copied text leaves it out as the capsule does
+      'Centralu · next step after compaction: Centralu sent the agent its next step after the compaction',
     ])
     // No summary: the text is the line itself, so there is nothing to show on demand
     expect(items[0]).toMatchObject({ notice: { head: 'Codex · warning', from: 'Codex' } })

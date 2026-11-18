@@ -1,5 +1,5 @@
 import { nudgeShares, type AutoCompact, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
-import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
+import { COMPACT_FLOOR_TOKENS, COMPACT_LABELS } from './self-compaction.js'
 
 /**
  * Telling a session its context is growing (#1492). An agent cannot see how full its context is: Claude Code does not tell the
@@ -32,8 +32,8 @@ export type ContextNudgesHost = {
   hasCompactTool(sessionId: string): boolean
   /** `SessionHandle.nudge`: whether the tool took the note (a promise when it knows later). False for a session with no process */
   nudge(sessionId: string, text: string): boolean | Promise<boolean>
-  /** A line in the conversation, in Centralu's name */
-  notice(sessionId: string, text: string): void
+  /** A line in the conversation, in Centralu's name, under the head `label` */
+  notice(sessionId: string, text: string, label: string): void
 }
 
 /** What a session was last told, and what is waiting to be told */
@@ -157,7 +157,7 @@ export class ContextNudges {
       // Not taken (a turn that has ended, or none that can be steered): it waits for a later request of a running turn
       if (!took) return
       c.waiting = null
-      this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self with then set to its next step`)
+      this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self with then set to its next step`, COMPACT_LABELS.contextFilling)
     }
     let took: boolean | Promise<boolean>
     try {
