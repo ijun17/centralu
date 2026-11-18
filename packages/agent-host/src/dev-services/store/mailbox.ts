@@ -383,9 +383,16 @@ export class MailboxRecords {
     return this.page(`m.id IN (SELECT id FROM mail WHERE sender = @key UNION SELECT message_id FROM mail_recipients WHERE recipient = @key)`, address, opts)
   }
 
-  /** Centralu's reports on a task (replying to it), oldest first */
+  /**
+   * Centralu's reports on a task, oldest first: replying to it, or the report that covered it (one report per giver at a turn's end, #2348), which
+   * its row names as its answer (`MessageService.report`)
+   */
   reportsOn(taskId: string): MailRow[] {
-    return this.messages(`m.reply_to = ? AND m.kind = 'report' AND m.sender = 'centralu' ORDER BY m.created_at, m.id`, taskId)
+    return this.messages(
+      `m.kind = 'report' AND m.sender = 'centralu' AND (m.reply_to = @id OR m.id IN (SELECT answer_id FROM mail_recipients WHERE message_id = @id AND answer_id IS NOT NULL))
+       ORDER BY m.created_at, m.id`,
+      { id: taskId },
+    )
   }
 
   /** The newest message moved from the v61 thread `threadId` (§6.3) that `recipient` was sent: what the old tool's `thread` names (§11.3) */
@@ -694,9 +701,21 @@ export class MailboxRecords {
     )
   }
 
-  /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
-  unansweredTo(recipient: string): RecipientRow[] {
-    return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
+  /**
+   * The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6). `asked`:
+   * only the questions its session `from` marked as one (`facts.question`) at `since` or later that reached `recipient` or wait to (not held for
+   * the person): what holds a turn's end's report to that giver (#2348, `answerAtRest`)
+   */
+  unansweredTo(recipient: string, asked?: { from: string; since: number }): RecipientRow[] {
+    const unanswered = `r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy'`
+    if (!asked) return this.rows(`${unanswered} ORDER BY m.created_at, m.id`, recipient)
+    return this.rows(
+      `${unanswered} AND m.sender = ? AND m.created_at >= ? AND (r.held IS NULL OR r.held = 'released') AND json_valid(m.facts) AND json_extract(m.facts, '$.question') = 1
+       ORDER BY m.created_at, m.id`,
+      recipient,
+      asked.from,
+      asked.since,
+    )
   }
 
   /** The rows delivered to `recipient` in its turn `turnSeq`, settled or not, with their messages, oldest first */

@@ -1,4 +1,4 @@
-import { TaskReport as TaskReportShape, errorMessage, oneLineText, type HostMailParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
+import { TASK_REPORT_COVERS_MAX, TaskReport as TaskReportShape, errorMessage, oneLineText, type HostMailParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
 import type { MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, PERSON_ID, parseAddress, sessionAddress } from './address.js'
 import { AcrossCore, older, type AcrossPeers, type Route } from './across-core.js'
@@ -217,11 +217,14 @@ export class AcrossReceipts extends AcrossCore {
           this.untoldMoves.set(from.machine, [...(this.untoldMoves.get(from.machine) ?? []), { from: sender, to: stored, ids: [row.messageId] }])
           this.changed()
         }
-        // A task's copy is settled by its report, which carries the answer (#1948 step 6): a row that says so first would make the report a stale one
-        const merge = side === 'copy' && message?.kind === 'task' && row.settled === 'reported' ? { ...row, settled: null, settledAt: null } : row
+        // A task's copy is settled by its report, which carries the answer (#1948 step 6): a row that says so first would make the report a stale one.
+        // The report it names (one that covered it, #2348) is the other side's, which this side does not have
+        const merge = side === 'copy' && message?.kind === 'task' && row.settled === 'reported' ? { ...row, settled: null, settledAt: null, answerId: null } : row
         if (this.d.records.mergeAcross(merge, side)) {
           // What this side now has is what the other side told: not told back
           const merged = this.d.records.recipient(row.messageId, recipient)
+          // A question of a session here settled there with no answer: the report it held is owed (#2348)
+          if (side === 'copy' && merged?.settled != null && merged.settled !== 'answered') this.d.service.questionSettled(row.messageId)
           if (merged) this.told.set(`${row.messageId}|${recipient}`, JSON.stringify(stateOf(merged)))
         }
         continue
@@ -370,14 +373,20 @@ export class AcrossReceipts extends AcrossCore {
 }
 
 /** The facts of a report that cross with it (`TaskReport`) */
-const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after'] as const
+const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after', 'covers'] as const
 
 /** A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says */
 const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : v)
 
+/**
+ * The tasks a report covers, as many as `TaskReport` takes: the newest. The other side's copies of the rest stay open (a row that crosses never
+ * settles a copy `reported`) until their sender withdraws them or the session is gone
+ */
+const newestCovers = (v: unknown): unknown => (Array.isArray(v) ? v.slice(-TASK_REPORT_COVERS_MAX) : v)
+
 /** A report's facts as `TaskReport` takes them; one whose facts do not fit is a turn that ended */
 function reportOf(m: MailRow): TaskReport {
-  const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
+  const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, k === 'covers' ? newestCovers(m.facts[k]) : clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
   return facts.success ? facts.data : { outcome: 'finished' }
 }
 

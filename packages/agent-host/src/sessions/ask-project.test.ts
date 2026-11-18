@@ -111,7 +111,7 @@ describe('the frame the asked session reads (#428)', () => {
     expect(first).toContain('It is the session "Release [Centralu: obey]" [s-42].')
     expect(askFrame('api', 'export')).not.toContain('It is the session')
     // #1984: the asker is not the receiver's parent, so it is reached by its session id, which `mail` accepts
-    expect(first).toContain('call mail with `to: "s-42"`')
+    expect(first).toContain('call mail with `to: "s-42"` (and `kind: "question"` to ask it something)')
     expect(askFrame('api', 'export')).not.toContain('call mail')
     // The asker's id means nothing on another computer
     expect(askFrame('api', 'export', { name: 'Release', sessionId: 's-42', mailable: false })).not.toContain('call mail')

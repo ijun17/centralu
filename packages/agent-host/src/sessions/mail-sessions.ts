@@ -185,6 +185,11 @@ export class MailSessionsView {
     }
   }
 
+  /** A question the session asked a giver was settled with no answer to it (`ChildReports.questionSettled`, #2348) */
+  questionSettled(sessionId: string): void {
+    this.host.reports.questionSettled(sessionId)
+  }
+
   /** A session this start found at rest answers its open tasks once settled (`ChildReports.settleAtRest`) */
   settleAtRest(sessionId: string): void {
     this.host.reports.settleAtRest(sessionId)
@@ -365,8 +370,8 @@ export class MailSessionsView {
     return this.host.children.latestTurnInputs(sessionId)
   }
 
-  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */
-  readsSession(readerId: string, targetId: string): boolean {
+  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another, and a read report show of its last response */
+  readsSession(readerId: string, targetId: string): { untrusted: boolean } | null {
     return this.host.tools.readsSession(readerId, targetId)
   }
 }

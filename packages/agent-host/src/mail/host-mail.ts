@@ -45,12 +45,17 @@ export type HostMailSessions = {
   projectTrusted(projectId: string): boolean
   /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`MailSessionsView.stoppedWords`) */
   stoppedWords?(id: string): string | null
-  /** Whether `readerId` can read `targetId` with read_session (`MailSessionsView.readsSession`): only then is a stopped session's text quoted to it */
-  readsSession?(readerId: string, targetId: string): boolean
+  /**
+   * Whether `readerId` can read `targetId` (this host's session, or a linked machine's as `m1.<id>`) with read_session, and whether its lines are marked
+   * untrusted; null when it cannot (`MailSessionsView.readsSession`): only then is a session's text quoted to it
+   */
+  readsSession?(readerId: string, targetId: string): { untrusted: boolean } | null
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
   /** A session this start found at rest answers the tasks it did not answer once it is settled (`ChildReports.settleAtRest`, mailbox.md §10.6.3) */
   settleAtRest?(id: string): void
+  /** A question the session asked a giver was settled with no answer to it: the report it held is owed now (`ChildReports.questionSettled`, #2348) */
+  questionSettled?(id: string): void
   /** Tells `receiverId`, whose seat cannot read mail, of `stoppedId`'s stop in the relayed report's words for that ending (`ChildReports.relayStop`); `told` once it went in */
   relayStop?(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void
   /** A send to a session the caller gives work, answered (`MailSessionsView.work`, #1948), or null for plain mail */
@@ -81,6 +86,7 @@ export function mailSessionsOf(
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
     work: (...a) => mgr.mail.work(...a),
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
+    questionSettled: (id) => mgr.mail.questionSettled(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
   }
 }
@@ -118,6 +124,16 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const { hostId } = opts
   const now = opts.now ?? Date.now
   const addressOf = (id: string) => sessionAddress(hostId, id)
+  /**
+   * Whether the session at `reader` reads the one at `target` with read_session, and whether its lines are marked untrusted; null when it does not
+   * (`HostMailSessions.readsSession`). Both are addresses of this host: a session here, or a linked machine's as this host names it (`m1.<id>`); a
+   * session another host names is none of this host's to read
+   */
+  const readsAs = (reader: string, target: string): { untrusted: boolean } | null => {
+    const [from, to] = [parseAddress(reader), parseAddress(target)]
+    if (from?.kind !== 'session' || to?.kind !== 'session' || from.host !== hostId || to.host !== hostId) return null
+    return sessions.readsSession?.(from.sessionId, to.sessionId) ?? null
+  }
   /** What a handoff moved, with the session a Centralu message is about as the session id the host uses (an address in the mailbox) */
   const aboutSessions = (list: HandedOverMessage[]): HandedOverMessage[] =>
     list.map(({ about, ...m }) => {
@@ -171,6 +187,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return mailCalls(party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
+    questionSettled: (address) => {
+      const party = parseAddress(address)
+      if (party?.kind === 'session' && party.host === hostId) sessions.questionSettled?.(party.sessionId)
+    },
     standing: (address) => {
       const party = parseAddress(address)
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
@@ -180,10 +200,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const party = parseAddress(address)
       return party?.kind === 'session' ? (sessions.stoppedWords?.(party.sessionId) ?? null) : null
     },
-    mayRead: (reader, target) => {
-      const [from, to] = [parseAddress(reader), parseAddress(target)]
-      return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
-    },
+    readsAs,
     ...(sessions.turnInputs ? { turnInputs: (id: string) => sessions.turnInputs?.(id) ?? [null] } : {}),
     // A session whose seat cannot read mail is refused the stop notice (`no_mailbox`): it is told the old way (mailbox.md §10.6.3)
     relayToMailless: (session, stopped, why, told) => {
@@ -231,10 +248,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const cards = s ? [...s.pendingQuestions.map((q) => q.requestId), ...(s.pendingApproval ? [s.pendingApproval.requestId] : [])] : []
       return s && { working: inTurn(s.state), cards, interrupted: (s.interruption ?? null) !== null, held: heldToContinue(s.interruption) }
     },
-    mayRead: (reader, target) => {
-      const [from, to] = [parseAddress(reader), parseAddress(target)]
-      return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
-    },
+    mayRead: (reader, target) => readsAs(reader, target) !== null,
     elsewhere: (address) => {
       const party = parseAddress(address)
       return party?.kind !== 'session' || party.host !== hostId || reach.elsewhere(address)

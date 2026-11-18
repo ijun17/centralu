@@ -57,7 +57,7 @@ export const ANSWER_GROUNDS = 'In your answer, say what each claim rests on (a f
 export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string; mailable?: boolean }): string {
   const who = asker ? ` It is the session ${JSON.stringify(frameField(asker.name))}${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
   // #1984: this session is not the asker's child, so `parent` does not resolve for it; the asker is reached by its session id (a bare id `mail` accepts)
-  const reach = asker?.sessionId && asker.mailable !== false ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\`.` : ''
+  const reach = asker?.sessionId && asker.mailable !== false ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\` (and \`kind: "question"\` to ask it something).` : ''
   return [
     `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
       `Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path. ${ANSWER_GROUNDS}${reach}]`,

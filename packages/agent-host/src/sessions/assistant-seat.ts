@@ -167,7 +167,7 @@ export function centraluToolsFor(
   const wide = () => !!ownProject && host.projectTrusted(ownProjectId())
   /** An Assistant's row is never read, even one with a project (a project assistant restored from before #1941) */
   const readable = (s: SessionInfo) => !isAssistantKind(s.kind) && (inScope(s) || wide())
-  /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one (`CentraluTools.mayRead`) */
+  /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one */
   const mayRead = (sessionId: string): boolean => {
     if (sessionId === assistantId) return false
     const target = host.meta.get(sessionId)
@@ -187,6 +187,18 @@ export function centraluToolsFor(
     !projectId ? '(none)' : (names.get(projectId) ?? '(project no longer exists)') + (names.has(projectId) && untrusted(projectId) ? NOT_TRUSTED : '')
   /** Which projects a row is marked untrusted for: only in a trusted reader's wide view, where its own is trusted */
   const untrustedMark = () => (wide() ? (id: string) => !host.projectTrusted(id) : () => false)
+  /**
+   * The one read rule (`CentraluTools.readsAs`): whether `readSession` reads this session, a linked machine's there or this host's here, and whether
+   * its lines are marked as a project nobody trusted; null when it does not. Never the reader itself
+   */
+  const readsAs = (sessionId: string): { untrusted: boolean } | null => {
+    if (sessionId === assistantId) return null
+    const reader = readLinks()
+    if (reader?.machineOf(sessionId)) return remoteReadable(reader, sessionId)
+    if (!mayRead(sessionId)) return null
+    const project = host.meta.get(sessionId)?.projectId ?? host.store.handoffs.projectOf(sessionId)
+    return { untrusted: !!project && untrustedMark()(project) }
+  }
   // A stale id (deleted, replaced) says what it was and which live session now carries its name (stale-session-id.ts)
   const readError = (id: string) =>
     (ownProject && wide() ? `Not a session you can read: ${id}` : scopeText(id)) + staleSessionHint(host, id, readable, central, 'read')
@@ -214,7 +226,7 @@ export function centraluToolsFor(
   }
 
   return {
-    mayRead,
+    readsAs,
     updateCentralu: async (action, signal) => host.updateCentraluAsked(assistantId, action, signal),
     listSessions: async (opts) => {
       const byId = projects()
@@ -516,7 +528,7 @@ export function centraluToolsFor(
       // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
       const reader = readLinks()
       if (!self && reader?.machineOf(sessionId)) {
-        const seen = remoteReadable(reader, sessionId)
+        const seen = readsAs(sessionId)
         if (!seen) return { ok: false, error: readError(sessionId) }
         const r = await reader.read(sessionId, limit, opts)
         return seen.untrusted && r.ok ? { ...r, untrusted: true } : r

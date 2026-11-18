@@ -18,8 +18,11 @@ export type StopNoticeOptions = {
   standing?: (sessionAddress: string) => 'turn' | 'rest' | 'cut'
   /** The words of the turn a session's stop cut, which its stop notice to a session quotes as that session's own text; none quoted when absent */
   stoppedWords?: (sessionAddress: string) => string | null
-  /** Whether `reader` can read the session `sessionAddress` with read_session (`SessionTools.readsSession`): a stop notice quotes only to such a reader; none when absent */
-  mayRead?: (reader: string, sessionAddress: string) => boolean
+  /**
+   * Whether `reader` can read the session `sessionAddress` with read_session, and whether its lines are marked untrusted; null when it cannot
+   * (`SessionTools.readsSession`): a stop notice quotes only to such a reader, and a read report shows a last response only to it; none when absent
+   */
+  readsAs?: (reader: string, sessionAddress: string) => { untrusted: boolean } | null
   /**
    * Who gave each thing that may have entered the session's latest turn other than mail (`ChildOwnership.latestTurnInputs`): a session id, or
    * null for anything no session provably sent (the person's text or answer to a question card, an app, a script, a relayed report). None quoted when absent
@@ -157,7 +160,7 @@ export class StopNotices {
    * (`mayRead`, that tool's own rule), and the turn is `sender`'s alone (`alone`)
    */
   quotes(stopped: string, sender: string, turnSeq?: number): boolean {
-    return this.d.mayRead?.(sender, stopped) === true && this.alone(stopped, sender, { turnSeq })
+    return (this.d.readsAs?.(sender, stopped) ?? null) !== null && this.alone(stopped, sender, { turnSeq })
   }
 
   /**

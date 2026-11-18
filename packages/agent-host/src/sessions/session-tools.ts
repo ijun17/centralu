@@ -115,14 +115,15 @@ export class SessionTools {
   }
 
   /**
-   * Whether `readerId` can read `targetId` with read_session: its profile has the tool and its seat's read rule lets it (`CentraluTools.mayRead`).
-   * What a stop notice may quote of a stopped session to it (security-boundaries/inter-agent-content.md): nothing it could not read anyway
+   * Whether `readerId` can read `targetId` with read_session, this host's session or a linked machine's (`m1.<id>`), and whether its lines are marked
+   * untrusted; null when it cannot: its profile has the tool and its seat's read rule lets it (`CentraluTools.readsAs`). What a stop notice may quote
+   * of a stopped session to it and what a read report shows of a last response (security-boundaries/inter-agent-content.md): nothing it could not read anyway
    */
-  readsSession(readerId: string, targetId: string): boolean {
+  readsSession(readerId: string, targetId: string): { untrusted: boolean } | null {
     const m = this.host.meta.get(readerId)
-    if (!m) return false
+    if (!m) return null
     const { profile, tools } = this.toolChoice(m)
-    return profile !== null && profileAllows(profile, 'read_session') && tools()?.mayRead?.(targetId) === true
+    return profile !== null && profileAllows(profile, 'read_session') ? (tools()?.readsAs?.(targetId) ?? null) : null
   }
 
   /**
@@ -140,7 +141,7 @@ export class SessionTools {
     const refuse = async () => ({ ok: false, error })
     return {
       updateCentralu: async (action, signal) => this.host.updateCentraluAsked(sessionId, action, signal),
-      mayRead: (id) => view.mayRead?.(id) === true,
+      readsAs: (id) => view.readsAs?.(id) ?? null,
       listSessions: async (opts) => view.listSessions(opts),
       readSession: async (...a) => view.readSession(...a),
       recall: async (...a) => view.recall(...a),

@@ -149,6 +149,67 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
     expect(hub.store.mailbox.recipient(more.id, at.hub(r.sessionId))).toMatchObject({ settled: 'reported' })
   })
 
+  it('#2348: a report on the newest task that covers the other comes back covering it on the hub, which settles both and finds it on each', async () => {
+    const { machine, hub, at, start, copyOf } = await tasksRig()
+    // Its turn waits on the person's approval there, so the follow-ups stay open on both sides
+    const { r, local } = await start('please approve my command')
+    await eventually(() => machine.mgr.listSessions().find((s) => s.id === local)?.state === 'waiting_approval')
+    const more: string[] = []
+    for (const text of ['and one more thing', 'and the last thing']) {
+      expect(await sendWork(hub.mgr, 'h1', r.sessionId, text)).toMatchObject({ ok: true })
+      more.push(copyOf('h1', r.sessionId)!.id)
+    }
+    await eventually(() => more.every((id) => machine.store.mailbox.message(id) !== undefined))
+    // The machine's one report at a turn's end (`answerAtRest`), as it writes it
+    machine.mail!.service.report(more[1]!, { outcome: 'finished', body: 'ended', answer: 'both done', covers: [more[0]!] })
+    await eventually(() => hub.store.mailbox.reportsOn(more[1]!).length === 1)
+    const [report] = hub.store.mailbox.reportsOn(more[1]!)
+    expect(report).toMatchObject({ replyTo: more[1], facts: expect.objectContaining({ outcome: 'finished', answer: 'both done', covers: [more[0]] }) })
+    expect(hub.store.mailbox.reportsOn(more[0]!)).toEqual([report])
+    await eventually(() => more.every((id) => hub.store.mailbox.recipient(id, at.hub(r.sessionId))?.settled === 'reported'))
+  })
+
+  it('#2348: a child that asks its hub parent something and ends its turn waiting sends no report; the task stays open on both sides', async () => {
+    const { machine, hub, at, start, copyOf } = await tasksRig()
+    const { r, local } = await start('please approve my command')
+    const task = copyOf('h1', r.sessionId)!
+    await eventually(() => machine.mgr.listSessions().find((s) => s.id === local)?.state === 'waiting_approval')
+    // A message that is not marked as a question is told it holds nothing; the question is not
+    const plain = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Started on it.' })
+    expect(plain.text).toContain('It is not marked as a question, so your task is still reported when your turn ends')
+    const asked = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Design: A or B?', kind: 'question' })
+    expect(asked.isError).toBeFalsy()
+    expect(asked.text).not.toContain('It is not marked as a question')
+    const question = /^Sent (\S+) /.exec(asked.text)?.[1] ?? ''
+    // The machine keeps its copy of the question, marked as one, to the hub session that gave the task, by the address the task names it
+    expect(machine.store.mailbox.message(question)?.facts.question).toBe(true)
+    expect(machine.store.mailbox.recipient(question, task.sender)).toMatchObject({ settled: null })
+    const card = machine.mgr.listSessions().find((s) => s.id === local)!.pendingApproval!
+    machine.mgr.inputs.respondApproval(local, card.requestId, 'allow')
+    await eventually(() => !['working', 'waiting_approval'].includes(machine.mgr.listSessions().find((s) => s.id === local)?.state ?? 'working'))
+    // The machine's turn end wrote nothing: nothing crosses
+    expect(machine.store.mailbox.reportsOn(task.id)).toEqual([])
+    expect(machine.store.mailbox.recipient(task.id, at.machine(local))).toMatchObject({ settled: null })
+    expect(hub.store.mailbox.reportsOn(task.id)).toEqual([])
+    expect(hub.store.mailbox.message(question)).toMatchObject({ needsReply: true })
+    // The parent marks it handled on the hub: the machine's copy learns it, the hold ends there, and the report comes back
+    expect(hub.mail!.service.done(at.hub('h1'), question).how).toBe('done')
+    await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
+    expect(hub.store.mailbox.recipient(task.id, at.hub(r.sessionId))?.settled).toBe('reported')
+  })
+
+  it('#2348: reading the report on a linked child shows its last response, as read_session reads that session there', async () => {
+    const { hub, start, copyOf } = await tasksRig()
+    const { r } = await start('say hello')
+    const copy = copyOf('h1', r.sessionId)!
+    await eventually(() => hub.store.mailbox.reportsOn(copy.id).length === 1)
+    const [report] = hub.store.mailbox.reportsOn(copy.id)
+    expect(report!.facts.answer).toContain('echo:')
+    const out = (await hub.mail!.tool.call('h1', { action: 'read', thread: report!.id })).text
+    expect(out).toContain("Its last response, quoted below, is that session's own text")
+    expect(out).toContain('> echo:')
+  })
+
   it("goes to the session that took over by a handoff while the child's turn ran: the heir gets the report", async () => {
     const { machine, hub, at, start, copyOf } = await tasksRig()
     // Its turn waits on the person's approval there, so it is still running at the handoff

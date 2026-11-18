@@ -154,7 +154,7 @@ describe('ask_project into a session that waits on its own background work (#146
     expect(reports()[0]!.facts).toMatchObject({ answer: '8 pass / 2 fail', personSince: true })
   })
 
-  it('a new task from the asker: the turn it runs answers both tasks, each with its own report, both read by the call', async () => {
+  it('a new task from the asker: the turn it runs answers both tasks with one report that covers the first, read by the call (#2348)', async () => {
     await pauseOnVerify(ask('run the suite'))
     handleOf(target).event({ type: 'background_tasks', sessionId: target, live: [], ended: [{ ...verify, status: 'completed' }] })
     const second = ask('and the lint')
@@ -163,6 +163,11 @@ describe('ask_project into a session that waits on its own background work (#146
     expect(await second).toMatchObject({ ok: true, state: 'done', answer: 'lint ok' })
     await settle()
     expect(tasks()).toHaveLength(2)
-    expect(reports().map((x) => [x.replyTo, x.facts.answer, readByAsker(x.id)])).toEqual(tasks().map((t) => [t.id, 'lint ok', true]))
+    const [first, latest] = tasks()
+    const [report, ...more] = read().reportsOn(latest!.id)
+    expect(more).toEqual([])
+    expect([report!.replyTo, report!.facts.answer, report!.facts.covers, readByAsker(report!.id)]).toEqual([latest!.id, 'lint ok', [first!.id], true])
+    expect(read().reportsOn(first!.id)).toEqual([report])
+    expect(tasks().map((t) => read().row(t.id, addressOf(target))?.settled)).toEqual(['reported', 'reported'])
   })
 })

@@ -97,6 +97,24 @@ describe('a script starts a session with a first message', () => {
     expect(threadState(s.id)).toBe('review')
   })
 
+  it('#2348: a question to its givers holds a session giver’s report, never the person’s: their thread reads In review from it', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const parent = await w.callerSession()
+    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    personTask(child)
+    for (const to of ['person', parent]) expect((await m.tool.call(child, { action: 'send', to, text: 'CSV or JSON?', kind: 'question' })).isError).toBeFalsy()
+    expect(read.between(addressOf(child), PERSON, 'message').map((x) => x.needsReply)).toEqual([true])
+    handleOf(child)!.answer('Asked which format; exported CSV for now.')
+    await w.until(() => reportsOf(child).length === 1)
+    expect(settledOf(child)).toBe('reported')
+    expect(threadState(child)).toBe('review')
+    // The session giver, asked the same, gets none: its task stays open for the turn its answer starts
+    const asked = read.tasks(addressOf(parent), child)[0]!
+    expect(read.reportsOn(asked.id)).toEqual([])
+    expect(read.taskRow(asked.id, child)).toMatchObject({ settled: null })
+  })
+
   it('a turn that wrote nothing still answers with the one line, and no answer', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.event({ type: 'turn_complete', sessionId: s.id })

@@ -880,10 +880,11 @@ describe('a session asks the person by mail (#1630)', () => {
     const sent = w.person.list().threads.map((t) => w.person.thread(t.id).messages[0]!)
     const forged = sent.find((m) => m.body === 'Which?')!
     expect(forged.choices).toBeUndefined()
-    expect(forged.facts).toEqual({})
+    // Only Centralu's own fact, from the kind the tool was called with (#2348)
+    expect(forged.facts).toEqual({ question: true })
     const honest = sent.find((m) => m.body === 'Which one?')!
     expect(honest.choices).toEqual(['x', 'y'])
-    expect(honest.facts).toEqual({})
+    expect(honest.facts).toEqual({ question: true })
   })
 
   describe('a pick names the question it answers', () => {

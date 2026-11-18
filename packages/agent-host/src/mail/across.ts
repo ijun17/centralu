@@ -35,7 +35,9 @@ export function mayReachAcross(_from: string, _to: string): boolean {
 }
 
 /** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
-type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[] }
+type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[]; question?: true }
+/** What a send across keeps in its copy here: the fields that cross, and that its sender marked it as a question (#2348, `MailFacts.question`), which only this side reads */
+type Kept = { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }
 
 /** A message id another host picked: its host's id and a ulid (`messageIdOf`), never one of this host's */
 const FOREIGN_ID = /^[^\s/]{1,120}\.m_[0-9A-Za-z]{10,40}$/
@@ -236,39 +238,41 @@ export class MailAcross extends AcrossReceipts {
       return { ok: false, why: 'untrusted_project', text: `your project ${p} is not trusted, and mail out of it to another computer cannot wait for the person as it does here, so nothing was sent. Ask the person to trust ${p}, then send it again.` }
     }
     const fields = { text: input.text, needsReply: input.needsReply, ...(input.urgent ? { urgent: true } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}) }
+    const kept: Kept = { ...fields, ...(input.question ? { question: true } : {}) }
     // What only the recipient's side reads (the person's Inbox): the copy here keeps the message without them
     const extra = { ...(input.subject ? { subject: input.subject } : {}), ...(input.choices ? { choices: input.choices } : {}) }
     const party = parseAddress(sender)
     const sessionId = party?.kind === 'session' ? party.sessionId : null
-    if (input.to === 'parent') return sessionId ? this.toParent(sessionId, sender, fields) : { ok: false, why: 'bad_address', text: 'only a session has a parent.' }
+    if (input.to === 'parent') return sessionId ? this.toParent(sessionId, sender, kept) : { ok: false, why: 'bad_address', text: 'only a session has a parent.' }
     const route = this.route(input.to)
     if (!route || route.kind === 'here') return { ok: false, why: 'bad_address', text: `${input.to} is not a session on another computer.` }
     if (route.kind === 'machine') {
       const m = this.peers?.machine?.(route.machineId)
       if (!m) return { ok: false, why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
-      const id = this.idFor(sender, input.to, fields, m.name)
+      const id = this.idFor(sender, input.to, kept, m.name)
       // The machine shows the sender as it reads here, with this computer's name
       const params: HostMailParams = { from: sender, name: `${sender === PERSON ? 'the person' : this.d.reach.labelOf(sender)} on ${this.selfName()}`, to: route.sessionId, ...fields, id }
       const r = this.settle(id, await this.ask(m, 'host.mail', params))
       // A machine from before the person's mail crossed takes mail from the hub's sessions only
       if (!r.ok && r.why === 'not_allowed' && sender === PERSON) return { ok: false, why: 'older', text: `${m.name} runs an older Centralu, which takes no answer from the person here. Update it there.` }
-      return this.wrote(sender, input.to, fields, m.name, r)
+      return this.wrote(sender, input.to, kept, m.name, r)
     }
     if (!sessionId) return { ok: false, why: 'not_allowed', text: `only a session here writes to ${input.to}.` }
     const h = this.peers?.hub?.(route.hubId)
     if (!h) return { ok: false, why: 'link_down', text: `the computer ${route.hubId} is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.` }
     if (!h.you) return { ok: false, why: 'older', text: `${h.name} runs an older Centralu, which takes mail only for the session that started one of its children here. Update it there.` }
-    const id = this.idFor(sender, input.to, fields, h.name)
+    const id = this.idFor(sender, input.to, kept, h.name)
     const toPerson = input.to === sessionAddress(route.hubId, PERSON_ID)
     const params: HubMailParams = { sessionId, to: this.asHubNames(route.hubId, input.to), name: this.d.reach.labelOf(sender), ...fields, ...extra, id }
     const r = this.settle(id, await this.ask(h, 'hub.mail', params))
     // A hub from before the person's mail crossed reads `person` as no address
     if (!r.ok && r.why === 'bad_address' && toPerson) return { ok: false, why: 'older', text: `${h.name} runs an older Centralu, which takes no mail to the person from here. Update it there.` }
-    return this.wrote(sender, input.to, fields, h.name, r)
+    return this.wrote(sender, input.to, kept, h.name, r)
   }
 
   /** A session a hub started here, to the session there that started it: through that hub only, which knows who that is */
-  private async toParent(sessionId: string, sender: string, fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }): Promise<AcrossSent> {
+  private async toParent(sessionId: string, sender: string, kept: Kept): Promise<AcrossSent> {
+    const { question: _question, ...fields } = kept
     const started = this.peers?.startingHub?.(sessionId) ?? null
     if (!started) {
       return {
@@ -281,19 +285,19 @@ export class MailAcross extends AcrossReceipts {
     const name = h?.name ?? (oneLineText(started.name, 120) || 'the computer that started this session')
     if (!h) return { ok: false, why: 'link_down', text: `${name}, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.` }
     // Its address there is the hub's to say: a second send of the same words reuses the id, and the hub takes it as the one it has
-    const id = this.idFor(sender, 'parent', fields, name)
+    const id = this.idFor(sender, 'parent', kept, name)
     const r = this.settle(id, await this.ask(h, 'hub.mail', { sessionId, name: this.d.reach.labelOf(sender), ...fields, id }))
     if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'gone', text: `${name} no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.` }
     if (!r.ok && r.why === 'older') return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
     // A hub from before item 2 does not say the parent's address: nothing to keep a copy under, and it took the message as a note
-    return this.wrote(sender, r.ok ? (r.address ?? null) : null, fields, name, r)
+    return this.wrote(sender, r.ok ? (r.address ?? null) : null, kept, name, r)
   }
 
   /** The other host's answer: on success the copy is written here, under its id */
   private wrote(
     sender: string,
     to: string | null,
-    fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string },
+    fields: Kept,
     computer: string,
     r: { ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean },
   ): AcrossSent {
@@ -407,7 +411,7 @@ export class MailAcross extends AcrossReceipts {
       // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
       const party = row ? parseAddress(row.recipient) : null
       const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
-      const body = reportWords(childId, { outcome: report.outcome, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
+      const body = reportWords(childId, { outcome: report.outcome, answered: !!report.answer, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
       const written = this.d.service.report(task.id, { ...report, body })
       return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
     } catch (e) {

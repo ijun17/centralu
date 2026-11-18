@@ -53,7 +53,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     }),
     projectTrusted: (projectId) => store.projects.listProjects().some((p) => p.id === projectId && p.trusted),
     ...(opts.work ? { work: opts.work } : {}),
-    readsSession: opts.readsSession ?? (() => true),
+    readsSession: opts.readsSession ?? (() => ({ untrusted: false })),
   }
   const m = hostMail(store, sessions, {
     hostId: HOST,

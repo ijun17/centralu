@@ -219,7 +219,7 @@ describe('a report on an ask across, owed to the side that asked (#1948 step 6)'
     expect(w.records.reportsOn(id)).toEqual([])
     expect(across.fromHub(hub, params)).toMatchObject({ ok: true })
     // Worded here from its facts, naming the hub's session as this machine reads it: the hub's text is never this host's Centralu's words
-    expect(w.records.reportsOn(id)).toMatchObject([{ body: reportWords('hub-0000000b.h1', { outcome: 'finished' }), facts: { answer: 'reviewed' } }])
+    expect(w.records.reportsOn(id)).toMatchObject([{ body: reportWords('hub-0000000b.h1', { outcome: 'finished', answered: true }), facts: { answer: 'reviewed' } }])
     expect(w.records.recipient(id, sessionAddress(hub.id, 'h1'))?.settled).toBe('reported')
   })
 })

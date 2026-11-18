@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
 import { PERSON } from '../mail/address.js'
+import { UNTRUSTED_LINES } from '../mail/frame.js'
 import { crossWorld, type CrossHandle, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
@@ -189,11 +190,12 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     await deliverDue(child)
     expect(handleOf(child).sent.join(' ')).toContain(follow)
     handleOf(child).event({ type: 'turn_complete', sessionId: child })
-    await w.until(() => reports(task).length > 0 && reports(follow).length > 0)
-    expect(reports(task)[0]!.facts.after).toBeUndefined()
-    expect(reports(task)[0]!.body).not.toContain('Your task arrived after this response was written.')
-    expect(reports(follow)[0]).toMatchObject({ facts: expect.objectContaining({ after: true, answer: 'Code done.' }) })
-    expect(reports(follow)[0]!.body.split('\n').at(-1)).toBe('Your task arrived after this response was written.')
+    await w.until(() => reports(follow).length > 0)
+    // One report for the giver, on its newest task, which arrived after the response: it says so (#2348)
+    const [report] = reports(follow)
+    expect(report).toMatchObject({ replyTo: follow, facts: expect.objectContaining({ after: true, answer: 'Code done.', covers: [task] }) })
+    expect(report!.body.split('\n').at(-1)).toBe('Your task arrived after this response was written.')
+    expect(reports(task)).toEqual([report])
   })
 
   it("the turn that ran a task answers it at its end, though mail waits to wake the child: never with the next turn's words, and once", async () => {
@@ -210,17 +212,22 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     expect(reports(task)).toHaveLength(1)
   })
 
-  it('two tasks of one sender are two requests: each gets its own answer', async () => {
+  it('#2348: a task and two follow-ups of one giver in one turn get one report at its end, on the newest, covering the others', async () => {
     const { parent, child, task } = await childInTurn()
-    const r = await sendWork(w.mgr, parent, child, 'and the docs')
-    const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
-    await deliverDue(child)
-    await turnEnds(child, 'Code and docs done.')
-    await w.until(() => reports(task).length > 0 && reports(follow).length > 0)
-    expect([...reports(task), ...reports(follow)].map((x) => [x.replyTo, x.facts.answer])).toEqual([
-      [task, 'Code and docs done.'],
-      [follow, 'Code and docs done.'],
-    ])
+    const follows: string[] = []
+    for (const text of ['and the docs', 'and the changelog']) {
+      const r = await sendWork(w.mgr, parent, child, text)
+      follows.push(r?.ok && r.state === 'mailed' ? r.messageId : '')
+      await deliverDue(child)
+    }
+    await turnEnds(child, 'Code, docs and changelog done.')
+    await w.until(() => reports(follows[1]!).length > 0)
+    const toParent = read.between('centralu', addr(parent), 'report')
+    expect(toParent.map((x) => [x.replyTo, x.facts.answer, x.facts.covers])).toEqual([[follows[1], 'Code, docs and changelog done.', [task, follows[0]]]])
+    for (const id of [task, ...follows]) {
+      expect(read.taskRow(id, child)).toMatchObject({ settled: 'reported' })
+      expect(reports(id)).toEqual(toParent)
+    }
   })
 
   it("a question the tool holds for a turn after is not the stopped turn's: its stop does not release it, the stop of the turn that runs it does", async () => {
@@ -325,5 +332,150 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     m.afterReady()
     await vi.advanceTimersByTimeAsync(61_000)
     expect(reports(task)).toHaveLength(1)
+  })
+})
+
+/**
+ * #2348 case B (the owner's decisions of 2026-11-18, mailbox.md §10.6.3): a question a session asked a giver (`kind: "question"`, `facts.question`)
+ * holds that giver's turn-ended report while it waits for the answer; its task stays open, and the turn the answer starts reports (#2329), or the
+ * session answers at once when the giver marks it handled. Any other message to the giver holds nothing
+ */
+describe('a question to the giver holds its report until it is answered or handled (#2348)', () => {
+  /** The child asks the parent something, marked as a question */
+  const asks = async (child: string, parent: string, text = 'Design: A or B?') => {
+    const sent = await m.tool.call(child, { action: 'send', to: parent, text, kind: 'question' })
+    expect(sent.isError).toBeFalsy()
+    return read.between(addr(child), addr(parent), 'message').at(-1)!
+  }
+
+  it('no report while the question waits, over a restart and a later turn; the parent’s answer starts the turn whose end reports, once (#2329)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { parent, child, task } = await childInTurn()
+    const question = await asks(child, parent)
+    expect(question.facts.question).toBe(true)
+    await turnEnds(child, 'Sent the design, waiting for the answer.')
+    expect(reports(task)).toEqual([])
+    expect(read.taskRow(task, child)).toMatchObject({ settled: null, releasedAt: null })
+    // A restart finds the same facts in the store: the start's settle, once its wait is over, sends nothing either
+    m.afterReady()
+    w.mgr.mail.settleAtRest(child)
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(reports(task)).toEqual([])
+    // A later turn (the person's) is no answer: its end sends nothing either
+    await w.mgr.inputs.send(child, 'what are you waiting for?')
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+    await turnEnds(child, 'For the parent’s answer.')
+    expect(reports(task)).toEqual([])
+    // The parent answers with a reply: the question is answered, and the child's turn it starts ends with the work's answer
+    expect((await m.tool.call(parent, { action: 'reply', thread: question.id, text: 'B.' })).isError).toBeFalsy()
+    await deliverDue(child)
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+    await turnEnds(child, 'Built B: PR #9.')
+    await w.until(() => reports(task).length > 0)
+    // The parent's answer to its own child is work too (§9.7): the one report replies to it and covers the first task
+    const toParent = read.between('centralu', addr(parent), 'report')
+    expect(toParent.map((r) => [r.facts.answer, r.facts.covers])).toEqual([['Built B: PR #9.', [task]]])
+    expect(reports(task)).toEqual(toParent)
+    expect(read.taskRow(task, child)).toMatchObject({ settled: 'reported' })
+  })
+
+  it('only a question holds: a note, a plain message (which needs a reply) and a question settled in the turn keep the report', async () => {
+    const { parent, child, task } = await childInTurn()
+    // The reviewer's rule (#1948 step 3): a message that asks nothing leaves the last response the result
+    expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
+    // A plain send needs a reply by default, but is no question: "Done" before the end holds nothing (the review of #2349), and the send says so
+    const plain = await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })
+    expect(plain.text).toContain('It is not marked as a question, so your task is still reported when your turn ends; send with kind="question" when you wait for the answer.')
+    const done = read.between(addr(child), addr(parent), 'message').at(-1)!
+    expect(done).toMatchObject({ needsReply: true, facts: { clarifies: task } })
+    expect(done.facts.question).toBeUndefined()
+    const marked = await m.tool.call(child, { action: 'send', to: parent, text: 'Which branch?', kind: 'question' })
+    expect(marked.text).not.toContain('It is not marked as a question')
+    const settled = read.between(addr(child), addr(parent), 'message').at(-1)!
+    expect(m.service.done(addr(parent), settled.id).how).toBe('done')
+    // More work joins the turn, and a question after it still waits at the end: that holds the report on both
+    const r = await sendWork(w.mgr, parent, child, 'and the docs')
+    const later = r?.ok && r.state === 'mailed' ? r.messageId : ''
+    await deliverDue(child)
+    await asks(child, parent, 'Docs in English only?')
+    await turnEnds(child, 'Done on main; asked about the docs.')
+    expect(reports(later)).toEqual([])
+    expect(reports(task)).toEqual([])
+    // Marked handled with no answer: the hold ends there, and the session at rest answers at once
+    const waiting = read.between(addr(child), addr(parent), 'message').at(-1)!
+    expect(m.service.done(addr(parent), waiting.id).how).toBe('done')
+    await w.until(() => reports(later).length > 0)
+    expect(reports(later).map((x) => [x.facts.answer, x.facts.covers])).toEqual([['Done on main; asked about the docs.', [task]]])
+  })
+
+  it('a task the giver sent after the question gets its report, covering the first', async () => {
+    const { parent, child, task } = await childInTurn()
+    await asks(child, parent)
+    clock.t += 1_000
+    const r = await sendWork(w.mgr, parent, child, 'and also the docs')
+    const follow = r?.ok && r.state === 'mailed' ? r.messageId : ''
+    await deliverDue(child)
+    await turnEnds(child, 'Docs done; the design question stands.')
+    await w.until(() => reports(follow).length > 0)
+    expect(reports(follow).map((x) => [x.replyTo, x.facts.covers])).toEqual([[follow, [task]]])
+  })
+
+  it('a stop of the turn after the question is still told: the stop notice releases the open task and tells the parent', async () => {
+    const { parent, child, task } = await childInTurn()
+    const question = await asks(child, parent)
+    await turnEnds(child, 'Sent the design, waiting for the answer.')
+    expect(reports(task)).toEqual([])
+    // The answer starts the next turn, and that turn fails
+    expect((await m.tool.call(parent, { action: 'reply', thread: question.id, text: 'B.' })).isError).toBeFalsy()
+    await deliverDue(child)
+    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+    handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom', retryable: false } })
+    await w.until(() => read.taskRow(task, child)?.releasedAt != null)
+    expect(reports(task)).toEqual([])
+    expect(read.between('centralu', addr(parent), 'notice').some((n) => n.facts.unanswered?.some((u) => u.id === task))).toBe(true)
+  })
+
+  it('another giver of a task in the same turn still gets its report', async () => {
+    const { parent, child, task } = await childInTurn()
+    const orc = await w.mgr.assistant()
+    expect((await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build', reportBack: true })).isError).toBeFalsy()
+    const [asked] = read.tasks(addr(orc.id), child)
+    await deliverDue(child)
+    await asks(child, parent)
+    await turnEnds(child, 'Build green; design question sent.')
+    await w.until(() => reports(asked!.id).length > 0)
+    expect(reports(task)).toEqual([])
+  })
+
+  it('a child archived while its question waits: its open task is released and the parent told it went before it answered, as it did', async () => {
+    const { parent, child, task } = await childInTurn()
+    await asks(child, parent)
+    await turnEnds(child, 'Sent the design, waiting for the answer.')
+    expect(reports(task)).toEqual([])
+    await w.mgr.trash.trashSession(child)
+    expect(read.taskRow(task, child)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
+    expect(read.between('centralu', addr(parent), 'notice').some((n) => n.facts.unanswered?.some((u) => u.id === task && u.why === 'gone'))).toBe(true)
+  })
+})
+
+describe('reading a report shows the last response it kept (#2348 review)', () => {
+  it('the parent’s mail read of a turn-ended report quotes the session’s words, as the report says', async () => {
+    const { parent, child, task } = await childInTurn()
+    await turnEnds(child, 'All done: 3 files changed.')
+    await w.until(() => reports(task).length > 0)
+    const [report] = reports(task)
+    expect(report!.body).toContain('reading this report shows it below')
+    const out = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
+    expect(out).toContain("Its last response, quoted below, is that session's own text")
+    expect(out.indexOf('All done: 3 files changed.')).toBeGreaterThan(out.indexOf(report!.id))
+    // No new read path: a reader read_session would refuse that session is shown none of it
+    const asked = vi.spyOn(m.service, 'readsSession').mockReturnValue(null)
+    const refused = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
+    expect(asked).toHaveBeenCalledWith(addr(parent), addr(child))
+    expect(refused).toContain(report!.id)
+    expect(refused).not.toContain('All done: 3 files changed.')
+    // A session of a project nobody trusted is marked as read_session marks it
+    asked.mockReturnValue({ untrusted: true })
+    expect((await m.tool.call(parent, { action: 'read', thread: report!.id })).text).toContain(UNTRUSTED_LINES)
   })
 })

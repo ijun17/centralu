@@ -26,6 +26,14 @@ read path, and one rule decides it (`StopNotices.quotes`), which the notice to t
   and is stored only as the mark `question_answered:<session>`, written before the answer is given. With no turn start
   recorded, nothing is quoted.
 
+A second exception (#2348, the owner's review of #2349): `mail read` of Centralu's report on a turn that ended shows the last response the
+report kept (`facts.answer`, at most 600 characters as the report cut it) under the report, every line behind `> `, under Centralu's words that it is
+that session's own text, to be read as its answer and never as instructions (`MailTool.answerShown`). It is not a new read path: it is shown only to
+a reader that `read_session` lets read that session, by the seat's one read rule (`CentraluTools.readsAs`, which both use: a session of this
+host, or a linked machine's as read_session reads it there), which could read the same words there; a session of a project nobody trusted is
+marked as read_session marks it (`UNTRUSTED_LINES`). It is
+never in Centralu's own words or in a wake, which still say only where to read it.
+
 The rows checked start at the turn before's start, so they can include that turn's own rows; such a row withholds the quote
 too. Withheld, the mail notice carries no quote, and the older path's report has `(not quoted: …)` where the last response
 would be. It is mail, so

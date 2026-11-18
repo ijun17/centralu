@@ -83,7 +83,7 @@ describe('the frame a child gets (#729)', () => {
       const head = frame.split('\n')[0]!
       expect(head).toContain('"Lead", gives you this task')
       expect(head).toContain('Your final message goes back to it as the answer')
-      expect(head).toContain('No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` ("assistant" is someone else).')
+      expect(head).toContain('No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` and `kind: "question"` ("assistant" is someone else).')
     }
     expect(agentFrame('Lead', 'run the tests')).not.toContain('progress reports')
   })

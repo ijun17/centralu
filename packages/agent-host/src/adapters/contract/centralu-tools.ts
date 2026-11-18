@@ -548,10 +548,11 @@ export type CentraluTools = {
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
   /**
-   * Whether `readSession` reads this session of this host for the seat: the one read rule (#984, #1941), which a stop notice's quote of a session's
-   * words asks too (security-boundaries/inter-agent-content.md). Absent: it reads none
+   * Whether `readSession` reads this session for the seat, this host's or a linked machine's, and whether its lines are marked as a project nobody
+   * trusted (#984); null when it does not. The one read rule (#984, #1941), which a stop notice's quote of a session's words and the last response
+   * a read report shows ask too (security-boundaries/inter-agent-content.md). Absent: it reads none
    */
-  mayRead?(sessionId: string): boolean
+  readsAs?(sessionId: string): { untrusted: boolean } | null
   /** Sessions this app currently manages (excludes the Assistant itself and archived sessions); `project` narrows by name or id */
   listSessions(opts?: { project?: string }): Promise<OrchestratedSession[]>
   /**

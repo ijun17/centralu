@@ -397,7 +397,9 @@ words into the machine's session (`host.send`) and followed its turns over the l
   the hub's Centralu's words, and its answer, error and reason stay facts. The hub writes it as its own report on its copy, which answers the task (`answers="<id>"`) and settles it, so its caller
   reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
   settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
-  first does not make the report a stale one. The answer, error and reason are cut to what a report across
+  first does not make the report a stale one. A report that covers the giver's other tasks (`covers`, #2348, mailbox.md §10.6.3) names them by the
+  ids they have on both sides, and the hub settles those of its copies that the same session gave the same child and that are still open, by the same report; a hub
+  older than it drops `covers`, and those copies stay open. The answer, error and reason are cut to what a report across
   takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
 - **A report is owed, not dropped.** As a notice (§6, Notices), a report the hub cannot take now (its link is down,
   or the call failed) stays undelivered on the machine and goes at the next connect; the hub's report dedupe takes a second
