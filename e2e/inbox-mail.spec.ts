@@ -982,3 +982,32 @@ test('A mail line cuts a long body at six lines inside the bubble: the seventh l
   expect(measure!.bubblePaddingBottom).toBeGreaterThan(0)
   expect(Math.abs(measure!.gapBelow - measure!.bubblePaddingBottom)).toBeLessThan(1)
 })
+
+test('A mail line keeps the bubble of a long unbroken word inside its column, at a narrow width and a large text size', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 720 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }
+  const thread = await seed(page, { subject: 'A path', from: boss, body: `${'x'.repeat(300)}\nand more words after it`, kind: 'note' })
+  const message = await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).messages[0].id as string, thread)
+  await page.evaluate(
+    ([s, t, m]) =>
+      (window as any).__mock.emit({ type: 'notice', sessionId: s, level: 'info', from: 'Centralu', label: 'mail', text: '1 message from a session of your project', mail: [{ threadId: t, messageId: m }] }),
+    [sid, thread, message] as const,
+  )
+  await page.evaluate(() => (document.documentElement.style.fontSize = '24px'))
+  await page.locator('[data-mark="mail"]').getByTestId('mark-toggle').click()
+  const shown = page.getByTestId('mail-line-message')
+  await expect(shown).toContainText('and more words after it')
+  // The bubble is the box with the border: an unbroken word lowers no minimum width unless the text may break anywhere, and the bubble then widens to the word and runs off the left edge
+  const box = await shown.evaluate((root) => {
+    const bubble = [...root.children].find((el) => Number.parseFloat(getComputedStyle(el).borderTopWidth) > 0)!
+    const b = bubble.getBoundingClientRect()
+    const column = root.getBoundingClientRect()
+    return { left: b.left, right: b.right, columnLeft: column.left, columnRight: column.right }
+  })
+  expect(box.left).toBeGreaterThanOrEqual(box.columnLeft - 1)
+  expect(box.right).toBeLessThanOrEqual(box.columnRight + 1)
+  // Not past the left edge, where it ran to. (The column's right edge itself sits past a 360 px window, the sidebar taking its share: not this line's)
+  expect(box.left).toBeGreaterThanOrEqual(0)
+})

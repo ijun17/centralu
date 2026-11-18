@@ -59,14 +59,14 @@ import { thenTurn, type StoredThen, type ThenKeep, type ThenStage } from './then
 
 /**
  * What the capsule of each line Centralu leaves about a compaction says after "Centralu ·" (owner, 2026-11-18): the capsule reads alone, so each
- * state has its own words, and the line under it is the fuller explanation. One line per event: a refused compaction whose step is sent
- * leaves only the step's line, with the reason in its folded text; a notice stays for an outcome that line does not show. A line an older host left says `compaction`, which stays as it was.
+ * state has its own words, and the line under it is the fuller explanation. One line per event: a refused compaction says so when it is
+ * refused, with the reason in its folded text, and its step adds no second line; a notice stays for an outcome that line does not show. A line an older host left says `compaction`, which stays as it was.
  */
 export const COMPACT_LABELS = {
   /** The next step, sent once the compaction is done */
   stepAfter: 'next step after compaction',
-  /** The step's turn after a compaction that did not happen (the reason is in its folded text) */
-  refusedStepGoes: 'nothing compacted, next step sent',
+  /** A compaction that did not happen, said when it did not (the reason is in its folded text); its step goes on and adds no line */
+  refused: 'nothing compacted',
   /** A compaction that did not happen, and a next step that was not sent (said once, whichever path found it) */
   refusedStepLost: 'nothing compacted, next step not sent',
   /** A next step that could not be given to the session, after a compaction that happened */
@@ -369,7 +369,10 @@ export class SelfCompaction {
       // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own. A failed one is a refusal for the step: nothing was
       // compacted, and the step goes saying so, not "the compaction is done"
       mine.compacted = true
-      if (e.failed && mine.then) mine.refused = `the tool reported the compaction failed${e.reason ? `: ${e.reason}` : ''}`
+      if (e.failed && mine.then) {
+        mine.refused = `the tool reported the compaction failed${e.reason ? `: ${e.reason}` : ''}`
+        this.refusal(id, mine.refused)
+      }
       this.stage(id, mine, mine.refused === null ? 'compacted' : 'refused')
     }
     // The size at the turn's end has come: a request that waited for it is decided now
@@ -546,8 +549,17 @@ export class SelfCompaction {
     if (then) this.tell(id, then, why, c.compacted && c.refused === null)
   }
 
+  /**
+   * The one line a refused compaction leaves, said when it is refused (owner, 2026-11-18): the session may be busy in a long turn for a long while before its step can
+   * go, and a refusal nobody sees looks like a stall. The step's own turn then adds no line (`sendThen`), so the refusal is one line; a step that cannot be sent still says so
+   */
+  private refusal(id: string, why: string): void {
+    this.host.notice(id, `The compaction did not happen (${why}): the next step the agent set goes on without it`, COMPACT_LABELS.refused)
+  }
+
   /** A request that did not compact and has a step: it is held like the step of a compaction (`ended`, so a turn of someone else's that begins goes first) and goes as a turn that says why */
   private refuseRequest(id: string, then: string, why: string): void {
+    this.refusal(id, why)
     const entry: Compacting = { sentAt: this.now(), started: true, compacted: true, ended: true, then, refused: why, focusAside: null, ahead: false }
     this.compacting.set(id, entry)
     this.stage(id, entry, 'refused')
@@ -560,6 +572,7 @@ export class SelfCompaction {
       this.compacting.delete(id)
       return
     }
+    this.refusal(id, why)
     c.refused = why
     c.started = true
     c.compacted = true
@@ -633,12 +646,8 @@ export class SelfCompaction {
     }
     if (!won) return
     try {
-      await this.goOn(
-        id,
-        thenTurn(rec),
-        rec.why === null ? 'Centralu sent the agent its next step after the compaction' : `Centralu sent the agent its next step: nothing was compacted (${rec.why})`,
-        rec.why === null ? COMPACT_LABELS.stepAfter : COMPACT_LABELS.refusedStepGoes,
-      )
+      // A refused request said so when it was refused (`refusal`): its step's turn adds no line (an empty one is none, `deliverMail`)
+      await this.goOn(id, thenTurn(rec), rec.why === null ? 'Centralu sent the agent its next step after the compaction' : '', COMPACT_LABELS.stepAfter)
       this.erase(id)
       this.counted(id)
     } catch (err) {

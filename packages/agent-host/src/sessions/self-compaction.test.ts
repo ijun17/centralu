@@ -479,10 +479,10 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens).toHaveLength(1)
     expect(w.thens[0]![1]).toMatch(/did not compact the conversation \(the tool reported the compaction failed: Not enough messages to compact\.\), so it is as it was/)
     expect(w.thens[0]![1]).not.toMatch(/The compaction you asked for with compact_self is done/)
-    // One line for it: the step's, with the reason in its folded text; no notice first that says the same
-    expect(w.lines).toEqual([expect.stringMatching(/^Centralu sent the agent its next step: nothing was compacted \(the tool reported the compaction failed/)])
-    expect(w.notices).toEqual([])
-    expect(w.lineLabels).toEqual([COMPACT_LABELS.refusedStepGoes])
+    // One line for it, said when it was refused, with the reason in its folded text; the step's turn adds none
+    expect(w.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen \(the tool reported the compaction failed: Not enough messages to compact\.\)/)])
+    expect(w.noticeLabels).toEqual([COMPACT_LABELS.refused])
+    expect(w.lines).toEqual([''])
     // And it is kept as a refusal for a host that finds it
     const kept = world()
     asked(kept, undefined, 'next')
@@ -502,8 +502,8 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens[0]![1]).toMatch(/did not compact the conversation \(the context was 60k tokens, under the 100k floor\), so it is as it was/)
     expect(w.thens[0]![1]).toContain('Continue with step 3')
     expect(w.nudges).toEqual([])
-    expect(w.lines).toEqual([expect.stringMatching(/^Centralu sent the agent its next step: nothing was compacted \(the context was 60k/)])
-    expect(w.notices).toEqual([])
+    expect(w.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen \(the context was 60k/)])
+    expect(w.lines).toEqual([''])
     expect(w.settings.m.has('compact_then:s1')).toBe(false)
     // A request with no `then` says nothing
     const plain = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
@@ -751,9 +751,10 @@ describe('compact_self then (#2024)', () => {
     refused.c.request('s1', undefined, 'next')
     refused.endTurn(undefined, 'after')
     await settled()
-    expect(refused.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted (the context was 60k tokens, under the 100k floor)'])
-    expect(refused.notices).toEqual([])
-    expect(refused.lineLabels).toEqual(['nothing compacted, next step sent'])
+    // Its refusal was said when it happened, and the step adds no second line
+    expect(refused.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen/)])
+    expect(refused.noticeLabels).toEqual(['nothing compacted'])
+    expect(refused.lines).toEqual([''])
 
     const old = world()
     old.settings.m.set('compact_then:s1', JSON.stringify({ stage: 'sent', then: 'next', focusAside: null, ahead: false, why: null, at: 1_000_000 }))
@@ -982,6 +983,26 @@ describe('compact_self then (#2024)', () => {
     err.mockRestore()
   })
 
+  it('says a refusal at once while the session is busy, and the step sent later adds no second line', async () => {
+    const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+    let leave!: () => void
+    // A step that cannot go yet: the session is held in a long turn
+    w.state.thenGate = new Promise<void>((r) => (leave = r))
+    w.startTurn()
+    w.c.request('s1', undefined, 'Continue with step 3')
+    w.endTurn(undefined, 'after')
+    await settled()
+    expect(w.thens).toEqual([])
+    expect(w.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen \(the context was 60k/)])
+    expect(w.noticeLabels).toEqual(['nothing compacted'])
+    leave()
+    await settled()
+    expect(w.thens).toHaveLength(1)
+    // The step went, and no line followed it
+    expect(w.notices).toHaveLength(1)
+    expect(w.lines).toEqual([''])
+  })
+
   it('says in the capsule that nothing was compacted when the step of a refused request could not be sent either', async () => {
     const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -991,8 +1012,8 @@ describe('compact_self then (#2024)', () => {
     w.endTurn(undefined, 'after')
     await settled()
     expect(w.notices.map((n) => n[1])).toContainEqual('The compaction did not happen, but the next step the agent set could not be sent')
-    // Only the outcome the step's line does not show: no notice for the refusal before it
-    expect(w.noticeLabels).toEqual(['nothing compacted, next step not sent'])
+    // The refusal said when it happened, then the outcome it does not show
+    expect(w.noticeLabels).toEqual(['nothing compacted', 'nothing compacted, next step not sent'])
     err.mockRestore()
   })
 
@@ -1952,6 +1973,9 @@ describe('on the session manager (#1451)', () => {
     expect(h.sent[1]).toContain('Continue with step 3')
     expect(h.origins.at(-1)).toEqual({ kind: 'channel', server: 'centralu' })
     expect(h.nudges).toEqual([])
+    // One line for the refusal (Centralu's, closed, headed with what happened), and none for the step that went after it
+    const notices = world.events.filter((e) => e.type === 'notice' && e.sessionId === id)
+    expect(notices).toEqual([expect.objectContaining({ label: 'nothing compacted', audience: 'centralu', text: expect.stringMatching(/^The compaction did not happen \(the context was 41k tokens/) })])
   })
 
   it('leaves a resting session alone after a model switch until the new model’s window is read: the old one’s is not its window (#1553)', async () => {
