@@ -398,7 +398,7 @@ words into the machine's session (`host.send`) and followed its turns over the l
   reads it as a local child's. The hub takes it only from the machine its copy went to. The machine's rows of the task
   settle the hub's copy in every way but `reported`: that is the report's, which carries the answer, so a row that is told
   first does not make the report a stale one. A report that covers the giver's other tasks (`covers`, #2348, mailbox.md §10.6.3) names them by the
-  ids they have on both sides, and the hub settles those of its copies that the same session gave the same child, by the same report; a hub
+  ids they have on both sides, and the hub settles those of its copies that the same session gave the same child and that are still open, by the same report; a hub
   older than it drops `covers`, and those copies stay open. The answer, error and reason are cut to what a report across
   takes (2,000 and 200 characters), so a long one still crosses as what it says, never as a bare `finished`.
 - **A report is owed, not dropped.** As a notice (§6, Notices), a report the hub cannot take now (its link is down,

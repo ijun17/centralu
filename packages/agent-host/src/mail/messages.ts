@@ -79,6 +79,8 @@ export type SendInput = {
   picked?: true
   /** The subject a `send` gives the chain it starts (#2229): kept on the chain's first message only, so a reply never renames it */
   subject?: string
+  /** The sender marked it as a question (`facts.question`, #2348): kept only on a message that needs a reply */
+  question?: true
 }
 /**
  * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
@@ -208,6 +210,8 @@ export class MessageService {
       calls?: (sessionAddress: string) => MessageCalls
       /** The newest message the person typed in this session (`MessageRecords.newestPersonMessage`); none cites anything when absent */
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
+      /** A question the session at that address asked was settled with no answer to it (`questionSettled`): the report it held is owed now (#2348) */
+      questionSettled?: (sessionAddress: string) => void
     } & StopNoticeOptions,
   ) {
     this.now = opts.now ?? Date.now
@@ -311,7 +315,13 @@ export class MessageService {
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
-      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}), ...(input.picked && cls === 'person' ? { picked: true } : {}) }
+      const facts: MailFacts = {
+        ...(clarifies !== undefined ? { clarifies } : {}),
+        ...(quiet ? { quiet: true } : {}),
+        ...(cited ? { cites: cited } : {}),
+        ...(input.picked && cls === 'person' ? { picked: true } : {}),
+        ...(input.question && needsReply ? { question: true } : {}),
+      }
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
@@ -345,14 +355,14 @@ export class MessageService {
    * what becomes of it (`MailboxRecords.mergeAcross`). No guard runs here: they ran where the message was written. An
    * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer)
    */
-  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; task?: { origin: DelegationOrigin; note?: true } }): MailRow {
+  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true; task?: { origin: DelegationOrigin; note?: true } }): MailRow {
     return this.run(() => {
       const now = this.now()
       const target = input.replyTo === undefined ? undefined : this.records.message(input.replyTo)
       // Work given across a link (#1948 step 6) is a task here as there: the report the machine sends back answers this copy, and settles it
       const work = input.task ? { kind: input.task.note ? ('message' as const) : ('task' as const), origin: input.task.origin, causeId: this.causeOf(sender) } : { kind: 'message' as const, origin: 'mail' as const }
       const stored = this.put(
-        { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work },
+        { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work, ...(input.question && input.needsReply ? { facts: { question: true } } : {}) },
         [this.row(input.to, { dueAt: now, deliveredAt: now })],
       )
       if (target && replyAnswers(target, input) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
@@ -430,13 +440,13 @@ export class MessageService {
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
       const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
-      // Only the same sender's tasks to the same session: a report another computer sent names no task of anyone else's (#2348). One the rows that
-      // crossed settled already is still named, so its readers find this report (`reportsOn`); `settle` leaves a settled row as it is
+      // Only the same sender's tasks to the same session, still open: a report another computer sent names no task of anyone else's, nor one
+      // withdrawn or answered already (#2348). A crossed row never settles a copy `reported` (`AcrossReceipts`), so a copy is open until this report
       const covers = pause
         ? []
         : [...new Set(input.covers ?? [])].filter((id) => {
             const m = id === taskId ? undefined : this.records.message(id)
-            return m?.kind === 'task' && m.sender === task.sender && this.records.recipient(id, row.recipient) !== undefined
+            return m?.kind === 'task' && m.sender === task.sender && this.records.recipient(id, row.recipient)?.settled === null
           })
       const facts: MailFacts = {
         outcome: input.outcome,
@@ -459,7 +469,9 @@ export class MessageService {
         dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}`,
       })
       if (!stored.duplicate && !pause) {
-        for (const id of [taskId, ...covers]) this.records.settle(id, row.recipient, 'reported', now)
+        this.records.settle(taskId, row.recipient, 'reported', now)
+        // Each covered row names the report as its answer: what `reportsOn` finds it by
+        for (const id of covers) this.records.settle(id, row.recipient, 'reported', now, stored.id)
       }
       return { message: stored, duplicate: stored.duplicate, first }
     })
@@ -498,8 +510,22 @@ export class MessageService {
         return { settled: n, how: n > 0 ? 'withdrawn' : 'none' }
       }
       if (row?.settled !== null) return { settled: 0, how: 'none' }
-      return { settled: this.records.settle(id, by, 'done', this.now()), how: 'done' }
+      const settled = this.records.settle(id, by, 'done', this.now())
+      if (settled > 0) this.questionSettled(id)
+      return { settled, how: 'done' }
     })
+  }
+
+  /**
+   * A question a session asked (`facts.question`) was settled with no answer that goes to it: marked handled here, or on the side it crossed to
+   * (`MailAcross`). The report it held for that giver is owed now (#2348, `answerAtRest`): the session's last response gives it once it is at rest.
+   * An answer needs none of this: it goes to the session, and the turn it starts answers. Told once the write that settled it is done
+   */
+  questionSettled(messageId: string): void {
+    const m = this.records.message(messageId)
+    if (m?.kind !== 'message' || !m.facts.question || senderKind(m.sender) !== 'session') return
+    const tell = this.opts.questionSettled
+    if (tell) queueMicrotask(() => tell(m.sender))
   }
 
   // ── Reading ──

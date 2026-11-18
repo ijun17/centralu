@@ -384,14 +384,12 @@ export class MailboxRecords {
   }
 
   /**
-   * Centralu's reports on a task, oldest first: replying to it, or replying to a later task of the same sender and covering it (`facts.covers`, one
-   * report per giver at a turn's end, #2348). The covering one is looked for among that sender's tasks since, by `mail_sender`
+   * Centralu's reports on a task, oldest first: replying to it, or the report that covered it (one report per giver at a turn's end, #2348), which
+   * its row names as its answer (`MessageService.report`)
    */
   reportsOn(taskId: string): MailRow[] {
     return this.messages(
-      `m.kind = 'report' AND m.sender = 'centralu' AND (m.reply_to = @id OR (
-         m.reply_to IN (SELECT t.id FROM mail o JOIN mail t ON t.sender = o.sender AND t.created_at >= o.created_at WHERE o.id = @id AND t.kind = 'task' AND t.id <> o.id)
-         AND json_valid(m.facts) AND EXISTS (SELECT 1 FROM json_each(m.facts, '$.covers') c WHERE c.value = @id)))
+      `m.kind = 'report' AND m.sender = 'centralu' AND (m.reply_to = @id OR m.id IN (SELECT answer_id FROM mail_recipients WHERE message_id = @id AND answer_id IS NOT NULL))
        ORDER BY m.created_at, m.id`,
       { id: taskId },
     )
@@ -703,9 +701,21 @@ export class MailboxRecords {
     )
   }
 
-  /** The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6) */
-  unansweredTo(recipient: string): RecipientRow[] {
-    return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
+  /**
+   * The needsReply rows to `recipient` with no answer, not settled or moved from an older build (`legacy`): what waits for its reply (S6). `asked`:
+   * only the questions its session `from` marked as one (`facts.question`) at `since` or later that reached `recipient` or wait to (not held for
+   * the person): what holds a turn's end's report to that giver (#2348, `answerAtRest`)
+   */
+  unansweredTo(recipient: string, asked?: { from: string; since: number }): RecipientRow[] {
+    const unanswered = `r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy'`
+    if (!asked) return this.rows(`${unanswered} ORDER BY m.created_at, m.id`, recipient)
+    return this.rows(
+      `${unanswered} AND m.sender = ? AND m.created_at >= ? AND (r.held IS NULL OR r.held = 'released') AND json_valid(m.facts) AND json_extract(m.facts, '$.question') = 1
+       ORDER BY m.created_at, m.id`,
+      recipient,
+      asked.from,
+      asked.since,
+    )
   }
 
   /** The rows delivered to `recipient` in its turn `turnSeq`, settled or not, with their messages, oldest first */
@@ -1184,33 +1194,6 @@ export class MailboxRecords {
    */
   mailStartedSince(since: number, session?: string): number {
     return this.count(`SELECT COUNT(*) AS n FROM (${MAIL_STARTED}) WHERE (@session IS NULL OR session_id = @session)`, { since, session: session ?? null })
-  }
-
-  /** When the session's latest turn began (a canceled delivery is no turn), or null when none is recorded */
-  latestTurnStart(sessionId: string): number | null {
-    return (
-      this.db
-        .prepare<[string], { at: number }>(`SELECT started_at AS at FROM mail_turns WHERE session_id = ? AND COALESCE(outcome, '') <> 'canceled' ORDER BY turn_seq DESC LIMIT 1`)
-        .get(sessionId)?.at ?? null
-    )
-  }
-
-  /**
-   * Whether `sender` asked `recipient` something at `since` or later that still waits for its answer: a message that needs a reply, not answered or
-   * settled, nor held from it for the person. What spares a turn's end its report to that giver (#2348, `answerAtRest`); a question answered within
-   * the turn does not, since the turn went on after it
-   */
-  awaitsAnswerSince(sender: string, recipient: string, since: number): boolean {
-    return (
-      this.count(
-        `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-          WHERE m.sender = ? AND m.created_at >= ? AND m.kind = 'message' AND m.needs_reply = 1 AND r.recipient = ?
-            AND (r.held IS NULL OR r.held = 'released') AND r.settled IS NULL AND r.answer_id IS NULL`,
-        sender,
-        since,
-        recipient,
-      ) > 0
-    )
   }
 
   /** When the person last started a turn of the session (their word, §7.5's pair warning), or null */

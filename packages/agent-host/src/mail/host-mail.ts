@@ -51,6 +51,8 @@ export type HostMailSessions = {
   turnInputs?(id: string): readonly (string | null)[]
   /** A session this start found at rest answers the tasks it did not answer once it is settled (`ChildReports.settleAtRest`, mailbox.md §10.6.3) */
   settleAtRest?(id: string): void
+  /** A question the session asked a giver was settled with no answer to it: the report it held is owed now (`ChildReports.questionSettled`, #2348) */
+  questionSettled?(id: string): void
   /** Tells `receiverId`, whose seat cannot read mail, of `stoppedId`'s stop in the relayed report's words for that ending (`ChildReports.relayStop`); `told` once it went in */
   relayStop?(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void
   /** A send to a session the caller gives work, answered (`MailSessionsView.work`, #1948), or null for plain mail */
@@ -81,6 +83,7 @@ export function mailSessionsOf(
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
     work: (...a) => mgr.mail.work(...a),
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
+    questionSettled: (id) => mgr.mail.questionSettled(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
   }
 }
@@ -171,6 +174,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return mailCalls(party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
+    questionSettled: (address) => {
+      const party = parseAddress(address)
+      if (party?.kind === 'session' && party.host === hostId) sessions.questionSettled?.(party.sessionId)
+    },
     standing: (address) => {
       const party = parseAddress(address)
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined

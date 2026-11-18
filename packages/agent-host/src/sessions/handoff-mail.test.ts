@@ -130,8 +130,6 @@ describe("a handoff moves the original's mail to the session that took over (#15
     expect(note).toContain(unreadLine('Which branch?', fromChild.id))
     expect(note).not.toContain(fromX.id)
 
-    // A question still waiting at the child's end holds its report (#2348): the successor handles the one it was given first
-    expect(h.m.service.done(at(heir), fromChild.id).how).toBe('done')
     h.claude.handles.get(child)!.answer('done here')
     await eventually(() => reportsIn(heir, child).length === 1)
     expect(reportsIn(parent, child)).toEqual([])
@@ -344,8 +342,6 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     expect(read.row(fromChild.id, at(heir))).toMatchObject({ settled: null })
     expect(pendingFor(heir, fromChild.id)).toBe(true)
     expect(pendingFor(parent, fromChild.id)).toBe(false)
-    // The question still waits through the update's continue and would hold the report (#2348): the successor handles it first
-    expect(next.m.service.done(at(heir), fromChild.id).how).toBe('done')
     next.claude.handles.get(child)!.answer('finished under the next host')
     await eventually(() => reportsIn(heir, child).length === 1)
     expect(reportsIn(parent, child)).toEqual([])

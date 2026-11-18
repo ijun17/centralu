@@ -130,6 +130,15 @@ export class ChildReports {
     this.settles.set(sessionId, timer)
   }
 
+  /**
+   * A question the session asked a giver was settled with no answer that goes to it (marked handled): the report its question held for that giver is
+   * owed now (#2348), and its last response gives it if it is at rest; otherwise its turn's end or settle does. Tasks a stop released are not
+   * answered by it, as at a settle. Never throws
+   */
+  questionSettled(sessionId: string): void {
+    this.answerAtRest(sessionId, false)
+  }
+
   /** Ends a settle timer; with no session, every one (the host is leaving) */
   stopSettling(sessionId?: string): void {
     for (const [id, timer] of [...this.settles]) {
@@ -176,7 +185,7 @@ export class ChildReports {
     return (
       `${TURN_ENDED}\nid: ${childId}\n${cut ? CUT_CONTINUED : ''}\n` +
       (answered
-        ? `Its last response is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.`
         : `It wrote no response: ${read} shows its turn.`) +
       this.cleanUpWords(receiverId, childId)
     )

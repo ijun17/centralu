@@ -174,10 +174,11 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
     const { r, local } = await start('please approve my command')
     const task = copyOf('h1', r.sessionId)!
     await eventually(() => machine.mgr.listSessions().find((s) => s.id === local)?.state === 'waiting_approval')
-    const asked = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Design: A or B?' })
+    const asked = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Design: A or B?', kind: 'question' })
     expect(asked.isError).toBeFalsy()
     const question = /^Sent (\S+) /.exec(asked.text)?.[1] ?? ''
-    // The machine keeps its copy of the question, to the hub session that gave the task, by the address the task names it
+    // The machine keeps its copy of the question, marked as one, to the hub session that gave the task, by the address the task names it
+    expect(machine.store.mailbox.message(question)?.facts.question).toBe(true)
     expect(machine.store.mailbox.recipient(question, task.sender)).toMatchObject({ settled: null })
     const card = machine.mgr.listSessions().find((s) => s.id === local)!.pendingApproval!
     machine.mgr.inputs.respondApproval(local, card.requestId, 'allow')
@@ -187,6 +188,10 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
     expect(machine.store.mailbox.recipient(task.id, at.machine(local))).toMatchObject({ settled: null })
     expect(hub.store.mailbox.reportsOn(task.id)).toEqual([])
     expect(hub.store.mailbox.message(question)).toMatchObject({ needsReply: true })
+    // The parent marks it handled on the hub: the machine's copy learns it, the hold ends there, and the report comes back
+    expect(hub.mail!.service.done(at.hub('h1'), question).how).toBe('done')
+    await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
+    expect(hub.store.mailbox.recipient(task.id, at.hub(r.sessionId))?.settled).toBe('reported')
   })
 
   it("goes to the session that took over by a handoff while the child's turn ran: the heir gets the report", async () => {

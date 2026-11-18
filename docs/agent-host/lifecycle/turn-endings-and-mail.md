@@ -71,7 +71,7 @@ read, caused by the turn the caller is in; the child's turn the task started is 
 message is a task from the person. Before a delegation out of a session's untrusted project starts anything, the tool asks
 `MailHooks.refusesDelegation` (mailbox.md §7.4): it answers S15, starts nothing, and records the call so trusting the project tells the caller once (S16).
 Since #1948 step 3 a task is answered by its reply marked as the answer (`replyAnswers`) or, once the session is at rest, by Centralu's report
-carrying its last response, one report per giver covering that giver's open tasks, and none to a giver the session ends its turn waiting on with a question of its own (#2348; `MessageService.lastResponse`, mailbox.md §10.6.3); a sender whose seat cannot read mail is
+carrying its last response, one report per giver covering that giver's open tasks, and none to a giver while a question the session marked as one (`kind: "question"`) waits for that giver's answer (#2348; `MessageService.lastResponse`, mailbox.md §10.6.3); a sender whose seat cannot read mail is
 told that answer, and a stop (`StopNotices.relayToMailless`), as the relayed report it always had (`SessionLastResponse.relay`, `ChildReports.relayStop`); report marks, a caller's paused reports and `reportRecorder` are
 gone, and a linked machine's report (`LinkedReports`) keeps its own path until mail crosses links. The end of the Assistant's turn on a
 session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer marks that report read

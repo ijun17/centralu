@@ -541,9 +541,15 @@ describe('reports (§9.3)', () => {
     const elsewhere = w.mail.task(A, C, { text: 'to another session', origin: 'start_agent', delivered: true })
     w.clock.t += 5
     const t2 = w.mail.task(A, W, { text: 'two', origin: 'agent_session', delivered: true })
-    const out = w.mail.report(t2.id, { outcome: 'finished', body: '[Centralu] done', covers: [t1.id, other.id, elsewhere.id, t2.id, 'nope'] })
+    const withdrawn = w.mail.task(A, W, { text: 'taken back', origin: 'agent_session', delivered: true })
+    expect(w.mail.done(A, withdrawn.id).how).toBe('withdrawn')
+    const out = w.mail.report(t2.id, { outcome: 'finished', body: '[Centralu] done', covers: [t1.id, other.id, elsewhere.id, withdrawn.id, t2.id, 'nope'] })
     if (!('message' in out)) throw new Error('settled already')
     expect(out.message.facts.covers).toEqual([t1.id])
+    // The covered row names the report as its answer; a task settled before keeps how it was settled, with no report on it
+    expect(w.rowOf(t1.id, W).answerId).toBe(out.message.id)
+    expect(w.rowOf(withdrawn.id, W).settled).toBe('withdrawn')
+    expect(w.records.reportsOn(withdrawn.id)).toEqual([])
     expect([t1, t2].map((t) => w.rowOf(t.id, W).settled)).toEqual(['reported', 'reported'])
     expect(w.rowOf(other.id, W).settled).toBeNull()
     expect(w.rowOf(elsewhere.id, C).settled).toBeNull()

@@ -237,7 +237,7 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     const outcome = how.ok ? ('finished' as const) : ('failed' as const)
     const written = mail.report(task.id, {
       outcome,
-      body: reportWords(childId, { outcome, ...(how.ok ? {} : { kind: how.error }) }),
+      body: reportWords(childId, { outcome, answered: how.ok && how.text !== '', ...(how.ok ? {} : { kind: how.error }) }),
       ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
     })
     if ('message' in written) {

@@ -72,6 +72,8 @@ export const HubAskResult = z.union([
   }),
 ])
 export type HubAskResult = z.infer<typeof HubAskResult>
+/** The most tasks a report across names as covered (`TaskReport.covers`): the newest, when a giver left more open */
+export const TASK_REPORT_COVERS_MAX = 100
 /** How the turn of a task that crossed ended, as the machine's report says it (`HubMailParams.report`, the mailbox's `TurnReport` without its words) */
 export const TaskReport = z.object({
   outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']),
@@ -84,10 +86,10 @@ export const TaskReport = z.object({
   after: z.literal(true).optional(),
   /**
    * The same giver's other tasks to that session the report answers too (#2348, additive): one report per giver at a turn's end. Each id is the
-   * one the task has on both sides; the receiver settles only its own tasks from that giver to that session. An older hub drops it, and its copies
-   * of those tasks read as settled from the row they cross with, with no report on them
+   * one the task has on both sides; the receiver settles only its own open tasks from that giver to that session. An older receiver drops it, and
+   * its copies of those tasks stay open: a row that crosses never settles a copy `reported` (`AcrossReceipts`), only a report does
    */
-  covers: z.array(z.string().min(1).max(200)).max(100).optional(),
+  covers: z.array(z.string().min(1).max(200)).max(TASK_REPORT_COVERS_MAX).optional(),
 })
 export type TaskReport = z.infer<typeof TaskReport>
 /**

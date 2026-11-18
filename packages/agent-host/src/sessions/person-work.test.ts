@@ -103,7 +103,7 @@ describe('a script starts a session with a first message', () => {
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     personTask(child)
-    for (const to of ['person', parent]) expect((await m.tool.call(child, { action: 'send', to, text: 'CSV or JSON?' })).isError).toBeFalsy()
+    for (const to of ['person', parent]) expect((await m.tool.call(child, { action: 'send', to, text: 'CSV or JSON?', kind: 'question' })).isError).toBeFalsy()
     expect(read.between(addressOf(child), PERSON, 'message').map((x) => x.needsReply)).toEqual([true])
     handleOf(child)!.answer('Asked which format; exported CSV for now.')
     await w.until(() => reportsOf(child).length === 1)

@@ -816,6 +816,7 @@ task is never reminded: its report settles it.
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
 | `agentDepth` | task | the agent depth a task from another computer's session gives the session here while it works on it (#838, #1948 step 6; [security-boundaries/ask-project.md](../security-boundaries/ask-project.md)) |
+| `question` | message | `true`: the sending session marked it as a question (`kind: "question"`, or `choices`), kept only on a message that needs a reply; a question to a session's giver holds that giver's turn-ended report until it is answered or handled (#2348, §10.6.3) |
 | `picked` | message | `true`: the person's answer to a session's question is one of the question's `choices`, pressed in the window (`mail.reply` with `answers`, D33, #1630); the host decides it, so `mail read` can say it to the asker |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
@@ -1881,7 +1882,8 @@ owner's decision of 2026-11-18, which replaced 2026-11-05's "a report attaches t
 rest after a turn that ended as turns do, the tasks to it that are still open are grouped by their sender, and each sender gets one report,
 replying to its newest open task (the thread the turn ended on), with the response as `facts.answer` (600 characters) beside Centralu's words.
 The report names the sender's other open tasks in `facts.covers`, and `MessageService.report` settles them all `reported` with it. It takes
-only that sender's tasks to that session, so a report from another computer cannot settle anyone else's. A reader that looks up a task's report
+only that sender's tasks to that session that are still open, so a report from another computer cannot settle anyone else's, nor name a task
+withdrawn before. Each covered row names the report as its answer (`answer_id`). By that, a reader that looks up a task's report
 (`MailboxRecords.reportsOn`: a waiting call, the relay to a seat that cannot read mail, a linked task's standing) finds the covering report on each
 task it covers. Why: a parent that gave a task and two follow-ups got three identical reports at one turn end. They cost it three wakes and three
 re-reads of its context. Two senders still get one report each. Which tasks: delivered, not settled, not held, from a session or the person (the person's own work, below), not held in
@@ -1898,33 +1900,41 @@ for an untrusted project that the person's trust lets go (`trustChanged`, which 
 reply's tool result says which it was ("Task … stays open: reply with kind="answer" to answer it, or your last response will."). The mail tool's
 definition is unchanged (1,231 characters before and after): `kind` was already a free word, and the result teaches it where it is needed.
 
-**No report to a giver the session is waiting on** (#2348, the owner's decision of 2026-11-18). A turn whose session asked a giver something
-and ends waiting for the answer sends that giver no report: the question already reached it and woke it. The question is a message that needs
-a reply, sent to that giver in this turn (`created_at` at or after the start of the session's latest `mail_turns` row) and after the giver's newest
-open task was delivered, not held, and still unanswered and unsettled (`MailboxRecords.awaitsAnswerSince`). The tasks stay open, so the turn that
-the giver's answer starts answers them with its own last response (#2329: before this, the first turn's report settled the task and the turn the answer
-started reported nothing). The rest is unchanged:
-- a session that asks nothing (a plain message, an early "On it") still gets the report, as the reviewer's rule above promises;
+**No report to a giver the session waits on with a question** (#2348, the owner's decisions of 2026-11-18). A question a session asked a giver
+holds the report that giver would get at a turn's end, for as long as it waits for the answer: the question already reached the giver and woke it.
+A question is a message the session marked as one: the mail tool's `kind: "question"`, or `choices`. `MessageService.send` keeps it as
+`facts.question`, and so does the copy of a message sent across a link (`MailAcross`). The question also has to come after the giver's newest open task
+was delivered, and still be unanswered, unsettled and not held (`MailboxRecords.unansweredTo` with `asked`, the one definition of "waits for its
+reply"). The tasks stay open while it waits, whatever turns run meanwhile: the person's, a compaction, the CLI going on after its own background work.
+The hold ends where the question settles:
+- answered by a reply: the answer goes to the session, and the turn it starts answers the tasks with its own last response. Before this, the first
+  turn's report settled the task and the turn the answer started reported nothing (#2329);
+- marked handled with no answer (`mail handled` by the giver, here or on the side it crossed to): the session answers at once with its last response
+  when it is at rest (`MessageService.questionSettled`, `ChildReports.questionSettled`), else its turn's end or settle does.
+
+Any other message to the giver holds nothing:
+- a plain `send` needs a reply by default and still holds nothing. A child that sends "Done: PR #12" and ends gets its report as usual, as the reviewer's rule above promises;
 - an answer marked `kind: "answer"` still settles its task with no report;
 - a task given after the question is still reported;
 - a stop is still told by the stop notice (§10.6.1), which releases the open tasks;
 - the person's own work always gets its report (`asksAnswerTurnEnd`, by the giver's kind), since the person's Inbox thread reads In review from it
   and the wake this saves is a session's.
+Everything is read from the store, so the settle at a host's start finds what the turn's end found.
 
-Everything is read from the store, so the settle at a host's start finds the same answer as the turn's end did, and a turn an update cut and
-Centralu continued is still the turn the question was asked in (`handoff-mail.test.ts`, "survives a host restart between the handoff and the
-child's question"). A turn the host saw no start of reads the latest turn it recorded, so a question asked in that turn still holds the report.
+Why a question marked as one, and not any message that needs a reply: a task left open has effects, and they are true only while the work
+really waits on its giver. The giver is kept from sleeping (`SessionProcesses.waitsOn`). It may not watch the session (`Watches`). It hears the
+session's cards (`cardGivers`). Archiving the session tells it "went to the trash before it answered" (`StopNotices.partyGone`). A `send` needs a
+reply unless it is a note, so "Done: PR #12" would have left all of these standing for work that was done. Then a "Thanks." back, which is work
+(§9.7), would have carried "You're welcome." as the task's answer. And a message marked handled would never have reported (the review of #2349).
 
-Why the question and not any message: a task left open after a turn has effects, and they are true only while the work really waits on its giver.
-The giver is kept from sleeping (`SessionProcesses.waitsOn`). It may not watch the session (`Watches`). It hears the session's cards
-(`cardGivers`). Archiving the session tells it "went to the trash before it answered" (`StopNotices.partyGone`). A plain message would leave all of
-these standing for work that was done.
+Accepted costs. A question followed by a silent end leaves the task open, with the effects above, until the giver answers or handles it, or the
+session stops or is archived. A linked machine's report crosses with `covers` (`TaskReport.covers`, protocol.md §3). A peer older than this drops
+it, and its copies of the covered tasks stay open: a row that crosses never settles a copy `reported` (protocol.md §3.3).
 
-Accepted costs. A fresh `mail send` needs a reply by default (only `kind: "note"` does not). So a session that sends its final result as a new
-message to its giver, instead of replying `kind: "answer"` on the task's thread, keeps the task open until the giver answers or marks it handled,
-and the turn that answer starts reports. A question followed by a silent end leaves the task open, with the effects above, until the giver answers
-or the session stops or is archived. A linked machine's report crosses with `covers` (`TaskReport.covers`, protocol.md §3). A hub older than this
-drops it, and its copies of the covered tasks stay open: a row that crosses never settles a hub's copy `reported` (protocol.md §3.3).
+**Reading a report shows the last response it kept.** A report's `facts.answer` is the session's own words, which Centralu's words never repeat (#120).
+`mail read` shows it under the report, quoted, as that session's text (`MailTool.shown`). The report's words say so: "reading this report shows it
+below". Before #2348's review it said the response was "the message above in this thread", where nothing showed it, so a reader had to call
+read_session for every report.
 
 **A sender whose seat cannot read mail** (an older build's coordinator, a builder: no `mail` tool, `canReadMail`) is refused the report as mail
 (`no_mailbox`), so the last response is told to it as it was before step 3: the relayed report in its conversation, in the same words

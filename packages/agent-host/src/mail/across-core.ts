@@ -81,7 +81,7 @@ export type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; ses
 export const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 
 /** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
-export type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }; computer: string; at: number; task?: Work }
+export type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }; computer: string; at: number; task?: Work }
 
 /** Work given across a link (#1948 step 6): the copy kept here is a task (a note) from that tool, whichever side's word comes first */
 export type Work = { origin: DelegationOrigin; note?: true }

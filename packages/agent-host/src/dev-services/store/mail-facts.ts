@@ -72,6 +72,11 @@ export const MailFacts = z.looseObject({
   hubAssistant: z.literal(true).optional(),
   /** On a task from another computer's session (#838, #1948 step 6): the agent depth the session here counts while it works on it */
   agentDepth: z.number().int().min(1).max(64).optional(),
+  /**
+   * On a session's message that needs a reply: its sender marked it as a question (the mail tool's `kind: "question"`, or `choices`). A question to a
+   * session that gave it work, still unanswered, holds the report a turn's end owes that giver until it is answered or handled (#2348, `answerAtRest`)
+   */
+  question: z.literal(true).optional(),
   /** On the person's answer to a session's question (#1630): it is one of the choices the question offered, pressed in the window; the host decides it, so a session reads it as Centralu's word */
   picked: z.boolean().optional(),
 })

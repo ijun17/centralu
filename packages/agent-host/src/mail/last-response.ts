@@ -1,5 +1,5 @@
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
-import { parseAddress, senderKind } from './address.js'
+import { senderKind } from './address.js'
 import type { TurnReport } from './turn-report.js'
 
 /**
@@ -42,8 +42,10 @@ export function tasksAtRest(records: MailboxRecords, recipient: string, last: Pi
  * of 2026-11-18, which replaced 2026-11-05's report per task). The report replies to that giver's newest open task, the one the turn ended on, and
  * covers the others (`facts.covers`), settling them all `reported`. `report` writes it (`MessageService.report`). Returns the tasks replied to.
  *
- * None goes to a giver the session asked something this turn and waits on (`awaitsAnswerSince`): its question is the sign the turn ended, and its tasks stay open, so the
- * turn the giver's answer starts answers them (#2329). Only a session giver: the person's own work always gets its report (`asksAnswerTurnEnd`)
+ * None goes to a giver the session asked a question (`facts.question`) that is still unanswered, asked after the giver's newest task came
+ * (`MailboxRecords.unansweredTo` with `asked`): the question reached it already, and its tasks stay open. The question settling ends the hold:
+ * an answer goes to the session and the turn it starts answers them (#2329); marked handled with no answer, the session answers at once
+ * (`MessageService.questionSettled`). Only a session giver: the person's own work always gets its report (`asksAnswerTurnEnd`)
  */
 export function answerAtRest(
   records: MailboxRecords,
@@ -52,16 +54,14 @@ export function answerAtRest(
   report: (taskId: string, input: TurnReport) => unknown,
   personAt: number | undefined,
 ): string[] {
-  const party = parseAddress(recipient)
-  const turnAt = party?.kind === 'session' ? records.latestTurnStart(party.sessionId) : null
   const byGiver = new Map<string, { row: RecipientRow; sender: string }[]>()
   for (const t of tasksAtRest(records, recipient, last)) byGiver.set(t.sender, [...(byGiver.get(t.sender) ?? []), t])
   return [...byGiver].flatMap(([sender, tasks]) => {
     const newest = tasks.at(-1)
     if (!newest) return []
     const given = newest.row.deliveredAt ?? 0
-    // Asked in this turn, after the giver's newest task came (a task given after the question still gets its answer), and still waiting for it
-    if (asksAnswerTurnEnd(sender) && turnAt !== null && records.awaitsAnswerSince(recipient, sender, Math.max(turnAt, given))) return []
+    // A question after the giver's newest task came (one given after it still gets its answer), still waiting for the giver's answer
+    if (asksAnswerTurnEnd(sender) && records.unansweredTo(sender, { from: recipient, since: given }).length > 0) return []
     // The person wrote after the first of these tasks was given (the person reads their own work's report: it is not told they wrote); the newest
     // arrived after the response was written
     const personSince = senderKind(sender) === 'session' && personAt !== undefined && personAt > (tasks[0]?.row.deliveredAt ?? given)
@@ -80,8 +80,8 @@ export function answerAtRest(
 }
 
 /**
- * Whether a session's question to this giver in the turn stands for the turn's end (#2348): a session giver's yes, it reads its mail and the question
- * wakes it. The person's no: their Inbox thread reads In review from the report, and the wake this saves is a session's
+ * Whether a session's question to this giver holds the giver's report (#2348): a session giver's yes, it reads its mail and the question woke it. The
+ * person's no: their Inbox thread reads In review from the report, and the wake this saves is a session's
  */
 function asksAnswerTurnEnd(giver: string): boolean {
   return senderKind(giver) === 'session'
@@ -102,11 +102,13 @@ export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its t
  * wrote goes in (#120): its answer, error and reason are the report's facts, never these words. `kind`: the kind of its tool's error, a word of this
  * host's (`errorKind`), which a report from another computer never brings
  */
-export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean }): string {
+export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean; answered?: boolean }): string {
   const read = `read_session(sessionId="${childId}")`
+  // Its answer is the report's fact, which reading the report shows below it (`MailTool`), never these words
+  const words = r.answered ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.` : `It wrote no response: ${read} shows its turn.`
   const lines =
     r.outcome === 'finished'
-      ? [`${TURN_ENDED}\nid: ${childId}\n\nIts last response is that session's own words, so it is not repeated here: ${read} reads it.`]
+      ? [`${TURN_ENDED}\nid: ${childId}\n\n${words}`]
       : [
           `[Centralu] ${r.outcome === 'failed' ? 'The assigned work did not finish.' : 'The assigned work stopped before finishing.'}\nid: ${childId}\n\n` +
             `${r.kind ? `Its tool's error, by kind: ${r.kind}. ` : ''}Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,

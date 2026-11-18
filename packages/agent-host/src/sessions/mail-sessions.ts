@@ -185,6 +185,11 @@ export class MailSessionsView {
     }
   }
 
+  /** A question the session asked a giver was settled with no answer to it (`ChildReports.questionSettled`, #2348) */
+  questionSettled(sessionId: string): void {
+    this.host.reports.questionSettled(sessionId)
+  }
+
   /** A session this start found at rest answers its open tasks once settled (`ChildReports.settleAtRest`) */
   settleAtRest(sessionId: string): void {
     this.host.reports.settleAtRest(sessionId)
