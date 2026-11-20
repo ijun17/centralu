@@ -380,34 +380,42 @@ inherits PATH from your terminal, so it will never reproduce that class of bug.
 ## Before opening a pull request
 
 **Run `pnpm pre-pr` first** (#1181). It checks what reviewers kept sending back that a machine can
-see, on your branch's commits (not the working tree), each in a temporary worktree:
+see, on your branch's commits (not the working tree), each in a temporary worktree. The checks run
+cheapest first, and the run **stops at the first one that finds something**, naming the ones it did
+not run; it prints each step's time as it goes. In that order:
 
+- `lint`: `pnpm lint` on the files your branch changed, with the type-aware rules, allowlists and per-package type-assertion
+  ceilings CI uses (the ceilings count the whole repository, a few seconds more). A finding in a file you did not touch is left to CI;
 - `tsc` at every pull request head of a stack, oldest first: a lower pull request lands on its own,
   so it must build on its own;
-- dependency-cruiser's orphans as errors (`pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
+- dependency-cruiser's orphans as errors (`orphans`; `pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
   cycle, a layer rule);
-- `pnpm lint` on the files your branch changed (`lint`), with the type-aware rules, allowlists and per-package type-assertion
-  ceilings CI uses (the ceilings count the whole repository, a few seconds more). A finding in a file you did not touch is left to CI;
-- a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
+- `repo-guards`: the repository-wide guards fast enough to run on every branch (`REPO_GUARDS` in
+  `scripts/pre-pr.mjs`: the document references and the OS allowlist), which fail on a file your branch did not touch;
+- `store-step`: a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
   that main already has or another open pull request adds (#1203): two parallel changes picking the
   same number each pass CI alone and clash when the second lands. It reads the open pull requests
   with `gh pr list` and `gh pr diff`, leaves out your stack's own, and names the one it clashes with.
   The numbers themselves come from the brief that gave you the work; a session whose brief names
   none and that finds it needs a step stops and asks (this check is only the backstop);
-- a repository-wide guard test your branch adds or changes (any `tooling/*.test.ts`, a test that scans the
-  whole repository from its root, or a file saying `pre-pr: guard`): each such guard is run against every
-  other open, non-draft pull request's head merged with your branch, and the ones it would fail are listed
-  with the first line of the failure. This never refuses: the list is printed and goes into **Verified**
+- `revert`: each new or changed test file, run with every other change of the pull request reverted to its
+  base: a new test that passes there protects nothing, and is reported. The run ends at the first such test.
+  A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
+- `guards`: a repository-wide guard test your branch adds or changes (any `tooling/*.test.ts`, a test that scans the
+  whole repository from its root, or a file saying `pre-pr: guard`) is run against each other open, non-draft
+  pull request that changes a file your branch changes, its head merged with your branch, and the ones it would
+  fail are listed with the first line of the failure. This never refuses: the list is printed and goes into **Verified**
   (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
   merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked. One
   that merges is started only with as much time left as your guards took in the revert check's run (a run
   cut off half way says nothing); the ones left are named with that time and what was left;
-- each new or changed test file, run with every other change of the pull request reverted to its
-  base: a new test that passes there protects nothing, and is reported. A test the base's file had
-  skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
 - and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
   and what a merge would conflict on.
+
+After a fix, rerun only the check that failed: `pnpm pre-pr --only lint` (any check above, and
+`--only` again for another). Run the whole of it once more before the pull request: the checks
+after the one that failed have not run yet.
 
 It also prints the change's **risk tier** ([below](#review-before-you-say-done)), and the board's
 `open_pr` writes it into **Verified** as a `Tier:` line and labels the pull request `tier:<name>`.
@@ -415,7 +423,7 @@ It also prints the change's **risk tier** ([below](#review-before-you-say-done))
 `pnpm pre-pr --base <branch>` checks a pull request stacked on another branch; `--head <ref>`
 checks a branch other than the one checked out. When one check's finding stands for a reason (a
 test that cannot fail without the change, and why), leave that check out with the reason:
-`--exempt revert="<why>"` (or `tsc`, `orphans`, `deps`, `lint`, `store-step`, `guards`). The board's `open_pr` runs it on the pushed branch
+`--exempt revert="<why>"` (or any other check above). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
 worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
@@ -443,6 +451,22 @@ Then ask these against your change. Put anything you could not check in **Not ex
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
+
+### The diff review before the pull request
+
+Before opening the pull request, have a sub-agent read your diff for what reviews sent back most
+often (#2373), and fix what it finds. A deep review reads the diff for the same list.
+
+- **The same fact computed in two places.** One definition per concept, and the UI derives nothing
+  the host or a selector already answers ([What is expected of code](#what-is-expected-of-code)).
+- **The same shape declared twice.** A type, a schema or a list of names written out again where it
+  could be imported or derived.
+- **History in comments.** "used to", "previously", "now", "no longer", the story of an issue: a
+  comment says why, now ([What is expected of code](#what-is-expected-of-code)).
+- **What the change left behind.** Dead code, an export or a parameter nothing uses, a flag or a
+  fallback nothing sets any more.
+- **A file past about 800 lines, or a function past about 80**, because of this change.
+- **The questions above**, and whether each new test fails with its fix disabled.
 
 ### Situations checked
 
@@ -481,7 +505,12 @@ read, or a skipped `pnpm pre-pr` make it deep.
 
 The author runs that review before saying done and fixes what it finds; nobody relays review
 rounds. **Verified** records who reviewed (which model or session) and what they found, fixed
-or left. Raise a tier by hand when the paths understate the risk; never lower it.
+or left; it does not restate `pnpm pre-pr`'s output, which `open_pr` sums up in one line of its own.
+Raise a tier by hand when the paths understate the risk; never lower it.
+
+**One report.** Work given by a brief is reported once, in the answer to whoever gave it: the pull
+request, what changed, the review's verdict and what it found, and what was not exercised. The
+pull request carries its own record in **Verified**; neither is repeated in pull request comments.
 
 ## Commits and pull requests
 
