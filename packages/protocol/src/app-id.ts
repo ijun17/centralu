@@ -81,7 +81,8 @@ export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
 /**
  * The judgment for a newly **proposed** name — the rule above, plus a ban on the `app-` prefix,
  * plus the reserved ids (`RESERVED_APP_IDS` unless the caller passes its own list). Returns null
- * when the name is fine. The problem is called `'builtin'`, which the UI's wording keys off.
+ * when the name is fine. The problem is called `'builtin'` (it covers every reserved id, not only
+ * built-in apps); the UI's wording keys off it.
  *
  * The `app-` prefix is not blocked during discovery (a hand-made `app-store` app is attached as
  * `app-app-store`, so it does not collide). What is blocked is the point where a new name comes

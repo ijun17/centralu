@@ -137,7 +137,8 @@ const ReasoningDelta = z.object({
  *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
  *
  * The tools' own files do not last (Claude Code deletes a transcript after 30 days without activity), so the store
- * keeps the whole record. Rows stored before #221 have neither field.
+ * keeps the whole record. Rows stored before #221 have neither field: they hold the card's preview only, the first 300
+ * characters of a result (Claude) or 2,000 (Codex), and only the path of a file edit.
  *
  * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
  * pages) and from every stored message it reads back unless the reader asks for them by name
