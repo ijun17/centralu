@@ -87,9 +87,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: pnpm
+
+      # The script runs under tsx and starts codex through the host's bounded runner (os/exec.ts), so it needs the workspace
+      - run: pnpm install --frozen-lockfile
 
       - name: Install latest Codex CLI
-        # Global, so `codex` lands on PATH where codex-bindings.mjs execFiles it, and
+        # Global, so `codex` lands on PATH where codex-bindings.mjs finds it, and
         # nowhere near the repo's lockfile. `--version` puts the codex version in the
         # log next to the result — a red run should read "gone as of X.Y.Z" at a glance
         # (the check script prints it too, but only after generation succeeds).
@@ -97,7 +101,7 @@ jobs:
           npm install -g @openai/codex@latest
           codex --version
 
-      # Writes nothing; it needs only node builtins, so no `pnpm install` here either.
+      # Writes nothing
       - run: pnpm codex:bindings --check-contract
 
   codex-types:
@@ -111,6 +115,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: pnpm
+
+      # The script runs under tsx and starts codex through the host's bounded runner (os/exec.ts), so it needs the workspace
+      - run: pnpm install --frozen-lockfile
 
       - name: Install latest Codex CLI
         run: |

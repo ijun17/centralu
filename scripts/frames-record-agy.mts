@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fakeInstall, HOST_TEST_ARCHIVE } from '../packages/agent-host/src/adapters/antigravity/agent-files.test-helpers.js'
 import { AntigravityAdapter, antigravityProfile, type AgyProfile } from '../packages/agent-host/src/adapters/antigravity/index.js'
 import { fileURLToPath } from 'node:url'
+import { execTool } from '../packages/agent-host/src/tool-run.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec } from '../packages/agent-host/src/adapters/contract.js'
 
 /** The cheapest model `agy models` offers that is Google's own flash, at its lowest thinking level: a recording only needs the frames */
@@ -34,7 +34,8 @@ export function temporaryAgy(parent: string, scenario: string, signedOut: boolea
     copyFileSync(real, copy)
   }
   const before = signedOut ? '' : readFileSync(copy, 'utf8')
-  const version = execFileSync('agy', ['--version'], { encoding: 'utf8' }).trim()
+  // Asked once, bounded, the first time the adapter wants it
+  let version: Promise<string> | undefined
   const recorded: AgyProfile = {
     ...profile,
     async launch() {
@@ -43,7 +44,7 @@ export function temporaryAgy(parent: string, scenario: string, signedOut: boolea
       // Through the proxy that sets the model (`frames-record-agy-model.mjs`)
       return { ...started, command: process.execPath, args: [MODEL_PROXY, AGY_MODEL, 'agy', 'acp', '--gemini-dir', profile.home.geminiHome, '--disable-telemetry'], env: { ...started.env, HOME: home, USERPROFILE: home } }
     },
-    installedVersion: async () => version,
+    installedVersion: () => (version ??= execTool('agy', ['--version'], { timeoutMs: 30_000 }).then((r) => r.stdout.trim())),
   }
   let done = false
   return {

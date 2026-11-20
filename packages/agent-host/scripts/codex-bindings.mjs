@@ -20,18 +20,19 @@
  *   pnpm codex:bindings --check-types     — that generated/ holds the types as this Codex makes them (stale types)
  *   pnpm codex:bindings --check           — both (drift.yml runs them as two jobs, so the two read apart)
  *
- * On Windows `codex` is an npm shim (codex.cmd), which only a shell runs: it is started through one there.
+ * Run by tsx (`pnpm codex:bindings`): codex is asked through `execTool`, as the host starts a tool, bounded and ended with
+ * what it started.
  *
  * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
  * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
  * (`enumValues`).
  */
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execTool } from '../src/tool-run.js'
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const ADAPTER = join(ROOT, 'packages/agent-host/src/adapters/codex')
@@ -44,22 +45,18 @@ const CHECK_TYPES = flag('--check') || flag('--check-types')
 const MANIFEST = join(ADAPTER, 'protocol-types.sha256')
 const DEST = join(ADAPTER, 'generated')
 
-/** Runs codex: through a shell on Windows, where it is an npm shim (codex.cmd) execFile cannot start; args are ours */
-const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
-const codex = (args, opts = {}) =>
-  process.platform === 'win32'
-    ? execFileSync('codex', args.map(quote), { ...opts, shell: true })
-    : execFileSync('codex', args, opts)
+/** Codex's answer to `args`, as text; past `timeoutMs` it is ended with what it started */
+const codex = async (args, timeoutMs) => (await execTool('codex', args, { timeoutMs, maxBuffer: 64 * 1024 * 1024 })).stdout
 
 /** A file's text as the manifest names it: sha256 of its UTF-8 bytes */
 const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
 
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
-const version = String(codex(['--version'], { encoding: 'utf8' })).trim()
+const version = (await codex(['--version'], 30_000)).trim()
 const tmp = mkdtempSync(join(tmpdir(), 'codex-bindings-'))
 
 try {
-  codex(['app-server', 'generate-ts', '--out', tmp], { stdio: 'pipe' })
+  await codex(['app-server', 'generate-ts', '--out', tmp], 300_000)
 } catch (e) {
   console.error('[codex] type generation failed — check whether the codex CLI is installed:', e.message)
   process.exit(1)

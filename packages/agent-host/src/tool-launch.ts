@@ -143,6 +143,11 @@ export function toolCommand(
   return find(name) ?? (platform === 'win32' ? notOnPath(name) : name)
 }
 
+/** An agent CLI by name, as it is started: what `toolCommand` finds, through its shim's entry on Windows (`launchFor`) */
+export function toolLaunch(name: string): ToolLaunch {
+  return launchFor(toolCommand(name))
+}
+
 const programs = new Map<string, string>()
 
 /** Forgets what programPath found (tests) */

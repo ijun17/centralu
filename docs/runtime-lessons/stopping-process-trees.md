@@ -201,3 +201,14 @@ Rule: `stdio: ['pipe', 'pipe', 'pipe', 'overlapped']`.
 Guard: `host/apps/external/mediation.test.ts` "accepts a broker call carrying its own run id — a request never declared
 is refused by the desk with a reason" (catches it only on the Windows CI job).
 Platforms: Windows.
+
+**KL21. A tool's probe is bounded and ends its tree.**
+Happened: 18 `opencode.exe --version` processes ran on for up to 19 days on a Windows machine with WSL (#2346); a probe
+with no limit, or one whose limit signalled the pid alone, left the tool running.
+Rule: a program asked a short question (`--version`, `--help`, `auth status`) is run by `execText` (os/exec.ts), a tool
+by its name through `execTool` (tool-run.ts), in scripts and tests as in the host: its limit ends the whole tree. A
+`child_process` starter asked `--version` or `--help` is refused in host code, scripts, tests, tooling and e2e, except for
+`git`, `node`, `gpgv` and `process.execPath`, which answer from their own binary.
+Guard: `guard/timed-start` (`probe`); `tooling/surface-drift.test.ts` "ends a tool that never answers, and what it
+started, at the run limit (#2346)".
+Platforms: macOS, Linux, Windows.
