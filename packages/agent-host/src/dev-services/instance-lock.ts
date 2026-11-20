@@ -1,11 +1,12 @@
 import { errorMessage } from '@cc/protocol'
 import { isObj, tryParseJson } from '../json-value.js'
 import { errnoCode } from '../os/errors.js'
-import { readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { hasPs } from '../os.js'
 import { realOs } from '../os/real.js'
+import { writeFileWhole } from '../os/write-file-whole.js'
 import type { SayStoreWork } from './store/store-work.js'
 
 /**
@@ -40,9 +41,9 @@ import type { SayStoreWork } from './store/store-work.js'
 
 /**
  * `sayWork` puts what the host does to its store into `host.lock` (`store`, store/store-work.ts), or takes it out with
- * null. The file is replaced whole by a rename, so a reader never sees half of it: readers take a file they cannot
- * parse for no holder. A rename that is refused (Windows, while a scanner holds the file) leaves the file as it was,
- * and the starters then wait as they did before the work was said.
+ * null. The file is replaced whole (`writeFileWhole`), so a reader never sees half of it: readers take a file they
+ * cannot parse for no holder. A rename still refused after the Os tries again leaves the file as it was, and the
+ * starters then wait as they did before the work was said.
  */
 export type LockResult =
   | { ok: true; release: () => void; sayWork: SayStoreWork }
@@ -146,12 +147,9 @@ export function acquireInstanceLock(
   return {
     ok: true,
     sayWork: (work) => {
-      const next = `${lockPath}.${process.pid}.next`
       try {
-        writeFileSync(next, JSON.stringify(work ? { ...own, store: work } : own))
-        renameSync(next, lockPath)
+        writeFileWhole(realOs().files, lockPath, JSON.stringify(work ? { ...own, store: work } : own))
       } catch (err) {
-        rmSync(next, { force: true })
         console.error(`[agent-host] host.lock could not ${work ? 'say what the host does to its store' : 'be put back'}: ${errorMessage(err)}`)
       }
     },

@@ -212,7 +212,7 @@ describe('what the open says while it works (#2334)', () => {
     expect((told[0] as StoreWork).bytes).toBeGreaterThanOrEqual(bytes)
   })
 
-  it('says nothing for a store that is new, or that has no step to run', () => {
+  it('says nothing for a store that is new, or that has no step to run, and the work of the open that has one', () => {
     const told: (StoreWork | null)[] = []
     const dir = tempRoot('cc-store-copy-')
     dirs.push(dir)
@@ -220,6 +220,11 @@ describe('what the open says while it works (#2334)', () => {
     const file = storeFile()
     stores.push(new Store(file, realOs(), (w) => void told.push(w)))
     expect(told).toEqual([])
+
+    // The same store, opened by the build with a step to run
+    added = [breaking(STEP)]
+    stores.push(new NextBuild(file, realOs(), (w) => void told.push(w)))
+    expect(told.map((w) => w?.doing ?? null)).toEqual(['copy', 'update', null])
   })
 })
 

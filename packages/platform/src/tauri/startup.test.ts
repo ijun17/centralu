@@ -116,13 +116,16 @@ describe('a host that works on its store before it answers (#2334)', () => {
     }
   })
 
-  it('a report that is not one is no work: the usual wait ends the start', async () => {
+  it('a report that is not one is no work: the screen is told none, and the usual wait ends the start', async () => {
     vi.useFakeTimers()
     try {
       invoke.mockImplementation(async (cmd: string) => (cmd === 'host_store_work' ? { doing: 'copy', step: '76' } : null))
-      const failed = createTauriPlatform().catch((e: Error) => e.message)
+      const told: unknown[] = []
+      const failed = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).catch((e: Error) => e.message)
       await vi.advanceTimersByTimeAsync(31_000)
       expect(await failed).toBe('agent-host did not become ready in time')
+      expect(told.length).toBeGreaterThan(0)
+      expect(told.every((w) => w === null)).toBe(true)
     } finally {
       vi.useRealTimers()
     }
