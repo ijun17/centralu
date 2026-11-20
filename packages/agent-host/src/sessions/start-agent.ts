@@ -97,12 +97,18 @@ export function projectInstructions(text: string): string[] {
  *   3. The project's remembered choice for the tool, as a session the person opens there gets.
  *
  * A model empty in all three is the tool's own default.
+ *
+ * A difficulty named with no model chosen for it on this tool falls to 3, and `fellBack` says so in the caller's
+ * answer (#2350): nine review sessions ran silently on a small default model when the tool had no setting for theirs.
  */
 export function agentChoice(
   asked: { model?: string; effort?: string; difficulty?: AgentDifficulty },
   remembered: ToolDefaults | undefined,
   byDifficulty: AgentModels[string] | undefined,
-): { model?: string; effort?: string; difficulty?: AgentDifficulty } {
+  toolLabel: string,
+  /** What runs when no model is settled here: the tool's default, or for a linked machine's child, what that machine picks */
+  noModel = `${toolLabel}'s default model`,
+): { model?: string; effort?: string; difficulty?: AgentDifficulty; fellBack?: string } {
   const picked = !asked.model && asked.difficulty ? byDifficulty?.[asked.difficulty] : undefined
   if (picked) {
     const effort = asked.effort ?? picked.effort
@@ -110,7 +116,10 @@ export function agentChoice(
   }
   const model = asked.model ?? remembered?.model ?? undefined
   const effort = asked.effort ?? (!asked.model || asked.model === remembered?.model ? (remembered?.effort ?? undefined) : undefined)
-  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  const fellBack = !asked.model && asked.difficulty
+    ? `no ${asked.difficulty} model is set for ${toolLabel}; it runs on ${model ? `"${model}"` : noModel}`
+    : undefined
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(fellBack ? { fellBack } : {}) }
 }
 
 /**

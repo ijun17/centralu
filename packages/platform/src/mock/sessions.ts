@@ -109,7 +109,7 @@ export class SessionsMock {
       })
       if (params.resumeExternalId) info.externalId = params.resumeExternalId
       this.store.sessions.set(id, info)
-      // The same rule as the real thing: the last tool chosen becomes that project's default (manager.createSession)
+      // The same rule as the real thing: the tool the person picked in the window becomes that project's default (session-start.ts `personsPick`)
       const owner = this.projectStore.list.find((p) => p.id === params.projectId)
       if (owner && owner.defaultTool !== params.tool) {
         owner.defaultTool = params.tool

@@ -176,7 +176,7 @@ export type MachinesPort = {
   followHub?(): void
 }
 
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; window?: true }
 
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
@@ -356,6 +356,8 @@ export function createRpcHandler(
         onWorktreeBase: (note) => (worktreeBase = note),
         fromScript: scriptAuthor('agents.createSession', ctx),
         ...(startedByHub ? { startedByHub } : {}),
+        // The person's own window (#2350): the only start whose tool becomes the project's default
+        ...(ctx?.window ? { personsPick: true as const } : {}),
       })
       // Created before that hub's offer arrived on this connection: recorded when it does
       if (p.fromHub && ctx && !startedByHub) hubs?.awaitOffer?.(ctx.client, info.id)

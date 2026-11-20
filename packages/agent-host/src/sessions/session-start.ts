@@ -151,6 +151,11 @@ export class SessionStarts {
        */
       fromScript?: { credential: string }
       /**
+       * The person picked this tool in their own window (`agents.createSession` on a call marked `window`, #2350): the only
+       * start that moves the project's default tool. Not in the RPC contract: the host sets it from the connection
+       */
+      personsPick?: true
+      /**
        * Role text pinned on the row and reapplied on every wake — filled only by `createAppBuilder`. A coordinator's
        * role rode here too; nothing creates a coordinator since the control app went (#372), and one already in a
        * store wakes through `resumeSession` with its own row.
@@ -167,8 +172,7 @@ export class SessionStarts {
       builderOf?: AppRef
       /**
        * This is an agent session an app asked for (M4 D-1) — filled only by `runAppAgent`. Loads the
-       * answer schema into the adapter (`outputSchema`) and does not change the project's default
-       * tool: the tool the app picked is not the person's choice.
+       * answer schema into the adapter (`outputSchema`).
        */
       appAgent?: { outputSchema?: Record<string, unknown> }
       /** The same-project session that started this agent (#561). */
@@ -402,17 +406,19 @@ export class SessionStarts {
      */
     this.host.emit({ type: 'session_created', sessionId: id, session: info })
     /*
-     * **The tool picked most recently becomes this project's default.**
+     * **The tool the person picked most recently becomes this project's default.**
      *
      * default_tool was hardcoded to 'claude' at project creation and had no place that ever updated
      * it — someone using codex had to click the picker again for every single new session, forever.
      * Why this lives here instead of a settings screen: "what to use as the default" is **already
-     * told to us by the act of creating a session.** So the UI and the Assistant's create_session
-     * both go through this same rule.
+     * told to us by the act of creating a session.**
+     *
+     * Only the person's own pick (`personsPick`, #2350). Any start defaults to not moving it: a session an agent starts
+     * (start_agent, ask_project, create_session, a fork, a handoff_session), an app's agent or builder, a script, or a
+     * linked hub. One agent's start_agent on Antigravity moved it, and every later start_agent there without a tool ran
+     * on Antigravity, nine review sessions on a small default model instead of the person's choice.
      */
-    // The tool of an agent an app asked for (M4 D-1) is the app's choice — it never moves the person's
-    // default
-    if (params.projectId && !params.appAgent) {
+    if (params.projectId && params.personsPick) {
       const owner = this.host.projectRow(params.projectId)
       if (owner && owner.defaultTool !== params.tool) {
         this.host.store.projects.setProjectDefaultTool(params.projectId, params.tool)

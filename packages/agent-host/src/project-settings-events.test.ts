@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { APP_VERSION, PROTOCOL_VERSION, type NormalizedEvent, type ProjectInfo } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, SHOWS_HOST_REQUESTS, type NormalizedEvent, type ProjectInfo } from '@cc/protocol'
 import { Store } from './dev-services/store.js'
 import { SessionManager } from './sessions/manager.js'
 import { scriptedAdapters } from './links/scripted-agent.test-helpers.js'
@@ -49,7 +49,8 @@ async function client(port: number) {
   const pending = new Map<string, (f: any) => void>()
   let n = 0
   await new Promise<void>((resolve) => {
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION }))
+    // Two of the person's windows: a session one of them starts is the person's pick, which moves the default tool (#2350)
+    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, shows: [SHOWS_HOST_REQUESTS] }))
     ws.onmessage = (m) => {
       const f = JSON.parse(String(m.data))
       frames.push(f)
