@@ -1,6 +1,38 @@
 import type { MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { senderKind } from './address.js'
+import { bodyLimit } from './rules.js'
 import type { TurnReport } from './turn-report.js'
+
+/**
+ * The most of a session's last response a report keeps as its answer (#2358 item 3): as long as a message a session may send, so reading the report
+ * shows the whole of almost any answer. Past it the answer ends in "…" and the report's words say so (`lastResponseLine`)
+ */
+export const ANSWER_KEPT_CHARS = bodyLimit('session')
+/** The most of a last response quoted where a preview is all there is room for: a stop notice's quote and the report relayed to a seat without mail */
+export const PREVIEW_CHARS = 600
+
+/** `text` cut to `max` characters, the cut marked by "…" */
+export function clipped(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+/** Whether a report's answer is whole or was cut at its most (`clipped`), or there is none: what its words say of it (`lastResponseLine`) */
+export type AnswerKept = 'none' | 'whole' | 'cut'
+
+/** `AnswerKept` of an answer whose most is `max` */
+export function answerKept(answer: string | undefined, max: number): AnswerKept {
+  if (!answer) return 'none'
+  return answer.length >= max && answer.endsWith('…') ? 'cut' : 'whole'
+}
+
+/** How a report's turn ended, in Centralu's words: the report's first line and the inbox's line on it say it alike (#2358 item 1) */
+export const OUTCOME_WORDS = {
+  finished: 'ended its turn',
+  failed: 'did not finish',
+  stopped: 'stopped before finishing',
+  paused: 'paused for its background work',
+  waiting: 'is waiting on other work',
+} as const satisfies Record<TurnReport['outcome'], string>
 
 /**
  * A session's last response, as the tasks it did not answer by a reply are answered with it (docs/plans/mailbox.md §10.6.3, #1948 target 4): Centralu's words
@@ -92,9 +124,9 @@ function asksAnswerTurnEnd(giver: string): boolean {
  * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
  * words, and the report must not contradict them
  */
-export const TURN_ENDED = "[Centralu] The session ended its turn. Its last response says whether the work is done."
+export const TURN_ENDED = `[Centralu] The session ${OUTCOME_WORDS.finished}. Its last response says whether the work is done.`
 /** The same line for the person, on their own work: one line, with nothing to call (§10.6.3) */
-export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its turn. Its last response says whether the work is done.'
+export const PERSON_TURN_ENDED = `[Centralu] The session you started ${OUTCOME_WORDS.finished}. Its last response says whether the work is done.`
 
 /**
  * Centralu's words on a report of work given the session read as `childId`, from how it ended alone: a call that returned that end (`answerRecorder`)
@@ -102,13 +134,13 @@ export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its t
  * wrote goes in (#120): its answer, error and reason are the report's facts, never these words. `kind`: the kind of its tool's error, a word of this
  * host's (`errorKind`), which a report from another computer never brings
  */
-export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean; answered?: boolean }): string {
+export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean; answer?: AnswerKept }): string {
   const read = `read_session(sessionId="${childId}")`
   const lines =
     r.outcome === 'finished'
-      ? [`${TURN_ENDED}\nid: ${childId}\n\n${lastResponseLine(read, r.answered === true)}`]
+      ? [`${TURN_ENDED}\nid: ${childId}\n\n${lastResponseLine(read, r.answer ?? 'none')}`]
       : [
-          `[Centralu] ${r.outcome === 'failed' ? 'The assigned work did not finish.' : 'The assigned work stopped before finishing.'}\nid: ${childId}\n\n` +
+          `[Centralu] The assigned work ${r.outcome === 'failed' ? OUTCOME_WORDS.failed : OUTCOME_WORDS.stopped}.\nid: ${childId}\n\n` +
             `${r.kind ? `Its tool's error, by kind: ${r.kind}. ` : ''}Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
         ]
   return [...lines, ...(r.personSince ? [PERSON_SINCE] : []), ...(r.after ? [AFTER] : [])].join('\n')
@@ -121,8 +153,9 @@ const AFTER = 'Your task arrived after this response was written.'
 
 /**
  * The line of a turn-ended report on where the session's last response is (`read`: the read_session call that shows its turn): its answer is the
- * report's fact, which reading the report shows below it (`MailTool`), never these words (#120); or that it wrote none
+ * report's fact, which reading the report shows (`MailTool`), never these words (#120); cut, read_session reads the rest; or that it wrote none
  */
-export function lastResponseLine(read: string, answered: boolean): string {
-  return answered ? `Its last response is that session's own words: reading this report shows it below, and ${read} reads more.` : `It wrote no response: ${read} shows its turn.`
+export function lastResponseLine(read: string, answer: AnswerKept): string {
+  if (answer === 'none') return `It wrote no response: ${read} shows its turn.`
+  return `Its last response is that session's own words: reading this report shows ${answer === 'cut' ? `its start, and ${read} reads the rest` : 'it'}.`
 }

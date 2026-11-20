@@ -83,6 +83,14 @@ export type SendInput = {
   question?: true
 }
 /**
+ * Whether a session's message waits for a reply (D3, #2357), the one rule: a reply, or a message to the giver of the task its turn is for (a
+ * clarification, `MessageService.clarifies`), only when marked a question (`kind: "question"` or choices); any other new message unless it is a note
+ */
+export function waitsForReply(m: { question: boolean; note: boolean; reply: boolean; clarifies: boolean }): boolean {
+  return m.reply || m.clarifies ? m.question : !m.note
+}
+
+/**
  * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
  * a task only by a reply marked as its answer that asks nothing back. Any other reply to a task is a message in its thread, and the task stays open, so
  * the last response at rest still answers it: an early "On it" closes nothing
@@ -212,6 +220,8 @@ export class MessageService {
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
       /** A question the session at that address asked was settled with no answer to it (`questionSettled`): the report it held is owed now (#2348) */
       questionSettled?: (sessionAddress: string) => void
+      /** The live session that took over from a gone one by a handoff, by address, which a refusal to write to the gone one names; null when none */
+      heirOf?: (sessionAddress: string) => string | null
     } & StopNoticeOptions,
   ) {
     this.now = opts.now ?? Date.now
@@ -282,9 +292,9 @@ export class MessageService {
     if (to.length > MAX_RECIPIENTS) throw refuse('recipients', REFUSAL_TEXT.recipients())
 
     const causeId = this.causeOf(sender)
-    const cause = causeId === null ? null : (this.records.message(causeId) ?? null)
-    // A clarification: a session's word to the owner of the task its turn is for (§9.7). It is no request
-    const clarifies = cls === 'session' && cause?.kind === 'task' && to.length === 1 && to[0] === cause.sender ? cause.id : undefined
+    // A clarification (§9.7) is no request
+    const [only] = to
+    const clarifies = cls === 'session' && only !== undefined && to.length === 1 ? this.clarifies(sender, only) : undefined
     // The owner's answer to one is work again: a task from the owner to the one who asked
     const asWork = target !== undefined && this.answersClarification(sender, target, to)
     const kind: MailKind = asWork ? 'task' : 'message'
@@ -1014,9 +1024,15 @@ export class MessageService {
     return text
   }
 
+  /** A gone session's refusal, naming the session that took over from it by a handoff when there is one (a reply to its question, say): write to that one */
+  private goneText(to: string): string {
+    const heir = this.opts.heirOf?.(to) ?? null
+    return `${REFUSAL_TEXT.gone(to)}${heir ? ` ${JSON.stringify(this.reach.labelOf(heir))} (${heir}) took over from it by a handoff: write to that session.` : ''}`
+  }
+
   private refusalText(why: ReturnType<MailReach['mayWrite']> & string, to: string): string {
     const text: Record<string, string | undefined> = {
-      gone: REFUSAL_TEXT.gone(to),
+      gone: this.goneText(to),
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
       elsewhere: REFUSAL_TEXT.elsewhere(to),
       assistant_asks: REFUSAL_TEXT.assistant_asks(),
@@ -1031,6 +1047,21 @@ export class MessageService {
     const row = m && m.sender !== reader ? this.records.recipient(id, reader) : undefined
     if (!m || (m.sender !== reader && (!row || isHidden(row)))) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
     return m
+  }
+
+  /**
+   * The task a session's message to `to` is about when `to` gave it that task, the one its turn is for (a clarification, §9.7), or undefined. `to`
+   * is an address, or `{ host }` for `parent` across a link: a session of the computer that started the sender (`MailAcross.parentHost`), which
+   * alone knows which session that is. The one condition for a clarification, on this host and across (#2357)
+   */
+  clarifies(sender: string, to: string | { host: string }): string | undefined {
+    if (senderKind(sender) !== 'session') return undefined
+    const causeId = this.causeOf(sender)
+    const cause = causeId === null ? undefined : this.records.message(causeId)
+    if (cause?.kind !== 'task') return undefined
+    const giver = parseAddress(cause.sender)
+    const gave = typeof to === 'string' ? cause.sender === to : giver?.kind === 'session' && giver.host === to.host
+    return gave ? cause.id : undefined
   }
 
   /** Whether `target` is a clarification of a task `owner` gave, and the answer goes to the one who asked (§9.7) */

@@ -77,14 +77,14 @@ describe('the frame of mail without threads', () => {
     expect(none).toContain(`</centralu-mail>\n${READ}\n</system-reminder>`)
     const some = buildMessageFrame([item(1, { needsReply: true }), item(2), item(3, { needsReply: true })]).text
     expect(some).toContain(
-      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…"), or close it with mail(action="handled", thread="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you set needsReply=true.\n</system-reminder>`,
+      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…"), or close it with mail(action="handled", thread="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind="question".\n</system-reminder>`,
     )
   })
 
   it('says of each clarification that its answer is given as work again and its turn is reported', () => {
     const frame = buildMessageFrame([item(1, { needsReply: true, clarifies: M(8) }), item(2, { needsReply: true, clarifies: M(7) })]).text
-    expect(frame).toContain(`${M(1)} asks about the work you gave; your answer to it is given as work again, and its turn is reported to you.`)
-    expect(frame).toContain(`${M(2)} asks about the work you gave; your answer to it is given as work again, and its turn is reported to you.`)
+    expect(frame).toContain(`${M(1)} is about the work you gave: a reply to it is given as work again, and its turn is reported to you.`)
+    expect(frame).toContain(`${M(2)} is about the work you gave: a reply to it is given as work again, and its turn is reported to you.`)
   })
 
   it('puts the words that flow down after the frame, every line behind "> ", under a header Centralu wrote; the tags in them are escaped', () => {

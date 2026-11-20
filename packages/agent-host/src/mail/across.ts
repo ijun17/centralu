@@ -1,10 +1,10 @@
-import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
+import { HubFindResult, HubMailResult, TASK_REPORT_ANSWER_MAX, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
 import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { DelegationOrigin } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
-import { reportWords } from './last-response.js'
+import { answerKept, reportWords } from './last-response.js'
 import { older, unreachable, type AcrossMachine, type AcrossSent, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
 import { MAILBOX_RETENTION } from '../dev-services/store/mailbox.js'
@@ -270,10 +270,20 @@ export class MailAcross extends AcrossReceipts {
     return this.wrote(sender, input.to, kept, h.name, r)
   }
 
+  /** The computer whose session `parent` names for a session a hub started here (`startingHub`), or null: the giver of its tasks from there (#2357) */
+  parentHost(sessionId: string): string | null {
+    return this.startedBy(sessionId)?.id ?? null
+  }
+
+  /** The hub that started a session here, as recorded with the session (`startingHub`), or null */
+  private startedBy(sessionId: string): { id: string; name: string } | null {
+    return this.peers?.startingHub?.(sessionId) ?? null
+  }
+
   /** A session a hub started here, to the session there that started it: through that hub only, which knows who that is */
   private async toParent(sessionId: string, sender: string, kept: Kept): Promise<AcrossSent> {
     const { question: _question, ...fields } = kept
-    const started = this.peers?.startingHub?.(sessionId) ?? null
+    const started = this.startedBy(sessionId)
     if (!started) {
       return {
         ok: false,
@@ -411,7 +421,7 @@ export class MailAcross extends AcrossReceipts {
       // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
       const party = row ? parseAddress(row.recipient) : null
       const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
-      const body = reportWords(childId, { outcome: report.outcome, answered: !!report.answer, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
+      const body = reportWords(childId, { outcome: report.outcome, answer: answerKept(report.answer, TASK_REPORT_ANSWER_MAX), ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
       const written = this.d.service.report(task.id, { ...report, body })
       return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
     } catch (e) {

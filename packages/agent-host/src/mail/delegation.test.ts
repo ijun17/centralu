@@ -9,6 +9,7 @@ import { answerRecorder, delegationRecorder, linkedTasksOf, personWorkRecorder, 
 import { A, B, ORC, W, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
+import { ANSWER_KEPT_CHARS } from './last-response.js'
 import { parseAddress } from './address.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
@@ -148,7 +149,7 @@ describe('a call that returned the answer (§9.6)', () => {
     expect(w.rowOf(task.id, W).settled).toBe('reported')
   })
 
-  it('a failure says its kind; an answer over 600 characters is cut; a read of where it stands only marks the reports read', () => {
+  it('a failure says its kind; an answer is kept whole up to a message’s length, and past it cut, as its words say (#2358); a read of where it stands only marks the reports read', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     const paused = w.mail.report(task.id, { outcome: 'paused', paused: 1, body: 'paused' })
@@ -159,7 +160,14 @@ describe('a call that returned the answer (§9.6)', () => {
     expect(w.store.mailbox.reportsOn(task.id).at(-1)!.facts).toMatchObject({ outcome: 'failed', error: 'network' })
     const t2 = w.mail.task(A, W, { text: 'again', origin: 'agent_session', delivered: true })
     answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'x'.repeat(700) })
-    expect(w.store.mailbox.reportsOn(t2.id)[0]!.facts.answer).toHaveLength(601)
+    const [whole] = w.store.mailbox.reportsOn(t2.id)
+    expect(whole!.facts.answer).toBe('x'.repeat(700))
+    expect(whole!.body).toContain('reading this report shows it.')
+    const t3 = w.mail.task(A, W, { text: 'more', origin: 'agent_session', delivered: true })
+    answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'y'.repeat(ANSWER_KEPT_CHARS + 50) })
+    const [cut] = w.store.mailbox.reportsOn(t3.id)
+    expect(cut!.facts.answer).toBe(`${'y'.repeat(ANSWER_KEPT_CHARS - 1)}…`)
+    expect(cut!.body).toContain('reading this report shows its start, and read_session(sessionId="w") reads the rest.')
   })
 })
 
