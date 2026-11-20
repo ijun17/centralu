@@ -784,3 +784,32 @@ describe('guard/timed-start', () => {
     }
   })
 })
+
+describe('guard/no-history-comments (#2355)', () => {
+  const file = 'packages/core/src/x.ts'
+  it.each([
+    ['// This used to wait for the host.'],
+    ['/** The list used to be sorted here. */'],
+    ['/*\n * The check that used\n * to run here.\n */'],
+    ['// Previously the host sent it twice.'],
+    ['// The host sends it once. Previously it sent it twice.'],
+    ['/**\n * - Previously: two sends\n */'],
+  ])('reports history in %j', async (code) => {
+    expect((await lines(file, code, 'no-history-comments')).length).toBe(1)
+  })
+  it.each([
+    ['// The key is used to sign requests.'],
+    ['// It can be used to sign requests.'],
+    ['// These are only used to sort.'],
+    ["// It's used to sort."],
+    ['// The waiting list is\n// used to sort.'],
+    ['// It was previously sent: a repeat is dropped.'],
+    ["const a = 'it used to wait'"],
+  ])('lets %j through', async (code) => {
+    await quiet(file, 'no-history-comments', code, '// It used to wait.')
+  })
+  it('reads only the folders whose comments are swept', async () => {
+    expect(await lines('packages/core/src/x.ts', '// It used to wait.', 'no-history-comments')).toEqual([1])
+    expect(await lines('packages/agent-host/src/x.ts', '// It used to wait.', 'no-history-comments')).toEqual([])
+  })
+})

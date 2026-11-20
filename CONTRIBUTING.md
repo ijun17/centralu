@@ -561,7 +561,8 @@ running, possibly the very session doing the work.
   stays: legal headers, rules of an external platform or dependency, a lint or formatter
   suppression with its reason, public API docs, issue or RFC links, and the non-obvious why; a
   number learned by measuring stays beside it. A long justification without one of these means the
-  code should change instead.
+  code should change instead. `guard/no-history-comments` (tooling/eslint-guards.js) reports "used to"
+  and a sentence opening with "Previously" in the folders already swept (`HISTORY_CLEARED`).
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
 - New comments and documents are written in English — see [Language](#language).
