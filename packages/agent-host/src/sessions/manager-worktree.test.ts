@@ -1624,6 +1624,11 @@ describe('worktree sessions', () => {
     // No session owns it, and git still lists it: a purge without "remove worktree" kept it
     const listed = join(dir, randomUUID())
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-at-purge', listed], { cwd: repo })
+    // The same, with its `.git` gone and a file git ignores: still listed, so still kept
+    const listedNoGit = join(dir, randomUUID())
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-listed', listedNoGit], { cwd: repo })
+    writeFileSync(join(listedNoGit, 'local.env'), 'what git ignores\n')
+    rmSync(join(listedNoGit, '.git'))
     // Not a session's folder at all
     const other = join(dir, 'not-a-session')
     mkdirSync(other)
@@ -1649,21 +1654,8 @@ describe('worktree sessions', () => {
     await restarted.worktreeSweep
 
     expect(existsSync(partWay)).toBe(false)
-    const kept = [live.worktree!.path, archived.worktree!.path, listed, other, workedIn, movedInto, ownGit, unknownProject]
+    const kept = [live.worktree!.path, archived.worktree!.path, listed, listedNoGit, other, workedIn, movedInto, ownGit, unknownProject]
     expect(kept.filter((p) => !existsSync(p))).toEqual([])
-  })
-
-  it('a start keeps a folder git lists that no session owns, also once its .git is gone (#2344)', async () => {
-    const listed = join(wtRoot, project.id, randomUUID())
-    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-listed', listed], { cwd: repo })
-    writeFileSync(join(listed, 'local.env'), 'what git ignores\n')
-    rmSync(join(listed, '.git'))
-
-    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
-    restarted.prLookup = async () => null
-    await restarted.worktreeSweep
-
-    expect(readFileSync(join(listed, 'local.env'), 'utf8')).toBe('what git ignores\n')
   })
 
   /*
