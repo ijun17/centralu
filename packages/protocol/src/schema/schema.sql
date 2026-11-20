@@ -8,8 +8,8 @@
 -- which v3 (1.4s), v11 (1.7s) and v21 (1.7s) were each a full table scan — a startup cost that
 -- only grows as the conversation history piles up.
 --
--- Leaving the value unset entirely means a new database starts at 0 and runs every step once,
--- while an existing database keeps whatever number the last step left
+-- Leaving the value unset entirely means a new database starts at 0 and runs every step once
+-- (the same as before), while an existing database keeps whatever number the last step left
 -- behind, so nothing reruns.
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -18,8 +18,9 @@ CREATE TABLE IF NOT EXISTS projects (
   name          TEXT NOT NULL,
   default_tool  TEXT NOT NULL DEFAULT 'claude',
   -- The default model and effort per tool (#107): {"codex":{"model":"gpt-5.6","effort":"high"}, ...}.
-  -- Per tool because a model name is a tool's own vocabulary: a single one with no tool attached
-  -- hands a session for a different tool that name, and it dies on its first turn.
+  -- This is where the scalars default_model/default_effort used to be — a model name is a tool's
+  -- own vocabulary, so remembering a single one with no tool attached meant a session for a
+  -- different tool inherited that name and died on its first turn.
   default_models TEXT,
   sidebar_order INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL
