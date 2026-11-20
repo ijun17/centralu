@@ -231,18 +231,13 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
       return app ? packageVersion(join(dirname(app), 'package.json')) : null
     }
     const text =
-      source.kind === 'command'
-        ? commandOutput(source.file, source.args)
+      source.kind === 'plutil'
+        ? execTextSync('/usr/bin/plutil', source.args, { timeoutMs: 5_000 }).stdout
         : readFileSync(join(copy, source.name), 'utf8')
     return text.trim() || null
   } catch {
     return null
   }
-}
-
-/** What a program prints when it exits 0 within 5 s; throws otherwise */
-function commandOutput(file: string, args: readonly string[]): string {
-  return execTextSync(file, args, { timeoutMs: 5_000 }).stdout
 }
 
 /** The AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`, as `centralu install` writes it) */

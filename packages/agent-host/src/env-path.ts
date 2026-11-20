@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 import { familyOf } from './os.js'
-import { findOnPath } from './os/rules.js'
+import { findOnPath, wslDrives } from './os/rules.js'
 
 /**
  * Aligns the GUI app's PATH with **the user's actual PATH**.
@@ -183,7 +183,22 @@ export function whichTool(
   platform: NodeJS.Platform = process.platform,
   exists: (path: string) => boolean = platform === 'win32' ? presentOnWindows : existsSync,
 ): string | null {
-  return findOnPath(name, env, familyOf(platform), exists)
+  return findOnPath(name, env, familyOf(platform), exists, platform === 'linux' ? hostWslDrives() : null)
+}
+
+let wslDrivesRead: string | null | undefined
+/** `wslDrives` of this machine, read once: the kernel and wsl.conf change only with a restart of WSL */
+function hostWslDrives(): string | null {
+  if (wslDrivesRead !== undefined) return wslDrivesRead
+  const read = (path: string) => {
+    try {
+      return readFileSync(path, 'utf8')
+    } catch {
+      return null
+    }
+  }
+  wslDrivesRead = wslDrives(read('/proc/sys/kernel/osrelease'), read('/etc/wsl.conf'))
+  return wslDrivesRead
 }
 
 /**

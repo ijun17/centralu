@@ -168,8 +168,8 @@ export function copySwapMayPrompt(platform: Platform = HOST_PLATFORM): boolean {
 /**
  * How to read the version the copy `centralu install` made carries (#645).
  *
- * macOS: the bundle's `CFBundleShortVersionString`, printed by `plutil`, which reads XML and binary
- * plists alike. It is the launcher's command (`bundleVersionCommand` in
+ * macOS: the bundle's `CFBundleShortVersionString`, printed by `/usr/bin/plutil` with these arguments, which reads XML
+ * and binary plists alike. It is the launcher's command (`bundleVersionCommand` in
  * `packaging/npm/centralu/bin/platform.mjs`, pinned to this by `updates.test.ts`), so the host and
  * `centralu install` never disagree about a copy. Windows: the `centralu-version.txt` the launcher
  * writes beside the copy (the exe's version resource drops the prerelease tag). Linux: the menu entry points back
@@ -179,9 +179,9 @@ export function copySwapMayPrompt(platform: Platform = HOST_PLATFORM): boolean {
 export function installedCopyVersionSource(
   copy: string,
   platform: Platform = HOST_PLATFORM,
-): { kind: 'command'; file: string; args: string[] } | { kind: 'file'; name: string } | { kind: 'menu-entry' } | null {
+): { kind: 'plutil'; args: string[] } | { kind: 'file'; name: string } | { kind: 'menu-entry' } | null {
   if (platform === 'darwin') {
-    return { kind: 'command', file: '/usr/bin/plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(copy, 'Contents', 'Info.plist')] }
+    return { kind: 'plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(copy, 'Contents', 'Info.plist')] }
   }
   // A file name in the copy, joined where it is read (by that host's path rules)
   if (platform === 'win32') return { kind: 'file', name: 'centralu-version.txt' }

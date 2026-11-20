@@ -10,6 +10,7 @@ import {
   isInside,
   pathKey,
   pathRules,
+  wslDrives,
   pathRulesFrom,
   pathToFileUrl,
   programCandidates,
@@ -258,6 +259,32 @@ describe('the environment and PATH by the family’s rules', () => {
       findOnPath('git', { PATH: 'repo;"C:\\Program Files\\Git\\cmd"' }, 'windows', (p) => there.has(p)),
     ).toBe('C:\\Program Files\\Git\\cmd\\git.exe')
     expect(findOnPath('git', { PATH: '/usr/bin:/bin' }, 'posix', (p) => p === '/bin/git')).toBe('/bin/git')
+  })
+
+  it("under WSL, skips a Windows drive's folders for a tool, and finds a .exe asked for by name there (#2366)", () => {
+    const PATH = '/usr/local/bin:/mnt/c/Users/me/AppData/Roaming/npm:/mnt/c/WINDOWS/system32:/windir/d/tools'
+    const there = new Set(['/mnt/c/Users/me/AppData/Roaming/npm/opencode', '/mnt/c/WINDOWS/system32/clip.exe', '/windir/d/tools/codex'])
+    const find = (name: string, drives: string | null) => findOnPath(name, { PATH }, 'posix', (p) => there.has(p), drives)
+    expect(find('opencode', null)).toBe('/mnt/c/Users/me/AppData/Roaming/npm/opencode')
+    expect(find('opencode', '/mnt/')).toBeNull()
+    expect(find('clip.exe', '/mnt/')).toBe('/mnt/c/WINDOWS/system32/clip.exe')
+    expect(find('codex', '/mnt/')).toBe('/windir/d/tools/codex')
+    expect(find('codex', '/windir/')).toBeNull()
+    there.add('/usr/local/bin/opencode')
+    expect(find('opencode', '/mnt/')).toBe('/usr/local/bin/opencode')
+  })
+
+  it("reads WSL's drive folder from the kernel's release and wsl.conf's [automount] root, /mnt/ when it names none", () => {
+    const wsl2 = '5.15.167.4-microsoft-standard-WSL2'
+    const conf = (...lines: string[]) => lines.join('\n')
+    expect(wslDrives('6.8.0-45-generic', null)).toBeNull()
+    expect(wslDrives(null, conf('[automount]', 'root = /windir/'))).toBeNull()
+    expect(wslDrives(wsl2, null)).toBe('/mnt/')
+    expect(wslDrives('4.4.0-19041-Microsoft', '')).toBe('/mnt/')
+    expect(wslDrives(wsl2, conf('[boot]', 'systemd=true'))).toBe('/mnt/')
+    expect(wslDrives(wsl2, conf('[boot]', 'systemd=true', '', '[automount]', 'enabled = true', 'root = /windir/', 'options = "metadata"'))).toBe('/windir/')
+    expect(wslDrives(wsl2, '[automount]\r\nroot="/drives" # mounted here\r\n')).toBe('/drives/')
+    expect(wslDrives(wsl2, conf('[network]', 'root = /not-this/', '[automount]', 'enabled = false'))).toBe('/mnt/')
   })
 })
 

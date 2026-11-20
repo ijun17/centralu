@@ -516,12 +516,19 @@ export function programCandidates(path: string, family: OsFamily): string[] {
  * something Windows can start (#14). Extensions are lowercased: NTFS ignores case, and `claude.cmd` is the name npm
  * wrote. Only absolute entries are searched (a relative one is read from the working folder, which may be a cloned
  * repository), and an entry is read without its quotes (`"C:\Program Files\Git\cmd"`), as Windows reads it.
+ *
+ * **Under WSL** (`windowsDrives`, the folder Windows' drives are mounted in: `wslDrives`) a folder on a Windows drive is
+ * not searched for a name without `.exe`: WSL appends Windows' PATH to Linux's, and what npm wrote there for a Windows
+ * install (`/mnt/c/…/npm/opencode`, an sh script ending in `exec …/opencode.exe`) would run the Windows tool, with the
+ * Windows install's config, home and sign-in, from a Linux host (#2366). A tool installed only on Windows is then not
+ * installed for that host. A `.exe` asked for by name is a Windows program the host means to run, and is found there.
  */
 export function findOnPath(
   name: string,
   env: Env,
   family: OsFamily,
   exists: (path: string) => boolean,
+  windowsDrives: string | null = null,
 ): string | null {
   if (family === 'windows') {
     const exts = /\.[^\\/.]+$/.test(name)
@@ -540,12 +547,25 @@ export function findOnPath(
     }
     return null
   }
+  const skipped = name.toLowerCase().endsWith('.exe') ? null : windowsDrives
   for (const dir of (env.PATH ?? '').split(posix.delimiter)) {
-    if (!dir) continue
+    if (!dir || (skipped !== null && posix.join(dir, '/').startsWith(skipped))) continue
     const candidate = posix.join(dir, name)
     if (exists(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * The folder WSL mounts Windows' drives in (with a trailing `/`), from the kernel's release (`/proc/sys/kernel/osrelease`,
+ * which names Microsoft under WSL) and `/etc/wsl.conf`: its `[automount]` `root`, `/mnt/` when it names none or cannot be
+ * read. null when this is not WSL.
+ */
+export function wslDrives(osRelease: string | null, wslConf: string | null): string | null {
+  if (!osRelease || !/microsoft/i.test(osRelease)) return null
+  const automount = /^\s*\[automount\]\s*$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/im.exec(wslConf ?? '')?.[1] ?? ''
+  const root = /^\s*root\s*=\s*["']?([^"'#\s]+)/im.exec(automount)?.[1]
+  return posix.join(root && posix.isAbsolute(root) ? root : '/mnt/', '/')
 }
 
 /** How to start a found tool: a program and the arguments that go before the tool's own */

@@ -38,7 +38,7 @@ export async function execText(command: string, args: readonly string[], options
 
 /**
  * `execText` for a caller that cannot wait: `runSync` blocks the host, and a limit ends that one process only, so it is for
- * a program that starts nothing (`ps`, `reg`, `whoami`, a package query). Anything that may start children is run with
+ * a program that starts nothing (the list `guard/timed-start` holds). Anything that may start children is run with
  * `execText`, which ends a tree. The same answer and the same failure; a program that could not be started or ran past its
  * limit throws the error `spawnSync` gave.
  */
