@@ -18,9 +18,9 @@
  * there (`child.kill` would end Playwright outright, without its teardown and report): the runner waits for the command to
  * end and gives the lock back. Anything else that ends the runner there ends it outright, and nothing above runs.
  */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { AFFECTED, affectedArgs, affectedEngines, engineOutput, listedCount, mergeBase, noSpecLines, reachesScreen } from './e2e-affected.js'
+import { AFFECTED, affectedArgs, affectedEngines, engineOutput, mergeBase, reachesScreen, runAffected } from './e2e-affected.js'
 import { acquireLock, passesSignalOn, signalExit, trackChild, withoutSeparator, type Held } from './e2e-lock.js'
 
 const [program, ...rest] = process.argv.slice(2)
@@ -73,42 +73,51 @@ process.off('SIGINT', onInt)
 process.off('SIGTERM', onTerm)
 console.error('e2e lock: taken')
 
+// The previous run's start-time lookup: awaited before the next run starts, so a late answer about it never names it over
+// the next run in the lock
+let tracking: Promise<void> = Promise.resolve()
+
 /** Runs the command once, with `more` arguments and `env` added; answers its exit code, as this process would report it. */
-function runOnce(more: string[] = [], env: Record<string, string> = {}): Promise<number> {
+async function runOnce(more: string[] = [], env: Record<string, string> = {}): Promise<number> {
+  await tracking
   return new Promise((resolve) => {
     child = spawn(process.execPath, [...argv, ...more], { stdio: 'inherit', env: { ...process.env, ...env } })
     if (passedOn !== null && passesSignalOn()) child.kill(passedOn)
     // Named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds): a runner
-    // killed in between must not leave Playwright running with the lock free. Awaited before the next run starts, so a late
-    // answer about this one never names it over the next
-    const tracking = child.pid === undefined ? Promise.resolve() : trackChild(held, child.pid)
+    // killed in between must not leave Playwright running with the lock free
+    if (child.pid !== undefined) tracking = trackChild(held, child.pid)
     // A run that cannot be started gives the lock back before it fails
     child.on('error', (err) => {
       held.release()
       console.error(`e2e lock: could not start ${program}: ${err.message}`)
       process.exit(1)
     })
-    child.on('close', (exitCode, signal) => {
-      const code = exitCode === null || (exitCode === 0 && passedOn !== null) ? signalExit(signal ?? passedOn) : exitCode
-      void tracking.then(() => resolve(code))
-    })
+    child.on('close', (exitCode, signal) => resolve(exitCode === null || (exitCode === 0 && passedOn !== null) ? signalExit(signal ?? passedOn) : exitCode))
   })
 }
 
-let code = 0
-if (!base) code = await runOnce()
-else {
-  // The listing loads the config and the specs and starts nothing: whether any spec is picked, before an engine is started for none
-  const listing = spawnSync(process.execPath, [...argv, '--list'], { encoding: 'utf8' })
-  if (listedCount(`${listing.stdout}${listing.stderr}`) === 0) for (const line of noSpecLines(base, reachesScreen(base))) console.error(line)
-  else {
-    for (const engine of affectedEngines()) {
-      if (passedOn !== null) break
-      console.error(`e2e: the affected specs in ${engine}`)
-      const ran = await runOnce([engineOutput(commandArgs, engine)], { E2E_BROWSER: engine })
-      if (code === 0) code = ran
-    }
-  }
+/** Playwright's `--list` of the same arguments, its output answered: it loads the config and the specs and starts nothing. */
+function listing(): Promise<string> {
+  return new Promise((resolve) => {
+    const list = spawn(process.execPath, [...argv, '--list'], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    list.stdout.on('data', (d: Buffer) => (out += d.toString()))
+    list.stderr.on('data', (d: Buffer) => (out += d.toString()))
+    list.on('error', () => resolve(out))
+    list.on('close', () => resolve(out))
+  })
 }
+
+const code = base
+  ? await runAffected({
+      base,
+      engines: affectedEngines(),
+      list: listing,
+      run: (engine) => runOnce([engineOutput(commandArgs, engine)], { E2E_BROWSER: engine }),
+      stopCode: () => (passedOn === null ? null : signalExit(passedOn)),
+      screen: () => reachesScreen(base),
+      say: (line) => console.error(line),
+    })
+  : await runOnce()
 held.release()
 process.exit(code)

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AFFECTED, affectedArgs, affectedEngines, engineOutput, listedCount, mergeBase, noSpecLines, reachesScreen } from './e2e-affected.js'
+import { AFFECTED, affectedArgs, affectedEngines, engineOutput, listedCount, mergeBase, noSpecLines, reachesScreen, runAffected, type Engine } from './e2e-affected.js'
 import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 
 /* `pnpm e2e --affected` (tooling/e2e-affected.ts): which specs, and what a run that picks none says. */
@@ -65,13 +65,61 @@ describe('the affected specs', () => {
       writeFileSync(join(repo, 'docs/a.md'), 'a\n')
       git('add', '-A')
       expect(reachesScreen(fork, repo)).toBe(false)
+      // A new file not yet added, as --only-changed counts it
       mkdirSync(join(repo, 'packages/ui/src'), { recursive: true })
       writeFileSync(join(repo, 'packages/ui/src/a.ts'), 'a\n')
+      expect(reachesScreen(fork, repo)).toBe(true)
       git('add', '-A')
       expect(reachesScreen(fork, repo)).toBe(true)
       expect(reachesScreen('not-a-commit', repo)).toBe(true)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
+  })
+})
+
+describe('one --affected run', () => {
+  const LISTED = 'Total: 2 tests in 1 file'
+  function affected(o: { listing?: string; codes?: Partial<Record<Engine, number>>; stopAfter?: 'list' | Engine; screen?: boolean } = {}) {
+    const said: string[] = []
+    const ran: Engine[] = []
+    let stop: number | null = null
+    const result = runAffected({
+      base: '0123456789abcdef',
+      engines: ['chromium', 'webkit'],
+      list: () => {
+        if (o.stopAfter === 'list') stop = 130
+        return Promise.resolve(o.listing ?? LISTED)
+      },
+      run: (engine) => {
+        ran.push(engine)
+        if (o.stopAfter === engine) stop = 130
+        return Promise.resolve(o.codes?.[engine] ?? 0)
+      },
+      stopCode: () => stop,
+      screen: () => o.screen ?? true,
+      say: (line) => said.push(line),
+    })
+    return result.then((code) => ({ code, ran, said }))
+  }
+
+  it('runs each engine in turn and answers the first failing one\'s code', async () => {
+    expect(await affected()).toEqual({ code: 0, ran: ['chromium', 'webkit'], said: ['e2e: the affected specs in chromium', 'e2e: the affected specs in webkit'] })
+    expect(await affected({ codes: { chromium: 1, webkit: 2 } })).toMatchObject({ code: 1, ran: ['chromium', 'webkit'] })
+    expect(await affected({ codes: { webkit: 2 } })).toMatchObject({ code: 2, ran: ['chromium', 'webkit'] })
+  })
+
+  it('starts no engine when the listing picks no spec, and says why', async () => {
+    const none = await affected({ listing: 'Total: 0 tests in 0 files', screen: false })
+    expect(none).toEqual({ code: 0, ran: [], said: noSpecLines('0123456789abcdef', false) })
+    // A listing without a count (a config error) runs, so the error is shown
+    expect((await affected({ listing: 'Error: no config' })).ran).toEqual(['chromium', 'webkit'])
+  })
+
+  it('starts no further engine once a signal reached the runner, the listing included', async () => {
+    expect(await affected({ stopAfter: 'list' })).toEqual({ code: 130, ran: [], said: [] })
+    expect(await affected({ stopAfter: 'list', listing: 'Total: 0 tests in 0 files' })).toEqual({ code: 130, ran: [], said: [] })
+    expect(await affected({ stopAfter: 'chromium' })).toMatchObject({ code: 130, ran: ['chromium'] })
+    expect(await affected({ stopAfter: 'chromium', codes: { chromium: 1 } })).toMatchObject({ code: 1, ran: ['chromium'] })
   })
 })

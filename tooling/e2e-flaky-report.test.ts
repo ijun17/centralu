@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Suite, TestCase } from '@playwright/test/reporter'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import FlakyReporter, { failedTests, flakyLines, flakySummary, flakyTests, knownFailureLines, knownFailureMatcher, knownFailuresText } from '../e2e/flaky-report.js'
+import FlakyReporter, { failedTests, flakyLines, flakySummary, flakyTests, knownFailureLines, knownFailureMatcher, knownFailures, knownFailuresText } from '../e2e/flaky-report.js'
 
 /*
  * e2e/flaky-report.ts: in CI a failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes
@@ -109,21 +109,26 @@ describe('the failures of a local run that the known intermittent failures issue
 
   it('are the ones Playwright calls failed, not the flaky or the passing ones', () => {
     expect(failedTests([broken, flaky, testCase('steady', 'expected', [{ status: 'passed' }])], ROOT).map((t) => t.title)).toEqual(['app › grid.spec.ts › grid › opens a cell'])
+    // Named as CI's log names it, which the issue quotes
+    expect(failedTests([broken], ROOT)[0]?.heading).toBe('[app] › e2e/grid.spec.ts:12:3 › grid › opens a cell')
   })
 
   it('are set apart with the quote they match, by the board\'s own matcher, the run\'s own failures left as they are', async () => {
-    const match = await knownFailureMatcher()
-    const lines = knownFailureLines(failedTests([broken, own], ROOT), { issue: 368, text: ISSUE }, match)
+    const known = { issue: 368, text: ISSUE, match: await knownFailureMatcher() }
+    const lines = knownFailureLines(failedTests([broken, own], ROOT), known)
     expect(lines).toEqual([
       '[e2e] 1 of 2 failure(s) are known intermittent ones (#368):',
       '[e2e]   e2e/grid.spec.ts:12 app › grid.spec.ts › grid › opens a cell: matches "page.goto: net::ERR_CONNECTION_RESET at http://127.0.0.1:..."',
     ])
-    expect(knownFailureLines(failedTests([own], ROOT), { issue: 368, text: ISSUE }, match)).toEqual(['[e2e] none of the 1 failure(s) is a known intermittent one (#368)'])
-    expect(knownFailureLines([], { issue: 368, text: ISSUE }, match)).toEqual([])
+    expect(knownFailureLines(failedTests([own], ROOT), known)).toEqual(['[e2e] none of the 1 failure(s) is a known intermittent one (#368)'])
+    expect(knownFailureLines([], known)).toEqual([])
+    // By CI's name of the test alone, as the issue lists one whose error varies
+    const byName = { ...known, text: 'Known intermittent failures:\n\n- [app] › e2e/grid.spec.ts:12:3 › grid › renames a session\n' }
+    expect(knownFailureLines(failedTests([own], ROOT), byName)[0]).toBe('[e2e] 1 of 1 failure(s) are known intermittent ones (#368):')
   })
 
   it('are none when the list cannot be read, and the run says so', () => {
-    expect(knownFailureLines(failedTests([broken], ROOT), { why: 'gh issue view 368 failed (offline)' }, () => 'a quote')).toEqual(['[e2e] known-failures list unavailable: gh issue view 368 failed (offline); no failure is set apart'])
+    expect(knownFailureLines(failedTests([broken], ROOT), { why: 'gh issue view 368 failed (offline)' })).toEqual(['[e2e] known-failures list unavailable: gh issue view 368 failed (offline); no failure is set apart'])
   })
 
   it('are read from the issue project.json names, with gh, and nothing is read without one', () => {
@@ -140,5 +145,15 @@ describe('the failures of a local run that the known intermittent failures issue
     expect(knownFailuresText(root, gh)).toEqual({ issue: 368, text: ISSUE })
     expect(asked).toEqual([['issue', 'view', '368', '--json', 'body', '--jq', '.body']])
     expect(knownFailuresText(root, () => { throw new Error('error connecting to api.github.com\nmore') })).toEqual({ why: 'gh issue view 368 failed (error connecting to api.github.com)' })
+  })
+
+  it('are none, and the run says why, when the board\'s matcher cannot be loaded', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cc-known-failures-'))
+    dirs.push(root)
+    mkdirSync(join(root, '.centralu/apps/project-board'), { recursive: true })
+    writeFileSync(join(root, '.centralu/apps/project-board/project.json'), JSON.stringify({ ci: { knownFailuresIssue: 368 } }))
+    const known = await knownFailures(root, () => ISSUE, () => Promise.reject(new Error('no such export')))
+    expect(knownFailureLines(failedTests([broken], ROOT), known)).toEqual(["[e2e] known-failures list unavailable: the board's matcher could not be loaded (no such export); no failure is set apart"])
+    expect(await knownFailures(root, () => ISSUE)).toMatchObject({ issue: 368, text: ISSUE })
   })
 })

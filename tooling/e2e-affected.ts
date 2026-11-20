@@ -2,9 +2,10 @@
  * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in Chromium and then WebKit (or the one engine
  * `E2E_BROWSER` names), under one e2e lock (tooling/with-e2e-lock.ts). Which specs is Playwright's own `--only-changed`
  * against the merge-base with main: the specs the branch changed, uncommitted changes included, and the specs that import
- * a file it changed. A spec imports only e2e/ helpers, never the window's
- * source (it drives a browser), so a change to the window alone picks none; CI's screen check (screenFiles,
- * .github/scripts/ci-changes.mjs) then says the screen changed, and the run says to pick the specs near the change by name.
+ * a file it changed. A spec drives a browser: it imports e2e/ helpers, and only a few of those import the window's or the
+ * host's code (the theme, for one), so most changes to the window pick no spec. When none is picked and CI's screen check
+ * (screenFiles, .github/scripts/ci-changes.mjs) says the change reaches the screen, the run says to pick the specs near it
+ * by name.
  */
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -13,11 +14,13 @@ import { fileURLToPath } from 'node:url'
 /** The flag `pnpm e2e` takes for this; Playwright never sees it. */
 export const AFFECTED = '--affected'
 
+export type Engine = 'chromium' | 'webkit'
+
 /**
  * The engines the affected specs run in, one after the other: both, as CI runs every spec in each (build.yml), unless
  * `E2E_BROWSER` names one (e2e/engine.ts), as a sandbox without WebKit has it.
  */
-export function affectedEngines(env: NodeJS.ProcessEnv = process.env): ('chromium' | 'webkit')[] {
+export function affectedEngines(env: NodeJS.ProcessEnv = process.env): Engine[] {
   return env.E2E_BROWSER === 'chromium' || env.E2E_BROWSER === 'webkit' ? [env.E2E_BROWSER] : ['chromium', 'webkit']
 }
 
@@ -61,7 +64,7 @@ export function noSpecLines(base: string, screen: boolean): string[] {
 }
 
 /**
- * Whether what differs from `base` in the working tree, as --only-changed reads it, reaches the screen: CI's one definition,
+ * Whether what differs from `base` in the working tree, untracked files too, as --only-changed reads it, reaches the screen: CI's one definition,
  * asked as the merge queue asks it (`ci-changes.mjs --screen`, the files on stdin). An answer that cannot be had is taken to
  * say yes: the run then only names a filter.
  */
@@ -70,10 +73,45 @@ export function reachesScreen(base: string, cwd = process.cwd()): boolean {
     const files = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .split('\0')
       .filter(Boolean)
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\0')
+      .filter(Boolean)
     const script = fileURLToPath(new URL('../.github/scripts/ci-changes.mjs', import.meta.url))
-    const answer: unknown = JSON.parse(execFileSync(process.execPath, [script, '--screen'], { cwd, input: JSON.stringify(files), encoding: 'utf8' }))
+    const answer: unknown = JSON.parse(execFileSync(process.execPath, [script, '--screen'], { cwd, input: JSON.stringify([...files, ...untracked]), encoding: 'utf8' }))
     return !(typeof answer === 'object' && answer !== null && 'screen' in answer && answer.screen === false)
   } catch {
     return true
   }
+}
+
+/**
+ * One `--affected` run under the lock: the listing first, which starts no browser and no server; nothing more when it
+ * picks no spec; then each engine in turn. `stopCode` is the exit code a signal that reached the runner asks for, or
+ * null: once there is one, no further engine starts. Answers the exit code: of several runs, the first failing one's.
+ */
+export async function runAffected(o: {
+  base: string
+  engines: Engine[]
+  list: () => Promise<string>
+  run: (engine: Engine) => Promise<number>
+  stopCode: () => number | null
+  screen: () => boolean
+  say: (line: string) => void
+}): Promise<number> {
+  const listing = await o.list()
+  const stopped = o.stopCode()
+  if (stopped !== null) return stopped
+  if (listedCount(listing) === 0) {
+    for (const line of noSpecLines(o.base, o.screen())) o.say(line)
+    return 0
+  }
+  let code = 0
+  for (const engine of o.engines) {
+    const stop = o.stopCode()
+    if (stop !== null) return code || stop
+    o.say(`e2e: the affected specs in ${engine}`)
+    const ran = await o.run(engine)
+    if (code === 0) code = ran
+  }
+  return code
 }

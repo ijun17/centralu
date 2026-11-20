@@ -251,8 +251,8 @@ something in WebKit goes in the shared fixture and skips itself in other engines
 `CI=1 pnpm e2e --affected` runs the specs a branch changed in Chromium and then in WebKit under one lock (#2373), or in the
 one engine `E2E_BROWSER` names; each engine keeps its results in `e2e/test-results/<engine>`. Which specs is Playwright's
 `--only-changed` against the merge-base with main: the specs the branch changed, uncommitted changes included, and the specs
-that import a file it changed. A spec never imports the window's own code, so a change to the UI alone picks no spec; the run
-then says so and, when the change reaches the screen by CI's definition (`screenFiles`), asks for the specs near it by name
+that import a file it changed. Only a few specs import the window's or the host's code (the theme, for one), through their
+fixtures, so most changes to the UI pick no spec; the run then says so and, when the change reaches the screen by CI's definition (`screenFiles`), asks for the specs near it by name
 (`CI=1 pnpm e2e <filter>`). On Windows, WebKit fails the scenarios that drag (#2022, above). Any local run with failures
 also says which of them the known intermittent failures issue lists (#368, the board's project.json
 `ci.knownFailuresIssue`), by the board's own matcher, each with the quote it matched; they are still failures. The issue is

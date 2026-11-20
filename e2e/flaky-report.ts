@@ -19,7 +19,7 @@ import { errorMessage } from '@cc/protocol'
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const runGh = (args: string[]) => execFileSync('gh', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+const runGh = (args: string[]) => execFileSync('gh', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000, windowsHide: true })
 
 export interface FlakyTest {
   /** The spec file, relative to the repository */
@@ -31,27 +31,37 @@ export interface FlakyTest {
   error: string
 }
 
-/** The tests of a finished run that Playwright judged `outcome`, as `FlakyTest`s with the first failed attempt's error */
-function testsWith(tests: TestCase[], outcome: ReturnType<TestCase['outcome']>, cwd: string): FlakyTest[] {
-  return tests
-    .filter((t) => t.outcome() === outcome)
-    .map((t) => {
-      const failed = t.results.find((r) => r.status !== 'passed' && r.status !== 'skipped')
-      const message = failed?.error?.message ?? failed?.errors[0]?.message ?? `the first attempt ended ${failed?.status ?? 'without passing'}`
-      return {
-        file: relative(cwd, t.location.file).split('\\').join('/'),
-        line: t.location.line,
-        title: t.titlePath().filter(Boolean).join(' › '),
-        error: stripVTControlCharacters(message).split('\n').find((l) => l.trim())?.trim() ?? '',
-      }
-    })
+/** A failed test, with the line Playwright's list reporter names it by: `[project] › file:line:column › titles`, as CI's log has it */
+export interface FailedTest extends FlakyTest {
+  heading: string
+}
+
+/** A test of a finished run as a `FlakyTest`, with the first failed attempt's error */
+function asFlakyTest(t: TestCase, cwd: string): FlakyTest {
+  const failed = t.results.find((r) => r.status !== 'passed' && r.status !== 'skipped')
+  const message = failed?.error?.message ?? failed?.errors[0]?.message ?? `the first attempt ended ${failed?.status ?? 'without passing'}`
+  return {
+    file: relative(cwd, t.location.file).split('\\').join('/'),
+    line: t.location.line,
+    title: t.titlePath().filter(Boolean).join(' › '),
+    error: stripVTControlCharacters(message).split('\n').find((l) => l.trim())?.trim() ?? '',
+  }
 }
 
 /** The flaky tests of a finished run, from Playwright's own verdict (`outcome() === 'flaky'`) */
-export const flakyTests = (tests: TestCase[], cwd = process.cwd()): FlakyTest[] => testsWith(tests, 'flaky', cwd)
+export const flakyTests = (tests: TestCase[], cwd = process.cwd()): FlakyTest[] => tests.filter((t) => t.outcome() === 'flaky').map((t) => asFlakyTest(t, cwd))
 
 /** The tests of a finished run that failed (`outcome() === 'unexpected'`) */
-export const failedTests = (tests: TestCase[], cwd = process.cwd()): FlakyTest[] => testsWith(tests, 'unexpected', cwd)
+export function failedTests(tests: TestCase[], cwd = process.cwd()): FailedTest[] {
+  return tests
+    .filter((t) => t.outcome() === 'unexpected')
+    .map((t) => {
+      const f = asFlakyTest(t, cwd)
+      // titlePath: the root's empty title, the project, the file, then the describe titles and the test's own
+      const [, project = '', , ...titles] = t.titlePath()
+      return { ...f, heading: [`[${project}]`, `${f.file}:${f.line}:${t.location.column}`, ...titles].join(' › ') }
+    })
+}
 
 /**
  * The text of the issue that lists the known intermittent failures (the board's project.json `ci.knownFailuresIssue`), read
@@ -89,14 +99,28 @@ export async function knownFailureMatcher(): Promise<KnownFailureMatch> {
   }
 }
 
+/** The known intermittent failures as a local run reads them: the issue and how a failure is matched to it, or why not */
+export type KnownFailures = { issue: number; text: string; match: KnownFailureMatch } | { why: string }
+
+/** The issue's text (knownFailuresText) and the board's matcher (knownFailureMatcher), or why either could not be had */
+export async function knownFailures(root = ROOT, gh: (args: string[]) => string = runGh, load = knownFailureMatcher): Promise<KnownFailures> {
+  const known = knownFailuresText(root, gh)
+  if ('why' in known) return known
+  try {
+    return { ...known, match: await load() }
+  } catch (e) {
+    return { why: `the board's matcher could not be loaded (${errorMessage(e)})` }
+  }
+}
+
 /**
  * What a local run prints about its failures: the ones the known intermittent failures issue lists, set apart (each with the
  * quote it matched), so a run's own breakage is not read past. A failure stays a failure either way.
  */
-export function knownFailureLines(failed: FlakyTest[], known: ReturnType<typeof knownFailuresText>, match: KnownFailureMatch): string[] {
+export function knownFailureLines(failed: FailedTest[], known: KnownFailures): string[] {
   if (!failed.length) return []
   if ('why' in known) return [`[e2e] known-failures list unavailable: ${known.why}; no failure is set apart`]
-  const matched = failed.map((t) => ({ t, quote: match({ line: t.title, error: t.error }, known.text) })).filter((m) => m.quote)
+  const matched = failed.map((t) => ({ t, quote: known.match({ line: t.heading, error: t.error }, known.text) })).filter((m) => m.quote)
   if (!matched.length) return [`[e2e] none of the ${failed.length} failure(s) is a known intermittent one (#${known.issue})`]
   return [`[e2e] ${matched.length} of ${failed.length} failure(s) are known intermittent ones (#${known.issue}):`, ...matched.map(({ t, quote }) => `[e2e]   ${t.file}:${t.line} ${t.title}: matches "${quote}"`)]
 }
@@ -144,7 +168,7 @@ export default class FlakyReporter implements Reporter {
     if (!label) for (const line of flakyLines(tests, github)) console.log(line)
     // CI's own check run is matched against the issue by the board (ci_status); a local run has no such reader
     const failed = github ? [] : failedTests(all)
-    if (failed.length) for (const line of knownFailureLines(failed, knownFailuresText(), await knownFailureMatcher())) console.log(line)
+    if (failed.length) for (const line of knownFailureLines(failed, await knownFailures())) console.log(line)
     if (!tests.length || !github) return
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${flakySummary(tests, label)}\n`)
     if (!label && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'flaky=true\n')
