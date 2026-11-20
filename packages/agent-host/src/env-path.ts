@@ -182,23 +182,19 @@ export function whichTool(
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
   exists: (path: string) => boolean = platform === 'win32' ? presentOnWindows : existsSync,
+  read: (path: string) => string | null = readOrNull,
 ): string | null {
-  return findOnPath(name, env, familyOf(platform), exists, platform === 'linux' ? hostWslDrives() : null)
+  // Under WSL, where Windows' drives are (`wslDrives`): two small files, read at each lookup so nothing is kept to go stale
+  const windowsDrives = platform === 'linux' ? wslDrives(read('/proc/sys/kernel/osrelease'), read('/etc/wsl.conf')) : null
+  return findOnPath(name, env, familyOf(platform), exists, { windowsDrives })
 }
 
-let wslDrivesRead: string | null | undefined
-/** `wslDrives` of this machine, read once: the kernel and wsl.conf change only with a restart of WSL */
-function hostWslDrives(): string | null {
-  if (wslDrivesRead !== undefined) return wslDrivesRead
-  const read = (path: string) => {
-    try {
-      return readFileSync(path, 'utf8')
-    } catch {
-      return null
-    }
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
   }
-  wslDrivesRead = wslDrives(read('/proc/sys/kernel/osrelease'), read('/etc/wsl.conf'))
-  return wslDrivesRead
 }
 
 /**

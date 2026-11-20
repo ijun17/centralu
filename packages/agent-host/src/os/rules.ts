@@ -457,13 +457,15 @@ export function commandInterpreter(env: Env): string {
 }
 
 /**
- * What is started on Windows for a program that is not on PATH: a path under `%SystemRoot%\System32` that only an
- * administrator can make, so the start reports the program missing (ENOENT, which every caller reads as "not
- * installed") and Windows looks for it nowhere else. Given the bare name, Windows looks in the child's working folder
- * before PATH: a `git.exe` committed in a project ran whenever git itself was not installed (#838).
+ * What is started for a program the host's lookup did not find: a path only an administrator can make, so the start
+ * reports the program missing (ENOENT, which every caller reads as "not installed") and nothing is looked for anywhere
+ * else. Windows: under `%SystemRoot%\System32`; given the bare name, Windows looks in the child's working folder before
+ * PATH, so a `git.exe` committed in a project would run whenever git itself is not installed (#838). Elsewhere: a folder at
+ * the root; given the bare name, the start's own PATH search finds what `findOnPath` passes over (a Windows install
+ * under WSL, #2366).
  */
-export function notOnPath(name: string, env: Env): string {
-  return systemTool(['centralu-not-on-path', `${name}.exe`], env)
+export function notOnPath(name: string, env: Env, family: OsFamily): string {
+  return family === 'windows' ? systemTool(['centralu-not-on-path', `${name}.exe`], env) : posix.join('/centralu-not-on-path', name)
 }
 
 /**
@@ -491,7 +493,7 @@ export function programFor(
         : find(name, '.COM;.EXE')
     if (!found) return { path: win32.join(win32.dirname(batch), `${name}.exe`), found: false }
   }
-  return found ? { path: found, found: true } : { path: notOnPath(name, env), found: false }
+  return found ? { path: found, found: true } : { path: notOnPath(name, env, family), found: false }
 }
 
 /** What Windows assumes when PATHEXT is not set */
@@ -528,7 +530,7 @@ export function findOnPath(
   env: Env,
   family: OsFamily,
   exists: (path: string) => boolean,
-  windowsDrives: string | null = null,
+  { windowsDrives = null }: { windowsDrives?: string | null } = {},
 ): string | null {
   if (family === 'windows') {
     const exts = /\.[^\\/.]+$/.test(name)
@@ -565,8 +567,11 @@ export function findOnPath(
  */
 export function wslDrives(osRelease: string | null, wslConf: string | null): string | null {
   if (!osRelease || !/microsoft/i.test(osRelease)) return null
-  const automount = /^\s*\[automount\]\s*$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/im.exec(wslConf ?? '')?.[1] ?? ''
-  const root = /^\s*root\s*=\s*["']?([^"'#\s]+)/im.exec(automount)?.[1]
+  // Every `[automount]` section is read, and the last `root` in them counts, as INI readers merge a section given twice
+  const sections = (wslConf ?? '').matchAll(/^\s*\[automount\]\s*(?:#.*)?$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/gim)
+  const roots = [...sections].flatMap(([, body]) => [...(body ?? '').matchAll(/^\s*root\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\s]+))/gim)])
+  const last = roots.at(-1)
+  const root = last && (last[1] ?? last[2] ?? last[3])
   return posix.join(root && posix.isAbsolute(root) ? root : '/mnt/', '/')
 }
 

@@ -264,7 +264,7 @@ describe('the environment and PATH by the family’s rules', () => {
   it("under WSL, skips a Windows drive's folders for a tool, and finds a .exe asked for by name there (#2366)", () => {
     const PATH = '/usr/local/bin:/mnt/c/Users/me/AppData/Roaming/npm:/mnt/c/WINDOWS/system32:/windir/d/tools'
     const there = new Set(['/mnt/c/Users/me/AppData/Roaming/npm/opencode', '/mnt/c/WINDOWS/system32/clip.exe', '/windir/d/tools/codex'])
-    const find = (name: string, drives: string | null) => findOnPath(name, { PATH }, 'posix', (p) => there.has(p), drives)
+    const find = (name: string, drives: string | null) => findOnPath(name, { PATH }, 'posix', (p) => there.has(p), { windowsDrives: drives })
     expect(find('opencode', null)).toBe('/mnt/c/Users/me/AppData/Roaming/npm/opencode')
     expect(find('opencode', '/mnt/')).toBeNull()
     expect(find('clip.exe', '/mnt/')).toBe('/mnt/c/WINDOWS/system32/clip.exe')
@@ -273,7 +273,7 @@ describe('the environment and PATH by the family’s rules', () => {
     there.add('/usr/local/bin/opencode')
     expect(find('opencode', '/mnt/')).toBe('/usr/local/bin/opencode')
     // Only a drive letter's folder is Windows': with `root = /` drives are `/c/…`, and `/usr`, `/mnt/wsl`, `/mnt/data` stay Linux's
-    const first = (PATH: string, drives: string) => findOnPath('tool', { PATH }, 'posix', () => true, drives)
+    const first = (PATH: string, drives: string) => findOnPath('tool', { PATH }, 'posix', () => true, { windowsDrives: drives })
     expect(first('/c/npm:/usr/bin', '/')).toBe('/usr/bin/tool')
     expect(first('/mnt/c:/mnt/wsl/bin', '/mnt/')).toBe('/mnt/wsl/bin/tool')
     expect(first('/c/npm:/mnt/data/bin', '/')).toBe('/mnt/data/bin/tool')
@@ -290,6 +290,8 @@ describe('the environment and PATH by the family’s rules', () => {
     expect(wslDrives(wsl2, conf('[boot]', 'systemd=true', '', '[automount]', 'enabled = true', 'root = /windir/', 'options = "metadata"'))).toBe('/windir/')
     expect(wslDrives(wsl2, '[automount]\r\nroot="/drives" # mounted here\r\n')).toBe('/drives/')
     expect(wslDrives(wsl2, conf('[network]', 'root = /not-this/', '[automount]', 'enabled = false'))).toBe('/mnt/')
+    expect(wslDrives(wsl2, conf('[automount] # drives', 'root = "/mnt/my drives"'))).toBe('/mnt/my drives/')
+    expect(wslDrives(wsl2, conf('[automount]', 'root = /first/', '[boot]', '[automount]', 'root = /last/'))).toBe('/last/')
   })
 })
 

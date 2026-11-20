@@ -183,8 +183,9 @@ const STARTS_NOTHING = /^(?:ps|reg|plutil)(?:\.exe)?$/
  *
  * In host code, `runSync` and `execTextSync` run only a program named in `STARTS_NOTHING`, written as a literal (a path's last
  * part counts) or as `systemTool([…, name])` (`sync`; off with `{ sync: false }`): a synchronous run cannot end a tree without
- * blocking the host for a process-table read, so it is kept to programs that leave none. A wrapper that hands its own
- * parameter on (`execTextSync` in os/exec.ts) is not read; its callers are.
+ * blocking the host for a process-table read, so it is kept to programs that leave none. `execTextSync` in os/exec.ts,
+ * which hands its own parameter on, is not read; its callers are. Not seen: a runner imported under another name or kept
+ * in a variable (`const run = os.processes.runSync`).
  */
 const timedStart = guard('timed-start', {
   timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)",
@@ -202,9 +203,9 @@ const timedStart = guard('timed-start', {
       : plain(command)
     return STARTS_NOTHING.test((named ?? '').split(/[\\/]/).at(-1) ?? '')
   }
-  /** `command` is a parameter of the enclosing `runSync` / `execTextSync` itself, which hands it on */
+  /** `command` is a parameter of `execTextSync` in os/exec.ts, which hands it on to `runSync` */
   const handedOn = (node, command) => {
-    if (command?.type !== 'Identifier') return false
+    if (command?.type !== 'Identifier' || !/[\\/]os[\\/]exec\.ts$/.test(context.filename)) return false
     let fn = node.parent
     while (fn && !/Function/.test(fn.type)) fn = fn.parent
     return !!fn && pidOnly.has(fn.id?.name) && fn.params.some((p) => p.type === 'Identifier' && p.name === command.name)

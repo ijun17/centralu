@@ -490,6 +490,27 @@ describe('worktree sessions', () => {
       }
     })
 
+    it("keeps an archived session's worktree that another session still works in", async () => {
+      const s = await start('pr/occupied')
+      commit(s.worktree!.path, 'occupied.txt')
+      git(s.worktree!.path, 'push', '-q', 'origin', 'pr/occupied')
+      const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
+      wtMgr.rename(helper.id, 'helper')
+      await wtRpc('agents.deleteSession', { sessionId: s.id })
+
+      await expect(start('pr/occupied')).rejects.toThrow(/"helper" working in it/)
+      expect(existsSync(s.worktree!.path)).toBe(true)
+    })
+
+    it("never takes a worktree named as an archived session that is not the one it recorded", async () => {
+      const old = await archived('pr/recorded')
+      const namesake = join(root, 'elsewhere', old.id)
+      git(repo, 'worktree', 'add', '-q', '-b', 'pr/namesake', namesake)
+
+      await expect(start('pr/namesake')).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(namesake)).toBe(true)
+    })
+
     it("never takes another project's archived worktree, though both are of one repository", async () => {
       const old = await archived('pr/other-project')
       mkdirSync(join(repo, 'sub'))
