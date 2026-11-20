@@ -252,9 +252,10 @@ describe('the host process, started for real', () => {
     const said = `kept 1 folder(s) in ${join(s.dir, 'worktrees', project)} that no session owns`
     // The sweep's line, written as the start reads the folder: waited for, within the start's own bound
     for (const deadline = Date.now() + 30_000 * SLOW; !log().includes(said) && Date.now() < deadline; ) await settle(50)
-    host.p.stdin!.end()
+    host.p.stdin?.end()
     expect(await host.exited).toBe(0)
     expect(log()).toContain(said)
+    expect(existsSync(join(elsewhere, 'worktrees'))).toBe(false)
   }, 60_000 * SLOW)
 
   it('the log is on before PATH and the lock: a refused start says why in host.log, after the banner (HO3)', () => {
