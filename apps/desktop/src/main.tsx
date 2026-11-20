@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
-import { errorMessage, storeWorkWords } from '@cc/protocol/client'
+import { errorMessage, sentenceStart, storeWorkWords } from '@cc/protocol/client'
 import { App, confirmKeyAction, formatBytes, formatDuration, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
   autoRestart,
@@ -364,9 +364,6 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   )
 }
 
-/** `words` as the start of a sentence */
-const sentence = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
-
 /**
  * The screen while the host starts. A host that works on its store first (#2334, `work`) says what, and for how long
  * by its own clock, so a long copy reads as one and not as a start that hung; a second of it shows nothing, so a
@@ -388,7 +385,7 @@ function Starting({ work = null }: { work?: StoreWork | null }) {
       {shown ? (
         <>
           <p className="text-md text-ink-muted">
-            {sentence(storeWorkWords(shown, "Centralu's"))} ({formatBytes(shown.bytes)})…
+            {sentenceStart(storeWorkWords(shown, "Centralu's"))} ({formatBytes(shown.bytes)})…
           </p>
           <p className="text-xs text-ink-faint">
             This can take a few minutes. Centralu opens when it is done ({formatDuration(now - shown.since, { coarse: true })} so far).

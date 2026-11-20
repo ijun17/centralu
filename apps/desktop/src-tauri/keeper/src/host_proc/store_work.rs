@@ -75,8 +75,7 @@ fn writer(lock: &Lock, alive: fn(u32) -> bool, start_text: fn(u32) -> Option<Str
 }
 
 /// The launcher's `isLockWriter`: an identified writer is believed, or not, by that; one that cannot be identified only
-/// while the record is young. Believing it for as long as its pid lives kept the window on its copy screen for a stranger
-/// that got the pid of a host ended in its work.
+/// while the record is young, since a host ended in its work leaves the record and its pid may go to any process.
 fn believed(lock: &Lock, identified: Option<bool>, alive: bool, now: u64) -> bool {
     alive
         && match identified {

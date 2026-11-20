@@ -148,9 +148,12 @@ copy of the store before a step that breaks older readers, or a long store step,
 in `host.lock`: `store: { doing: 'copy' | 'update', step, bytes, since }` beside who holds the folder, written before
 the copy and before each step and taken out after the last ([stored-shapes.md](../../stored-shapes.md)). The launcher
 reads it in one place (`storeWork` in `serve-files.mjs`), and only while `host.lock` names the process that wrote it
-(`isLockWriter`, the rule every reader of `host.lock` goes by, the shell's included): one identified by its start time
-counts, and one Windows cannot identify (another logon's process) only while the record is younger than a start takes,
-120 s. A host ended in its work leaves the record, and its pid may be another process's by then. Every surface says the
+(`isLockWriter`, the rule every reader that waits on the host goes by, the shell's included): one identified by its
+start time counts, and one Windows cannot identify (another logon's process) only while the record is younger than a
+start takes, 120 s. A host ended in its work leaves the record, and its pid may be another process's by then. The 120 s
+count from when the host took the folder, so an unidentifiable host still copying after them is no longer waited for;
+an identified one, the usual case, is waited for to the end. A stop signals only an identified writer
+(`lockHolderIsAlive`): one it cannot identify is left, whatever the record's age. Every surface says the
 work in the same words, with no step number ("copying its data before an update", `storeWorkWords` in @cc/protocol).
 Then:
 

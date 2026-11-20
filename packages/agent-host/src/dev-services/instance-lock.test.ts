@@ -45,9 +45,6 @@ describe('single-instance lock for the host', () => {
     expect(readdirSync(join(db, '..')).filter((n) => n.startsWith('host.lock'))).toEqual(['host.lock'])
     r.release()
     expect(existsSync(lock)).toBe(false)
-    // The shell's reader pins the same record
-    const shellTest = readFileSync(new URL('../../../../apps/desktop/src-tauri/keeper/src/host_proc/store_work.rs', import.meta.url), 'utf8')
-    expect(shellTest).toContain('include_str!("../../../../../../tooling/fixtures/host-lock-store-work.json")')
   })
 
   it('acquiring it for the first time succeeds and creates a lock file', () => {

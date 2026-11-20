@@ -2899,6 +2899,24 @@ describe('asking the host on the port without handing the token to anyone else (
   }, 30_000 * SLOW)
 
   /*
+   * A record whose writer cannot be identified (its creation unreadable, as another logon's process on Windows, and no
+   * start time recorded) names any process that got a dead host's pid, however young the record: waited on, never signalled
+   */
+  it('a stop never signals a process host.lock names that it cannot identify as its writer, however young the record', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const stranger = lockHolderProcess(d, 'serve')
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: stranger.pid, started: null, at: Date.now(), by: 'serve' }))
+    const signals: Array<[number, string]> = []
+    const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]), createdAt: () => null })
+    expect(signals).toEqual([])
+    expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+    expect(stopped.message).toContain('centralu serve is not running')
+    expect(stranger.alive()).toBe(true)
+  }, 30_000 * SLOW)
+
+  /*
    * What stays stoppable (#838): a host that cannot prove the key (still on the key it had before --rotate-token) which
    * serve started, as its lock says.
    */

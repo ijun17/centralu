@@ -669,40 +669,35 @@ export function foreignHolder(dataDir) {
 }
 
 /**
- * Whether the process `host.lock` names is the one that wrote it (#838 review): alive, and started when the lock says
- * (`ps -o lstart`, as the host writes it, `instance-lock.ts`). A lock left by a host that died, whose pid another
- * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
- * start time and no `at` (its host found no `ps`) cannot be told apart, so it does not count. Windows has no `ps` and its
- * host records no start time (#1723), only `at`, when it took the folder: the process that wrote the lock was created by
- * then, and one given its number afterwards was created later. Both times come from one clock and the host writes `at`
- * 17 ms or more after its process was created, so the slack is one clock tick, for the two readings of it. An `at` in the
- * future (a clock set back since) proves nothing.
+ * Whether the process `host.lock` names is identified as the one that wrote it (`isWriter` true): what a stop may signal,
+ * and what `heldHere` counts as this folder's host. One that cannot be identified is never signalled, whatever the age
+ * of its record: it may be any process of the user's that got a dead host's pid. Waiting on a host goes by `isLockWriter`.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
-  return isLockWriter(lockHolder(dataDir), new Map(), (h) => isWriter(h, startOf, createdAt))
+  return isWriter(lockHolder(dataDir), startOf, createdAt) === true
 }
 
 /**
- * Whether host.lock's `holder` names the live process that wrote it: the one rule every reader of host.lock here goes by
- * (`lockHolderIsAlive`, `storeWork`, `--stop`'s wait on a start), as the shell's does (keeper `host_proc/store_work.rs`).
- * A writer `isWriter` identifies is believed, or not, by that. One it cannot identify (Windows will not say when another
- * logon's process was created) is believed only while the record is younger than a start takes (`STARTING_MAX_MS`): a
- * host ended mid-work leaves its record, and believing an unknown process for as long as its pid lives kept every
- * starter waiting on a stranger that got the pid. `known` keeps what `writer` said per record between calls, since a
+ * Whether host.lock's `holder` names the live process that wrote it, for waiting on it (`storeWork`, `--stop`'s wait on
+ * a start, a stop's wait on store work), as the shell's reader does (keeper `host_proc/store_work.rs`): `isWriterWithin`
+ * for as long as a start takes (`STARTING_MAX_MS`). `known` keeps what `writer` said per record between calls, since a
  * Windows creation time costs a PowerShell; the record's age is read at each call.
  */
 export function isLockWriter(holder, known = new Map(), writer = isWriter) {
   if (!holder || !isAlive(holder.pid)) return false
   const key = `${holder.pid}:${holder.started}:${holder.at}`
   if (!known.has(key)) known.set(key, writer(holder))
-  const w = known.get(key)
-  return w === null ? typeof holder.at === 'number' && Date.now() - holder.at < STARTING_MAX_MS : w === true
+  return isWriterWithin(holder, STARTING_MAX_MS, () => known.get(key))
 }
 
 /**
- * Whether `{ pid, started, at }` names the live process that wrote it, by `lockHolderIsAlive`'s rule: true, false, or
- * null when it lives and Windows cannot say when it was created (another logon's process); each caller decides what
- * that counts as
+ * Whether `{ pid, started, at }` names the live process that wrote it (#838 review): true, false, or null when it lives
+ * and its creation cannot be read (Windows will not say for another logon's process); each caller decides what null
+ * counts as. Where the writer recorded `started` (`ps -o lstart`, `instance-lock.ts`), the process must have started
+ * then. Without it (Windows has no `ps`, #1723) only `at`, when the record was written: the writer was created by then,
+ * and a process given its number afterwards was created later. Both times come from one clock and the host writes `at`
+ * 17 ms or more after its process was created, so the slack is one clock tick, for the two readings of it. A record with
+ * neither, or an `at` in the future (a clock set back since), proves nothing.
  */
 export function isWriter(holder, startOf = processStartTime, createdAt = processCreatedAt) {
   if (!holder || !isAlive(holder.pid)) return false
@@ -713,14 +708,14 @@ export function isWriter(holder, startOf = processStartTime, createdAt = process
 }
 
 /**
- * `isWriter` with its third answer settled: a process that lives but whose creation Windows will not tell (another logon's,
- * `null`) counts as the writer while its record is younger than `maxAgeMs`, by the `at` it wrote. Asking for more
- * (an elevated read, a prompt) is not an option for a launcher; the cost is a stranger that took a dead writer's pid
- * within that time counting as the writer for the rest of it.
+ * `isWriter` with its third answer settled: a process that lives but whose creation cannot be read (`null`) counts as the
+ * writer while its record is younger than `maxAgeMs`, by the `at` it wrote. Asking for more (an elevated read, a prompt)
+ * is not an option for a launcher; the cost is a stranger that took a dead writer's pid within that time counting as the
+ * writer for the rest of it, so this is for waiting, never for signalling.
  */
 export function isWriterWithin(holder, maxAgeMs, writer = isWriter) {
   const w = writer(holder)
-  return w === null ? typeof holder?.at === 'number' && Date.now() - holder.at < maxAgeMs : w
+  return w === null ? typeof holder?.at === 'number' && Date.now() - holder.at < maxAgeMs : w === true
 }
 
 /** One tick of the Windows clock */

@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, lockHolderPid, readServePid, storeWork, storeWorkText } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolder, lockHolderIsAlive, lockHolderPid, isLockWriter, isWriter, processCreatedAt, processStartTime, readServePid, storeWork, storeWorkText } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, listensHere } from './serve-port.mjs'
 import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
@@ -36,7 +36,7 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * listens: ended in its work, it would do all of it again at its next start, and an update that stops it each time
  * would never land. A person's stop ends it as before, and says that its next start does that work again.
  */
-export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, waitOnWork = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
+export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, waitOnWork = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig), createdAt = processCreatedAt }) {
   const state = readServeState(dataDir)
   if (!state) return { ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` }
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -46,17 +46,18 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const probe = () => probeHost({ port, ...own, protocolVersion: installed })
   // What host.lock's writer was found to be, for every read of it during this stop
   const known = new Map()
-  const work = storeWork(dataDir, known)
+  const writer = (h) => isWriter(h, processStartTime, createdAt)
+  const work = storeWork(dataDir, known, writer)
   if (work && waitOnWork && !(await probe()).running) {
     say(`the host is ${storeWorkText(work)}; waiting for it to finish before it is stopped`)
     // A host that answers is past its work, whatever host.lock still says: one whose clear of the record was refused
     // (a reader holding the file on Windows) keeps saying it until it exits
-    while (storeWork(dataDir, known) && !(await probe()).running) await sleep(500)
+    while (storeWork(dataDir, known, writer) && !(await probe()).running) await sleep(500)
     // It listens within moments of its work: one that does not is taken for a start that hung, below
-    await waitUntil(async () => (await probe()).running || !lockHolderIsAlive(dataDir), WORK_TO_LISTEN_MS)
+    await waitUntil(async () => (await probe()).running || !isLockWriter(lockHolder(dataDir), known, writer), WORK_TO_LISTEN_MS)
   }
   const first = await probe()
-  const silent = !first.running && !first.unproven && (await heldSilently(dataDir, port))
+  const silent = !first.running && !first.unproven && (await heldSilently(dataDir, port, createdAt))
   if (!silent && !heldHere(first, dataDir, undefined, state.port != null)) {
     // The folder is held, but not by a serve (#1722): the app's or the keeper's host, whatever answered on the port
     const other = foreignHolder(dataDir)
@@ -127,8 +128,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
  * event loop is stalled answers no probe in time either, and is running (#1906 review). Not part of `heldHere`, which
  * `--connection` and `--detach`'s wait read: there a host still starting must not count as one that answers
  */
-async function heldSilently(dataDir, port) {
-  return startedByServe(dataDir) && lockHolderIsAlive(dataDir) && !(await listensHere(port))
+async function heldSilently(dataDir, port, createdAt) {
+  return startedByServe(dataDir) && lockHolderIsAlive(dataDir, processStartTime, createdAt) && !(await listensHere(port))
 }
 
 /** How long a host that finished its work on its store has to listen before a stop takes it for a start that hung */
