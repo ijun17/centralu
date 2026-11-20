@@ -23,26 +23,25 @@ export type ProjectsSlice = {
   /**
    * How many times, per project, we have heard "the working tree may have moved" (#160). Bumped
    * by one each time `refreshProjectGit` actually goes and asks. The evidence panel's change list,
-   * history and collapsed strip hold their own lists, so they never heard a re-read that only
-   * updated `project.git` (the sidebar's summary) — they now subscribe to this counter and re-read
+   * history and collapsed strip hold their own lists, so a re-read that only updates `project.git`
+   * (the sidebar's summary) would not reach them. They subscribe to this counter and re-read
    * together on turn end, window focus, approval, and branch switch.
    */
   gitEpoch: Record<string, number>
   /** Git, files and the viewer belong to the project — they must be viewable without a session */
   focusedProjectId: string | null
   /**
-   * Per-project command run state — a projection of the host's `commands.state` (#60, moved into
-   * the terminal panel). The host's buffer holds the log body; this only holds the facts a badge
-   * needs to read (is it running, what did it end with). Why this lives in the store: "it is
-   * running" is not only the run window's own concern, it is a fact the tab badge and the collapsed
-   * strip must read too — the gap this piece exists to close is that leaving a dev server on and
-   * moving away left no trace of it visible anywhere. Keyed projectId → command → last run.
+   * Per-project command run state — a projection of the host's `commands.state` (#60). The host's
+   * buffer holds the log body; this only holds the facts a badge needs to read (is it running, what
+   * did it end with). Why this lives in the store: "it is running" is not only the run window's own
+   * concern, it is a fact the tab badge and the collapsed strip must read too — otherwise leaving a
+   * dev server on and moving away would leave no trace of it visible anywhere. Keyed projectId →
+   * command → last run.
    */
   commandRuns: Record<string, Record<string, CommandRun>>
   focusProject(id: string): void
   /**
-   * Sets the project's worktree trunk (#76). It was chosen when making the worktree manager, which was folded into
-   * ordinary sessions (#561 part 3); a failure is thrown back to the dialog, which keeps it in place (#180).
+   * Sets the project's worktree trunk (#76); a failure is thrown back to the dialog, which keeps it in place (#180).
    */
   setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void>
   /** `machine`: a folder on that linked machine, its path in that machine's terms (#82) */
@@ -93,10 +92,9 @@ export type ProjectsSlice = {
   /**
    * Ask for this project's git status again, debounced (issue #41).
    *
-   * `project.git` was measured once, at attach, and never again — so the sidebar's changed
-   * count was a snapshot from app start that an agent's edits and commits never moved.
-   * Everything that shows git for a project reads that one field, so this writes back
-   * there rather than growing a second, parallel copy for the sidebar.
+   * `project.git` is measured at attach; without this, the sidebar's changed count would stay a snapshot from app
+   * start that an agent's edits and commits never move. Everything that shows git for a project reads that one field,
+   * so this writes back there rather than growing a second, parallel copy for the sidebar.
    *
    * Returns nothing and is safe to call from anywhere: the call is a *hint* that the tree
    * may have moved, not a request the caller waits on.
@@ -105,12 +103,12 @@ export type ProjectsSlice = {
   /**
    * Changing a repository on purpose, from inside the app (issue #49).
    *
-   * #41 gave the sidebar three ways to hear that a tree moved — a turn ending, an approval
+   * The sidebar hears that a tree moved in three ways (#41) — a turn ending, an approval
    * granted, the window regaining focus — and every one of them is a *guess* that something
-   * probably happened elsewhere. The git panel then went straight to `platform.git` and told
-   * only itself, so **committing, the one change we make deliberately and know about, was the
-   * only one the sidebar never heard**. The count sat on its old value until an unrelated
-   * signal happened to fire.
+   * probably happened elsewhere. A git panel writing straight to `platform.git` would tell
+   * only itself, so **committing, the one change we make deliberately and know about, would be
+   * the only one the sidebar never hears**, and the count would sit on its old value until an
+   * unrelated signal happens to fire.
    *
    * So the writes come through here and the refresh is part of the operation rather than
    * something each call site has to remember. Reads stay on `platform.git`: a panel asking

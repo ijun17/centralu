@@ -7,10 +7,9 @@ import { readStored, writeStored } from './stored.js'
  * Like a theme, these are values for tokens in `styles/index.css` — `--font-sans`, `--font-mono`,
  * `--leading-body`, `--leading-code` — set as inline properties on the root, so every utility,
  * every `var()` in CSS, xterm (components/terminalTheme.ts) and app views (hostStyles.ts) follow.
- * A preference left at its default writes nothing: the stylesheet's own value shows, so the
- * default screen is exactly what it was before these settings existed.
+ * A preference left at its default writes nothing: the stylesheet's own value shows.
  *
- * The text size is the root's CSS zoom, as it was before it moved into the preferences.
+ * The text size is the root's CSS zoom.
  */
 
 /**

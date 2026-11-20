@@ -6,8 +6,8 @@ export { formatClock, formatDay }
  * How the app writes a size, a count and a length of time (#428). (A moment, `formatClock` and `formatDay`, is written
  * in core, which needs it too.)
  *
- * Eight places each wrote their own, and the copies disagreed: a byte size came out as "5120.0 MB", "1024.0 KB", "0KB"
- * or "630MB" depending on the screen, a token count as "1000k" or "2500.0k". One rule: the number is scaled to the largest
+ * One rule for every screen, so none writes a byte size as "5120.0 MB", "1024.0 KB", "0KB" or "630MB", or a token count
+ * as "1000k" or "2500.0k": the number is scaled to the largest
  * unit it reaches, written with one decimal below 100 and none from there ("1.5 KB", "630 MB", "8.5 GB"), and a value
  * that rounds up to the next unit is written in it ("1 MB", not "1024 KB").
  */
@@ -39,8 +39,8 @@ export const formatChangedCount = (n: number, more?: boolean): string =>
 
 /**
  * A length of time, in one style: the two largest units that matter, no space before a unit ("1.5s", "3m 20s", "2h 5m",
- * "3d 4h"). Eight places each wrote their own and disagreed: "42 s" beside "42s", "75h 3m" past a day, "125.0 s",
- * a 4-hour wait spelled "4 hours".
+ * "3d 4h"). One style everywhere: never "42 s" beside "42s", "75h 3m" past a day, "125.0 s", or a 4-hour wait spelled
+ * "4 hours".
  *
  * - Precise (default): milliseconds under a second ("250ms"), tenths under ten seconds ("1.5s"), whole seconds to a
  *   minute, minutes and seconds to ten minutes ("9m 50s": a precision that stops being useful there), then minutes.

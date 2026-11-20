@@ -421,9 +421,9 @@ describe('project screen arrangement (#203)', () => {
     const saved = { [a.id]: { panels: ['session:arr-r1'] } }
     mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
     /*
-     * Restoring the focused session used to save the snapshot midway, and a crash right after must not find the
-     * arrangement gone. Saves are now held off for the whole restore (`restoringWorkspace`), so the stronger thing
-     * holds: the restore writes nothing, and the stored arrangement is exactly what it was.
+     * A crash right after restoring the focused session must not find the arrangement gone. Saves are held off for
+     * the whole restore (`restoringWorkspace`), so the stronger thing holds: the restore writes nothing, and the
+     * stored arrangement is exactly what it was.
      */
     const written: unknown[] = []
     const save = mock.workspace.save
@@ -530,7 +530,7 @@ describe('project screen arrangement (#203)', () => {
 })
 
 describe('the workspace snapshot has a single writer (U7)', () => {
-  // #2168: the switches are the host's alone (`prefs.notifyPolicy`); the snapshot no longer carries a second copy
+  // #2168: the switches are the host's alone (`prefs.notifyPolicy`); the snapshot carries no second copy
   it('changing the notify policy writes it to the host, not to the workspace snapshot, and a layout save leaves it there', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -574,11 +574,10 @@ describe('the workspace snapshot has a single writer (U7)', () => {
   })
 
   /*
-   * What "cannot see ignored files" actually meant was "can see them, but it forgets every time"
-   * (issue #17). The switch lived on the component, so leaving the git tab and coming back turned it
-   * off again.
+   * The ignored-files switch is remembered by the store, not the component (issue #17): on the
+   * component, leaving the git tab and coming back would reset it.
    *
-   * The direction that matters is now *off*, since on is the default (#17 again). Turning
+   * The direction that matters is *off*, since on is the default (#17). Turning
    * it off is the only version of this choice a person can make deliberately, so it is the
    * one that has to survive a relaunch — and it has to survive the default too.
    */
@@ -622,8 +621,8 @@ describe('the workspace snapshot has a single writer (U7)', () => {
 /**
  * The screen being viewed carries over a restart.
  *
- * The session comes back, but **the way it is viewed** did not — closed in the grid, it came back up
- * in the focus view. The order of restoration is the trap: `focusSession` forces `view` to `focus`
+ * The session comes back, and so must **the way it is viewed** — closed in the grid, it must not come
+ * back up in the focus view. The order of restoration is the trap: `focusSession` forces `view` to `focus`
  * (because a picked session must be shown), so view restoration has to happen **after** that.
  */
 describe('view restoration', () => {
@@ -709,9 +708,9 @@ describe('view restoration', () => {
 
 /*
  * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
- * through saves, so a save in the middle of it used to write the defaults of every field restored later back over
- * the snapshot. The last setting restored (whether .gitignore's files show) is the one it showed: the person turned it off, and after a restart
- * it was on again (2026-09-30).
+ * through saves, so a save in the middle of it would write the defaults of every field restored later back over
+ * the snapshot. The last setting restored (whether .gitignore's files show) shows it: turned off, it would be on
+ * again after a restart (seen 2026-09-30).
  */
 describe('restoring the workspace saves nothing until it is done', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -808,10 +807,10 @@ describe('restoring the workspace saves nothing until it is done', () => {
   })
 
   /*
-   * #2220: after an update the window came back with every project expanded and no screen. The lists `attach` reads
-   * before the restore take long then, and the host and its subscriptions are live meanwhile: a save in that time (an app list
-   * that changed notes its arrivals and saves) wrote this window's defaults over the stored snapshot, and the restore read
-   * the defaults back.
+   * #2220: after an update, the lists `attach` reads before the restore take long, and the host and its subscriptions
+   * are live meanwhile: a save in that time (an app list that changed notes its arrivals and saves) would write this
+   * window's defaults over the stored snapshot, and the restore would read the defaults back — every project expanded
+   * and no screen.
    */
   it('a save made while attach is still reading its lists does not write over the stored snapshot (#2220)', async () => {
     const mock = new MockPlatform()
@@ -843,8 +842,8 @@ describe('restoring the workspace saves nothing until it is done', () => {
 
   /*
    * The host's first word (`connected`) arrives while the lists are still being read, and a reconnect reads an unread
-   * snapshot again (`readWorkspaceAgain`). That second read must not run beside the attach's own: it laid the snapshot
-   * without its screen and let saves through, so the save that followed stored a window with no screen.
+   * snapshot again (`readWorkspaceAgain`). That second read must not run beside the attach's own: it would lay the
+   * snapshot without its screen and let saves through, so the save that follows would store a window with no screen.
    */
   it('the host connecting while attach reads its lists does not start a second read of the snapshot (#2220)', async () => {
     const mock = new MockPlatform()
@@ -891,9 +890,9 @@ describe('restoring the workspace saves nothing until it is done', () => {
 
 /*
  * A snapshot that could not be read (#384): `workspace.load` failed (a timeout under load, a host that threw), or the
- * restore threw partway. The screen came up as the defaults with no word, and the next change saved those defaults
- * over the stored snapshot, which held settings as well as the layout (the notification switches, the app spans,
- * `introSeen`). Now it is said, and nothing is saved over the stored snapshot until it has been read.
+ * restore threw partway. Coming up as the defaults with no word, the next change would save those defaults over the
+ * stored snapshot, which holds settings as well as the layout (the notification switches, the app spans,
+ * `introSeen`). So it is said, and nothing is saved over the stored snapshot until it has been read.
  */
 describe('a workspace snapshot that could not be read', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -1047,9 +1046,9 @@ describe('a workspace snapshot that could not be read', () => {
 })
 
 /*
- * A failed save is retried, not dropped (`workspaceSave` in store.ts). On 2026-09-30 the machine froze for hours,
- * the person folded every project during that time, every save timed out, and after a restart the folds were gone:
- * the stored snapshot never received them.
+ * A failed save is retried, not dropped (`workspaceSave` in store.ts). A machine frozen for hours times out every
+ * save (seen 2026-09-30); dropped, every fold made meanwhile is gone after a restart, since the stored snapshot never
+ * receives them.
  */
 describe('a workspace save that fails is sent again', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -1108,7 +1107,7 @@ describe('a workspace save that fails is sent again', () => {
     }
   })
 
-  // #841 item 9: past the last retry a save stopped trying with no word, and the layout was found lost after a restart
+  // #841 item 9: a save that stops trying past the last retry says so; silent, the layout is found lost after a restart
   it('says so once the retries while connected run out', async () => {
     const mock = await attached()
     failSaves(mock, 100)

@@ -11,7 +11,7 @@ describe('is the app in front of the person', () => {
   })
 
   /*
-   * The spot where notifications used to be silently blocked.
+   * The spot where notifications are silently blocked if visibility alone decides.
    *
    * When switching to another app, the window is still 'visible' but has no focus.
    * Looking only at visibility would answer 'in front' here, and from that point notifications

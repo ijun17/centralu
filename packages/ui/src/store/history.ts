@@ -31,9 +31,9 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     if (!platform) return
     /*
      * A page that fails to arrive is asked for again (`RETRY_MS`), and meanwhile the cursor is dropped.
-     * Swallowing the failure left a re-read's gap for good: a resync re-reads sessions that already hold a cursor,
-     * and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing read it again
-     * until the app was reopened. Without the cursor, opening the conversation reads it again too.
+     * Swallowing the failure would leave a re-read's gap for good: a resync re-reads sessions that already hold a
+     * cursor, and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing would
+     * read it again until the app is reopened. Without the cursor, opening the conversation reads it again too.
      */
     let held: AppState['history'][string] | undefined
     const msgs = await retryLadder(
@@ -57,11 +57,10 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       bumpChatKeysAbove(items)
       set((s) => {
         /*
-         * Screen rows are merged with history, never discarded (#79, `mergePage`). This used to
-         * discard the page whenever rows existed on screen — setting the cursor from the discarded
-         * page. Re-reads (catching up on a conversation continued elsewhere, filling a gap) go
-         * through the same path: within the page's range, history is the source of truth, and only
-         * whatever streams after it belongs to the screen.
+         * Screen rows are merged with history, never discarded (#79, `mergePage`). Re-reads
+         * (catching up on a conversation continued elsewhere, filling a gap) go through the same
+         * path: within the page's range, history is the source of truth, and only whatever streams
+         * after it belongs to the screen.
          * The cursor is the stored number of the top row of the merged result: the page's first
          * row, or the cursor the person had already read back to when those rows are kept (`readBack`).
          */
@@ -131,9 +130,9 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     /*
      * The page is only good for the cursor it was asked from (#79). A re-read that lands while this
      * one is out (`loadHistory`: a catch-up, a resync) or a trim on leaving the session moves the
-     * cursor and the rows under it; prepending the page then left the rows between it and the new
-     * cursor out for good, since the cursor was set below them. Such a page is dropped: the cursor
-     * that replaced it is right, and the next scroll asks again from there.
+     * cursor and the rows under it; prepending the page then would leave the rows between it and the
+     * new cursor out for good, since the cursor would be set below them. Such a page is dropped: the
+     * cursor that replaced it is right, and the next scroll asks again from there.
      */
     const stale = () => get().history[sessionId] !== asked
     try {
@@ -193,7 +192,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     try {
       /*
        * With the first page, how many of the card's steps are in the session archive (#418), so an empty card says where they went
-       * rather than that none were recorded. A host before it does not answer, and the card reads as before.
+       * rather than that none were recorded. An older host does not answer, and the card goes without the count.
        */
       const [page, trashed] = await Promise.all([
         platform.agents.loadSubagentMessages(sessionId, callId, after, SUBAGENT_STEPS_PAGE),

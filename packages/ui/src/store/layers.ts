@@ -19,8 +19,8 @@ export type OwnLayer = 'inbox' | 'overlay'
  * Whether another layer stands over this one: a modal, the palette, settings, usage, the inbox or an overlay.
  *
  * Every keyboard listener on the window that acts on something on screen asks this first, so a key meant for the
- * layer on top is not also answered underneath. It used to be written out four times, and the copies drifted: the
- * capability question over an app view left out `openLayers`, so y or n answered it while a modal stood over it
+ * layer on top is not also answered underneath. One definition, so the listeners cannot drift apart: a copy that
+ * leaves out `openLayers` lets y or n answer the capability question over an app view while a modal stands over it
  * (#850 item 11). `own` names the layer asking, which does not cover itself.
  */
 export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
@@ -36,9 +36,9 @@ export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
 
 /**
  * Whether a dialog stands over the whole window: a modal (anything counted in `openLayers`), settings or usage (#842
- * item 1). The window's global shortcuts are not answered while one is up: ⌘K over a dialog opened the palette under
- * it and took the keyboard, so what the person typed went to the hidden palette and its Enter ran a command nobody
- * could see; ⌘1-9 and ⌘[ moved the screen behind it. The palette is not one of these: ⌘K closes it.
+ * item 1). The window's global shortcuts are not answered while one is up: ⌘K over a dialog would open the palette
+ * under it and take the keyboard, so what the person typed would go to the hidden palette and its Enter run a command
+ * nobody could see; ⌘1-9 and ⌘[ would move the screen behind it. The palette is not one of these: ⌘K closes it.
  */
 export function dialogOpen(st: Pick<CoveringLayers, 'openLayers' | 'settingsOpen' | 'usageOpen'>): boolean {
   return st.openLayers > 0 || st.settingsOpen || st.usageOpen

@@ -22,8 +22,8 @@ export const answerActions = (set: StoreSet, get: StoreGet): AnswerActions => ({
     /*
      * A request is answered exactly once (#158). If a response already sent is still in flight, or if
      * that outcome already dismissed the card, this is not sent again. A card keeps its listener alive
-     * until `approval_resolved` lands and React re-renders, so a second `y` in that window became a
-     * "vanished request" on the host and recorded a command that had already run as Denied. Both the
+     * until `approval_resolved` lands and React re-renders, so a second `y` in that window would become a
+     * "vanished request" on the host and record a command that already ran as Denied. Both the
      * card's key and its buttons go through this same path.
      */
     const flight = inFlightKey(sessionId, requestId)
@@ -32,17 +32,15 @@ export const answerActions = (set: StoreSet, get: StoreGet): AnswerActions => ({
     // The command trimmed or the edit's path, the same key the host matches (#428); none for an edit with no path
     const matcher = (decision === 'always' && pending && alwaysAllowKey(pending.detail)) || undefined
     /*
-     * This used to be the one action in this store that swallowed a failure. Approval is exactly the
-     * spot where **pressing it and having nothing happen is worst of all** — there is no way to tell
-     * whether the command ran or not.
+     * A failure is shown, never swallowed. Approval is exactly the spot where **pressing it and
+     * having nothing happen is worst of all** — there is no way to tell whether the command ran or not.
      */
     try {
       await get().platform!.agents.respondApproval(sessionId, requestId, decision, scope, matcher)
       /*
-       * What got remembered is stated using **the matcher actually sent** (#170). The card used to
-       * compose its own wording separately, so even a kind with no matcher (`other`) was announced as
-       * "Always allow in this session: other" — even though neither the adapter nor the store had kept
-       * anything at all.
+       * What got remembered is stated using **the matcher actually sent** (#170), not wording of the
+       * card's own: a kind with no matcher (`other`) must not be announced as "Always allow in this
+       * session: other" when neither the adapter nor the store kept anything.
        */
       if (decision === 'always') {
         const access = pending?.detail.kind === 'project_access' ? pending.detail : null

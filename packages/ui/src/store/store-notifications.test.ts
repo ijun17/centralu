@@ -99,7 +99,8 @@ describe('update status (#43)', () => {
       install.spy.mockRestore()
     })
 
-    // #2155 review: the switches seated their answer with neither check, so one from a host connection gone since replaced the newer host's state
+    // #2155 review: a switch's answer seated with neither check would let a host connection gone since replace the
+    // newer host's state
     it("drops a switch's answer that comes back after the host connection it was asked on is gone", async () => {
       const platform = new MockPlatform()
       const answers: Array<(value: UpdateStatus) => void> = []
@@ -360,7 +361,7 @@ describe('MCP server suggestions', () => {
     expect(mock.badge).toBe(1)
   })
 
-  // 'assistant_proposals_changed': the same broadcast from a host of a later release, under the role's new name (#2133)
+  // 'assistant_proposals_changed': the same broadcast from a host of a later release, under the role's current name (#2133)
   it.each(['orchestrator_proposals_changed', 'assistant_proposals_changed'] as const)('one broadcast (%s) re-reads both lists, whichever tool or command made the change', async (type) => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -468,8 +469,7 @@ describe('pending proposals wait on the person', () => {
 })
 
 /*
- * The settings-change toast states what the host actually did (#164). It used to always say "(from
- * next turn)."
+ * The settings-change toast states what the host actually did (#164), not always "(from next turn)."
  */
 describe('the settings-change toast (#164)', () => {
   it.each([
@@ -488,9 +488,9 @@ describe('the settings-change toast (#164)', () => {
 })
 
 /*
- * The "always allow" notification uses the matcher actually sent (#170). The card used to compose its
- * own separate wording, so even a kind with no matcher (`other`) was announced as "Always allow in
- * this session: other" — even though no rule had actually been kept.
+ * The "always allow" notification uses the matcher actually sent (#170), not wording of the card's
+ * own: a kind with no matcher (`other`) must not be announced as "Always allow in this session:
+ * other" when no rule was kept.
  */
 describe('the always-allow notification (#170)', () => {
   async function answerAlways(detail: Record<string, unknown>, scope: 'session' | 'project' = 'session') {
@@ -511,7 +511,7 @@ describe('the always-allow notification (#170)', () => {
     expect(r.toast).toBe('Always allow in this project: /x/a.ts')
   })
 
-  // An edit whose path is unknown has nothing to remember (#428): it used to send "(no path)" and toast it as a rule
+  // An edit whose path is unknown has nothing to remember (#428): no "(no path)" is sent or toasted as a rule
   it('a file edit with no path sends no matcher and says it was allowed once', async () => {
     const r = await answerAlways({ kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })
     expect(r.matcher).toBeUndefined()
@@ -689,8 +689,9 @@ describe('resets, notices and switches the tool made (#304)', () => {
   })
 
   /*
-   * #659: a window other than the caller (or the person's own window when an agent made the change) only learned the new
-   * model and permission preset from a re-list. The mock emits what the host emits for `agents.updateSettings`.
+   * #659: a window other than the caller (or the person's own window when an agent made the change) learns the new model
+   * and permission preset from the host's events, without a re-list. The mock emits what the host emits for
+   * `agents.updateSettings`.
    */
   it('a settings change another client made shows the new model and permission preset, without the Assistant toast (#659)', async () => {
     const mock = new MockPlatform()

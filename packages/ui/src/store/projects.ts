@@ -477,7 +477,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     try {
       await platform.commands.stop(projectId, command)
     } catch (e) {
-      // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
+      // As `runCommand` (#841 item 11): a stop that failed silently would leave the badge lit, read as "it is stopping"
       mark(false)
       set({ toast: `Could not stop: ${errorMessage(e)}` })
     }
@@ -491,7 +491,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       watchFailureSaid.delete(projectId)
     } catch (e) {
       /*
-       * Watching is a side glance, so the tree goes on (#34), but a failure swallowed whole left a tree that stopped
+       * Watching is a side glance, so the tree goes on (#34), but a failure swallowed whole would leave a tree that stops
        * following what an agent or Finder changed with no word of it (#841). Said once: the tree asks again with every
        * folder opened
        */

@@ -21,9 +21,8 @@ export type GridSlice = {
    * every placement of that app that has no span of its own (from the panel's top bar), and ahead of the app's own
    * recommendation (core's `resolveGridSpan`). An app with no entry takes its recommendation, else 1 × 1.
    *
-   * Kept in the workspace snapshot, like `projectPanels`: a way of looking that only this UI reads, about an app the
-   * host's tables do not key (a user-folder app has no project). The choice for one placement is on the placement
-   * itself, in the host's grid table, because it goes when the panel goes.
+   * Kept in the workspace snapshot, like `projectPanels`; the choice for one placement is on the placement itself, in
+   * the host's grid table. Why each lives where it does: docs/product-spec.md §5.4.
    */
   appSpans: Record<string, GridSpan>
   /** Sets or clears (`null`) the person's span for an app, and saves the snapshot */

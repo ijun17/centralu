@@ -15,7 +15,7 @@ import { delta, line, readAll, resetStore, sessionInfo } from './store.test-help
 beforeEach(resetStore)
 
 /**
- * Reading back further (dogfooding, 2026-09-09: "older conversation does not load above").
+ * Reading back further.
  *
  * The conversation the screen holds and the history cursor **must move together.** If they fall out
  * of sync, "earlier conversation" either prepends a range that does not connect to the screen, or the
@@ -49,9 +49,9 @@ describe('history cursor', () => {
   })
 
   /*
-   * The old assertion was `oldestSeq === chat[0].seq`. It passed while a bug remained: since that
-   * `seq` was the render key, `loadOlder` still started reading from the wrong place (#79) even
-   * though the cursor was at "the same spot" as the screen. So the actual outcome is checked instead.
+   * `oldestSeq === chat[0].seq` is not enough: when that `seq` is the render key, `loadOlder` starts
+   * reading from the wrong place (#79) even though the cursor is at "the same spot" as the screen. So
+   * the actual outcome is checked instead.
    */
   it('a conversation built only from events still has every stored row exactly once when read back to the end', async () => {
     const mock = new MockPlatform()
@@ -92,9 +92,9 @@ describe('history cursor', () => {
  * history is the number the host assigned within that session. In a session where an event arrives
  * before the screen, if the cursor took the render key instead: a key lower than the stored number
  * leaves a gap in the middle (A), and a key higher appends the newest page a second time (A2). An
- * event arriving mid-read used to discard the page just fetched (B). Measured (2026-09-25): opening
- * the session for an app's requested agent for the first time showed the prompt and the Read/Write
- * cards twice.
+ * event arriving mid-read must not discard the page just fetched (B). Measured (2026-09-25): with the
+ * render key as the cursor, opening the session for an app's requested agent for the first time showed
+ * the prompt and the Read/Write cards twice.
  */
 describe('the cursor for a session where an event arrives before history (#79)', () => {
   const rows = (id: string, n: number, from = 1) =>
@@ -291,7 +291,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
 
     // Before this session is opened: a command that went through approval, a human message (numbered by
     // its user_message, as the host announces it, #999), an agent's image (numbered like any recorded
-    // row since #868), a failed turn (the schema strips the number, #161)
+    // row, #868), a failed turn (the schema strips the number, #161)
     mock.emit({ type: 'approval_request', sessionId: 'e79', requestId: 'q1', detail: { kind: 'command', command: 'rm -rf build' } } as never)
     mock.emit({ type: 'approval_resolved', sessionId: 'e79', requestId: 'q1', decision: 'allow' } as never)
     await useStore.getState().send('e79', 'Hi')
@@ -497,12 +497,12 @@ describe('the cursor for a session where an event arrives before history (#79)',
 })
 
 /**
- * When a non-conversation event arrives before history is read (dogfooding, 2026-09-25).
+ * When a non-conversation event arrives before history is read.
  *
- * Reopening the app showed an 11,550-line session as completely empty. A state or usage event the
- * host sent while resuming the session created `chat[id] = []` before the user ever clicked that
- * session, and focusing read that empty array as "already read," so history was never called. There
- * was no error either.
+ * A state or usage event the host sends while resuming a session must not create `chat[id] = []`
+ * before the person ever clicks that session: focusing would read that empty array as "already read,"
+ * so history would never be called, with no error. An 11,550-line session then reopens completely
+ * empty (seen 2026-09-25).
  */
 describe('an event arriving before history', () => {
   const many = (id: string, n: number) =>
@@ -554,7 +554,7 @@ describe('an event arriving before history', () => {
   })
 
   /*
-   * The actual fix is here: a non-conversation event never creates a slot. `chat[id]` being absent is
+   * The main rule: a non-conversation event never creates a slot. `chat[id]` being absent is
    * used throughout the store as "not read yet" (focus, session creation). The two safeguards below
    * catch this at load time, so this promise would silently break without a test pinning it down on
    * its own.
@@ -575,7 +575,7 @@ describe('an event arriving before history', () => {
    * The two below pin down the rule itself, **independent of any event**: an empty slot is treated the
    * same as never having read it. An event is not the only way an empty array gets created (a filter
    * that undoes an optimistically drawn row can also empty it). The tests above never see these two
-   * safeguards, since the event-side fix already blocks it.
+   * safeguards, since the event-side rule already blocks it.
    */
   it('clicking a session with an empty slot and no cursor still calls history — no matter where the empty slot came from', async () => {
     const mock = new MockPlatform()

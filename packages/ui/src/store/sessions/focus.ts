@@ -62,29 +62,28 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
     /*
      * Picking a session **must make that session visible.**
      *
-     * With the grid left open, clicking a different session in the sidebar left the screen
-     * unchanged: what was picked had changed but what was visible had not, so to the person who
-     * clicked, nothing appeared to happen. This lives here because there are a dozen call sites
+     * Otherwise, with the grid open, clicking a different session in the sidebar would change what
+     * is picked but not what is visible, so to the person who clicked, nothing would appear to
+     * happen. This lives here because there are a dozen call sites
      * (sidebar, inbox, palette, approval banner, …) — attaching it at each call site means one of
      * them eventually gets missed.
      *
      * Deselecting (`null`) leaves the view untouched, because that is not "look at this."
      */
     /*
-     * **The Assistant goes to its own screen, not 'focus'** (a dogfooding bug).
+     * **The Assistant goes to its own screen, not 'focus'.**
      *
-     * Turning on `view: 'focus'` unconditionally here meant clicking the Assistant from the top
-     * bar's "waiting for response" list opened the Assistant's conversation **inside the frame of
-     * the session screen.** Two symptoms came from that: the right-hand evidence lane came along
-     * (`App`'s `hasEvidenceLane` decides by `view` — the Assistant has no repository to view), and
-     * the sidebar's assistant button looked unpressed (`active` also decides by `view`).
+     * In `view: 'focus'`, the Assistant's conversation would open **inside the frame of the session
+     * screen**: the right-hand evidence lane would come along (`App`'s `hasEvidenceLane` decides by
+     * `view` — the Assistant has no repository to view), and the sidebar's assistant button would
+     * look unpressed (`active` also decides by `view`).
      *
-     * The fix belongs here for the same reason as the comment above: this function has a dozen call
+     * The decision lives here for the same reason as the comment above: this function has a dozen call
      * sites (inbox, notification card, palette, approval banner, shortcuts, …). Even one of them
      * meeting the Assistant reproduces the same symptom, so the decision has to live in this one
      * place, not at each caller.
      */
-    // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
+    // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment below)
     const onGrid = !!id && !!opts?.preferGrid && gridSessionIds(get().gridPanels).includes(id)
     const assistant = !!id && (id === get().assistantId || isAssistantKind(get().sessions[id]?.kind))
     /*
@@ -125,7 +124,7 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       /*
        * The Assistant's screen shows the session `assistantId` names, and a run learns that id only by opening the
        * screen itself. A pick that arrives by another way (a mail, a notice, the waiting list) knows the session, so it
-       * names it here, in the state change the sidebar's button makes (#1647); left unset, the screen showed its empty
+       * names it here, in the state change the sidebar's button makes (#1647); left unset, the screen would show its empty
        * start state over a conversation that exists, until the person went to the grid and back.
        */
       ...(id && assistant && !onGrid && !picked?.machine ? assistantScreen(id) : {}),
@@ -172,13 +171,12 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
      * if an event arrives before the screen does (a session the host created in the background, like
      * an app's requested agent, or an event replayed by the initial connection), only rows appear.
      *
-     * Before this (09-09), such a session's cursor used to be set from the top row on screen. The
-     * reasoning was that re-reading could wipe out a still-streaming message or an optimistically
-     * drawn first prompt. But that number was the render key: a stored 8-line session ended up with a
-     * cursor of 48, so "earlier conversation" appended the whole conversation a second time (measured
-     * 2026-09-25), and whenever the key was lower than the stored number, the entire middle went
-     * missing. Now that `loadHistory` merges with history rather than clearing the screen's rows
-     * (`mergePage`), it is always safe to read.
+     * The cursor is never taken from the top row on screen: that number is the render key, not the
+     * stored number. A stored 8-line session would get a cursor of 48, so "earlier conversation" would
+     * append the whole conversation a second time (measured 2026-09-25), and a key lower than the
+     * stored number would drop the entire middle. Reading is always safe, because `loadHistory` merges
+     * with the screen's rows (`mergePage`) rather than clearing them, so a still-streaming message or
+     * an optimistically drawn first prompt survives.
      */
     if (opts?.targetSeq !== undefined) {
       // Mark the cursor as loading before the pane observes this session. Otherwise its ordinary
@@ -188,9 +186,9 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       void get().loadHistoryAt(id, targetSeq)
     } else if (!cur.history[id]) void get().loadHistory(id)
     /*
-     * Selecting a session no longer wakes it (#568). Its process starts when the person sends to it or its composer takes
+     * Selecting a session does not wake it (#568). Its process starts when the person sends to it or its composer takes
      * the keyboard: reading an old conversation should not start a 250 MB process that the host puts back to sleep in
-     * 15 minutes. The resume this used to hide costs about 0.7 s (p50) on Claude, and it runs while the person types.
+     * 15 minutes. The resume this defers costs about 0.7 s (p50) on Claude, and it runs while the person types.
      */
   },
 })

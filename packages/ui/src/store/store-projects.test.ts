@@ -136,11 +136,10 @@ describe('project trust (M4)', () => {
 /**
  * A project's default model belongs to **the tool** (#107).
  *
- * An actual incident: a project with `default_tool=codex` was also holding
- * `default_model=opus[1m]`, and a codex session born from it died every turn with a
- * `400 invalid_request_error`. A handoff deliberately clears the model when the tool changes
- * (`sameTool ? … : undefined`), but the project default filled it right back in beneath that guard —
- * a shape where the guard collapsed onto a layer it had delegated to.
+ * A project with `default_tool=codex` that also holds `default_model=opus[1m]` would give a codex
+ * session that dies every turn with a `400 invalid_request_error`. A handoff deliberately clears the
+ * model when the tool changes (`sameTool ? … : undefined`), and a default kept per project would
+ * fill it right back in beneath that guard.
  */
 describe('a project\'s default model follows the tool (#107)', () => {
   const withDefaults = async (mock: MockPlatform, path: string, defaults: Record<string, { model: string | null; effort: string | null }>) => {
@@ -389,8 +388,8 @@ describe('a project git count the host could not read (#850 review of item 10)',
 })
 
 /*
- * A failed save puts back only what it changed (#842 item 3). The rollbacks used to put back the whole map from before
- * the save, so whatever happened while the save was out was lost with it.
+ * A failed save puts back only what it changed (#842 item 3). Putting back the whole map from before the save would
+ * lose whatever happened while the save was out.
  */
 describe('a failed reorder or command save puts back only what it changed (#842 item 3)', () => {
   /** A promise this test settles by hand */

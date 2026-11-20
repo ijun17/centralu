@@ -20,8 +20,8 @@ export type ImeKey = { key: string; isComposing: boolean; keyCode: number }
  * syllable missing or leaves the syllable being composed sitting in the field. Escape and the
  * arrows during a composition belong to the input method too (cancel it, walk its candidates).
  * Every handler that acts on Enter, Escape or the arrows where text can be typed goes through this
- * check: for a while only the session composer knew it, and the command palette, the session
- * rename field and every Esc-to-close layer each had their own (missing) rule.
+ * one check — the composer, the command palette, the session rename field and every Esc-to-close
+ * layer — rather than a rule of its own.
  */
 export function composingKey(e: ImeKey): boolean {
   return e.isComposing || e.key === 'Process' || e.keyCode === 229
@@ -43,7 +43,7 @@ export function isPlainEscape(e: ImeKey): boolean {
 /**
  * The Latin letter a key press points to. null if there is none.
  *
- * Letter shortcuts (y/n/a, j/k/d) used to look only at `e.key`. That value is the character the
+ * Letter shortcuts (y/n/a, j/k/d) cannot look only at `e.key`. That value is the character the
  * keyboard actually produced, so the comparison goes wrong entirely the moment someone is not on
  * a Latin layout or a modifier key changes the character. These values were asked directly of the
  * installed layout (UCKeyTranslate):
@@ -51,11 +51,10 @@ export function isPlainEscape(e: ImeKey): boolean {
  *   ABC / U.S.     A = a    ⌥A = å
  *   2-Set Korean   A = ㅁ   ⌥A = a
  *
- * So the `⌥a` the settings screen advertised ("always allow — project scope") did nothing at all
- * on a Mac, because `'å' === 'a'` is false. On Linux and Windows, Alt does not change the
- * character, so it worked fine there — meaning it was dead only on the platform this app runs on
- * every day. For the same reason, while typing Korean, y/n/a/j/k/d all arrive as different
- * characters entirely.
+ * So `⌥a` ("always allow — project scope"), read from `e.key` alone, does nothing at all on a Mac,
+ * because `'å' === 'a'` is false. On Linux and Windows, Alt does not change the character, so it
+ * would fail only on the platform this app runs on every day. For the same reason, while typing
+ * Korean, y/n/a/j/k/d all arrive as different characters entirely.
  *
  * The rule: only ask for the key's physical position when the character is not a Latin letter.
  *
@@ -102,9 +101,9 @@ export function pressesItself(target: EventTarget | null): boolean {
  * What a single key press means in a confirmation dialog (quit confirmation) (#181) — a pure
  * function, so it is tested without a browser.
  *
- *  - A key that is part of an IME composition means nothing. If the dialog appeared while typing
- *    Korean, an Enter pressed to finish the composition used to quit the app, and an Esc pressed
- *    to cancel the composition used to close the dialog.
+ *  - A key that is part of an IME composition means nothing. Otherwise, if the dialog appears
+ *    while typing Korean, an Enter pressed to finish the composition would quit the app, and an
+ *    Esc pressed to cancel the composition would close the dialog.
  *  - Enter on a button belongs to that button — pressing Enter after Tab-ing to Cancel must not
  *    become quit (the button presses itself).
  *  - Any other Enter confirms, Esc cancels.

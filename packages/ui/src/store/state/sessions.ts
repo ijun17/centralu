@@ -14,19 +14,17 @@ export type SessionsSlice = {
   /**
    * Which agent tools this machine has, as the host reports them.
    *
-   * The screens that draw a row per tool used to read a `TOOL_META` constant compiled into
-   * `@cc/protocol`, which meant the set of tools was fixed at build time and a new adapter
-   * could not appear without editing the protocol. It arrives over the wire now, so it has
-   * to be held somewhere every screen can reach — the chips in the sidebar need the label
-   * and the mark synchronously, once per row.
+   * It arrives over the wire rather than being compiled into `@cc/protocol`, so a new adapter
+   * can appear without editing the protocol. It has to be held somewhere every screen can reach —
+   * the chips in the sidebar need the label and the mark synchronously, once per row.
    */
   tools: ToolStatus[]
   focusedSessionId: string | null
   /**
    * The project whose session-creation window is open (`null` means closed).
    *
-   * This used to be local state on the sidebar panel, and was lifted into the store because **the
-   * first-run screen needs to open this window.** The moment a project is created, the first-run
+   * Held in the store, not on the sidebar panel, because **the first-run screen needs to open this
+   * window.** The moment a project is created, the first-run
    * screen disappears (`App` branches on whether any project exists), so the only way for that
    * screen to hand off its next step is to reserve a window that will stand somewhere else, in
    * place of the screen that is about to disappear.
@@ -39,9 +37,9 @@ export type SessionsSlice = {
    * another project's window would contaminate the suggestion.
    */
   /**
-   * A queue (dogfooding for #69): when the manager suggested two branches back to back, a single
-   * slot meant only the last one survived — the first suggestion had to be typed by hand after
-   * reading the name off the conversation. Each time the window opens, it consumes that project's
+   * A queue (#69): when the manager suggests two branches back to back, a single slot would keep
+   * only the last one, and the first suggestion would have to be typed by hand after reading the
+   * name off the conversation. Each time the window opens, it consumes that project's
    * oldest suggestion (FIFO).
    */
   worktreeProposals: { projectId: string; branch: string }[]
@@ -56,7 +54,7 @@ export type SessionsSlice = {
   /**
    * The session currently being woken up.
    *
-   * Picking a session **wakes it immediately.** It used to wake on send, which piles the whole
+   * Picking a session **wakes it immediately.** Waking on send would pile the whole
    * process-startup time onto the time between turning the app on and the first response. Worse, a
    * sleeping session has no process to ask, so it cannot even hand back its slash-skill list. The
    * act of picking already means "I am about to use this session," so preparation starts right then.
@@ -65,10 +63,8 @@ export type SessionsSlice = {
   /**
    * **Why** waking it failed.
    *
-   * This used to fail silently ("it will retry when sending anyway"). But the screen read "sending a
-   * message will resume it automatically" while it actually would not resume, and the person had no
-   * way to find out why (pointed out during dogfooding). No silent failures — the reason is written
-   * right there.
+   * No silent failures: a screen that says "sending a message will resume it automatically" when it
+   * will not leaves the person no way to find out why. The reason is written right there.
    */
   wakeError: Record<string, string>
   /**
@@ -121,7 +117,7 @@ export type SessionsSlice = {
     opts?: {
       tool?: ToolName
       model?: string
-      /** When given, this value is used instead of the project default — used to carry a dying session's settings whole through a handoff */
+      /** When given, this value is used instead of the project default — a handoff carries a dying session's settings whole this way */
       effort?: string
       verbosity?: string
       serviceTier?: string
@@ -140,7 +136,6 @@ export type SessionsSlice = {
       worktreeBase?: string
     },
   ): Promise<SessionInfo>
-  /** Hides from the list / brings back (the record survives) */
   /** Restarts only the agent (the conversation stays as is) */
   restartSession(sessionId: string): Promise<boolean>
   /** Moves the session to the session archive (#204); the two flags say what goes with it when it is deleted for good */
@@ -158,8 +153,8 @@ export type SessionsSlice = {
    */
   restoreFromTrash(sessionId: string): Promise<string | null>
   /**
-   * Hands off and starts fresh (a dogfooding request — the way out of the 7-13 second resume delay
-   * on an old codex thread). The dying session writes a handoff note → the new session starts from
+   * Hands off and starts fresh (the way out of the 7-13 second resume delay on an old codex
+   * thread). The dying session writes a handoff note → the new session starts from
    * that note → the old session (with deleteOld) is **actually** deleted, all the way down to the tool's
    * own original. Destruction comes last: nothing is deleted until the new session is successfully
    * up.

@@ -74,9 +74,9 @@ describe('handling resync_required (U3)', () => {
   })
 
   /*
-   * #173: while a resync re-read only the focused session, another session's conversation was left
-   * holding a gap, and opening it later did not re-read it either, since a cursor already existed —
-   * the gap stayed unfilled until the app was reopened.
+   * #173: a resync that re-reads only the focused session would leave another session's conversation
+   * holding a gap, and opening it later would not re-read it either, since a cursor already exists —
+   * the gap would stay unfilled until the app is reopened.
    */
   it('a resync also fills the gap from the store for other sessions holding a conversation', async () => {
     const mock = new MockPlatform()
@@ -106,7 +106,7 @@ describe('handling resync_required (U3)', () => {
 /** Lets every pending promise and zero-delay timer run */
 const settle = () => new Promise((r) => setTimeout(r, 0))
 
-// #841 items 9 and 10: what the window could not read was dropped with no word
+// #841 items 9 and 10: what the window cannot read is not dropped with no word
 describe('what the window could not read is said', () => {
   it('a reconnect that cannot read the session list after its retries says so', async () => {
     const mock = new MockPlatform()
@@ -184,7 +184,7 @@ describe('what the window could not read is said', () => {
 /**
  * A reconnect's recovery while the host keeps talking. The session list is read with a request, and live
  * events keep arriving until its answer does; the hub answers only once every linked machine has, so the
- * list can be older than them. The recovery used to apply the rows as they stood.
+ * list can be older than them, and its rows cannot be applied as they stand.
  */
 describe('reconnect recovery against live events', () => {
   it('a relaunched window keeps re-attachment events when recovery overtakes its initial list (#640)', async () => {
@@ -453,9 +453,8 @@ describe('merging the session list on reconnect (U4)', () => {
 
 /*
  * #173: if the socket drops, the client refuses an `agents.send` that never got an answer with
- * `connection_lost`. The host may already have received that message, but the screen used to raise a
- * failure toast and put the text back into the composer — sending it again then sends the same
- * instruction twice.
+ * `connection_lost`. The host may already have received that message, so raising a failure toast and
+ * putting the text back into the composer would have the person send the same instruction twice.
  */
 describe('a message sent at the instant of disconnect (#173)', () => {
   async function sendingWhenTheLineDrops(delivered: boolean) {
@@ -1082,7 +1081,7 @@ describe('the pen for events before registration is bounded (#392)', () => {
     mock.sessions.set('pen-later', sessionInfo('pen-later'))
     await useStore.getState().attach(mock)
     expect(useStore.getState().chat['pen-never']).toBeUndefined()
-    // A pen still inside the window is replayed as before
+    // A pen still inside the window is still replayed
     expect(useStore.getState().chat['pen-later']!.map(line)).toEqual(['read 1'])
   })
 })

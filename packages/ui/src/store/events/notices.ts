@@ -31,7 +31,7 @@ export function alertPerson(notice: NotifyRequest, event: string | undefined, se
   void raisesHere(event).then((first) => {
     const st = get()
     if (!first || !st.platform) return
-    // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
+    // The banner is a nice-to-have (this path is dead on macOS).
     // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
     void st.platform.system.notify(notice.title, notice.body).catch((e: unknown) => set({ toast: errorMessage(e) }))
     // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
@@ -74,9 +74,9 @@ function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notic
  */
 export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet, id?: string): void {
   /*
-   * A session asks to start another agent (#673): a notice every time, on screen or not, until it is answered. It
-   * used to stand unseen in a session the person was not looking at until it was withdrawn, and the session then
-   * worked alone.
+   * A session asks to start another agent (#673): a notice every time, on screen or not, until it is answered.
+   * Otherwise it could stand unseen in a session the person is not looking at until it is withdrawn, and the session
+   * would then work alone.
    */
   if (e.type === 'approval_request' && e.detail.kind === 'agent_start') {
     // Made on screen too (owner, 2026-10-18): a question the person must answer is always told
@@ -94,12 +94,9 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
   /*
    * The response finished — the trigger for one sweep of the screen.
    *
-   * **Visibility is decided right now.** This used to keep only the fact, and let the screen
-   * multiply in "is it visible" later, which lets the two moments fall out of sync: switching to
-   * the session at the very instant it becomes visible would also make that later check true, so
-   * **the sweep fired even though nothing had just finished** (dogfooding: "it also fires just from
-   * switching session windows"). Worse, since this value was never cleared, it repeated every time
-   * on switching back and forth.
+   * **Visibility is decided right now.** Keeping only the fact and letting the screen work out "is
+   * it visible" later lets the two moments fall out of sync: switching to the session makes that
+   * later check true, so **the sweep would fire even though nothing had just finished**.
    *
    * Deciding it once, at the instant the event happens, leaves no room to fall out of sync.
    * The instant is kept alongside it so the same session finishing twice in a row still fires each
@@ -115,11 +112,10 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
     /*
      * **Seen = the app is in front, and that session is on screen.**
      *
-     * The first half used to be missing. `isOnScreen` only checks which session is showing in the
-     * UI, so it was true even with the app behind another window — but stepping away makes the
-     * whole app invisible. So the sweep fired in an empty room, and the very card built for the
-     * case of stepping away was never created. Exactly nothing happened in the one case a
-     * notification mattered most.
+     * `isOnScreen` only checks which session is showing in the UI, so it is true even with the app
+     * behind another window — but stepping away makes the whole app invisible. Without the first
+     * half, the sweep would fire in an empty room and nothing would reach the person in the one
+     * case a notification matters most.
      */
     const seen =
       s.appFocused &&
@@ -157,9 +153,8 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
 
     /*
      * A finished turn is the cheapest strong hint that the working tree moved (issue #41):
-     * an agent just stopped editing in that folder, which is the very thing that made the
-     * sidebar's changed count wrong. No filesystem watcher needed for the common case —
-     * that is a bigger design (#34) and this must not wait for it.
+     * an agent just stopped editing in that folder, which is the very thing that makes the
+     * sidebar's changed count go stale. No filesystem watcher is needed for the common case (#34).
      *
      * The session may not be registered yet (its events arrive buffered and are replayed
      * after `attach` lists it); the replay runs this branch again with a project to name.
@@ -205,9 +200,9 @@ export function notifyStateChange(
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     if (notice || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*
-       * The notification policy decides the sound and the banner, not whether the top bar says it (owner, 2026-10-18).
-       * With the cards gone, a notice is one line the inbox's capsule writes out for a few seconds and nothing that
-       * covers the page, so an approval or an error is told there always, the session on screen included.
+       * The notification policy decides the sound and the banner, not whether the top bar says it (owner,
+       * 2026-10-18). A notice is one line the inbox's capsule writes out for a few seconds and nothing that covers
+       * the page, so an approval or an error is told there always, the session on screen included.
        */
       pushNotice(set, { sessionId, kind: waitKind(e, withSeq), name: withSeq.name, at: Date.now() })
     }

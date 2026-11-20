@@ -16,8 +16,8 @@ export type ConnectionSlice = {
   machineResyncs: Record<string, number>
   /**
    * The first lists have arrived and the last screen has been restored (owner, 2026-10-18). Until then the window
-   * does not know which screen to show, so it shows none: the Assistant's intro and "No projects yet" used to flash
-   * before the restored screen replaced them. Stays true across later reconnects.
+   * does not know which screen to show, so it shows none: otherwise the Assistant's intro or "No projects yet" would
+   * flash before the restored screen replaces it. Stays true across later reconnects.
    */
   workspaceReady: boolean
   attach(platform: Platform): Promise<void>

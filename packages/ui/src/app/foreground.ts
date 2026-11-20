@@ -9,9 +9,9 @@
  *   - `hasFocus`   is it covered by another app (false when switching apps on a Mac)
  *   - `visibility` is it minimized or covered by another tab
  *
- * The visibilitychange handler used to look only at `visibility`. So after switching to another
- * app (becoming false via blur), if another occlusion event fired, it went back to true — because
- * the window was still 'visible'. From that moment on, notifications were blocked.
+ * Looking only at `visibility` is not enough: after switching to another app (false via blur),
+ * another occlusion event finds the window still 'visible' and answers true again, and from that
+ * moment on notifications are blocked.
  */
 export function isForeground(hasFocus: boolean, visibility: DocumentVisibilityState): boolean {
   return hasFocus && visibility === 'visible'

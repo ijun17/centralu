@@ -14,8 +14,7 @@ export function followOutside(state: Followed, value: string): Followed {
 /**
  * A text field's draft that follows a value edited outside it (a theme file edited by hand, #312). Kept apart from the
  * value so the person can type something not yet valid, and replaced when the value changes underneath: a draft
- * captured once wrote the old value back on blur, undoing the outside edit (the theme's name, and every token row,
- * which had its own copy of this).
+ * captured once would write the old value back on blur, undoing the outside edit.
  */
 export function useFollowed(value: string): [draft: string, setDraft: (draft: string) => void] {
   const [state, setState] = useState<Followed>({ draft: value, seen: value })

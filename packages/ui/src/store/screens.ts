@@ -56,9 +56,8 @@ export function openProjectOf(
  * The project whose files and git history the evidence panel and the overlay show, or null: a focused session's own
  * project, and the project looked at last only while no session is focused.
  *
- * A session with no project (the Assistant, a coordinator) **does not fall back to the last project** (a dogfooding
- * finding, 2026-09-06): that project's files beside it would read as if the session started in that folder, when it
- * actually runs from the Assistant's home.
+ * A session with no project (the Assistant, a coordinator) **does not fall back to the last project**: that project's
+ * files beside it would read as if the session started in that folder, when it actually runs from the Assistant's home.
  */
 export function evidenceProjectOf(s: Pick<AppState, 'focusedSessionId' | 'focusedProjectId' | 'sessions'>): string | null {
   const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null

@@ -43,7 +43,8 @@ function liveFactsOf(
     unreachable: s.unreachable === true,
     // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
     interruption: s.interruption ?? null,
-    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not, 2026-11-05). Taken with every row, as `machine` is
+    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not). Taken with
+    // every row, as `machine` is
     startedFromHub: s.startedFromHub === true,
   }
 }
@@ -107,8 +108,8 @@ export function watchLiveEvents(): { touched: LiveEventFields; stop: () => void 
  *
  * Events keep arriving while the list is out, and the list can be older than them: the hub answers once every linked
  * machine has, so its own rows may be read long before the answer leaves (`links/router.ts`). Applying the rows as
- * they stand turned a session that `session_created` registered during the wait into a deleted one (it was not in
- * the list), and wrote an answered approval, an older state or read position back over the live ones. So, against
+ * they stand would turn a session that `session_created` registered during the wait into a deleted one (it is not in
+ * the list), and write an answered approval, an older state or read position back over the live ones. So, against
  * `asked` (the sessions when the list was requested):
  *
  * - a field the store changed since then keeps the store's value; every other field takes the list's
@@ -244,9 +245,10 @@ const pendingEvents = new Map<string, { since: number; events: { e: NormalizedEv
  * How many events the pen holds for one session, and for how long (#392).
  *
  * A session registers within moments of its first event: `createSession` answers, or `attach` and a
- * reconnect read the list. An event for a session that never registers stayed in the pen for the
- * life of the window: a late event for a session already deleted (its `session_deleted` cleared the
- * pen before it arrived), or one for a session the list does not carry. Ten minutes is far past any
+ * reconnect read the list. Without these limits an event for a session that never registers would
+ * stay in the pen for the life of the window: a late event for a session already deleted (its
+ * `session_deleted` cleared the pen before it arrived), or one for a session the list does not
+ * carry. Ten minutes is far past any
  * registration; a pen older than that is for a session that is not coming. Past the count, the
  * oldest half goes: the host has already written that output to its store, and opening the
  * session reads it from there.
@@ -259,7 +261,7 @@ export function penEvent(sessionId: string, e: NormalizedEvent, id: string | und
   for (const [id, pen] of pendingEvents) if (now - pen.since > PENDING_EVENTS_MAX_AGE_MS) pendingEvents.delete(id)
   let pen = pendingEvents.get(sessionId)
   if (!pen) pendingEvents.set(sessionId, (pen = { since: now, events: [] }))
-  // Pushed in place: copying the pen for every event made a burst of n events cost n² (#392)
+  // Pushed in place: copying the pen for every event would make a burst of n events cost n² (#392)
   pen.events.push({ e, id })
   if (pen.events.length > PENDING_EVENTS_MAX) pen.events.splice(0, PENDING_EVENTS_MAX / 2)
 }
@@ -268,11 +270,11 @@ export function penEvent(sessionId: string, e: NormalizedEvent, id: string | und
  * Replays events held while waiting for registration, in order, **only for sessions now
  * registered**.
  *
- * While only `createSession` drained this holding pen, events for a session that had already been
- * running on the host before the app was even opened stayed in the pen forever if they arrived
- * before `attach` registered the list — the entire output of the first turn was lost until a
- * restart. This is now called at every point a session gets registered. Cleared from the pen before
- * replay, so even overlapping calls never apply the same event twice.
+ * Called at every point a session gets registered, not only by `createSession`: events for a
+ * session already running on the host before the app opened can arrive before `attach` registers
+ * the list, and left in the pen they would lose the entire output of the first turn until a
+ * restart. Cleared from the pen before replay, so even overlapping calls never apply the same
+ * event twice.
  */
 export function replayPendingEvents(get: () => AppState): void {
   for (const id of [...pendingEvents.keys()]) {

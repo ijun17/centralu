@@ -155,10 +155,9 @@ export function App({
    * window. If something happens, our handler did it.
    *
    * This is in the capture phase and has no conditions. Adding even one condition — the kind of
-   * drag, the element underneath, whether there is a handler that accepts it — turns the other
-   * side of that condition into the next round of this bug. That is exactly what happened before:
-   * the composer blocked its own spot, and the rest of the window still belonged to the webview.
-   * It is capture for the same reason — even if something below calls stopPropagation, the floor
+   * drag, the element underneath, whether there is a handler that accepts it — hands the other
+   * side of that condition back to the webview: a composer that blocks only its own spot leaves
+   * the rest of the window to it. It is capture for the same reason — even if something below calls stopPropagation, the floor
    * has to be laid down first.
    *
    * All three are blocked. `drop` alone is not enough: `dragover` is the answer to "can something
@@ -208,11 +207,10 @@ export function App({
 
   useEffect(() => {
     /*
-       All three handlers use the same judgment.
-       Previously only visibilitychange looked at visibility — after switching to another app, if
-       another occlusion event fired, the window was still 'visible' so it went back to being 'in
-       front' again, and from that point notifications were silently suppressed. Notifying the
-       person while they are away is exactly what this app is supposed to do.
+       All three handlers use the same judgment. If only visibilitychange looked at visibility,
+       another occlusion event after switching to another app would find the window still
+       'visible' and mark it 'in front' again, and notifications would be silently suppressed.
+       Notifying the person while they are away is exactly what this app is supposed to do.
      */
     // document.hasFocus() can still be stale at the moment of blur, so pass the value we already
     // know directly
@@ -235,7 +233,7 @@ export function App({
   return (
     <PlatformProvider platform={platform}>
       {/*
-        The window survives even if a render throws (dogfooding, 2026-09-07). Without a boundary,
+        The window survives even if a render throws. Without a boundary,
         React tears down the whole tree and leaves a blank white screen, and that screen is
         indistinguishable from "the app is dead".
       */}
@@ -244,9 +242,9 @@ export function App({
         <div className="relative flex h-full flex-col bg-surface-floor text-ink">
           <TopBar />
           {/*
-            The shell's banner sits in the flow, below the top bar (#326). It used to be laid over
-            the window by the desktop shell (fixed, top 0), which put its text under the macOS
-            traffic lights and its button on top of the header's own controls. Above the top bar
+            The shell's banner sits in the flow, below the top bar (#326). Laid over the window
+            (fixed, top 0), it would put its text under the macOS traffic lights and its button on
+            top of the header's own controls. Above the top bar
             would not do either: the traffic lights are pinned at a fixed spot in the window
             (trafficLightPosition, traffic_lights.rs), so they would land on the banner instead,
             and the top bar would stop being the strip they are centred on. Here the top bar stays
@@ -254,13 +252,12 @@ export function App({
             min-h-0 on Body take that out of the lanes rather than pushing the composer off the
             bottom.
 
-            Taking room does shift the lanes when it comes and goes, the cost that got the global
-            approval banner removed (product-spec.md, "Approval requests from unfocused
-            sessions"). That banner came and went with every request, in the middle of reading;
-            this one shows once per build mismatch and stays until the person dismisses it or the
-            switch they asked for finishes, and it holds one height through all its states
-            (ShellBanner). Laid over the lanes instead, it would hide the top of the sidebar and
-            the pane header for as long as it stands.
+            Taking room does shift the lanes when it comes and goes, the cost that rules out a global approval banner
+            (product-spec.md, "Approval requests from unfocused sessions"). That banner would come and go with every
+            request, in the middle of reading; this one shows once per build mismatch and stays until the person
+            dismisses it or the switch they asked for finishes, and it holds one height through all its states
+            (ShellBanner). Laid over the lanes instead, it would hide the top of the sidebar and the pane header for
+            as long as it stands.
           */}
           {banner}
           <Body />
@@ -269,7 +266,7 @@ export function App({
           <CommandPalette />
           {/*
             Mounted from the first time it opens, and kept: Settings remembers the category it was
-            left on while closed, as it did when it was mounted from the start.
+            left on while closed.
           */}
           <OnceOpened open={settingsOpen}>
             <Settings />
@@ -287,7 +284,7 @@ export function App({
             Four strips, not one box with a border: a box the size of the window that lies over the composited scrollers is
             composited for overlap too, with a backing store as large as the window (~22 MB of the GPU process in WebKit,
             #2034). Each strip is a layer a pixel thick. Each is a border of its own, not a 1px background, so it snaps to
-            whole device pixels as the frame's border did (at 1.5x a 1px box can come out two device pixels thick). The
+            whole device pixels as a border does (at 1.5x a 1px box can come out two device pixels thick). The
             sides run the full height and cross the top and bottom strips at the corners: the colour is opaque, so no
             pixel is painted differently.
           */}
@@ -317,10 +314,9 @@ function OnceOpened({ open, children }: { open: boolean; children: ReactNode }) 
  * one session (including an Assistant), this person is not first-time, and showing the intro
  * again would only get in the way.
  *
- * The sidebar stands alongside it. While the intro used to cover the whole screen, Add project
- * was not on screen, so a person reading the intro had no way to create a project — the screen
- * was breaking this flow's own premise of not forcing a conversation (caught by dogfooding).
- * Only the evidence lane is missing: there is no project or session yet to look at.
+ * The sidebar stands alongside it. An intro covering the whole screen would hide Add project, so
+ * a person reading the intro would have no way to create a project — breaking this flow's own
+ * premise of not forcing a conversation. Only the evidence lane is missing: there is no project or session yet to look at.
  */
 function Body() {
   const intro = useStore(showsIntro)
@@ -350,12 +346,9 @@ function Body() {
     return (
       <div className="relative flex min-h-0 flex-1">
         {/*
-          The sidebar stays fully visible as-is. It was once built with the view-switch buttons
-          removed — the reasoning was that pressing them while the intro held the center would
-          not change the screen, so the click would be dead. That diagnosis was right but the fix
-          was wrong: instead of hiding the buttons, make them work. Now pressing either the
-          assistant or the grid button moves past the intro to that screen (setView and
-          openAssistant in the store set introSeen).
+          The sidebar stays fully visible, view-switch buttons included. Pressing the assistant or
+          the grid button moves past the intro to that screen (setView and openAssistant in the
+          store set introSeen), so the click is never dead.
 
           Not forcing a flow is this onboarding's premise. Removing the path for a person who
           wants to skip the intro and start using the app right away would mean forcing "read the
@@ -388,8 +381,7 @@ function Body() {
 
   return (
     // relative: the notice cards need to float inside this. Applying it to the whole app would
-    // cover the top bar and the approval banner, so the card would intercept the banner's button
-    // (e2e caught this as a blocked click).
+    // cover the top bar and the approval banner, so the card would intercept the banner's button.
     <div className="relative flex min-h-0 flex-1">
       <Sidebar />
       <Notices />
@@ -397,22 +389,21 @@ function Body() {
         The overlay is confined to this lane, and that is why it lives inside this div
         rather than beside it. Covering the left lane would mean missing another session
         calling for me while I read code — blinding the instruments in the control tower.
-        Covering the right lane turned out to be just as bad in a quieter way.
+        Covering the right lane is just as bad in a quieter way.
 
-        It used to cover the right lane too, on the grounds that "340px can't hold a diff".
-        That is a true sentence and the wrong conclusion: it answers why the overlay is not
-        rendered *inside* the panel, not why it should *hide* the panel. The overlay is not
-        competing with the panel for width — it is competing with the conversation. What
-        the panel holds is the file tree and the change list, which is how you open the
-        next file, so the loop people were left with was: click a file, watch the tree
-        disappear, press escape, click the next one (issue #15). The diff does get ~340px
+        "340px can't hold a diff" is true, but it answers why the overlay is not rendered
+        *inside* the panel, not why it should *hide* the panel. The overlay is not competing
+        with the panel for width — it is competing with the conversation. What the panel
+        holds is the file tree and the change list, which is how you open the next file;
+        hiding it leaves the loop: click a file, watch the tree disappear, press escape,
+        click the next one (issue #15). The diff does get ~340px
         narrower; it is unified, not side-by-side, so that costs line width and not a
         column, and the tree stays where your hand already is.
       */}
       {/*
         Without min-w-0, this lane cannot shrink below the min-content width of its contents.
         Then widening the panel pushes the layout past the window edge and the whole screen
-        scrolls horizontally (the real cause of a bug found in dogfooding).
+        scrolls horizontally.
       */}
       <div className="cc-fade relative flex min-h-0 min-w-0 flex-1" style={{ minWidth: CENTER_FLOOR / zoom }}>
         {view === 'assistant' ? (
@@ -441,12 +432,11 @@ function Body() {
 /**
  * Top bar = the dashboard.
  *
- * There is one number (user request, 2026-09-09). FR-12 said not to sum approvals and
- * waiting-for-input, and that held for a long time, but dogfooding showed that the decision to
- * tell the two apart never actually happened at the top bar: either way, the answer was "open the
- * list and work through it one by one", and the kind is already written on each row of the list.
- * Keeping the two separate on the dashboard just made the reader do the addition in their head
- * every time.
+ * There is one number (user request, 2026-09-09), though FR-12 keeps approvals and
+ * waiting-for-input apart: the decision to tell the two apart never happens at the top bar.
+ * Either way, the answer is "open the list and work through it one by one", and the kind is
+ * already written on each row of the list. Two numbers on the dashboard would make the reader do
+ * the addition in their head every time.
  *
  * Instead, brightness carries the urgency: pure white (ink-signal) if there is even one approval or
  * error, gray if only waiting-for-input. The rule that pure white is reserved for whatever is
@@ -465,8 +455,8 @@ function TopBar() {
   // Leave room in the top-left if the window buttons occupy it. Since the title bar is hidden,
   // this header is the only drag handle —
   //
-  // How much to leave is a platform fact, so we ask instead of assuming. It was
-  // `pl-[86px]`, which is right on macOS (the traffic lights sit inside this bar) and
+  // How much to leave is a platform fact, so we ask instead of assuming. A fixed
+  // `pl-[86px]` is right on macOS (the traffic lights sit inside this bar) and
   // wrong everywhere else: on desktops that draw their own decorations above us, the
   // same padding is just a hole at the left edge with nothing in it.
   const controlsInset = useCapability('windowControlsInset')
@@ -475,12 +465,12 @@ function TopBar() {
   /*
    * Top bar.
    *
-   * Without data-tauri-drag-region, the window cannot be moved (caught in dogfooding).
+   * Without data-tauri-drag-region, the window cannot be moved.
    *
-   * Aligned on the same axis as the traffic lights. It was first fitted by shrinking the bar
-   * down to title-bar height (28px), which made the bar too thin. Since we control the traffic
-   * light position ourselves through `trafficLightPosition` in tauri.conf.json, the bar height is
-   * now decided first and the buttons are fit to it — the window decoration does not get to
+   * Aligned on the same axis as the traffic lights. Shrinking the bar down to title-bar height
+   * (28px) would make it too thin. Since we control the traffic light position ourselves through
+   * `trafficLightPosition` in tauri.conf.json, the bar height is decided first and the buttons are
+   * fit to it — the window decoration does not get to
    * dictate the height the screen needs.
    *
    *   bar height 36px, button diameter 12px → y = (36 - 12) / 2 = 12
@@ -492,12 +482,11 @@ function TopBar() {
     <DragRegion
       className="flex h-9 shrink-0 items-center gap-4 border-b border-line-chrome bg-surface-side pr-4 relative"
       /*
-       * Inset is 0 wherever there are no traffic lights (web and mock report it that way —
-       * correct, since there is no button to make room for). But using it as-is would remove the
-       * left margin entirely and the first control would sit flush against the window corner. The right
-       * side has pr-4 while the left had nothing, so the bar looked lopsided (caught in
-       * dogfooding). So there is a floor: make room for whatever there is to make room for, and
-       * otherwise use the same margin as the other corners.
+       * Inset is 0 wherever there are no traffic lights (web and mock report it that way — correct, since there is no
+       * button to make room for). But using it as-is would remove the left margin entirely and the first control
+       * would sit flush against the window corner. With pr-4 on the right and nothing on the left, the bar would look
+       * lopsided. So there is a floor: make room for whatever there is to make room for, and otherwise use the same
+       * margin as the other corners.
        */
       style={{ paddingLeft: Math.max(controlsInset, EDGE_PADDING) }}
       testId="app-header"
@@ -505,9 +494,9 @@ function TopBar() {
       <NavButtons />
 
       {/*
-        The list drops down directly below this button (user request, 2026-09-09). While it was a
-        modal in the center of the screen, the place pressed and the place it opened were far
-        apart, so the one action of seeing the number and opening the list made the eye move
+        The list drops down directly below this button (user request, 2026-09-09). As a modal in
+        the center of the screen, the place pressed and the place it opened would be far apart,
+        so the one action of seeing the number and opening the list would make the eye move
         twice. Where something is pressed and where it appears must be the same place (the rule
         from #4).
       */}
@@ -520,34 +509,30 @@ function TopBar() {
       {/*
         The shortcut chips (⌘I · ⌘⇧A) are not here (issue #33).
 
-        They sat beside the count and brightened with it, so at the one moment the bar has
-        something to say — something is waiting — two of the three bright things were
-        instructions. A shortcut hint is worth reading once and then never again, but a chip
-        on the dashboard charges attention on every glance, forever. The dashboard is the place
-        that speaks state.
+        Beside the count and brightening with it, they would make two of the three bright things
+        instructions at the one moment the bar has something to say — something is waiting. A
+        shortcut hint is worth reading once and then never again, but a chip on the dashboard
+        charges attention on every glance, forever. The dashboard is the place that speaks state.
 
-        Brightening stays the number's job. The chip's on-condition was just `waiting > 0`, while
-        the number already has its own brightness by kind (ink-signal for approvals, ink-muted for
-        waiting-for-input) — a more accurate signal was already there, and the chip was just
-        riding along with it.
+        Brightening is the number's job: it has its own brightness by kind (ink-signal for
+        approvals, ink-muted for waiting-for-input), a more accurate signal than a chip lit on
+        `waiting > 0`.
 
-        Where they went: named with their keys in the palette's Keyboard shortcuts, and runnable from
-        the command palette (⌘K). Deleting the only visible mention was the failure to avoid,
-        so the palette gained both entries in the same change.
+        The shortcuts keep a visible mention: they are named with their keys in the palette's
+        Keyboard shortcuts, and runnable from the command palette (⌘K).
       */}
       {/*
-        The middle of the bar is empty on purpose (owner, 2026-11-05): the search field went back to the top of the
-        sidebar (SearchField), and the room it stood in is kept for controls still to come. Empty bar is drag region.
+        The middle of the bar is empty on purpose (owner, 2026-11-05): the search field is at the top of the sidebar
+        (SearchField), and the room is kept for controls still to come. Empty bar is drag region.
       */}
       {/* data-tauri-drag-region: a double press on the gap inside this wrapper zooms the window, as on the bar itself */}
       <span className="ml-auto flex items-center gap-3 self-stretch" data-tauri-drag-region>
         {/*
           "A new version is available" — a line that appears only when there is one (issue #43).
 
-          This puts something back in the spot the shortcut chips were removed from (comment
-          above), but with the opposite character: the chip stayed on all the time and stopped
-          telling anything after the first time it was seen, while this line is normally absent
-          entirely and only appears when the dashboard has something to say. And this too is
+          It has the opposite character of a shortcut chip (comment above): a chip stays on all
+          the time and stops telling anything after the first time it is seen, while this line is
+          normally absent entirely and only appears when the dashboard has something to say. And this too is
           state — "this app is not up to date right now" is a question the dashboard should be
           able to answer.
         */}
@@ -563,10 +548,10 @@ function TopBar() {
         */}
         <UsageDonuts />
         {/*
-          Settings used to have exactly one entrance: the command palette. But the shortcuts
-          table lives inside it — meaning only someone who already knew the shortcuts could see
-          the shortcuts table. Dogfooding surfaced this as "where are the settings?". Not forcing
-          a flow is different from hiding the entrance.
+          Settings has an entrance here, not only in the command palette: the shortcuts table
+          lives inside Settings, so with the palette as the only way in, only someone who already
+          knew the shortcuts could see the shortcuts table. Not forcing a flow is different from
+          hiding the entrance.
         */}
         {/* A gear, not the word (owner, 2026-10-18): the one settings mark people already know; the name is its tooltip */}
         <IconButton
@@ -581,9 +566,9 @@ function TopBar() {
         {/* Windows: the window's own controls, flush with the right edge, where the OS title bar was (WindowControls) */}
         {windowControls && <WindowControls />}
         {/*
-          "Add project" used to be here. It moved to the bottom of the sidebar (issue #4) — the
-          place pressed (far right of the screen) and the place the result appeared (the sidebar
-          on the left) were apart, across the whole screen. The top bar is a dashboard, and a
+          "Add project" is at the bottom of the sidebar, not here (issue #4): here the place
+          pressed (far right of the screen) and the place the result appears (the sidebar on the
+          left) would be apart, across the whole screen. The top bar is a dashboard, and a
           button that creates something standing next to the numbers mixes reading and doing into
           one row.
         */}
@@ -673,7 +658,7 @@ function GlobalKeys() {
         openNextWaiting()
         return
       }
-      // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
+      // Toggle the evidence panel ⌘B.
       // Git and files are not a screen that replaces the conversation, they sit alongside it.
       if (mod && letter === 'b') {
         e.preventDefault()
@@ -681,7 +666,7 @@ function GlobalKeys() {
         return
       }
       // Digit shortcuts are read from e.code — e.key turns into a symbol like '#' when Shift is
-      // held (caught by e2e)
+      // held
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
       // Jump to project ⌘1-9 (FR-17)
       if (mod && !e.shiftKey && digit) {
@@ -744,7 +729,7 @@ function Toast() {
   const held = heldFor === toastAt
   useEffect(() => {
     if (!toast || held) return
-    // A toast with an Undo stays long enough to be read and pressed (#1512); one that only says something goes as before
+    // A toast with an Undo stays long enough to be read and pressed (#1512); one that only says something goes sooner
     const t = setTimeout(() => setToast(null), action ? 8000 : 2500)
     return () => clearTimeout(t)
   }, [toast, toastAt, action, held, setToast])
@@ -754,7 +739,7 @@ function Toast() {
       z-30 — the same tier as the notice cards, and above the overlay (z-20).
 
       Without it this is an opaque pill painted *underneath* the wide surface, so every
-      failure reported while a file or a diff is open said nothing at all. That is the one
+      failure reported while a file or a diff is open says nothing at all. That is the one
       state where the toast matters most: the overlay covers the lane the pill sits in, and
       what it covers up is the app's whole answer to "that didn't work".
     */

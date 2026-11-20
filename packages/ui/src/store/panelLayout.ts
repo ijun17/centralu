@@ -31,18 +31,17 @@ export const PANEL_TABS = ['git', 'history', 'files', 'terminal'] as const
 /**
  * What the evidence panel can show.
  *
- * `history` is the only place the log lives now. It started (#21) alongside a log strip
- * inside the git tab; that strip was a fixed-height block, and once the panel could
- * split into stacked groups (#20) it overflowed a short group straight over the next
- * group's tab strip — so it left, and its lane graph moved here. Wanting the log next
- * to the git tab is exactly what the split is for: drag `history` below `git`.
+ * `history` is the only place the log lives (#21). A fixed-height log strip inside the
+ * git tab would overflow a short group straight over the next group's tab strip when the
+ * panel splits into stacked groups (#20). Wanting the log next to the git tab is exactly
+ * what the split is for: drag `history` below `git`.
  */
 export type PanelTab = (typeof PANEL_TABS)[number]
 
 /** One vertical slot of the panel: which tabs live here, and which one is showing */
 export type PanelGroup = { tabs: PanelTab[]; active: PanelTab }
 
-/** A fresh install: one group, every tab, git in front (what the old `panelTab` defaulted to) */
+/** A fresh install: one group, every tab, git in front */
 export function defaultLayout(): PanelGroup[] {
   return [{ tabs: [...PANEL_TABS], active: 'git' }]
 }

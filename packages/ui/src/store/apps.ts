@@ -296,7 +296,7 @@ export async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppStat
 /**
  * An instance left open that a reopened UI is closing (`syncInlineViews`). Held only while its close is on its way:
  * once the host has answered, it no longer lists the instance, and one it still lists is open and closed again. Kept
- * for good, this grew by one id per orphan for the life of the window (#392).
+ * for good, this would grow by one id per orphan for the life of the window (#392).
  */
 const releasedOrphans = new Set<string>()
 
@@ -413,7 +413,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     if (get().inlineViews[sessionId]?.[callId]?.state !== 'closing') return
     /*
      * A placeholder draws neither the input nor the result, and reopening takes both from the host (#392). Kept
-     * here, each parked card held its call's whole input and outcome (up to 256 KB each) for the life of the
+     * here, each parked card would hold its call's whole input and outcome (up to 256 KB each) for the life of the
      * window, and a long conversation parks one card per app call.
      */
     patch({ state: 'parked', instanceId: null, toolInput: undefined, toolResult: undefined })

@@ -47,7 +47,7 @@ type UpdateActions = Pick<
  * One request's answer for `update` (#2155), and whether it may still be shown: not once the host connection it was asked on is
  * gone (another platform, or a resync), nor once an answer to a later request is seated. The window's own check on connect, the
  * forced check as Updates opens, an install and the switches each ask the host on their own, and their answers can come back in
- * any order: seated as they arrived, an older answer replaced a newer one, and the person could decide on a stale "update
+ * any order: seated as they arrive, an older answer would replace a newer one, and the person could decide on a stale "update
  * available" until the host's next event. The host's `update_status` events are not asked for: they are its newest state, and an
  * answer the host gives after one leaves after it on the same connection
  */

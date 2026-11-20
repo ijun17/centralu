@@ -20,8 +20,7 @@ export function mergeBySeq<T extends { seq: number }>(...lists: readonly (readon
 /**
  * How much history is read back at a time — **a count of messages, not rows** (#66).
  * The host's `loadMessages` merges delta chunks into messages before counting them, so what arrives
- * is 100 real messages, not the "200 rows = 200 tokens = a couple of sentences" that 200 meant in
- * the days before that merge.
+ * is 100 real messages; counted as rows, a page of streamed deltas would be a couple of sentences.
  */
 export const HISTORY_PAGE = 100
 
@@ -69,7 +68,7 @@ function settle(live: ChatItem, row: ChatItem): ChatItem {
  * There are three kinds of unnumbered row: a message before confirmation (a mock never sends the
  * confirmation), an image (the host assigns the number only **after** writing the file, so the event
  * carries none), and an error (a mock never records the error, so it carries no number — the host's
- * own errors have carried a number since #161). All three exist in the host's store.
+ * own errors carry one, #161). All three exist in the host's store.
  */
 function sameLine(live: ChatItem, row: ChatItem): boolean {
   if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && !row.fromScript && live.text === row.text
@@ -82,10 +81,9 @@ function sameLine(live: ChatItem, row: ChatItem): boolean {
  * Merges the newest history page with the conversation on screen (#79) — rows are matched only by
  * stored number (`storedSeq`).
  *
- * This used to discard the page and set the cursor from the page alone whenever the screen already
- * had rows. That left a gap between the discarded page and the screen (`loadOlder` only reads above
- * the cursor), and setting the cursor from the render key at the top of the screen appended the same
- * conversation a second time.
+ * Discarding the page whenever the screen already has rows would leave a gap between the page and
+ * the screen (`loadOlder` only reads above the cursor), and setting the cursor from the render key at
+ * the top of the screen would append the same conversation a second time.
  *
  * The page is the last N rows as of the moment the host read them, and within that range (first row
  * through last row) **the page is the source of truth.**
@@ -178,12 +176,12 @@ export function prependPage(have: ChatItem[], older: ChatItem[]): ChatItem[] {
  *
  * A re-read (`history_synced` when a resumed session catches up, a resync after a reconnect) merges
  * the newest page with the screen, and `mergePage` drops every screen row older than the page. For
- * a stale fragment replayed on first contact that is right, but it also dropped the pages the person
- * had just read back through with "earlier messages": the conversation snapped back to its last page
- * in the middle of reading, and the cursor with it. These rows are kept when they still connect to
- * the page, which is when the screen holds a stored row inside the page's range: everything from the
- * cursor up to that row was read as whole pages. When the screen ends before the page starts, a gap
- * of unknown size lies between them, and the rows go as before.
+ * a stale fragment replayed on first contact that is right, but it would also drop the pages the
+ * person has just read back through with "earlier messages": the conversation would snap back to its
+ * last page in the middle of reading, and the cursor with it. These rows are kept when they still
+ * connect to the page, which is when the screen holds a stored row inside the page's range: everything
+ * from the cursor up to that row was read as whole pages. When the screen ends before the page
+ * starts, a gap of unknown size lies between them, and the rows are dropped.
  */
 export function readBack(have: ChatItem[], held: AppState['history'][string] | undefined, rows: StoredMessage[]): ChatItem[] {
   const first = rows[0]?.seq
@@ -198,18 +196,14 @@ const WINDOW_SIZE = 50
 /**
  * Cuts a conversation down to its last `WINDOW_SIZE` rows, or returns null when there is nothing to cut.
  *
- * **Shrinking the window moves the cursor along with it** (dogfooding, 2026-09-09: "older
- * conversation does not load above").
+ * **Shrinking the window moves the cursor along with it**: the trim point is the new cursor.
+ * Trimming only `chat` would leave the cursor (`oldestSeq`) at its old value, so "load earlier
+ * conversation" would prepend **a range that does not connect to the screen**, and the
+ * trimmed-away gap would never be seen again.
  *
- * This used to trim only `chat`. That left the top of the screen at the freshly trimmed spot
- * while the cursor (`oldestSeq`) stayed at its old value, so "load earlier conversation"
- * prepended **a range that does not connect to the screen** — the trimmed-away gap was never
- * seen again. The trim point is now the new cursor.
- *
- * The cursor is the top row's **stored number** (#79). Back when the render key was used, if
- * the top of the 50 kept rows was a live row, the cursor received a number shared across every
- * session. The window never starts at an unnumbered row (an image, a message before
- * confirmation) — it has no number to set, and that row lives in the store anyway, so
+ * The cursor is the top row's **stored number** (#79), not the render key: a live row's render key
+ * is a number shared across every session. The window never starts at an unnumbered row (an image,
+ * a message before confirmation) — it has no number to set, and that row lives in the store anyway, so
  * `loadOlder` brings it back. If there is no numbered row at all, nothing is trimmed: trimming
  * with no cursor would leave no way back into the trimmed gap.
  */
@@ -226,17 +220,18 @@ export function trimWindow(items: ChatItem[]): { items: ChatItem[]; oldestSeq: n
  *
  * Losing focus is not the only way a conversation grows out of sight: a worker the Assistant
  * started, a session an app asked for, a grid panel that is not the focused one — none of them is
- * ever focused and then left, so the trim in `focusSession` never reached them, and every event
- * (screenshots included, base64 and all) stayed in memory for the life of the window. Twice the
- * window leaves slack, so the cut happens once per window's worth of rows rather than on every event.
+ * ever focused and then left, so the trim in `focusSession` never reaches them, and without this
+ * every event (screenshots included, base64 and all) would stay in memory for the life of the
+ * window. Twice the window leaves slack, so the cut happens once per window's worth of rows rather
+ * than on every event.
  */
 export const OFFSCREEN_TRIM_AT = WINDOW_SIZE * 2
 
 /**
  * A session's launch cards without the steps of the closed ones (#392), for when its conversation is cut back to the
- * window. A closed card kept every step it had read, and a live session kept appending to it, for the life of the
- * window. Opening it again reads them from the store, as the first opening did. An open card keeps its steps: it is
- * still showing them, or will be when the person comes back.
+ * window. Otherwise a closed card would keep every step it has read, and a live session keep appending to it, for the
+ * life of the window. Opening it again reads them from the store, as the first opening did. An open card keeps its
+ * steps: it is still showing them, or will be when the person comes back.
  */
 export function withoutClosedSteps(all: AppState['subagentSteps'], sessionId: string): AppState['subagentSteps'] {
   const mine = all[sessionId]

@@ -54,7 +54,7 @@ afterEach(() => {
 describe('attaching to a platform', () => {
   /*
    * A subscription is a fresh closure each time, so attaching again without dropping the old one
-   * applied every event once per attach: streamed text arrived doubled (dogfooding, x2 and x3).
+   * would apply every event once per attach: streamed text would arrive doubled or tripled.
    */
   it('attaching again applies each event once, not once per attach', async () => {
     const mock = new MockPlatform()

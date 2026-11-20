@@ -58,9 +58,9 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
     try {
       /*
        * **Only asks — never creates** (#63, deferred startup). Opening the screen and creating the
-       * process are now separate: if there is none, an empty conversation (with suggested-question
+       * process are separate: if there is none, an empty conversation (with suggested-question
        * cards) stands, and creation happens only in `askAssistant`, at the moment the first
-       * question is asked. Creating it here as before would bring up a tool process for a person who
+       * question is asked. Creating it here would bring up a tool process for a person who
        * never even asked for it.
        */
       const info = await platform.agents.assistantPeek()

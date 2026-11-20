@@ -33,11 +33,10 @@ export type ConversationSlice = {
   /**
    * Text not yet sent — kept **per session**.
    *
-   * It used to be held by the composer component itself. That binds the text to the screen's spot
-   * rather than to the session: switching sessions in the focus view reuses the same component, so
-   * text written for A was still sitting in B's composer — sending it as is would **go to the
-   * wrong session** (confirmed by measurement). Conversely, in the grid, which swaps out
-   * components, the text vanished along with the unmounted component.
+   * Not held by the composer component: that binds the text to the screen's spot rather than to the
+   * session. Switching sessions in the focus view reuses the same component, so text written for A
+   * would sit in B's composer, and sending it as is would **go to the wrong session**. In the grid,
+   * which swaps out components, the text would vanish along with the unmounted component.
    *
    * Not put in the store's persisted snapshot. It is not heavy enough to need to survive the app
    * being closed and reopened.
@@ -53,11 +52,9 @@ export type ConversationSlice = {
   /**
    * Whether a conversation was left standing at its newest line — **per session** (#31).
    *
-   * The flag used to be a ref inside the chat stream, so it was born `true` with every
-   * mount, and the grid mounts and unmounts panels as you move around: look at another
-   * session, come back, and the panel had decided for itself that you were at the bottom.
-   * Fourth time state that belongs to the work has been kept by the view instead (drafts,
-   * the elapsed count, expanded folders, this).
+   * Not a ref inside the chat stream: that would be born `true` with every mount, and the grid
+   * mounts and unmounts panels as you move around, so looking at another session and coming back
+   * would put you at the bottom.
    *
    * Per session, and that is the opposite call from expanded folders (#16) on purpose. An
    * open folder is a fact about *the code*, so every session on that repo wants it; where
@@ -66,7 +63,7 @@ export type ConversationSlice = {
    *
    * **What is kept is "were you at the bottom", not the offset.** A pixel `scrollTop`
    * restored into a virtualiser that has not measured its rows yet lands *near* the right
-   * place — which is the symptom #31 reported, not a cure for it. The bottom needs no
+   * place, not on it (#31). The bottom needs no
    * measurements to be reachable: it is wherever the content ends.
    *
    * Absent means yes: a conversation nobody has scrolled starts at its newest line. Not
@@ -77,11 +74,9 @@ export type ConversationSlice = {
    * When a conversation was left somewhere other than the bottom, **which row and where in it** it
    * was showing (#61).
    *
-   * The comment above, that no pixel offset is kept, is still true — pinning a raw `scrollTop` into
-   * a virtualizer that has not yet measured its rows lands only *near* the right place. But that
-   * conclusion had been read as "keep nothing at all," and the result was that any conversation not
-   * at the bottom restarted from the top every time it was reopened (#61's "the scroll jumps to
-   * the top").
+   * No pixel offset is kept (`stickToBottom`): pinning a raw `scrollTop` into a virtualizer that has
+   * not yet measured its rows lands only *near* the right place. Keeping nothing at all would
+   * restart any conversation not at the bottom from the top every time it is reopened (#61).
    *
    * So what is kept is not a pixel but a **row**: the `seq` of the item spanning the top of the
    * screen, and the offset within that item. `seq` is a fact independent of measurement, so it
@@ -96,10 +91,9 @@ export type ConversationSlice = {
   /**
    * When the turn a session is currently running started — the instant, per session.
    *
-   * The "Waiting for response" line used to take `Date.now()` on mount and count up from
-   * there, so switching views restarted the clock: a turn three minutes old read as if it
-   * had just begun (issue #23). The component was holding the wrong half. **Elapsed time is
-   * derived; the start instant is the fact.** Keeping the instant here means the count is
+   * Not taken by the "Waiting for response" line on mount: switching views would restart the
+   * clock, so a turn three minutes old would read as if it had just begun (#23). **Elapsed time
+   * is derived; the start instant is the fact.** Keeping the instant here means the count is
    * recomputed rather than resumed, and nothing depends on a component staying alive.
    *
    * Not `waitingSince`, which sounds like the same thing and is the opposite one: that is
@@ -112,7 +106,7 @@ export type ConversationSlice = {
   workingSince: Record<string, number>
   /**
    * A Stop the person pressed, per session (#1060): the turn it was pressed in (that turn's `workingSince`), and the
-   * notice text once the tool says it has not taken effect. Stop is said once the tool confirms it, as Claude now
+   * notice text once the tool says it has not taken effect. Stop is said once the tool confirms it, as Claude
    * waits too, so the button says "Stopping…" from the click until the session leaves `working`. Keyed to its turn,
    * so a later turn never reads an old Stop, and nothing has to clear it.
    */
@@ -125,8 +119,7 @@ export type ConversationSlice = {
   history: Record<string, { oldestSeq: number; more: boolean; loading: boolean }>
   /**
    * The steps of a native subagent, per session and launch card (#222) — present once the person has opened that
-   * card's steps, and only then read from the host. Kept here rather than in the card, so a card the virtual list
-   * detaches and draws again comes back as it was left (open, loaded), not collapsed and reading again.
+   * card's steps, and only then read from the host. Kept here rather than in the card: docs/state-management.md §4.
    */
   subagentSteps: Record<string, Record<string, SubagentSteps>>
   /**
@@ -151,21 +144,21 @@ export type ConversationSlice = {
   /**
    * Approval requests that have had a response sent but not yet answered (#158) — `inFlightKey(sessionId, requestId)`
    * → `true`. Keyed by the session too (#683 review): a request id is unique only within a session's process, so two
-   * sessions can hold the same one, and an answer in one must not be dropped as a repeat of the other's. If a second input arrives on the same card (two key presses, the card and the rail)
-   * before the first response's result reaches the screen, the second response became a "vanished
-   * request" and recorded a command that had already run as denied.
+   * sessions can hold the same one, and an answer in one must not be dropped as a repeat of the other's. Without it, a
+   * second input on the same card (two key presses, the card and the rail) before the first response's result reaches
+   * the screen would become a "vanished request" and record a command that had already run as denied.
    */
   approvalsInFlight: Record<string, true>
   /**
    * The number of attachments currently uploading, per session (#180). A chip only enters the draft
-   * once the host has finished storing it, and sending during that window sent only the text —
-   * the chip that finished later attached itself to the draft afterward and rode along with the next
-   * message. The composer refuses to send while this value is above zero.
+   * once the host has finished storing it, so sending during that window would send only the text,
+   * and the chip that finished later would ride along with the next message. The composer refuses
+   * to send while this value is above zero.
    */
   uploading: Record<string, number>
   /**
-   * A request to open the session settings menu (model, effort, permissions) (2026-09-07, the
-   * `/model` GUI command). The menu's open state is local state on `SessionSettings` — this only
+   * A request to open the session settings menu (model, effort, permissions) (the `/model`
+   * GUI command). The menu's open state is local state on `SessionSettings` — this only
    * carries the signal. `at` is needed so that requesting the same session twice in a row still
    * opens it each time.
    */
@@ -182,8 +175,7 @@ export type ConversationSlice = {
    * Reads one page of the newest history, merges it with the conversation on screen, and sets the
    * cursor (#79, `mergePage`). The same path serves a session opened for the first time, a re-read
    * that catches up on a conversation continued elsewhere (`history_synced`), and a resync that
-   * fills a gap — there used to be a separate `force` that swapped in only for re-reads. Now, within
-   * a page's range, history is always the source of truth.
+   * fills a gap. Within a page's range, history is always the source of truth.
    */
   loadHistory(sessionId: string): Promise<void>
   /** Reads the page containing a search result instead of only the newest history page. */

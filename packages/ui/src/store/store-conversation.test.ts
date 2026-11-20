@@ -17,8 +17,8 @@ beforeEach(resetStore)
 /*
  * When the current turn started (issue #23).
  *
- * The "Waiting for response" line counted up from its own mount, so any remount put a
- * three-minute turn back at zero. The instant lives here now and the count is derived from
+ * Counting up from the "Waiting for response" line's own mount would put a three-minute turn
+ * back at zero on any remount. So the instant lives in the store and the count is derived from
  * it — which only helps if the instant itself holds still while a turn streams, and is let
  * go when the turn ends. Both are what these check.
  *
@@ -119,9 +119,9 @@ describe('whether a conversation stood at the bottom (issue #31)', () => {
 
 describe('messagesToChat — restoring tool output', () => {
   /*
-   * The host keeps the call and the result as separate rows. While there was no branch for the
-   * result, reopening a session left the card with only its title, its output gone — a screen that
-   * had only ever existed for whoever watched it live.
+   * The host keeps the call and the result as separate rows. Without a branch for the result,
+   * reopening a session would leave the card with only its title, its output gone — a screen that
+   * only ever existed for whoever watched it live.
    */
   const call = (seq: number) => ({
     sessionId: 's',
@@ -351,7 +351,7 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
   })
 
-  // #418: the steps was archived, and a card still showing them, or reading as "none recorded", was wrong
+  // #418: once the steps are archived, a card still showing them, or reading as "none recorded", is wrong
   it('moving the steps to the session archive and back makes an open card read again and say where they went', async () => {
     const s = 'sub-trash'
     const mock = await setup(s)
@@ -389,9 +389,9 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
 /**
  * A failed turn **must be visible** (#107).
  *
- * An actual incident: a codex rollout carried the full 400 error in `task_complete`, but the app kept
- * an empty reply and a state of `waiting_input`. "Waiting for a human" was a lie — what needed waiting
- * for was an explanation, not a person. Both halves are checked together: does it survive in the
+ * A codex rollout can carry the full 400 error in `task_complete`. Keeping an empty reply and a state
+ * of `waiting_input` would make "Waiting for a human" a lie — what needs waiting for is an
+ * explanation, not a person. Both halves are checked together: does it survive in the
  * transcript, and is the state honest.
  */
 describe('a failed turn reaches the screen (#107)', () => {
@@ -505,7 +505,7 @@ describe('messagesToChat — reasoning rows', () => {
 
 /*
  * Two neighboring replies are two blocks (#77). A new reply with no human message in between (a
- * background task finished, a question card was answered) used to run together with the reply before
+ * background task finished, a question card was answered) must not run together with the reply before
  * it, with no gap: "…still running.All six reviews are in." Messages are split by stored number — the
  * host groups a message's chunks into one row and carries that row's number on every chunk (#66). The
  * mock numbers them by the same rule.
@@ -653,7 +653,7 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
 })
 
 /**
- * Restoring written text after a send failure (a follow-up to the loss incident of 2026-09-02).
+ * Restoring written text after a send failure.
  *
  * The composer is cleared the instant it is sent (#38). On failure, the bubble is removed, which
  * leaves the sentence **nowhere at all** — a toast only reports the failure, it does not return the
@@ -671,7 +671,7 @@ describe('restoring written text after a send failure', () => {
 
     expect(useStore.getState().drafts[s]?.text).toBe('a sentence that must not be lost')
     expect(useStore.getState().toast).toMatch(/Could not send/)
-    // Still no bubble left behind that looks sent (existing behavior kept)
+    // Still no bubble left behind that looks sent
     expect((useStore.getState().chat[s] ?? []).some((i) => i.kind === 'user')).toBe(false)
   })
 
@@ -703,8 +703,8 @@ describe('restoring written text after a send failure', () => {
 
 /*
  * #158: if a second input arrives on the same card before the first response's result reaches the
- * screen, the second response became a "vanished request" on the host and recorded a command that had
- * already run as Denied. A request is sent only once.
+ * screen, the second response would become a "vanished request" on the host and record a command that
+ * already ran as Denied. A request is sent only once.
  */
 describe('an approval is sent only once per request (#158)', () => {
   async function pendingCard() {
@@ -772,10 +772,10 @@ describe('an approval is sent only once per request (#158)', () => {
 
 /*
  * #174 (the rest of #125): when text cannot be an answer to a question (several questions, or an
- * attachment), sending it starts a new turn and drops the question. The hint text never looked at
- * attachments, so it said "write an answer" while sending the text as a new turn, and the card
- * vanished with no explanation. Handing off a session with an open question sent the request text as
- * that question's answer.
+ * attachment), sending it starts a new turn and drops the question. The hint text and sending use one
+ * decision, so the hint never says "write an answer" for text that goes to a new turn, and the card
+ * never vanishes with no explanation. Handing off a session with an open question must not send the
+ * request text as that question's answer.
  */
 describe('an open question and the composer (#174)', () => {
   const q = (requestId: string, ...questions: string[]) => ({
@@ -831,7 +831,7 @@ describe('an open question and the composer (#174)', () => {
 })
 
 /*
- * #180: if the send path failed or raced, what a person wrote disappeared.
+ * #180: when the send path fails or races, what a person wrote must not disappear.
  */
 describe('a failed send returns what was written (#180)', () => {
   it('text sent as an answer to a question comes back to the composer if it never lands', async () => {

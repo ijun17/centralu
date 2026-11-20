@@ -35,9 +35,9 @@ export const SIDEBAR_DEFAULT = 240
  * The minimum width the conversation lane must keep.
  *
  * Without this, stretching both side panels squeezes the center down to zero and beyond, pushing
- * the whole layout past the window edge so the entire screen scrolls horizontally (this actually
- * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
- * creating feedback where dragging it makes it grow larger still.
+ * the whole layout past the window edge so the entire screen scrolls horizontally. Worse, in that
+ * state the handle position calculation goes wrong, creating feedback where dragging it makes it
+ * grow larger still.
  */
 const CENTER_MIN = 360
 
@@ -56,7 +56,7 @@ export const CENTER_FLOOR = 300
  * inflated at higher zoom and the layout is pushed past the window edge. The minimum width, on
  * the other hand, is **pinned to real pixels** — if it were allowed to grow with the zoom level up
  * to the point where the panel could be narrowed, raising the zoom in a narrow window would let
- * the panel eat the whole screen (per a dogfooding request: the minimum width stays fixed).
+ * the panel eat the whole screen.
  */
 function fitWidth(px: number, minReal: number, max: number, otherLane: number, zoom = 1): number {
   const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom

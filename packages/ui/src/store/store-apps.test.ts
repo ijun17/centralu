@@ -16,13 +16,6 @@ import { appInfo, resetStore, sessionInfo } from './store.test-helpers.js'
 beforeEach(resetStore)
 
 /**
- * Handing off and starting fresh (a dogfooding request — the way out of the 7-13 second resume delay
- * on an old thread). The dying session's written text becomes the new session's first message, its
- * name and settings carry over, and the old session is deleted all the way to its own original —
- * since #204 it goes to the session archive, and its tool file goes when it is deleted for good.
- * Destruction comes last — a failure deletes nothing.
- */
-/**
  * An external app's "changed" (M4 B-5): the store only counts, per (project, app). Re-reading is the
  * open view's own job, through its state tool — the store never asks the host for it.
  */
@@ -47,7 +40,7 @@ describe('an external app\'s change signal (M4 B-5)', () => {
     mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: 'p1' } as NormalizedEvent)
     mock.emit({ type: 'external_app_runs_changed', appId: 'notes', projectId: null } as NormalizedEvent)
     await vi.waitFor(() => expect(useStore.getState().externalAppRunChanges).toEqual({ 'p1/notes': 1, '_user/notes': 1 }))
-    // A read-only tool's chain also arrives through this signal — waking the view would bring back #190's loop
+    // A read-only tool's chain also arrives through this signal — waking the view would start #190's loop
     expect(useStore.getState().externalAppChanges).toEqual({})
   })
 

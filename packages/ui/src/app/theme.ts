@@ -98,7 +98,7 @@ export function resolveSide(
 export type ThemeChoice = { mode: UiPreferences['themeMode']; dark: ResolvedTheme; light: ResolvedTheme }
 
 /**
- * The stored `accent` is not followed (owner, 2026-10-20): Settings stopped offering it, and a value an older
+ * The stored `accent` is not followed (owner, 2026-10-20): Settings does not offer it, and a value an older
  * build saved would otherwise colour focus and selection with no switch left to take it back. A theme file can still
  * set the same tokens itself.
  */
@@ -167,8 +167,8 @@ export function applyCachedTheme(): void {
 /**
  * The custom themes the last run showed, as theme files, for the store's `lastGoodThemes` before any file has been read.
  * A theme file that is broken when the window starts (half edited, or one the host could not parse) has no clean version
- * in memory yet; without this the window fell back to the Dark preset and wrote that over the cache, so the custom theme
- * was gone from the first paint until the file was fixed. The cache is the page's own writing, re-checked like in
+ * in memory yet; without this the window would fall back to the Dark preset and write that over the cache, so the custom
+ * theme would be gone from the first paint until the file was fixed. The cache is the page's own writing, re-checked like in
  * `applyCachedTheme`.
  */
 export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
@@ -192,7 +192,7 @@ export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
 
 /**
  * Reads what a preset sets every token to (by theme-file key), with the custom layer
- * lifted for the moment it takes to read. Used to duplicate a preset into a theme file: the copy
+ * lifted for the moment it takes to read. Duplicating a preset into a theme file reads it here: the copy
  * starts from exactly what that preset puts on screen.
  */
 export function readPresetTokens(preset: string, root: HTMLElement = document.documentElement): Record<string, string> {

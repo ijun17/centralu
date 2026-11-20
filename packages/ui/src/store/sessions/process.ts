@@ -124,12 +124,11 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
   async restartSession(sessionId) {
     const platform = get().platform
     /*
-     * **Prevents a second press** (dogfooding).
+     * **Prevents a second press.**
      *
-     * Restarting kills the process and brings it back up, which takes a few seconds, and the screen
-     * stayed silent through it. So the person pressed it again, and the second press **killed the
-     * process that had just come up** — the exact button pressed to fix something was the one causing
-     * the breakage.
+     * Restarting kills the process and brings it back up, which takes a few seconds. A second press in
+     * that window would **kill the process that has just come up** — the exact button pressed to fix
+     * something would be the one causing the breakage.
      *
      * The lock is the same `resuming` that `wake` and `fork` use. All three state the same fact — "this
      * session's process is being replaced right now" — so keeping a separate indicator for each would
@@ -248,10 +247,9 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
         },
       })))
       /*
-       * States exactly what changed. This used to say "Perms:" for anything that was not the model —
-       * so even changing effort showed "Perms: normal," and what the screen said no longer matched
-       * what had just been done. (Adding verbosity, #54, created a third place to lie, which is why
-       * this is being fixed now.)
+       * States exactly what changed, one wording per setting (verbosity: #54). A single "Perms:" for
+       * anything that is not the model would show "Perms: normal" after an effort change, which does
+       * not match what was just done.
        */
       const changed =
         s.model !== undefined
@@ -264,9 +262,8 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
                 ? `Speed: ${info.serviceTier ?? 'default'}`
                 : `Perms: ${info.permissionPreset}`
       /*
-       * When it takes effect is also stated as it actually happened (#164). This used to always say
-       * "(from next turn)," but the host could replace the process mid-turn on the spot and lose the
-       * turn in progress. It now returns what the host actually did.
+       * When it takes effect is also stated as it actually happened (#164): the host returns what it
+       * did, so a process replaced mid-turn is not announced as "(from next turn)".
        */
       const when =
         info.applied === 'restarted' ? 'agent restarted'

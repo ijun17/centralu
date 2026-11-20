@@ -45,14 +45,10 @@ import { RETRY_MS, retryLadder, type RetrySteps } from './retry.js'
  * True while `attach` restores the workspace snapshot. `saveWorkspace` does nothing then.
  *
  * The restore goes through the same setters a person uses (`focusSession`, `setPanelWidth`,
- * `setSidebarWidth`, `openAssistant`), and each of them saves. A save in the middle of the restore writes
- * the half-restored state back over the snapshot being read, so every field restored after that save is
- * stored as its default, and the next launch reads the default. It hit the folded projects (#205) and
- * `introSeen` (#63), each fixed by restoring that one field earlier, and then the spinning-marker
- * settings, which are restored last: the person turned both off, and after the machine restarted both
- * were on again (2026-09-30, on the real store: the snapshot held `false` for both at 06:18 and `true`
- * after the restart, with every other field unchanged). Reordering fixes one field at a time; not saving
- * while restoring fixes the class.
+ * `setSidebarWidth`, `openAssistant`), and each of them saves. A save in the middle of the restore would write
+ * the half-restored state back over the snapshot being read, so every field restored after that save would be
+ * stored as its default, and the next launch would read the default (#205, #63). Restoring a field earlier
+ * protects that one field; not saving while restoring protects them all.
  */
 export let restoringWorkspace = false
 
@@ -71,11 +67,9 @@ let recoveryGeneration = 0
 /**
  * The latest workspace snapshot the host has not confirmed storing, and the one writer that sends it.
  *
- * A save used to be sent once and a failure swallowed (`.catch(() => {})`). On 2026-09-30 the machine
- * froze for hours; the person folded every project during that time, every save timed out (an RPC gives
- * up after 30 s), and after a restart the folds were gone because the stored snapshot never got them.
- * Now a failed save stays pending and goes out again: when the connection comes back, and after a short
- * backoff while connected.
+ * A failed save stays pending and goes out again: when the connection comes back, and after a short
+ * backoff while connected. An RPC gives up after 30 s, so on a host that stalls every save times out, and a
+ * save sent only once would leave the stored snapshot without the changes made meanwhile.
  *
  * Only the **latest** snapshot is ever sent, and only one save is in flight at a time. A newer save
  * replaces the pending one instead of queueing behind it, so a retry can never write an older
@@ -135,7 +129,7 @@ async function flushWorkspace(get: () => AppState, set: StoreSet): Promise<void>
       () => send(start),
       () => mine() && workspaceSave.pending !== null && !restoringWorkspace,
       undefined,
-      // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart
+      // Said once the retries run out (#841 item 9): otherwise a layout that did not stick is found only after a restart
       () => {
         if (mine()) set({ toast: 'Could not save the window layout; it is tried again on the next change or reconnect' })
       },
@@ -186,12 +180,9 @@ export function goodThemes(
 function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, set: StoreSet, screen: boolean): boolean {
   let screenBack = true
   /*
-   * Folded projects are restored **first of all** (#205). `focusSession` right below this
-   * calls `saveWorkspace`, and if this value is still its initial state ([]) at that point, it
-   * writes an empty list back over the snapshot just read, erasing the fold — the same thing
-   * that happens to `introSeen` (see the comment below). Anything that is not a string is
-   * discarded. (Saves are now held off for the whole restore, `restoringWorkspace`, so this order
-   * is no longer what protects the fold.)
+   * Folded projects are restored **first of all** (#205), before `focusSession` below, which calls
+   * `saveWorkspace`; a save while this is still `[]` would erase the stored fold. Saves are held off
+   * for the whole restore (`restoringWorkspace`). Anything that is not a string is discarded.
    */
   const savedFolds = (snap as { foldedProjects?: unknown }).foldedProjects
   if (Array.isArray(savedFolds)) {
@@ -242,8 +233,7 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   /*
    * The view comes back *after* the session, on purpose: focusSession forces
    * view:'focus' (selecting a session must show it), so restoring in the other
-   * order would have the session restore quietly undo the view restore — the
-   * exact bug being fixed, reintroduced by ordering.
+   * order would have the session restore quietly undo the view restore.
    *
    * The Assistant goes through its own door (openAssistant) rather than a
    * bare set: the view alone would be a "Waking the Assistant…" screen that
@@ -251,10 +241,9 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    */
   /*
    * `introSeen` is restored **before** `view` (#63). `openAssistant` below calls
-   * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
-   * writes `false` back over the snapshot just read, erasing the stored value — the next launch
-   * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
-   * field is restored last). That class is now closed by `restoringWorkspace`.
+   * `saveWorkspace`, and a save while `introSeen` is still `false` would write `false` over the
+   * snapshot just read, and the next launch would show the intro screen again. `restoringWorkspace`
+   * holds every save during the restore.
    */
   if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
   const savedView = screen ? (snap as { view?: unknown }).view : undefined
@@ -276,10 +265,8 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
     } else screenBack = false
   }
   /*
-   * Layout prefs come back even when the focused session is gone (#20). They used
-   * to sit inside the session check above, so a snapshot whose session had been
-   * deleted threw the whole arrangement away with it — but the panel's shape is a
-   * fact about the person, not about any session.
+   * Layout prefs come back even when the focused session is gone (#20): the panel's
+   * shape is a fact about the person, not about any session.
    */
   if (typeof snap.panelOpen === 'boolean') set({ panelOpen: snap.panelOpen })
   // The arrangement survives restart, globally (#20 decision)
@@ -295,23 +282,22 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
   if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
   const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
-  // The host's record is the one source (#1306); the snapshot's copy, which no build writes now (#2168), is read only from a host
+  // The host's record is the one source (#1306); the snapshot's copy, from builds before #2168, is read only from a host
   // that has none, and not at all once the host answered (the preferences arrive before the snapshot is applied)
   if (savedPolicy != null && get().prefs.notifyPolicy === undefined) set((s) => ({ prefs: { ...s.prefs, notifyPolicy: readNotifyPolicy(savedPolicy) } }))
   // Whether the tree shows ignored files is a way of looking, so it comes back with
   // the rest of the panel's layout rather than being re-chosen every launch (#17).
   //
-  // The `typeof` guard is what lets the default move. Reading the field as a plain
-  // falsy check would make "never wrote one" indistinguishable from "turned it off",
-  // and flipping the default to on would then quietly turn it back on for the one
-  // person who had deliberately turned it off. An absent field takes the new default;
-  // a stored `false` is a decision and outranks it.
+  // The `typeof` guard tells "never wrote one" from "turned it off": an absent field
+  // takes the default, and a stored `false` is a decision that outranks it, also when
+  // the default changes.
   const savedIgnored = (snap as { showIgnored?: boolean }).showIgnored
   if (typeof savedIgnored === 'boolean') set({ showIgnored: savedIgnored })
   // The text size is a preference (UiPreferences.textSize, #312 step 5), not part of the snapshot
   /*
-   * `foldComposer` (the "fold the message box" switch) is no longer read (owner, 2026-10-20): a grid or project panel
-   * folds its composer by its own height now (SessionPane's `foldWhenShort`). A snapshot that still carries it is fine.
+   * A snapshot from an older build may carry `foldComposer` (the "fold the message box" switch); it is not read
+   * (owner, 2026-10-20): a grid or project panel folds its composer by its own height (SessionPane's
+   * `foldWhenShort`).
    */
   return screenBack
 }
@@ -325,7 +311,7 @@ let workspaceReading = false
 
 /**
  * Reading a snapshot again after a read that failed (#384). `attach` runs once per window, so without this one
- * timeout at startup held every save (`workspaceUnread`) until the window was opened again. It is read again on every
+ * timeout at startup would hold every save (`workspaceUnread`) until the window is opened again. It is read again on every
  * reconnect and on the `RETRY_MS` waits while connected; read, it is brought back (`applyWorkspaceSnapshot`, without the
  * screen) and saving resumes. Past the last wait, the snapshot the window holds is saved in its place, said once: a row that
  * never reads must not stop the window saving for good.
@@ -377,9 +363,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      *
      * A subscription is a **fresh closure** every time, so putting it in a Set never deduplicates
      * it. If `attach` runs twice, the same event is applied twice; three times, three times — the
-     * screen shows text multiplied as is, arriving letter-duplicated like "호호스트가스트가" ("the
-     * host is" with syllables doubled and overlapping) (this happened during dogfooding, once at ×3
-     * and once at ×2).
+     * screen shows streamed text with its letters duplicated.
      *
      * Streaming deltas are **cumulative**, which makes this failure mode especially bad: once it
      * goes wrong once, everything after it piles up wrong too. `attach` is built so calling it at any
@@ -399,7 +383,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      * The stored snapshot is unread from here until the restore below has read it (#2220). The lists read in between take long
      * after an update, and the host and the subscriptions are live meanwhile: anything that saves in that time (an app list that
      * changed notes its arrivals and saves) would write this window's defaults over the stored snapshot, and the restore would then
-     * read the defaults back. A read that fails leaves it unread, as before (`readWorkspaceAgain`); an attach that fails before it
+     * read the defaults back. A read that fails leaves it unread (`readWorkspaceAgain`); an attach that fails before it
      * leaves it unread too, and the next reconnect reads it.
      */
     workspaceUnread = true
@@ -412,11 +396,9 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
          * resync_required: the connection itself is alive, but the host could not resend the
          * events that happened while it was disconnected (they fell outside the resend buffer).
          *
-         * While nothing consumed this signal, two things went wrong: missed events were never
-         * recovered, and the label logic drew anything other than `connected` as 'Disconnected',
-         * so it **showed disconnected while actually connected**. The label is kept at `connected`,
-         * and the gap is filled by a full resync (merging the session list and re-reading the
-         * conversation being viewed).
+         * The label is kept at `connected`, since the label logic draws anything else as
+         * 'Disconnected', and the gap is filled by a full resync (merging the session list and
+         * re-reading the conversation being viewed).
          */
         const resync = connection === 'resync_required'
         if (resync) {
@@ -620,10 +602,9 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV, workspaceReady: true })
 
     /*
-     * The grid's sessions are not woken at startup any more (#568). They used to be, one by one, to move a slow Codex
-     * resume (7-13 s for a large thread) to a moment nobody waited on; but every panel then held its process from the
-     * first second, and the host puts idle sessions to sleep after 15 minutes anyway. A panel wakes when it is used:
-     * its composer taking the keyboard, or a message sent to it.
+     * The grid's sessions are not woken at startup (#568), although a Codex resume is slow (7-13 s for a large thread):
+     * waking them would have every panel hold its process from the first second, and the host puts idle sessions to sleep
+     * after 15 minutes anyway. A panel wakes when it is used: its composer taking the keyboard, or a message sent to it.
      */
   },
 
@@ -631,10 +612,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
    * Saves every time state changes — "save on exit" is helpless against a crash.
    *
    * **This must be the only place that writes the snapshot.** The host replaces the layout whole,
-   * so the moment a second writer saves a partial snapshot, each erases the other's fields — this
-   * actually happened, when `setNotifyPolicy` saved separately with its own list, and the notify
-   * policy and history height were quietly reset by the other save. A new field has to be
-   * added **to this function**.
+   * so the moment a second writer saves a partial snapshot, each erases the other's fields. A new
+   * field has to be added **to this function**.
    *
    * The snapshot is not sent from here directly: it becomes the pending one and `flushWorkspace` sends
    * it, so a save that fails is sent again rather than dropped (see `workspaceSave`).
@@ -670,9 +649,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
    *
    * When the host dies, the supervisor brings it back up (up to five times, with exponential
    * backoff), but that new host **knows none of the agent processes that were alive** — they died
-   * along with it, and the new host's memory starts empty. So every session was left sitting asleep
-   * on screen, and the person had to press each one by hand to wake it (dogfooding: "the session
-   * connection drops in other places too").
+   * along with it, and the new host's memory starts empty. Without this, every session would sit
+   * asleep on screen until the person woke each one by hand.
    *
    * **The UI knows** what was running — the live state from right before the disconnect is right
    * here, and revival works from that. An archived session and one that was already asleep to begin
@@ -730,11 +708,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     /*
      * **The new host's list is merged in, never discarded.**
      *
-     * This used to use `fresh` only to decide `live` and throw the rest away — a session created,
-     * renamed or deleted elsewhere (a different app, a terminal) while disconnected stayed invisible
-     * until the app was closed and reopened. Only the facts the host knows (name, state, read
-     * position, approval/questions/limit, …) are overwritten; local derived state (preview,
-     * `touchedPaths`, …) belongs to the reducer and is preserved.
+     * A session created, renamed or deleted elsewhere (a different app, a terminal) while
+     * disconnected would otherwise stay invisible until the app is reopened. Only the facts the
+     * host knows (name, state, read position, approval/questions/limit, …) are overwritten; local
+     * derived state (preview, `touchedPaths`, …) belongs to the reducer and is preserved.
      * Approval and questions also have the host as their source of truth — they could have been
      * resolved or newly arrived while disconnected, and keeping the local ones would leave behind a
      * card for a dead `requestId`.
@@ -766,11 +743,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
      * Resync: events from the gap never come again — the screen's conversation is merged with the
      * store's own truth (`mergePage` fills the gap).
      *
-     * **Every session holding a conversation, not just the one being viewed** (#173). This used to
-     * re-read only the focused session, leaving every other session's conversation holding onto its
-     * gap. Opening that session later would not re-read history, since a cursor already exists, so
-     * the gap stayed unfilled until the app itself was reopened. A resync is rare, so the cost of
-     * reading one page per session is affordable.
+     * **Every session holding a conversation, not just the one being viewed** (#173). Opening a
+     * session later does not re-read history, since a cursor already exists, so a gap left in its
+     * conversation would stay unfilled until the app itself is reopened. A resync is rare, so the cost
+     * of reading one page per session is affordable.
      */
     const focused = get().focusedSessionId
     if (resync) {

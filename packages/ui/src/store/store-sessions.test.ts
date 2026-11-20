@@ -57,10 +57,9 @@ describe('inheriting while-alive facts', () => {
 /*
  * Settings survive a restart on screen, not only in the database (issue #37).
  *
- * Reported as "model, effort and permissions do not save": the database held the chosen
- * values the whole time and the host read them back, but the store's cold-start path took
- * only `effort` off the list and let initialSession's defaults fill the rest — so the button
- * under the composer said "Default · Normal" and every restart looked like a loss.
+ * The database holds the chosen values and the host reads them back. A cold-start path that
+ * takes only `effort` off the list and lets initialSession's defaults fill the rest would make the
+ * button under the composer say "Default · Normal", and every restart would look like a loss.
  * A stored value must come from the session, never from what the startup path bothered to
  * name, so this checks all of them at once.
  */
@@ -95,9 +94,8 @@ describe('inheriting stored session settings (issue #37)', () => {
 })
 
 /*
- * A rename must never fail while only the screen reports success (issue #5). This store has been
- * burned by this class of bug more than once, so a failure must always surface where a person can see
- * it (a toast).
+ * A rename must never fail while only the screen reports success (issue #5). A failure must always
+ * surface where a person can see it (a toast).
  */
 describe('renaming a session (issue #5)', () => {
   it('a success changes the name and locks auto-naming', async () => {
@@ -173,7 +171,7 @@ describe('wake — silently waking along the focus path', () => {
 /**
  * Sleeping sessions are woken by use, not by being seen (#568). The host puts idle sessions to sleep after 15 minutes;
  * waking every grid panel at startup, or every session the person clicks through, would start processes nobody types
- * to. Before #568 the grid's panels were woken one by one as the app came up, and selecting a session woke it.
+ * to.
  */
 describe('waking a sleeping session (#568)', () => {
   it('the grid\'s sleeping panels stay asleep when the app comes up', async () => {
@@ -266,7 +264,7 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
     expect(useStore.getState().commandRuns[p0.id]!['pnpm dev']!.running).toBe(true)
   })
 
-  // #841 item 11: runCommand toasted a failure and stopCommand swallowed it
+  // #841 item 11: stopCommand does not swallow a failure; it says it, as runCommand does
   it('a stop that fails says so, as a run that fails does', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -293,8 +291,8 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
 
 /**
  * A session deleted while awaited (#163). A post-await `set` spreading `{ ...s.sessions[id]!, … }`
- * revived a nearly empty row if `session_deleted` arrived in that window — code that iterates every
- * session broke on that row.
+ * would revive a nearly empty row if `session_deleted` arrived in that window — code that iterates every
+ * session would break on that row.
  */
 describe('a session deleted while awaited is never revived (#163)', () => {
   function stalled<T>() {
@@ -354,7 +352,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
     ])
   })
 
-  // #378 review: the host deletes an app's agent session once its run is over, and the draft went with it
+  // #378 review: the host deletes an app's agent session once its run is over, and the draft must not go with it
   it('a draft with words in it survives its session\'s deletion, to be copied', () => {
     const id = 'del-draft-378'
     useStore.setState({
@@ -387,8 +385,8 @@ describe('a session deleted while awaited is never revived (#163)', () => {
 
 /*
  * An app's agent session the person opens stays theirs (#378 review). The host hears "opened" through markRead, which
- * the window skipped with nothing unread: the app's request is read as it arrives, so a fresh app-agent session opened
- * that way told the host nothing, and a short run deleted it under the person's eyes.
+ * sends nothing with nothing unread, and the app's request is read as it arrives: a fresh app-agent session opened that
+ * way would tell the host nothing, and a short run would delete it under the person's eyes.
  */
 describe('an app-agent session on screen', () => {
   it('tells the host it is open even with nothing unread, without moving the read position', async () => {
@@ -407,8 +405,8 @@ describe('an app-agent session on screen', () => {
 
 /*
  * A lock found after a slow background resume had already handed the session back (#168, item 5).
- * It used to arrive as adapter_crashed: the session stayed "live" on screen and the fork offer,
- * drawn only from the wake result, never appeared.
+ * Taken as adapter_crashed, the session would stay "live" on screen and the fork offer, drawn only
+ * from the wake result, would never appear.
  */
 describe('a late lock error offers the fork (#168)', () => {
   it('the session turns dormant with the reason and the fork offer, and the marker does not speak of a turn', () => {
@@ -448,8 +446,8 @@ describe('a late lock error offers the fork (#168)', () => {
 
 /*
  * A newer host's session (#384). `sessions.list` reads it tolerantly (`parseTolerant`): a value this build does not
- * know costs that value only. `session_created`, the only word about a session the host made on its own, parsed it
- * strictly, so one new word left the session out of the sidebar until a reconnect listed it.
+ * know costs that value only. `session_created`, the only word about a session the host made on its own, does too:
+ * parsed strictly, one new word would leave the session out of the sidebar until a reconnect lists it.
  */
 describe('a session a newer host created', () => {
   it('is added from session_created even with a value this build does not know, as the session list would', async () => {
@@ -717,7 +715,7 @@ describe('newSessionProjectOf (#529)', () => {
 })
 
 /*
- * The preset a new session starts with (owner decision 2026-11-05, before it #1525): `auto` in a trusted project, here or
+ * The preset a new session starts with (owner decision 2026-11-05; #1525): `auto` in a trusted project, here or
  * on a linked machine, `normal` in an untrusted one, and the person's own choice always wins. The window sends the preset
  * itself, so a client that names none (a script, the limited credential) still gets `normal` from the host.
  */
@@ -794,8 +792,8 @@ describe('the Assistant session being deleted', () => {
 })
 
 /*
- * #2171: a row built from the host's `SessionInfo` is built in one place. `createSession`'s own answer used to leave out
- * half the fields, and replaced a row that `session_created` (broadcast before the response) had registered.
+ * #2171: a row built from the host's `SessionInfo` is built in one place, so `createSession`'s own answer neither leaves
+ * out fields nor replaces a row that `session_created` (broadcast before the response) has registered.
  */
 describe('registering a session from the host\'s answer (#2171)', () => {
   async function createdFrom(answer: (id: string) => SessionInfo, before?: (answer: SessionInfo) => void) {

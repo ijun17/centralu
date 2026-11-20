@@ -20,11 +20,10 @@ import { machineNameOf, projectMachineOf } from './names.js'
 /**
  * The agent tools this machine has, as the host reported them when the app connected.
  *
- * Empty until that first snapshot lands. The screens that draw a row per tool used to read
- * a `TOOL_META` constant compiled into `@cc/protocol`, so the list was always present and
- * always exactly two; now it is data, and a new adapter can appear without either side
- * being rebuilt. The cost is this one instant of emptiness, which reads as a row that has
- * not arrived rather than a row that is wrong.
+ * Empty until that first snapshot lands. The list is data, not a constant compiled into
+ * `@cc/protocol`, so a new adapter can appear without either side being rebuilt. The cost is
+ * this one instant of emptiness, which reads as a row that has not arrived rather than a row
+ * that is wrong.
  */
 export function useTools(): ToolStatus[] {
   return useStore((s) => s.tools)
@@ -35,8 +34,8 @@ export function useTools(): ToolStatus[] {
  *
  * **Falls back to the bare identifier instead of throwing.** A stored session can name a
  * tool this build has no adapter for: one that was removed, or one from a newer build that
- * wrote the row. `TOOL_META[tool].label` on such a row was a crash in the middle of the
- * sidebar. A chip that reads `codex` where it should read `Codex` is a smaller failure.
+ * wrote the row. Throwing on such a row would crash the middle of the sidebar. A chip that
+ * reads `codex` where it should read `Codex` is a smaller failure.
  */
 export function useToolMeta(tool: ToolName): ToolDescriptor {
   const tools = useStore((s) => s.tools)
@@ -85,9 +84,9 @@ export function useFocusedSession(): SessionSummary | undefined {
  * What is currently selected in the sidebar.
  *
  * While looking at the grid, neither a session nor a project is selected — the grid is what is
- * selected. A session row used to look only at `focusedSessionId`, so entering the grid left the
- * session row still lit up as if it were selected (dogfooding). With two bright things on
- * screen at once, the screen contradicts itself about which one is being looked at.
+ * selected. A session row that looked only at `focusedSessionId` would stay lit after entering
+ * the grid, as if it were selected. With two bright things on screen at once, the screen
+ * contradicts itself about which one is being looked at.
  *
  * Why this is computed in one place: if the session row and the project row each made their own
  * judgment, one of them would eventually get fixed while the other did not.
@@ -117,8 +116,8 @@ export function useProjectMachine(projectId: string | null | undefined): string 
 /**
  * The folder a session works in, which every path its conversation names is relative to (#1209): its worktree when it
  * has one, its project's folder otherwise, and null for a session with no project (the Assistant), whose words then
- * link nowhere (`parseFileRef`). One answer for the conversation's links and the approval rows: the conversation used
- * the project's folder while the rows used the worktree, so a worktree session's link opened the main checkout's file.
+ * link nowhere (`parseFileRef`). One answer for the conversation's links and the approval rows: if the conversation took
+ * the project's folder while the rows took the worktree, a worktree session's link would open the main checkout's file.
  */
 export function sessionFolderOf(state: Pick<AppState, 'sessions' | 'projects'>, sessionId: string): string | null {
   const s = state.sessions[sessionId]

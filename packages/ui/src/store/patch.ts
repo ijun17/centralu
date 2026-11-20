@@ -13,9 +13,9 @@ export function omitKey<T>(obj: Record<string, T>, key: string): Record<string, 
  * A `set` that updates one session **after** awaiting an RPC (#163) — changes nothing if
  * `session_deleted` arrived in the meantime.
  *
- * The post-await `set` used to spread `{ ...s.sessions[id]!, … }`. If the session was deleted while
- * awaiting, that revived a near-empty row (`{"live":true}`), which broke code that iterates all
- * sessions (`s.touchedPaths is not iterable`). Every post-await session update now goes through this
+ * A post-await `set` that spreads `{ ...s.sessions[id]!, … }` revives a near-empty row
+ * (`{"live":true}`) when the session was deleted while awaiting, which breaks code that iterates all
+ * sessions (`s.touchedPaths is not iterable`). Every post-await session update goes through this
  * gate, so any future addition gets the same rule.
  */
 export function ifSessionStill(
@@ -32,9 +32,9 @@ export function ifSessionStill(
  * `current`, with its keys in the order `order` names (#842 item 3); keys `order` does not name keep their place after
  * those, and names no longer in `current` are skipped.
  *
- * What a failed reorder puts back. It used to put back the whole map as it was before the drag, so anything that
- * happened while the save was out went with it: a session created meanwhile vanished, a state change was undone, and a
- * project deleted meanwhile came back. Only the order was the reorder's to undo.
+ * What a failed reorder puts back. Putting back the whole map as it was before the drag would undo anything that
+ * happened while the save was out: a session created meanwhile would vanish, a state change would be undone, and a
+ * project deleted meanwhile would come back. Only the order is the reorder's to undo.
  */
 export function inOrder<T>(current: Record<string, T>, order: readonly string[]): Record<string, T> {
   const next: Record<string, T> = {}

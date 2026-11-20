@@ -12,7 +12,8 @@ import { updateEvent } from './updates.js'
 /**
  * `dispatchEvent`: every event the host sends goes through here. App-wide events first, then the
  * session guard, then a session's own life, its notices and its conversation, each in its family's
- * file. The order is the order these were handled in when they were one function.
+ * file. A handler that answers true ends the dispatch, so the order of the calls is part of the
+ * behaviour.
  */
 export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'dispatchEvent'> => ({
   dispatchEvent(e, id) {

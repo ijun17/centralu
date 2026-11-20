@@ -14,8 +14,7 @@ import { appTitleOf, machineNameOf } from './names.js'
  * reading status (e.g. an app in an untrusted project cannot be opened) would have to exist once
  * per screen, and one of them would eventually drift out of sync.
  *
- * There used to be a second kind in this list, the compiled built-in app (`control`, the rail).
- * It was removed in #97, so every entry here is an external app.
+ * Every entry here is an external app (#97).
  */
 
 /** Turns status into the shape shown to a person. The judgment lives in this one place */
@@ -186,8 +185,7 @@ export function useProjectApps(projectId: string): ExternalCatalogApp[] {
 
 /**
  * The user folder's apps — since they do not belong to a project, they get their own group in the sidebar. Every
- * machine's (#734): a linked machine's stand among this computer's, by title, each with its machine's badge, where they
- * used to stand under that machine's header.
+ * machine's (#734): a linked machine's stand among this computer's, by title, each with its machine's badge.
  */
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)

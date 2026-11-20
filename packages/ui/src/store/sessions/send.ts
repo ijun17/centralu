@@ -21,8 +21,8 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
  *
  * Appending one character at a time (`binary += String.fromCharCode(b)`) rebuilds the string from
  * scratch every time, freezing the app for tens of seconds even for a single screenshot (a few MB)
- * — the screen looks as if nothing is happening. This was in fact the reported symptom "file
- * attachment does not work." Processed in chunks instead.
+ * — the screen looks as if nothing is happening and the attachment seems not to work. Processed in
+ * chunks instead.
  */
 function toBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000
@@ -35,9 +35,9 @@ function toBase64(bytes: Uint8Array): string {
 
 /**
  * What the composer's text becomes relative to an open question (#125, #174) — the composer's hint
- * text and `send` use **the same decision**. While the two were decided separately (the hint
- * text did not look at attachments), a person who attached a file was told to "write an answer," and
- * the text went to a new turn instead.
+ * text and `send` use **the same decision**. Decided separately, a hint that does not look at
+ * attachments would tell a person who attached a file to "write an answer," while the text went to a
+ * new turn instead.
  *
  *  - `answer`: exactly one question, and no attachments — the text is that question's answer.
  *  - `drops`: a question is open but the text cannot be its answer. When one request has several
@@ -219,11 +219,10 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
     /*
      * **If a question is open, the composer's text is that question's answer, not a new turn.**
      *
-     * This used to not check `pendingQuestions` at all. So sending text while a card was up cut off
-     * the turn in progress, and an `AskUserQuestion` that never got an answer was cleaned up as
-     * **a refused tool use** — the card vanished for no visible reason and the turn broke with
-     * `error_during_execution` (an actual incident, 2026-09-23: the person only typed "can you ask
-     * the question again?" and the question disappeared).
+     * Sent as a new turn while a card is up, the text cuts off the turn in progress, and an
+     * `AskUserQuestion` that never got an answer is cleaned up as **a refused tool use** — the card
+     * vanishes for no visible reason and the turn breaks with `error_during_execution`, even when the
+     * person only typed "can you ask the question again?".
      *
      * Instead of blocking it, the intent is honored. Writing an answer by hand because none of the
      * options fit is a natural thing to do, and the card already has an "Other — write your own" slot.

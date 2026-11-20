@@ -8,7 +8,7 @@ import { EMPTY_DRAFT } from '../state.js'
  * the record, the successor's first message, and the grid slot it takes over.
  */
 
-/** The prompt asking the agent for its note, now in the protocol (#694: the Assistant's handoff_session asks with it too) */
+/** The prompt asking the agent for its note, from the protocol (#694: the Assistant's handoff_session asks with it too) */
 export { handoffPrompt }
 
 /** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */
@@ -38,8 +38,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     const project = session?.projectId ? s.projects[session.projectId] : null
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
     const { tool: heirTool, mode, deleteOld } = opts
-    // A worktree session cannot hand off yet. A session with worktree children can since #561: they outlive it (they
-    // used to pin a worktree manager, whose delete refused while one was unmerged)
+    // A worktree session cannot hand off yet. A session with worktree children can (#561): they outlive it
     if (session.worktree) {
       set({ toast: 'Worktree sessions cannot hand off yet — merge or delete them first' })
       return
@@ -62,10 +61,9 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     try {
       /*
        * The note's location is decided and written by the host (#142) — under the data folder, at
-       * `handoff/<project id>/<departing session id>.md`. This used to clear that spot inside the
-       * project first (#104: a file left by a past failure was then delivered as if it were the
-       * freshly written note). Now the file is only returned as a path **after** the host has
-       * overwritten it with this handoff's text, so there is no way to read a leftover file.
+       * `handoff/<project id>/<departing session id>.md`. The file is returned as a path only **after**
+       * the host has overwritten it with this handoff's text, so a file left by a past failure is never
+       * delivered as the freshly written note (#104).
        */
       let note = ''
       let notePath = ''
@@ -84,11 +82,10 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         notePath = record.path
       } else {
       /*
-       * If a turn is running, the request **waits for it to finish** first (measured in the Mea session: a
-       * handoff where the prompt merged into (steered) the turn already in progress, so the report of the
-       * work just done ended up glued to the top of the handoff note. Nothing was actually lost, but it read
-       * as "a note with its beginning cut off"). Sending only after the turn boundary makes sure the reply
-       * that follows is the handoff, whole.
+       * If a turn is running, the request **waits for it to finish** first. A prompt sent mid-turn merges
+       * into (steers) that turn, so the report of the work just done is glued to the top of the handoff
+       * note: nothing is lost, but it reads as "a note with its beginning cut off". Sending only after the
+       * turn boundary makes sure the reply that follows is the handoff, whole.
        */
       const quietBy = Date.now() + 10 * 60_000
       // A machine that is away shows its turn as not working (#1822): what it does there is not known, so it is waited for
@@ -117,8 +114,8 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
 
       /*
        * **Waits for the turn to finish, then receives the note from the host** (#142) — never
-       * scraped from the on-screen conversation (measured: leftover output from a turn still in
-       * progress mixed into the top of the text and read as "cut off"). The host reads the last reply
+       * scraped from the on-screen conversation (leftover output from a turn still in progress would
+       * mix into the top of the text and read as "cut off"). The host reads the last reply
        * after the request message from its own record and places it as a file. If the turn is still
        * running or there is no reply yet, it returns `null` and this asks again. Nothing is cleared if
        * no reply ever arrives.
@@ -139,8 +136,8 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         if (isInTurn(cur.state)) continue
         /*
          * null is "no reply yet": asked again. A throw is not (#841 item 5): the host could not place the note (a
-         * full disk, a folder it cannot write), and reading it as "not yet" polled to the ten-minute timeout and blamed
-         * that. A throw because the connection dropped is asked again once it is back.
+         * full disk, a folder it cannot write), and reading it as "not yet" would poll to the ten-minute timeout and
+         * blame that. A throw because the connection dropped is asked again once it is back.
          */
         let got: Awaited<ReturnType<typeof s.platform.agents.exportHandoffNote>>
         try {
@@ -158,7 +155,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       }
 
       /*
-       * The new session inherits **every one** of the dying session's settings (the rule #37 taught:
+       * The new session inherits **every one** of the dying session's settings (#37:
        * carrying over only one leaves the rest born fresh with defaults). Except **when the tool
        * changes, nothing is carried over** — model, effort, verbosity and speed are all tool-specific
        * values, and passing them across tools either kills session creation outright or leaves a
@@ -182,7 +179,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       await get().rename(info.id, session.name)
 
       /*
-       * Grid slot succession (a dogfooding request, 2026-09-04): if the dying session was on the grid,
+       * Grid slot succession: if the dying session was on the grid,
        * the successor takes its place at **the same index**. Emptying the slot with the delete and
        * then reinserting it would make the panel flicker away and reappear, shifting the order along
        * the way — so the swap happens before destruction. It swaps even with `deleteOld: false`: the
@@ -202,19 +199,16 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       /*
        * **Nothing is cleaned up here** (#106).
        *
-       * Cleanup has moved twice. The first time it was right here, right after `createSession` — the
-       * successor had not even opened the file yet. #102 moved it to **the instant the successor's
-       * first turn ends**, but that condition asks neither whether the turn succeeded nor whether the
-       * note was ever read: in an actual incident, the first turn died with a 400 in under a second,
-       * and the directory was empty within three minutes. What the successor received was a path to a
-       * file that no longer existed, and that text can never be recreated — the predecessor who wrote
-       * it had just been replaced.
+       * Right after `createSession` the successor has not even opened the file. A cleanup tied to
+       * **the end of the successor's first turn** asks neither whether the turn succeeded nor whether
+       * the note was read: a first turn that dies with a 400 in under a second would leave the
+       * successor a path to a file that no longer exists, and that text can never be recreated — the
+       * predecessor who wrote it has just been replaced.
        *
-       * "Was it read" is not a fact we can observe. So the whole approach of hanging cleanup off a
-       * turn is abandoned, and the two moments that cannot race the reader (session deletion, and
-       * startup) are handed to the host instead (`manager.sweepOrphanHandoffNotes`). The cost of
-       * leaving one extra file behind is close to zero — the note lives in the data folder, not the
-       * user's repository (#142).
+       * "Was it read" is not a fact we can observe. So no cleanup hangs off a turn: the host cleans up
+       * only at the two moments that cannot race the reader, session deletion and startup
+       * (`manager.sweepOrphanHandoffNotes`). The cost of leaving one extra file behind is close to
+       * zero — the note lives in the data folder, not the user's repository (#142).
        */
 
       if (deleteOld) {

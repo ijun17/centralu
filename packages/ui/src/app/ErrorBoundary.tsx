@@ -29,8 +29,7 @@ export function reportCrash(platform: Platform | null | undefined, thrown: unkno
 }
 
 /**
- * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
- * "it said there was an error and then went blank").
+ * Leaves a sentence instead of a blank page when the screen crashes.
  *
  * When React has nowhere to catch an exception thrown during render, it unmounts the whole tree —
  * the screen goes blank white. In that state there is nothing the person can tell: not what

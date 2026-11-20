@@ -1,13 +1,13 @@
 /**
  * Whether this window is the one that raises the notification for an event (#2168). Every window hears the host's
- * events, so with two open each raised its own banner and sound for one mail or approval. The windows of one machine
+ * events, so with two open each would raise its own banner and sound for one mail or approval. The windows of one machine
  * share their origin's IndexedDB (the desktop app's windows, a browser's tabs), whose `add` of a key already there fails
  * in every connection alike: the window whose `add` succeeds raises it, and the others leave it. So it is once per
  * machine, as the person sees it. (localStorage would not do: another process sees a write a moment later.)
  *
  * A key is kept `KEPT_MS`, so an event replayed after a reconnect is not raised again either. A page without IndexedDB,
  * or one that fails or does not answer within `CLAIM_BOUND_MS` (a test in Node, storage denied, a hung database), cannot
- * tell, and every window raises its own, as before: a notification twice rather than none.
+ * tell, and every window raises its own: a notification twice rather than none.
  */
 const DB = 'centralu-notices'
 const STORE = 'raised'

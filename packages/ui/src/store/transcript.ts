@@ -39,9 +39,8 @@ export type ChatItem =
    * worker reports).
    */
   /**
-   * attachments: things sent along with it. Images are drawn as real thumbnails (the successor to
-   * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
-   * could differ, causing a double render, #75).
+   * attachments: things sent along with it, kept apart from the text so what is drawn and what was
+   * sent never differ (#75). Images are drawn as real thumbnails.
    */
   (
     | {
@@ -98,12 +97,11 @@ export type ChatItem =
      * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
      * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
      * merge of history with live items go **only by this number**. If the render key were to leak
-     * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
-     * session for an app's requested agent was opened, a stored 8-line session ended up with a
-     * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
+     * into the cursor, `loadOlder` would start reading from the wrong place, and the whole
+     * conversation could be appended a second time.
      *
      * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
-     * from a host that sends no number. An agent's image carries its row's number since #868, as every
+     * from a host that sends no number. An agent's image carries its row's number (#868), as every
      * recorded row does. A merged message carries the number of its first chunk — the same rule the
      * host's `loadMessages` uses.
      */
@@ -120,6 +118,10 @@ export type ChatItem =
 /**
  * The render key counter for live conversation items. ONE counter shared by every session — see
  * `ChatItem.storedSeq` for why it must never stand in for a stored number.
+ *
+ * Its value is both the React key and the virtual scroll's item key, so it **must never overlap an
+ * item read back from the store**: two items sharing a key are drawn in the same spot, their text
+ * mashed together. So it is pushed above every stored item as it is brought in (`bumpChatKeysAbove`).
  */
 let chatSeq = 0
 
@@ -135,8 +137,8 @@ export function bumpChatKeysAbove(items: { seq: number }[]): void {
 
 /**
  * The **tool row that owns** this result or live output (#98), found by `callId`: a background agent's card stays open while
- * its parent uses another tool, so a rule by position attached the parent's results to the agent's card. Measured: across
- * 44,140 `tool_call` rows in the store (28,517 claude, 15,623 codex), `callId` has never once collided within a single
+ * its parent uses another tool, so a rule by position would attach the parent's results to the agent's card. Measured:
+ * across 44,140 `tool_call` rows in the store (28,517 claude, 15,623 codex), `callId` has never once collided within a single
  * session (2026-09-25).
  */
 function ownerOf(items: ChatItem[], callId: string): number {
@@ -166,8 +168,8 @@ function holds(items: ChatItem[], seq: number | undefined): boolean {
  * The host groups a message's chunks into one row (#66) and carries that row's number on every
  * chunk. So chunks of the same message share a number, while a new reply with no human message in
  * between (a background task finished, a question card was answered) arrives under a new number.
- * While this only checked the kind and appended blindly, two such messages ran together into one
- * paragraph with no gap ("…still running.All six reviews are in."). History (`messagesToChat`) also
+ * Appending by kind alone would run two such messages together into one paragraph with no gap
+ * ("…still running.All six reviews are in."). History (`messagesToChat`) also
  * counts one row as one item — both paths draw the same screen this way.
  *
  * The unnumbered side is still appended: an unstored empty chunk (arrives with no number), and a
@@ -185,9 +187,8 @@ function continues<K extends 'assistant' | 'reasoning'>(
  * The conversation with one row replaced: one copy of the list, every other row the same object (#364).
  *
  * Streaming replaces a row per delta, and the focused conversation can hold thousands of rows after reading back
- * through history (2,200 in the spike, docs/spikes/2026-10-memory-heavy-store.md). The delta paths used to copy the
- * list twice (`slice(0, -1)` and a spread) or build it with `map` and a closure per row; a list has to be new for the
- * screen to see the change, but once is enough.
+ * through history (2,200 in the spike, docs/spikes/2026-10-memory-heavy-store.md). A list has to be new for the
+ * screen to see the change, but one copy is enough: no second copy, no `map` with a closure per row.
  */
 function replaceAt(items: ChatItem[], index: number, item: ChatItem): ChatItem[] {
   const next = items.slice()
@@ -242,7 +243,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'message_image':
       /*
        * With its row's number (#868), so a re-read of history matches it by number. The host's row holds a file path and
-       * no bytes, so matching by content (`sameLine`) never paired them, and the image showed twice after a re-read.
+       * no bytes, so matching by content (`sameLine`) cannot pair them, and the image would show twice after a re-read.
        */
       if (holds(items, e.seq)) return items
       return [
@@ -332,8 +333,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       /*
        * If I sent it, it is already drawn — this only confirms it.
        * If someone else sent it (the Assistant's `send_to_session`), this is the only path by
-       * which it appears on screen at all. Before this branch existed, an injected message was only
-       * stored, never shown.
+       * which it appears on screen at all.
        *
        * A message carrying `from` is excluded from confirmation matching (FR-11) — if the person
        * happened to have the same sentence sitting pending, the Assistant's instruction would be
@@ -341,10 +341,9 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
        * an assumption that only holds among my own messages.
        */
       /*
-       * The match is made against **the text as sent** (#75). Back when attachments were mixed into
-       * `text` as a 📎 label, what was drawn and what was sent differed, so confirmation never lined
-       * up and a second bubble was appended (discovered on codex). Now that attachments are a
-       * separate field, `text` is exactly the text sent — this identity is what this match relies on.
+       * The match is made against **the text as sent** (#75). Attachments are a separate field, so
+       * `text` is exactly the text sent — this identity is what this match relies on; text that
+       * differs from what was sent never lines up, and a second bubble is appended.
        */
       // A message sent by an app (M4 B-1) is also excluded from the human message's confirmation match — its origin marker must never be absorbed into a human bubble
       // Already confirmed by the merge with history (#79) — a history page arrived before this event
@@ -390,7 +389,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     /*
      * A failed turn is also kept in the conversation (#107).
      *
-     * An error used to only change state and pass through. So a turn that died with a 400 was
+     * An error that only changed state would leave a turn that died with a 400
      * indistinguishable on screen from **nothing having happened at all** — an empty reply, and
      * "waiting for a human." What happened must be visible in the transcript: the session badge
      * recovers once the next turn starts, but even then the person still has no idea why.
@@ -474,9 +473,9 @@ function markerText(
 }
 
 /**
- * The readable parts of a tool's notice (#342), for the line that draws it. The owner saw two Codex notices in a row
- * that read like the same kind of problem: one about the person's own `config.toml`, one about how Centralu loads
- * history, which they can do nothing about. So the line says who is speaking and what kind of notice it is
+ * The readable parts of a tool's notice (#342), for the line that draws it. Two notices can read like the same kind of
+ * problem while only one is the person's to act on (one about their own `config.toml`, one about how Centralu loads
+ * history). So the line says who is speaking and what kind of notice it is
  * (`head`), whose it is to act on (`audience`), and for a notice the host recognized, a plain explanation (`summary`,
  * `items`, `hint`) with the tool's own words (`original`) one click away.
  */
@@ -630,9 +629,8 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }
       >
       /*
-       * A marker kind this build does not know (one a newer host stored) is left out. It used to be drawn as a
-       * compaction, the only marker there was at first — so a #304 notice read back by an older window would have said
-       * "Earlier messages were compacted here".
+       * A marker kind this build does not know (one a newer host stored) is left out: drawn as a known kind, it would be
+       * worded wrongly (a notice drawn as a compaction says "Earlier messages were compacted here").
        */
       if (typeof e.type !== 'string' || !KNOWN_MARKERS.has(e.type)) return
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
@@ -644,12 +642,11 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
       if (e.summary) items.push(toolItem(m.seq, { storedSeq: m.seq }, e.callId, e.summary))
     } else if (m.kind === 'tool_result') {
       /*
-       * A restored tool card also **carries its output** (2026-09-12, surfaced in a demo scene).
+       * A restored tool card also **carries its output**.
        *
-       * The host keeps `tool_call` and `tool_result` as separate rows, but only the `tool_call` branch
-       * existed here. So reopening a session left the card with only its title, its output gone
-       * completely — a screen that had only ever been visible to whoever watched it live. The
-       * attachment rule is the same as live's (`appendChat`): **its own call's row** (`ownerOf`, #98).
+       * The host keeps `tool_call` and `tool_result` as separate rows; without this branch a reopened
+       * session's card would show only its title. The attachment rule is the same as live's
+       * (`appendChat`): **its own call's row** (`ownerOf`, #98).
        *
        * If no match is found (a page boundary put its `tool_call` outside this batch), it is silently
        * dropped — attaching an ownerless output to the conversation as a new row would invent a

@@ -30,7 +30,7 @@ export function createVisibleTicker(env: { hidden: () => boolean; now: () => num
 
 /**
  * Asks `fn` every `everyMs` while the window is in view, and again at once when it comes back (#1143). One place for the
- * pause-while-hidden rule that the usage meter, the update check and a linked machine's install watch each wrote.
+ * pause-while-hidden rule (the usage meter, the update check, a linked machine's install watch).
  *
  * `fn` is the latest one passed; it is told whether this run of the effect is still the current one (`live`), for an answer
  * that arrives after `restartOn` changed or the component left. `restartOn` restarts the clock, as an effect's list does.

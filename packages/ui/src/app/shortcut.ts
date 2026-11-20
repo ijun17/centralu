@@ -5,10 +5,9 @@ import { useCapability } from './PlatformProvider.jsx'
 /**
  * Shortcuts are written by meaning, and the keyboard is left to attach the name (issue #32).
  *
- * `⌘` used to be baked directly into screens all over the app. That key does not exist on Linux
- * or Windows — the combination itself already accepted both `metaKey || ctrlKey`, so the behavior
- * was fine and only the label was lying. Writing the glyph at every call site meant that lie
- * existed in 61 places at once.
+ * `⌘` is not baked into screens: that key does not exist on Linux or Windows. The combination
+ * itself accepts both `metaKey || ctrlKey`, so only the label would lie, and writing the glyph at
+ * every call site would put that lie in every one of them.
  *
  * So the caller only writes the meaning, 'mod' or 'alt'. Whether that means `⌘` or `Ctrl` is
  * answered by the side that knows the keyboard (@cc/platform) — ui never learns which OS it is

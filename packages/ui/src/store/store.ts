@@ -77,10 +77,9 @@ import { focusActions } from './sessions/focus.js'
  */
 
 /**
- * The tab set and arrangement live in panelLayout.ts (#20) — the single `panelTab`
- * value became a group structure when the panel learned to split, and the reasoning
- * for what the tabs *are* (e.g. why `history` sits beside `git` rather than inside it,
- * #21) moved with the type. Re-exported so screens keep one import site for the store.
+ * The tab set and arrangement live in panelLayout.ts (#20), with the reasoning for what
+ * the tabs *are* (e.g. why `history` sits beside `git` rather than inside it, #21).
+ * Re-exported so screens keep one import site for the store.
  */
 export type { PanelTab } from './panelLayout.js'
 
@@ -97,7 +96,7 @@ export function registerInlineFrame(sessionId: string, callId: string, frame: In
 }
 
 /**
- * The root's CSS zoom factor (a protocol `TEXT_SIZES` value; the middle of the five is the default). Used to convert
+ * The root's CSS zoom factor (a protocol `TEXT_SIZES` value; the middle of the five is the default). It converts
  * between real pixels and zoom coordinates.
  *
  * It is a zoom, not a font-only scale: switching to rem would be a full rewrite, because every bit of text in this
@@ -110,33 +109,18 @@ export function useTextZoom(): number {
 }
 
 /**
- * A conversation item's unique number. This value is both the React key and the virtual scroll's
- * item key.
- *
- * **Must never overlap an item read back from the store.** An overlap means two items share the
- * same key, and the virtual scroll draws them both in the same spot, mashing the text together as
- * if it had run on. (This was in fact the reported symptom "it sometimes renders strangely": a
- * session that had loaded history — stored seq 1..N — started its own seq count over at 1 the
- * moment a new message was appended.)
- * So this number is pushed above every stored item as it is brought in.
- */
-
-/**
  * Which tools the Usage modal should report on — deduplicated, in screen order (#26).
  *
  * Usage is an **account** property that differs per tool, so the only honest question is
- * "which tools are on screen right now". The old picker asked a narrower one — *the*
- * focused session's tool, then the project default, then a hardcoded `'claude'` — and
- * that question has no answer in the grid: `focusedSessionId` does not name one of nine
- * panels, so a grid of Codex agents fell through to Claude's limits with nothing on
- * screen saying a substitution had happened.
+ * "which tools are on screen right now". In the grid, `focusedSessionId` does not name one
+ * of the panels, so asking only for the focused session's tool has no answer there.
  *
  * Deduplicated because usage belongs to the account, not the session: two Claude panels
  * share one number, and printing it twice would suggest they are two separate budgets.
  *
- * **An empty result is a real result.** The `'claude'` fallback is gone — it turned
- * "we cannot tell" into "here is the wrong tool", which is the failure the caller has no
- * way to detect. The modal says it does not know instead.
+ * **An empty result is a real result.** A fallback to a fixed tool would turn "we cannot
+ * tell" into "here is the wrong tool", which is the failure the caller has no way to
+ * detect. The modal says it does not know instead.
  */
 export function usageTools(s: AppState): ToolName[] {
   const out: ToolName[] = []
@@ -150,7 +134,7 @@ export function usageTools(s: AppState): ToolName[] {
     return out
   }
 
-  // Focus (and the Assistant) still look at one conversation — unchanged behaviour
+  // Focus (and the Assistant) look at one conversation
   const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
   if (session) return [session.tool]
   add(s.focusedProjectId ? (s.projects[s.focusedProjectId]?.defaultTool ?? undefined) : undefined)

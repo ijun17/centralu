@@ -5,8 +5,8 @@ import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntr
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
 
 /**
- * The fix for reading letter shortcuts only from the character the keyboard produced (the
- * settings screen's `⌥a` did nothing on a Mac).
+ * Letter shortcuts are not read only from the character the keyboard produced (read that way,
+ * the settings screen's `⌥a` does nothing on a Mac).
  *
  * The values below are not invented — they were asked directly of the installed keyboard layout
  * (Carbon UCKeyTranslate, 2026-08-24):
@@ -147,8 +147,8 @@ describe('confirmKeyAction — Enter and Esc on the quit confirmation dialog (#1
 })
 
 /**
- * #181: the run dialog's Enter handling did not check composition state — the last syllable of a
- * Korean-language alias was dropped
+ * #181: the run dialog's Enter handling checks composition state — without it the last syllable of
+ * a Korean-language alias is dropped
  */
 describe('isPlainEnter — the save key for a single-line field (#181)', () => {
   it('only a non-composing Enter saves', () => {

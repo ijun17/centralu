@@ -81,19 +81,18 @@ export function conversationEvent(
    * `chat[id]` being **absent** means "history has not been read yet" — focusing reads that and
    * calls for history. But a non-conversation event (a state change, context usage, and so on)
    * also arrives here, and writing `[]` for it would make that session read as "read, and empty,"
-   * so **history is never called for again.** Dogfooding, 2026-09-25: an 11,550-line session
-   * looked completely empty after reopening the app. An event the host sent while resuming it had
-   * arrived before the user ever clicked that session. So no slot is created for a session that had
-   * no conversation to append and no slot yet.
+   * so **history is never called for again.** An event the host sends while resuming a session can
+   * arrive before the person ever opens it. So no slot is created for a session that had no
+   * conversation to append and no slot yet.
    */
   const had = get().chat[sessionId]
   const appended = stampNew(had ?? [], appendChat(had ?? [], e), Date.now())
   const chat = had === undefined && appended.length === 0 ? undefined : appended
   /*
    * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
-   * before the host has run it and saved the proposal, so a read on it came back with the old list and the card never
-   * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that event's handler (in
-   * events/rereads.ts) is what re-reads them.
+   * before the host has run it and saved the proposal, so a read on it would come back with the old list and the card
+   * would not show. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that event's handler
+   * (in events/rereads.ts) is what re-reads them.
    *
    * A safety net for a host that predates that event (an old host still serving during a swap): the call's
    * `tool_result` comes after the save, so it re-reads both lists. `centralu_run` may be either proposal (#512).
@@ -124,11 +123,11 @@ export function conversationEvent(
   /*
    * **Unread tracking (`lastSeq`) advances only by the seq the host assigns within the session.**
    *
-   * It used to advance by the conversation item's render key (`chatSeq`, shared across every
-   * session). That value flows through `markRead` into the host's `last_read_seq`, so after viewing
-   * a 200-message session, even a single event arriving in a 2-message session inflated that
-   * session's `last_read_seq` to around 201 — and even across a restart, its unread dot never
-   * appeared again. The render key and the stored sequence are two different numbering schemes.
+   * Not by the conversation item's render key (`chatSeq`, shared across every session): `lastSeq`
+   * flows through `markRead` into the host's `last_read_seq`, so after viewing a 200-message
+   * session, a single event arriving in a 2-message session would inflate that session's
+   * `last_read_seq` to around 201, and its unread dot would never appear again, even across a
+   * restart. The render key and the stored sequence are two different numbering schemes.
    */
   const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
   let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
@@ -148,9 +147,8 @@ export function conversationEvent(
     const stop = stopAfter(st.stopping[sessionId], cur.state, withSeq.state, workingSince[sessionId])
     /*
      * An off-screen conversation is cut back to the window (OFFSCREEN_TRIM_AT), never while a page of history is
-     * still on its way: that page is merged against the rows it was asked for. The focused session is never cut,
-     * even while the Assistant, the grid or a pinned app covers it: it is the conversation the person returns
-     * to, with the pages they loaded and their reading position (docs/state-management.md §4).
+     * still on its way: that page is merged against the rows it was asked for. The focused session is never cut
+     * (docs/state-management.md §4).
      */
     const trimmed =
       chat !== undefined &&

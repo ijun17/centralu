@@ -71,16 +71,16 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
       focusedProjectId: id,
       /*
        * Picking a project **always** releases session focus — the click was made to see the project
-       * screen. This used to release it only when a *different* project was picked, so clicking that
-       * same project's name while already viewing one of its sessions left the session in place,
-       * looking as if nothing had happened (user report 2026-09-28). The only callers are the
+       * screen. Releasing it only when a *different* project is picked would leave the session in
+       * place when that same project's name is clicked while one of its sessions is on screen,
+       * looking as if nothing had happened. The only callers are the
        * sidebar's name and the palette when it picks a project with no session — both want the
        * project screen.
        */
       focusedSessionId: null,
       // The project screen exists only in the focus lane — what the person picked must be shown (the same
-      // rule as `focusSession`). This combination actually arose once onboarding started opening the
-      // assistant view first (#63) (caught by e2e).
+      // rule as `focusSession`). A project can be picked from another view: onboarding opens the
+      // assistant view first (#63).
       view: 'focus',
       viewerPath: null,
       viewerProjectId: null,

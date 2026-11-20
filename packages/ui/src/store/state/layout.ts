@@ -5,9 +5,8 @@ export type LayoutSlice = {
   /**
    * Which folders are expanded in the file tree — **per project** (issue #16).
    *
-   * The tree rows used to hold this themselves, so it went away with the component: moving
-   * between sessions collapsed everything and you dug down the same path again. Third time
-   * we have made this mistake (drafts, the elapsed count, this).
+   * Not held by the tree rows: it would go away with the component, so moving between sessions
+   * would collapse everything and you would dig down the same path again.
    *
    * Per project, not per session, and the difference is not an accident. A draft is
    * something *you* were saying to *one* agent, so it belongs to that session. An expanded
@@ -15,8 +14,8 @@ export type LayoutSlice = {
    * matter which of that project's sessions you happen to be reading. Two sessions on the
    * same repo want the same tree open; two projects almost never do.
    *
-   * **Not persisted, deliberately.** The complaint was "every time", and every time meant
-   * every session switch — dozens an hour. A relaunch happens once a day, and it is exactly
+   * **Not persisted, deliberately.** The loss that matters is on every session switch —
+   * dozens an hour. A relaunch happens once a day, and it is exactly
    * the moment the tree is most likely to be wrong: branches moved, folders were deleted,
    * a worktree came and went. Restoring yesterday's paths would either quietly expand into
    * nothing or fire a listDir per stale path on first paint, which is the cost the lazy
@@ -29,11 +28,10 @@ export type LayoutSlice = {
   /**
    * Whether the file tree shows what `.gitignore` hides (issue #17).
    *
-   * **Defaults to on.** It used to default to off, and that was the wrong way round for a
-   * tree you open to *look at a file*: the file you want is often exactly the one git does
-   * not track — a `.env`, a build artefact you are checking, a local note. A tree that
-   * silently omits it does not read as filtered, it reads as "that file is not there", and
-   * the toggle that would explain it is one line of small text you were not looking at.
+   * **Defaults to on.** Off is the wrong way round for a tree you open to *look at a file*: the file you want is
+   * often exactly the one git does not track — a `.env`, a build artefact you are checking, a local note. A tree that
+   * silently omits it does not read as filtered, it reads as "that file is not there", and the toggle that would
+   * explain it is one line of small text you were not looking at.
    *
    * Still a toggle rather than always-on, because of *what* is behind it: not a curiosity
    * or two but `node_modules`, `dist`, `.next` — thousands of entries that sort in among
@@ -51,8 +49,7 @@ export type LayoutSlice = {
    * Whether the evidence lane (git, files) is open.
    * Why it is a panel and not a tab: git status is not a screen that **replaces** the conversation,
    * it is **evidence** for what the conversation claims. Grouping things that are not alternatives
-   * to each other into tabs produces "where do I see that?" (this actually came up during
-   * dogfooding).
+   * to each other into tabs produces "where do I see that?".
    */
   panelOpen: boolean
   /**
@@ -64,8 +61,8 @@ export type LayoutSlice = {
    */
   panelLayout: PanelGroup[]
   /**
-   * The **share the top group takes** of the two vertically split groups (0.15–0.85, per a
-   * dogfooding request). Meaningless with a single group. A fixed 50/50 split could not capture the
+   * The **share the top group takes** of the two vertically split groups (0.15–0.85).
+   * Meaningless with a single group. A fixed 50/50 split cannot capture the
    * actual use of "the terminal can be narrow, but the diff needs to be wide" — the split ratio is
    * also a way of viewing, so it is carried in the snapshot.
    */
@@ -78,8 +75,8 @@ export type LayoutSlice = {
   /** Width of the session list (px) */
   sidebarWidth: number
   /**
-   * Projects whose session list is folded (#205, user request 2026-09-28 — the sidebar got crowded
-   * as projects grew in number).
+   * Projects whose session list is folded (#205): the sidebar gets crowded as projects grow in
+   * number.
    *
    * Remembered per project and carried in the workspace snapshot — the sidebar is a way of viewing
    * the whole app, and a way of viewing belongs to the person (the same call as `showIgnored`, #17).

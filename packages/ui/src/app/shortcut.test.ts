@@ -9,8 +9,7 @@ const PC: ShortcutKeys = { mod: 'Ctrl', alt: 'Alt', join: '+' }
 
 describe('shortcut notation (#32)', () => {
   it('on a Mac this is exactly what was already on screen', () => {
-    // If these strings change, e2e and the settings table break together — the sweep moved
-    // where this is decided, not the notation itself
+    // If these strings change, e2e and the settings table break together
     expect(shortcut(MAC, 'mod', 'I')).toBe('⌘I')
     expect(shortcut(MAC, 'mod', '⇧A')).toBe('⌘⇧A')
     expect(shortcut(MAC, 'mod', '⇧1~4')).toBe('⌘⇧1~4')

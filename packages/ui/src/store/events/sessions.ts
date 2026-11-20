@@ -78,9 +78,9 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
 export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): boolean {
   /*
    * The only notice for a session the host created on its own (#69) — the Assistant's
-   * `create_session`, or a manager set up by worktree adoption. Without this, such a session did
-   * not appear until after a reconnect, and any event that arrived before that stayed stuck in the
-   * holding pen forever (its release condition was "once registered," and nothing was there to
+   * `create_session`, or a manager set up by worktree adoption. Without it, such a session would
+   * not appear until after a reconnect, and any event that arrived before that would stay stuck in
+   * the holding pen forever (it is released once the session is registered, and nothing else would
    * register it). A session created through an RPC is already registered by its response, so this
    * is silently discarded for that case.
    */

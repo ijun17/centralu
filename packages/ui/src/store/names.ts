@@ -11,7 +11,7 @@ export function appTitleOf(app: { name?: string | null; appId: string }): string
 
 /**
  * What names the project of a row beside it: the project's name, "Assistant" for a session that has none, and nothing
- * for a project the list does not hold (yet). The inbox, the palette and the message picker said it three ways (#428).
+ * for a project the list does not hold (yet). One wording for the inbox, the palette and the message picker (#428).
  */
 export function projectLabelOf(projects: Readonly<Record<string, { name: string }>>, projectId: string | null): string {
   return (projectId ? projects[projectId]?.name : 'Assistant') ?? ''
