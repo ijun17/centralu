@@ -12,7 +12,7 @@ import { realOs } from '../os/real.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { Store, StoreTooNewError } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
-import type { StoreWork } from './store/store-work.js'
+import type { StoreWork } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 const { files, paths, processes, env } = realOs()

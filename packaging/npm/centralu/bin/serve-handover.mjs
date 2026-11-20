@@ -44,10 +44,11 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   // The limited credential is enough to probe and to stop it (#1405, `host.stop` is everyday)
   const own = { token: state.token, proofKey: state.proofKey }
   const probe = () => probeHost({ port, ...own, protocolVersion: installed })
-  const work = storeWork(dataDir)
+  // What host.lock's writer was found to be, for every read of it during this stop
+  const known = new Map()
+  const work = storeWork(dataDir, known)
   if (work && waitOnWork && !(await probe()).running) {
     say(`the host is ${storeWorkText(work)}; waiting for it to finish before it is stopped`)
-    const known = new Map()
     // A host that answers is past its work, whatever host.lock still says: one whose clear of the record was refused
     // (a reader holding the file on Windows) keeps saying it until it exits
     while (storeWork(dataDir, known) && !(await probe()).running) await sleep(500)

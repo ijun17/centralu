@@ -1,6 +1,6 @@
 import type { OsChild } from '../os/port.js'
 import { realOs } from '../os/real.js'
-import { oneLineText } from '@cc/protocol'
+import { oneLineText, type StoreWork, storeWorkOf } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj, tryParseJson } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
@@ -75,11 +75,8 @@ export type ConnectionLine = {
    * that breaks older readers, or updating it. Said only while no host answers. The link waits for it rather than start
    * another. Absent from a remote that predates it
    */
-  starting?: RemoteStoreWork
+  starting?: StoreWork
 }
-
-/** What a remote's host does to its store before it answers (agent-host `store/store-work.ts`, without its size) */
-export type RemoteStoreWork = { doing: 'copy' | 'update'; step: number; since: number }
 
 /**
  * A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when.
@@ -234,18 +231,10 @@ function stoppedOf(raw: unknown): { stopped?: RemoteStop } {
   return { stopped: { by: o.by === 'quit' ? 'quit' : 'stop', at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : null } }
 }
 
-/** The `starting` field, or nothing when it is not one (`RemoteStoreWork`) */
-function startingOf(raw: unknown): { starting?: RemoteStoreWork } {
+/** The `starting` field, or nothing when it is not one */
+function startingOf(raw: unknown): { starting?: StoreWork } {
   const work = storeWorkOf(raw)
   return work ? { starting: work } : {}
-}
-
-/** `{ doing, step, since }` as `--connection` and `--detach` say it; null when it is not one */
-export function storeWorkOf(raw: unknown): RemoteStoreWork | null {
-  const o = asObj(raw)
-  if (o.doing !== 'copy' && o.doing !== 'update') return null
-  if (typeof o.step !== 'number' || !Number.isInteger(o.step) || typeof o.since !== 'number' || !Number.isFinite(o.since)) return null
-  return { doing: o.doing, step: o.step, since: o.since }
 }
 
 /** The `takes` field: the names in it that are words, or nothing */
@@ -298,7 +287,7 @@ export function parseAutostart(raw: unknown): RemoteAutostart | null {
 /** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
 export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
-  | { ok: false; reason: string; message: string; node?: string; by?: string; startedAt?: number; work?: RemoteStoreWork }
+  | { ok: false; reason: string; message: string; node?: string; by?: string; startedAt?: number; work?: StoreWork }
 
 /**
  * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
@@ -334,7 +323,7 @@ export class SwitchUnderWay extends Error {
 export class HostWorksOnStore extends Error {
   constructor(
     message: string,
-    readonly work: RemoteStoreWork | null,
+    readonly work: StoreWork | null,
   ) {
     super(message)
     this.name = 'HostWorksOnStore'
@@ -351,7 +340,7 @@ export function parseDetachLine(stdout: string): DetachAnswer {
     if (!d || typeof d !== 'object') continue
     const o = asObj(d)
     if (o.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof o.how === 'string' ? o.how : null }
-    const work = o.reason === 'starting' ? storeWorkOf(o) : null
+    const work = o.reason === 'starting' ? storeWorkOf(o.work) : null
     return {
       ok: false,
       reason: typeof o.reason === 'string' ? o.reason : 'failed',

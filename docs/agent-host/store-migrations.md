@@ -149,7 +149,7 @@ step against:
      copy; on 2026-11-20 an 18 GB store took 54 to 59 s in a host started by `centralu serve --detach` on the same
      machine. host.log says that the copy started and how long it took. While the copy and the steps run, the host
      says so in `host.lock` (`store`, #2334), and everything that waits for a start waits for it: the window shows
-     "Saving a copy of Centralu's data before this update (18 GB)…" or "Updating Centralu's data for this version…"
+     "Copying Centralu's data before an update (18 GB)…" or "Updating Centralu's data for the new version (18 GB)…"
      with the time so far, and `serve --detach`, a linked hub, the update switch and a hub's `serve --stop` wait
      instead of giving up or ending the host ([remote/serve.md](remote/serve.md)). A person's stop still ends it;
      the next start deletes the unfinished copy and makes it again.

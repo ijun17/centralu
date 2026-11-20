@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
-import { errorMessage } from '@cc/protocol/client'
+import { errorMessage, storeWorkWords } from '@cc/protocol/client'
 import { App, confirmKeyAction, formatBytes, formatDuration, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
   autoRestart,
@@ -364,6 +364,9 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   )
 }
 
+/** `words` as the start of a sentence */
+const sentence = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
+
 /**
  * The screen while the host starts. A host that works on its store first (#2334, `work`) says what, and for how long
  * by its own clock, so a long copy reads as one and not as a start that hung; a second of it shows nothing, so a
@@ -371,7 +374,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
  */
 function Starting({ work = null }: { work?: StoreWork | null }) {
   const [now, setNow] = useState(Date.now)
-  // Kept on whether there is work, not on the report: a new one comes with every check, more often than the clock ticks
+  // Kept on whether there is work, not on the report: the next step's report does not set the clock back
   const working = work !== null
   useEffect(() => {
     if (!working) return
@@ -385,9 +388,7 @@ function Starting({ work = null }: { work?: StoreWork | null }) {
       {shown ? (
         <>
           <p className="text-md text-ink-muted">
-            {shown.doing === 'copy'
-              ? `Saving a copy of Centralu's data before this update (${formatBytes(shown.bytes)})…`
-              : `Updating Centralu's data for this version (${formatBytes(shown.bytes)})…`}
+            {sentence(storeWorkWords(shown, "Centralu's"))} ({formatBytes(shown.bytes)})…
           </p>
           <p className="text-xs text-ink-faint">
             This can take a few minutes. Centralu opens when it is done ({formatDuration(now - shown.since, { coarse: true })} so far).

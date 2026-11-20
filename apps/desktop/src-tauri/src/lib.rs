@@ -202,7 +202,7 @@ fn working_dir_away_from(cwd: &std::path::Path, exe_dir: &std::path::Path, home:
 fn leave_app_folder() {
     let (Ok(cwd), Ok(exe)) = (std::env::current_dir(), std::env::current_exe()) else { return };
     let Some(exe_dir) = exe.parent() else { return };
-    let home = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let home = centralu_keeper_core::os::home().map(std::path::PathBuf::from);
     if let Some(to) = working_dir_away_from(&cwd, exe_dir, home) {
         if let Err(e) = std::env::set_current_dir(&to) {
             eprintln!("[startup] could not leave the app folder for {}: {e}", to.display());

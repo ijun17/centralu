@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const invoke = vi.fn()
@@ -86,7 +87,8 @@ describe('a host that works on its store before it answers (#2334)', () => {
   it('is waited for past the 30 seconds while the shell reports the work, which the screen is told, and then the wait is the usual one', async () => {
     vi.useFakeTimers()
     try {
-      const work = { doing: 'copy', step: 76, bytes: 19_352_965_120, since: 1_800_000_000_000 }
+      // What the shell reads from host.lock, as the host writes it (tooling/fixtures/host-lock-store-work.json)
+      const work = (JSON.parse((JSON.parse(readFileSync(new URL('../../../../tooling/fixtures/host-lock-store-work.json', import.meta.url), 'utf8')) as { record: string }).record) as { store: unknown }).store
       let working = true
       let ready = false
       invoke.mockImplementation(async (cmd: string) => {

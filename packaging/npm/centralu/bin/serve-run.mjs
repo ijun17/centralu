@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, markStarting, clearStarting, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, storeWork, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, markStarting, clearStarting, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, isWriter, lockHolder, lockHolderPid, storeWork, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
@@ -31,8 +31,10 @@ export function serveFolder({ env, home, cliPath, platform = process.platform })
  * things.
  * `others` names the full credentials the folder holds besides the one just paired, never their values, each marked
  * `replaced` when its pairing took the place of an earlier one of its label.
+ * `known` and `writer` are `storeWork`'s: a caller that describes the folder again and again (`--detach`'s wait) passes
+ * its own `known`, so host.lock's writer is identified once per record, not at every look.
  */
-export async function describe({ env, dataDir, state, entry, version, paired = null, keyPaired = null }) {
+export async function describe({ env, dataDir, state, entry, version, paired = null, keyPaired = null, known = new Map(), writer = isWriter }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry)
   const probe = await probeHost({ port, token: state.token, proofKey: state.proofKey, protocolVersion: installed })
@@ -42,7 +44,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
   // A host that holds the folder and works on its store (#2334): a hub waits for it rather than start another
-  const work = hostRunning ? null : storeWork(dataDir)
+  const work = hostRunning ? null : storeWork(dataDir, known, writer)
   return {
     port,
     ...(paired ? { token: paired.token, credential: paired.id } : {}),
@@ -64,7 +66,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
     install: installInfo(dataDir, env),
     autostart: autostartInfo(dataDir, process.platform, env),
     ...(stopped ? { stopped } : {}),
-    ...(work ? { starting: { doing: work.doing, step: work.step, since: work.since } } : {}),
+    ...(work ? { starting: work } : {}),
   }
 }
 

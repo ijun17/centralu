@@ -147,16 +147,20 @@ copy of the store before a step that breaks older readers, or a long store step,
 (an 18 GB store took 54 to 59 s to copy on a Windows 11 NVMe disk), and the host answers no one meanwhile. It says so
 in `host.lock`: `store: { doing: 'copy' | 'update', step, bytes, since }` beside who holds the folder, written before
 the copy and before each step and taken out after the last ([stored-shapes.md](../../stored-shapes.md)). The launcher
-reads it in one place (`storeWork` in `serve-files.mjs`), and only while the process `host.lock` names is the one
-that wrote it. Then:
+reads it in one place (`storeWork` in `serve-files.mjs`), and only while `host.lock` names the process that wrote it
+(`isLockWriter`, the rule every reader of `host.lock` goes by, the shell's included): one identified by its start time
+counts, and one Windows cannot identify (another logon's process) only while the record is younger than a start takes,
+120 s. A host ended in its work leaves the record, and its pid may be another process's by then. Every surface says the
+work in the same words, with no step number ("copying its data before an update", `storeWorkWords` in @cc/protocol).
+Then:
 
 - `--detach` does not count the work against its waits: each runs from when the host stops saying it. A host that
   already holds the folder and says it is waited for, and no second one is started beside it. Past 90 s from the
   start of `--detach` (`DETACH_WORK_CAP_MS`, inside the hub's 120 s ssh deadline) with the work still said, it
-  answers `reason: "starting"` with `doing`, `step` and `since`. The hub's link then says `starting` and what the host
+  answers `reason: "starting"` with the `work`. The hub's link then says `starting` and what the host
   does, asks again every 5 s and starts nothing; an older hub shows the message and retries on its backoff. The
   window's `--window` waits with no cap.
-- `--connection` adds `starting: { doing, step, since }` while no host answers, and a link that reads it waits the
+- `--connection` adds `starting: { doing, step, bytes, since }` while no host answers, and a link that reads it waits the
   same way instead of running `--detach`.
 - The update switch's check (`hear`) waits for as long as the work is said, and the new version then has the usual
   30 s to answer; the switcher writes its lock's time again meanwhile, so a reader that cannot read its creation time

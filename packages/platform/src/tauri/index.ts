@@ -6,7 +6,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort, WindowAction } from '../ports/index.js'
 import type { HostBuild } from '@cc/protocol/client'
-import { isRecord } from '@cc/protocol/client'
+import { isRecord, type StoreWork, storeWorkOf } from '@cc/protocol/client'
 import { createWebPlatform } from '../web/index.js'
 import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart } from './switch-plan.js'
@@ -35,14 +35,8 @@ export {
 
 type HostInfo = { port: number; token: string }
 
-/**
- * What the starting host does to its store before it can answer (#2334): copying it before a step that breaks older
- * readers, or updating it. The shell reads it from host.lock (`host_store_work`); `since` is epoch milliseconds.
- */
-export type StoreWork = { doing: 'copy' | 'update'; step: number; bytes: number; since: number }
-
-const isStoreWork = (w: unknown): w is StoreWork =>
-  isRecord(w) && (w.doing === 'copy' || w.doing === 'update') && typeof w.step === 'number' && typeof w.bytes === 'number' && typeof w.since === 'number'
+/** What the starting host does to its store before it can answer (#2334); the shell reads it from host.lock (`host_store_work`) */
+export type { StoreWork }
 
 type HostStatus =
   | { state: 'starting' }
@@ -135,7 +129,7 @@ async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | n
       void invoke<unknown>('host_store_work')
         .then((w) => {
           if (done) return
-          const work = isStoreWork(w) ? w : null
+          const work = storeWorkOf(w)
           // Told when it changes: each check reads a new report, and a screen drawn again on each would never tick its clock
           const key = JSON.stringify(work)
           if (key !== saidWork) onStoreWork(work)

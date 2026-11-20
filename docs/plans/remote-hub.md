@@ -794,8 +794,8 @@ cache there (`Microsoft/Windows/PowerShell/ModuleAnalysisCache`), which a commit
 | `The update of <machine> to Centralu <to> was interrupted before the switch; nothing was switched` | The update's error or row note |
 | `<hub> is switching the Centralu version on <machine>; press Connect to try again` | Machine row, Auto reconnect off |
 | `an update from <hub> started at <time> is switching versions here; no host starts until it ends` | `serve` / `--detach` on the machine (stderr) |
-| `Centralu on <machine> is copying its data before an update (since <time>); it connects when that is done` (or `is updating its data`) | Machine row, `starting`, while the host there works on its store (#2334, [serve.md](../agent-host/remote/serve.md)) |
-| `the host is copying its data before step <n>, since <time>; it answers when that is done` | `--detach` on the machine, `reason: 'starting'` |
+| `Centralu on <machine> is copying its data before an update (since <time>); it connects when that is done` (or `is updating its data for the new version`) | Machine row, `starting`, while the host there works on its store (#2334, [serve.md](../agent-host/remote/serve.md)) |
+| `the host is copying its data before an update, since <time>; it answers when that is done` (or `updating its data for the new version`) | `--detach` on the machine, `reason: 'starting'` |
 | `Centralu <version> did not start on <machine> (Centralu <other> answered there instead; something started it again during the switch); it runs Centralu <from> again` | The update's error, when an old host came back twice (#1907) |
 | `The update of <machine> to Centralu <to> was interrupted; Centralu <other> was started there meanwhile and runs` | Row note or the update's error, when a reader left a host of a third version serving (#1907) |
 

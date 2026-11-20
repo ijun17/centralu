@@ -16,6 +16,8 @@ import {
   type MachineStatus,
   type MachineVersions,
   isAssistantOrCoordinator,
+  type StoreWork,
+  storeWorkWords,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
@@ -25,7 +27,7 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, dataDirError, HostWorksOnStore, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type RemoteStoreWork, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, HostWorksOnStore, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
 import { clock, readSwitchStatus, switchResult, type SwitchState } from './update.js'
@@ -1240,8 +1242,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * The host there works on its store before it can answer (#2334): the row says `starting` with what it does, and the
    * link asks again later. No start is counted, and none is made beside it
    */
-  private waitForStoreWork(work: RemoteStoreWork | null): void {
-    const doing = !work ? 'is working on its data' : work.doing === 'copy' ? `is copying its data before an update (since ${clock(work.since)})` : `is updating its data (since ${clock(work.since)})`
+  private waitForStoreWork(work: StoreWork | null): void {
+    const doing = work ? `is ${storeWorkWords(work)} (since ${clock(work.since)})` : 'is working on its data'
     this.setStatus('starting', `Centralu on ${this.name} ${doing}; it connects when that is done`)
     if (!this.autoReconnect) return this.setStatus('unreachable', `Centralu on ${this.name} ${doing}; ${WAITS_FOR_PERSON}`)
     this.retryLater(this.deps.retryMs?.[0] ?? STORE_WORK_ASK_MS)

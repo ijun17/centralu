@@ -679,7 +679,24 @@ export function foreignHolder(dataDir) {
  * future (a clock set back since) proves nothing.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
-  return isWriter(lockHolder(dataDir), startOf, createdAt) === true
+  return isLockWriter(lockHolder(dataDir), new Map(), (h) => isWriter(h, startOf, createdAt))
+}
+
+/**
+ * Whether host.lock's `holder` names the live process that wrote it: the one rule every reader of host.lock here goes by
+ * (`lockHolderIsAlive`, `storeWork`, `--stop`'s wait on a start), as the shell's does (keeper `host_proc/store_work.rs`).
+ * A writer `isWriter` identifies is believed, or not, by that. One it cannot identify (Windows will not say when another
+ * logon's process was created) is believed only while the record is younger than a start takes (`STARTING_MAX_MS`): a
+ * host ended mid-work leaves its record, and believing an unknown process for as long as its pid lives kept every
+ * starter waiting on a stranger that got the pid. `known` keeps what `writer` said per record between calls, since a
+ * Windows creation time costs a PowerShell; the record's age is read at each call.
+ */
+export function isLockWriter(holder, known = new Map(), writer = isWriter) {
+  if (!holder || !isAlive(holder.pid)) return false
+  const key = `${holder.pid}:${holder.started}:${holder.at}`
+  if (!known.has(key)) known.set(key, writer(holder))
+  const w = known.get(key)
+  return w === null ? typeof holder.at === 'number' && Date.now() - holder.at < STARTING_MAX_MS : w === true
 }
 
 /**
@@ -726,35 +743,30 @@ function parseLockHolder(text) {
   }
 }
 
-/** `{ doing, step, bytes, since }` from host.lock's `store`, or null */
+/** `{ doing, step, bytes, since }` from host.lock's `store`, or null: @cc/protocol's `StoreWork`, read without it */
 function parseStoreWork(w) {
   if (w?.doing !== 'copy' && w?.doing !== 'update') return null
-  if (!Number.isInteger(w.step) || !Number.isFinite(w.bytes) || !Number.isFinite(w.since)) return null
+  if (!Number.isInteger(w.step) || !Number.isFinite(w.bytes) || w.bytes < 0 || !Number.isFinite(w.since)) return null
   return { doing: w.doing, step: w.step, bytes: w.bytes, since: w.since }
 }
 
 /**
- * What the host that holds the folder does to its store before it can answer (#2334), `{ doing, step, bytes, since }`,
- * or null. The one reader of it here: `--detach`, `--connection`, the update switch and `--stop` wait while it is said,
- * instead of taking a host that does not answer yet for a start that hung.
+ * What the host that holds the folder does to its store before it can answer (#2334, `StoreWork` in @cc/protocol),
+ * `{ doing, step, bytes, since }`, or null. The one reader of it here: `--detach`, `--connection`, the update switch and
+ * `--stop` wait while it is said, instead of taking a host that does not answer yet for a start that hung.
  *
- * Believed only while the process host.lock names is the one that wrote it (`isWriter`): a host that was ended in its
- * work leaves the record, and a stranger given its pid later is not it. No time limit: a copy or a step is SQLite work
- * under the folder's lock, which ends or fails, and the person sees how long it has run. A writer Windows cannot tell
- * (another logon's process) counts while it lives. `known` keeps the answer per lock between calls, as `liveStarts` does,
- * since a Windows creation time costs a PowerShell.
+ * Believed only while host.lock names the process that wrote it (`isLockWriter`): a host ended in its work leaves the
+ * record. No other limit: a copy or a step is SQLite work under the folder's lock, which ends or fails, and the person
+ * sees how long it has run. A caller that asks again and again passes the same `known`.
  */
 export function storeWork(dataDir, known = new Map(), writer = isWriter) {
   const h = lockHolder(dataDir)
-  if (!h?.store) return null
-  const key = `${h.pid}:${h.started}:${h.at}`
-  if (!known.has(key)) known.set(key, writer(h) !== false)
-  return known.get(key) && isAlive(h.pid) ? h.store : null
+  return h?.store && isLockWriter(h, known, writer) ? h.store : null
 }
 
-/** What `storeWork` says, as `--detach`, `--stop` and the switch word it: "copying its data before step 76" */
+/** What `storeWork` says, in the words every surface uses (@cc/protocol `storeWorkWords`, which a test holds this to) */
 export function storeWorkText(work) {
-  return work.doing === 'copy' ? `copying its data before step ${work.step}` : `updating its data (step ${work.step})`
+  return work.doing === 'copy' ? 'copying its data before an update' : 'updating its data for the new version'
 }
 
 /**

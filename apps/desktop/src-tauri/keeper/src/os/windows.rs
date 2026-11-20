@@ -29,12 +29,14 @@ pub fn home() -> Option<std::ffi::OsString> {
 extern "system" {
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
     fn GetExitCodeProcess(process: *mut std::ffi::c_void, code: *mut u32) -> i32;
+    fn GetProcessTimes(process: *mut std::ffi::c_void, created: *mut u64, exited: *mut u64, kernel: *mut u64, user: *mut u64) -> i32;
     fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
 }
 
+const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
 /// Whether a process with this pid is running. One this account may not open (another user's) exists, so it counts.
 pub fn pid_alive(pid: u32) -> bool {
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     const STILL_ACTIVE: u32 = 259;
     const ERROR_ACCESS_DENIED: i32 = 5;
     if pid == 0 {
@@ -51,6 +53,29 @@ pub fn pid_alive(pid: u32) -> bool {
         CloseHandle(handle);
         read != 0 && code == STILL_ACTIVE
     }
+}
+
+/// When a process was created, in epoch milliseconds, as the npm launcher's `processCreatedAt` reads it. None for one this
+/// account may not open (another logon's): its creation cannot be told.
+pub fn process_created_ms(pid: u32) -> Option<u64> {
+    // 100-nanosecond intervals from 1601-01-01, where a FILETIME counts from, to 1970-01-01
+    const UNIX_EPOCH_AS_FILETIME: u64 = 116_444_736_000_000_000;
+    // SAFETY: plain Win32 calls with pointers to locals; the handle is closed before it goes out of scope.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let (mut created, mut exited, mut kernel, mut user) = (0u64, 0u64, 0u64, 0u64);
+        let read = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user);
+        CloseHandle(handle);
+        (read != 0 && created >= UNIX_EPOCH_AS_FILETIME).then(|| (created - UNIX_EPOCH_AS_FILETIME) / 10_000)
+    }
+}
+
+/// A process's start time as a host records it in host.lock's `started`: never on Windows, which has no `ps` (#1723).
+pub fn process_start_text(_pid: u32) -> Option<String> {
+    None
 }
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.

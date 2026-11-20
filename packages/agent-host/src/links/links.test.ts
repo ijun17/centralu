@@ -722,7 +722,7 @@ describe('a hub linked to another host (#82)', () => {
 
     // #2334: a host there that holds its folder and copies its store has not answered yet; a second one would meet its lock
     it('starts none while the host there works on its store, says it is starting and what it does, then starts or connects once it is done', async () => {
-      const over: Partial<ConnectionLine> = { starting: { doing: 'copy', step: 76, since: Date.now() } }
+      const over: Partial<ConnectionLine> = { starting: { doing: 'copy', step: 76, bytes: 1, since: Date.now() } }
       const l = await linkTo(async () => ({ how: 'detached', note: null }), undefined, over)
       await eventually(() => l.links.list()[0]!.status === 'starting' && /is copying its data before an update/.test(l.links.list()[0]!.error ?? ''))
       // Asked again, and still nothing started
@@ -738,7 +738,7 @@ describe('a hub linked to another host (#82)', () => {
       const l = await linkTo(async () => {
         if (!first) return { how: 'detached', note: null }
         first = false
-        throw new HostWorksOnStore('the host is updating its data (step 76)', { doing: 'update', step: 76, since: Date.now() })
+        throw new HostWorksOnStore('the host is updating its data for the new version', { doing: 'update', step: 76, bytes: 1, since: Date.now() })
       })
       await eventually(() => l.links.list()[0]!.status === 'connected')
       expect(l.logs.some((x) => /could not be started/.test(x))).toBe(false)
