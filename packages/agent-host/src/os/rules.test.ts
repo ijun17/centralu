@@ -272,6 +272,11 @@ describe('the environment and PATH by the family’s rules', () => {
     expect(find('codex', '/windir/')).toBeNull()
     there.add('/usr/local/bin/opencode')
     expect(find('opencode', '/mnt/')).toBe('/usr/local/bin/opencode')
+    // Only a drive letter's folder is Windows': with `root = /` drives are `/c/…`, and `/usr`, `/mnt/wsl`, `/mnt/data` stay Linux's
+    const first = (PATH: string, drives: string) => findOnPath('tool', { PATH }, 'posix', () => true, drives)
+    expect(first('/c/npm:/usr/bin', '/')).toBe('/usr/bin/tool')
+    expect(first('/mnt/c:/mnt/wsl/bin', '/mnt/')).toBe('/mnt/wsl/bin/tool')
+    expect(first('/c/npm:/mnt/data/bin', '/')).toBe('/mnt/data/bin/tool')
   })
 
   it("reads WSL's drive folder from the kernel's release and wsl.conf's [automount] root, /mnt/ when it names none", () => {

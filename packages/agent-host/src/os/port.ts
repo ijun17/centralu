@@ -394,8 +394,8 @@ export interface OsProcesses {
    */
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>
   /**
-   * The same, holding the host until it ends, for a program that starts nothing (`ps`, `reg`, `plutil`; `guard/timed-start`
-   * holds the list): a limit ends the pid alone, because ending a tree without blocking the host for a process-table read
+   * The same, holding the host until it ends, for a program that starts nothing (`STARTS_NOTHING`, the list
+   * `guard/timed-start` holds): a limit ends the pid alone, because ending a tree without blocking the host for a process-table read
    * cannot be done synchronously
    */
   runSync(

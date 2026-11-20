@@ -302,16 +302,13 @@ export class WorktreeSessions {
     const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
     if (!holder) return
     const where = `${branch} is checked out at ${holder.path}`
-    /*
-     * Whose worktree it is, by the path the session recorded, not by where the folder sits: a worktree made under another
-     * root (a host started with a `--db` elsewhere put them beside the store) is still that session's
-     */
+    // Whose worktree it is, by the path the session recorded: where the folder sits under today's worktree root does not decide it
     const id = basename(holder.path)
-    const holds = (s: { worktree?: { path: string } | null } | undefined) => s?.worktree != null && canonicalKey(s.worktree.path) === canonicalKey(holder.path)
+    const holds = (s: Pick<SessionInfo, 'worktree'>) => s.worktree != null && canonicalKey(s.worktree.path) === canonicalKey(holder.path)
     const live = this.host.meta.get(id)
     if (live && holds(live)) throw rpcError(`${where}, the worktree of the session "${live.name}". Delete that session first, or start on another branch.`)
     const archived = isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
-    if (!archived || !holds(archived.session)) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    if (!archived || archived.record.projectId !== projectId || !holds(archived.session)) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
     const kept = (why: string) => rpcError(`${where}, the worktree of the archived session "${archived.session.name}", which ${why}. Nothing was removed: restore that session to keep its work, or start on another branch.`)
     /*
      * Held across the checks and the removal: the archive refuses a restore or a purge of a session whose worktree is

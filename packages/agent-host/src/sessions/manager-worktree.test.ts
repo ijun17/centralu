@@ -490,6 +490,18 @@ describe('worktree sessions', () => {
       }
     })
 
+    it("never takes another project's archived worktree, though both are of one repository", async () => {
+      const old = await archived('pr/other-project')
+      mkdirSync(join(repo, 'sub'))
+      const sub = (await wtRpc('projects.add', { path: join(repo, 'sub') })) as { id: string }
+      await wtRpc('projects.setTrusted', { projectId: sub.id, trusted: true })
+
+      await expect(
+        wtRpc('agents.createSession', { projectId: sub.id, cwd: join(repo, 'sub'), tool: 'claude', worktree: true, worktreeBranch: 'pr/other-project' }),
+      ).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(old.worktree!.path)).toBe(true)
+    })
+
     it("keeps an archived session's worktree with uncommitted changes, and says whose it is", async () => {
       const old = await archived('pr/dirty')
       writeFileSync(join(old.worktree!.path, 'a.txt'), 'not committed\n')

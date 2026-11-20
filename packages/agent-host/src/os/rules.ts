@@ -517,8 +517,8 @@ export function programCandidates(path: string, family: OsFamily): string[] {
  * wrote. Only absolute entries are searched (a relative one is read from the working folder, which may be a cloned
  * repository), and an entry is read without its quotes (`"C:\Program Files\Git\cmd"`), as Windows reads it.
  *
- * **Under WSL** (`windowsDrives`, the folder Windows' drives are mounted in: `wslDrives`) a folder on a Windows drive is
- * not searched for a name without `.exe`: WSL appends Windows' PATH to Linux's, and what npm wrote there for a Windows
+ * **Under WSL** (`windowsDrives`, the folder Windows' drives are mounted in: `wslDrives`) a folder on a Windows drive
+ * (`<that folder><letter>/…`) is not searched for a name without `.exe`: WSL appends Windows' PATH to Linux's, and what npm wrote there for a Windows
  * install (`/mnt/c/…/npm/opencode`, an sh script ending in `exec …/opencode.exe`) would run the Windows tool, with the
  * Windows install's config, home and sign-in, from a Linux host (#2366). A tool installed only on Windows is then not
  * installed for that host. A `.exe` asked for by name is a Windows program the host means to run, and is found there.
@@ -548,8 +548,10 @@ export function findOnPath(
     return null
   }
   const skipped = name.toLowerCase().endsWith('.exe') ? null : windowsDrives
+  // A drive is one letter under the mount folder: `/mnt/wsl`, a disk mounted at `/mnt/data` and, with `root = /`, `/usr` are Linux's
+  const onDrive = (dir: string) => skipped !== null && dir.startsWith(skipped) && /^[a-z]\//i.test(dir.slice(skipped.length))
   for (const dir of (env.PATH ?? '').split(posix.delimiter)) {
-    if (!dir || (skipped !== null && posix.join(dir, '/').startsWith(skipped))) continue
+    if (!dir || onDrive(posix.join(dir, '/'))) continue
     const candidate = posix.join(dir, name)
     if (exists(candidate)) return candidate
   }

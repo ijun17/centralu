@@ -92,7 +92,8 @@ function host(adapter: Adapter) {
       events.push(e)
       ref.svc?.observe(e)
     },
-    undefined, { worktreeRoot: tmpdir() },
+    undefined,
+    { worktreeRoot: tmpdir() },
   )
   const svc = new AgentVersionService({
     tools: () => [{ tool: 'claude', installedVersion: () => adapter.installedVersion() }],

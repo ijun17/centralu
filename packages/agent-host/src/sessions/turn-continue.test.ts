@@ -50,7 +50,8 @@ function host() {
       events.push(e)
       if (e.type === 'error') leavingAtError.push(mgr.tenure.disposing)
     },
-    undefined, { worktreeRoot: dir },
+    undefined,
+    { worktreeRoot: dir },
   )
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }

@@ -65,9 +65,9 @@ retry; the archive's answer and the purge say so.
 
 **Where worktrees are, and what a start sweeps** (#2344). The worktree root is `worktrees` in the data folder
 (`worktreesFolder`, the one definition), beside `worktree-recovery` (`worktreeRecoveryFolder`), so a host or test given
-`CC_DATA_DIR` never makes one in the real `~/.centralu`. A `--db` named elsewhere moves the store and what is kept beside
-it (host.log, host-errors.log, the stop and quit marks, the update-resume list, the system-end record, held tool output),
-not the worktrees: a worktree and its recovery snapshots stay in one folder. As the host starts, it removes each session folder in the root
+`CC_DATA_DIR` never makes one in the real `~/.centralu`. A `--db` named elsewhere moves the store and what the host keeps beside
+it (host.lock and host-ownership.sqlite, host.log and host-errors.log, the stop and quit marks, the update-resume list,
+the system-end record, held tool output, the copies kept before a breaking step), not the worktrees: a worktree and its recovery snapshots stay in one folder. As the host starts, it removes each session folder in the root
 (`<project id>/<session id>`) that a removal left part way: owned by no session (no live or archived session has its
 name as its id, or has it or a folder inside it as its worktree or working folder), not listed by git, and with no
 `.git`. It goes through `gitWorktreeRemove` with `leftoverOnly`, which refuses a folder git lists on its own read of

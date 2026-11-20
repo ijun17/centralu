@@ -778,26 +778,16 @@ describe('guard/timed-start', () => {
   it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('git', ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('ps', ['-o', 'pid'], { timeoutMs: 5000 })"], ["execFileSync('npm', ['view', id, 'version', '--json'])"], ["execFileSync('ssh', [host, '-v'])"]])('does not report %s as a probe', async (code) => {
     await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
   })
-  it.each([
-    ["os.processes.runSync('cmd.exe', ['/d', '/c', shim], { timeoutMs: 5000 })"],
-    ["realOs().processes.runSync(found, ['status'], { timeoutMs: 5000 })"],
-    ["execTextSync(source.file, source.args, { timeoutMs: 5000 })"],
-    ["execTextSync(systemTool(['powershell.exe']), ['-c', 'x'], { timeoutMs: 5000 })"],
-  ])('reports %s in host code: a synchronous run ends the pid only, so it runs only a program that starts nothing (#2370)', async (code) => {
-    expect(await lines('packages/agent-host/src/sessions/x.ts', code, 'timed-start')).toHaveLength(1)
-  })
-  it.each([
-    ["realOs().processes.runSync('ps', ['-A'], { timeoutMs: 2000 })"],
-    ["execTextSync('/usr/bin/plutil', args, { timeoutMs: 5000 })"],
-    ["realOs().processes.runSync(systemTool(['reg.exe']), ['query', key], { timeoutMs: 5000 })"],
-    ["export function execTextSync(command: string, args: string[]) { return os.processes.runSync(command, args, {}) }"],
-  ])('lets %s run synchronously in host code', async (code) => {
-    await quiet('packages/agent-host/src/sessions/x.ts', 'timed-start', code, "os.processes.runSync('cmd.exe', [], {})")
-  })
+  it.each([["os.processes.runSync('cmd.exe', ['/d', '/c', shim], {})"], ['realOs().processes.runSync(found, [], {})'], ['execTextSync(source.file, source.args, {})'], ["execTextSync(systemTool(['powershell.exe']), [], {})"]])(
+    'reports %s in host code: a synchronous run ends the pid only, so it runs only a program that starts nothing (#2370)',
+    async (code) => expect(await lines('packages/agent-host/src/sessions/x.ts', code, 'timed-start')).toHaveLength(1),
+  )
+  it.each([["realOs().processes.runSync('ps', ['-A'], {})"], ["execTextSync('/usr/bin/plutil', args, {})"], ["runSync(systemTool(['reg.exe']), [], {})"], ['export function execTextSync(command: string) { return os.processes.runSync(command, [], {}) }']])(
+    'lets %s run synchronously in host code',
+    async (code) => quiet('packages/agent-host/src/sessions/x.ts', 'timed-start', code, "os.processes.runSync('cmd.exe', [], {})"),
+  )
   it('reads a synchronous run in host code alone: scripts, tests and tooling run what they need', async () => {
-    for (const at of ['scripts/x.mts', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {
-      await quiet(at, 'timed-start', "os.processes.runSync(process.execPath, ['-e', 'x'], {})", "execFileSync('agy', ['--version'])")
-    }
+    for (const at of ['scripts/x.mts', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) await quiet(at, 'timed-start', "runSync(process.execPath, [], {})", "execFileSync('agy', ['--version'])")
   })
   it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
     for (const at of ['scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {

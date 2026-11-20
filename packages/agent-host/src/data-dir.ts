@@ -59,9 +59,8 @@ export function dataRoot(): string {
 /**
  * The folder session worktrees are made in (`<root>/<project id>/<session id>`): `worktrees` in the data folder, so dev
  * and the packaged app never touch each other's, and a host or test given `CC_DATA_DIR` never makes one in the real
- * `~/.centralu`. In the data folder, not beside the store: a `--db` named elsewhere moves the store and what is kept beside it
- * (host.log, host-errors.log, the stop and quit marks, the update-resume list, the system-end record, held tool output), and a
- * worktree stays beside its recovery snapshots (`worktreeRecoveryFolder`), which a restore reads together.
+ * `~/.centralu`. In the data folder, not beside the store: a `--db` named elsewhere moves the store and what the host keeps beside it
+ * (docs/agent-host/delegation/child-workspace.md "Where worktrees are, and what a start sweeps" lists them), and a worktree stays beside its recovery snapshots (`worktreeRecoveryFolder`), which a restore reads together.
  */
 export function worktreesFolder(): string {
   return join(dataRoot(), 'worktrees')
