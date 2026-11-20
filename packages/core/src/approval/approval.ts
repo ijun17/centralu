@@ -59,7 +59,7 @@ export function previewMatches(matcher: string, history: readonly string[]): str
 /**
  * The default pattern the approval card suggests for "always allow" — the whole approved command, as is.
  *
- * Widened to the first two words + '*', approving `rm -rf node_modules` would suggest `rm -rf*`, which
+ * If it widened to the first two words + '*', approving `rm -rf node_modules` would suggest `rm -rf*`, which
  * approves `rm -rf /` along with it. Appending '*' to the whole command is
  * not safe either — `cmd*` is broken open by chaining such as `cmd; rm -rf /`. So the suggestion is an exact
  * match, and the host matches it exactly too (#838). A command that ends in `*` gets no suggestion (`''`): an older

@@ -261,6 +261,10 @@ export const sessionsParams = {
   'sessions.reorder': z.object({ projectId: ProjectId, orderedIds: z.array(z.string()) }),
   'sessions.list': z.object({}),
   'sessions.rename': z.object({ sessionId: SessionId, name: z.string() }),
+  /*
+   * `sessions.setKind` (#13) is retired and its name is not reused (docs/protocol.md §4): there is one Assistant per
+   * app, and the role that directs sessions inside a project comes from the relationship (#69), not a choice.
+   */
   'sessions.markRead': z.object({ sessionId: SessionId, seq: z.number() }),
   /**
    * Done on a session in `error` (#1549): it moves to `idle` and what the person saw is read, so the sidebar's mark and the

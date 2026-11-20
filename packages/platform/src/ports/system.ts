@@ -94,8 +94,9 @@ export type PlatformCapabilities = {
    * What this machine's keyboard prints on the modifier keys we put on screen.
    *
    * Every shortcut handler accepts `metaKey || ctrlKey`, so the keys work on Linux and
-   * Windows; only a label can be wrong, so no call site writes out `⌘`. A symbol nobody's keyboard has is worse than
-   * no hint at all: it tells you the app is not for you.
+   * Windows; only the labels can be wrong, so call sites ask for the labels instead of
+   * writing `⌘`. A symbol nobody's keyboard has is worse than no hint at all: it tells you
+   * the app is not for you.
    *
    * Asking for the *labels* rather than for an OS name is the same trade as
    * `windowControlsInset` above, for the same reason: ui is the one package with no

@@ -12,7 +12,7 @@ export const assistantParams = {
    * Returns it if it exists, and **does not create one if it does not** (#63).
    *
    * Onboarding shows the Assistant screen first, so "opening the screen" and "creating the
-   * process" are apart — the screen only asks via this, and creation
+   * process" are separate steps — the screen only asks via this, and creation
    * happens through `orchestrator.get` at the moment the person actually asks their first
    * question. Creating it any earlier would leave a tool process running for a person who never
    * even asked (the lazy-startup principle).

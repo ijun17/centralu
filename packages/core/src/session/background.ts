@@ -6,7 +6,7 @@ const tasks = (n: number) => `${n} background task${n === 1 ? '' : 's'}`
  * What pressing Stop on the turn does to the session's background work (#290), as one line for the Stop control —
  * null when nothing is running in the background.
  *
- * An interrupt can stop background subagents with nothing said, one that finished its work just before it commits.
+ * An interrupt can stop a background subagent silently, even one that has finished its work and is about to commit.
  * Each task carries what an interrupt does to it as measured for its tool
  * (`stopsWithTurn`): Claude stops a subagent and leaves a shell running, Codex leaves a child agent running. A task
  * whose tool was not measured is not promised either way — "may keep running" is the honest middle, and it leans

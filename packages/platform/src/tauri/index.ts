@@ -75,7 +75,7 @@ export function onHostStatus(cb: (status: HostStatus) => void): () => void {
  *
  * Polling also asks about **failure** (#184). The supervisor only leaves a failure message
  * when it gives up (a restart clears it), so if there is a message, that is the answer.
- * Without it, missing the `failed` event — when a supervisor restarted by Retry gives up
+ * Without this poll, missing the `failed` event — when a supervisor restarted by Retry gives up
  * again before the webview is listening — means waiting out the full 30 seconds.
  *
  * **A host working on its store is not late** (#2334): a copy of a large store before an update, or a long store step,
