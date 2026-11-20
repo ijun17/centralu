@@ -15,7 +15,8 @@
 //   node scripts/tier.mjs [--json] -- <path>...                        the paths given
 //
 // A file's mode counts too (git diff --raw): a symbolic link or a submodule is deep, and a file executable in the
-// new commit at least light, whatever its name says.
+// new commit at least light, whatever its name says. A code file whose change is only comments and blank lines is at
+// most light (#2352, `commentsOnly`): a comment fix in a deep file does not make the change deep.
 //
 // --base defaults to origin/main, --head to HEAD; the change is what head adds over where it left
 // base. The rules are read from base, so a change cannot loosen the rules that judge it; a base
@@ -27,6 +28,7 @@
 // person's, raised by hand; none is deep). The label alone goes stale when commits are pushed after it.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -153,16 +155,18 @@ export function modeTier(entry) {
 
 /**
  * One file's tier: { path, tier, rules }, and `tests` when it took the tier of the file it tests (a test
- * of a deep file guards that boundary, so weakening it is deep too), or `mode` when its mode put it higher
+ * of a deep file guards that boundary, so weakening it is deep too), `commentsOnly` (the tier its name
+ * gives) when only its comments changed and that put it lower, or `mode` when its mode put it higher
  * (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
  */
-export function tierOfFile(path, rules, entry = null) {
+export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
   let best = { path: p, ...ownTier(p, rules) }
   for (const s of subjectsOf(p)) {
     const t = ownTier(s, rules)
     if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }
   }
+  if (commentsOnly && rank(best.tier) > rank(COMMENT_ONLY_TIER)) best = { path: p, tier: COMMENT_ONLY_TIER, rules: [], commentsOnly: best.tier }
   const m = modeTier(entry)
   if (m && rank(m.tier) > rank(best.tier)) best = { path: p, tier: m.tier, rules: [], mode: m.mode }
   return best
@@ -171,10 +175,11 @@ export function tierOfFile(path, rules, entry = null) {
 /**
  * A change's tier: { tier, files, because, counts }. `because` is the files at that tier, the ones that
  * put it there; `counts` how many files fell in each tier. No files at all is auto: nothing to review.
- * `modes`: each path's modes (`changedEntries`), when they are known.
+ * `modes`: each path's modes (`changedEntries`), when they are known; `commentsOnly`: the paths whose change
+ * is only comments and blank lines (`commentsOnly`), when their contents were read.
  */
-export function classify(paths, rules, modes = new Map()) {
-  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null))
+export function classify(paths, rules, modes = new Map(), commentsOnly = new Set()) {
+  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null, commentsOnly.has(p)))
   const tier = files.map((f) => f.tier).reduce(higher, 'auto')
   const counts = Object.fromEntries(TIERS.map((t) => [t, files.filter((f) => f.tier === t).length]).filter(([, n]) => n))
   return { tier, files, because: files.filter((f) => f.tier === tier), counts }
@@ -183,6 +188,7 @@ export function classify(paths, rules, modes = new Map()) {
 /** Why a file has its tier, in a few words: its rules, or that none matched. */
 export function reasonOf(file, rules) {
   if (file.mode) return file.mode
+  if (file.commentsOnly) return `only comments changed, else ${file.commentsOnly}`
   if (!file.rules.length) return `no rule matches: ${rules.fallback}`
   return `${file.rules.join(', ')}${file.tests ? `, as the test of ${file.tests}` : ''}`
 }
@@ -215,6 +221,7 @@ export function report(result, rules) {
   for (const f of result.because) {
     lines.push(`  ${f.path}${f.tests ? ` (a test of ${f.tests}, which takes its tier)` : ''}`)
     if (f.mode) lines.push(`      ${f.mode}, so ${f.tier} whatever its name says`)
+    else if (f.commentsOnly) lines.push(`      only its comments and blank lines changed, so at most ${COMMENT_ONLY_TIER} (by its name: ${f.commentsOnly})`)
     else if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
     for (const id of f.rules) lines.push(`      ${id}: ${byId.get(id).why}`)
   }
@@ -230,6 +237,163 @@ export function report(result, rules) {
 export function tierOfLabels(labels) {
   const tiers = (labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((l) => typeof l === 'string' && l.startsWith(LABEL_PREFIX)).map((l) => l.slice(LABEL_PREFIX.length)).filter((t) => TIERS.includes(t))
   return tiers.length ? tiers.reduce(higher) : 'deep'
+}
+
+// --- Comment-only changes (#2352) --------------------------------------------------------------
+
+/**
+ * The most a file whose change is only comments and blank lines takes: a comment fix in a deep file must not make
+ * the change deep, yet it is still reviewed, since a deleted comment may be one that mattered and a wrong judgment
+ * here must not land code unreviewed (owner's choice, 2026-11-20).
+ */
+export const COMMENT_ONLY_TIER = 'light'
+
+const WORD = /[\p{L}\p{N}_]+/uy
+const RAW_OPEN = /(#*)"/y
+const LINE_BREAK = /[\n\r\u2028\u2029]/
+const JS_KINDS = { ts: 'TS', mts: 'TS', cts: 'TS', tsx: 'TSX', js: 'JS', mjs: 'JS', cjs: 'JS', jsx: 'JSX' }
+
+/**
+ * Comments a tool reads, so changing one changes what runs or what is checked: TypeScript's and ESLint's directives
+ * (`@ts-expect-error`, `eslint-disable`, `/* global x *\/`), Prettier's ignore, bundler and coverage hints
+ * (`@vite-ignore`, `__PURE__`, `webpackChunkName`, `c8 ignore`), pragmas (`@jsx`, `@vitest-environment`, `@refresh`),
+ * a triple-slash reference, a source map. Broad on purpose: a prose comment it takes for one keeps its tier.
+ */
+const TOOL_COMMENT = /@ts-|@jsx|@vite|@vitest|@refresh|@deprecated|@license|@preserve|[@#]__\w+__|eslint|prettier|\b(?:c8|v8|istanbul|biome|oxlint|dprint)\b|webpack[A-Z]|sourceMappingURL|sourceURL|^\/\*\s*(?:globals?|exported)\s|^\/\/\/\s*</
+
+/**
+ * A TypeScript or JavaScript file as what changing it can change: its tokens in order (from the parsed tree, so a
+ * regular expression or a template is one token), each with whether a line break comes before it (automatic
+ * semicolons), the comments a tool reads where they stand, and its `#!` line. In JavaScript every comment with an
+ * `@tag` counts too: JSDoc there is types. Null when the file does not parse: then it is not judged.
+ */
+function scriptShape(ts, path, text) {
+  const ext = /\.([^./]+)$/.exec(path)?.[1].toLowerCase() ?? ''
+  const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, ts.ScriptKind[JS_KINDS[ext]])
+  if (sf.parseDiagnostics?.length) return null
+  const js = JS_KINDS[ext].startsWith('JS')
+  const shape = [ts.getShebang(text) ?? '']
+  const visit = (node) => {
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return
+    const children = node.getChildren(sf)
+    if (children.length || node.kind === ts.SyntaxKind.SyntaxList) return children.forEach(visit)
+    // JSX text starts at its full start: what looks like a comment in it is text on screen
+    const start = node.kind === ts.SyntaxKind.JsxText ? node.pos : node.getStart(sf)
+    // the comments between the token before and this one: the ones on its line (TypeScript's "trailing"), then the rest
+    for (const c of [...(ts.getTrailingCommentRanges(text, node.pos) ?? []), ...(ts.getLeadingCommentRanges(text, node.pos) ?? [])]) {
+      const comment = text.slice(c.pos, c.end)
+      if (c.end <= start && (TOOL_COMMENT.test(comment) || (js && /@[a-z]/i.test(comment)))) shape.push(comment)
+    }
+    shape.push(node.pos > 0 && LINE_BREAK.test(text.slice(node.pos, start)) ? '\n' : ' ', node.kind, text.slice(start, node.end))
+  }
+  visit(sf)
+  return shape
+}
+
+/**
+ * A Rust file as what changing it can change: its text with each plain comment (`//`, `/* *\/`, nested) as a space and
+ * every run of spaces as one, literals (strings, raw strings, characters) as they are. Doc comments (`///`, `//!`,
+ * `/** *\/`, `/*! *\/`) are kept: they are attributes, public documentation and doctests. Null when a comment or a
+ * literal is not closed.
+ */
+function rustShape(text) {
+  let out = ''
+  let space = false
+  const emit = (s) => {
+    if (space && out) out += ' '
+    space = false
+    out += s
+  }
+  for (let i = 0; i < text.length; ) {
+    const head = text.slice(i, i + 4)
+    WORD.lastIndex = i
+    const word = WORD.exec(text)?.[0]
+    let end
+    if (/\s/.test(text[i])) {
+      space = true
+      end = i + 1
+    } else if (head.startsWith('//')) {
+      end = text.indexOf('\n', i) < 0 ? text.length : text.indexOf('\n', i)
+      if (/^\/\/(?:\/(?!\/)|!)/.test(head)) emit(text.slice(i, end))
+      else space = true
+    } else if (head.startsWith('/*')) {
+      let depth = 0
+      end = i
+      do {
+        if (text.startsWith('/*', end)) (depth++, (end += 2))
+        else if (text.startsWith('*/', end)) (depth--, (end += 2))
+        else end++
+      } while (depth && end < text.length)
+      if (depth) return null
+      if (/^\/\*(?:\*(?![*/])|!)/.test(head)) emit(text.slice(i, end))
+      else space = true
+    } else if (word) {
+      // r"…", r#"…"#, br"…", cr"…": a raw string, whose backslashes escape nothing
+      RAW_OPEN.lastIndex = i + word.length
+      const raw = /^[bc]?r$/.test(word) ? RAW_OPEN.exec(text) : null
+      if (raw) {
+        const close = text.indexOf(`"${raw[1]}`, RAW_OPEN.lastIndex)
+        if (close < 0) return null
+        end = close + 1 + raw[1].length
+      } else end = i + word.length
+      emit(text.slice(i, end))
+    } else if (text[i] === '"') {
+      end = i + 1
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1
+      if (end >= text.length) return null
+      end++
+      emit(text.slice(i, end))
+    } else if (text[i] === "'") {
+      // a character ('a', '\n', '\u{1F600}'), else a lifetime or a label ('a, 'outer:)
+      let close = -1
+      if (text[i + 1] === '\\') {
+        close = text.indexOf("'", i + 3)
+        if (close < 0) return null
+      } else {
+        const after = i + 1 + String.fromCodePoint(text.codePointAt(i + 1) ?? 32).length
+        if (text[after] === "'") close = after
+      }
+      end = close < 0 ? i + 1 : close + 1
+      emit(text.slice(i, end))
+    } else {
+      end = i + 1
+      emit(text[i])
+    }
+    i = end
+  }
+  return out
+}
+
+/**
+ * The typescript package beside this script, else as the checkout at `root` installs it (the integrator runs a copy of
+ * this file from a temporary folder), else null: then no TypeScript or JavaScript file is judged comment-only.
+ */
+function typescriptAt(root) {
+  for (const from of [import.meta.url, join(root, 'package.json')]) {
+    try {
+      return createRequire(from)('typescript')
+    } catch {
+      // not installed there
+    }
+  }
+  return null
+}
+
+/**
+ * Whether going from `before` to `after` changes only comments and blank lines (and indentation) in the code file
+ * `path`: TypeScript and JavaScript by their parsed tokens (`ts`: the typescript package), Rust by its lexed text.
+ * Any other kind of file, a file that does not parse, or a comment a tool reads changing: false.
+ */
+export function commentsOnly(path, before, after, ts) {
+  if (before === after) return false
+  const ext = /\.([^./]+)$/.exec(path)?.[1].toLowerCase() ?? ''
+  let shape
+  if (ext === 'rs') shape = rustShape
+  else if (ts && JS_KINDS[ext]) shape = (text) => scriptShape(ts, path, text)
+  else return false
+  const a = shape(before)
+  const b = shape(after)
+  return a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b)
 }
 
 // --- Reading a checkout -------------------------------------------------------------------------
@@ -261,7 +425,7 @@ export function rulesAt(root, ref, fallbackRef) {
 }
 
 /**
- * What `head` changes over where it left `base`, with modes: { path, oldMode, newMode } per file (added,
+ * What `head` changes over where it left `base`, with modes: { path, oldMode, newMode, oldSha, newSha } per file (added,
  * changed and deleted, renames as both names; 000000 is "not there"). From `git diff --raw -z`, whose
  * records are ":<old mode> <new mode> <old sha> <new sha> <status>" and then the path, each ended by a NUL.
  */
@@ -272,8 +436,8 @@ export function changedEntries(root, base, head) {
   const out = []
   for (let i = 0; i < parts.length; i++) {
     if (!parts[i].startsWith(':')) continue
-    const [oldMode, newMode] = parts[i].slice(1).split(' ')
-    out.push({ path: parts[i + 1], oldMode, newMode })
+    const [oldMode, newMode, oldSha, newSha] = parts[i].slice(1).split(' ')
+    out.push({ path: parts[i + 1], oldMode, newMode, oldSha, newSha })
     i += 1
   }
   return out
@@ -282,6 +446,19 @@ export function changedEntries(root, base, head) {
 /** The files `head` changes over where it left `base`: added, changed and deleted, renames as both names. */
 export function changedFiles(root, base, head) {
   return changedEntries(root, base, head).map((e) => e.path)
+}
+
+const PLAIN_FILES = [MODES.executable, '100644']
+
+/**
+ * The paths among `entries` (`changedEntries`) whose change is only comments: a plain file on both sides whose name
+ * puts it above COMMENT_ONLY_TIER, read from git by its blobs. Lower ones are not read: this would not lower them.
+ */
+function commentOnlyPaths(root, entries, rules) {
+  const ts = typescriptAt(root)
+  const blob = (sha) => git(root, ['cat-file', 'blob', sha])
+  const judged = entries.filter((e) => PLAIN_FILES.includes(e.oldMode) && PLAIN_FILES.includes(e.newMode) && rank(tierOfFile(e.path, rules).tier) > rank(COMMENT_ONLY_TIER))
+  return new Set(judged.filter((e) => commentsOnly(e.path, blob(e.oldSha), blob(e.newSha), ts)).map((e) => e.path))
 }
 
 /**
@@ -297,6 +474,7 @@ export function tierOfChange({ root, base, head, rulesRef = base }) {
     entries.map((e) => e.path),
     found.rules,
     new Map(entries.map((e) => [e.path, e])),
+    commentOnlyPaths(root, entries, found.rules),
   )
   return { ...result, rulesFrom: found.from, line: tierLine(result, found.rules), text: report(result, found.rules) }
 }
