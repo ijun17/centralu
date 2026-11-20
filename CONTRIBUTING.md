@@ -409,9 +409,10 @@ not run; it prints each step's time as it goes. In that order:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
   merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked. One
   that merges is started only with as much time left as your guards took in the revert check's run (a run
-  cut off half way says nothing); the ones left are named with that time and what was left;
-- and, as a warning only (the merge queue merges main in anyway), whether the branch contains main,
-  and what a merge would conflict on.
+  cut off half way says nothing); the ones left are named with that time and what was left.
+
+Before the checks it warns, without refusing (the merge queue merges main in anyway), when the
+branch does not contain main, and names what a merge would conflict on.
 
 After a fix, rerun only the check that failed: `pnpm pre-pr --only lint` (any check above, and
 `--only` again for another). Run the whole of it once more before the pull request: the checks

@@ -45,8 +45,8 @@ const FOLDER_LINK = process.platform === 'win32' ? 'junction' : 'dir'
  * Gives a worktree the checkout's installed dependencies without installing (#1254): each node_modules
  * folder of the checkout (see {@link nodeModulesDirs}) is mirrored as a real folder of links, and a link
  * that leads to a package of the workspace points at that package in the worktree, not in the checkout.
- * Linking the folder itself, as this once did, made tsc follow `@cc/platform` back to the checkout's
- * sources while the worktree's own files stayed where they are: one class with two declarations, and
+ * Linking the folder itself would make tsc follow `@cc/platform` back to the checkout's
+ * sources while the worktree's own files stay where they are: one class with two declarations, and
  * `Types have separate declarations of a private property`. Any other link (pnpm's store, a plain
  * folder) points at what it is in the checkout; plain files (pnpm's state) are not given. A folder of the
  * checkout that the worktree has no place for is left out, as is a workspace package the worktree lacks.
