@@ -351,6 +351,7 @@ export function parseDetachLine(stdout: string): DetachAnswer {
     if (!d || typeof d !== 'object') continue
     const o = asObj(d)
     if (o.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof o.how === 'string' ? o.how : null }
+    const work = o.reason === 'starting' ? storeWorkOf(o) : null
     return {
       ok: false,
       reason: typeof o.reason === 'string' ? o.reason : 'failed',
@@ -358,7 +359,7 @@ export function parseDetachLine(stdout: string): DetachAnswer {
       ...(typeof o.node === 'string' ? { node: o.node } : {}),
       ...(typeof o.by === 'string' ? { by: o.by } : {}),
       ...(typeof o.startedAt === 'number' ? { startedAt: o.startedAt } : {}),
-      ...(o.reason === 'starting' && storeWorkOf(o) ? { work: storeWorkOf(o)! } : {}),
+      ...(work ? { work } : {}),
     }
   }
   throw new Error('The remote did not say whether it started')
