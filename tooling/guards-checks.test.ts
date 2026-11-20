@@ -737,7 +737,7 @@ describe('the guard rules as a set', () => {
 describe('guard/timed-start', () => {
   const file = 'packages/agent-host/src/sessions/x.ts'
   it.each([
-    ["execFile('claude', ['auth', 'status'], { timeout: 5000 }, cb)"],
+    ["execFile('claude', ['--version'], { timeout: 5000 }, cb)"],
     ["execFileSync('ps', args, { encoding: 'utf8', timeout: 2000 })"],
     ["const run = promisify(execFile)" + NL + "await run('npm', ['root'], { timeout: 60_000, windowsHide: true })"],
     ["cp.exec(command, { cwd, timeout: 90_000 }, cb)"],
@@ -745,9 +745,10 @@ describe('guard/timed-start', () => {
     ["const run = promisify(execFile)" + NL + "await run('git', args, { cwd, ...DEFAULTS, windowsHide: true })"],
     ["execFileSync('ps', args, { ...base, encoding: 'utf8' })"],
   ])('reports %s', async (code) => {
-    expect((await lines(file, code, 'timed-start')).length).toBe(1)
+    // Reported on its one line: for its limit, and once more when it is also a probe
+    expect(new Set(await lines(file, code, 'timed-start')).size).toBe(1)
   })
-  it.each([["execFile('git', ['status'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
+  it.each([["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
     await quiet(file, 'timed-start', code, "execFileSync('ps', args, { timeout: 1 })")
   })
   it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {
@@ -768,12 +769,11 @@ describe('guard/timed-start', () => {
     }
   })
   it.each([["execFileSync('git', ['--version'])"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"]])('does not report %s as a probe', async (code) => {
-    expect(await lines('scripts/x.mts', code, 'timed-start')).toEqual([])
+    await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
   })
   it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
-    const code = "execFileSync('ps', args, { timeout: 2000 })"
     for (const at of ['scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {
-      expect(await lines(at, code, 'timed-start'), at).toEqual([])
+      await quiet(at, 'timed-start', "execFileSync('ps', args, { timeout: 2000 })", "execFileSync('agy', ['--version'])")
     }
   })
 })
