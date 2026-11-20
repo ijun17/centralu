@@ -51,8 +51,7 @@ import { SessionSettings, type SessionSettingsHost } from './session-settings.js
 import { CacheLedger } from './cache-ledger.js'
 import { UsageRecorder } from './usage-recorder.js'
 import { usageHistory } from './usage-history.js'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { worktreeRootIn } from '../data-dir.js'
 import type {
   MachineInfo,
   NormalizedEvent,
@@ -66,7 +65,6 @@ import type {
 import {
   autoCompactOf,
   autoContinueOf,
-  DATA_DIR,
   withoutToolRecord,
   errorMessage,
   ASSISTANT_CHANGE,
@@ -257,12 +255,8 @@ export class SessionManager {
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
     private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
-    /**
-     * Root under which worktrees are created. **Placed next to the data folder** — that way dev and
-     * the packaged app naturally separate (`~/.centralu-dev` vs `~/.centralu`), and tests supply a
-     * temporary directory so they never touch the user's real home.
-     */
-    private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
+    /** Root under which worktrees are created: the data folder's (`worktreeRootIn`) unless a caller names one */
+    private worktreeRoot = worktreeRootIn(),
     private keeperOpts: {
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
@@ -471,6 +465,8 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
+    // Worktree folders a removal left part way (#2344); listed now, before this host can make one of its own
+    this.worktreeSweep = this.worktrees.sweepLeftoverWorktrees().catch((e: Error) => console.error(`[worktree] the sweep of leftover worktrees stopped: ${e.message}`))
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[archive] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
@@ -729,6 +725,8 @@ export class SessionManager {
 
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
+  /** The start's sweep of leftover worktree folders (`WorktreeSessions.sweepLeftoverWorktrees`); never rejects */
+  readonly worktreeSweep: Promise<void>
 
   /** `SessionSettings.updateSettings` (session-settings.ts), kept on the manager for its callers */
   updateSettings(...a: Parameters<SessionSettings['updateSettings']>): ReturnType<SessionSettings['updateSettings']> {

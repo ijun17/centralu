@@ -1,7 +1,7 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
 import { basename, dirname, join } from 'node:path'
-import { lstatSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, statSync } from 'node:fs'
 import type {
   BackgroundTask,
   NormalizedEvent,
@@ -51,6 +51,7 @@ import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
 import { durationText, sleep } from '../timing.js'
 import { realOs } from '../os/real.js'
+import { isUuid } from '../adapters/input-receipts.js'
 
 /** How long a project's setup command may run in a new worktree */
 const SETUP_TIMEOUT_MS = 90_000
@@ -93,6 +94,14 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
   }
 }
 
+/** The folders directly in `dir`, not links; none when it cannot be read */
+function childFolders(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return []
+  }
+}
 
 /** The line a new session shows when its worktree was set up only in part (#841 item 3); `problems` from `createWorktree` */
 export function worktreeSetupNotice(problems: readonly string[]): string {
@@ -325,6 +334,64 @@ export class WorktreeSessions {
       this.worktreeCleanup.delete(sid)
     }
     console.error(`[worktree] removed the archived session ${sid.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
+  }
+
+  /**
+   * Removes the session folders in the worktree root that a worktree removal left part way (#2344): a folder named as
+   * this host names one (`<project id>/<session id>`, the id a UUID) that no session owns, that git no longer lists and
+   * that has no `.git` of its own, so no git command can reach or recover it. An
+   * older build's removal (git's own delete, which stopped at a path past 260 characters on Windows) left such folders
+   * with nothing in Centralu that knew of them. Each removal, and each folder kept with why, is written to the log.
+   *
+   * A session folder no session owns that git still lists stays: a purge without "remove worktree" keeps it on the
+   * person's word, and "no uncommitted changes and no unpublished commits" still misses what git ignores (`.env`, local
+   * builds). Owned means a live or archived session has this id, has this folder as its worktree, or works inside it.
+   *
+   * Run once as the host starts: the folders are listed before this returns its promise, so a worktree made by this
+   * host is never among them; ownership is read again for each folder just before it is judged.
+   */
+  sweepLeftoverWorktrees(): Promise<void> {
+    const root = this.host.worktreeRoot
+    const folders: { projectId: string; path: string }[] = []
+    for (const projectId of childFolders(root).filter(isProjectId)) {
+      for (const name of childFolders(join(root, projectId)).filter(isUuid)) folders.push({ projectId, path: join(root, projectId, name) })
+    }
+    return (async () => {
+      for (const { projectId, path } of folders) {
+        if (this.ownedFolder(path)) continue
+        let repo: string
+        try {
+          repo = this.host.cwdOf(projectId)
+        } catch {
+          console.error(`[worktree] kept ${path}: no session owns it, and its project is not registered here`)
+          continue
+        }
+        const listed = (await gitWorktreeList(repo).catch(() => [])).some((w) => canonicalKey(w.path) === canonicalKey(path))
+        if (listed) {
+          console.error(`[worktree] kept ${path}: no session owns it, and git still lists it as a worktree of ${repo} (remove it with git worktree remove if it is not wanted)`)
+          continue
+        }
+        if (this.ownedFolder(path)) continue
+        await gitWorktreeRemove(repo, path, { worktreeRoot: root }).then(
+          () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
+          (e: Error) => console.error(`[worktree] kept ${path}: ${e.message.trim()}`),
+        )
+      }
+    })()
+  }
+
+  /** Whether a live or archived session has `path`'s name as its id, `path` as its worktree, or its working folder inside it */
+  private ownedFolder(path: string): boolean {
+    const id = basename(path)
+    if (this.host.meta.has(id) || this.host.store.trash.isTrashed(id)) return true
+    const real = canonicalPath(path)
+    const key = canonicalKey(path)
+    const sessions = [...this.host.meta.values(), ...this.host.store.sessions.readSessions('1 = 1')]
+    return sessions.some((s) => {
+      if (s.id === id || (s.worktree && canonicalKey(s.worktree.path) === key)) return true
+      const cwd = this.host.store.sessions.sessionCwd(s.id)
+      return cwd !== null && isInside(real, canonicalPath(cwd))
+    })
   }
 
   /**

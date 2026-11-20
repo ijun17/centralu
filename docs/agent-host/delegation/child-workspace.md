@@ -62,6 +62,14 @@ anything else unlisted is refused. git is given the path as it lists it (a Windo
 A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
 retry; the archive's answer and the purge say so.
 
+**Where worktrees are, and what a start sweeps** (#2344). The worktree root is `worktrees` in the data folder
+(`worktreeRootIn`, the one definition), so a host or test given `CC_DATA_DIR` never makes one in the real
+`~/.centralu`. As the host starts, it removes (through `gitWorktreeRemove`) each session folder in the root that a
+removal left part way: named by a session id, owned by no live or archived session, not listed by git, and with no
+`.git`. A folder no session owns that git still lists stays and is logged: a purge without "remove worktree" keeps it
+on the person's word, and "nothing uncommitted, nothing unpublished" still misses what git ignores (`.env`, local
+builds). Every removal and every keep is a line in host.log.
+
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
 extra roots (#585). Codex keeps `.git` read-only even inside writable roots, so this does not permit commits

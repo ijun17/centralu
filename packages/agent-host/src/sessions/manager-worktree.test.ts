@@ -25,6 +25,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import type { NormalizedEvent, SessionInfo, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
@@ -1590,6 +1591,49 @@ describe('worktree sessions', () => {
     await wtRpc('agents.deleteSession', { sessionId: s.id })
 
     expect(existsSync(path)).toBe(true)
+  })
+
+  it('a manager given no worktree root makes its worktrees in the data folder, not the home folder (#2344)', async () => {
+    const data = join(root, 'data')
+    vi.stubEnv('CC_DATA_DIR', data)
+    // A stand-in home folder: where the worktree would land without the data folder's root, never the person's
+    const home = join(root, 'home')
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    const mgr = new SessionManager(store, adapters, () => {})
+    mgr.prLookup = async () => null
+    const s = (await createRpcHandler(mgr, adapters)('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true })) as SessionInfo
+
+    expect(s.worktree?.path).toBe(join(data, 'worktrees', project.id, s.id))
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it('a start removes the session folders a worktree removal left part way, and keeps every other (#2344)', async () => {
+    const live = await create(true)
+    const archived = await create(true)
+    await wtRpc('agents.deleteSession', { sessionId: archived.id })
+    const dir = join(wtRoot, project.id)
+    // What git's own delete left on Windows: no `.git`, no longer listed, with paths past 260 characters
+    const partWay = join(dir, randomUUID())
+    let deep = join(partWay, 'node_modules')
+    for (let i = 0; i < 12; i++) deep = join(deep, `.pnpm-store-package-${i}`)
+    mkdirSync(deep, { recursive: true })
+    writeFileSync(join(deep, 'index.js'), '')
+    expect(join(deep, 'index.js').length).toBeGreaterThan(260)
+    // No session owns it, and git still lists it: a purge without "remove worktree" kept it
+    const listed = join(dir, randomUUID())
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-at-purge', listed], { cwd: repo })
+    // Not a session's folder at all
+    const other = join(dir, 'not-a-session')
+    mkdirSync(other)
+
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    restarted.prLookup = async () => null
+    await restarted.worktreeSweep
+
+    expect(existsSync(partWay)).toBe(false)
+    expect([live.worktree!.path, archived.worktree!.path, listed, other].filter((p) => !existsSync(p))).toEqual([])
   })
 
   /*

@@ -57,6 +57,15 @@ export function dataRoot(): string {
 }
 
 /**
+ * The folder session worktrees are made in (`<root>/<project id>/<session id>`): `worktrees` in the data folder, so dev
+ * and the packaged app never touch each other's, and a host or test given `CC_DATA_DIR` never makes one in the real
+ * `~/.centralu`.
+ */
+export function worktreeRootIn(dataDir: string = dataRoot()): string {
+  return join(dataDir, 'worktrees')
+}
+
+/**
  * Which folder this host keeps its data in (#973), and which legacy folder (if any) is moved into it first.
  *
  * One rule: `CC_DATA_DIR` when it is set, else `~/.centralu` (`~/.centralu-dev` when `CC_DEV=1`). The legacy folder
