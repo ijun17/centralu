@@ -1627,13 +1627,43 @@ describe('worktree sessions', () => {
     // Not a session's folder at all
     const other = join(dir, 'not-a-session')
     mkdirSync(other)
+    // Part-way folders a session of another id still owns: its working folder is inside one, its worktree is the other
+    const workedIn = join(dir, randomUUID())
+    mkdirSync(join(workedIn, 'sub'), { recursive: true })
+    const plain = await create(false)
+    store.sessions.setSessionCwd(plain.id, join(workedIn, 'sub'))
+    const movedInto = join(dir, randomUUID())
+    mkdirSync(movedInto)
+    const holder = await create(false)
+    store.sessions.upsertSession({ ...holder, worktree: { path: movedInto, branch: 'held' } })
+    // Unlisted, but with a `.git` of its own: not what a removal leaves
+    const ownGit = join(dir, randomUUID())
+    mkdirSync(ownGit)
+    writeFileSync(join(ownGit, '.git'), 'gitdir: elsewhere\n')
+    // A folder of a project this host does not know
+    const unknownProject = join(wtRoot, randomUUID(), randomUUID())
+    mkdirSync(unknownProject, { recursive: true })
 
     const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
     restarted.prLookup = async () => null
     await restarted.worktreeSweep
 
     expect(existsSync(partWay)).toBe(false)
-    expect([live.worktree!.path, archived.worktree!.path, listed, other].filter((p) => !existsSync(p))).toEqual([])
+    const kept = [live.worktree!.path, archived.worktree!.path, listed, other, workedIn, movedInto, ownGit, unknownProject]
+    expect(kept.filter((p) => !existsSync(p))).toEqual([])
+  })
+
+  it('a start keeps a folder git lists that no session owns, also once its .git is gone (#2344)', async () => {
+    const listed = join(wtRoot, project.id, randomUUID())
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-listed', listed], { cwd: repo })
+    writeFileSync(join(listed, 'local.env'), 'what git ignores\n')
+    rmSync(join(listed, '.git'))
+
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    restarted.prLookup = async () => null
+    await restarted.worktreeSweep
+
+    expect(readFileSync(join(listed, 'local.env'), 'utf8')).toBe('what git ignores\n')
   })
 
   /*

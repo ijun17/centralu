@@ -1,7 +1,7 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
 import { basename, dirname, join } from 'node:path'
-import { lstatSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'
 import type {
   BackgroundTask,
   NormalizedEvent,
@@ -338,59 +338,59 @@ export class WorktreeSessions {
 
   /**
    * Removes the session folders in the worktree root that a worktree removal left part way (#2344): a folder named as
-   * this host names one (`<project id>/<session id>`, the id a UUID) that no session owns, that git no longer lists and
-   * that has no `.git` of its own, so no git command can reach or recover it. An
-   * older build's removal (git's own delete, which stopped at a path past 260 characters on Windows) left such folders
-   * with nothing in Centralu that knew of them. Each removal, and each folder kept with why, is written to the log.
+   * this host names one (`<project id>/<session id>`, the id a UUID) that no session owns, that git does not list and
+   * that has no `.git` of its own, so no git command can reach or recover it. Owned means a live or archived session has
+   * its name as its id, or has it (or a folder inside it) as its worktree or working folder.
    *
-   * A session folder no session owns that git still lists stays: a purge without "remove worktree" keeps it on the
-   * person's word, and "no uncommitted changes and no unpublished commits" still misses what git ignores (`.env`, local
-   * builds). Owned means a live or archived session has this id, has this folder as its worktree, or works inside it.
+   * A folder no session owns that git still lists stays (`leftoverOnly`): a purge without "remove worktree" keeps it on
+   * the person's word, and "no uncommitted changes and no unpublished commits" still misses what git ignores (`.env`,
+   * local builds). Each removal and each folder kept for want of an owner is a line in the log.
    *
    * Run once as the host starts: the folders are listed before this returns its promise, so a worktree made by this
    * host is never among them; ownership is read again for each folder just before it is judged.
    */
   sweepLeftoverWorktrees(): Promise<void> {
     const root = this.host.worktreeRoot
-    const folders: { projectId: string; path: string }[] = []
-    for (const projectId of childFolders(root).filter(isProjectId)) {
-      for (const name of childFolders(join(root, projectId)).filter(isUuid)) folders.push({ projectId, path: join(root, projectId, name) })
-    }
+    const projects = childFolders(root)
+      .filter(isProjectId)
+      .map((projectId) => ({ projectId, folders: childFolders(join(root, projectId)).filter(isUuid).map((name) => join(root, projectId, name)) }))
     return (async () => {
-      for (const { projectId, path } of folders) {
-        if (this.ownedFolder(path)) continue
+      for (const { projectId, folders } of projects) {
+        const orphans = folders.filter((path) => !this.ownedFolder(path))
+        if (!orphans.length) continue
         let repo: string
         try {
           repo = this.host.cwdOf(projectId)
         } catch {
-          console.error(`[worktree] kept ${path}: no session owns it, and its project is not registered here`)
+          console.error(`[worktree] kept ${orphans.length} folder(s) in ${join(root, projectId)} that no session owns: no project ${projectId} is registered here`)
           continue
         }
-        const listed = (await gitWorktreeList(repo).catch(() => [])).some((w) => canonicalKey(w.path) === canonicalKey(path))
-        if (listed) {
-          console.error(`[worktree] kept ${path}: no session owns it, and git still lists it as a worktree of ${repo} (remove it with git worktree remove if it is not wanted)`)
-          continue
+        for (const path of orphans) {
+          if (this.ownedFolder(path) || !existsSync(path)) continue
+          await gitWorktreeRemove(repo, path, { worktreeRoot: root, leftoverOnly: true }).then(
+            () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
+            (e: Error) => console.error(`[worktree] kept ${path}, which no session owns: ${e.message.trim()}`),
+          )
         }
-        if (this.ownedFolder(path)) continue
-        await gitWorktreeRemove(repo, path, { worktreeRoot: root }).then(
-          () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
-          (e: Error) => console.error(`[worktree] kept ${path}: ${e.message.trim()}`),
-        )
       }
     })()
   }
 
-  /** Whether a live or archived session has `path`'s name as its id, `path` as its worktree, or its working folder inside it */
+  /**
+   * Whether a live or archived session has `path`'s name as its id, or `path` or a folder inside it as its worktree or
+   * working folder. Only a path written under the worktree root is resolved: one elsewhere cannot be inside, and resolving
+   * it could wait on a drive that is not there.
+   */
   private ownedFolder(path: string): boolean {
     const id = basename(path)
     if (this.host.meta.has(id) || this.host.store.trash.isTrashed(id)) return true
+    const roots = [this.host.worktreeRoot, canonicalPath(this.host.worktreeRoot)]
     const real = canonicalPath(path)
-    const key = canonicalKey(path)
     const sessions = [...this.host.meta.values(), ...this.host.store.sessions.readSessions('1 = 1')]
     return sessions.some((s) => {
-      if (s.id === id || (s.worktree && canonicalKey(s.worktree.path) === key)) return true
-      const cwd = this.host.store.sessions.sessionCwd(s.id)
-      return cwd !== null && isInside(real, canonicalPath(cwd))
+      if (s.id === id) return true
+      const used = [s.worktree?.path, this.host.store.sessions.sessionCwd(s.id)]
+      return used.some((p) => p != null && roots.some((r) => isInside(r, p)) && isInside(real, canonicalPath(p)))
     })
   }
 
