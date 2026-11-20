@@ -1,7 +1,7 @@
 import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 import type { StopWhy } from '../mail/stop-notices.js'
-import { failureSentence, isNetworkFailure, isPlanLimit } from './error-kind.js'
+import { failureSentence, isNetworkFailure, isPlanLimit, planLimitResetAt } from './error-kind.js'
 
 /**
  * How an event changes a session's interruption, or `undefined` when it does not. Live state stays with the event's
@@ -10,12 +10,21 @@ import { failureSentence, isNetworkFailure, isPlanLimit } from './error-kind.js'
  *   a new turn (working)                       cleared
  *   an error the network caused that ended a   network, with the tool's words
  *   running turn (`endedTurn`)
- *   a usage limit that ended a running turn    limit (#1415): the tool's limit event, or an error its words call one
+ *   a usage limit that ended a running turn    limit (#1415): the tool's limit event, or an error its words call one;
+ *                                              with its reset when known (`limitReset`)
+ *   a limit report at rest while a limit       the same stop with the report's reset: the host keeps one current
+ *   stop stands                                reset, which the wait follows (`TurnContinue.armAfter`)
  *   any other error, a finished turn           cleared: what shows is the error itself, or nothing to tell
  *   an interrupt nobody here asked for         interrupted
  *   a Stop of ours                             cleared: the person or the Assistant knows
  */
-export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: boolean): Interruption | null | undefined {
+export function interruptionAfter(
+  e: NormalizedEvent,
+  now: number,
+  endedTurn: boolean,
+  session: { limit?: SessionLimit | null; interruption?: Interruption | null } = {},
+): Interruption | null | undefined {
+  const limit = session.limit ?? undefined
   switch (e.type) {
     case 'error':
       /*
@@ -25,10 +34,21 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
        */
       if (!e.sessionId || !endedTurn || e.error.code === 'adapter_crashed') return undefined
       if (isNetworkFailure(e.error.message)) return { reason: 'network', at: now, detail: failureSentence(e.error.message).slice(0, 600) }
-      return isPlanLimit(e.error.message) ? { reason: 'limit', at: now, detail: failureSentence(e.error.message).slice(0, 600) } : null
-    case 'limit_reached':
-      // Only one that ended a turn: Codex reports its limits at any time (`account/rateLimits/updated`), and one at rest stopped nothing
-      return e.sessionId && endedTurn ? { reason: 'limit', at: now } : undefined
+      return isPlanLimit(e.error.message) ? { reason: 'limit', at: now, detail: failureSentence(e.error.message).slice(0, 600), ...resetOf(e, limit, now) } : null
+    case 'limit_reached': {
+      if (!e.sessionId) return undefined
+      if (endedTurn) return { reason: 'limit', at: now, ...resetOf(e, limit, now) }
+      // Codex reports its limits at any time (`account/rateLimits/updated`): one at rest stops nothing, but says the standing limit stop's reset
+      const current = session.interruption
+      if (current?.reason !== 'limit') return undefined
+      // A credits limit has no reset: one said before it is not this limit's
+      if (e.credits && current.resetAt !== undefined) {
+        const { resetAt: _, ...stop } = current
+        return stop
+      }
+      const resetAt = limitReset(e, limit, now)
+      return resetAt !== undefined && resetAt !== current.resetAt ? { ...current, resetAt } : undefined
+    }
     case 'turn_complete':
       return null
     case 'state_change':
@@ -39,6 +59,26 @@ export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: bo
     default:
       return undefined
   }
+}
+
+/**
+ * A usage limit's reset as the host knows it (#1415): the tool's data first (ISO: Claude's limit event, a Codex rate-limit update the
+ * session holds as its `limit`), else the time the tool's words name (`planLimitResetAt`, Codex's "try again at 5:02 PM"). Undefined
+ * with neither, and for a credits or spend limit, which no time resets: the `resumeAt` Codex reports beside it is its primary
+ * window's, not this limit's. The one source of `Interruption.resetAt` and of a limit wait's time
+ */
+export function limitReset(e: NormalizedEvent, limit: SessionLimit | undefined, now: number): number | undefined {
+  if (e.type === 'limit_reached' ? e.credits : limit?.credits) return undefined
+  const said = Date.parse((e.type === 'limit_reached' ? e.resumeAt : limit?.resumeAt) ?? '')
+  if (Number.isFinite(said)) return said
+  return e.type === 'error' ? planLimitResetAt(e.error.message, now) : undefined
+}
+
+type SessionLimit = { resumeAt?: string; credits?: boolean }
+
+const resetOf = (e: NormalizedEvent, limit: SessionLimit | undefined, now: number): { resetAt?: number } => {
+  const resetAt = limitReset(e, limit, now)
+  return resetAt === undefined ? {} : { resetAt }
 }
 
 /**

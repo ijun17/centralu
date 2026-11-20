@@ -1,14 +1,17 @@
-import { CONTINUE_WORDS, SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
-import { isInTurn } from '@cc/core'
+import { useMemo } from 'react'
+import { CONTINUE_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
+import { turnStop, type TurnStop } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { canContinue, interruptionLabel, waitStands } from '../../components/primitives.jsx'
-import { usePresence } from '../../components/presence.js'
+import { turnStopLabel } from '../../components/primitives.jsx'
+import { useNowUntil } from '../../app/useLabelNow.js'
+import { useHeld, usePresence } from '../../components/presence.js'
 import { Button } from '../../components/Button.jsx'
+import { AutoContinueWait } from './AutoContinueWait.jsx'
 
 /*
  * The lines a session pane shows above its composer when the session will not simply hear the
- * next message (#428): its machine is away, its last turn was cut short, or it has no process.
+ * next message (#428): its machine is away, its last turn stopped, or it has no process.
  */
 
 type NotedSession = { id: string; state: SessionState; live: boolean; interruption?: Interruption | null }
@@ -23,18 +26,16 @@ type NotedSession = { id: string; state: SessionState; live: boolean; interrupti
 export function useSessionNotes(session: NotedSession | undefined, away: boolean) {
   const waking = useStore((s) => !!(session && s.resuming[session.id]))
   const wakeError = useStore((s) => (session ? s.wakeError[session.id] : undefined))
-  const error = !!session && session.state === 'error' && !away
-  const interrupted = !!session && canContinue(session.interruption) && !isInTurn(session.state) && !away
+  const state = session?.state
+  const interruption = session?.interruption
+  // One object while its facts stay, so the note can tell a new stop from the same one
+  const stop = useMemo(() => (state && !away ? turnStop({ state, interruption }) : null), [state, interruption, away])
   const dormant = !!session && !away && !session.live
   return {
-    error,
-    interrupted,
+    stop,
     dormant,
-    /**
-     * A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking).
-     * A stop Centralu continues by itself has its buttons in the header (#1415), so its note has none
-     */
-    hasButton: error || (interrupted && !waitStands(session.interruption)) || (dormant && !!wakeError && !waking),
+    /** A button waits in a note: every stop has one (Continue, Done, or the wait's two), and the dormant note's Retry */
+    hasButton: stop !== null || (dormant && !!wakeError && !waking),
   }
 }
 
@@ -53,74 +54,68 @@ export function AwayNote({ machine }: { machine: string | null }) {
 }
 
 /**
- * A session whose last turn ended in an error (#1549). The error line is in the conversation with its reason; this is the
- * one control that takes the mark off the sidebar and the inbox once the person has read it. Done stops, retries and
- * continues nothing, and a new error marks the session again.
+ * Why the last turn stopped and what can be done (`turnStop`), the one note that says it. The conversation keeps the tool's
+ * own words as its record; this says what Centralu knows and offers: Continue for a cut turn, Done (#1549) to take an
+ * error's mark off, or while Centralu waits to continue it, the wait (AutoContinueWait).
+ *
+ * The wait and the rest sit in one grid cell so they cross-fade without the line jumping to two rows. `stop` is null when
+ * nothing stopped; the note then fades out saying the last stop, taking no press.
  */
-export function ErrorNote({ sessionId }: { sessionId: string }) {
-  const done = useStore((s) => s.markDone)
-  return (
-    <p className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted" data-testid="error-note">
-      <span className="min-w-0 flex-1 break-words">The last turn ended in an error. The reason is in the conversation.</span>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="shrink-0"
-        onClick={() => void done(sessionId)}
-        title="Clears the error mark. Nothing is stopped or sent."
-        data-testid="error-done"
-      >
-        Done
-      </Button>
-    </p>
-  )
-}
-
-export function InterruptedNote({
-  sessionId,
-  interruption,
-}: {
-  sessionId: string
-  interruption: Interruption
-}) {
+export function StopNote({ sessionId, stop: current }: { sessionId: string; stop: TurnStop | null }) {
   const send = useStore((s) => s.send)
-  // Centralu continues it by itself (#1415): the header says when, with Continue now; this line says only the stop
-  // It fades out as a wait comes and in as one goes (design-system.md §9), taking no press while it leaves
-  const button = usePresence(!waitStands(interruption))
-  const why =
-    interruption.reason === 'network'
-      ? 'A network error ended the last turn before it finished.'
-      : interruption.reason === 'limit'
-        ? 'The usage limit ended the last turn before it finished.'
-        : interruption.reason === 'quit'
-        ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
-        : interruption.reason === 'shutdown'
-          ? `The last turn did not finish: ${SHUTDOWN_WORDS} while it was running.`
-          : 'The agent tool interrupted the last turn before it finished.'
+  const done = useStore((s) => s.markDone)
+  const note = usePresence(current !== null)
+  const stop = useHeld(current)
+  const plain = usePresence(stop?.kind !== 'wait')
+  // The plain line's stop, kept while it fades out under a wait that came
+  const said = useHeld(stop?.kind === 'wait' ? null : stop)
+  const now = useNowUntil(said?.kind === 'stopped' ? said.resetAt : undefined)
+  if (!note.shown || !stop) return null
   return (
-    <p
-      className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted"
-      data-testid="interrupted-note"
-      data-reason={interruption.reason}
-      title={interruption.detail}
+    <div
+      className={`${note.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} grid grid-cols-1 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted`}
+      aria-hidden={note.leaving || undefined}
+      data-testid="stop-note"
+      data-kind={stop.kind}
     >
-      <span className="min-w-0 flex-1 break-words">
-        <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
-      </span>
-      {button.shown && (
-        <Button
-          variant="secondary"
-          size="sm"
-          className={`${button.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} shrink-0`}
-          aria-hidden={button.leaving || undefined}
-          onClick={() => void send(sessionId, CONTINUE_WORDS)}
-          title={`Sends "${CONTINUE_WORDS}"`}
-          data-testid="interrupted-continue"
+      {plain.shown && said && (
+        <div
+          className={`${plain.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} col-start-1 row-start-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1`}
+          aria-hidden={plain.leaving || undefined}
         >
-          Continue
-        </Button>
+          <span className="min-w-0 flex-[1_1_auto] break-words text-ink" data-testid="stop-note-words">
+            {turnStopLabel(said, now)}
+          </span>
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            {said.kind === 'stopped' && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => void send(sessionId, CONTINUE_WORDS)}
+                title={`Sends "${CONTINUE_WORDS}"`}
+                data-testid="stop-note-continue"
+              >
+                Continue
+              </Button>
+            )}
+            {(said.kind === 'error' || said.error) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => void done(sessionId)}
+                title="Clears the error mark. Nothing is stopped or sent."
+                data-testid="stop-note-done"
+              >
+                Done
+              </Button>
+            )}
+          </span>
+        </div>
       )}
-    </p>
+      <AutoContinueWait sessionId={sessionId} wait={stop.kind === 'wait' ? stop : null} className="col-start-1 row-start-1" />
+    </div>
   )
 }
 

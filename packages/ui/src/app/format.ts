@@ -1,6 +1,6 @@
-import { formatClock, formatDay } from '@cc/core'
+import { formatClock, formatDay, formatWhen } from '@cc/core'
 
-export { formatClock, formatDay }
+export { formatClock, formatDay, formatWhen }
 
 /**
  * How the app writes a size, a count and a length of time (#428). (A moment, `formatClock` and `formatDay`, is written

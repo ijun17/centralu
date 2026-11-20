@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { LabelClock, watchLabelVisibility, type NextLabelTick } from './labelClock.js'
+import { useCallback, useEffect, useState } from 'react'
+import { LabelClock, nextResetTick, watchLabelVisibility, type NextLabelTick } from './labelClock.js'
 
 const clock = new LabelClock()
 let mounted = 0
@@ -31,4 +31,10 @@ export function useLabelNow(next: NextLabelTick | null): number {
     }
   }, [next])
   return now
+}
+
+/** The clock of a label that names a moment ahead (a reset, a continue): it ticks until the moment has passed, so the label can say so */
+export function useNowUntil(at: number | undefined): number {
+  const next = useCallback((now: number) => nextResetTick(at ?? NaN, now), [at])
+  return useLabelNow(at !== undefined && Number.isFinite(at) ? next : null)
 }

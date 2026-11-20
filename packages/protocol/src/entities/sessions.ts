@@ -83,6 +83,11 @@ export const Interruption = z.object({
    * does not clear with time). An older host never sets it, and an older window drops it
    */
   autoContinue: z.object({ at: z.number().optional(), tries: z.number().int().min(0) }).optional(),
+  /**
+   * A `limit` stop's reset (ms), when the host knows it: the tool's limit data, else the time its words name (#1415). Kept when the wait
+   * goes (Don't continue, the setting off), so the screen still says when the limit clears. Absent: not known, or an older host
+   */
+  resetAt: z.number().optional(),
 })
 export type Interruption = z.infer<typeof Interruption>
 

@@ -572,8 +572,8 @@ test('the pinned message leaves while the pane is folded and comes back when it 
 const noteCases = [
   {
     name: 'an error (Done)',
-    note: 'error-note',
-    button: 'error-done',
+    note: 'stop-note',
+    button: 'stop-note-done',
     show: (page: Page, id: string) =>
       page.evaluate((sid) => {
         const m = (window as never as { __mock: any }).__mock
@@ -581,12 +581,12 @@ const noteCases = [
         m.emit({ type: 'error', sessionId: sid, error: { code: 'internal', message: 'boom', retryable: true } })
       }, id),
     // Pressing the button is the way out
-    dismiss: (page: Page) => page.getByTestId('error-done').click(),
+    dismiss: (page: Page) => page.getByTestId('stop-note-done').click(),
   },
   {
     name: 'an interruption (Continue)',
-    note: 'interrupted-note',
-    button: 'interrupted-continue',
+    note: 'stop-note',
+    button: 'stop-note-continue',
     show: (page: Page, id: string) =>
       page.evaluate((sid) => {
         const m = (window as never as { __mock: any }).__mock
@@ -594,7 +594,19 @@ const noteCases = [
         m.emit({ type: 'state_change', sessionId: sid, state: 'idle' })
         m.emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'quit', at: Date.now() } })
       }, id),
-    dismiss: (page: Page) => page.getByTestId('interrupted-continue').click(),
+    dismiss: (page: Page) => page.getByTestId('stop-note-continue').click(),
+  },
+  {
+    name: 'a wait Centralu continues by itself (Continue now, #1415)',
+    note: 'stop-note',
+    button: 'auto-continue-stop',
+    show: (page: Page, id: string) =>
+      page.evaluate((sid) => {
+        const m = (window as never as { __mock: any }).__mock
+        m.emit({ type: 'state_change', sessionId: sid, state: 'idle' })
+        m.emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'limit', at: Date.now(), autoContinue: { at: Date.now() + 3_600_000, tries: 0 } } })
+      }, id),
+    dismiss: (page: Page) => page.getByTestId('auto-continue-now').click(),
   },
   {
     name: 'a session that could not wake (Retry)',
@@ -689,11 +701,11 @@ test('a hand that left the strip while a note showed does not leave the card rai
   await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 20)
   await expect(shell).toHaveAttribute('data-up', 'true')
   await fail(page, a)
-  await expect(panel.getByTestId('error-note')).toBeVisible()
+  await expect(panel.getByTestId('stop-note')).toBeVisible()
   // It leaves the panel, and then the error goes by another way (Done from the inbox, a new turn)
   await page.mouse.move(pane.x + pane.width / 2, 2)
   await clear(page, a)
-  await expect(panel.getByTestId('error-note')).toHaveCount(0)
+  await expect(panel.getByTestId('stop-note')).toHaveCount(0)
   await expect(shell).not.toHaveAttribute('data-up', 'true')
 })
 
@@ -733,7 +745,7 @@ test('a panel in the band where the fold and open lines overlap folds again when
   await fail(page, a)
   await expect.poll(hangsBelow).toBe(false)
   await clear(page, a)
-  await expect(panel.getByTestId('error-note')).toHaveCount(0)
+  await expect(panel.getByTestId('stop-note')).toHaveCount(0)
   await expect.poll(hangsBelow).toBe(true)
 })
 
@@ -791,7 +803,7 @@ test('a note opening the composer slides the card up from below the edge into it
   // The pane clips (not hides: a scroll container would scroll to a field focused below its edge) while the card is out of it
   expect(open.clip).toBe('clip')
   // Nothing waits on it: the button is there to press at once, and the pane stops clipping once the card is in place
-  await expect(panel.getByTestId('error-done')).toBeEnabled()
+  await expect(panel.getByTestId('stop-note-done')).toBeEnabled()
   await expect.poll(() => panel.getByTestId('session-view').evaluate((el) => getComputedStyle(el).overflow)).not.toBe('clip')
 })
 
@@ -825,7 +837,7 @@ test('under reduced motion the card does not slide when the composer opens', asy
   await expect.poll(async () => Math.round((await settled(shell)).y - (edge.y + edge.height))).toBeGreaterThanOrEqual(0)
 
   await fail(page, a)
-  await expect(panel.getByTestId('error-note')).toBeVisible()
+  await expect(panel.getByTestId('stop-note')).toBeVisible()
   // In place at once, with no class that moves it and nothing running on it, and the pane never clips for it
   const state = await shell.evaluate((el) => ({
     cls: el.classList.contains('cc-composer-rise'),
@@ -852,7 +864,7 @@ test('a card that was raised when the pane opens its composer stays where it is 
   await expect(shell).toHaveAttribute('data-up', 'true')
   const up = await settled(shell)
   await fail(page, a)
-  await expect(panel.getByTestId('error-note')).toBeVisible()
+  await expect(panel.getByTestId('stop-note')).toBeVisible()
   const now = await shell.evaluate((el) => ({
     cls: el.classList.contains('cc-composer-rise'),
     running: el.getAnimations().filter((x) => x instanceof CSSAnimation).length,

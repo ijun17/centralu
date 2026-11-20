@@ -33,7 +33,7 @@ export class InterruptionWatch {
    * is not a stuck one.
    */
   trackInterruption(e: NormalizedEvent, m: SessionInfo, endedTurn: boolean): void {
-    const next = interruptionAfter(e, Date.now(), endedTurn)
+    const next = interruptionAfter(e, Date.now(), endedTurn, m)
     // The reconnecting flag stands while the tool still retries, whatever else the turn says meanwhile
     const stillReconnecting = m.interruption?.reason === 'reconnecting' && m.state === 'working' && m.activity === 'retrying'
     if (next !== undefined && !stillReconnecting) m.interruption = next

@@ -377,7 +377,7 @@ export const REPLAYS: Replay[] = [
       // The CLI's own message (a synthetic one, no model behind it) is the error line only: no bubble (`expectPane`), and the note under the composer points to the line (#2050)
       expect(text(await page.getByTestId('msg-mark').innerText())).toBe(`The agent could not finish this turn — ${text(held.failure!)}`)
       await expect(page.getByTestId('msg-assistant')).toHaveCount(0)
-      await expect(page.getByTestId('error-note')).toBeVisible()
+      await expect(page.getByTestId('stop-note')).toBeVisible()
     },
   },
   { tool: 'claude', scenario: 'files' },
@@ -536,7 +536,7 @@ export const REPLAYS: Replay[] = [
       expect(marks).toHaveLength(2)
       expect(marks[0]).toContain(`Model metadata for ${model} not found`)
       expect(marks[1]).toContain(`Codex refused the model ${model}`)
-      await expect(page.getByTestId('error-note')).toBeVisible()
+      await expect(page.getByTestId('stop-note')).toBeVisible()
     },
   },
   {
@@ -605,7 +605,7 @@ export const REPLAYS: Replay[] = [
     async shows(page) {
       // The app-server killed in the middle of a turn: one error line and the reason under the composer, not a finished turn
       expect(await failure(page)).toEqual([expect.stringContaining('codex app-server exited')])
-      await expect(page.getByTestId('error-note')).toBeVisible()
+      await expect(page.getByTestId('stop-note')).toBeVisible()
     },
   },
   { tool: 'codex', scenario: 'resume' },

@@ -7,7 +7,7 @@ import { useDismiss } from '../../components/useDismiss.js'
 import { BackgroundIcon, StopIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
-import { usePresence } from '../../components/presence.js'
+import { useHeld, usePresence } from '../../components/presence.js'
 import { useStore } from '../../store/store.js'
 
 /**
@@ -66,9 +66,7 @@ export function BackgroundTasksBadge({
   const listRef = useRef<HTMLDivElement>(null)
   const running = backgroundCount(tasks) > 0
   // What it showed while work ran, for its exit: once nothing runs there is nothing to say, so it goes as it was and does not turn into a record
-  const [last, setLast] = useState(tasks)
-  if (running && last !== tasks) setLast(tasks)
-  const shownTasks = running ? tasks : last
+  const shownTasks = useHeld(running ? tasks : null) ?? tasks
   const count = backgroundCount(shownTasks)
 
   /*

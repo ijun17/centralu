@@ -44,7 +44,7 @@ export function planLimitResetAt(message: string, now: number): number | undefin
   }
   const at = new Date(now)
   at.setHours(h, min, 0, 0)
-  // The stated minute itself is now, not tomorrow: a stop at 6:17:20 that says "6:17 PM" resets at once (resetAt keeps a past time at now)
+  // The stated minute itself is now, not tomorrow: a stop at 6:17:20 that says "6:17 PM" resets at once (the wait keeps a past reset at now, `continueAt`)
   if (at.getTime() <= now - 60_000) at.setDate(at.getDate() + 1)
   return at.getTime()
 }

@@ -129,7 +129,7 @@ the person's Continue would.
   silent for `UPDATE_SLOT_MS` has given its slot up and is no longer "not answered yet": a stop after that does not list it again, and its
   note is not sent again (accepted: a request that hung that long). Nor is a session in `error`. Accepted too: the person's Stop on a woken
   turn that reads at rest (between the process's own turn end and its first answer) ends nothing where the tool says nothing at rest, so
-  that wake stays unanswered and a stop then lists it `woken` again. There is no setting and no wait in the header: Centralu cut these turns, the person
+  that wake stays unanswered and a stop then lists it `woken` again. There is no setting and no wait above the composer: Centralu cut these turns, the person
   did not stop them.
 - **Not continued.** A session that is not mid-turn when the host stops: the person stopped it and the host took the
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and

@@ -252,13 +252,14 @@ export function inboxDoneTests() {
     await page.evaluate((sid) => ((window as any).__mock as Mock).emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'network', at: Date.now(), detail: 'ECONNRESET' } }), target)
     await expect.poll(() => stateOf(page, target)).toBe('error')
     await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
-    await expect(page.getByTestId('error-note')).toBeVisible()
+    await expect(page.getByTestId('stop-note')).toBeVisible()
     const mark = page.getByTestId(`session-row-${target}`).locator('[data-look]')
     await expect(mark).toHaveAttribute('data-look', 'stopped')
 
-    await page.getByTestId('error-done').click()
+    await page.getByTestId('stop-note-done').click()
 
-    await expect(page.getByTestId('error-note')).toHaveCount(0)
+    // The note stays for the stop, without its Done
+    await expect(page.getByTestId('stop-note-done')).toHaveCount(0)
     expect(await stateOf(page, target)).toBe('idle')
     expect(await hostStateOf(page, target)).toBe('idle')
     await expect(waitingCount(page)).toContainText('0')
@@ -266,7 +267,7 @@ export function inboxDoneTests() {
     // The sidebar's mark goes with it, the stopped turn's interruption notwithstanding
     await expect(mark).toHaveAttribute('data-look', 'idle')
     // Done stops and continues nothing: a stopped turn the person may go on with still offers Continue
-    await expect(page.getByTestId('interrupted-continue')).toBeVisible()
+    await expect(page.getByTestId('stop-note-continue')).toBeVisible()
   })
 
   test('Done never forces idle: what the host did meanwhile stands, an approval card included (#1549 review)', async ({ page }) => {
@@ -285,7 +286,7 @@ export function inboxDoneTests() {
       }
     }, target)
 
-    await page.getByTestId('error-done').click()
+    await page.getByTestId('stop-note-done').click()
 
     await expect.poll(() => stateOf(page, target)).toBe('waiting_approval')
     await expect(page.getByTestId('approval-card')).toBeVisible()

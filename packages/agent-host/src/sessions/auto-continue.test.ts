@@ -231,9 +231,41 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(a.session(id).interruption?.autoContinue?.at).toBe(new Date(2026, 10, 13, 18, 17).getTime() + RESET_MARGIN_MS)
   })
 
+  it("a Codex limit report at rest after a stop that named no reset gives the stop its reset, and the wait goes by it", async () => {
+    vi.setSystemTime(new Date(2026, 10, 13, 17, 30))
+    const a = host()
+    const { id, handle } = await started(a)
+    handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: "You've hit your usage limit. Upgrade to Pro or try again later.", retryable: false } })
+    expect(a.session(id).interruption?.resetAt).toBeUndefined()
+    const reset = new Date(2026, 10, 13, 19, 0)
+    // `account/rateLimits/updated` at rest: the session's limit and its stop now say one reset
+    handle.emit({ type: 'limit_reached', sessionId: id, resumeAt: reset.toISOString(), usedPercent: 100 })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit', resetAt: reset.getTime(), autoContinue: { at: reset.getTime() + RESET_MARGIN_MS, tries: 0 } })
+    expect(a.session(id).limit?.resumeAt).toBe(reset.toISOString())
+    // Not at the 30-minute retry it was first timed for
+    await vi.advanceTimersByTimeAsync(31 * 60_000)
+    expect(handle.sent).toEqual([])
+    await vi.advanceTimersByTimeAsync(reset.getTime() + RESET_MARGIN_MS - Date.now() + TICK_MS)
+    expect(handle.sent).toEqual([LIMIT_NOTE])
+  })
+
+  it("Don't continue keeps the limit's reset on the stop, and a later report still updates it", async () => {
+    const { a, id } = await limited(60 * 60_000)
+    const first = a.session(id).interruption!.resetAt!
+    expect(await a.rpc('sessions.stopContinue', { sessionId: id })).toEqual({ ok: true, stopped: true })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit', resetAt: first })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    const later = new Date(first + 2 * 60 * 60_000)
+    a.adapter.last.emit({ type: 'limit_reached', sessionId: id, resumeAt: later.toISOString() })
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit', resetAt: later.getTime() })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+  })
+
   it('a Codex credits limit does not reset with time and waits for the person', async () => {
     const { a, id, handle } = await limited(60_000, { credits: true })
     expect(a.session(id).interruption).toMatchObject({ reason: 'limit' })
+    // The resumeAt beside it is the primary window's: the stop says no reset
+    expect(a.session(id).interruption?.resetAt).toBeUndefined()
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
     expect(handle.sent).toEqual([])
@@ -245,9 +277,10 @@ describe('a turn a usage limit stopped (#1415)', () => {
     // Codex's failed turn first, its rate-limit notice after, at rest
     handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: "You've hit your usage limit. Upgrade to Pro or try again later.", retryable: false } })
     expect(a.session(id).interruption).toMatchObject({ reason: 'limit', autoContinue: { tries: 0 } })
-    handle.emit({ type: 'limit_reached', sessionId: id, credits: true })
+    handle.emit({ type: 'limit_reached', sessionId: id, credits: true, resumeAt: new Date(Date.now() + 60 * 60_000).toISOString() })
     expect(a.session(id).interruption).toMatchObject({ reason: 'limit' })
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    expect(a.session(id).interruption?.resetAt).toBeUndefined()
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
     expect(handle.sent).toEqual([])
   })

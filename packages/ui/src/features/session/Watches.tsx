@@ -6,7 +6,7 @@ import { useAnchoredPlacement } from '../../components/anchored.js'
 import { Button } from '../../components/Button.jsx'
 import { ClockIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { LEAVE_MS, usePresence } from '../../components/presence.js'
+import { LEAVE_MS, useHeld, usePresence } from '../../components/presence.js'
 import { useDismiss } from '../../components/useDismiss.js'
 import { watchCount } from '../../store/mail.js'
 import { useStore } from '../../store/store.js'
@@ -72,9 +72,7 @@ export function WatchesCapsule({ sessionId, rows }: { sessionId: string; rows: r
   const listRef = useRef<HTMLDivElement>(null)
   const any = watchCount(rows) > 0
   // What it listed, for its exit when the last one goes
-  const [last, setLast] = useState(rows ?? NONE)
-  if (any && rows && last !== rows) setLast(rows)
-  const shown = any && rows ? rows : last
+  const shown = useHeld(any && rows ? rows : null) ?? rows ?? NONE
   const count = watchCount(shown)
 
   useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, listRef], returnFocusTo: buttonRef })

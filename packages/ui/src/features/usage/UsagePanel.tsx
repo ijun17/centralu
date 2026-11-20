@@ -1,6 +1,4 @@
-import { useCallback } from 'react'
-import { useLabelNow } from '../../app/useLabelNow.js'
-import { nextResetTick } from '../../app/labelClock.js'
+import { useNowUntil } from '../../app/useLabelNow.js'
 import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
@@ -252,8 +250,7 @@ function Donut({ window: w }: { window: UsageWindow }) {
 
 function ResetTime({ resetsAt }: { resetsAt: string | null }) {
   const at = resetsAt ? Date.parse(resetsAt) : NaN
-  const next = useCallback((now: number) => nextResetTick(at, now), [at])
-  const now = useLabelNow(Number.isFinite(at) ? next : null)
+  const now = useNowUntil(Number.isFinite(at) ? at : undefined)
   return <>{resetText(resetsAt, now)}</>
 }
 

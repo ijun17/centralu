@@ -1,54 +1,63 @@
-import { useState } from 'react'
-import { CONTINUE_WORDS, type Interruption } from '@cc/protocol/client'
+import { CONTINUE_WORDS } from '@cc/protocol/client'
+import type { TurnStop } from '@cc/core'
 import { useStore } from '../../store/store.js'
-import { autoContinueLabel } from '../../components/primitives.jsx'
-import { formatClock } from '../../app/format.js'
+import { turnStopLabel } from '../../components/primitives.jsx'
+import { useNowUntil } from '../../app/useLabelNow.js'
 import { Button } from '../../components/Button.jsx'
-import { usePresence } from '../../components/presence.js'
+import { useHeld, usePresence } from '../../components/presence.js'
 
 /**
- * The wait of a stop Centralu continues by itself (#1415), in the session's header (owner, 2026-10-26): what it waits for,
- * **Continue now** and **Don't continue**. Only here: the line above the composer keeps saying the stop, without these
- * buttons, so no button shows twice. It fades in and out (design-system.md §9); while it leaves it keeps the last wait it
- * said and takes no press.
+ * The wait of a stop Centralu continues by itself (#1415): what it waits for, **Continue now** and **Don't continue**, in
+ * the line above the composer (agent-host/lifecycle/auto-continue.md "Where it shows"). The words wrap rather than cut,
+ * and the buttons wrap under them as a pair, so a narrow window still reads the cause and the time.
+ *
+ * While it fades out it keeps the last wait it said and takes no press. `className` places it in the line.
  */
-export function AutoContinueWait({ sessionId, interruption }: { sessionId: string; interruption: Interruption | null | undefined }) {
+export function AutoContinueWait({
+  sessionId,
+  wait: current,
+  className = '',
+}: {
+  sessionId: string
+  wait: Extract<TurnStop, { kind: 'wait' }> | null
+  className?: string
+}) {
   const stopContinue = useStore((s) => s.stopContinue)
-  const label = interruption ? autoContinueLabel(interruption, formatClock) : null
-  const { shown, leaving } = usePresence(label !== null)
-  // The last wait said, for the frames it fades out in ("state from the previous props", as usePresence)
-  const [last, setLast] = useState(label)
-  if (label !== null && label !== last) setLast(label)
-  if (!shown) return null
+  const { shown, leaving } = usePresence(current !== null)
+  const wait = useHeld(current)
+  const now = useNowUntil(wait?.interruption.autoContinue?.at)
+  if (!shown || !wait) return null
   return (
-    <span
-      className={`${leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} flex min-w-0 shrink items-center gap-2`}
+    <div
+      className={`${leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 ${className}`.trim()}
       data-testid="auto-continue"
       aria-hidden={leaving || undefined}
     >
-      <span className="truncate text-xs text-ink" data-testid="auto-continue-wait">
-        {label ?? last}
+      <span className="min-w-0 flex-[1_1_auto] break-words text-ink" data-testid="auto-continue-wait">
+        {turnStopLabel(wait, now)}
       </span>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="shrink-0"
-        onClick={() => void useStore.getState().send(sessionId, CONTINUE_WORDS)}
-        title={`Sends "${CONTINUE_WORDS}"`}
-        data-testid="auto-continue-now"
-      >
-        Continue now
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0"
-        onClick={() => void stopContinue(sessionId)}
-        title="Centralu leaves this turn stopped for you to continue"
-        data-testid="auto-continue-stop"
-      >
-        Don&apos;t continue
-      </Button>
-    </span>
+      <span className="flex min-w-0 flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void useStore.getState().send(sessionId, CONTINUE_WORDS)}
+          title={`Sends "${CONTINUE_WORDS}"`}
+          data-testid="auto-continue-now"
+        >
+          Continue now
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void stopContinue(sessionId)}
+          title="Centralu leaves this turn stopped for you to continue"
+          data-testid="auto-continue-stop"
+        >
+          Don&apos;t continue
+        </Button>
+      </span>
+    </div>
   )
 }

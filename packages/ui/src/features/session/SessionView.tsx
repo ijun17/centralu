@@ -14,7 +14,7 @@ import { ChatStream } from './chat-stream/ChatStream.jsx'
 import { SessionStart } from './SessionStart.jsx'
 import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
-import { AwayNote, DormantNote, ErrorNote, InterruptedNote, useSessionNotes } from './SessionNotes.jsx'
+import { AwayNote, DormantNote, StopNote, useSessionNotes } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 import { COMPOSER_REACH } from './foldedComposer.js'
@@ -471,15 +471,10 @@ export function SessionPane({
       {away ? <AwayNote machine={session.machine ?? null} /> : notes.dormant && <DormantNote sessionId={session.id} />}
 
       {/*
-        The last turn stopped before it finished, and nobody here chose that (#698): the network, a quit, or the tool's
-        own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
-        waiting for input) looks the same as a turn that ended.
+        Why the last turn stopped, with what goes on from there (#698, #1415, #1549): the state alone (error, idle, waiting
+        for input) looks the same as a turn that ended.
       */}
-      {notes.error && <ErrorNote sessionId={session.id} />}
-
-      {notes.interrupted && session.interruption && (
-        <InterruptedNote sessionId={session.id} interruption={session.interruption} />
-      )}
+      <StopNote key={session.id} sessionId={session.id} stop={notes.stop} />
 
       {/*
         Collapsed (requested by a user on 2026-09-10): a rounded card waits wholly below the pane's
