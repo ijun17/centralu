@@ -298,7 +298,6 @@ packages/agent-host/src/sessions/manager-resume.test.ts
 packages/agent-host/src/sessions/manager-updates.test.ts
 packages/agent-host/src/sessions/manager-worktree.test.ts
 packages/agent-host/src/sessions/manager.test.ts
-packages/agent-host/src/sessions/manager.ts
 packages/agent-host/src/sessions/mcp-apps.test.ts
 packages/agent-host/src/sessions/memory-gate.ts
 packages/agent-host/src/sessions/message-image.test.ts

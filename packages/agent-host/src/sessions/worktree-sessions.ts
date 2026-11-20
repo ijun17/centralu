@@ -1,7 +1,7 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
 import { basename, dirname, join } from 'node:path'
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'
+import { lstatSync, statSync } from 'node:fs'
 import type {
   BackgroundTask,
   NormalizedEvent,
@@ -97,7 +97,7 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
 /** The folders directly in `dir`, not links; none when it cannot be read */
 function childFolders(dir: string): string[] {
   try {
-    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    return realOs().files.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
   } catch {
     return []
   }
@@ -366,7 +366,7 @@ export class WorktreeSessions {
           continue
         }
         for (const path of orphans) {
-          if (this.ownedFolder(path) || !existsSync(path)) continue
+          if (this.ownedFolder(path) || !realOs().files.existsSync(path)) continue
           await gitWorktreeRemove(repo, path, { worktreeRoot: root, leftoverOnly: true }).then(
             () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
             (e: Error) => console.error(`[worktree] kept ${path}, which no session owns: ${e.message.trim()}`),
