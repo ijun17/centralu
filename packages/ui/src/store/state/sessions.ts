@@ -169,7 +169,7 @@ export type SessionsSlice = {
    * are all tool-specific values, and handing codex's model name to claude would fail right at session
    * creation.
    * deleteOld: kept, the old session stays standing — a branch, not a switch.
-   * mode 'record' (#78 made it for a session whose service was cut off): asks the agent nothing and has
+   * mode 'record' (#78, #694): asks the agent nothing and has
    * the host build the note straight from the store's own transcript. 'agent': the departing session
    * writes the note.
    */

@@ -317,8 +317,9 @@ export class HostTenure {
 }
 
 /**
- * The row a session starts this host with: a turn the last host was in is lost and reset to idle, since its process left
- * with that host. `turnCut` is the one definition of a turn a stop also lists the turns it ends by (idle.ts, #1618).
+ * The row a session starts this host with. A live state is true only while a process exists, and the last host took its
+ * processes with it: a turn it was in is lost and reset to idle, and the session wakes when something next addresses it.
+ * The turns found cut are those a stop lists as cut: one definition, `turnCut` (idle.ts, #1618).
  */
 function resetLiveState(
   s: SessionInfo,
