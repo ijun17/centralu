@@ -430,7 +430,7 @@ mod tests {
         (launcher, marker)
     }
 
-    /// #1466: for a window on the serve host, `build` says so and "Quit completely" stops that host
+    /// #1466: for a window on the serve host, `build` reports that host and "Quit completely" stops it
     #[test]
     fn a_window_on_the_serve_host_reports_it_and_quit_completely_stops_it() {
         let (launcher, marker) = stopping_launcher();

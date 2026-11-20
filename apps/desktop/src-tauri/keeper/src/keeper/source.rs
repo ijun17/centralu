@@ -2,8 +2,8 @@
 //!
 //! A host started by the keeper never runs from a bundle (#280): the running app may be the
 //! build-output bundle that `pnpm app:open` opens in place, which the next `tauri build` rewrites
-//! on disk, and a host reads the Codex bridge, `schema.sql` and `app-template/` from its folder on
-//! demand, so it could mix two builds. The keeper copies the bundle's `resources/host` folder to
+//! on disk, and a host holds its code in memory but reads the Codex bridge, `schema.sql` and
+//! `app-template/` from its folder on demand, so it could mix two builds. The keeper copies the bundle's `resources/host` folder to
 //! `<data>/hosts/<key>/` first and runs it from there. Rebuilding, replacing or deleting the
 //! bundle afterwards cannot touch the running host.
 //!
@@ -142,7 +142,7 @@ pub fn hosts_dir(data: &Path) -> PathBuf {
 /// real name.
 ///
 /// A complete copy is reused even when the folder it came from is gone. On Linux that folder is
-/// inside the AppImage, which exists only while it is mounted: a keeper outlives the window whose
+/// inside the AppImage, which exists only while it is mounted: a keeper can outlive the window whose
 /// mount held it, and a host restart that read the missing source would fail and give up
 /// (measured in WSL2, docs/spikes/2026-10-linux-keeper.md).
 pub fn copy_into(data: &Path, src: &BuildSource) -> Result<PathBuf, String> {

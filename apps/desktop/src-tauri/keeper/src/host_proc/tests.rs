@@ -7,8 +7,8 @@ use super::*;
 use std::io::BufReader;
 
 /**
- * `kill_group` reaches the whole group the host leads and nothing outside it (#350). Not by
- * `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (Ubuntu 24.04) turns into a signal to the
+ * `kill_group` reaches the whole group the host leads and nothing outside it (#350). It does not
+ * use `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (Ubuntu 24.04) turns into a signal to the
  * group named by the pid's first digit: there the leader and its child below survive, and a
  * pid starting with 1 sends SIGTERM to every process of the user, this test's runner included.
  * macOS's `kill` reads the argument as a group, so only a Linux run tells the two apart.
@@ -495,8 +495,8 @@ fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
     assert!(below_floor(&floor_text(just_below), floor));
 }
 
-/// The keeper, the hub and the launcher each check a Node against the floor, and must agree, on
-/// `v22.14.0-rc.1`, `v22` and `v22.x.1` too. One fixture pins the three; the hub's and the
+/// The keeper, the hub and the launcher each check a Node against the floor, and must agree,
+/// including on `v22.14.0-rc.1`, `v22` and `v22.x.1`. One fixture pins the three; the hub's and the
 /// launcher's tests read it too (`packages/agent-host/src/links/node-floor.test.ts`).
 #[test]
 fn the_floor_check_agrees_with_the_hubs_and_the_launchers() {

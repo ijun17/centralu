@@ -68,9 +68,9 @@ pub const DESCRIPTOR_LIMIT: u64 = 10_240;
  * is lower; never lowers it. Returns the limit before and after when it changed.
  *
  * A keeper started from Finder or launchd gets a soft limit of 256, and every relay through the
- * front door holds two descriptors: a limit that low is soon reached, and with it every accept and
- * spawn fails (#840 item 3). What the keeper
- * starts gets the limit it had before back (`original_descriptor_limit`): a program that still uses
+ * front door holds two descriptors: about a hundred relays reach it, and with it every accept and
+ * spawn fails (#840 item 3). What the keeper starts gets the limit it had before back
+ * (`original_descriptor_limit`): a program that still uses
  * `select` cannot take a descriptor at or past `FD_SETSIZE` (1,024), which a limit of 10,240 would
  * let it be given.
  */
@@ -166,8 +166,8 @@ pub const RUNS_SH_SCRIPTS: bool = true;
 /**
  * A keeper an earlier build may have left on the window's data folder (`dev`: the dev one), its host holding the folder's
  * lock: asked to stop and waited for (`keeper::client::stop_and_wait`), so the window's own host finds the folder free.
- * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): an
- * earlier build ran a keeper there under `CC_USE_KEEPER=1`.
+ * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): a
+ * keeper an earlier build started there under `CC_USE_KEEPER=1` can still be running.
  */
 pub fn stop_earlier_keeper(dev: bool) -> Option<String> {
     use crate::keeper::client::{stop_and_wait, Stopped};
@@ -260,7 +260,7 @@ pub fn kill_pid(pid: u32) {
 /**
  * Sends `signal` to the one process `pid`. Refused (`InvalidInput`) for a number `kill(2)` reads as
  * something other than one process (`signal_target`). The one way the keeper signals a single
- * process: the host, a handed-over host, a child it holds (#840 item 13).
+ * process (#840 item 13).
  */
 pub fn signal_pid(pid: u32, signal: libc::c_int) -> io::Result<()> {
     let Some(target) = signal_target(pid) else { return Err(refused(pid)) };

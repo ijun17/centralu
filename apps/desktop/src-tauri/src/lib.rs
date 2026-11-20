@@ -145,8 +145,7 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
  * which continues what that one ended.
  *
- * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below
- * (#840 item 6). Through
+ * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below. Through
  * `ExitRequested` with a code (our quit gate lets a programmatic exit through) and `Exit`, Tauri
  * then runs this executable's path again, reading the executable's name from the bundle's new
  * `Info.plist` (`tauri::process::restart`, 2.11.5).
@@ -389,8 +388,8 @@ pub fn run() {
              * exit is blocked and the webview is asked instead — only `quit_app` sets the
              * flag, so any ExitRequested that arrives after that passes straight through.
              *
-             * **⌘Q never reaches here** (not measured, confirmed against upstream source,
-             * quit.rs): macOS's terminate has no place to hang a veto, so this event
+             * **⌘Q never reaches here** (not measured, confirmed against upstream source; the
+             * evidence is in quit.rs): macOS's terminate has no place to hang a veto, so this event
              * simply never fires for it. That case is caught earlier by `install_quit_menu` in
              * the menu — what this gate is responsible for is the last-window-closed case and
              * the exit we call ourselves.

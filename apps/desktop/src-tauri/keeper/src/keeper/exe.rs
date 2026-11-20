@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(dev.env(), [("CC_DEV".to_string(), "1".to_string()), (IN_PROCESS_ENV.to_string(), "1".to_string())]);
     }
 
-    /// Shell v1's pinned bytes pass `--keeper` first; the keeper reads the rest as without it.
+    /// Shell v1's pinned bytes pass `--keeper` first; the keeper reads the remaining arguments the same either way.
     #[test]
     fn a_keeper_still_reads_a_command_line_that_starts_with_keeper() {
         let argv: Vec<String> =

@@ -47,7 +47,7 @@ pub(crate) fn install_quit_menu(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /**
- * The person confirmed quitting in the modal, so ⌘Q and ⌘W never quit at once.
+ * The person confirmed quitting in the modal; until then ⌘Q and ⌘W do not quit.
  *
  * The flag is set before calling exit — this exit in turn produces another ExitRequested, and
  * the gate (the run callback below) has to let it through at that point. The flag is the

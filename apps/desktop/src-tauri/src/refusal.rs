@@ -1,9 +1,10 @@
 //! Why signed content was refused, shown in a native window (#634, docs/security-boundaries/signed-content.md
 //! "Signed content").
 //!
-//! When the shell refuses this window's content, the person is not told by the web UI: that UI is fed
-//! by the host, and the host is the very thing whose content failed to verify, so it could hide or
-//! rewrite what it says. A dialog drawn here, in the window process (the signed app bundle), cannot be
+//! When the shell refuses this window's content as not what was signed, the person is told by a dialog
+//! drawn here, not by the web UI's build bar: that UI is fed by the host, and the host is the very
+//! thing whose content failed to verify, so it could hide or rewrite what it says. A dialog drawn here,
+//! in the window process (the signed app bundle), cannot be
 //! suppressed by the host: it needs nothing from the host, only what the shell wrote to
 //! `<data>/shell-status.json`, read by the window itself.
 //!

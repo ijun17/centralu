@@ -5,7 +5,7 @@
 //! until that connection is accepted. When `accept` fails for want of a descriptor (`EMFILE`, a
 //! keeper started from Finder has a soft limit of 256), the connection stays in the queue, so a
 //! loop that went straight back would meet the same failure: one core spinning and the log growing
-//! by thousands of lines a second, until a descriptor came free. So a failure leaves the listener
+//! by thousands of lines a second, until a descriptor comes free. So a failure leaves the listener
 //! alone for a moment, and the log says it once (and then once every `LOG_EVERY`, with the count)
 //! instead of every time.
 //!
