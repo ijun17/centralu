@@ -74,7 +74,7 @@ const NO_MAIL = 'this computer gives work to another machine only by mail, and i
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'closing' | 'emit' | 'linkedReader' | 'linkedTasks' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports'
+  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'closing' | 'emit' | 'linkedReader' | 'linkedTasks' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'adapters'
 >
 
 /**
@@ -242,7 +242,9 @@ export class RemoteAgents {
     if (takes !== true) return { ok: false, error: olderThere(machine.name) }
     const tool = opts.tool ?? target.defaultTool ?? caller.tool
     // The person's model for a difficulty is read here, as for a local child; the machine is not asked for its list
-    const { model, effort, difficulty } = agentChoice(opts, undefined, this.host.uiPreferences().agentModels?.[tool])
+    const label = this.host.adapters.get(tool)?.descriptor.label ?? tool
+    // The machine may apply its own remembered model for the project: this computer cannot name it
+    const { model, effort, difficulty, fellBack } = agentChoice(opts, undefined, this.host.uiPreferences().agentModels?.[tool], label, `the model ${machine.name} picks for it`)
     const given = givenAgentName(opts.name)
     const siblings = [...this.records().filter((r) => r.callerId === callerId).map((r) => r.name), ...[...this.host.meta.values()].filter((s) => s.askedBy === callerId).map((s) => s.name)]
     const basis = given ?? distinguishingText(opts.task, siblings)
@@ -309,7 +311,7 @@ export class RemoteAgents {
     const place = this.places.reservePlace(callerId, project.id)
     if ('error' in place) return { ok: false, error: place.error }
     try {
-      return await this.makeChild(callerId, caller, opts, { machine, target, tool, name, model, effort, branch, startedAt, preset, there, unasked }, reader, place.release, signal)
+      return await this.makeChild(callerId, caller, opts, { machine, target, tool, name, model, effort, fellBack, branch, startedAt, preset, there, unasked }, reader, place.release, signal)
     } finally {
       place.release()
     }
@@ -322,6 +324,8 @@ export class RemoteAgents {
     opts: StartAgentOpts & { machine: string },
     c: {
       machine: { id: string; name: string }; target: LinkedProject; tool: string; name?: string; model?: string; effort?: string; branch?: string; startedAt: number
+      /** A difficulty named with no model set for it on this tool (`agentChoice`, #2350) */
+      fellBack?: string
       /** The preset it is to run under there, what the machine said of an `auto` caller's, and whether no card was asked (#1273) */
       preset: PermissionPreset; there: AutoThere | null; unasked: boolean
     },
@@ -329,7 +333,7 @@ export class RemoteAgents {
     counted: () => void,
     signal?: AbortSignal,
   ): Promise<ChildRunResult> {
-    const { machine, target, tool, name, model, effort, branch, startedAt, there, unasked } = c
+    const { machine, target, tool, name, model, effort, fellBack, branch, startedAt, there, unasked } = c
     const made = await reader.createSession(target, {
       tool: tool as never,
       ...(name ? { name } : {}),
@@ -377,6 +381,7 @@ export class RemoteAgents {
     // It counts by itself now: its task is open (`workingIn`)
     counted()
     const unchecked = [
+      fellBack ?? '',
       // Where its worktree forked from, as the machine said (#1488); a machine from before it says nothing
       made.worktreeBase ?? '',
       model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : '',

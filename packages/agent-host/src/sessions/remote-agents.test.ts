@@ -133,6 +133,7 @@ function agents(): RemoteAgents {
     autoBoundaryOpen: () => false,
     emit: () => {},
     uiPreferences: () => ({}),
+    adapters: new Map(),
     hostCards: { askHost: async () => 'allow' },
     files: { projectOrigin: async () => 'https://github.com/me/app' },
     closing: false,
@@ -213,6 +214,11 @@ describe('the work a start and a send give a child on a linked machine (#1948 st
     tasks.refusal = 'the link dropped'
     expect(await start(ra)).toEqual({ ok: false, error: `The session "Child" [${CHILD}] was made on Box but did not take the task: the link dropped. Send it again by mail, or delete it with agent_session.` })
     expect(ra.of(CHILD)).toBeTruthy()
+  })
+
+  it('a difficulty with no model set for the tool says so, naming the machine as what picks the model (#2350)', async () => {
+    const r = await start(agents(), { difficulty: 'heavy' })
+    expect(r).toMatchObject({ ok: true, notice: expect.stringMatching(/no heavy model is set for \S+; it runs on the model Box picks for it/) })
   })
 
   it("stops the child there and withdraws the caller's open tasks to it", async () => {

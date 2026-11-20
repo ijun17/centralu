@@ -84,6 +84,6 @@ export type StartProgress = {
   childId?: string
   /** Set once the child's run is registered, so a late answer can describe it as the normal path does */
   d?: Delegation
-  /** Said when the model or effort asked for could not be checked */
+  /** Said when the model or effort asked for could not be checked, or a difficulty named had no model set (#2350) */
   unchecked?: string
 }

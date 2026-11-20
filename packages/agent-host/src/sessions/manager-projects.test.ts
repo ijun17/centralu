@@ -152,23 +152,26 @@ describe('projects', () => {
   }, 30_000 * SLOW)
 
   /*
-   * The last tool chosen becomes that project's default (2026-08-27 flow review).
-   *
-   * default_tool was hardcoded to 'claude' when a project was created, and there was **no place**
-   * that ever updated it afterward — a person using codex had to reselect it forever, on every new
-   * session. The fact that matters here is not the settings screen but the act of creating a
-   * session, so both the UI and the Assistant get the same rule.
+   * The tool the person last picked in their window becomes the project's default; a start an agent, a script or a
+   * linked hub makes never moves it (#2350).
    */
-  it('creating a session makes that tool the project default', async () => {
+  it('a session the person creates in their window makes that tool the project default; no other start does', async () => {
     const p = await addProject()
     const list = async () => ((await rpc('projects.list', {})) as { id: string; defaultTool: string }[])
+    const window = { client: 1, rights: 'full' as const, window: true as const }
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
 
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' }, window)
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('codex')
 
     // Switching back follows the same path — the last choice always wins.
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' }, window)
+    expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
+
+    // A linked hub (a full credential, no window), a script (the limited one) and the host's own starts do not move it
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex', fromHub: { callerPreset: 'normal' } }, { client: 2, rights: 'full' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' }, { client: 3, rights: 'limited', label: 'script' })
+    await mgr.createSession({ projectId: p.id, cwd: p.path, tool: 'codex', permissionPreset: 'normal' })
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
   })
 })

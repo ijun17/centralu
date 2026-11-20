@@ -226,7 +226,9 @@ export class AgentStartFlow {
     const full = this.agentCeilingError(callerId, project.id)
     if (full) return done({ ok: false, error: full })
     // The model named, else the person's for the difficulty named (#729), else the project's remembered one (#107)
-    const { model, effort, difficulty } = agentChoice(opts, fromAssistant ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
+    const { model, effort, difficulty, fellBack } = agentChoice(
+      opts, fromAssistant ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool], adapter.descriptor.label,
+    )
     // A setting's choice is checked as a named one is: a model retired since it was picked is refused with the list.
     // The caller never named it, so the remedy it reads is to tell the person or name a model, not to leave it out
     const setting = difficulty ? `the person's choice for ${difficulty} work in Settings → Agents` : ''
@@ -239,7 +241,8 @@ export class AgentStartFlow {
       const theirs = difficulty && (checked.on === 'model' || !opts.effort)
       return done({ ok: false, error: checked.error + (theirs ? ` That is ${setting}: tell them, or name a model.` : '') })
     }
-    const unchecked = checked.unchecked
+    // Rides with the answer as the unchecked choice does: a model the person did not pick for this work is said (#2350)
+    const unchecked = [fellBack, checked.unchecked].filter(Boolean).join('; ') || undefined
     progress.unchecked = unchecked
     const found = await adapter.detect()
     if (!found.installed || !found.loggedIn) return done({ ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}. ${ASK_THE_PERSON}` })

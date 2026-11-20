@@ -30,7 +30,7 @@ async function sentFor(preset: PermissionPreset): Promise<{ preset?: string; cal
   }
   const reader = new Proxy(known, { get: (t, k) => (k in t ? t[k as keyof typeof t] : async () => ({ ok: true })) }) as unknown as LinkedSessions
   const agents = new RemoteAgents(
-    { children: new ChildOwnership(store), store, linkedReader: reader, meta: new Map([[caller.id, caller]]), emit: () => {}, uiPreferences: () => ({}) } as unknown as RemoteAgentsHost,
+    { children: new ChildOwnership(store), store, linkedReader: reader, meta: new Map([[caller.id, caller]]), emit: () => {}, uiPreferences: () => ({}), adapters: new Map() } as unknown as RemoteAgentsHost,
     { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) },
   )
   const makeChild = (agents as unknown as { makeChild: (...a: unknown[]) => Promise<unknown> }).makeChild.bind(agents)

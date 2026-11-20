@@ -251,14 +251,8 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     set((s) => ({
       sessions: { ...s.sessions, [info.id]: sessionFromInfo(info, s.sessions[info.id]) },
       /*
-       * **The chosen tool becomes this project's default.**
-       *
-       * `default_tool` used to be pinned to 'claude' when a project was created and never updated
-       * anywhere else — someone using codex had to re-press it forever, every time they created a new
-       * session. Why there is no separate setting for this: the fact that the last choice becomes the
-       * default **is already stated by the act of creating a session.** The host makes the same
-       * decision in the same place (`manager.createSession`) — what happens here is an optimistic
-       * update so it shows up right away in this run.
+       * The tool the person picks here becomes the project's default, as the host decides for a pick made in the
+       * window (session-start.ts `personsPick`, #2350); this optimistic update shows it at once.
        */
       projects:
         opts?.tool && s.projects[projectId]
