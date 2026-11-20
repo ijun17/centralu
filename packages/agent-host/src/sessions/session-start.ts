@@ -406,17 +406,9 @@ export class SessionStarts {
      */
     this.host.emit({ type: 'session_created', sessionId: id, session: info })
     /*
-     * **The tool the person picked most recently becomes this project's default.**
-     *
-     * default_tool was hardcoded to 'claude' at project creation and had no place that ever updated
-     * it — someone using codex had to click the picker again for every single new session, forever.
-     * Why this lives here instead of a settings screen: "what to use as the default" is **already
-     * told to us by the act of creating a session.**
-     *
-     * Only the person's own pick (`personsPick`, #2350). Any start defaults to not moving it: a session an agent starts
-     * (start_agent, ask_project, create_session, a fork, a handoff_session), an app's agent or builder, a script, or a
-     * linked hub. One agent's start_agent on Antigravity moved it, and every later start_agent there without a tool ran
-     * on Antigravity, nine review sessions on a small default model instead of the person's choice.
+     * The tool the person picked most recently becomes the project's default: creating a session is how they say it.
+     * Only the person's own pick moves it (`personsPick`); every other start leaves it, so an agent's choice of tool
+     * never becomes the person's default (#2350).
      */
     if (params.projectId && params.personsPick) {
       const owner = this.host.projectRow(params.projectId)

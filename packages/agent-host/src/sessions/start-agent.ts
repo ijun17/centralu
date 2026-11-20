@@ -99,7 +99,7 @@ export function projectInstructions(text: string): string[] {
  * A model empty in all three is the tool's own default.
  *
  * A difficulty named with no model chosen for it on this tool falls to 3, and `fellBack` says so in the caller's
- * answer (#2350): nine review sessions ran silently on a small default model when the tool had no setting for theirs.
+ * answer, so the caller sees a model the person did not pick for that work (#2350).
  */
 export function agentChoice(
   asked: { model?: string; effort?: string; difficulty?: AgentDifficulty },

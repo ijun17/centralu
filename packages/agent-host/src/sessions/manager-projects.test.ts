@@ -152,13 +152,8 @@ describe('projects', () => {
   }, 30_000 * SLOW)
 
   /*
-   * The last tool chosen becomes that project's default (2026-08-27 flow review).
-   *
-   * default_tool was hardcoded to 'claude' when a project was created, and there was **no place**
-   * that ever updated it afterward — a person using codex had to reselect it forever, on every new
-   * session. The fact that matters here is not the settings screen but the act of creating a
-   * session. Only the person's own pick in their window counts (#2350): a start an agent, a script or a linked hub
-   * makes never moves it.
+   * The tool the person last picked in their window becomes the project's default; a start an agent, a script or a
+   * linked hub makes never moves it (#2350).
    */
   it('a session the person creates in their window makes that tool the project default; no other start does', async () => {
     const p = await addProject()
