@@ -51,7 +51,7 @@ import { SessionSettings, type SessionSettingsHost } from './session-settings.js
 import { CacheLedger } from './cache-ledger.js'
 import { UsageRecorder } from './usage-recorder.js'
 import { usageHistory } from './usage-history.js'
-import { worktreeRootIn } from '../data-dir.js'
+import { worktreesFolder } from '../data-dir.js'
 import type {
   MachineInfo,
   NormalizedEvent,
@@ -250,8 +250,8 @@ export class SessionManager {
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
     private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
-    /** Root under which worktrees are created: the data folder's (`worktreeRootIn`) unless a caller names one */
-    private worktreeRoot = worktreeRootIn(),
+    /** Root under which worktrees are created: the data folder's (`worktreesFolder`) unless a test names one */
+    private worktreeRoot = worktreesFolder(),
     private keeperOpts: {
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote

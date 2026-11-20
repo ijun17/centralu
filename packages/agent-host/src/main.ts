@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
-import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor, worktreeRootIn } from './data-dir.js'
+import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
 import { recordViewHandover, restoreViewHandover } from './view-handover.js'
@@ -374,7 +374,7 @@ const mgr = new SessionManager(
     sleeperRef.current?.observe(e)
   },
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
-  worktreeRootIn(dirname(dbPath)),
+  undefined,
   {
     ...(updateResume ? { updateResume } : {}),
     // The last host recorded that the system was ending (#1397)
