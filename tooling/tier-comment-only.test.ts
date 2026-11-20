@@ -64,6 +64,12 @@ const NOT_COMMENT_ONLY: [string, string, string, string][] = [
   ['a.rs', 'let x = 1;', 'let x = 2;', 'a token'],
   ['a.rs', 'a/*c*/b', 'ab', 'two tokens made one'],
   ['a.rs', 'fn a() {} /* open', 'fn a() {} /* open more', 'a comment never closed'],
+  ['a.ts', '// eslint-disable-next-line no-x\nbad()\n', '// eslint-disable-next-line no-x\n\nbad()\n', 'a blank line between a directive and its line'],
+  ['a.ts', '// eslint-disable-next-line no-x\n// why\nbad()\n', '// eslint-disable-next-line no-x\nbad()\n', 'a comment taken from between a directive and its line'],
+  ['a.ts', 'f()\n/** doc */\n', 'f() // eslint-disable-line no-x\n/** doc */\n', 'a directive before a JSDoc that ends the file'],
+  ['a.js', 'f()\n/** @typedef {number} N */\n', 'f()\n/** @typedef {string} N */\n', 'a JSDoc type that ends a JavaScript file'],
+  ['a.ts', '#!/usr/bin/env node\nf()\n', '#!/usr/bin/env node\r\nf()\n', 'the #! line\'s ending'],
+  ['a.js', 'x = a < !--y\n', 'x = a <!--y\n', 'an HTML-like comment in a classic script'],
   ['a.json', '{}', '{ }', 'a kind it does not read'],
   ['a.md', '<!-- a -->', '<!-- b -->', 'a kind it does not read'],
 ]
@@ -127,7 +133,7 @@ describe('pnpm tier with a comment-only change in a deep file (#2352)', () => {
     expect(r.tier).toBe('light')
     expect(r.files.find((f: { path: string }) => f.path === EVENTS)).toMatchObject({ tier: COMMENT_ONLY_TIER, commentsOnly: 'deep' })
     expect(r.line).toContain(`\`${EVENTS}\` (only comments changed, else deep)`)
-    expect(r.text).toContain('only its comments and blank lines changed, so at most light (by its name: deep)')
+    expect(r.text).toContain('only its comments and whitespace changed, so at most light (by its name: deep)')
   })
 
   it('takes a deep Rust file whose comments alone changed as light, and a change of its code as deep', () => {
@@ -135,14 +141,28 @@ describe('pnpm tier with a comment-only change in a deep file (#2352)', () => {
     expect(change({ [PATH_SAFETY]: read(PATH_SAFETY).replace(/\bfn /, 'pub(crate) fn ') }).tier).toBe('deep')
   })
 
-  it('still makes a one-token change in events.ts deep, and a directive comment added to it', () => {
+  it('takes events.ts with an edited comment as light, but one token changed, a directive comment added or a new file as deep', () => {
     const text = read(EVENTS)
-    expect(change({ [EVENTS]: text.replace(/^export (type|const|interface) (\w)/m, 'export $1 X$2') }).tier).toBe('deep')
-    git('reset', '-q', '--hard', 'main')
-    expect(change({ [EVENTS]: text.replace(/^export /m, '// eslint-disable-next-line no-x\nexport ') }).tier).toBe('deep')
+    const onMain = (edits: Record<string, string>) => {
+      git('reset', '-q', '--hard', 'main')
+      return change(edits).tier
+    }
+    expect(onMain({ [EVENTS]: text.replace(/^export /m, '// A comment the fix adds.\nexport ') })).toBe('light')
+    expect(onMain({ [EVENTS]: text.replace(/^export (type|const|interface) (\w)/m, 'export $1 X$2') })).toBe('deep')
+    expect(onMain({ [EVENTS]: text.replace(/^export /m, '// eslint-disable-next-line no-x\nexport ') })).toBe('deep')
+    expect(onMain({ 'packages/protocol/src/new.ts': '// only a comment\n' })).toBe('deep')
   })
 
-  it('reads a new or deleted deep file by its name alone', () => {
-    expect(change({ 'packages/protocol/src/new.ts': '// only a comment\n' }).tier).toBe('deep')
+  it('does not take two bytes that are not UTF-8 for one text', () => {
+    writeFileSync(join(repo, EVENTS), Buffer.concat([Buffer.from('export const x = "'), Buffer.from([0xe9]), Buffer.from('" // a\n')]))
+    git('commit', '-q', '-am', 'latin-1')
+    git('branch', '-f', 'main', 'HEAD')
+    writeFileSync(join(repo, EVENTS), Buffer.concat([Buffer.from('export const x = "'), Buffer.from([0xe8]), Buffer.from('" // b\n')]))
+    git('commit', '-q', '-am', 'another byte')
+    expect(tierOfChange({ root: repo, base: 'main', head: 'top' }).tier).toBe('deep')
+    writeFileSync(join(repo, EVENTS), 'export const x = 1 // a\n')
+    git('commit', '-q', '-am', 'utf-8')
+    git('branch', '-f', 'main', 'HEAD')
+    expect(change({ [EVENTS]: 'export const x = 1 // b\n' }).tier).toBe('light')
   })
 })
