@@ -282,8 +282,8 @@ export const ExternalSession = z.object({
    * **The id of that session**, if it is already open.
    *
    * A label alone is not enough: a row that only says "already imported" while the click still
-   * goes through opens the same conversation twice in the list (measured). If this value is present, the UI takes the person to that session instead of
-   * creating a new one.
+   * goes through opens the same conversation twice in the list (measured). If this value is present, the UI takes
+   * the person to that session instead of creating a new one.
    */
   importedAs: z.string().nullable().default(null),
 })

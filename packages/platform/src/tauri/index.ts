@@ -70,7 +70,8 @@ export function onHostStatus(cb: (status: HostStatus) => void): () => void {
  *
  * **Order matters:** subscribe to the event first, then ask for the current state.
  * Doing it the other way around can miss the signal if readiness finishes in between, and
- * stall all the way to the timeout (measured: the host comes up in under a second). Polling is added on top as a third layer of defense.
+ * stall all the way to the timeout (observed: the host can come up in under a second).
+ * Polling is added on top as a third layer of defense.
  *
  * Polling also asks about **failure** (#184). The supervisor only leaves a failure message
  * when it gives up (a restart clears it), so if there is a message, that is the answer.

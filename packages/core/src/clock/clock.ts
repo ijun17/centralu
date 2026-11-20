@@ -1,8 +1,9 @@
 /**
  * How the app writes a moment: one fixed format, English, 24-hour, in the person's own time zone (#428).
  *
- * One format, so the same app never shows "15:12" on one screen and "3:12 PM" on the next. They are built by hand here, not through `Intl`, so what is written never depends on the machine's language or on how an
- * engine spells midnight.
+ * One format, so the same app never shows "15:12" on one screen and "3:12 PM" on the next. They are built by hand
+ * here, not through `Intl`, so what is written never depends on the machine's language or on how an engine spells
+ * midnight.
  */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const

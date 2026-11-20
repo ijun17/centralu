@@ -318,8 +318,8 @@ export class RpcClient {
    * the way to the 30-second timeout (a file link turns into a blank screen).
    *
    * The host sends only codes it knows about, but **an unreadable response can still arrive**,
-   * from a version-mismatched host, or an envelope a proxy touched. When it does, saying "could not read it" right away is always better than
-   * letting the screen hang.
+   * from a version-mismatched host, or an envelope a proxy touched. When it does, saying "could not read it" right
+   * away is always better than letting the screen hang.
    *
    * A successful response is not salvaged this way — passing a value that failed validation
    * through as if it were a real result would let that lie blow up somewhere else on screen in
