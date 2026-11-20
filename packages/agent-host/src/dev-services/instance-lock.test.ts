@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,6 +25,28 @@ afterEach(() => {
 })
 
 describe('single-instance lock for the host', () => {
+  /*
+   * #2334: what the host does to its store before it can answer is said in host.lock, which every starter reads. The Rust
+   * reader's test pins this record (`host_proc/store_work.rs` `SAID`) and the launcher's reads it (`storeWork`)
+   */
+  it('says the store work in host.lock beside who holds it, replaces the file whole, and takes it out again', () => {
+    const db = dbIn()
+    const r = acquireInstanceLock(db, () => null, { by: 'app' }, () => 1_800_000_000_000)
+    if (!r.ok) throw new Error('not taken')
+    const lock = join(db, '..', 'host.lock')
+    const work = { doing: 'copy' as const, step: 76, bytes: 19_352_965_120, since: 1_800_000_001_000 }
+    r.sayWork(work)
+    expect(readFileSync(lock, 'utf8')).toBe(
+      `{"pid":${process.pid},"started":null,"at":1800000000000,"by":"app","store":{"doing":"copy","step":76,"bytes":19352965120,"since":1800000001000}}`,
+    )
+    r.sayWork(null)
+    expect(JSON.parse(readFileSync(lock, 'utf8'))).toEqual({ pid: process.pid, started: null, at: 1_800_000_000_000, by: 'app' })
+    // Nothing is left beside it, and the release still knows the file for its own
+    expect(readdirSync(join(db, '..')).filter((n) => n.startsWith('host.lock'))).toEqual(['host.lock'])
+    r.release()
+    expect(existsSync(lock)).toBe(false)
+  })
+
   it('acquiring it for the first time succeeds and creates a lock file', () => {
     const db = dbIn()
     const r = acquireInstanceLock(db)

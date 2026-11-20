@@ -35,6 +35,15 @@ export {
 
 type HostInfo = { port: number; token: string }
 
+/**
+ * What the starting host does to its store before it can answer (#2334): copying it before a step that breaks older
+ * readers, or updating it. The shell reads it from host.lock (`host_store_work`); `since` is epoch milliseconds.
+ */
+export type StoreWork = { doing: 'copy' | 'update'; step: number; bytes: number; since: number }
+
+const isStoreWork = (w: unknown): w is StoreWork =>
+  isRecord(w) && (w.doing === 'copy' || w.doing === 'update') && typeof w.step === 'number' && typeof w.bytes === 'number' && typeof w.since === 'number'
+
 type HostStatus =
   | { state: 'starting' }
   | { state: 'ready'; port: number; token: string }
@@ -74,8 +83,13 @@ export function onHostStatus(cb: (status: HostStatus) => void): () => void {
  * when it gives up (a restart clears it), so if there is a message, that is the answer. It
  * used to be that missing the `failed` event — when a supervisor restarted by Retry gave up
  * again before the webview was listening — meant waiting out the full 30 seconds.
+ *
+ * **A host working on its store is not late** (#2334): a copy of a large store before an update, or a long store step,
+ * outlasts any fixed wait, and the host cannot answer meanwhile. While the shell reports such work the wait starts
+ * over, so `timeoutMs` counts only time the host spends on nothing it said; `onStoreWork` is told what it is (null
+ * once it is not said), for the screen.
  */
-async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
+async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | null) => void = () => {}): Promise<HostInfo> {
   return new Promise<HostInfo>((resolve, reject) => {
     let done = false
     const stop = () => {
@@ -96,11 +110,12 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
       reject(new Error(message))
     }
 
-    const timer = setTimeout(() => {
+    const expire = () => {
       void invoke<string | null>('host_error')
         .catch(() => null)
         .then((err) => fail(err ?? 'agent-host did not become ready in time'))
-    }, timeoutMs)
+    }
+    let timer = setTimeout(expire, timeoutMs)
 
     // (1) Subscribes first
     const unlisten = listenHostStatus((p) => {
@@ -115,6 +130,16 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
         .catch(() => {})
       void invoke<string | null>('host_error')
         .then((err) => err && fail(err))
+        .catch(() => {})
+      void invoke<unknown>('host_store_work')
+        .then((w) => {
+          if (done) return
+          const work = isStoreWork(w) ? w : null
+          onStoreWork(work)
+          if (!work) return
+          clearTimeout(timer)
+          timer = setTimeout(expire, timeoutMs)
+        })
         .catch(() => {})
     }
     check()
@@ -489,18 +514,19 @@ async function followEndpoint(): Promise<{
   }
 }
 
-export async function createTauriPlatform(): Promise<TauriPlatform> {
+/** `onStoreWork`: what the starting host does to its store while the platform waits for it (`waitForHost`) */
+export async function createTauriPlatform({ onStoreWork }: { onStoreWork?: (work: StoreWork | null) => void } = {}): Promise<TauriPlatform> {
   const endpoint = await followEndpoint()
   try {
-    return await createOnHost(endpoint.onEndpointChange)
+    return await createOnHost(endpoint.onEndpointChange, onStoreWork)
   } catch (e) {
     endpoint.stop()
     throw e
   }
 }
 
-async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
-  const { port, token } = await waitForHost()
+async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void, onStoreWork?: (work: StoreWork | null) => void): Promise<TauriPlatform> {
+  const { port, token } = await waitForHost(undefined, onStoreWork)
 
   // Ask the shell how much of our top bar the OS has already claimed. Only Rust knows
   // (it is a build-time `cfg!`), and this is the one place allowed to know it — the

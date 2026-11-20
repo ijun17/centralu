@@ -79,6 +79,9 @@ import {
   markStarting,
   readStarting,
   startingNow,
+  storeWork,
+  storeWorkText,
+  describe as describeServe,
   markStopped,
   readStopped,
   rotateServeLog,
@@ -2303,6 +2306,132 @@ describe('a --stop during a start (#2150)', () => {
     expect(await stopNow(d)).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
   })
 })
+
+describe('a host that works on its store before it answers (#2334)', () => {
+  const sleepers: ChildProcess[] = []
+  const sleeper = () => {
+    const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    sleepers.push(c)
+    return c.pid!
+  }
+  afterEach(() => {
+    for (const c of sleepers.splice(0)) c.kill()
+  })
+  const work = { doing: 'copy', step: 76, bytes: 19_352_965_120, since: 1_800_000_000_000 }
+  /** host.lock as a host started by `serve` writes it, naming `pid`, with `store` while it works on its store */
+  const holdWith = (d: string, pid: number, store: typeof work | null) =>
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at: Date.now(), by: 'serve', ...(store ? { store } : {}) }))
+  /** `isWriter` as it answers for a record this test wrote: the process it names is the writer while it lives */
+  const writer = (h: unknown) => isAlive((h as { pid: number }).pid)
+
+  it('is read from host.lock while the process it names lives, and not after, nor in a shape it does not know', () => {
+    const d = tempDir()
+    const pid = sleeper()
+    holdWith(d, pid, work)
+    expect(storeWork(d, new Map(), writer)).toEqual(work)
+    expect(storeWorkText(work)).toBe('copying its data before step 76')
+    holdWith(d, pid, { ...work, doing: 'index' })
+    expect(storeWork(d, new Map(), writer)).toBeNull()
+    holdWith(d, pid, null)
+    expect(storeWork(d, new Map(), writer)).toBeNull()
+    holdWith(d, pid, work)
+    expect(storeWork(d, new Map(), () => false)).toBeNull()
+  })
+
+  it('--detach waits for it, starts no second host beside it, and says `starting` with what it does once its cap is reached', async () => {
+    const d = tempDir()
+    holdWith(d, sleeper(), work)
+    const started: unknown[] = []
+    const lines: string[] = []
+    const code = await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async (o: unknown) => (started.push(o), { ok: true, pid: process.pid, exited: new Promise(() => {}) }),
+      timeoutMs: 200,
+      workCapMs: 1_000,
+      look: async () => ({ hostRunning: false }),
+      write: (l: string) => void lines.push(l),
+    })
+    expect(code).toBe(1)
+    // Before: a 200 ms wait, then a second launcher started on a folder the first host holds
+    expect(started).toEqual([])
+    expect(JSON.parse(lines.join(''))).toMatchObject({ v: 1, detach: { ok: false, reason: 'starting', doing: 'copy', step: 76, since: work.since } })
+  })
+
+  it('--detach answers as soon as the host answers once its work is done', async () => {
+    const d = tempDir()
+    const pid = sleeper()
+    holdWith(d, pid, work)
+    let asked = 0
+    const lines: string[] = []
+    const code = await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async () => ({ ok: false, blocked: false, message: 'no second start' }),
+      timeoutMs: 2_000,
+      // The host works for about 3 s (looks are 250 ms apart), past the 2 s wait, then is done and answers two looks later
+      look: async () => {
+        asked += 1
+        if (asked === 12) holdWith(d, pid, null)
+        return asked >= 14 ? { hostRunning: true, port: 1, protocolVersion: 1, version: '1.0.0', dataDir: d } : { hostRunning: false }
+      },
+      write: (l: string) => void lines.push(l),
+    })
+    expect(code).toBe(0)
+    expect(JSON.parse(lines.join(''))).toMatchObject({ hostRunning: true, detach: { ok: true, already: true } })
+  })
+
+  it('the connection line says it while no host answers', async () => {
+    const d = tempDir()
+    const state = ensureServeState(d)
+    holdWith(d, process.pid, work)
+    const line = await describeServe({ env: { CC_DATA_DIR: d }, dataDir: d, state, entry: SOURCE_HOST, version: '1.0.0' })
+    expect(line).toMatchObject({ hostRunning: false, starting: { doing: 'copy', step: 76, since: work.since } })
+    expect(JSON.parse(connectionLine(line))).toMatchObject({ starting: { doing: 'copy', step: 76, since: work.since } })
+  })
+
+  it('a hub’s stop waits for it past the grace a start that hung gets, and stops it once it listens; a person’s stop ends it and says so', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    markStarting(d)
+    const pid = sleeper()
+    holdWith(d, pid, work)
+    const stop = async (env: Record<string, string>) => {
+      const lines: string[] = []
+      await runStop({ env: { CC_DATA_DIR: d, ...env }, home: d, entry: SOURCE_HOST, writer, write: (l: string) => void lines.push(l) })
+      return JSON.parse(lines.join('')) as { stop: Record<string, unknown> }
+    }
+    let ended = false
+    const hubStop = stop({ CENTRALU_STOP_BY: 'hub', CENTRALU_STOP_FOR: 'update' }).then((r) => ((ended = true), r))
+    // Before: past LOCK_GRACE_MS the start counted as one that hung, and the host was ended in its copy
+    await new Promise((r) => setTimeout(r, LOCK_GRACE_MS + 3_000))
+    expect(ended).toBe(false)
+    expect(isAlive(pid)).toBe(true)
+    // Its work done, it is stopped as any host that does not answer is (this stand-in never listens)
+    clearStarting(d)
+    holdWith(d, pid, null)
+    expect((await hubStop).stop).toMatchObject({ ok: true, wasRunning: true })
+
+    const other = tempDir()
+    ensureServeState(other)
+    const second = sleeper()
+    holdWith(other, second, { ...work, doing: 'update' })
+    const lines: string[] = []
+    await runStop({ env: { CC_DATA_DIR: other }, home: other, entry: SOURCE_HOST, writer, write: (l: string) => void lines.push(l) })
+    expect(JSON.parse(lines.join('')).stop).toMatchObject({ ok: true, message: expect.stringContaining('it was updating its data (step 76), which its next start does again') })
+  }, 120_000 * SLOW)
+})
+
 
 describe('centralu serve --detach and --stop, end to end (the host as it ships, a temporary data folder)', () => {
   /*

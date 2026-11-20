@@ -16,11 +16,41 @@ pub fn stop_earlier_keeper(_dev: bool) -> Option<String> {
 /// (`start_plan::Host::Serve`) rather than starting one the lock would refuse. The folder is the host's own default:
 /// `CC_DATA_DIR`, or `.centralu` in the user's profile.
 pub fn serve_launcher() -> Option<PathBuf> {
-    let data = match std::env::var("CC_DATA_DIR") {
-        Ok(d) if !d.trim().is_empty() => PathBuf::from(d),
-        _ => PathBuf::from(std::env::var_os("USERPROFILE")?).join(".centralu"),
-    };
+    let data = crate::data_folder::data_dir_with(false);
     [data.join("remote").join("bin").join("centralu.cmd"), data.join("bin").join("centralu.cmd")].into_iter().find(|p| p.is_file())
+}
+
+/// The folder the host takes for the person's home (Node's `os.homedir()`): the user's profile.
+pub fn home() -> Option<std::ffi::OsString> {
+    std::env::var_os("USERPROFILE").filter(|h| !h.is_empty())
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+    fn GetExitCodeProcess(process: *mut std::ffi::c_void, code: *mut u32) -> i32;
+    fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+}
+
+/// Whether a process with this pid is running. One this account may not open (another user's) exists, so it counts.
+pub fn pid_alive(pid: u32) -> bool {
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: plain Win32 calls; the handle is closed before it goes out of scope.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED);
+        }
+        let mut code = 0u32;
+        let read = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        read != 0 && code == STILL_ACTIVE
+    }
 }
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.

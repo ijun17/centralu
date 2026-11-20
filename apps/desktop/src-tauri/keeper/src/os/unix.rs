@@ -199,6 +199,11 @@ pub fn hide_console(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// The folder the host takes for the person's home (Node's `os.homedir()`): `HOME`.
+pub fn home() -> Option<std::ffi::OsString> {
+    std::env::var_os("HOME")
+}
+
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
 /// *runs*. Not whether its number is taken, which a zombie still does.
 ///

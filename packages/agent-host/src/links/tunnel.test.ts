@@ -16,6 +16,7 @@ import {
   detachCommand,
   lastLine,
   parseConnectionLine,
+  parseDetachLine,
   hubNameForRemote,
   powershell,
   serveCommand,
@@ -771,6 +772,17 @@ describe('the remote command per shell (#82)', () => {
     expect(parseConnectionLine(JSON.stringify({ ...base, stopped: { by: '`rm -rf`', at: 'soon' } })).stopped).toEqual({ by: 'stop', at: null })
     expect(parseConnectionLine(JSON.stringify(base))).not.toHaveProperty('stopped')
     expect(parseConnectionLine(JSON.stringify({ ...base, stopped: true }))).not.toHaveProperty('stopped')
+  })
+
+  // #2334: the host there works on its store before it answers; an older serve says nothing of it
+  it('reads the store work of a host that has not answered yet from the line and from --detach, and nothing that is not one', () => {
+    const base = { v: 1, port: 17175, token: 't', protocolVersion: 1, hostRunning: false }
+    const work = { doing: 'copy', step: 76, since: 5 }
+    expect(parseConnectionLine(JSON.stringify({ ...base, starting: work })).starting).toEqual(work)
+    expect(parseConnectionLine(JSON.stringify({ ...base, starting: { ...work, doing: 'index' } }))).not.toHaveProperty('starting')
+    expect(parseConnectionLine(JSON.stringify(base))).not.toHaveProperty('starting')
+    expect(parseDetachLine(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'starting', message: 'm', ...work } }))).toEqual({ ok: false, reason: 'starting', message: 'm', work })
+    expect(parseDetachLine(JSON.stringify({ v: 1, detach: { ok: false, reason: 'timeout', message: 'm', ...work } }))).not.toHaveProperty('work')
   })
 
   it('says it is the hub’s own stop to serve --stop in every shell, so serve leaves no mark of the person’s stop', () => {

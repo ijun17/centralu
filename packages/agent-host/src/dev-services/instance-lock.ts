@@ -1,11 +1,12 @@
 import { errorMessage } from '@cc/protocol'
 import { isObj, tryParseJson } from '../json-value.js'
 import { errnoCode } from '../os/errors.js'
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { hasPs } from '../os.js'
 import { realOs } from '../os/real.js'
+import type { SayStoreWork } from './store/store-work.js'
 
 /**
  * Only one host per data folder.
@@ -37,7 +38,15 @@ import { realOs } from '../os/real.js'
  * are not reliable.
  */
 
-export type LockResult = { ok: true; release: () => void } | { ok: false; heldByPid: number | null; holder: Holder | null; lockPath: string }
+/**
+ * `sayWork` puts what the host does to its store into `host.lock` (`store`, store/store-work.ts), or takes it out with
+ * null. The file is replaced whole by a rename, so a reader never sees half of it: readers take a file they cannot
+ * parse for no holder. A rename that is refused (Windows, while a scanner holds the file) leaves the file as it was,
+ * and the starters then wait as they did before the work was said.
+ */
+export type LockResult =
+  | { ok: true; release: () => void; sayWork: SayStoreWork }
+  | { ok: false; heldByPid: number | null; holder: Holder | null; lockPath: string }
 
 /** The file whose exclusive lock is the ownership */
 export const OWNERSHIP_FILE = 'host-ownership.sqlite'
@@ -109,7 +118,7 @@ export function acquireInstanceLock(
   now: () => number = Date.now,
 ): LockResult {
   // an in-memory database is never shared
-  if (dbPath === ':memory:') return { ok: true, release: () => {} }
+  if (dbPath === ':memory:') return { ok: true, release: () => {}, sayWork: () => {} }
 
   const lockPath = join(dirname(dbPath), 'host.lock')
   const readHolder = (): Holder | null => {
@@ -136,6 +145,16 @@ export function acquireInstanceLock(
   let released = false
   return {
     ok: true,
+    sayWork: (work) => {
+      const next = `${lockPath}.${process.pid}.next`
+      try {
+        writeFileSync(next, JSON.stringify(work ? { ...own, store: work } : own))
+        renameSync(next, lockPath)
+      } catch (err) {
+        rmSync(next, { force: true })
+        console.error(`[agent-host] host.lock could not ${work ? 'say what the host does to its store' : 'be put back'}: ${errorMessage(err)}`)
+      }
+    },
     release: () => {
       if (released) return
       released = true

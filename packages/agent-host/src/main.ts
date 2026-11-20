@@ -324,7 +324,8 @@ const signals = holdSignals(process, (line) => console.error(line))
 start.at('store')
 let store: Store
 try {
-  store = new Store(dbPath)
+  // What the store's opening does is said in host.lock, for whoever waits on this start (store/store-work.ts)
+  store = new Store(dbPath, undefined, ownership.sayWork)
 } catch (err) {
   if (!(err instanceof StoreTooNewError)) throw err
   refuse(err.message)

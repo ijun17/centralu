@@ -82,6 +82,53 @@ describe('waiting for the host', () => {
   })
 })
 
+describe('a host that works on its store before it answers (#2334)', () => {
+  it('is waited for past the 30 seconds while the shell reports the work, which the screen is told, and then the wait is the usual one', async () => {
+    vi.useFakeTimers()
+    try {
+      const work = { doing: 'copy', step: 76, bytes: 19_352_965_120, since: 1_800_000_000_000 }
+      let working = true
+      let ready = false
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'host_info') return ready ? { port: 1, token: 't' } : null
+        if (cmd === 'host_store_work') return working ? work : null
+        return null
+      })
+      const told: unknown[] = []
+      let settled = false
+      const platform = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).finally(() => (settled = true))
+      // Before: rejected at 30 s with "agent-host did not become ready in time", the copy still running
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(settled).toBe(false)
+      expect(told.at(-1)).toEqual(work)
+
+      working = false
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(told.at(-1)).toBeNull()
+      ready = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(settled).toBe(true)
+      vi.useRealTimers()
+      const p = await platform
+      await p.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a report that is not one is no work: the usual wait ends the start', async () => {
+    vi.useFakeTimers()
+    try {
+      invoke.mockImplementation(async (cmd: string) => (cmd === 'host_store_work' ? { doing: 'copy', step: '76' } : null))
+      const failed = createTauriPlatform().catch((e: Error) => e.message)
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(await failed).toBe('agent-host did not become ready in time')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('background mode (#280)', () => {
   const shell = (mode: 'keeper' | 'direct') =>
     invoke.mockImplementation(async (cmd: string, args?: { on?: boolean }) => {

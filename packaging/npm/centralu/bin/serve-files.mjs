@@ -710,18 +710,51 @@ export function isWriterWithin(holder, maxAgeMs, writer = isWriter) {
 const CLOCK_TICK_MS = 16
 
 /**
- * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
- * (`instance-lock.ts`), absent when the host did not say
+ * host.lock's `{ pid, started, by?, store? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
+ * (`instance-lock.ts`), absent when the host did not say. `store` (#2334, additive) is what the host does to its store
+ * before it can answer (agent-host `store/store-work.ts`); one that does not read whole is left out
  */
 function parseLockHolder(text) {
   try {
     const v = JSON.parse(text)
     if (!Number.isInteger(v?.pid) || v.pid <= 0) return null
     const by = v.by === 'app' || v.by === 'keeper' || v.by === 'serve' ? v.by : null
-    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(Number.isFinite(v.at) ? { at: v.at } : {}), ...(by ? { by } : {}) }
+    const store = parseStoreWork(v.store)
+    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(Number.isFinite(v.at) ? { at: v.at } : {}), ...(by ? { by } : {}), ...(store ? { store } : {}) }
   } catch {
     return null
   }
+}
+
+/** `{ doing, step, bytes, since }` from host.lock's `store`, or null */
+function parseStoreWork(w) {
+  if (w?.doing !== 'copy' && w?.doing !== 'update') return null
+  if (!Number.isInteger(w.step) || !Number.isFinite(w.bytes) || !Number.isFinite(w.since)) return null
+  return { doing: w.doing, step: w.step, bytes: w.bytes, since: w.since }
+}
+
+/**
+ * What the host that holds the folder does to its store before it can answer (#2334), `{ doing, step, bytes, since }`,
+ * or null. The one reader of it here: `--detach`, `--connection`, the update switch and `--stop` wait while it is said,
+ * instead of taking a host that does not answer yet for a start that hung.
+ *
+ * Believed only while the process host.lock names is the one that wrote it (`isWriter`): a host that was ended in its
+ * work leaves the record, and a stranger given its pid later is not it. No time limit: a copy or a step is SQLite work
+ * under the folder's lock, which ends or fails, and the person sees how long it has run. A writer Windows cannot tell
+ * (another logon's process) counts while it lives. `known` keeps the answer per lock between calls, as `liveStarts` does,
+ * since a Windows creation time costs a PowerShell.
+ */
+export function storeWork(dataDir, known = new Map(), writer = isWriter) {
+  const h = lockHolder(dataDir)
+  if (!h?.store) return null
+  const key = `${h.pid}:${h.started}:${h.at}`
+  if (!known.has(key)) known.set(key, writer(h) !== false)
+  return known.get(key) && isAlive(h.pid) ? h.store : null
+}
+
+/** What `storeWork` says, as `--detach`, `--stop` and the switch word it: "copying its data before step 76" */
+export function storeWorkText(work) {
+  return work.doing === 'copy' ? `copying its data before step ${work.step}` : `updating its data (step ${work.step})`
 }
 
 /**

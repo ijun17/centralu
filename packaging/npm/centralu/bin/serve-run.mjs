@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, markStarting, clearStarting, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, markStarting, clearStarting, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, storeWork, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
@@ -41,6 +41,8 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
   const hostRunning = heldHere(probe, dataDir, undefined, state.port != null)
   // The person stopped it here (#1143): said while no host runs, so a hub starts none by itself
   const stopped = hostRunning ? null : readStopped(dataDir)
+  // A host that holds the folder and works on its store (#2334): a hub waits for it rather than start another
+  const work = hostRunning ? null : storeWork(dataDir)
   return {
     port,
     ...(paired ? { token: paired.token, credential: paired.id } : {}),
@@ -62,6 +64,7 @@ export async function describe({ env, dataDir, state, entry, version, paired = n
     install: installInfo(dataDir, env),
     autostart: autostartInfo(dataDir, process.platform, env),
     ...(stopped ? { stopped } : {}),
+    ...(work ? { starting: { doing: work.doing, step: work.step, since: work.since } } : {}),
   }
 }
 

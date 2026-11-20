@@ -4,6 +4,7 @@ import { parseJson, readJsonList } from './json.js'
 import { type MigrationStep } from './migrations/context.js'
 import { ReaderGate } from './reader-gate.js'
 import { type CopySkipped, StoreCopies } from './store-copy.js'
+import type { SayStoreWork, StoreWork } from './store-work.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
 
@@ -39,6 +40,9 @@ export abstract class MigrationRunner extends ReaderGate {
 
   /** A step that breaks older readers ran at this open without a copy of the store before it (#2304), and why; null otherwise */
   copySkipped: CopySkipped | null = null
+
+  /** Where the open says what it does to the store while the host cannot answer (store/store-work.ts) */
+  protected abstract readonly sayWork: SayStoreWork
 
   /**
    * The migration runner (E-0).
@@ -98,22 +102,36 @@ export abstract class MigrationRunner extends ReaderGate {
      */
     const copies = current > 0 && this.dbPath !== ':memory:' ? new StoreCopies(this.os, this.db, this.dbPath) : null
     copies?.sweep()
+    /*
+     * What this open does is said before each piece of it (#2334): a copy and a step of a store that holds a person's
+     * data can outlast every starter's wait. A new store is not: its steps run on empty tables.
+     */
+    const work = copies ? new WorkSaid(this.sayWork, this.os, this.dbPath) : null
     let copied = false
-    for (const step of steps) {
-      const due = current < step.to || deferred.has(step.to)
-      if (!due) continue
-      if (copies && step.breaksOlderReaders && !copied) {
-        this.copySkipped = copies.copyBefore(step.to)
-        copied = true
+    try {
+      for (const step of steps) {
+        const due = current < step.to || deferred.has(step.to)
+        if (!due) continue
+        if (copies && step.breaksOlderReaders && !copied) {
+          work?.say('copy', step.to)
+          this.copySkipped = copies.copyBefore(step.to)
+          copied = true
+        }
+        work?.say('update', step.to)
+        floor = this.runStep(step, floor, () => {
+          if (step.to > this.schemaVersion) this.db.pragma(`user_version = ${step.to}`)
+          // A step an earlier swap left for later is crossed off in its own commit
+          if (deferred.delete(step.to)) this.writeDeferred([...deferred])
+        })
       }
-      floor = this.runStep(step, floor, () => {
-        if (step.to > this.schemaVersion) this.db.pragma(`user_version = ${step.to}`)
-        // A step an earlier swap left for later is crossed off in its own commit
-        if (deferred.delete(step.to)) this.writeDeferred([...deferred])
-      })
+      // A vacuum a stopped host left owed (#396) runs now
+      if (this.vacuumOwed) {
+        work?.say('update', this.schemaVersion)
+        this.runOwedVacuum('a host stopped during it left it owed')
+      }
+    } finally {
+      work?.done()
     }
-    // A vacuum a stopped host left owed (#396) runs now
-    if (this.vacuumOwed) this.runOwedVacuum('a host stopped during it left it owed')
     /*
      * If migrations ran, **say so** (a lesson from a dogfooding incident: beta.4 silently
      * reworked a 151k-message database for over ten seconds, and with neither the UI nor the
@@ -224,6 +242,38 @@ export abstract class MigrationRunner extends ReaderGate {
 
   private writeDeferred(steps: number[]): void {
     writeStoreKey(this.db, DEFERRED_KEY, steps.length === 0 ? null : JSON.stringify([...steps].sort((a, b) => a - b)))
+  }
+}
+
+/** The store work an open says (store/store-work.ts): the copy, then the update, which keeps the time it began across its steps */
+class WorkSaid {
+  private now: StoreWork | null = null
+
+  constructor(
+    private readonly tell: SayStoreWork,
+    private readonly os: Os,
+    private readonly dbPath: string,
+  ) {}
+
+  say(doing: StoreWork['doing'], step: number): void {
+    const since = this.now?.doing === doing ? this.now.since : this.os.clock.now()
+    this.now = { doing, step, bytes: this.bytes(), since }
+    this.tell(this.now)
+  }
+
+  /** Said only when something was: a store that ran nothing leaves the lock as the host wrote it */
+  done(): void {
+    if (this.now) this.tell(null)
+    this.now = null
+  }
+
+  private bytes(): number {
+    const size = (path: string) => this.os.files.statSync(path, { throwIfNoEntry: false })?.size ?? 0
+    try {
+      return size(this.dbPath) + size(`${this.dbPath}-wal`)
+    } catch {
+      return 0
+    }
   }
 }
 

@@ -7,13 +7,14 @@ import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriterWithin, isWriter, readServePid, STARTING_MAX_MS } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriterWithin, isWriter, readServePid, STARTING_MAX_MS, storeWork, storeWorkText } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslCommandLine } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
 import { stopServedHost } from './serve-handover.mjs'
 import { connectionLine, serveFrom } from './serve-host.mjs'
 import { describe, runServe, serveFolder } from './serve-run.mjs'
+import { clockOf } from './serve-switch.mjs'
 
 /**
  * What a detached launcher needs from the `--detach` that started it. A process created through WMI
@@ -103,7 +104,13 @@ export async function startDetached({ how, execPath, args, env, cwd }) {
  * end of serve.log. Exit codes do not survive Windows' ssh (agent-host/remote/hub-links.md), so the line is
  * what counts; the exit code is 0 or 1 for a person at a prompt.
  *
- * `start` and the two waits are parameters so tests can stand in for WMI.
+ * A host that says it works on its store (`storeWork`, #2334) is not counted against the waits: each runs from when it
+ * stops saying so. Past `workCapMs` from the start, with the work still said, the answer is `reason: 'starting'` with
+ * `doing`, `step` and `since`: the host is fine and answers when its work is done, so the hub asks again later
+ * rather than count a start that failed. The cap keeps the answer inside the hub's ssh deadline
+ * (`SSH_DETACH_TIMEOUT_MS`, 120 s); the window's `--window` waits with none.
+ *
+ * `start` and the waits are parameters so tests can stand in for WMI.
  */
 export async function runDetach({
   env,
@@ -122,13 +129,29 @@ export async function runDetach({
   signInMs = 20_000,
   timeoutMs = 30_000,
   noStartMs = 10_000,
+  workCapMs = DETACH_WORK_CAP_MS,
   write = (line) => process.stdout.write(line),
   // What the folder's host answers (a test's stand-in for the host coming up at a given moment)
   look = describe,
 }) {
   // Created here, so the token exists before the launcher reads it and `answered` reads it again
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
-  const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
+  const fail = (reason, message, extra = {}) => answerLine(write, 'detach', { ok: false, how, reason, message, ...extra })
+  const began = Date.now()
+  const known = new Map()
+  let saidWork = null
+  /**
+   * The store work the folder's host says, said once on stderr for each kind; `{ over }` once it has run past the cap,
+   * with the answer that says so
+   */
+  const working = () => {
+    const w = storeWork(dataDir, known)
+    if (!w) return null
+    if (saidWork !== w.doing) say(`its host is ${storeWorkText(w)}; waiting for it`)
+    saidWork = w.doing
+    if (Date.now() - began < workCapMs) return { over: null }
+    return { over: () => fail('starting', `the host is ${storeWorkText(w)}, since ${clockOf(w.since)}; it answers when that is done`, { doing: w.doing, step: w.step, since: w.since }) }
+  }
   const answered = async (already, as = how) => {
     const d = await look({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
     if (!d?.hostRunning) return false
@@ -136,6 +159,18 @@ export async function runDetach({
     return true
   }
   if (await answered(true)) return 0
+  // A host that holds the folder and works on its store is this start already: waited for, never a second one beside it
+  if (working()) {
+    let until = Date.now() + timeoutMs
+    while (Date.now() < until || storeWork(dataDir, known)) {
+      if (await answered(true)) return 0
+      const w = working()
+      if (w?.over) return w.over()
+      if (w) until = Date.now() + timeoutMs
+      await sleep(250)
+    }
+    return fail('timeout', `the host that holds ${dataDir} did not answer within ${Math.round(timeoutMs / 1000)} s of the end of its work on its data`)
+  }
   /*
    * From here a start is in progress (#2150): a `--stop` meanwhile waits for it rather than find nothing running, write
    * the stopped mark and leave the host to come up after it. This process's record is removed on every way out; the
@@ -169,9 +204,12 @@ export async function runDetach({
         } catch {
           // the line on stderr is all there is
         }
-        const t0 = Date.now()
-        while (Date.now() - t0 < signInMs) {
+        let until = Date.now() + signInMs
+        while (Date.now() < until || storeWork(dataDir, known)) {
           if (await answered(false, 'task')) return 0
+          const w = working()
+          if (w?.over) return w.over()
+          if (w) until = Date.now() + signInMs
           await sleep(250)
         }
         notInSignIn = `the host the sign-in task "${s.name}" started did not answer within ${Math.round(signInMs / 1000)} s`
@@ -201,8 +239,12 @@ export async function runDetach({
     let exited
     started.exited?.then((c) => (exited = c ?? 'unknown'))
     const t0 = Date.now()
-    while (Date.now() - t0 < timeoutMs) {
+    let until = t0 + timeoutMs
+    while (Date.now() < until || storeWork(dataDir, known)) {
       if (await answered(false)) return 0
+      const w = working()
+      if (w?.over) return w.over()
+      if (w) until = Date.now() + timeoutMs
       const why = tail(log)
       if (exited !== undefined) return fail('exited', `centralu serve exited (${exited}) before its host answered${why ? `:\n${why}` : ''}`)
       const gone = started.alive?.() === false
@@ -220,6 +262,12 @@ export async function runDetach({
     clearStarting(dataDir)
   }
 }
+
+/**
+ * How long `--detach` waits for a host that says it works on its store before it answers `starting` (`runDetach`): inside
+ * the hub's ssh deadline for the whole command (`SSH_DETACH_TIMEOUT_MS`, 120 s), with room for ssh's connect and a cold start
+ */
+export const DETACH_WORK_CAP_MS = 90_000
 
 /** Why the host was not started in the Windows sign-in, from `startInSignIn`'s answer, for serve.log and stderr */
 export function signInMissed(s) {
@@ -304,9 +352,12 @@ export async function runStop({
    * host that has held host.lock for `LOCK_GRACE_MS` with its start still named is stopped as any running host is,
    * answering or not (one that hung before it listened, #1903, is ended by `stopServedHost`). The wait leaves the stop its share of the budget; when that is reached, a start
    * whose launcher is known (serve.pid) is ended, the launcher and the host it started, and any other is said to be
-   * still starting, with nothing stopped
+   * still starting, with nothing stopped. A hub's stop never ends a start whose host works on its store (`storeWork`,
+   * #2334): it waits for it, as `stopServedHost` does with `waitOnWork`
    */
   const known = new Map()
+  const automatic = env.CENTRALU_STOP_BY === 'hub'
+  const workKnown = new Map()
   // Since when a live host holds host.lock while a start is still named: a host that is up ends its start within a moment
   let heldSince = null
   const tookTheFolder = () => {
@@ -322,7 +373,7 @@ export async function runStop({
   for (let starts = liveStarts(dataDir, known, { writer }); starts.length > 0 && !tookTheFolder(); starts = liveStarts(dataDir, known, { writer })) {
     if (!waiting) say(`centralu serve is starting a host for ${dataDir}; waiting for it, to stop it`)
     waiting = true
-    if (Date.now() < deadline - STOP_RESERVE_MS) {
+    if (Date.now() < deadline - STOP_RESERVE_MS || (automatic && storeWork(dataDir, workKnown, writer))) {
       await sleep(100)
       continue
     }
@@ -353,10 +404,13 @@ export async function runStop({
       ? { ok: true, wasRunning: true, how: 'ended', message: `ended a start that was still in progress (pid ${ending.join(', ')})` }
       : { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir}, and pid ${ending.join(', ')} did not end` })
   }
-  // What is left of the budget: the host is waited for, after its request to stop, for all of it but the grace and the ends that follow
+  /*
+   * What is left of the budget: the host is waited for, after its request to stop, for all of it but the grace and the ends
+   * that follow. A hub's stop has no budget (it waits on a host's work on its store): its host gets a whole shutdown
+   */
   const left = deadline - Date.now()
-  const timeoutMs = Math.max(3_000, left - graceMs - 10_000)
-  const stopped = await stopServedHost({ dataDir, entry, platform, forUpdate: env.CENTRALU_STOP_FOR === 'update', timeoutMs, graceMs, kill })
+  const timeoutMs = automatic ? 30_000 : Math.max(3_000, left - graceMs - 10_000)
+  const stopped = await stopServedHost({ dataDir, entry, platform, forUpdate: env.CENTRALU_STOP_FOR === 'update', waitOnWork: automatic, timeoutMs, graceMs, kill })
   if (stopped.ok) mark()
   return answerLine(write, 'stop', stopped)
 }

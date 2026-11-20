@@ -264,7 +264,7 @@ export function switchResult(s: SwitchState, machine: string, stoppedTurns: stri
 }
 
 /** The time a switch started, as the person reads it: HH:MM, as the machine says it too (serve-switch.mjs `clockOf`) */
-const clock = (at: number | null | undefined) => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
+export const clock = (at: number | null | undefined): string => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
 
 /**
  * Hands a switch to the machine and follows it to its outcome (plan §10.5a steps 3 to 5): the turns there are waited

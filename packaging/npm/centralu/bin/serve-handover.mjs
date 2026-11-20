@@ -3,7 +3,7 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, lockHolderPid, readServePid } from './serve-files.mjs'
+import { readServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, lockHolderPid, readServePid, storeWork, storeWorkText } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, listensHere } from './serve-port.mjs'
 import { protocolVersionOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
@@ -30,8 +30,13 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * when nothing runs there, and `{ ok: false, busy: true }` says it did not. `forUpdate` (#1618): a hub's update stops it, and
  * the host writes the turns it ends for the next one (`host.stop { forUpdate }`); a host that does not take the request is
  * ended as any is, and lists nothing.
+ *
+ * A host that works on its store before it can answer (`storeWork`, #2334) is no start that hung. With `waitOnWork` (a
+ * stop nobody asked for by hand: a hub's, the update switch's) it is waited for, however long, and stopped once it
+ * listens: ended in its work, it would do all of it again at its next start, and an update that stops it each time
+ * would never land. A person's stop ends it as before, and says that its next start does that work again.
  */
-export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
+export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, waitOnWork = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
   const state = readServeState(dataDir)
   if (!state) return { ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` }
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -39,6 +44,14 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   // The limited credential is enough to probe and to stop it (#1405, `host.stop` is everyday)
   const own = { token: state.token, proofKey: state.proofKey }
   const probe = () => probeHost({ port, ...own, protocolVersion: installed })
+  const work = storeWork(dataDir)
+  if (work && waitOnWork) {
+    say(`the host is ${storeWorkText(work)}; waiting for it to finish before it is stopped`)
+    const known = new Map()
+    while (storeWork(dataDir, known)) await sleep(500)
+    // It listens within moments of its work: one that does not is taken for a start that hung, below
+    await waitUntil(async () => (await probe()).running || !lockHolderIsAlive(dataDir), WORK_TO_LISTEN_MS)
+  }
   const first = await probe()
   const silent = !first.running && !first.unproven && (await heldSilently(dataDir, port))
   if (!silent && !heldHere(first, dataDir, undefined, state.port != null)) {
@@ -92,6 +105,7 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
       }
     }
     if (how === 'ended') note = `${note ? `${note}; ` : ''}ended the host without its shutdown`
+    if (work && !waitOnWork && how !== 'asked') note = `${note ? `${note}; ` : ''}it was ${storeWorkText(work)}, which its next start does again`
   }
   if (launcherPid && launcherPid !== process.pid && !(await waitUntil(() => !isAlive(launcherPid), 5_000))) {
     try {
@@ -113,6 +127,9 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
 async function heldSilently(dataDir, port) {
   return startedByServe(dataDir) && lockHolderIsAlive(dataDir) && !(await listensHere(port))
 }
+
+/** How long a host that finished its work on its store has to listen before a stop takes it for a start that hung */
+const WORK_TO_LISTEN_MS = 30_000
 
 /** How long the hand-over waits for the host's work to end before it gives up and says so (#1224 review) */
 export const HANDOVER_WAIT_MS = 30 * 60_000

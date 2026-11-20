@@ -14,6 +14,7 @@
 //! added here, in plain sight. A later step starts the keeper from verified content outside the
 //! window's bundle, where it must not need the window's frameworks.
 
+pub mod data_folder;
 pub mod host_proc;
 #[cfg(unix)]
 pub mod keeper;

@@ -145,6 +145,8 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
  * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`). It listens on a port of its own,
  * `<data>/hung.port`: `hungListening` is how a test tells that it lives (not by its pid: a freed pid goes to the next process, #2082).
+ * `FAKE_COPIES=<version>` plays a version whose host holds the lock and copies its store first (#2334): its lock says so
+ * (`store`) for `FAKE_COPY_MS`, its pid in `<data>/hung`, and `--detach` answers `starting`; then it serves as that version.
  *
  * The switch (plan §10.5a): with `realServe`, `--switch`, `--switch-run` and `--switch-status` are the real launcher's,
  * and `--detach` asks its gate first (`beforeHostStart`), so the real switcher drives these fake versions through their
@@ -243,6 +245,14 @@ if (real && a.startsWith('serve --switch')) {
     real.recordServePort(d, free.address().port)
     await new Promise((r) => free.close(r))
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'timeout', message: 'the host did not answer within 30 s' } }))
+  } else if (real && F('FAKE_COPIES') === V) {
+    const since = Date.now()
+    const copy = "const fs=require('fs');const [d,V,ms]=process.argv.slice(1);setTimeout(function(){const l=JSON.parse(fs.readFileSync(d+'/host.lock','utf8'));delete l.store;fs.writeFileSync(d+'/host.lock',JSON.stringify(l));fs.writeFileSync(d+'/running',V)},Number(ms));setInterval(function(){},1e6)"
+    const copying = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', copy, d, V, String(F('FAKE_COPY_MS') || 35000)], env: process.env, cwd: d })
+    if (!copying.ok) throw new Error(copying.message)
+    writeFileSync(d + '/host.lock', JSON.stringify({ pid: copying.pid, started: real.processStartTime(copying.pid), at: Date.now(), by: 'serve', store: { doing: 'copy', step: 76, bytes: 1, since } }))
+    writeFileSync(d + '/hung', String(copying.pid))
+    console.log(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'starting', doing: 'copy', step: 76, since, message: 'the host is copying its data before step 76' } }))
   } else if (store.startsWith('needs ') && store.slice(6) !== V) {
     appendFileSync(d + '/host.log', 'host ' + V + ': StoreTooNewError: this store needs Centralu ' + store.slice(6) + '\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))

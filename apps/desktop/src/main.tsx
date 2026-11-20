@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
 import { errorMessage } from '@cc/protocol/client'
-import { App, confirmKeyAction, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
+import { App, confirmKeyAction, formatBytes, formatDuration, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
   autoRestart,
   buildBar,
@@ -18,6 +18,7 @@ import {
   restartKeeper,
   restartPlan,
   type ShellHostBuild,
+  type StoreWork,
   type TauriPlatform,
   watchHostBuild,
 } from '@cc/platform/tauri'
@@ -49,7 +50,7 @@ function boot() {
   // **Draw something first.** If nothing is rendered while waiting on the host, an empty black
   // window shows up, and that reads as broken (flagged during dogfooding).
   root.render(<Starting />)
-  createTauriPlatform()
+  createTauriPlatform({ onStoreWork: (work) => root.render(<Starting work={work} />) })
     .then(async (platform) => {
       await firstPaint
       root.render(<DesktopRoot platform={platform} />)
@@ -363,13 +364,40 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   )
 }
 
-function Starting() {
+/**
+ * The screen while the host starts. A host that works on its store first (#2334, `work`) says what, and for how long
+ * by its own clock, so a long copy reads as one and not as a start that hung; a second of it shows nothing, so a
+ * fast start does not flicker.
+ */
+function Starting({ work = null }: { work?: StoreWork | null }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!work) return
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [work])
+  const shown = work && now - work.since >= 1000 ? work : null
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-surface-floor" data-testid="starting">
-      <p className="text-md text-ink-muted">Starting the agent host…</p>
-      {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
-          Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
-      <p className="text-xs text-ink-faint">On first run, your system may ask for folder access.</p>
+      {shown ? (
+        <>
+          <p className="text-md text-ink-muted">
+            {shown.doing === 'copy'
+              ? `Saving a copy of Centralu's data before this update (${formatBytes(shown.bytes)})…`
+              : `Updating Centralu's data for this version (${formatBytes(shown.bytes)})…`}
+          </p>
+          <p className="text-xs text-ink-faint">
+            This can take a few minutes. Centralu opens when it is done ({formatDuration(now - shown.since, { coarse: true })} so far).
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-md text-ink-muted">Starting the agent host…</p>
+          {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
+              Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
+          <p className="text-xs text-ink-faint">On first run, your system may ask for folder access.</p>
+        </>
+      )}
     </div>
   )
 }

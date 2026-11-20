@@ -16,7 +16,7 @@ import { Links, type LinkDeps } from './links.js'
 import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
-import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
+import { DirectTunnel, HostWorksOnStore, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { credentialCheck, usedEvent, verifierOf, type FullCredential, type ListedCredential, type CredentialsReport, type CredentialsRead } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { switchStatusCommand } from './update.js'
@@ -719,6 +719,32 @@ describe('a hub linked to another host (#82)', () => {
       links.start()
       return { links, statuses, logs, starts: () => starts }
     }
+
+    // #2334: a host there that holds its folder and copies its store has not answered yet; a second one would meet its lock
+    it('starts none while the host there works on its store, says it is starting and what it does, then starts or connects once it is done', async () => {
+      const over: Partial<ConnectionLine> = { starting: { doing: 'copy', step: 76, since: Date.now() } }
+      const l = await linkTo(async () => ({ how: 'detached', note: null }), undefined, over)
+      await eventually(() => l.links.list()[0]!.status === 'starting' && /is copying its data before an update/.test(l.links.list()[0]!.error ?? ''))
+      // Asked again, and still nothing started
+      await new Promise((r) => setTimeout(r, 300))
+      expect(l.starts()).toBe(0)
+      delete over.starting
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      expect(l.starts()).toBe(1)
+    })
+
+    it('waits the same way when --detach answers that the host there is still at its work', async () => {
+      let first = true
+      const l = await linkTo(async () => {
+        if (!first) return { how: 'detached', note: null }
+        first = false
+        throw new HostWorksOnStore('the host is updating its data (step 76)', { doing: 'update', step: 76, since: Date.now() })
+      })
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      expect(l.logs.some((x) => /could not be started/.test(x))).toBe(false)
+      // Before: `not_running` with the answer as a failure to start, on the backoff
+      expect(l.statuses).not.toContain('not_running')
+    })
 
     // §10.5a: the machine switches versions itself; a host started between its stop and its start would be the old version
     it('starts none while the machine runs a switch, says it is updating, then connects and says once how the switch ended', async () => {

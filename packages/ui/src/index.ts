@@ -8,6 +8,7 @@ export { confirmKeyAction, pressesItself } from './app/keys.js'
 export { applyCachedTheme } from './app/theme.js'
 export { applyCachedTypography, applyTypography, typographyOf } from './app/typography.js'
 export { prepareFirstPaint } from './app/firstPaint.js'
+export { formatBytes, formatDuration } from './app/format.js'
 export { ShellBanner } from './components/ShellBanner.js'
 // The desktop's own dialogs (quit, switch build, restart) count as open layers too, so y/n/a do not answer a card behind them
 export { useOpenLayer } from './components/Modal.js'
