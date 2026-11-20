@@ -469,7 +469,7 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 Every change has a risk tier by the paths it touches (#1259): `pnpm tier [--base origin/main]`
 prints it and the files that put it there. The rules, one reason each, are in
 [`.centralu/tiers.json`](.centralu/tiers.json); a change takes the highest tier of its files, and
-a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). A symbolic link or a submodule is deep, and a file that is executable in the change at least light, whatever its name. A TypeScript, JavaScript or Rust file whose change is only comments and whitespace is at most light (#2352), so a comment fix never makes a change deep; a comment a tool reads (`@ts-expect-error`, `eslint-disable`, `prettier-ignore`, a JSDoc type in JavaScript) and a Rust doc comment count as code. No rules, rules that cannot be
+a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). A symbolic link or a submodule is deep, and a file that is executable in the change at least light, whatever its name. A TypeScript or JavaScript file whose change is only in comments, spaces and blank lines is at most light (#2352), so a comment fix never makes a change deep; a line break added or removed between two tokens, and a comment a tool reads (`@ts-expect-error`, `eslint-disable`, `prettier-ignore`, a JSDoc type in JavaScript) with what follows it up to its line, count as code. Any other file, Rust included, keeps the tier of its name. No rules, rules that cannot be
 read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
