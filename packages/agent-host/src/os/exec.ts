@@ -1,5 +1,6 @@
 import type { Env, Os } from './port.js'
 import { realOs } from './real.js'
+import { errnoCode } from './errors.js'
 
 /** What a probe that failed carries, as `execFile`'s rejection did: callers read the output of a CLI that exited with 1 */
 export type ExecFailure = Error & { stdout: string; stderr: string; code: number | null; ended?: 'timeout' | 'overflow' | 'aborted' | 'stopped' }
@@ -9,7 +10,7 @@ export const isExecFailure = (e: unknown): e is ExecFailure => e instanceof Erro
 
 export type ProbeOptions = {
   timeoutMs: number; env?: Env; cwd?: string; maxBuffer?: number; input?: string
-  /** What a failure calls the program: a tool by its name, not the Node its shim runs (`execTool`) */
+  /** What a failure calls the program, also one that could not be started: a tool by its name, not the Node its shim runs or the path it was looked for at (`execTool`) */
   name?: string
 }
 
@@ -24,7 +25,14 @@ export type ProbeOptions = {
  */
 export async function execText(command: string, args: readonly string[], options: ProbeOptions, os: Pick<Os, 'processes'> = realOs()): Promise<{ stdout: string; stderr: string }> {
   const { name, ...run } = options
-  const r = await os.processes.run(command, args, { ...run, contained: false })
+  let r: Awaited<ReturnType<typeof os.processes.run>>
+  try {
+    r = await os.processes.run(command, args, { ...run, contained: false })
+  } catch (e) {
+    if (name === undefined) throw e
+    const code = errnoCode(e)
+    throw Object.assign(new Error(`${name} could not be started${code ? ` (${code})` : ''}`, { cause: e }), code ? { code } : {})
+  }
   return textOf(name ?? command, { ...r, stdout: r.stdout.toString('utf8'), stderr: r.stderr.toString('utf8') })
 }
 
@@ -34,11 +42,10 @@ export async function execText(command: string, args: readonly string[], options
  * `execText`, which ends a tree. The same answer and the same failure; a program that could not be started or ran past its
  * limit throws the error `spawnSync` gave.
  */
-export function execTextSync(command: string, args: readonly string[], options: ProbeOptions, os: Pick<Os, 'processes'> = realOs()): { stdout: string; stderr: string } {
-  const { name, ...run } = options
-  const r = os.processes.runSync(command, args, run)
+export function execTextSync(command: string, args: readonly string[], options: Omit<ProbeOptions, 'name'>, os: Pick<Os, 'processes'> = realOs()): { stdout: string; stderr: string } {
+  const r = os.processes.runSync(command, args, options)
   if (r.error) throw r.error
-  return textOf(name ?? command, r)
+  return textOf(command, r)
 }
 
 /** The one mapping of a finished run to the answer or the failure of `execText` */

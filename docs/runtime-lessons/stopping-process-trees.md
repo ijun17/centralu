@@ -206,10 +206,14 @@ Platforms: Windows.
 Happened: 18 `opencode.exe --version` processes ran on for up to 19 days on a Windows machine with WSL (#2346); a probe
 with no limit, or one whose limit signalled the pid alone, left the tool running.
 Rule: a program asked a short question (`--version`, `--help`, `auth status`) is run by `execText` (os/exec.ts), a tool
-by its name through `execTool` (tool-run.ts), in scripts and tests as in the host: its limit ends the whole tree. A
-`child_process` starter asked `--version` or `--help` in a literal argument list or command line is refused in host code,
-scripts, tests, tooling and e2e, except for `git`, `node`, `gpgv` and `process.execPath`, which answer from their own
-binary. A batch file that is not an npm-style shim is not run through `cmd.exe`: it fails to start (EINVAL).
+by its name through `execTool` (tool-run.ts), in scripts and tests as in the host: its limit ends the whole tree, and
+the run settles only once that stop has finished, so a caller that exits on the answer leaves nothing behind. A
+`child_process` starter, `runSync` or `execTextSync` asked `--version`, `--version=…` or `--help`, or `-v` or `version`
+as its first argument, in a literal argument list or command line is refused in host code, scripts, tests, tooling and
+e2e, except for `git`, `node`, `gpgv` and `process.execPath`, which answer from their own binary. Arguments held in a
+variable, a command line built by interpolation and a starter imported under another name are beyond the lint rule:
+the review catches those. A batch file that is not an npm-style shim is not run through `cmd.exe`: it fails to start
+(EINVAL).
 Guard: `guard/timed-start` (`probe`); `tooling/surface-drift.test.ts` "ends a tool that never answers, and what it
-started, at the run limit (#2346)".
+started, at the run limit (#2346)"; `tooling/tool-run.test.ts` "leaves nothing running when the caller exits on a timeout".
 Platforms: macOS, Linux, Windows.

@@ -54,6 +54,8 @@ const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
 let version = ''
 const tmp = mkdtempSync(join(tmpdir(), 'codex-bindings-'))
+// Removed on every way out, a failed `--version` and each `process.exit` below included
+process.on('exit', () => rmSync(tmp, { recursive: true, force: true }))
 
 try {
   version = (await codex(['--version'], 30_000)).trim()
@@ -265,7 +267,6 @@ if (CHECK_CONTRACT && missing.length > 0) {
       missing.join('\n  ') +
       '\n→ update adapters/codex to match the new protocol, and refresh protocol-contract.json.',
   )
-  rmSync(tmp, { recursive: true, force: true })
   process.exit(1)
 }
 if (stale.length > 0) {
@@ -275,7 +276,6 @@ if (stale.length > 0) {
       stale.join('\n  ') +
       `\n→ run pnpm codex:bindings with ${version} and commit generated/; fix what the build then says about the adapter.`,
   )
-  rmSync(tmp, { recursive: true, force: true })
   process.exit(1)
 }
 
@@ -291,7 +291,6 @@ if (WRITE) {
 } else {
   if (CHECK_TYPES && !CHECK_CONTRACT) {
     console.log(`[codex] generated/ holds the ${committed.size} types the adapter reads as ${version} makes them`)
-    rmSync(tmp, { recursive: true, force: true })
     process.exit(0)
   }
   console.log(
@@ -303,5 +302,4 @@ if (WRITE) {
   )
 }
 
-rmSync(tmp, { recursive: true, force: true })
 if (!existsSync(CONTRACT)) process.exit(1)

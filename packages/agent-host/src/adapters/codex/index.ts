@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
-import { launchFor, toolCommand } from '../../tool-launch.js'
+import { toolCommand } from '../../tool-launch.js'
+import { execTool } from '../../tool-run.js'
 import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { withCodexClient } from './short-lived.js'
@@ -20,7 +21,6 @@ import { CODEX_SURFACE } from './surface.js'
 import { CODEX_SUBAGENT_TOOL } from './thread-open.js'
 import { launchPreset } from '../edit-grant.js'
 import { CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
-import { execText } from '../../os/exec.js'
 
 export { CODEX_TOOL_TIMEOUT_SEC, LAZY_RESUME_WAIT_MS, repoFilesConfig }
 
@@ -108,8 +108,7 @@ export class CodexAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('codex')
     try {
-      const launch = launchFor(path ?? toolCommand('codex'))
-      const { stdout } = await execText(launch.command, [...launch.args, '--version'], { timeoutMs: 5000 })
+      const { stdout } = await execTool('codex', ['--version'], { timeoutMs: 5000 })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // Login status is judged by whether the auth file exists (cheap — no need to start the CLI)
       const loggedIn = existsSync(join(codexHome(), 'auth.json'))

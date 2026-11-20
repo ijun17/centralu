@@ -764,12 +764,18 @@ describe('guard/timed-start', () => {
     ["const run = promisify(execFile)" + NL + "await run('claude', ['--help'])"],
     ["spawnSync(found, ['--version'])"],
     ["execSync('agy --version')"],
+    ["execFileSync('npm', ['-v'])"],
+    ["execFileSync('go', ['version'])"],
+    ["execSync('npm -v')"],
+    ["execFileSync('agy', ['--version=json'])"],
+    ["os.processes.runSync('codex', ['--version'], { timeoutMs: 5000 })"],
+    ["execTextSync('codex', ['--version'], { timeoutMs: 5000 })"],
   ])('reports the probe %s in host code, scripts, tests and tooling', async (code) => {
     for (const at of ['packages/agent-host/src/sessions/x.ts', 'scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'packages/agent-host/src/x.test.ts', 'tooling/x.test.ts', 'e2e/x.spec.ts']) {
       expect((await lines(at, code, 'timed-start')).length, at).toBe(1)
     }
   })
-  it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"]])('does not report %s as a probe', async (code) => {
+  it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('git', ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('ps', ['-o', 'pid'], { timeoutMs: 5000 })"], ["execFileSync('npm', ['view', id, 'version', '--json'])"], ["execFileSync('ssh', [host, '-v'])"]])('does not report %s as a probe', async (code) => {
     await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
   })
   it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
