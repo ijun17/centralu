@@ -199,6 +199,11 @@ pub fn hide_console(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// The folder the host takes for the person's home (Node's `os.homedir()`): `HOME`.
+pub fn home() -> Option<std::ffi::OsString> {
+    std::env::var_os("HOME")
+}
+
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
 /// *runs*. Not whether its number is taken, which a zombie still does.
 ///
@@ -219,6 +224,20 @@ pub fn pid_alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks.
     let rc = unsafe { libc::kill(target, 0) };
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// A process's start time as host.lock's `started` records it (agent-host `instance-lock.ts` `processStartTime`, which the
+/// npm launcher reads the same way): `ps -o lstart=` in the C locale, so the writer and a reader in another locale read
+/// the same text. None when `ps` cannot say.
+pub fn process_start_text(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).env("LC_ALL", "C").output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !text.is_empty()).then_some(text)
+}
+
+/// When a process was created, in epoch milliseconds: read on Windows only, whose host records no `started` (#1723).
+pub fn process_created_ms(_pid: u32) -> Option<u64> {
+    None
 }
 
 /// Whether the group a host led may still be signalled once the host itself has ended.

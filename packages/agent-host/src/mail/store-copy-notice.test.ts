@@ -43,6 +43,22 @@ describe('a store step that ran without a copy (#2304)', () => {
     expect(w.delivered).toEqual([])
   })
 
+  it.each([
+    { name: 'a byte short', short: 1 },
+    { name: 'a megabyte short', short: 2 ** 20 },
+    { name: 'a tenth of a gigabyte short', short: 0.1 * 2 ** 30 },
+  ])('free space $name of the copy reads as just under it, never as the same figure twice', ({ short }) => {
+    const store = new Store()
+    const needed = 16 * 2 ** 30
+    store.copySkipped = { step: 76, reason: 'low_disk', free: needed - short, needed }
+
+    started(store)
+
+    const body = notices(store)[0]?.body ?? ''
+    // Each of these rounds to 16 GB, as the figure the copy needs does
+    expect(body).toContain('the disk has just under 16 GB free, and the copy is made only when 16 GB is free')
+  })
+
   it('a copy that could not be written: the person reads that, and the reason stays in the log', () => {
     const store = new Store()
     store.copySkipped = { step: 76, reason: 'failed' }

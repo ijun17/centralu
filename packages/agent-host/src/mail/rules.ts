@@ -221,8 +221,9 @@ export const WARNING_TEXT = {
    * `short` of the room a copy is made with, or (null) the copy could not be written, which the log explains. Said
    * plainly, since nothing brings back what the change removed
    */
+  // Free space just short of what the copy needs can round to the same figure: it then reads "just under"
   noStoreCopy: (short: { free: string; needed: string } | null) =>
-    `This update changed Centralu's data on this computer without keeping a copy first: ${short ? `the disk has ${short.free} free, and the copy is made only when ${short.needed} is free (twice the size of the data)` : 'the copy could not be written'}. The change cannot be undone, and there is no copy to go back to. Centralu works as usual.`,
+    `This update changed Centralu's data on this computer without keeping a copy first: ${short ? `the disk has ${short.free === short.needed ? 'just under ' : ''}${short.free} free, and the copy is made only when ${short.needed} is free (twice the size of the data)` : 'the copy could not be written'}. The change cannot be undone, and there is no copy to go back to. Centralu works as usual.`,
 } as const
 
 

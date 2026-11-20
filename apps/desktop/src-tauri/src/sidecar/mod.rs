@@ -107,6 +107,8 @@ pub struct Supervisor {
     direct: host_proc::Supervisor,
     /// The serve host this window runs on, when it does (`Host::Serve`): what "Quit completely" stops
     serve: ServeSlot,
+    /// The data folder the host works in, once the start chose it: where `store_work` reads host.lock
+    data: Arc<Mutex<Option<PathBuf>>>,
     #[cfg(unix)]
     keeper: Arc<Mutex<Option<Arc<link::KeeperLink>>>>,
 }
@@ -216,10 +218,20 @@ impl Supervisor {
         }
     }
 
+    /// What the host this window waits for does to its store before it can answer (#2334, `host_proc::store_work`)
+    pub fn store_work(&self) -> Option<host_proc::store_work::StoreWork> {
+        let data = self.data.lock().ok()?.clone()?;
+        host_proc::store_work::read(&data)
+    }
+
     /// Starts supervising. The app still comes up even if this fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
         let start = start_plan(&app);
         self.remember_serve(&start);
+        if let Ok(mut d) = self.data.lock() {
+            // The folder the host takes: the keeper hands it this one, and a host the window starts finds it the same way
+            *d = Some(centralu_keeper_core::data_folder::data_dir_with(start.plan.dev || std::env::var("CC_DEV").as_deref() == Ok("1")));
+        }
         #[cfg(unix)]
         {
             // What "Apply now" compares the bundle on disk with (#1895); the bundled host only, not one `centralu serve` runs

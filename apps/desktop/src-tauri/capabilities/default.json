@@ -33,6 +33,7 @@
     },
     "allow-host-info",
     "allow-host-error",
+    "allow-host-store-work",
     "allow-restart-host",
     "allow-set-badge",
     "allow-alert",

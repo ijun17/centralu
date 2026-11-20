@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol/client'
+import { sentenceStart, type CacheSessionStats, type CacheStats, type CacheWindowStats } from '@cc/protocol/client'
 import { cacheHitRate, cacheWindowName, cacheWriteShare, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Badge } from '../../components/Badge.jsx'
@@ -152,7 +152,7 @@ export function CacheSection({
 /** "5 h", "Today": the switch's words, shorter than the window's own name */
 function shortName(w: CacheWindowStats): string {
   if (w.id === '5h') return '5 h'
-  return w.label.charAt(0).toUpperCase() + w.label.slice(1)
+  return sentenceStart(w.label)
 }
 
 /**

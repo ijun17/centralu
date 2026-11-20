@@ -1,6 +1,6 @@
 import type { OsChild } from '../os/port.js'
 import { realOs } from '../os/real.js'
-import { oneLineText } from '@cc/protocol'
+import { oneLineText, type StoreWork, storeWorkOf } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj, tryParseJson } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
@@ -70,6 +70,12 @@ export type ConnectionLine = {
    * Start. Absent from a remote that predates it, which is started as before
    */
   stopped?: RemoteStop
+  /**
+   * The host there holds its data folder and works on its store before it can answer (#2334): copying it before a step
+   * that breaks older readers, or updating it. Said only while no host answers. The link waits for it rather than start
+   * another. Absent from a remote that predates it
+   */
+  starting?: StoreWork
 }
 
 /**
@@ -184,6 +190,7 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
         ...(autostart ? { autostart } : {}),
         ...((o as { proof?: unknown }).proof === true ? { proof: true } : {}),
         ...stoppedOf((o as { stopped?: unknown }).stopped),
+        ...startingOf((o as { starting?: unknown }).starting),
         ...takesOf((o as { takes?: unknown }).takes),
       }
     }
@@ -222,6 +229,12 @@ function stoppedOf(raw: unknown): { stopped?: RemoteStop } {
   if (!raw || typeof raw !== 'object') return {}
   const o = raw as { by?: unknown; at?: unknown }
   return { stopped: { by: o.by === 'quit' ? 'quit' : 'stop', at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : null } }
+}
+
+/** The `starting` field, or nothing when it is not one */
+function startingOf(raw: unknown): { starting?: StoreWork } {
+  const work = storeWorkOf(raw)
+  return work ? { starting: work } : {}
 }
 
 /** The `takes` field: the names in it that are words, or nothing */
@@ -274,7 +287,7 @@ export function parseAutostart(raw: unknown): RemoteAutostart | null {
 /** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
 export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
-  | { ok: false; reason: string; message: string; node?: string; by?: string; startedAt?: number }
+  | { ok: false; reason: string; message: string; node?: string; by?: string; startedAt?: number; work?: StoreWork }
 
 /**
  * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
@@ -303,6 +316,20 @@ export class SwitchUnderWay extends Error {
   }
 }
 
+/**
+ * `serve --detach` found the host there working on its store and still at it when its wait ended (`reason: 'starting'`,
+ * #2334): the host is fine and answers once that is done. The link waits for it, and counts no start
+ */
+export class HostWorksOnStore extends Error {
+  constructor(
+    message: string,
+    readonly work: StoreWork | null,
+  ) {
+    super(message)
+    this.name = 'HostWorksOnStore'
+  }
+}
+
 /** Reads the one JSON line `--detach` prints; throws when there is none */
 export function parseDetachLine(stdout: string): DetachAnswer {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
@@ -313,6 +340,7 @@ export function parseDetachLine(stdout: string): DetachAnswer {
     if (!d || typeof d !== 'object') continue
     const o = asObj(d)
     if (o.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof o.how === 'string' ? o.how : null }
+    const work = o.reason === 'starting' ? storeWorkOf(o.work) : null
     return {
       ok: false,
       reason: typeof o.reason === 'string' ? o.reason : 'failed',
@@ -320,6 +348,7 @@ export function parseDetachLine(stdout: string): DetachAnswer {
       ...(typeof o.node === 'string' ? { node: o.node } : {}),
       ...(typeof o.by === 'string' ? { by: o.by } : {}),
       ...(typeof o.startedAt === 'number' ? { startedAt: o.startedAt } : {}),
+      ...(work ? { work } : {}),
     }
   }
   throw new Error('The remote did not say whether it started')
@@ -918,6 +947,7 @@ export class SshTunnel implements Tunnel {
     if (answer.reason === 'exited' && isHostCrash(answer.message)) throw new NodeTooOld(answer.message, 'crashed', null)
     if (answer.reason === 'exited' || answer.reason === 'timeout') throw new StartedNotServing(answer.message)
     if (answer.reason === 'switching') throw new SwitchUnderWay(answer.message, answer.by ?? 'another computer', answer.startedAt ?? Date.now())
+    if (answer.reason === 'starting') throw new HostWorksOnStore(answer.message, answer.work ?? null)
     throw new Error(answer.message)
   }
 

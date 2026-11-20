@@ -1,5 +1,6 @@
 import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, appServerName } from './app-id.js'
 import type { ToolSummary } from './entities/sessions.js'
+import { sentenceStart } from './plain-line.js'
 
 /**
  * Centralu's own tool calls (#730): which server a call went to, read the same way by the adapters that mark a call
@@ -44,7 +45,7 @@ export function centraluCallOf(
 export function centraluCallLabel(c: NonNullable<ToolSummary['centralu']>, appName?: string): string {
   if (c.label) return c.label
   const words = c.tool.replace(/[_-]+/g, ' ').trim()
-  const tool = words ? words.charAt(0).toUpperCase() + words.slice(1) : c.tool
+  const tool = words ? sentenceStart(words) : c.tool
   return c.app ? `${appName ?? c.app}: ${words || c.tool}` : tool
 }
 

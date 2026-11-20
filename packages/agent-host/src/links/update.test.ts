@@ -228,6 +228,29 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     }
   }, 90_000 * SLOW)
 
+  /*
+   * #2356 item 1: a new version that copies a large store before its first step took longer than the check. The switch put
+   * the old version back, its stop ended the copy, and every later try copied the whole store again
+   */
+  it('waits for a new version that copies its store for longer than the check, and keeps it (#2334)', async () => {
+    await installedAndRunning()
+    const { done } = update('9.9.2', { FAKE_COPIES: '9.9.2', FAKE_COPY_MS: '35000' })
+    try {
+      expect(await done).toMatchObject({ current: { version: '9.9.2', node: NODE_V }, previous: { version: '9.9.1', node: NODE_V } })
+      expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
+      expect(running()).toBe('9.9.2')
+    } finally {
+      // Only the process this test's fake started, while its lock still names it
+      if (existsSync(data('hung')) && (await hungHolderAlive(data()))) {
+        try {
+          process.kill(Number(readFileSync(data('hung'), 'utf8')), 'SIGKILL')
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 120_000 * SLOW)
+
   it('does not say the old version runs again before it said hello, and says the stop before it failed', async () => {
     await installedAndRunning()
     const { done } = update('9.9.2', { FAKE_BROKEN: '9.9.2', FAKE_STOP_FAILS: '-', FAKE_SILENT: '9.9.1' })

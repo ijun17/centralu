@@ -16,6 +16,8 @@ import {
   type MachineStatus,
   type MachineVersions,
   isAssistantOrCoordinator,
+  type StoreWork,
+  storeWorkWords,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
@@ -25,10 +27,10 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, dataDirError, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, HostWorksOnStore, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
-import { readSwitchStatus, switchResult, type SwitchState } from './update.js'
+import { clock, readSwitchStatus, switchResult, type SwitchState } from './update.js'
 
 /**
  * A linked machine's connection (links.ts): its transport and client, the backoff, the version gate,
@@ -89,6 +91,8 @@ const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
  */
 const KEEPS_TRYING = 'reconnecting'
 const WAITS_FOR_PERSON = 'press Connect to try again'
+/** How often a link asks again while the host there works on its store: a copy of a large store takes minutes */
+const STORE_WORK_ASK_MS = 5_000
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
 /** How often a connected link reads the machine's full credentials (`host.credentials`, #1405) */
 const CREDENTIALS_MS = 30_000
@@ -1087,6 +1091,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.setStatus('unreachable', `Centralu is no longer running on ${this.name}; ${WAITS_FOR_PERSON}`)
       return
     }
+    // A host there that works on its store is the start: waited for, never a second one beside it (#2334)
+    if (!endpoint.line.hostRunning && endpoint.line.starting) {
+      if (this.held) return
+      return this.waitForStoreWork(endpoint.line.starting)
+    }
     // Only where the link can start one; elsewhere a host that is not running is `not_running`, as before
     const notStarted = endpoint.line.hostRunning || !this.tunnel.startHost ? null : this.startRefusal(endpoint.line)
     if (notStarted) {
@@ -1117,6 +1126,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         if (this.stopped) return
         // `--detach` refused: a switch there began since the read above (another hub's, a boot entry's)
         if (err instanceof SwitchUnderWay) return this.waitForSwitch(err.by)
+        if (err instanceof HostWorksOnStore) return this.waitForStoreWork(err.work)
         // A host that was started and never answered, one that crashes at boot (#1143 re-review): counted as one that
         // answered and then stopped, and the Start it answered is spent. A crash the Node there may explain too
         if (err instanceof StartedNotServing || (err instanceof NodeTooOld && err.kind === 'crashed')) this.countStart((err as Error).message)
@@ -1226,6 +1236,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // With Auto reconnect off nothing asks again (#1341): the row says so instead of waiting on a retry
     if (!this.autoReconnect) return this.setStatus('unreachable', `${by} is switching the Centralu version on ${this.name}; ${WAITS_FOR_PERSON}`)
     this.retryLater(this.deps.retryMs?.[0] ?? 2_000)
+  }
+
+  /**
+   * The host there works on its store before it can answer (#2334): the row says `starting` with what it does, and the
+   * link asks again later. No start is counted, and none is made beside it
+   */
+  private waitForStoreWork(work: StoreWork | null): void {
+    const doing = work ? `is ${storeWorkWords(work)} (since ${clock(work.since)})` : 'is working on its data'
+    this.setStatus('starting', `Centralu on ${this.name} ${doing}; it connects when that is done`)
+    if (!this.autoReconnect) return this.setStatus('unreachable', `Centralu on ${this.name} ${doing}; ${WAITS_FOR_PERSON}`)
+    this.retryLater(this.deps.retryMs?.[0] ?? STORE_WORK_ASK_MS)
   }
 
   /**

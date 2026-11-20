@@ -18,7 +18,7 @@ import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFi
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { answerLine, replaceFile, runCaptured, say, sleep, tail, waitUntil } from './serve-util.mjs'
-import { isWriter, isWriterWithin, processStartTime, serveDataDir } from './serve-files.mjs'
+import { isWriter, isWriterWithin, processStartTime, serveDataDir, storeWork } from './serve-files.mjs'
 import { POINTER_WORD, managedLauncherScript, parsePointer, remoteLayout } from './serve-install.mjs'
 import { detachHow } from './serve-windows.mjs'
 
@@ -38,7 +38,8 @@ const HANDOVER_MS = 10_000
 /**
  * A live pid whose creation time Windows cannot read (another logon's process) counts as the switcher while its record
  * is younger than this: past the longest switch (a stop of 30 s, a start and check of 60 s, a put-back of 60 s), so a
- * pid reused later is not believed for long
+ * pid reused later is not believed for long. A host's work on its store has no such bound: the switcher writes its
+ * lock's time again while it waits on one (`touch`)
  */
 const UNREADABLE_ALIVE_MS = 10 * 60_000
 /** The steps between a stop and the start that follows it: no other host may start then */
@@ -103,7 +104,9 @@ export function lockIsLive(holder, writer = isWriter) {
 /**
  * Takes `switch.lock` for `id`: an exclusive create naming this process, so of two switchers only one runs. A lock whose
  * process is not alive is stale and is taken over, moved aside first so of two takers only one removes it. Null when a
- * live process holds it. The function it returns releases it, only while it is still this one's
+ * live process holds it. The function it returns releases it, only while it is still this one's; its `touch` writes the
+ * lock again with the time now, so a switcher that waits on a host's work on its store for longer than
+ * `UNREADABLE_ALIVE_MS` is still taken for alive by a reader that cannot read its creation time
  */
 function takeLock(root, id) {
   const file = join(root, SWITCH_LOCK)
@@ -116,10 +119,19 @@ function takeLock(root, id) {
       } finally {
         closeSync(fd)
       }
-      return () => {
+      const mine = () => {
         const now = readJson(file)
-        if (now?.pid === own.pid && now.at === own.at) rmSync(file, { force: true })
+        return now?.pid === own.pid && now.at === own.at
       }
+      const release = () => {
+        if (mine()) rmSync(file, { force: true })
+      }
+      release.touch = () => {
+        if (!mine()) return
+        own.at = Date.now()
+        replaceFile(file, JSON.stringify(own))
+      }
+      return release
     } catch (e) {
       if (e?.code !== 'EEXIST') throw e
     }
@@ -284,7 +296,7 @@ export function storeRestore(dataDir, owner) {
  * The work of one switch, in a data folder, with the steps written to `switch.json` as they are taken. `state` is the
  * file's content; `finish` writes the outcome
  */
-function switchWork(dataDir, state, { env, platform }) {
+function switchWork(dataDir, state, { env, platform, touch = () => {} }) {
   const l = remoteLayout(dataDir)
   const file = join(l.root, SWITCH_FILE)
   /** Answers the switch as written, which `runSwitcher` and `reconcile` answer in turn (a status read prints it) */
@@ -308,15 +320,22 @@ function switchWork(dataDir, state, { env, platform }) {
   /**
    * What answers within `ms`, by the connection line of the version `asker`: `{ ok: true }` once a host answers as
    * `version` (null: any), `{ ok: false, other }` at once when one answers as another version, `{ ok: false }` when none
-   * did. Asked at least once
+   * did. Asked at least once. A host that holds the folder and works on its store (`storeWork`, #2334) is waited for
+   * however long that takes, and has `ms` (5 s at least) from when it is done: ended now, it would do the work again at
+   * every start, and the switch would never land
    */
+  const known = new Map()
   const hear = async (asker, version, ms = CHECK_MS) => {
-    const until = Date.now() + ms
+    let until = Date.now() + ms
     for (;;) {
       const r = await serveOf(l, asker, ['--connection'], env, platform)
       const said = lastLine(r.stdout, (o) => (typeof o.port === 'number' ? o : undefined))
       if (said?.hostRunning === true && (version === null || said.version === version)) return { ok: true }
       if (said?.hostRunning === true && typeof said.version === 'string') return { ok: false, other: said.version }
+      if (storeWork(dataDir, known)) {
+        touch()
+        until = Date.now() + Math.max(ms, 5_000)
+      }
       if (Date.now() >= until) return { ok: false }
       await sleep(1_000)
     }
@@ -334,7 +353,8 @@ function switchWork(dataDir, state, { env, platform }) {
       const r = await serveOf(l, v, ['--detach'], env, platform)
       const detach = lastLine(r.stdout, (o) => o.detach)
       if (detach?.ok === false && detach.reason === 'wmi_blocked') return { why: null, unchecked: detach.message ?? 'WMI is blocked' }
-      const failed = detach?.ok === false ? (detach.message ?? 'it did not start') : !detach ? r.stderr.trim().split(/\r?\n/).at(-1) || `serve --detach gave no answer (exit ${r.code})` : null
+      // A host still working on its store (#2334) did start: `hear` waits for it
+      const failed = detach?.ok === false && detach.reason !== 'starting' ? (detach.message ?? 'it did not start') : !detach ? r.stderr.trim().split(/\r?\n/).at(-1) || `serve --detach gave no answer (exit ${r.code})` : null
       if (checkStep) step(checkStep)
       // A start that failed may have met a host starting meanwhile: a few seconds tell
       const heard = await hear(v, v.version, failed ? 5_000 : CHECK_MS)
@@ -398,7 +418,7 @@ export async function runSwitcher({ dataDir, params, env, platform = process.pla
   if (!release) return null
   try {
     const state = { v: 1, ...params, from: params.was.current, step: 'stop', startedAt: Date.now(), pid: process.pid, started: processStartTime(process.pid) }
-    const w = switchWork(dataDir, state, { env, platform })
+    const w = switchWork(dataDir, state, { env, platform, touch: release.touch })
     w.write({})
     onLocked(state)
     const { from, to } = w
@@ -477,7 +497,7 @@ export async function reconcile(dataDir, { env, platform = process.platform, sta
   try {
     const again = readSwitch(dataDir)
     if (!again || again.outcome) return again
-    const w = switchWork(dataDir, again, { env, platform })
+    const w = switchWork(dataDir, again, { env, platform, touch: release.touch })
     if (again.step === 'prune') return finishDone(dataDir, w, { interrupted: true })
     const now = readPointerFile(l.current)
     const back = ['roll_back', 'restart'].includes(again.step)

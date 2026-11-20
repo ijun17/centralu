@@ -12,7 +12,7 @@ import { realOs } from '../os/real.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { Store, StoreTooNewError } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
-import { COPY_KEPT_MS } from './store/store-copy.js'
+import type { StoreWork } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 const { files, paths, processes, env } = realOs()
@@ -159,6 +159,20 @@ describe('before a step that breaks older readers', () => {
     expect(files.statSync(copyOf(file)).mode & 0o777).toBe(0o600)
   })
 
+  it('a store wider than the creation mask allows keeps its mode in the copy', { skip: !realOs().traits.modesGuardFiles }, () => {
+    const file = storeFile()
+    files.chmodSync(file, 0o640)
+    // A new file under this mask is made 0600 at most, so only setting the mode afterwards gives the copy the store's 0640
+    const mask = process.umask(0o077)
+    try {
+      openNext(file, [breaking(STEP)])
+    } finally {
+      process.umask(mask)
+    }
+
+    expect(files.statSync(copyOf(file)).mode & 0o777).toBe(0o640)
+  })
+
   it('the build the person had opens the copy put back in the store’s place, with what the step removed', () => {
     const file = storeFile()
     openNext(file, [breaking(STEP)]).close()
@@ -174,6 +188,43 @@ describe('before a step that breaks older readers', () => {
 
     expect(before.schemaVersion).toBe(LATEST)
     expect(before.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
+  })
+})
+
+describe('what the open says while it works (#2334)', () => {
+  it('says the copy while it writes it, each step while it runs, and nothing once it is done', () => {
+    const file = storeFile()
+    const told: (StoreWork | null)[] = []
+    // What had been said when the copy asked how much room the disk has: the copy is under way by then
+    let duringCopy: StoreWork | null | undefined
+    const os = osWith({ freeBytesSync: () => ((duringCopy = told.at(-1)), null) }, () => 1_800_000_000_000)
+    added = [breaking(STEP), expanding(STEP + 1)]
+    stores.push(new NextBuild(file, os, (w) => void told.push(w)))
+
+    const bytes = files.statSync(file).size
+    expect(duringCopy).toEqual({ doing: 'copy', step: STEP, bytes: expect.any(Number), since: 1_800_000_000_000 })
+    expect(told).toEqual([
+      { doing: 'copy', step: STEP, bytes: expect.any(Number), since: 1_800_000_000_000 },
+      { doing: 'update', step: STEP, bytes: expect.any(Number), since: 1_800_000_000_000 },
+      { doing: 'update', step: STEP + 1, bytes: expect.any(Number), since: 1_800_000_000_000 },
+      null,
+    ])
+    expect((told[0] as StoreWork).bytes).toBeGreaterThanOrEqual(bytes)
+  })
+
+  it('says nothing for a store that is new, or that has no step to run, and the work of the open that has one', () => {
+    const told: (StoreWork | null)[] = []
+    const dir = tempRoot('cc-store-copy-')
+    dirs.push(dir)
+    stores.push(new Store(join(dir, 'store.db'), realOs(), (w) => void told.push(w)))
+    const file = storeFile()
+    stores.push(new Store(file, realOs(), (w) => void told.push(w)))
+    expect(told).toEqual([])
+
+    // The same store, opened by the build with a step to run
+    added = [breaking(STEP)]
+    stores.push(new NextBuild(file, realOs(), (w) => void told.push(w)))
+    expect(told.map((w) => w?.doing ?? null)).toEqual(['copy', 'update', null])
   })
 })
 
@@ -490,6 +541,9 @@ describe('the copy’s name reaches the disk', () => {
     expect(synced).toEqual([])
   })
 })
+
+/** The 14 days the owner decided on #2304, written out here so a change to the constant fails this file */
+const COPY_KEPT_MS = 14 * 24 * 60 * 60 * 1000
 
 describe('a copy is kept for 14 days, whatever comes after it', () => {
   /** A store the next build copied and closed, and when the copy was written, by the file's own time */

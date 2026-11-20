@@ -1,4 +1,4 @@
-import { liveBackgroundTasks, type BackgroundTask } from '@cc/protocol/client'
+import { liveBackgroundTasks, sentenceStart, type BackgroundTask } from '@cc/protocol/client'
 
 const tasks = (n: number) => `${n} background task${n === 1 ? '' : 's'}`
 
@@ -22,8 +22,7 @@ export function interruptNotice(all: readonly BackgroundTask[]): string | null {
   if (stops > 0) parts.push(`also stops ${tasks(stops)}`)
   if (keeps > 0) parts.push(`${tasks(keeps)} ${keeps === 1 ? 'keeps' : 'keep'} running`)
   if (unknown > 0) parts.push(`${tasks(unknown)} may keep running`)
-  const line = parts.join(' · ')
-  return line.charAt(0).toUpperCase() + line.slice(1)
+  return sentenceStart(parts.join(' · '))
 }
 
 /** The number the header and the sidebar show — running tasks that are activity (ambient excluded). */

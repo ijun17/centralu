@@ -146,9 +146,13 @@ step against:
      The rule itself counts as before: it is about the copy being written, and the space earlier copies take is
      already out of what the disk says is free. Measured on 2026-11-17 on a 972 MB store (Windows 11, NVMe, warm
      cache): `VACUUM INTO` 1.8 to 2.0 s, the sync 2 ms; in a host started on that store, 1.8 to 2.6 s for the
-     copy. The window shows "Starting the agent host…" meanwhile, and host.log says that the copy started and how
-     long it took. A copy and step that together take over 30 s show "Could not start the agent host" though the
-     host is fine (#2334).
+     copy; on 2026-11-20 an 18 GB store took 54 to 59 s in a host started by `centralu serve --detach` on the same
+     machine. host.log says that the copy started and how long it took. While the copy and the steps run, the host
+     says so in `host.lock` (`store`, #2334), and everything that waits for a start waits for it: the window shows
+     "Copying Centralu's data before an update (18 GB)…" or "Updating Centralu's data for the new version (18 GB)…"
+     with the time so far, and `serve --detach`, a linked hub, the update switch and a hub's `serve --stop` wait
+     instead of giving up or ending the host ([remote/serve.md](remote/serve.md)). A person's stop still ends it;
+     the next start deletes the unfinished copy and makes it again.
 
 | Steps | What they do | Older build |
 |---|---|---|
@@ -205,14 +209,22 @@ breaking step, and the build from before the update refuses it or opens it witho
 notice that an update ran without a copy is about the step that got none: a copy an earlier start of the same
 update wrote is still there.
 
-1. Quit Centralu with "Quit completely", and stop `centralu serve` (`centralu serve --stop`) if it runs on this
+1. Turn off Settings, Updates, "Automatic updates" on this computer. If this computer is a linked machine, turn it
+   off on the computer it is linked from as well: that computer's switch also updates the machines linked to it.
+   Otherwise the older build you install next updates itself again, the step runs again on the store you put back,
+   and makes a new copy: going back is silently undone, though nothing is lost.
+2. Quit Centralu with "Quit completely", and stop `centralu serve` (`centralu serve --stop`) if it runs on this
    computer. The store must have no host: with "Keep agents running after Centralu quits" on, a plain "Quit" leaves
    one running, which keeps writing to the files the next step moves (Windows refuses the move).
-2. Install the Centralu you had before the update. The newer one would run the step again on the copy.
-3. In the data folder, move `store.db`, `store.db-wal` and `store.db-shm` somewhere else (the last two may not be
-   there). Keep them until the old build has started.
-4. Rename the copy you chose, `store.before-<step>.db`, to `store.db`. Leave any other copy where it is.
-5. Start Centralu.
+3. Install the Centralu you had before the update. The newer one would run the step again on the copy.
+4. In the data folder, move `store.db`, `store.db-wal` and `store.db-shm` somewhere else (the last two may not be
+   there). Keep them until the old build has started. All three must go: SQLite applies a `store.db-wal` it finds
+   beside `store.db` to it, so a WAL the newer build left would be written into the copy. The result opens and
+   passes SQLite's own checks, but it is neither store: the copy's tables with the newer build's last changes, its
+   `min_reader_version` among them, which can make the older build refuse it.
+5. Rename the copy you chose, `store.before-<step>.db`, to `store.db`. Leave any other copy where it is.
+6. Start Centralu. Turn "Automatic updates" back on only once you want the newer version again, which runs the step
+   again.
 
 What is not in the copy: conversations, sessions, mail and settings from after the update. Files outside the store
 (attachments, apps' data, worktrees) are not copied and not put back; they stay as they are now.

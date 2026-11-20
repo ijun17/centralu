@@ -15,6 +15,7 @@ import { MailboxRecords } from './store/mailbox.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords } from './store/messages.js'
 import { MigrationRunner } from './store/migrate-runner.js'
+import type { SayStoreWork } from './store/store-work.js'
 import { type MigrationStep } from './store/migrations/context.js'
 import { migrationSteps } from './store/migrations/index.js'
 import { PermissionRecords } from './store/permissions.js'
@@ -85,6 +86,7 @@ export class Store extends MigrationRunner {
   constructor(
     protected readonly dbPath = ':memory:',
     protected readonly os: Os = realOs(),
+    protected readonly sayWork: SayStoreWork = () => {},
   ) {
     super()
     const path = dbPath

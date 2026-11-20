@@ -14,6 +14,11 @@ export function plainLine(body: string, max: number): string {
   return oneLineText(plainText(body), max)
 }
 
+/** `words` as the start of a sentence: its first letter capitalized */
+export function sentenceStart(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 /** A body's first `lines` lines as plain words, the lines kept (a question's card), cut to `max` characters */
 export function plainLines(body: string, lines: number, max: number): string {
   const text = plainText(body)

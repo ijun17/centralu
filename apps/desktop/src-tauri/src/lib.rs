@@ -73,6 +73,12 @@ fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
     sup.last_error()
 }
 
+/// What the starting host does to its store, while it says so (#2334): the window waits for it and shows it
+#[tauri::command]
+fn host_store_work(sup: State<'_, Supervisor>) -> Option<centralu_keeper_core::host_proc::store_work::StoreWork> {
+    sup.store_work()
+}
+
 /// Which builds are involved (#280): this window's, the running host's, and whether they are
 /// the same one. `mode` is `keeper` or `direct`.
 #[tauri::command]
@@ -196,7 +202,7 @@ fn working_dir_away_from(cwd: &std::path::Path, exe_dir: &std::path::Path, home:
 fn leave_app_folder() {
     let (Ok(cwd), Ok(exe)) = (std::env::current_dir(), std::env::current_exe()) else { return };
     let Some(exe_dir) = exe.parent() else { return };
-    let home = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let home = centralu_keeper_core::os::home().map(std::path::PathBuf::from);
     if let Some(to) = working_dir_away_from(&cwd, exe_dir, home) {
         if let Err(e) = std::env::set_current_dir(&to) {
             eprintln!("[startup] could not leave the app folder for {}: {e}", to.display());
@@ -309,6 +315,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,
+            host_store_work,
             restart_host,
             set_badge,
             alert,

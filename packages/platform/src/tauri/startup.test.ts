@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fixture from '../../../../tooling/fixtures/host-lock-store-work.json'
 
 const invoke = vi.fn()
 const handlers = new Map<string, (e: { payload: unknown }) => void>()
@@ -79,6 +80,57 @@ describe('waiting for the host', () => {
     await expect(createTauriPlatform()).rejects.toThrow('Could not find Node.js')
     // Subscriptions do not pile up on every retry
     await vi.waitFor(() => expect(unlistened).toContain('host-status'))
+  })
+})
+
+describe('a host that works on its store before it answers (#2334)', () => {
+  it('is waited for past the 30 seconds while the shell reports the work, which the screen is told, and then the wait is the usual one', async () => {
+    vi.useFakeTimers()
+    try {
+      // What the shell reads from host.lock, as the host writes it (tooling/fixtures/host-lock-store-work.json)
+      const work = (JSON.parse(fixture.record) as { store: unknown }).store
+      let working = true
+      let ready = false
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'host_info') return ready ? { port: 1, token: 't' } : null
+        if (cmd === 'host_store_work') return working ? work : null
+        return null
+      })
+      const told: unknown[] = []
+      let settled = false
+      const platform = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).finally(() => (settled = true))
+      // Before: rejected at 30 s with "agent-host did not become ready in time", the copy still running
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(settled).toBe(false)
+      // Once for the work, not once per check (the screen's clock is reset by each)
+      expect(told).toEqual([work])
+
+      working = false
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(told).toEqual([work, null])
+      ready = true
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(settled).toBe(true)
+      vi.useRealTimers()
+      const p = await platform
+      await p.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a report that is not one is no work: the screen is told none, and the usual wait ends the start', async () => {
+    vi.useFakeTimers()
+    try {
+      invoke.mockImplementation(async (cmd: string) => (cmd === 'host_store_work' ? { doing: 'copy', step: '76' } : null))
+      const told: unknown[] = []
+      const failed = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).catch((e: Error) => e.message)
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(await failed).toBe('agent-host did not become ready in time')
+      expect(told).toEqual([null])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

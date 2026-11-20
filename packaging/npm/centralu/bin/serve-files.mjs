@@ -669,23 +669,35 @@ export function foreignHolder(dataDir) {
 }
 
 /**
- * Whether the process `host.lock` names is the one that wrote it (#838 review): alive, and started when the lock says
- * (`ps -o lstart`, as the host writes it, `instance-lock.ts`). A lock left by a host that died, whose pid another
- * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
- * start time and no `at` (its host found no `ps`) cannot be told apart, so it does not count. Windows has no `ps` and its
- * host records no start time (#1723), only `at`, when it took the folder: the process that wrote the lock was created by
- * then, and one given its number afterwards was created later. Both times come from one clock and the host writes `at`
- * 17 ms or more after its process was created, so the slack is one clock tick, for the two readings of it. An `at` in the
- * future (a clock set back since) proves nothing.
+ * Whether the process `host.lock` names is identified as the one that wrote it (`isWriter` true): what a stop may signal,
+ * and what `heldHere` counts as this folder's host. One that cannot be identified is never signalled, whatever the age
+ * of its record: it may be any process of the user's that got a dead host's pid. Waiting on a host goes by `isLockWriter`.
  */
 export function lockHolderIsAlive(dataDir, startOf = processStartTime, createdAt = processCreatedAt) {
   return isWriter(lockHolder(dataDir), startOf, createdAt) === true
 }
 
 /**
- * Whether `{ pid, started, at }` names the live process that wrote it, by `lockHolderIsAlive`'s rule: true, false, or
- * null when it lives and Windows cannot say when it was created (another logon's process); each caller decides what
- * that counts as
+ * Whether host.lock's `holder` names the live process that wrote it, for waiting on it (`storeWork`, `--stop`'s wait on
+ * a start, a stop's wait on store work), as the shell's reader does (keeper `host_proc/store_work.rs`): `isWriterWithin`
+ * for as long as a start takes (`STARTING_MAX_MS`). `known` keeps what `writer` said per record between calls, since a
+ * Windows creation time costs a PowerShell; the record's age is read at each call.
+ */
+export function isLockWriter(holder, known = new Map(), writer = isWriter) {
+  if (!holder || !isAlive(holder.pid)) return false
+  const key = `${holder.pid}:${holder.started}:${holder.at}`
+  if (!known.has(key)) known.set(key, writer(holder))
+  return isWriterWithin(holder, STARTING_MAX_MS, () => known.get(key))
+}
+
+/**
+ * Whether `{ pid, started, at }` names the live process that wrote it (#838 review): true, false, or null when it lives
+ * and its creation cannot be read (Windows will not say for another logon's process); each caller decides what null
+ * counts as. Where the writer recorded `started` (`ps -o lstart`, `instance-lock.ts`), the process must have started
+ * then. Without it (Windows has no `ps`, #1723) only `at`, when the record was written: the writer was created by then,
+ * and a process given its number afterwards was created later. Both times come from one clock and the host writes `at`
+ * 17 ms or more after its process was created, so the slack is one clock tick, for the two readings of it. A record with
+ * neither, or an `at` in the future (a clock set back since), proves nothing.
  */
 export function isWriter(holder, startOf = processStartTime, createdAt = processCreatedAt) {
   if (!holder || !isAlive(holder.pid)) return false
@@ -696,32 +708,60 @@ export function isWriter(holder, startOf = processStartTime, createdAt = process
 }
 
 /**
- * `isWriter` with its third answer settled: a process that lives but whose creation Windows will not tell (another logon's,
- * `null`) counts as the writer while its record is younger than `maxAgeMs`, by the `at` it wrote. Asking for more
- * (an elevated read, a prompt) is not an option for a launcher; the cost is a stranger that took a dead writer's pid
- * within that time counting as the writer for the rest of it.
+ * `isWriter` with its third answer settled: a process that lives but whose creation cannot be read (`null`) counts as the
+ * writer while its record is younger than `maxAgeMs`, by the `at` it wrote. Asking for more (an elevated read, a prompt)
+ * is not an option for a launcher; the cost is a stranger that took a dead writer's pid within that time counting as the
+ * writer for the rest of it, so this is for waiting, never for signalling.
  */
 export function isWriterWithin(holder, maxAgeMs, writer = isWriter) {
   const w = writer(holder)
-  return w === null ? typeof holder?.at === 'number' && Date.now() - holder.at < maxAgeMs : w
+  return w === null ? typeof holder?.at === 'number' && Date.now() - holder.at < maxAgeMs : w === true
 }
 
 /** One tick of the Windows clock */
 const CLOCK_TICK_MS = 16
 
 /**
- * host.lock's `{ pid, started, by? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
- * (`instance-lock.ts`), absent when the host did not say
+ * host.lock's `{ pid, started, by?, store? }`. `by` (#1223, additive) is who started the host: `app`, `keeper` or `serve`
+ * (`instance-lock.ts`), absent when the host did not say. `store` (#2334, additive) is what the host does to its store
+ * before it can answer (agent-host `store/store-work.ts`); one that does not read whole is left out
  */
 function parseLockHolder(text) {
   try {
     const v = JSON.parse(text)
     if (!Number.isInteger(v?.pid) || v.pid <= 0) return null
     const by = v.by === 'app' || v.by === 'keeper' || v.by === 'serve' ? v.by : null
-    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(Number.isFinite(v.at) ? { at: v.at } : {}), ...(by ? { by } : {}) }
+    const store = parseStoreWork(v.store)
+    return { pid: v.pid, started: typeof v.started === 'string' ? v.started : null, ...(Number.isFinite(v.at) ? { at: v.at } : {}), ...(by ? { by } : {}), ...(store ? { store } : {}) }
   } catch {
     return null
   }
+}
+
+/** `{ doing, step, bytes, since }` from host.lock's `store`, or null: @cc/protocol's `StoreWork`, read without it */
+function parseStoreWork(w) {
+  if (w?.doing !== 'copy' && w?.doing !== 'update') return null
+  if (!Number.isInteger(w.step) || !Number.isFinite(w.bytes) || w.bytes < 0 || !Number.isFinite(w.since)) return null
+  return { doing: w.doing, step: w.step, bytes: w.bytes, since: w.since }
+}
+
+/**
+ * What the host that holds the folder does to its store before it can answer (#2334, `StoreWork` in @cc/protocol),
+ * `{ doing, step, bytes, since }`, or null. The one reader of it here: `--detach`, `--connection`, the update switch and
+ * `--stop` wait while it is said, instead of taking a host that does not answer yet for a start that hung.
+ *
+ * Believed only while host.lock names the process that wrote it (`isLockWriter`): a host ended in its work leaves the
+ * record. No other limit: a copy or a step is SQLite work under the folder's lock, which ends or fails, and the person
+ * sees how long it has run. A caller that asks again and again passes the same `known`.
+ */
+export function storeWork(dataDir, known = new Map(), writer = isWriter) {
+  const h = lockHolder(dataDir)
+  return h?.store && isLockWriter(h, known, writer) ? h.store : null
+}
+
+/** What `storeWork` says, in the words every surface uses (@cc/protocol `storeWorkWords`, which a test holds this to) */
+export function storeWorkText(work) {
+  return work.doing === 'copy' ? 'copying its data before an update' : 'updating its data for the new version'
 }
 
 /**

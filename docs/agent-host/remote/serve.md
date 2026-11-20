@@ -142,6 +142,37 @@ created a process that never ran (no `serve.log` within 10 s, or the process gon
 Defender's attack surface reduction rule "Block process creations originating from PSExec and WMI commands", off by
 default and turned on by some managed machines. The hub then runs the host bound to its link ([hub-links.md](hub-links.md)).
 
+**A host that works on its store before it answers is waited for, never taken for a start that failed** (#2334). A
+copy of the store before a step that breaks older readers, or a long store step, can take minutes on a large store
+(an 18 GB store took 54 to 59 s to copy on a Windows 11 NVMe disk), and the host answers no one meanwhile. It says so
+in `host.lock`: `store: { doing: 'copy' | 'update', step, bytes, since }` beside who holds the folder, written before
+the copy and before each step and taken out after the last ([stored-shapes.md](../../stored-shapes.md)). The launcher
+reads it in one place (`storeWork` in `serve-files.mjs`), and only while `host.lock` names the process that wrote it
+(`isLockWriter`, the rule every reader that waits on the host goes by, the shell's included): one identified by its
+start time counts, and one Windows cannot identify (another logon's process) only while the record is younger than a
+start takes, 120 s. A host ended in its work leaves the record, and its pid may be another process's by then. The 120 s
+count from when the host took the folder, so an unidentifiable host still copying after them is no longer waited for;
+an identified one, the usual case, is waited for to the end. A stop signals only an identified writer
+(`lockHolderIsAlive`): one it cannot identify is left, whatever the record's age. Every surface says the
+work in the same words, with no step number ("copying its data before an update", `storeWorkWords` in @cc/protocol).
+Then:
+
+- `--detach` does not count the work against its waits: each runs from when the host stops saying it. A host that
+  already holds the folder and says it is waited for, and no second one is started beside it. Past 90 s from the
+  start of `--detach` (`DETACH_WORK_CAP_MS`, inside the hub's 120 s ssh deadline) with the work still said, it
+  answers `reason: "starting"` with the `work`. The hub's link then says `starting` and what the host
+  does, asks again every 5 s and starts nothing; an older hub shows the message and retries on its backoff. The
+  window's `--window` waits with no cap.
+- `--connection` adds `starting: { doing, step, bytes, since }` while no host answers, and a link that reads it waits the
+  same way instead of running `--detach`.
+- The update switch's check (`hear`) waits for as long as the work is said, and the new version then has the usual
+  30 s to answer; the switcher writes its lock's time again meanwhile, so a reader that cannot read its creation time
+  still takes it for alive.
+- `--stop` from a hub (`CENTRALU_STOP_BY=hub`: an update, a rollback, the switch's put-back, an uninstall) waits for
+  the work to end and then stops the host in order: ended in its copy, it would copy the whole store again at its next
+  start, and an update that stopped it each time would never land. A person's `--stop` (and "Quit completely") ends it
+  as before, and its answer says that the next start does the work again.
+
 **A Node below the floor is refused before any host starts** (#699). The floor is `engines.node` of the npm package
 (22.14.0), read by `bin/node-floor.mjs` and nowhere restated. The bundled better-sqlite3 declares Node-API 10, which
 Node has from 22.14.0; under 22.12.0 (measured on Windows and on macOS) the module loads and then crashes on its first

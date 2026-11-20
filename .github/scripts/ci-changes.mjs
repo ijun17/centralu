@@ -68,7 +68,7 @@ const TESTS = [/\.test\.(ts|tsx|mts|mjs)$/, /\.test-helpers\.(ts|mts)$/, /^e2e\/
  * `include_str!`, and only the keeper jobs run those. So a change to one alone runs the host jobs (and the host's
  * tests, which read them too), though no bundle carries it.
  */
-const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/]
+const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/, /^tooling\/fixtures\/host-lock-store-work\.json$/]
 /** The window: what the host, the keeper and the content verifier never load */
 const WINDOW = [/^packages\/(ui|core|platform)\//, /^apps\/web\//]
 /** The product the UI scenarios start and speak to besides the window: the host and the protocol between them, and the helpers both run (packages/common) */
