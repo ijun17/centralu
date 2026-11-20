@@ -62,9 +62,10 @@ anything else unlisted is refused. git is given the path as it lists it (a Windo
 A removal that cannot finish (a file held open) throws with the path and what was left, and git's entry stays for a
 retry; the archive's answer and the purge say so.
 
-**Where worktrees are, and what a start sweeps** (#2344). The worktree root is `worktrees` beside the store: in the
-data folder, or beside a `--db` named elsewhere (`worktreeRootIn`, the one definition), so a host or test given
-`CC_DATA_DIR` never makes one in the real `~/.centralu`. As the host starts, it removes each session folder in the root
+**Where worktrees are, and what a start sweeps** (#2344). The worktree root is `worktrees` in the data folder
+(`worktreesFolder`, the one definition), beside `worktree-recovery` (`worktreeRecoveryFolder`), so a host or test given
+`CC_DATA_DIR` never makes one in the real `~/.centralu`. A `--db` named elsewhere moves the store and its logs, not the
+worktrees: a worktree and its recovery snapshots stay in one folder. As the host starts, it removes each session folder in the root
 (`<project id>/<session id>`) that a removal left part way: owned by no session (no live or archived session has its
 name as its id, or has it or a folder inside it as its worktree or working folder), not listed by git, and with no
 `.git`. It goes through `gitWorktreeRemove` with `leftoverOnly`, which refuses a folder git lists on its own read of

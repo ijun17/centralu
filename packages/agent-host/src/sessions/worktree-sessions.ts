@@ -51,7 +51,7 @@ import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
 import { durationText, sleep } from '../timing.js'
 import { realOs } from '../os/real.js'
-import { isUuid } from '../adapters/input-receipts.js'
+import { isUuid } from '../uuid.js'
 
 /** How long a project's setup command may run in a new worktree */
 const SETUP_TIMEOUT_MS = 90_000

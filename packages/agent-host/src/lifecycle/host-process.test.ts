@@ -6,6 +6,7 @@
  * These are the rules a unit test of one module cannot see, because they are about the order `main.ts` takes its steps in.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -233,6 +234,28 @@ describe('the host process, started for real', () => {
     }
     host.p.stdin!.end()
     expect(await host.exited).toBe(0)
+  }, 60_000 * SLOW)
+
+  /*
+   * The worktrees are in the data folder, beside their recovery snapshots, wherever `--db` puts the store: a folder planted
+   * in `CC_DATA_DIR/worktrees` is what the start's sweep reads (its project is not registered, so it is kept and named)
+   */
+  it('a --db outside the data folder leaves the worktree root in the data folder', async () => {
+    const s = setup()
+    const elsewhere = join(s.dir, 'elsewhere')
+    mkdirSync(elsewhere)
+    const project = randomUUID()
+    mkdirSync(join(s.dir, 'worktrees', project, randomUUID()), { recursive: true })
+    const host = startHost({ ...s, db: join(elsewhere, 'store.db') }, ['--watch-parent'])
+    await host.ready
+    const log = () => (existsSync(join(elsewhere, 'host.log')) ? readFileSync(join(elsewhere, 'host.log'), 'utf8') : '')
+    const said = `kept 1 folder(s) in ${join(s.dir, 'worktrees', project)} that no session owns`
+    // The sweep's line, written as the start reads the folder: waited for, within the start's own bound
+    for (const deadline = Date.now() + 30_000 * SLOW; !log().includes(said) && Date.now() < deadline; ) await settle(50)
+    host.p.stdin?.end()
+    expect(await host.exited).toBe(0)
+    expect(log()).toContain(said)
+    expect(existsSync(join(elsewhere, 'worktrees'))).toBe(false)
   }, 60_000 * SLOW)
 
   it('the log is on before PATH and the lock: a refused start says why in host.log, after the banner (HO3)', () => {

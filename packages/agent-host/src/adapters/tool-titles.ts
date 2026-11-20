@@ -1,6 +1,6 @@
 import { appServerName, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../apps/contract.js'
-import { isUuid } from './input-receipts.js'
+import { isUuid } from '../uuid.js'
 import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
 /**

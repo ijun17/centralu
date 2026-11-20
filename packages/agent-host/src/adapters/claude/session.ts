@@ -1,6 +1,7 @@
 import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
-import { centraluInputId, isUuid, type InputReceipt } from '../input-receipts.js'
+import { centraluInputId, type InputReceipt } from '../input-receipts.js'
+import { isUuid } from '../../uuid.js'
 import type { InputObserver } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'

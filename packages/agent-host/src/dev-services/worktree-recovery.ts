@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { errorMessage, isSessionId } from '@cc/protocol'
 import { isObj } from '../json-value.js'
-import { dataRoot } from '../data-dir.js'
+import { worktreeRecoveryFolder } from '../data-dir.js'
 import { dataBytes, removeData } from './data-folder.js'
 import { gitFilterListings, runGit, type GitFilterListings, type GitTrust, type RunGitOptions } from './git-exec.js'
 import { assertExistingPath } from './path-guard.js'
@@ -20,7 +20,7 @@ const RECOVERY_TIMEOUT = 120_000
 
 export function worktreeRecoveryDir(sessionId: string): string {
   if (!isSessionId(sessionId)) throw new Error('Invalid session id for worktree recovery')
-  return join(dataRoot(), 'worktree-recovery', sessionId)
+  return join(worktreeRecoveryFolder(), sessionId)
 }
 
 /**
@@ -48,7 +48,7 @@ const PURGING = '.purging-'
  * Run at startup, when no purge is under way.
  */
 export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string) => boolean): Promise<void> {
-  const root = join(dataRoot(), 'worktree-recovery')
+  const root = worktreeRecoveryFolder()
   if (!existsSync(root)) return
   for (const name of await readdir(root)) {
     const at = name.indexOf(PURGING)
