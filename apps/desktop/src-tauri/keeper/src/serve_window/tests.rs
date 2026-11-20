@@ -50,7 +50,7 @@ fn windows_plan(serve_said: Option<&str>, window_protocol: u32) -> Option<Host> 
     plan(&f).host
 }
 
-/// The review's cases: each one that cannot serve the window starts the bundled host, as before #1223
+/// The review's cases: each one that cannot serve the window starts the bundled host, as a window without serve does
 #[test]
 fn an_older_serve_a_serve_on_another_protocol_and_one_that_did_not_answer_leave_the_window_its_bundled_host() {
     assert_eq!(windows_plan(Some(&line(r#","takes":["from","window"]"#, 1)), 1), Some(Host::Serve));
@@ -227,7 +227,7 @@ fn host_in(launcher: std::path::PathBuf, ready: bool) -> (ServeHost, Arc<ServeFa
     (ServeHost::new(launcher, fallback.clone()), fallback)
 }
 
-/// #1466: "Quit completely" in a window on the serve host did nothing, and left the host running
+/// #1466: "Quit completely" in a window on the serve host stops that host with `serve --stop`, and says why when it cannot
 #[test]
 fn quit_completely_on_the_serve_host_runs_serve_stop_as_a_quit_and_says_why_it_could_not() {
     let (launcher, marker) = recording_launcher("ok", r#"{"v":1,"stop":{"ok":true,"wasRunning":true}}"#);
@@ -256,8 +256,8 @@ fn a_window_that_fell_back_to_its_own_host_stops_nothing_through_serve() {
     assert!(!marker.exists(), "the bundled host the window runs is stopped by quitting");
 }
 
-/// The review of #1964: a stop 0.7 s after `serve --window` began answered "not running", the host came up at 1.7 s and
-/// kept running, and the window quit
+/// #1964 review: a stop 0.7 s after `serve --window` began, before its host comes up at 1.7 s, waits for that host and
+/// stops it, rather than answer "not running" and leave it running after the window quits
 #[test]
 fn a_stop_while_the_serve_host_is_starting_waits_for_it_and_stops_it() {
     let (host, fallback) = host_in(std::path::PathBuf::from("unused"), false);

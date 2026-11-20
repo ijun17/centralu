@@ -12,10 +12,8 @@ use std::time::{Duration, Instant};
  * Whether the keeper the window is attached to is of the window's build, from the build the
  * keeper reports for itself (`keeper.build`, #280 step 4).
  *
- * A keeper that reports none is older than step 4: it cannot hand itself over, and ignores the
- * `keeper` a switch names. Until #461 the window could not tell such a keeper's build and left it
- * alone; now it counts as another build, so after the host moves the window offers "Restart
- * completely", which starts a keeper of its own build.
+ * A keeper that reports none is older than step 4, and counts as another build (#461), so the
+ * window offers "Restart completely", which starts a keeper of its own build.
  */
 pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource) -> bool {
     keeper.is_some_and(|b| b.same_build(app))
@@ -67,7 +65,7 @@ impl UpdateStop {
  * "Apply now" with a keeper (#1895 step 4, PR 3): the keeper stops the host for an update and exits, and the relaunched window
  * starts the new build's (`stops_for_update`, what `before_relaunch` asks). The keeper reports when the host is busy, so the
  * automatic mode waits for idle and applies by itself. A keeper of an earlier build than step 3 cannot stop that way, and no
- * window switches one any more: not offered, the build bar's restart into this build comes first. While the keeper's host is
+ * window switches one: not offered, the build bar's restart into this build comes first. While the keeper's host is
  * not up it cannot say, and the reason says to wait rather than to restart the keeper.
  */
 pub(crate) fn with_keeper(info: RelaunchInfo, stop: UpdateStop) -> RelaunchInfo {
@@ -82,7 +80,7 @@ mod tests {
     use super::*;
 
     /// #1895 step 4, PR 3: "Apply now" stops the host for an update through the keeper, and only a keeper that can is
-    /// offered it: an earlier one would be left holding the old host behind a relaunch nobody switches any more
+    /// offered it: an earlier one would be left holding the old host behind a relaunch nobody switches
     #[test]
     fn apply_now_is_offered_only_with_a_keeper_that_stops_for_an_update() {
         let ready = RelaunchInfo { ready: true, ..Default::default() };
@@ -130,9 +128,8 @@ mod tests {
         assert!(!keeper_same_build(None, &app));
     }
 
-    /// The UI used to be told only when one of seven fields of the keeper's view changed, named one
-    /// by one, so a field added to `HostBuild` but not to that list never reached it. Now any change
-    /// to what the UI is given counts.
+    /// Any change to what the UI is given counts, not a list of named fields, so a field added to
+    /// `HostBuild` reaches the UI without being named.
     #[test]
     fn the_ui_hears_of_any_change_to_the_build_and_of_nothing_else() {
         let build = HostBuild { mode: "keeper", busy: Some(false), ..Default::default() };
@@ -290,7 +287,7 @@ impl KeeperLink {
 
     /// "Apply now" (#1895 step 3): the keeper stops the host for an update and exits, and this window stops attaching, so it
     /// starts no keeper of its own build behind the relaunch. Returns once the keeper is gone. Err, in words that follow "Not
-    /// relaunched:", when the keeper refused (it stopped nothing, and this window attaches on as before). A quit meanwhile is
+    /// relaunched:", when the keeper refused (it stopped nothing, and this window attaches on). A quit meanwhile is
     /// refused (`stop`)
     pub fn stop_for_update(&self) -> Result<(), String> {
         let keeper_pid = self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.keeper.pid));
@@ -357,7 +354,7 @@ impl KeeperLink {
             // KeeperBeside, and a mode that never reaches here (Direct, Attach)
             _ => (keeper_exe::beside(&me), false),
         };
-        // Until #461 the window's own executable ran the keeper when none was beside it
+        // No keeper beside it: the window's own executable does not stand in (#461)
         if !in_process && !exe.is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -462,7 +459,7 @@ impl KeeperLink {
 
     /// Keeps the app attached: finds or launches the keeper, attaches, and on losing it
     /// (the keeper crashed or was stopped by someone else) starts over with backoff, by the
-    /// same rules the app used for a crashed host.
+    /// same rules as the direct path's for a crashed host.
     fn run(self: &Arc<Self>, app: &AppHandle) {
         let mut attempt = 0u32;
         loop {
@@ -747,7 +744,7 @@ mod update_stop_tests {
         dir
     }
 
-    /// Refused while the keeper still answers: nothing was stopped, the window says why and goes on attaching as before
+    /// Refused while the keeper still answers: nothing was stopped, the window says why and goes on attaching
     #[test]
     fn a_refused_stop_for_an_update_keeps_the_window_attached_and_says_why() {
         let dir = scratch("refused");
@@ -772,9 +769,10 @@ mod update_stop_tests {
     }
 
     /**
-     * Review of #1895 step 3: with background mode on, a refused stop for an update fell through to the relaunch (the check
-     * meant for an older keeper that cannot hold on), so the relaunched window found the same keeper and nothing applied.
-     * And the refusal said "With background mode off the running agents would stop", whatever the keeper's reason was.
+     * Review of #1895 step 3: with background mode on, a refused stop for an update does not fall through to the relaunch
+     * (the check meant for an older keeper that cannot hold on), where the relaunched window would find the same keeper and
+     * nothing would apply. And the refusal gives the keeper's own reason, not "With background mode off the running agents
+     * would stop".
      */
     #[test]
     fn apply_now_refused_by_the_keeper_does_not_relaunch_even_with_background_mode_on() {
@@ -793,10 +791,10 @@ mod update_stop_tests {
     }
 
     /**
-     * Review of #1895 step 3: a keeper stopping for an update that this window's "Apply now" did not ask for (now a restart into
-     * this build) removes its socket and runs on for up to the stop's bound, with no `stopping_for_update` of this window's set. "Quit completely" then found no
-     * socket and failed with no reason the person could act on, and the window, already marked shutting down, never attached
-     * again. It is refused now, saying why, and the window attaches on.
+     * Review of #1895 step 3: a keeper stopping for an update that this window's "Apply now" did not ask for (a restart into
+     * this build) removes its socket and runs on for up to the stop's bound, with no `stopping_for_update` of this window's set.
+     * "Quit completely" is then refused, saying why, and the window attaches on, rather than fail on the missing socket with
+     * no reason the person could act on and, already marked shutting down, never attach again.
      */
     #[test]
     fn a_quit_while_the_keeper_is_on_its_way_out_is_refused_and_says_why() {

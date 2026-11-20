@@ -1,12 +1,12 @@
 //! What the keeper writes to an attached window, written by a thread of the window's own instead of
 //! under the keeper's state lock (#840 item 5).
 //!
-//! A push used to be a blocking write inside `Keeper::broadcast`, which runs under the state lock: a
-//! window that stopped reading held every push, every request and the host's status sink for up to
-//! `WINDOW_WRITE_TIMEOUT` on each change. Now `broadcast` only queues the line. Each window's writer
-//! sends its queue in order; a status view still waiting when a newer one comes is replaced by it
-//! (each view is whole, so only the newest matters), while an answer (`attach`'s) is never dropped. A
-//! write that fails or times out closes the window, as before (`on_fail`).
+//! `Keeper::broadcast` runs under the state lock, so it only queues the line: a blocking write there
+//! would let a window that stopped reading hold every push, every request and the host's status sink
+//! for up to `WINDOW_WRITE_TIMEOUT` on each change. Each window's writer sends its queue in order; a
+//! status view still waiting when a newer one comes is replaced by it (each view is whole, so only the
+//! newest matters), while an answer (`attach`'s) is never dropped. A write that fails or times out
+//! closes the window (`on_fail`).
 
 use std::collections::VecDeque;
 use std::io::Write;

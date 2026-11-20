@@ -26,7 +26,7 @@
 //! only as strong as the path. What this closes is the easy path: a script asking the socket for
 //! the token, or running a copy of `node` named `centralu`.
 //!
-//! **Linux.** No Linux window starts a keeper since #1895 step 4 PR 7 (`start_plan.rs`). A window there
+//! **Linux.** No Linux window starts a keeper (#1895 step 4 PR 7, `start_plan.rs`). A window there
 //! runs from its AppImage's mount, whose path changes at every launch, so a keeper would accept only
 //! the window that started it (its `--bundle-path`), and this is a limit to settle before a Linux
 //! keeper is ever brought back (docs/plans/keeper-removal.md §2.4).

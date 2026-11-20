@@ -11,10 +11,10 @@
 //!     its own (#440), detached into its own session — and attaches to it over its control socket.
 //!     A macOS release first asks the shell to start it (`crate::shell`, thin-shell plan §6): the
 //!     shell holds macOS permissions across updates, and when it does not start a keeper the window
-//!     starts one itself, as before, and says why. The keeper holds the host, so quitting, crashing
-//!     or replacing the app does not end the host unless background mode is off, in which case the
-//!     keeper stops it the moment the last window detaches, as quitting always did.
-//!   - **Direct**: the app is the host's parent, exactly as before.
+//!     starts one itself, and says why. The keeper holds the host, so quitting, crashing or
+//!     replacing the app does not end the host unless background mode is off, in which case the
+//!     keeper stops it the moment the last window detaches.
+//!   - **Direct**: the app is the host's parent.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -269,7 +269,7 @@ impl Supervisor {
 
     /// Called when the app quits.
     ///
-    /// Direct: stops the host, as always. Keeper: only detaches. The keeper applies background
+    /// Direct: stops the host. Keeper: only detaches. The keeper applies background
     /// mode itself — with it off it stops the host now; with it on, the host keeps running.
     /// Either way the app does not wait: the keeper gives the host its grace period after the
     /// app is gone.
@@ -323,7 +323,7 @@ impl Supervisor {
             }),
             #[cfg(unix)]
             Choice::Direct if centralu_keeper_core::os::RELAUNCH_WITHOUT_KEEPER => relaunch::direct_info(),
-            // Where nothing relaunches into the new build (a quit and open is the update): no reason, as before the port was offered here
+            // Where nothing relaunches into the new build (a quit and open is the update): no reason
             _ => RelaunchInfo::default(),
         }
     }
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn the_direct_path_stays_the_default_for_debug_builds() {
-        // `pnpm app:dev` must keep running the host as the app's own child, unchanged.
+        // `pnpm app:dev` must run the host as the app's own child.
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
             assert!(!start_plan::plan(&Facts::window(Env::current(), true, false)).mode.keeper());
         }
@@ -430,7 +430,7 @@ mod tests {
         (launcher, marker)
     }
 
-    /// #1466: `stop_agents` was `_ => Ok(())` and `build` said "direct" for a window on the serve host, and nothing failed
+    /// #1466: for a window on the serve host, `build` says so and "Quit completely" stops that host
     #[test]
     fn a_window_on_the_serve_host_reports_it_and_quit_completely_stops_it() {
         let (launcher, marker) = stopping_launcher();

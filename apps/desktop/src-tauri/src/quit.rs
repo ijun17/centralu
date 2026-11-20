@@ -4,8 +4,7 @@
 use tauri::{AppHandle, State};
 
 /**
- * Make ⌘Q ask too (dogfooding, 2026-09-07: "⌘W no longer quits immediately, but ⌘Q still
- * does").
+ * Make ⌘Q ask too, as ⌘W does.
  *
  * The ExitRequested gate in the run callback below **never sees ⌘Q.** The evidence is in the
  * upstream source:
@@ -48,8 +47,7 @@ pub(crate) fn install_quit_menu(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /**
- * The person confirmed quitting in the modal (dogfooding, 2026-09-04: prevent an immediate
- * quit from ⌘Q/⌘W).
+ * The person confirmed quitting in the modal, so ⌘Q and ⌘W never quit at once.
  *
  * The flag is set before calling exit — this exit in turn produces another ExitRequested, and
  * the gate (the run callback below) has to let it through at that point. The flag is the

@@ -2,12 +2,9 @@
 //! with its reason. docs/agent-host/lifecycle/start.md lists every row this function returns, per platform; the
 //! table test below holds those rows.
 //!
-//! Before this module the decision was spread over `use_keeper()` and `shell_resources()` in the
-//! window, the keeper executable's `exec_target`, `debug_assertions` at several sites and five
-//! environment variables read where they were used. Now every start site reads its facts
-//! (`Facts::window`), asks `plan`, and does what the answer says.
+//! Every start site reads its facts (`Facts::window`), asks `plan`, and does what the answer says.
 //!
-//! `centralu --keeper` is no longer a start site of its own (#461): the window's executable runs
+//! `centralu --keeper` is not a start site of its own (#461): the window's executable runs
 //! the keeper only for a debug window that asked (`StartMode::KeeperInProcess`), and otherwise
 //! refuses at once (`keeper::exe::run_from_window`).
 //!
@@ -17,8 +14,6 @@
 //!     whether the carried shell is pinned, and why it refused (`shell::start::start`). The window
 //!     tells this plan only whether the shell already failed to start a keeper in its life
 //!     (`Shell::FellBack`), after which every start is direct;
-//!   - which way a keeper hands itself over (`server::content_route` in the keeper: from verified
-//!     content, or to the executable a window names);
 //!   - `centralu serve` and the npm launcher, which start the host from Node
 //!     (`packaging/npm/centralu/bin/`), listed in the same table.
 //!
@@ -81,7 +76,7 @@ pub struct Env {
     /// `CC_HOST_CMD`: the host's command line, split on whitespace. Any value, even a blank one,
     /// keeps the window the host's parent; only a non-blank one replaces the host it runs.
     pub host_cmd: Var,
-    /// `CC_USE_KEEPER=1`: a macOS debug build uses the keeper. Linux ignores it since #1895 step 4 PR 7.
+    /// `CC_USE_KEEPER=1`: a macOS debug build uses the keeper. Linux ignores it (#1895 step 4 PR 7).
     pub use_keeper: bool,
     /// `CC_KEEPER_HOST_SOURCE`: the host folder a keeper runs (the keeper scripts' way of naming the
     /// repository's freshly bundled host). Any value keeps the window from going through the shell;
@@ -238,8 +233,7 @@ impl Reason {
         match self {
             Reason::HostCommand => "CC_HOST_CMD is set: the window runs that host itself",
             Reason::NoKeeperHere => "the keeper is built on unix sockets, descriptor passing and flock; Windows has no keeper yet",
-            // Until #1895 step 4 PR 7 CC_USE_KEEPER=1 ran a keeper from a copy out of the AppImage's mount
-            // (docs/plans/keeper-removal.md §2.4): no Linux desktop ever ran it by default.
+            // Why Linux is direct: docs/plans/keeper-removal.md §2.4
             Reason::LinuxDirect => "a Linux window is the host's parent: there is no permission model for a keeper to hold",
             Reason::DebugDirect => "a debug build is the host's parent unless CC_USE_KEEPER=1",
             Reason::KeeperAnswers => "a keeper already answers on keeper.sock",

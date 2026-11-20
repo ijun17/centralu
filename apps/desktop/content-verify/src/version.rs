@@ -154,7 +154,7 @@ pub fn read_highest_seen(path: &Path) -> Result<Option<String>> {
 /// (unix), with a temporary file of this call's own (#840 item 14). The shell and a keeper, or two
 /// threads of one keeper, record at once: without the lock one could read the floor, the other
 /// raise it, and the first write back a lower version over it; with one temporary name per
-/// process, two threads wrote the same file and a rename failed or published a mix.
+/// process, two threads would write the same file and a rename would fail or publish a mix.
 pub fn record_started(path: &Path, version: &str, rollback: Rollback) -> Result<()> {
     let v = Version::parse(version)?;
     let _held = lock_folder_of(path).map_err(|e| Error::io(format!("lock the folder of {}", path.display()), e))?;

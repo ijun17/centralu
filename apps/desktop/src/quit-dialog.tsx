@@ -9,7 +9,7 @@ import { COMPLETELY_STOPS, SERVE_COMPLETELY_STOPS } from '../../../packages/plat
 export type Stray = { pid: number; command: string; cwd: string }
 
 /**
- * The quit question (dogfooding 2026-09-04, #280). Its buttons follow background mode ("Keep agents
+ * The quit question (#280). Its buttons follow background mode ("Keep agents
  * running after Centralu quits"):
  *
  * - **Off** (or unknown, or no keeper): quitting already stops the keeper, the host and everything
@@ -25,9 +25,8 @@ export type Stray = { pid: number; command: string; cwd: string }
  *   then quits, so the turns go on; the dialog says it turns the setting on, since nothing else asks. Without a turn
  *   running there is nothing to keep, so it is not offered.
  *
- * "Quit completely" used to read "Quit and stop agents", which undersold it: it also ends every
- * terminal, running command and app process. What each button does did not change: off, both
- * paths are the plain quit, which the keeper turns into a full stop; on, "Quit completely" is the
+ * "Quit completely" ends every agent, terminal, running command and app process. Off, both paths
+ * are the plain quit, which the keeper turns into a full stop; on, "Quit completely" is the
  * keeper's `stop`.
  *
  * Presentational: the state, the focus trap and Enter/Esc live in main.tsx, so the browser
@@ -77,8 +76,8 @@ export function QuitDialog({
   const keepsRunning = background === true || serve
   const offersKeep = background === false && running > 0 && onKeepRunning !== undefined
   /*
-   * Drawn in the app's current dialog style (owner, 2026-10-20): a title and one muted line, what is left running as a
-   * card of rows with a switch, and the shared buttons with their keys as keycaps. What each button does is unchanged.
+   * Drawn in the app's dialog style: a title and one muted line, what is left running as a card of rows with a switch,
+   * and the shared buttons with their keys as keycaps.
    */
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin" data-testid="confirm-quit" onClick={onCancel}>

@@ -68,8 +68,8 @@ pub const DESCRIPTOR_LIMIT: u64 = 10_240;
  * is lower; never lowers it. Returns the limit before and after when it changed.
  *
  * A keeper started from Finder or launchd gets a soft limit of 256, and every relay through the
- * front door holds four descriptors, every attached child stream more: a few dozen clients were
- * enough to run out, and with it every accept and spawn failed (#840 item 3). What the keeper
+ * front door holds two descriptors: a limit that low is soon reached, and with it every accept and
+ * spawn fails (#840 item 3). What the keeper
  * starts gets the limit it had before back (`original_descriptor_limit`): a program that still uses
  * `select` cannot take a descriptor at or past `FD_SETSIZE` (1,024), which a limit of 10,240 would
  * let it be given.
@@ -166,8 +166,8 @@ pub const RUNS_SH_SCRIPTS: bool = true;
 /**
  * A keeper an earlier build may have left on the window's data folder (`dev`: the dev one), its host holding the folder's
  * lock: asked to stop and waited for (`keeper::client::stop_and_wait`), so the window's own host finds the folder free.
- * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): until
- * then `CC_USE_KEEPER=1` ran a keeper there.
+ * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): an
+ * earlier build ran a keeper there under `CC_USE_KEEPER=1`.
  */
 pub fn stop_earlier_keeper(dev: bool) -> Option<String> {
     use crate::keeper::client::{stop_and_wait, Stopped};
@@ -207,13 +207,12 @@ pub fn home() -> Option<std::ffi::OsString> {
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
 /// *runs*. Not whether its number is taken, which a zombie still does.
 ///
-/// `kill(pid, 0)` alone succeeds on a zombie. A process that is someone else's child (until #1895
-/// step 4 PR 4, a host handed over by the previous keeper) and died before its parent reaped it kept
-/// reading as running under signal 0, so it was never seen as exited.
+/// `kill(pid, 0)` alone succeeds on a zombie: a process that is someone else's child and died
+/// before its parent reaped it would read as running under signal 0, and never be seen as exited.
 ///
 /// The state is read before `kill` asks whether the pid exists, never after (#546). The other
-/// order took a zombie reaped between the two calls for a running process: `kill` found the
-/// zombie, then its state could no longer be read, so it was not a zombie. Once a process has
+/// order takes a zombie reaped between the two calls for a running process: `kill` finds the
+/// zombie, then its state cannot be read, so it is not a zombie. Once a process has
 /// ended, its state reads as a zombie or not at all, and a pid whose state is gone is gone for
 /// `kill` too, so the answer cannot turn from "ended" back to "alive".
 pub fn pid_alive(pid: u32) -> bool {
@@ -261,8 +260,7 @@ pub fn kill_pid(pid: u32) {
 /**
  * Sends `signal` to the one process `pid`. Refused (`InvalidInput`) for a number `kill(2)` reads as
  * something other than one process (`signal_target`). The one way the keeper signals a single
- * process: the host, a handed-over host, a child it holds (#840 item 13, which found four signal
- * helpers, each with guards of its own).
+ * process: the host, a handed-over host, a child it holds (#840 item 13).
  */
 pub fn signal_pid(pid: u32, signal: libc::c_int) -> io::Result<()> {
     let Some(target) = signal_target(pid) else { return Err(refused(pid)) };
@@ -307,11 +305,11 @@ pub fn signal_target(pid: u32) -> Option<i32> {
  * SIGTERM to the process group `pid` leads (`spawn_host` made the group number the host's pid),
  * never to the caller's own group.
  *
- * `kill(2)` with the number negated, not `/bin/kill -TERM -<pid>` as before (#350). procps-ng
- * 4.0.4's `kill` (Ubuntu 24.04) reads a `-<pid>` that follows a signal option as more options and
- * signals the group named by **its first digit**: `-12345` became `kill(-1, SIGTERM)`, every
- * process the user may signal, and `-40000` became group 4. macOS's `kill` reads it as a group,
- * which is why only Linux ever saw it (docs/spikes/2026-10-linux-keeper.md).
+ * `kill(2)` with the number negated, not `/bin/kill -TERM -<pid>` (#350). procps-ng 4.0.4's
+ * `kill` (Ubuntu 24.04) reads a `-<pid>` that follows a signal option as more options and
+ * signals the group named by **its first digit**: `-12345` becomes `kill(-1, SIGTERM)`, every
+ * process the user may signal, and `-40000` becomes group 4. macOS's `kill` reads it as a group,
+ * so only Linux shows it (docs/spikes/2026-10-linux-keeper.md).
  */
 pub fn kill_group(pid: u32) {
     let _ = signal_group(pid, libc::SIGTERM);
@@ -359,8 +357,8 @@ pub fn probe_shell(shell: &str, timeout: std::time::Duration) -> Option<String> 
 }
 
 /// Asks an interactive login shell to run `script` and returns the first line of its output that `pick` takes, within
-/// `timeout`. The one way the keeper (and a test that wants the shell's own answer) runs the shell: a test that ran
-/// it by hand, with its stdin and process group, saw it stopped (SIGTTOU) and never return (#1883).
+/// `timeout`. The one way the keeper (and a test that wants the shell's own answer) runs the shell: run by hand, with
+/// the caller's stdin and process group, it is stopped (SIGTTOU) and never returns (#1883).
 pub fn ask_shell(shell: &str, script: &str, timeout: std::time::Duration, pick: impl Fn(&str) -> Option<String>) -> Option<String> {
     use std::io::BufReader;
     use std::path::Path;
@@ -382,8 +380,8 @@ pub fn ask_shell(shell: &str, script: &str, timeout: std::time::Duration, pick: 
     // A session of its own, not only a group: its group is still its pid, which `kill_group`
     // below needs, and it has no controlling terminal. An interactive shell in a background group
     // of a terminal's session is stopped (SIGTTOU) when it sets up job control, so an app started
-    // from a terminal (the npm launcher runs the AppImage attached to one) waited out the 5 s
-    // below and fell back to the fixed paths. Measured in WSL2 Ubuntu 24.04: state `T` in a group
+    // from a terminal (the npm launcher runs the AppImage attached to one) would wait out the 5 s
+    // below and fall back to the fixed paths. Measured in WSL2 Ubuntu 24.04: state `T` in a group
     // of its own, the answer in 0.04 s in a session of its own (docs/spikes/2026-10-linux-keeper.md).
     new_session(&mut cmd);
 
@@ -398,8 +396,8 @@ pub fn ask_shell(shell: &str, script: &str, timeout: std::time::Duration, pick: 
     //
     // The answer is the marked line, not the end of the output (#840 item 12): something the
     // configuration started in the background (an agent, a version manager's daemon) inherits
-    // stdout and keeps it open after the shell has exited, and waiting for the end then sat out the
-    // whole bound and fell back to the fixed paths with the answer already read. A reader still
+    // stdout and keeps it open after the shell has exited, and waiting for the end would sit out the
+    // whole bound and fall back to the fixed paths with the answer already read. A reader still
     // blocked on such a pipe ends when that process lets go of it.
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
@@ -515,7 +513,7 @@ mod tests {
 
     /// #840 item 12: the answer is the marked line, not the end of the output. A process the
     /// configuration left in the background holds stdout open after the shell has exited; waiting
-    /// for the end sat out the bound and fell back to the fixed paths with the answer already read.
+    /// for the end would sit out the bound and fall back to the fixed paths with the answer already read.
     #[test]
     fn the_answer_does_not_wait_for_a_background_process_holding_the_output() {
         let node = fake_shell("node-bg", "exit 0");
@@ -586,8 +584,8 @@ mod tests {
 
     /// A process that has ended is never alive again, also while it is being reaped (#546). Here
     /// a zombie is reaped while `pid_alive` asks about it, at a different moment each round. When
-    /// `kill(pid, 0)` came before the state, a zombie reaped between the two read as running: 1103
-    /// of 3000 rounds on macOS, and on Linux the member of a reaped host's group read as gone,
+    /// `kill(pid, 0)` comes before the state, a zombie reaped between the two reads as running: 1103
+    /// of 3000 rounds on macOS, and on Linux the member of a reaped host's group reads as gone,
     /// then as running, in `host_proc`'s test.
     #[test]
     fn a_zombie_reaped_while_it_is_checked_is_not_alive() {

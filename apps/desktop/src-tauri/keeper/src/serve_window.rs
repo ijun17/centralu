@@ -3,13 +3,13 @@
 //! On Windows, with serve installed in the data folder, the window runs `centralu serve --window` instead of a host
 //! of its own (`start_plan::Host::Serve`). That serve is whatever version a linked hub installed. A serve from before
 //! `--window` refuses the option, and a host on another protocol refuses the window's hello, so the window would be
-//! left with no host where it used to start its own. So:
+//! left with no host, where without serve it starts its own. So:
 //!
 //!   - before choosing it, the window asks the serve (`serve --connection`, `ask_connection`): only one whose line
 //!     lists `window` in `takes` and speaks the window's protocol is used (`choose`);
 //!   - a `serve --window` that ends before its ready line hands the next attempt to the bundled host
 //!     (`ServeFallback`). If a host holds the data folder all the same, the bundled host's start is refused by the
-//!     folder's lock, with the message that names who holds it, as before.
+//!     folder's lock, with the message that names who holds it.
 //!
 //! No `cfg` here: the launcher is a `.cmd` only on Windows, where `os::serve_launcher` finds it, but asking it is the
 //! same everywhere.
