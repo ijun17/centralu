@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -153,15 +153,22 @@ describe('pnpm tier with a comment-only change in a deep file (#2352)', () => {
     expect(onMain({ 'packages/protocol/src/new.ts': '// only a comment\n' })).toBe('deep')
   })
 
-  // each in a checkout of its own: Node keeps the first module it loaded from a path for the whole process
-  it('reads typescript from the checkout only: without it there, nothing is judged', () => {
-    rmSync(join(repo, 'node_modules'), { recursive: true, force: true })
-    expect(change(withComment()).tier).toBe('deep')
-  })
-
-  it('judges nothing with a typescript that has no JavaScript API (typescript 7)', () => {
-    installTypescript('module.exports = { version: "7.0.2" }\n')
-    expect(change(withComment()).tier).toBe('deep')
+  it('reads typescript from the checkout, and judges nothing when it is missing there or has no JavaScript API (typescript 7)', () => {
+    // Node keeps a module loaded from a path for the whole process; a run of pnpm tier loads it once
+    const forgetCheckoutModules = () => {
+      const cache = createRequire(import.meta.url).cache
+      const prefixes = [repo, realpathSync(repo)].map((p) => p.toLowerCase())
+      for (const key of Object.keys(cache)) if (prefixes.some((p) => key.toLowerCase().startsWith(p))) Reflect.deleteProperty(cache, key)
+    }
+    const onMain = (prepare: () => void) => {
+      git('reset', '-q', '--hard', 'main')
+      forgetCheckoutModules()
+      prepare()
+      return change(withComment()).tier
+    }
+    expect(onMain(() => {})).toBe('light')
+    expect(onMain(() => rmSync(join(repo, 'node_modules'), { recursive: true, force: true }))).toBe('deep')
+    expect(onMain(() => installTypescript('module.exports = { version: "7.0.2" }\n'))).toBe('deep')
   })
 
   it('does not take two bytes that are not UTF-8 for one text', () => {
