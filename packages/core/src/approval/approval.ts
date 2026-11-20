@@ -1,15 +1,10 @@
 import { NO_PATH, alwaysAllowKey, matchesAllowRule, oneLineText, type ApprovalDetail, type ApprovalScope } from '@cc/protocol/client'
 
 /**
- * Approval policy (FR-3). "Don't block it, make it visible" — approving in place is not forbidden; only the
- * requests that carry too little information are marked "needs checking".
- */
-
-/**
  * Approval policy (FR-3). "Don't block it, make it visible".
  *
- * An approval is answered **on that session's card**, or, where the card's question is a plain yes or no, on the waiting list's row
- * that shows it (#543, `answersInPlace` below).
+ * An approval is answered **on that session's card**, or, where the card's question is a plain yes or no, on the
+ * waiting list's row that shows it (#543, `answersInPlace` below).
  */
 
 /*
