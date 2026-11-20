@@ -37,7 +37,7 @@ nothing does, so your own check and the review must catch it.
 
 | What you change | Read | The rule in one line | Guard |
 |---|---|---|---|
-| Anything | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) "What is expected of code" | Fix a hazard once, at its owner. One definition per concept. Root cause, not a stopgap. Less code, no dead code | pre-pr `orphans` (dead files only); the rest UNGUARDED |
+| Anything | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) "What is expected of code" | Fix a hazard once, at its owner. One definition per concept. Root cause, not a stopgap. Less code, no dead code. A comment says why, now: no history, no excuse for the code | pre-pr `orphans` (dead files only); the rest UNGUARDED |
 | A concept, state or name | [domain-model.md](docs/domain-model.md) §1, §3 | One glossary. The UI never works out a session's state with conditions of its own | `guard/protocol-type-copies`, `core/session/state-parity.test.ts` |
 | Which package code goes in, an import or a dependency | [architecture.md](docs/architecture.md) §2; [folder-structure.md](docs/folder-structure.md) §1–3; [platform-abstraction.md](docs/platform-abstraction.md) §4, §6; [tech-stack.md](docs/tech-stack.md) §6 | core and common do no IO; ui reaches the outside only through ports and never knows its OS; only apps pick an implementation. A library on the forbidden list needs reasoning in tech-stack.md | dependency-cruiser (pre-pr `deps`), `tooling/boundaries.test.ts`, `guard/ui-no-os`; a dependency is `pnpm tier` deep |
 | Front-end state or settings | [state-management.md](docs/state-management.md) §3, §6 | Derived values (inbox order, counts, unread, badges) are selectors, never stored fields | UNGUARDED |

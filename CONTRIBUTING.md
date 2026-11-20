@@ -554,8 +554,14 @@ running, possibly the very session doing the work.
   tool definition or server instructions rides in every request; a `*_BUDGET_CHARS` ceiling goes
   up only after the owner agrees on the issue, with the measured numbers
   ([docs/tool-cost.md](docs/tool-cost.md)).
-- **Comments say why, not what.** Anything learned by measuring is kept together with
-  the number that was measured.
+- **A comment says why, now, and only what the code cannot carry** (owner's decision on #2355,
+  2026-11-20). Code that needs a paragraph to excuse it is reshaped until it does not. No history
+  ("used to", "previously", "no longer", "since #N it …"): git and the issues hold it. A comment
+  that restates a document is a pointer (`docs/x.md §n`) plus what the document does not say. What
+  stays: legal headers, rules of an external platform or dependency, a lint or formatter
+  suppression with its reason, public API docs, issue or RFC links, and the non-obvious why; a
+  number learned by measuring stays beside it. A long justification without one of these means the
+  code should change instead.
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
 - New comments and documents are written in English — see [Language](#language).

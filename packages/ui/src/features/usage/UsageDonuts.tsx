@@ -14,17 +14,13 @@ import { usageTone, weeklyWindow } from './weekly.js'
 import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
-/**
- * What `agents.usage` answered for one tool. `unsupported` is the host's own `supported: false` (the tool cannot report
- * limits at all, #1616: `supported: false` with the host's `notReported` mark), never inferred from the tool's name. It
- * is unset for a failed read and for an older host that sends no mark: those are *unknown for now*, not *never*.
- */
+/** What `agents.usage` answered for one tool */
 type Snap = {
   usage: UsageSnapshot | null
   reason?: string
   cache?: CacheStats
   sameAccount?: boolean
-  unsupported?: boolean
+  limits: 'read' | 'never' | 'unknown'
 }
 
 /**
@@ -32,7 +28,7 @@ type Snap = {
  * `supported: false` for a read that failed, and a host that predates the mark answers both alike: only `notReported`
  * (the tool has no way to report limits) is the dimmed ring, so everything else stays unknown for now.
  */
-function toSnap(r: {
+export function toSnap(r: {
   supported?: boolean
   reason?: string
   notReported?: boolean
@@ -40,13 +36,12 @@ function toSnap(r: {
   cache?: CacheStats
   sameAccountAsHub?: boolean
 }): Snap {
-  const unsupported = r.supported === false && r.notReported === true
   return {
     usage: r.usage,
     reason: r.supported ? undefined : r.reason,
     cache: r.cache,
     sameAccount: r.sameAccountAsHub,
-    unsupported: unsupported || undefined,
+    limits: r.supported === true ? 'read' : r.supported === false && r.notReported === true ? 'never' : 'unknown',
   }
 }
 
@@ -194,7 +189,7 @@ export function UsageDonuts() {
              * dashed and back; over a link that stays up, stay dashed until the retry.
              */
             const failed = (reason: string) =>
-              patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null }), reason } } }))
+              patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null, limits: 'unknown' }), reason } } }))
             /*
              * A tool whose own command was slower than the host waits answered provisionally (#1623): asked once more,
              * to settle, the donut gets the answer when the command ends, not at the next tick. Once per answer, never in a
@@ -532,7 +527,7 @@ function Donut({
    * faint letter, a state the person may change (a session to run, a machine to connect). Unsupported: the tool never
    * reports limits, so there is nothing to act on: a plain, solid, dimmed ring with no fill, the letter at full ink.
    */
-  const unsupported = !known && !signedOut && snap?.unsupported === true
+  const unsupported = !known && !signedOut && snap?.limits === 'never'
   const state = known ? 'known' : unsupported ? 'unsupported' : 'unknown'
   // What is drawn: signed out is its own look (below): the dashed ring of the unknown, in the signal colour, never the dimmed unsupported
   const look = signedOut ? 'signedOut' : state

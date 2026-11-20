@@ -26,6 +26,7 @@ export { gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
 import { cachedThemeFiles } from '../app/theme.js'
 export {
+  evidenceProjectOf,
   gridScreenAppKeys,
   newSessionProjectOf,
   openProjectOf,

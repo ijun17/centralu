@@ -37,15 +37,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     const session = s.sessions[sessionId]
     const project = session?.projectId ? s.projects[session.projectId] : null
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
-    const heirTool = opts?.tool ?? session.tool
-    /*
-     * The note comes from the record unless the caller asks the agent (owner decision on #694): the session being
-     * replaced is the one least likely to summarize correctly (repeated compaction, stale state, injected text), and
-     * the record mode asks it nothing. It used to be the default only for a session that could not respond (#78).
-     */
-    const mode = opts?.mode ?? 'record'
-    // Only a fallback for a caller that leaves it out: the dialog always passes its box, which starts on (archive the original, #1477)
-    const deleteOld = opts?.deleteOld ?? mode === 'agent'
+    const { tool: heirTool, mode, deleteOld } = opts
     // A worktree session cannot hand off yet. A session with worktree children can since #561: they outlive it (they
     // used to pin a worktree manager, whose delete refused while one was unmerged)
     if (session.worktree) {

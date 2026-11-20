@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { isPlainEscape } from '../../app/keys.js'
-import { useStore } from '../../store/store.js'
+import { evidenceProjectOf, useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -40,13 +40,10 @@ export function Overlay() {
   // Esc gives the keyboard back to where it was, the composer included (#115)
   useFocusReturn(overlay !== null)
   const close = useStore((s) => s.closeOverlay)
-  const projectId = useStore((s) => {
-    // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)
-    if (s.overlay?.kind === 'viewer' && s.viewerProjectId) return s.viewerProjectId
-    // A session with no project (the Assistant, a coordinator) does not fall back to the last project — same rule as EvidencePanel
-    const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
-    return sess ? sess.projectId : s.focusedProjectId
-  })
+  // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)
+  const projectId = useStore((s) =>
+    s.overlay?.kind === 'viewer' && s.viewerProjectId ? s.viewerProjectId : evidenceProjectOf(s),
+  )
   // The session a file link named, whose folder (its worktree) the file is read from (#1209); only with its project
   const sessionId = useStore((s) => (s.overlay?.kind === 'viewer' && s.viewerProjectId ? s.viewerSessionId : null))
 

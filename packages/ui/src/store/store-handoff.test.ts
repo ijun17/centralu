@@ -53,7 +53,7 @@ describe('handing off and starting fresh', () => {
     const old = oldRepoNote(mock, 'ho-s1')
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s1', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-s1', { tool: 'codex', deleteOld: true, mode: 'agent' })
     // A handoff request is never hidden — it enters as the session's own ordinary message
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
@@ -104,7 +104,7 @@ describe('handing off and starting fresh', () => {
     await useStore.getState().attach(mock)
     const before = mock.sessions.size
 
-    const done = useStore.getState().handoffSession('ho-f1', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-f1', { tool: 'claude', deleteOld: true, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-f1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -125,7 +125,7 @@ describe('handing off and starting fresh', () => {
     await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'].map(sessionGridPanel))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-g2', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-g2', { tool: 'claude', deleteOld: true, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-g2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -145,14 +145,14 @@ describe('handing off and starting fresh', () => {
    * counterpart who cannot respond for a will — the host builds the record from the store's own
    * transcript and **asks the dead session nothing at all**.
    */
-  it('record mode asks the dead session nothing, and leaves the original by default (#78)', async () => {
+  it('record mode asks the dead session nothing, and a kept original stays standing (#78)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-rec')
     mock.sessions.set('ho-r1', sessionInfo('ho-r1', { projectId: proj.id, name: 'Dead Mea', tool: 'codex', state: 'error' }))
     const old = oldRepoNote(mock, 'ho-r1')
     await useStore.getState().attach(mock)
 
-    await useStore.getState().handoffSession('ho-r1', { mode: 'record', tool: 'claude' })
+    await useStore.getState().handoffSession('ho-r1', { tool: 'claude', deleteOld: false, mode: 'record' })
 
     // No message went out to the dead session — this is the whole reason this mode exists
     expect((useStore.getState().chat['ho-r1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
@@ -163,7 +163,7 @@ describe('handing off and starting fresh', () => {
     expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record') // Preview
     expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
     expect(mock.lastCreateParams?.tool).toBe('claude')
-    // The original survives — record mode's default is to preserve it (until the successor is confirmed)
+    // The original survives — it was kept (until the successor is confirmed)
     expect(mock.sessions.has('ho-r1')).toBe(true)
     expect(mock.externallyDeleted).not.toContain('ho-r1')
     // The name is inherited
@@ -171,16 +171,16 @@ describe('handing off and starting fresh', () => {
   })
 
   /*
-   * The note comes from the record unless the caller asks the agent (owner decision on #694): a live session that
+   * The note from the record is every session's default in the dialog (owner decision on #694): a live session that
    * could answer is still not asked, since it is the one least likely to summarize itself correctly.
    */
-  it('builds the note from the record by default, even for a live session, and keeps the original (#694)', async () => {
+  it('record mode asks even a live session nothing, and a kept original stays standing (#694)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-default')
     mock.sessions.set('ho-d1', sessionInfo('ho-d1', { projectId: proj.id, name: 'Live Mea', tool: 'claude', state: 'idle' }))
     await useStore.getState().attach(mock)
 
-    await useStore.getState().handoffSession('ho-d1')
+    await useStore.getState().handoffSession('ho-d1', { tool: 'claude', deleteOld: false, mode: 'record' })
 
     expect((useStore.getState().chat['ho-d1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
     expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
@@ -195,7 +195,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: 'Mea 2' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s2', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-s2', { tool: 'claude', deleteOld: true, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -213,7 +213,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: 'Switching', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s5', { mode: 'agent', tool: 'claude' })
+    const done = useStore.getState().handoffSession('ho-s5', { tool: 'claude', deleteOld: true, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s5'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -235,7 +235,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: 'Branch' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s6', { mode: 'agent', deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-s6', { tool: 'claude', deleteOld: false, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s6'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -257,7 +257,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: 'Mea 4', state: 'working' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s4', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-s4', { tool: 'claude', deleteOld: true, mode: 'agent' })
     // The running turn has not ended yet — the prompt is never sent, only that turn's report streams in
     await new Promise((r) => setTimeout(r, 700))
     mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: 'Applied: report on the previous task' } as NormalizedEvent)
@@ -292,7 +292,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-big', sessionInfo('ho-big', { projectId: proj.id, name: 'a session that lived long' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-big', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('ho-big', { tool: 'claude', deleteOld: true, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-big'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -327,7 +327,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: 'Cleanup' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-sw', { mode: 'agent', deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-sw', { tool: 'claude', deleteOld: false, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-sw'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -364,8 +364,8 @@ describe('handing off and starting fresh', () => {
     await useStore.getState().attach(mock)
 
     // Both are started side by side — doing them one after the other would never surface this bug at all
-    const a = useStore.getState().handoffSession('ho-a', { mode: 'agent', deleteOld: false })
-    const b = useStore.getState().handoffSession('ho-b', { mode: 'agent', deleteOld: false })
+    const a = useStore.getState().handoffSession('ho-a', { tool: 'claude', deleteOld: false, mode: 'agent' })
+    const b = useStore.getState().handoffSession('ho-b', { tool: 'claude', deleteOld: false, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-a'] ?? []).some((i) => i.kind === 'user')).toBe(true)
       expect((useStore.getState().chat['ho-b'] ?? []).some((i) => i.kind === 'user')).toBe(true)
@@ -418,7 +418,7 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
 
-    const done = useStore.getState().handoffSession('ho-st', { mode: 'agent', deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-st', { tool: 'claude', deleteOld: false, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-st'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
@@ -454,7 +454,7 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'turn_complete', sessionId: 'ho-lag' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-lag', state: 'waiting_input' } as NormalizedEvent)
 
-    const done = useStore.getState().handoffSession('ho-lag', { mode: 'agent', deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-lag', { tool: 'claude', deleteOld: false, mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-lag'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
@@ -474,7 +474,7 @@ describe('handing off and starting fresh', () => {
     )
     await useStore.getState().attach(mock)
 
-    await useStore.getState().handoffSession('ho-s3')
+    await useStore.getState().handoffSession('ho-s3', { tool: 'claude', deleteOld: false, mode: 'record' })
 
     expect(mock.sessions.has('ho-s3')).toBe(true)
     expect((useStore.getState().chat['ho-s3'] ?? []).length).toBe(0)
@@ -491,7 +491,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-card', sessionInfo('ho-card', { projectId: proj.id, state: 'waiting_approval', pendingApproval: null, pendingQuestions: [] }))
     await useStore.getState().attach(mock)
 
-    void useStore.getState().handoffSession('ho-card', { mode: 'agent' })
+    void useStore.getState().handoffSession('ho-card', { tool: 'claude', deleteOld: true, mode: 'agent' })
 
     await vi.waitFor(() => expect(useStore.getState().toast).toBe('Answer the open approval first, or hand off from the record'))
     expect((useStore.getState().chat['ho-card'] ?? []).length).toBe(0)
@@ -552,7 +552,7 @@ describe('handing off a session of a linked machine whose link drops', () => {
     await useStore.getState().attach(mock)
     const asked = vi.spyOn(mock.agents, 'exportHandoffNote')
 
-    const done = useStore.getState().handoffSession('box.ho-m1', { mode: 'agent' })
+    const done = useStore.getState().handoffSession('box.ho-m1', { tool: 'claude', deleteOld: true, mode: 'agent' })
     // Its turn ran on when the link dropped: the request waits, though the row no longer says working
     mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
     expect(useStore.getState().sessions['box.ho-m1']!.state).toBe('idle')
