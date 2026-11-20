@@ -29,9 +29,16 @@ test('a context gauge for a window of 0 says unknown, not Infinity%', async ({ p
   await expect(page.getByTestId('context-gauge')).toHaveText('Context —')
 })
 
-test('the limit badge says when the limit resets as a 24-hour clock, not "03:12 PM"', async ({ page }) => {
+test('the limit badge says when the limit resets as a 24-hour clock, not "03:12 PM", with the day when it is not today', async ({ page }) => {
   await setup(page, ['/tmp/alpha'])
   const id = await newSession(page, 'alpha')
-  await emit(page, id, { type: 'limit_reached', usedPercent: 21, windowMins: 10080, resumeAt: '2026-08-15T14:30:00Z' })
-  await expect(page.getByTestId('limit-badge')).toHaveText(/^Limit 21% · resets \d{2}:\d{2}$/)
+  await emit(page, id, { type: 'limit_reached', usedPercent: 21, windowMins: 10080, resumeAt: '2030-08-15T12:30:00Z' })
+  await expect(page.getByTestId('limit-badge')).toHaveText(/^Limit 21% · resets Aug 1[56], 2030, \d{2}:\d{2}$/)
+})
+
+test('the limit badge says no reset for a credits limit, which no time resets (#1415)', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const id = await newSession(page, 'alpha')
+  await emit(page, id, { type: 'limit_reached', credits: true, resumeAt: '2030-08-15T12:30:00Z' })
+  await expect(page.getByTestId('limit-badge')).toHaveText('Limit reached')
 })

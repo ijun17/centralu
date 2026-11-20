@@ -1,7 +1,7 @@
 import { isAssistantKind } from '@cc/protocol/client'
 import type { DragEvent, ReactNode } from 'react'
 import type { SessionSummary } from '@cc/core'
-import { formatClock } from '../../app/format.js'
+import { formatWhen } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { CrownIcon, RestartIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -80,8 +80,9 @@ export function SessionHeader({
       {session.limit && (
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
-          {session.limit.resumeAt
-            ? ` · resets ${formatClock(new Date(session.limit.resumeAt))}`
+          {/* A credits or spend limit has no reset: the resumeAt beside it is the primary window's */}
+          {session.limit.resumeAt && !session.limit.credits
+            ? ` · resets ${formatWhen(new Date(session.limit.resumeAt))}`
             : ''}
         </span>
       )}

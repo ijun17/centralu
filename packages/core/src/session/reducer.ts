@@ -67,7 +67,8 @@ export type SessionSummary = {
   pendingQuestions: { requestId: string; questions: Question[] }[]
   usage: TokenUsage | null
   context: { used: number; window: number; exactness: 'exact' | 'estimate' } | null
-  limit: { resumeAt?: string; usedPercent?: number; windowMins?: number } | null
+  /** `credits`: a credits or spend limit, which no time resets (the host's `SessionInfo.limit` says the same) */
+  limit: { resumeAt?: string; usedPercent?: number; windowMins?: number; credits?: boolean } | null
   lastError: { code: string; message: string } | null
   /** The files this session changed, as its events reported them (FR-2): the git changes and the file tree mark them */
   touchedPaths: string[]
@@ -261,7 +262,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'limit_reached':
       return {
         ...next,
-        limit: { resumeAt: event.resumeAt, usedPercent: event.usedPercent, windowMins: event.windowMins },
+        limit: { resumeAt: event.resumeAt, usedPercent: event.usedPercent, windowMins: event.windowMins, ...(event.credits ? { credits: true } : {}) },
       }
     /*
      * An automatic name does not overwrite a name the person gave (FR-18, issue #5).
