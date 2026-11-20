@@ -1,5 +1,5 @@
 import type { OsChild, OsClock, OsFiles, OsProcesses, RunOptions, RunResult } from './port.js'
-import { STOPS_SETTLE_MS } from './kill-tree.js'
+import { STOPS_SETTLE_MS } from './stop-bounds.js'
 
 /** How long a run waits for its output to close once the program has exited: a grandchild may hold the pipes (git-exec.ts) */
 export const CLOSE_AFTER_EXIT_MS = 1000
@@ -20,9 +20,11 @@ export const RUN_STOP_GRACE_MS = 2000
  * it started still holds the pipes. A timeout, an overflow past `maxBuffer` or an abort ends the whole tree
  * (`stop`), and the result says which (`ended`). Rejects only when the program could not be started.
  *
- * A run that ends its tree settles once that stop has finished, or after `STOPS_SETTLE_MS`: on Windows the tree is ended
- * from the process table after the child (`stopTreeWindows`), and a caller that exits on the answer left what the stop had
- * not reached yet running (a tool's shim, its child and grandchild, KL21).
+ * A run that ends its tree for a timeout, an overflow or an abort settles once that stop has finished, or after
+ * `STOPS_SETTLE_MS`: on Windows the tree is ended from the process table after the child (`stopTreeWindows`), and a caller
+ * that exits on the answer left what the stop had not reached yet running (a tool's shim, its child and grandchild, KL21).
+ * One its reader stopped (`onStdout`, `ended: 'stopped'`) settles as before: the reader had what it wanted, and its group
+ * went with it.
  */
 export function runChild(
   os: {
@@ -53,7 +55,8 @@ export function runChild(
       if (ended || settled) return
       ended = why
       // Ended because the reader had enough: its group went with it, and a sweep for leftovers would only cost a listing
-      stopping = os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS, { sweep: why !== 'stopped' }).catch(() => {})
+      const stop = os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS, { sweep: why !== 'stopped' }).catch(() => {})
+      if (why !== 'stopped') stopping = stop
     }
     // Not once the program has exited: what it did then is done, and the answer is its own
     const onAbort = () => {
