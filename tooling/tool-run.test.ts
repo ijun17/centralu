@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { execTool } from './tool-run.js'
+import { execTool } from '../packages/agent-host/src/tool-run.js'
 
 describe('execTool', () => {
   let dir = ''
