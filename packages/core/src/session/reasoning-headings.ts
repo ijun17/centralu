@@ -2,9 +2,9 @@
  * Reasoning summaries stored with their headings run together (#1464).
  *
  * Codex's summary is a `**Heading**` and a paragraph, one per part. A row stored before #1464 has the second item's
- * heading appended to the first with nothing between: `**Checking projects child process****흰 화면…**`. New rows are
- * joined with a blank line at the source (`ReasoningParts`); an older row is mended when it is read, and the store is left as it was: nothing is lost by it, and a
- * migration would have to touch every Codex row to fix a display.
+ * heading appended to the first with nothing between: `**Checking projects child process****흰 화면…**`. New rows
+ * are joined with a blank line at the source (`ReasoningParts`); an older row is mended when it is read, and the store
+ * is left as it was: nothing is lost by it, and a migration would have to touch every Codex row to fix a display.
  *
  * Only a whole bold span with another bold span opening right after it (`**A****B**`) is a join, and only in prose: a
  * code span or a fenced block is left alone. The join is skipped when a digit or one of `-_@/+=#` touches the four
