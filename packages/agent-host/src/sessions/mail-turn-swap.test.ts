@@ -38,7 +38,7 @@ afterEach(async () => {
 function host(updateResume?: UpdateResumeFolder) {
   const claude = new Adapter(true)
   const events: NormalizedEvent[] = []
-  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'), updateResume ? { updateResume } : {})
+  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, { worktreeRoot: join(root, 'worktrees'), ...(updateResume ? { updateResume } : {}) })
   mgr.prLookup = async () => null
   hosts.push(mgr)
   const m = wireHostMail(mgr, store)

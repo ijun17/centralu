@@ -81,7 +81,7 @@ function host() {
   const mgr = new SessionManager(store, adapters, (e) => {
     events.push(e)
     ref.svc?.observe(e)
-  }, undefined, tmpdir())
+  }, undefined, { worktreeRoot: tmpdir() })
   const svc = new AgentVersionService({
     tools: () => [{ tool: 'claude', installedVersion: () => adapter.installedVersion() }],
     sessions: mgr,

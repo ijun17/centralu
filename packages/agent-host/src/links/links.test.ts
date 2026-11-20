@@ -100,7 +100,7 @@ async function remoteHost(
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, o.updateResume && !o.before1618 ? { updateResume: o.updateResume } : {})
+  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, o.updateResume && !o.before1618 ? { updateResume: o.updateResume } : {})
   const hubs = o.mail
     ? new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub), settings: store.settings })
     : null

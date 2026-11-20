@@ -103,7 +103,7 @@ export async function machineHost(
     // `claude`: Claude Code's sessions run in this adapter (the real one over a fake CLI, #2318) rather than the scripted agent
     const adapters = scriptedAdapters()
     if (o.claude) adapters.set('claude', o.claude())
-    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, { updateResume })
+    const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, { updateResume })
     const hubs = new LinkedHubs({
       call: (client, method, params, opts) => server.call(client, method, params, opts),
       lookupMs: 2000,
