@@ -427,6 +427,7 @@ export function SessionPane({
         setRunOpen={setRunOpen}
         headerExtra={headerExtra}
         headerDrag={headerDrag}
+        stop={notes.stop}
       />
 
       {/* Outside the composer: its height decides when a grid panel folds the composer, and a line of notice is not part of that */}

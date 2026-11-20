@@ -1,6 +1,6 @@
 import { isAssistantKind } from '@cc/protocol/client'
 import type { DragEvent, ReactNode } from 'react'
-import type { SessionSummary } from '@cc/core'
+import type { SessionSummary, TurnStop } from '@cc/core'
 import { formatWhen } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { CrownIcon, RestartIcon } from '../../components/icons.jsx'
@@ -28,6 +28,7 @@ export function SessionHeader({
   setRunOpen,
   headerExtra,
   headerDrag,
+  stop,
 }: {
   session: SessionSummary
   projectRoot: string | null
@@ -35,11 +36,15 @@ export function SessionHeader({
   setRunOpen: (open: boolean) => void
   headerExtra?: ReactNode
   headerDrag?: (e: DragEvent<HTMLElement>) => void
+  /** Why the last turn stopped, as the pane's note says it (`useSessionNotes`): null when no note shows, an away session's included */
+  stop: TurnStop | null
 }) {
   const restart = useStore((s) => s.restartSession)
   // Whether the process is being swapped out (the same lock as wake/fork) — the basis for the
   // button spinning and locking
   const restarting = useStore((s) => !!s.resuming[session.id])
+  // The note says a time (a limit's continue or reset): the limit badge leaves it there and keeps its gauge
+  const noteSaysTime = (stop?.kind === 'wait' && stop.interruption.autoContinue?.at !== undefined) || (stop?.kind === 'stopped' && stop.resetAt !== undefined)
 
   /*
    * The header's height is written as **an explicit height**, not padding (2026-09-13).
@@ -81,7 +86,7 @@ export function SessionHeader({
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
           {/* A credits or spend limit has no reset: the resumeAt beside it is the primary window's */}
-          {session.limit.resumeAt && !session.limit.credits
+          {session.limit.resumeAt && !session.limit.credits && !noteSaysTime
             ? ` · resets ${formatWhen(new Date(session.limit.resumeAt))}`
             : ''}
         </span>

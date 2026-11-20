@@ -275,3 +275,28 @@ async function expectWaitWhole(page: Page) {
     expect(seen, id).toEqual({ inside: true, reached: true, overflow: 0, lines: 1 })
   }
 }
+
+/** The header's limit badge keeps its gauge, and leaves the reset to the note while the note says a time (#1415) */
+export function limitBadgeTests() {
+  test("the header's limit badge drops its reset while the note says a time, and keeps it when the note says none", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    const at = new Date(2030, 0, 1, 1, 20)
+    await emit(page, [
+      { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'limit_reached', sessionId: s, usedPercent: 100, resumeAt: at.toISOString() },
+    ])
+    const badge = page.getByTestId('limit-badge')
+    await expect(badge).toHaveText('Limit 100% · resets Jan 1, 2030, 01:20')
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now(), resetAt: at.getTime(), autoContinue: { at: at.getTime() + 60_000, tries: 0 } } }])
+    await expect(page.getByTestId('auto-continue-wait')).toBeVisible()
+    await expect(badge).toHaveText('Limit 100%')
+    await page.getByTestId('auto-continue-stop').click()
+    await expect(page.getByTestId('stop-note-words')).toHaveText('Stopped: usage limit · resets at Jan 1, 2030, 01:20')
+    await expect(badge).toHaveText('Limit 100%')
+    // A stop that says no time (an older host, which sends no reset): the badge keeps the reset, so it is said somewhere
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now() } }])
+    await expect(page.getByTestId('stop-note-words')).toHaveText('Stopped: usage limit')
+    await expect(badge).toHaveText('Limit 100% · resets Jan 1, 2030, 01:20')
+  })
+}
