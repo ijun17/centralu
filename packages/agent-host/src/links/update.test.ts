@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fakeRegistry, fakeServe, hungHolderAlive, hungListening, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, fakeServe, hungHolderAlive, hungListening, linuxRemote, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { SshTunnel, SwitchUnderWay } from './tunnel.js'
 import { parseStopLine, readSwitchStatus, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
@@ -21,7 +21,6 @@ import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 
 const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
 const NODE_V = '24.21.0'
-const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
 
 describe('parseStopLine', () => {
   it('reads serve --stop’s line under anything else it printed, and nothing else', () => {
@@ -38,7 +37,7 @@ describe('stopRemoteHost', () => {
   })
 })
 
-// A Linux remote played by this machine's sh (see install.test.ts); the Windows counterpart is install-windows.test.ts.
+// A Linux remote played by this machine's sh (`linuxRemote`); the Windows counterpart is install-windows.test.ts.
 describe.skipIf(process.platform === 'win32')('update, rollback and uninstall over a fake ssh into a real sh (plan §10.5)', () => {
   let root: string
   let home: string
@@ -63,24 +62,11 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-update-'))
     home = join(root, 'home')
-    const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
-    mkdirSync(bin, { recursive: true })
-    const tool = (name: string, body: string) => {
-      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
-      chmodSync(join(bin, name), 0o755)
-    }
-    tool('uname', 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) /usr/bin/uname "$@" ;; esac')
-    tool('getconf', 'echo "glibc 2.39"')
-    writeFileSync(
-      join(root, 'ssh'),
-      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
-    )
-    chmodSync(join(root, 'ssh'), 0o755)
-    const archive = tarGz(`node-v${NODE_V}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT' })
+    const machine = linuxRemote(root, NODE_V)
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3')])
-    reg.addNodeArchive(NODE_V, NODE_FILE, archive)
-    runtime = { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: sha256(archive) } } } }
+    reg.addNodeArchive(machine.archive.version, machine.archive.file, machine.archive.bytes)
+    runtime = machine.runtime
   })
   afterAll(async () => {
     await reg.close()

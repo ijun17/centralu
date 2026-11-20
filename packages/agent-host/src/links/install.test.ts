@@ -1,13 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fakeRegistry, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, linuxRemote, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
 import { VERSION_WORD } from './registry.js'
 import { powershell } from '../os.js'
@@ -431,7 +431,6 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   let home: string
   let reg: FakeRegistry
   let runtime: RemoteRuntime
-  let archive: Buffer
 
   const pkgs = (version: string): FakePackage[] => [
     {
@@ -459,33 +458,14 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'cc-install-'))
     home = join(root, 'home')
-    const bin = join(root, 'bin')
     mkdirSync(home, { recursive: true })
-    mkdirSync(bin, { recursive: true })
-    const tool = (name: string, body: string) => {
-      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
-      chmodSync(join(bin, name), 0o755)
-    }
-    // This machine plays a Linux remote: what it is comes from uname and getconf (GLIBC in the env)
-    tool('uname', 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) /usr/bin/uname "$@" ;; esac')
-    tool('getconf', 'echo "glibc ${FAKE_GLIBC:-2.39}"')
-    // ssh hands its last argument to the remote's shell, as sshd does
-    writeFileSync(
-      join(root, 'ssh'),
-      `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
-    )
-    chmodSync(join(root, 'ssh'), 0o755)
-    archive = tarGz(`node-v${NODE_V}-linux-x64`, {
-      'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 },
-      LICENSE: 'MIT',
-      'include/node/node.h': '/* 67 MB in the real one */',
-      'lib/node_modules/npm/package.json': '{}',
-    })
+    // What a Node archive carries beyond what the install keeps
+    const machine = linuxRemote(root, NODE_V, { 'include/node/node.h': '/* 67 MB in the real one */', 'lib/node_modules/npm/package.json': '{}' })
     // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one, as a
     // release publishes it now: beside the platform package, which npm installs keep using
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3'), ...pkgs('9.9.4'), hostOnly('9.9.4'), ...pkgs('9.9.5'), hostOnly('9.9.5')])
-    reg.addNodeArchive(NODE_V, NODE_FILE, archive)
-    runtime = { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: sha256(archive) } } } }
+    reg.addNodeArchive(machine.archive.version, machine.archive.file, machine.archive.bytes)
+    runtime = machine.runtime
   })
   afterAll(async () => {
     await reg.close()

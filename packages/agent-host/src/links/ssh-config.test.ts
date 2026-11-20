@@ -210,12 +210,12 @@ process.stdout.write('user me\\nhostname ' + last + '.lan\\nport 2222\\n')
   })
 
   /** Each chunk was decoded on its own, so a character split between two turned into U+FFFD (#428) */
-  it.skipIf(!posix)('reads a reason from ssh -G whose character arrives in two pieces as one character', async () => {
-    const fake = write(
-      'bin/ssh-split',
-      `#!/usr/bin/env node\nconst b = Buffer.from('설정 오류: 잘못된 줄\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(255) }, 200)\n`,
+  it('reads a reason from ssh -G whose character arrives in two pieces as one character', async () => {
+    const fake = fakeExe(
+      join(home, 'bin'),
+      'ssh-split',
+      "const b = Buffer.from('설정 오류: 잘못된 줄\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(255) }, 200)\n",
     )
-    chmodSync(fake, 0o755)
     expect(await resolveAlias('box', { ssh: fake })).toEqual({ hostName: null, user: null, port: null, error: '설정 오류: 잘못된 줄' })
   })
 

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import type { RemoteRuntime } from './install.js'
 
 /**
  * A local stand-in for registry.npmjs.org and nodejs.org/dist (links/install tests): signed version
@@ -63,6 +64,38 @@ export async function tarGzAsync(top: string, files: Record<string, FakeFile>): 
 
 export const sha512 = (b: Buffer) => `sha512-${createHash('sha512').update(b).digest('base64')}`
 export const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+
+/**
+ * This POSIX machine playing a Linux x64 machine a hub links to, for the install, update and dev-build tests. In `root`:
+ * `bin/uname` says Linux x86_64 and `bin/getconf` says glibc `$FAKE_GLIBC` (2.39 when unset), for `bin` to come first
+ * on the remote's PATH; `ssh` hands its last argument to `/bin/sh` in `$HOME`, as sshd does, so the hub's real commands
+ * run. `archive` is the pinned Node for `FakeRegistry.addNodeArchive`: its `bin/node` runs this Node, beside a licence
+ * and `archiveFiles`; `runtime` pins it.
+ */
+export function linuxRemote(
+  root: string,
+  nodeVersion: string,
+  archiveFiles: Record<string, FakeFile> = {},
+): { bin: string; ssh: string; archive: { version: string; file: string; bytes: Buffer }; runtime: RemoteRuntime } {
+  const bin = join(root, 'bin')
+  mkdirSync(bin, { recursive: true })
+  const script = (path: string, text: string) => {
+    writeFileSync(path, text)
+    chmodSync(path, 0o755)
+  }
+  script(join(bin, 'uname'), '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) /usr/bin/uname "$@" ;; esac\n')
+  script(join(bin, 'getconf'), '#!/bin/sh\necho "glibc ${FAKE_GLIBC:-2.39}"\n')
+  const ssh = join(root, 'ssh')
+  script(ssh, `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`)
+  const file = `node-v${nodeVersion}-linux-x64.tar.gz`
+  const bytes = tarGz(`node-v${nodeVersion}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT', ...archiveFiles })
+  return {
+    bin,
+    ssh,
+    archive: { version: nodeVersion, file, bytes },
+    runtime: { node: { version: nodeVersion, archives: { 'linux-x64': { file, sha256: sha256(bytes) } } } },
+  }
+}
 
 export type FakeRegistry = {
   url: string
