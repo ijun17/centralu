@@ -4,7 +4,7 @@ import { isUnread, type ReadTracked } from '../unread/unread.js'
 
 /**
  * The inbox is derived state (docs/state-management.md §3). It is never stored.
- * Order: newest first, by when the wait started (owner, 2026-11-12, #2213; it was urgency, then the longest wait). A row
+ * Order: newest first, by when the wait started (owner, 2026-11-12, #2213). A row
  * with no start time of its own (a pending proposal, an app arrival) is ordered by when the window first saw it, which a
  * reload does not keep (it counts as just seen then). The counters still tell the states apart.
  *

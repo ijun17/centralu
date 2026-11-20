@@ -9,11 +9,10 @@ import { PermissionPreset, ToolName } from './ids.js'
  * record of this conversation" message, and `@cc/agent-host` depends on this package and
  * not on `@cc/core`. This is the only shelf both sides can reach.
  *
- * **Why the values do not.** They used to: a `TOOL_META` record right here held the
- * labels, the glyphs, and the install and login commands for two named vendors. Adding a
- * tool meant editing the shared protocol, which is the opposite of what an adapter is
- * for. Each adapter now carries its own descriptor, and they reach the UI through
- * `agents.detect`.
+ * **Why the values do not.** Each adapter carries its own descriptor (labels, glyphs, the
+ * install and login commands), and they reach the UI through `agents.detect`: values here
+ * would make adding a tool an edit to the shared protocol, the opposite of what an adapter
+ * is for.
  *
  * This is presentation, not capability. What a tool can *do* is declared by its adapter
  * (`AdapterCapabilities`, `ModelOption`) and must never be listed here — that split is
@@ -131,8 +130,8 @@ export type AgentModels = z.infer<typeof AgentModels>
  * (product-spec §6.2).
  *
  * **Anything knowable from whether an optional method exists does not go here.** A flag and the
- * implementation can drift apart: there used to be a listExternal flag, and when it was true but
- * the method did not exist, nothing happened, silently. The answer to "can it do this?" has to
+ * implementation can drift apart: a flag that says true for a method that does not exist does
+ * nothing, silently. The answer to "can it do this?" has to
  * be single-sourced — if the method exists, it can. What remains here is only the properties a
  * method cannot express (whether approvals are supported, context accuracy, and so on).
  */
@@ -280,8 +279,8 @@ const PRESET_LABEL: Record<PermissionPreset, string> = {
  *
  * **We never write down this list ourselves.** It carries exactly what the tool reports through
  * its official API (Claude: `supportedModels()`, Codex: `model/list`). Hardcoding it would leave
- * this app silently falling behind every time a new model ships — Fable actually shipped once
- * and could not be selected because it was missing from a hardcoded list.
+ * this app silently falling behind every time a new model ships: a model missing from a hardcoded
+ * list cannot be selected.
  *
  * Reasoning effort also arrives attached to the model, since which levels are supported differs
  * by model. Keeping it as a separate flag would give two different answers to "does this model

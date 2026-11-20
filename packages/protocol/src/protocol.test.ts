@@ -66,7 +66,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     input: { file_path: 'a.ts', content: 'export {}' },
   },
   { type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote', output: 'wrote a.ts' },
-  // A summary with no read-only hint (#428): adapters no longer set it, and it is optional, so the frames above still parse
+  // A summary with no read-only hint (#428): adapters do not set it, and it is optional, so the frames above still parse
   {
     type: 'tool_call',
     sessionId: 's1',
@@ -747,9 +747,9 @@ describe("a newer host's approval card", () => {
   })
 
   /*
-   * Review of #936: the first version showed only the card's text when it had one. A `project_access` card with a new
-   * `access` then read as the agent's own "export the sprites", with Allow live, and never said it was a new kind of
-   * reach into another project.
+   * #936 review: showing only the card's text when it has one makes a `project_access` card with a new `access` read as
+   * the agent's own "export the sprites", with Allow live, never saying it is a new kind of reach into another
+   * project.
    */
   it("of a known kind with a word this build does not have says the kind, the word and the projects before the agent's text", () => {
     const d = detailOf(
@@ -820,7 +820,7 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
   /*
    * #659: a build from before `person` and `permissionPreset` parses the new frame with the shape below (copied from
    * the schema as it stood). A frame that fails there is dropped whole (`parseServerFrame` salvages only answers), so a
-   * window of the old build, open while the host is swapped, would miss the change. A new word in `by` did exactly that.
+   * window of the old build, open while the host is swapped, would miss the change. A new word in `by` does exactly that.
    */
   it('an older build still parses every settings_changed frame this one sends (#659)', () => {
     const before = z.object({
@@ -1042,10 +1042,9 @@ describe('envelope', () => {
 })
 
 /**
- * A tool's presentation used to be a `Record<ToolName, …>` compiled into this package, so the
- * compiler guaranteed every tool had a label and a mark. It is data on the wire now — sent by
- * whichever adapter the host happens to have — and the schema is the only thing left standing
- * between a half-filled descriptor and a screen that draws it.
+ * A tool's presentation is data on the wire — sent by whichever adapter the host happens to have —
+ * so no compiler checks that every tool has a label and a mark: the schema is the only thing
+ * standing between a half-filled descriptor and a screen that draws it.
  */
 describe('tool presentation metadata', () => {
   const descriptor = {
@@ -1076,8 +1075,8 @@ describe('tool presentation metadata', () => {
 
   it('refuses a status that is only a detect result', () => {
     // ToolStatus carries both halves so no screen has to join them. A raw detect result —
-    // installed/loggedIn/detail with no descriptor — is exactly the shape that join used to
-    // take, and it must not pass for the joined one.
+    // installed/loggedIn/detail with no descriptor — is the half before that join, and it
+    // must not pass for the joined one.
     const detected = { name: 'claude', installed: true, loggedIn: true, detail: 'v2.0.0' }
     expect(ToolStatus.safeParse({ ...descriptor, ...detected }).success).toBe(true)
     expect(ToolStatus.safeParse(detected).success).toBe(false)
@@ -1238,7 +1237,7 @@ describe('the apply card in a released window (#665)', () => {
 
   it('would have been dropped as an update card with a new action', () => {
     expect(released.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
-    // This build no longer drops it (#844), but could only say it cannot show it: the question is not in it
+    // This build does not drop it (#844), but can only say it cannot show it: the question is not in it
     expect(isUnknownCard(ApprovalDetail.parse({ kind: 'centralu_update', action: 'apply' }))).toBe(true)
   })
 })

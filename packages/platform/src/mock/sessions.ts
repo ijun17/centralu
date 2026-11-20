@@ -76,8 +76,8 @@ export class SessionsMock {
           }
         : null
       /*
-       * The same rule as the real thing (#561 part 3): a worktree session the person makes stands on its own; the
-       * worktree manager it used to hang under was folded into ordinary sessions.
+       * The same rule as the real thing (#561 part 3): a worktree session the person makes stands on its own, with no
+       * parent.
        */
       const parentSessionId: string | null = null
       const info: SessionInfo = mockSessionInfo({
@@ -93,8 +93,8 @@ export class SessionsMock {
         /*
          * The same rule as the real thing (#69): if the person set the branch name, that name
          * is the session name and the automatic name does not overwrite it. If they did not,
-         * it **starts** as the automatic branch name — this used to be 'New session' here, and
-         * in the worktree panel it was unreadable which row was which branch.
+         * it **starts** as the automatic branch name — with a fixed 'New session', the worktree
+         * panel cannot tell which row is which branch.
          */
         name:
           (params.worktreeBranch?.trim() || undefined) ??
@@ -119,9 +119,9 @@ export class SessionsMock {
       /*
        * The same order as the real thing (#172): once the host creates a session, it broadcasts
        * `session_created` first, and only after broadcasting the handoff marker and the first
-       * prompt does it respond. While the mock skipped this, an event arriving before
-       * registration would be held and replayed after the response, and a defect where the
-       * response overwrites the screen's conversation was masked on the mock only.
+       * prompt does it respond. Without it, an event arriving before registration is held and
+       * replayed after the response, which masks, on the mock only, a defect where the response
+       * overwrites the screen's conversation.
        */
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       // Import: restores a previous conversation already marked as read (the same rule as the host's importHistory)

@@ -4,8 +4,8 @@ import { MockPlatform } from './index.js'
 
 /**
  * The mock fans out the way the web client does (#972 item 4): a subscriber that throws is reported, and every
- * other subscriber still gets the value. Before, one throwing subscriber kept an event from the rest in the mock only,
- * so a test could see a screen break that the app would not.
+ * other subscriber still gets the value. If one throwing subscriber kept an event from the rest in the mock only, a test
+ * would see a screen break that the app does not.
  */
 describe('the mock fan-out', () => {
   // Put back after each test (#845 item 15): made once for the file, the spy outlived it

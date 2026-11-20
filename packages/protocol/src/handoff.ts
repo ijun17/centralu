@@ -4,18 +4,16 @@
  */
 
 /**
- * The handoff prompt (per a dogfooding request to "prompt it properly" — specifically, that the
- * language the user is using needs to carry over). Only the dying session has the full context, so
+ * The handoff prompt: the language the person is using carries over. Only the dying session has the full context, so
  * it is the one that writes the note.
  *
- * **The note is received as the reply, and the host places the file** (#142). The agent used to
- * write directly into `.centralu/handoff/` inside the project. Once the note moved outside the
- * user's repository (into the data folder), writing it directly would have meant granting both
- * tools more permissions — so the agent only replies, and after that turn ends the host takes
- * **the reply as recorded in the store** and places it as a file (`agents.exportHandoffNote`). This
- * also sidesteps a second dogfooding finding (a reply scraped from the on-screen conversation mixed
- * in streaming chunks and leftover output from the previous turn): it is read from the host's
- * record, not the screen, only the reply to this specific request, and only after the turn ends.
+ * **The note is received as the reply, and the host places the file** (#142). The note lives
+ * outside the user's repository (in the data folder), and writing it there directly would mean
+ * granting both tools more permissions — so the agent only replies, and after that turn ends the
+ * host takes **the reply as recorded in the store** and places it as a file
+ * (`agents.exportHandoffNote`). A reply scraped from the on-screen conversation mixes in streaming
+ * chunks and leftover output from the previous turn, so it is read from the host's record, not the
+ * screen, only the reply to this specific request, and only after the turn ends.
  *
  * Exported because the e2e tests identify the handoff message by this wording. Here rather than in the window's store
  * since the Assistant's handoff_session asks for the note too (#694): one wording for both, and the host does not
@@ -63,19 +61,18 @@ function quotedName(name: string): string {
 /**
  * The successor's first message (#102) — **hands over the note's location, not the note itself.**
  *
- * The full note used to be the first message verbatim. But the prompt above tells the predecessor
- * "it is a file, so length is not a constraint" — the longer the note, the more thorough it is, and
- * the more thorough it is, the larger the single message the successor received grew (measured: handing
- * a long session off to codex produced an error the moment it arrived). The file is already sitting
- * where the host placed it, so the first message only needs to point at the path — only then does
- * length stop being a constraint in fact, not merely by declaration. That location is outside the
+ * The prompt above tells the predecessor "it is a file, so length is not a constraint", so a note
+ * can be long, and a long note sent as the first message breaks the successor (measured: handing a
+ * long session off to codex produced an error the moment it arrived). The file is already sitting
+ * where the host placed it, so the first message only points at the path — only then is length
+ * not a constraint in fact, not merely by declaration. That location is outside the
  * project (the data folder, #142), so the path is absolute. The host opens that folder so the
  * successor can read it without asking (Claude's additional working folder — Codex does not block
  * reading it).
  *
  * Why the preview rides along too: someone who only reads the conversation record still needs to
  * know what happened. Why it **explicitly** says reading in pieces or grepping is fine: without that
- * line, the agent reads the whole file and recreates the exact problem this design just removed.
+ * line, the agent reads the whole file and recreates the problem the path avoids: one message too large.
  */
 export function handoffOpening(
   predecessor: string,

@@ -182,7 +182,7 @@ describe('update cards (#581, #665)', () => {
     expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'install' })).toBe('Allow this session to install a Centralu update?')
   })
 
-  // #665 review: what applying costs must be said. Since #1895 step 3 the host restarts and every running turn, the asker's too, is cut and continued
+  // #665 review: what applying costs must be said. The host restarts (#1895 step 3) and every running turn, the asker's too, is cut and continued
   it('says that applying relaunches the window, restarts the host, and that running turns stop and go on', () => {
     expect(CENTRALU_APPLY_QUESTION).toContain('the agent host restarts')
     expect(CENTRALU_APPLY_QUESTION).toContain('this one included, stop and go on')

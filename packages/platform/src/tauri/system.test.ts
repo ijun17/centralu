@@ -33,8 +33,8 @@ describe('TauriSystemPort', () => {
 
   /*
    * #972 item 2: every call into the shell or a plugin rejects with an Error, so the screen's
-   * `err.message` names the reason. Each of these used to pass the bare string through, and a
-   * missing drag permission read "Could not move window: undefined".
+   * `err.message` names the reason. A bare string passed through makes a missing drag permission
+   * read "Could not move window: undefined".
    */
   const reasonOf = async (p: Promise<unknown>) => {
     const err = await p.then(() => null, (e: unknown) => e)

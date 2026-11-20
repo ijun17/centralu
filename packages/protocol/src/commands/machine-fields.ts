@@ -10,6 +10,6 @@ export const machineField = { machine: z.string().nullable().optional() }
 
 /**
  * The machine a per-machine question is for (#82): its agent CLIs, its usage, its folders. Absent:
- * the hub's own, which is what every call meant before linked machines existed.
+ * the hub's own (as from a caller that predates linked machines).
  */
 export const machineParam = { machine: MachineId.optional() }

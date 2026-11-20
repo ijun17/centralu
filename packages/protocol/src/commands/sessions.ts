@@ -18,11 +18,8 @@ import { machineField } from './machine-fields.js'
 /**
  * A session's role (#13).
  *
- * The judgment that `projectId === null` means assistant used to be scattered across six
- * places, and this field gathers that scattering into a single marker. Once the project
- * assistant was discontinued (2026-09-01), the two judgments became equivalent again, but the
- * marker stays — having the judgment live in one place is still better, and a migration to
- * revert it would carry risk with nothing to gain.
+ * One marker, so the judgment lives in one place rather than as a `projectId === null` check at
+ * every place that asks.
  */
 export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'assistant'])
 export type SessionKind = z.infer<typeof SessionKind>
@@ -196,12 +193,8 @@ export const SessionInfo = z.object({
    * sessions have no owner. Cross-project tasks keep their asking session in the conversation's
    * `from` instead (#614).
    *
-   * **The meaning moved, the field did not (#844).** Until #614 it named the session of another
-   * project that asked for this one through ask_project (#371), and store step v48 copied a former
-   * worktree manager's `parent_session_id` into it. Store step v55 clears the cross-project rows
-   * (the host start did until #844). A window of beta.20 or before reads a start_agent child as
-   * "asked by" its parent, which is now what it means; a host of beta.20 or before still writes the
-   * old meaning, and a row it writes after v55 keeps it (agent-host/store-migrations.md "Migration steps: expand, then contract").
+   * **The meaning moved, the field did not (#844)**: what it named before #614, and what a window or host of beta.20
+   * or before reads and writes, is docs/protocol.md §3.3 ("Fields whose meaning moved").
    */
   askedBy: z.string().nullable().optional(),
   /**
@@ -226,10 +219,10 @@ export const SessionInfo = z.object({
    * **Facts valid only while the process is alive** — these come from the host's memory, not
    * the database.
    *
-   * While these fields were missing, refetching the list after a reconnect or app restart could
-   * show state=waiting_approval with **no payload to draw the card from**, so the approval card
-   * never appeared, and with no requestId there was no way to respond — the agent stayed blocked
-   * forever (measured). If the host process itself restarts, the fact really is gone, so the
+   * Without them, refetching the list after a reconnect or app restart shows
+   * state=waiting_approval with **no payload to draw the card from**: the approval card never
+   * appears, and with no requestId there is no way to respond — the agent stays blocked forever
+   * (measured). If the host process itself restarts, the fact really is gone, so the
    * default (null/[]) is correct.
    */
   pendingApproval: z.object({ requestId: z.string(), detail: ApprovalDetail }).nullable().default(null),
@@ -358,8 +351,8 @@ export type StoredMessage = z.infer<typeof StoredMessage>
 export const SUBAGENT_STEPS_PAGE = 500
 
 /**
- * A session in the session archive (#204), as Settings lists it. The concept was called "the trash" until #1404;
- * the names `Trashed*` and `trash.*` stay because the protocol only grows. Say "archive" in anything a person or an
+ * A session in the session archive (#204), as Settings lists it. The names `Trashed*` and `trash.*` keep the word
+ * "trash" (#1404) because the protocol only grows. Say "archive" in anything a person or an
  * agent reads.
  *
  * Archiving a session moves it here instead of destroying it; only Settings deletes it for good (or the Assistant, after the person's card, #1219). The list says what

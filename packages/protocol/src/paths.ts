@@ -49,7 +49,7 @@ export function wireBaseName(path: string): string {
 
 /**
  * The folder a wire path is in: `src/app/a.ts` is `src/app`, and a path with no separator, or the root itself, is `''`:
- * the root, in the notation `listDir` uses. The UI's file tree and the mock file system each had their own copy.
+ * the root, in the notation `listDir` uses.
  */
 export function wireParent(path: string): string {
   const cut = path.lastIndexOf('/')

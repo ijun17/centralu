@@ -281,8 +281,8 @@ describe.each([
 
   /*
    * Every case gets a fresh implementation and sets up what it reads. One harness shared by the
-   * whole file let a case read the project an earlier case had registered, so a case run alone
-   * (`-t`) or in another order failed for a reason that was not its own (#845).
+   * whole file lets a case read the project an earlier case registered, so a case run alone
+   * (`-t`) or in another order fails for a reason that is not its own (#845).
    */
   beforeEach(async () => {
     h = await make()
@@ -420,9 +420,9 @@ describe.each([
   })
 
   /*
-   * An agent's image is a row of its own between the text around it (#868). The host left the text row open across it
-   * and wrote the image's row only once its file was saved, so text, image, text was stored as one text row above the
-   * image, while the live screen drew three. The image here names a path and carries no bytes: nothing is written to
+   * An agent's image is a row of its own between the text around it (#868). A text row left open across it, with the
+   * image's row written only once its file is saved, stores text, image, text as one text row above the image, while
+   * the live screen draws three. The image here names a path and carries no bytes: nothing is written to
    * an attachments folder.
    */
   it('text, an image, then text are three rows in that order', async () => {
@@ -576,8 +576,8 @@ describe.each([
   })
 
   /*
-   * Where the mock had drifted from the host (#999): each of these answered differently in the mock, so e2e and the
-   * demo showed what the app does not.
+   * Where the mock can drift from the host (#999): a mock that answers any of these differently makes e2e and the
+   * demo show what the app does not.
    */
   describe('what the mock used to answer differently (#999)', () => {
     let parent = ''
@@ -1124,9 +1124,9 @@ describe.each([
  *
  * So the mock's answer is pinned to the function the host uses instead of to the host itself.
  * `ProjectCreation.addProject` names a project with `basename` from `node:path`; on Windows that
- * is `win32.basename`. Reading only `/` here meant the mock called a project
- * `C:\Users\me\proj` while the host called it `proj`, and e2e — which only ever runs the mock —
- * had no way to notice.
+ * is `win32.basename`. Reading only `/` here, the mock would call a project
+ * `C:\Users\me\proj` while the host calls it `proj`, and e2e — which only ever runs the mock —
+ * has no way to notice.
  */
 describe('Platform contract: path separator (#47)', () => {
   it('the project name the mock builds matches the basename the host uses', async () => {

@@ -219,8 +219,7 @@ describe('session name (FR-18)', () => {
 
   /*
    * A name the person changed has to reach the other screens **however many times it is changed** (issue #5).
-   * It used to be decided by looking only at this side's own autoNamed, so from the second change on it was
-   * quietly dropped.
+   * Decided from this side's own autoNamed alone, it is quietly dropped from the second change on.
    */
   it('a name the person chose (auto:false) updates a session that is already manual too', () => {
     const once = applyEvent(s0(), ev({ type: 'session_title', title: 'Guard MCP', auto: false }), NOW)

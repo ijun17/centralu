@@ -6,10 +6,9 @@ import type { NormalizedEvent, SubagentStep } from './events.js'
  * Which events become stored transcript rows, and where a streamed message ends (#66, #77, #212).
  *
  * The host records a session's events (`SessionRecord.persistMessage`) and the mock replays the same record in
- * memory (`SessionStore.record`, platform mock). Both used to spell these rules out by hand and drifted: the mock
- * merged two messages with different `messageId`s into one row, kept no row for an error, and stored a subagent's
- * empty chunks. What one screen draws from a live event and from the row read back (`messagesToChat`) depends on
- * these rules, so they live here once and both sides read them.
+ * memory (`SessionStore.record`, platform mock). What one screen draws from a live event and from the row read back
+ * (`messagesToChat`) depends on these rules, and copies spelled out by hand drift, so they live here once and both
+ * sides read them.
  */
 
 /** The two kinds of row a streamed chunk grows */
@@ -38,7 +37,7 @@ export type OpenStreamRow = { kind: StoredMessage['kind']; payload: unknown }
  *
  * A chunk of another kind (answer <-> reasoning) starts a new row. So does a chunk that names a different message than
  * the open row (#212): Codex can say two things in a row with nothing recorded between them (a poll of a running
- * command is not an item), and with no boundary there the two became one row: "…polling it now.It is still running…".
+ * command is not an item), and with no boundary there the two would become one row: "…polling it now.It is still running…".
  * A chunk that names no message continues the open row.
  */
 export function continuesStreamRow(open: OpenStreamRow | undefined, e: NormalizedEvent): boolean {
@@ -53,7 +52,7 @@ export function continuesStreamRow(open: OpenStreamRow | undefined, e: Normalize
  * The row kind an event that is not a stream is recorded as, or null when it is not recorded.
  *
  * - `marker`: a compaction point and a fresh conversation (#304) (the model forgot, our record did not), what the tool
- *   wanted the person to read (#304), and a failure (#107: a turn that died with a 400 used to leave an empty answer
+ *   wanted the person to read (#304), and a failure (#107: without it, a turn that died with a 400 leaves an empty answer
  *   and nothing saying why).
  * - `app_view`: only that an app's view was raised under a card, or refused (M4 B-1). A result, a cancellation or a
  *   close happen while the view is alive and are not recorded.

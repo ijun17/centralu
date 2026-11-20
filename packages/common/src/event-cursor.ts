@@ -1,6 +1,6 @@
 /**
  * The cursor a client keeps into a host's numbered event stream (#82, #173, #2163): the window's connection to its host
- * and a hub's link to a machine both read events this way, and were kept in step only by a comment.
+ * and a hub's link to a machine both read events this way, through this one cursor.
  *
  * A greeting says whether the gap since the last event can be replayed: only when the cursor is a cursor into this host
  * lifetime (the same `streamEpoch`, or none said) and the host is not behind it (`currentSeq < seq` is a host that came back

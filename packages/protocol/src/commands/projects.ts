@@ -24,9 +24,8 @@ export type SavedCommand = z.infer<typeof SavedCommand>
 /**
  * The values last chosen for one tool (#107).
  *
- * verbosity and serviceTier are not here — they have never been remembered as a project
- * default (there is no column for them either), and there is no reason to invent that memory now.
- * If they are added, they go into the same envelope.
+ * verbosity and serviceTier are not here — they are not remembered as a project default (there
+ * is no column for them either). If they are added, they go into the same envelope.
  */
 export const ToolDefaults = z.object({
   model: z.string().nullable().default(null),
@@ -41,22 +40,19 @@ export const ProjectInfo = z.object({
   /**
    * The tool this project reached for last, if it ever did.
    *
-   * It defaulted to `'claude'`, which was the last vendor name left in this package after
-   * the tool list became data: a project created on a machine without Claude Code still
-   * claimed to prefer it. There is no sensible default here — only the host knows which
-   * tools exist — so the absence is now recorded as one, and the screens fall back to
-   * whatever the machine actually has.
+   * No default: only the host knows which tools exist, and a default vendor name would make a
+   * project created on a machine without that tool claim to prefer it. The absence is recorded
+   * as one, and the screens fall back to whatever the machine actually has.
    */
   defaultTool: ToolName.nullable().default(null),
   /**
    * The last-chosen model and effort — **kept separately per tool** (#107).
    *
-   * This used to be one value per project (the scalars `defaultModel` and `defaultEffort`). But
-   * a model name is a tool's own vocabulary, so a Codex session started in a project that had
-   * once had a Claude model chosen inherited that name wholesale — measured: a project with
+   * A model name is a tool's own vocabulary: with one value per project, a Codex session started
+   * in a project where a Claude model was chosen inherits that name — measured: a project with
    * `default_tool=codex` held `default_model=opus[1m]`, and that session died with a 400 on
-   * every turn. The rule "the act of choosing becomes the default" was correct; the storage
-   * shape just failed to express it: **a choice is always a choice for some particular tool.**
+   * every turn. "The act of choosing becomes the default" holds per tool: **a choice is always a
+   * choice for some particular tool.**
    */
   defaultModels: z.record(ToolName, ToolDefaults).default({}),
   /**
@@ -67,10 +63,9 @@ export const ProjectInfo = z.object({
    * (which is why `agents.commands` carries a `ready` flag), and the project is already
    * in the store in one piece, so there is no reason to invent that distinction here.
    *
-   * A row used to be the bare command string so that "there is no label that can drift
-   * away from it". The label came back by user request (2026-09-06) — `pnpm dev` reads
-   * worse than "Dev server" at a glance — but the drift argument still shapes the rule:
-   * every surface that shows the label **also shows the command**, so a name can never
+   * A row may carry a label — `pnpm dev` reads worse than "Dev server" at a glance — but a
+   * label can drift away from its command, so every surface that shows the label **also
+   * shows the command**, and a name can never
    * silently mean something else. The command string stays the identity everywhere
    * (run ledger, host PTY registry); the label is display-only.
    */

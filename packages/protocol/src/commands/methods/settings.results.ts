@@ -24,7 +24,7 @@ export const settingsResults = {
       matcher: z.string(),
       decision: z.string(),
       createdAt: z.number(),
-      /** Which project or session this rule belongs to — the same rule from two different projects used to look like one identical row in Settings (#183) */
+      /** Which project or session this rule belongs to — without it, the same rule from two different projects looks like one row in Settings (#183) */
       projectId: z.string().nullable().default(null),
       sessionId: z.string().nullable().default(null),
       /** A rule of a linked machine (#82): its `id` is then folded into a negative number the hub maps back */

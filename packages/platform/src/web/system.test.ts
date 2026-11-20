@@ -9,7 +9,7 @@ class UnconnectedSocket {
 const platform = () => createWebPlatform({ token: 'test', WebSocketImpl: UnconnectedSocket as unknown as typeof WebSocket })
 
 /**
- * The browser's system port says when it could not do something (#972 item 5). It used to resolve as if the IDE had
+ * The browser's system port says when it could not do something (#972 item 5). It does not resolve as if the IDE had
  * opened, the tab had opened behind a pop-up blocker, or the notification had been shown with no permission asked.
  */
 describe('the web system port', () => {

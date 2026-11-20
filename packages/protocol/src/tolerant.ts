@@ -2,21 +2,13 @@ import type { z } from 'zod'
 
 /**
  * Reads a payload another build sent, so that **its defaults apply** and **one value this build
- * does not understand costs only that value** (docs/protocol.md §4).
+ * does not understand costs only that value**: the rules and their reasons are docs/protocol.md §4
+ * (a field added to a host payload has a default the client applies; the read is tolerant).
  *
- * The first half is the reason this exists. A field the protocol added carries a `.default()`, and
- * the types on this side are the parser's output, so the code reads the field as always present.
- * That is true only if the payload went through the schema. A beta.9 window attached to a beta.7
- * host (#280 lets a window outlive its host's build) took the session list as it came, without
- * `backgroundTasks` (#305), and the first `.filter` on it took the screen down.
- *
- * The second half keeps the other direction working. A newer host can send a word this build's
- * enum does not have, or a value of a shape it later widened. A plain parse fails the whole
- * payload for it, and a session list is a lot to lose over one badge. So when the whole parse
- * fails, the payload is read again piece by piece: objects field by field, arrays element by
- * element, and a value that still fails on its own is kept as it came, which is exactly what this
- * client did with every payload before it parsed any. Fields the schema does not know are dropped,
- * as a successful parse drops them, unless the object is declared loose.
+ * When the whole parse fails, the payload is read again piece by piece: objects field by field,
+ * arrays element by element, and a value that still fails on its own is kept as it came. Fields
+ * the schema does not know are dropped, as a successful parse drops them, unless the object is
+ * declared loose.
  *
  * Not a validator. Nothing here rejects; the host's own answers are trusted, and this only fills
  * in what an older one could not have known to send.

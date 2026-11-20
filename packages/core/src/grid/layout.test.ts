@@ -3,7 +3,7 @@ import { MAX_PANEL_H, MIN_PANEL_W, addPanel, columnsFor, removePanel, rowsFor, v
 
 /**
  * A screen height that leaves the height guard inert, which is every ordinary one
- * (see MAX_PANEL_H). Cases that pass this are about the width, as they always were.
+ * (see MAX_PANEL_H). Cases that pass this are about the width.
  */
 const H = 900
 
@@ -58,7 +58,7 @@ describe('columnsFor', () => {
   })
 
   it('a wide screen may hold more than three columns — the limit is the panel width, not a count', () => {
-    // 12 panels at 4000: four columns are 1000px each, where the old cap of three insisted on
+    // 12 panels at 4000: four columns are 1000px each, where a cap of three would insist on
     // 1333px and a fourth row. Both fill every cell, so the wider-panel tie-break is not what
     // decides it — three columns would be a row deeper.
     expect(columnsFor(4000, H, 12)).toBe(4)

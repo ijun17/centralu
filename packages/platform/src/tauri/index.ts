@@ -70,13 +70,12 @@ export function onHostStatus(cb: (status: HostStatus) => void): () => void {
  *
  * **Order matters:** subscribe to the event first, then ask for the current state.
  * Doing it the other way around can miss the signal if readiness finishes in between, and
- * stall all the way to the timeout (this actually happened once the host started coming up in
- * under a second). Polling is added on top as a third layer of defense.
+ * stall all the way to the timeout (measured: the host comes up in under a second). Polling is added on top as a third layer of defense.
  *
  * Polling also asks about **failure** (#184). The supervisor only leaves a failure message
- * when it gives up (a restart clears it), so if there is a message, that is the answer. It
- * used to be that missing the `failed` event — when a supervisor restarted by Retry gave up
- * again before the webview was listening — meant waiting out the full 30 seconds.
+ * when it gives up (a restart clears it), so if there is a message, that is the answer.
+ * Without it, missing the `failed` event — when a supervisor restarted by Retry gives up
+ * again before the webview is listening — means waiting out the full 30 seconds.
  *
  * **A host working on its store is not late** (#2334): a copy of a large store before an update, or a long store step,
  * outlasts any fixed wait, and the host cannot answer meanwhile. While the shell reports such work the wait starts
@@ -166,10 +165,9 @@ export async function quitApp(): Promise<void> {
  * first render**.
  *
  * The shell catches ⌘Q, the menu's Quit, and closing the window, all alike, and sends this
- * event to the webview. It used to be that the only listener was the app screen (the quit
- * modal), so on the screen waiting for the host and on the startup-failure screen, the event
- * vanished with nobody to receive it — the only way to close the app was from the Dock or by
- * force-quitting.
+ * event to the webview. With the app screen (the quit modal) as the only listener, the event
+ * vanishes on the screen waiting for the host and on the startup-failure screen, with nobody
+ * to receive it — and the only way to close the app is from the Dock or by force-quitting.
  *
  * If something to ask (a modal) is up, hands it off to that; if not, there is nothing to ask,
  * so it quits right away.
@@ -190,7 +188,7 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
  * Where a build came from (#280) — the keeper's record, as the shell hands it over. The host's own record (`HostBuild`,
  * protocol envelope.ts) with what only the keeper records: when it was built and the folder it runs from. The keeper's
  * record may lack the protocol version, so it is optional here. Named apart from this file's `ShellHostBuild`, the
- * shell's whole report, which used to share the protocol's name (#428).
+ * shell's whole report, so neither shares the protocol's name (#428).
  */
 export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
   protocolVersion?: number
@@ -251,8 +249,8 @@ function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
  * Follows which builds are involved: the current report, then every change (#850 item 17).
  *
  * The order is the one `waitForHost` keeps: the listener is registered first and only then is the current report
- * asked for. Asked the other way round, a report sent between the answer and the registration was missed, and an
- * answer read before a report but arriving after it put the older state back. Once a report has arrived, the
+ * asked for. Asked the other way round, a report sent between the answer and the registration is missed, and an
+ * answer read before a report but arriving after it puts the older state back. Once a report has arrived, the
  * answer to the question is dropped for the same reason. `onAskFailed` is called when asking fails and no report
  * has arrived.
  */
@@ -304,7 +302,7 @@ export class TauriSystemPort implements SystemPort {
    * A notification is **the only way to reach a person who has stepped away.** So if one could
    * not be sent, this says so.
    *
-   * It used to just return if permission was missing. That leaves no way to ever find out "the
+   * Returning quietly when permission is missing leaves no way to ever find out "the
    * notification never came" — the code looks fine and nothing happens on screen, so the tool
    * ends up being the one suspected. Warns only once (raising it on every single notification
    * would be more noise than it is worth).
@@ -385,7 +383,7 @@ export class TauriSystemPort implements SystemPort {
   /**
    * The window's appearance and background (#312). `setTheme(null)` hands the appearance back to
    * the OS, which is what lets the webview's `prefers-color-scheme` follow it in System mode
-   * (tauri.conf.json no longer holds the window to Dark). The background arrives as a computed
+   * (tauri.conf.json does not hold the window to Dark). The background arrives as a computed
    * CSS colour (`rgb(29, 29, 29)`); Tauri wants channels, so anything else is left alone.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
@@ -479,7 +477,7 @@ export type TauriPlatform = Platform
  *
  * The order `waitForHost` keeps, for the whole of startup: the listener is registered first, and only then is the
  * address read. Startup reads the address and then awaits several more shell calls before the web platform exists; a
- * `ready` for a new port in that gap (a crash restart, a swap) used to be lost, and the client retried the old
+ * `ready` for a new port in that gap (a crash restart, a swap) would be lost, and the client would retry the old
  * address forever. Here the latest `ready` heard is kept, and handed to the web platform the moment it subscribes,
  * then every later one; the client ignores an address it already has.
  */
@@ -490,7 +488,7 @@ async function followEndpoint(): Promise<{
   let latest: HostInfo | null = null
   let forward: ((info: HostInfo) => void) | null = null
   let stopped = false
-  // A listener that cannot be registered costs only the following, as it did before: startup itself goes on
+  // A listener that cannot be registered costs only the following: startup itself goes on
   const un = await listenHostStatus((p) => {
     if (stopped || p.state !== 'ready') return
     latest = { port: p.port, token: p.token }

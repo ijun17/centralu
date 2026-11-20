@@ -92,11 +92,11 @@ afterEach(() => {
 })
 
 /**
- * An unreadable response is also a response (dogfooding, 2026-09-10).
+ * An unreadable response is also a response.
  *
- * When the host sent an error code not in the protocol, the frame failed validation and was
- * silently dropped, and the caller waited for an answer all the way to the 30-second timeout —
- * the screen stayed at 'loading' the whole time.
+ * A frame with an error code not in the protocol fails validation; dropped silently, it leaves
+ * the caller waiting for an answer all the way to the 30-second timeout — the screen at
+ * 'loading' the whole time.
  */
 describe('RpcClient unreadable response (dogfooding)', () => {
   it('even a failure response that fails validation ends the call — carrying its explanation as-is', async () => {
@@ -136,9 +136,9 @@ describe('RpcClient unreadable response (dogfooding)', () => {
 })
 
 /**
- * A window attached to an older host (#280). The beta.9 window read a beta.7 host's session list,
- * which had no `backgroundTasks` (#305), and crashed on `undefined.filter`: results reached the
- * screen as sent, so the field's `.default([])` never applied.
+ * A window attached to an older host (#280). An older host's session list can lack
+ * `backgroundTasks` (#305); handed to the screen as sent, the field's `.default([])` never
+ * applies, and the screen crashes on `undefined.filter`.
  */
 describe('RpcClient — an older host\'s answers get the defaults the protocol added since (#280)', () => {
   it('a session list with every defaulted field left out arrives with all of them filled in', async () => {
@@ -264,9 +264,8 @@ describe('RpcClient rejects in-flight calls on disconnect (U1)', () => {
 
 /*
  * An RPC that ends in a revival gets a long budget (#164). A revival alone can use up to 150
- * seconds just to start the process (the manager's stage limit), and these five were missing
- * from the list and cut off at 30 seconds — the host applied the settings and restarted, but
- * the screen showed a failure.
+ * seconds just to start the process (the manager's stage limit); cut off at 30 seconds, the
+ * host applies the settings and restarts while the screen shows a failure.
  */
 describe('RpcClient — budget for a call ending in a revival (#164)', () => {
   const RESUMING = [
@@ -319,7 +318,7 @@ describe('RpcClient — budget for a git write', () => {
  * #173: the starting point for replay. A first-met host replays its whole buffer, and that is
  * all stuff that finished before the screen was attached (a "done" card stood for every
  * finished turn). Attaching to a host that came back up on the same address while still
- * holding the old number meant nothing was ever replayed.
+ * holding the old number would replay nothing.
  */
 describe('RpcClient — the starting point for replay (#173)', () => {
   const ev = (seq: number) => ({
@@ -405,8 +404,7 @@ describe('RpcClient — the starting point for replay (#173)', () => {
 })
 
 /*
- * #82: recovery hardening for the local app. Every test here was run against the code before it
- * and failed; the failures are quoted in the pull request.
+ * #82: recovery hardening for the local app.
  */
 describe('RpcClient — what the window says it shows (#1405)', () => {
   it("says in its hello that it shows host requests, so a host raises a limited caller's card for it", () => {
@@ -748,7 +746,7 @@ describe('RpcClient — an answer that cannot be read', () => {
     ws.ready()
     const call = rpc.call('sessions.list', {})
     resultFault.next = new RangeError('Maximum call stack size exceeded')
-    // The throw used to escape the socket callback, after the call had already left `pending`
+    // The throw must not escape the socket callback, after the call has already left `pending`
     expect(() => ws.receive({ kind: 'res', id: lastRpcId(ws), ok: true, result: [] })).not.toThrow()
     await expect(call).rejects.toMatchObject({ code: 'internal', message: expect.stringContaining('sessions.list') })
     expect(vi.getTimerCount()).toBe(0)

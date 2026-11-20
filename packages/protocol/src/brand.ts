@@ -36,8 +36,7 @@ export const APP_SLUG = 'centralu'
 
 /**
  * The bundle passed when introducing the app to an external CLI (codex `clientInfo`).
- * Five places were building the same object, and touching only the version would silently
- * put them out of sync.
+ * One object, so a change to the version cannot leave a hand-built copy out of sync.
  */
 export const CLIENT_INFO = { name: APP_SLUG, title: APP_NAME, version: APP_VERSION } as const
 

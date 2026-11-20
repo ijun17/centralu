@@ -191,9 +191,8 @@ export function workTasks(tasks: readonly BackgroundTask[]): BackgroundTask[] {
 /**
  * Choices an agent presents to a person (AskUserQuestion).
  *
- * **Never truncated.** During dogfooding, this tool call once got cut off partway while flowing
- * through as raw JSON, and everything from the second option onward disappeared — the entire
- * means of answering vanished with it. Unlike an approval (ApprovalDetail), this does not carry
+ * **Never truncated.** Cut partway (measured, while flowing through as raw JSON), the call loses
+ * every option after the cut, and with them the means of answering. Unlike an approval (ApprovalDetail), this does not carry
  * a preview — it carries **everything needed to answer**.
  */
 export const QuestionOption = z.object({
@@ -223,9 +222,8 @@ export const ToolSummary = z.object({
   /** A one-line summary (the full command, a file path, etc.) */
   title: z.string(),
   /**
-   * No longer set or read (#428). It was meant to collapse a read-only tool's card (FR-3), but every card folds now
-   * (core/approval.ts), and the two adapters' classifiers had drifted (Codex counted every `git` command, `git push`
-   * included, as read-only). Kept, optional, so events and stored records from older builds still parse.
+   * Not set or read (#428): every card folds (core/approval.ts). Kept, optional, so events and stored records from
+   * older builds still parse.
    */
   readOnly: z.boolean().optional(),
   paths: z.array(z.string()).default([]),
@@ -283,9 +281,8 @@ export const ExternalSession = z.object({
   /**
    * **The id of that session**, if it is already open.
    *
-   * A label alone is not enough — this used to just say "already imported" while the click still
-   * went through as before, producing the same conversation twice in the list (confirmed by
-   * measurement). If this value is present, the UI takes the person to that session instead of
+   * A label alone is not enough: a row that only says "already imported" while the click still
+   * goes through opens the same conversation twice in the list (measured). If this value is present, the UI takes the person to that session instead of
    * creating a new one.
    */
   importedAs: z.string().nullable().default(null),
