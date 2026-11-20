@@ -371,11 +371,14 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
  */
 function Starting({ work = null }: { work?: StoreWork | null }) {
   const [now, setNow] = useState(Date.now)
+  // Kept on whether there is work, not on the report: a new one comes with every check, more often than the clock ticks
+  const working = work !== null
   useEffect(() => {
-    if (!work) return
+    if (!working) return
+    setNow(Date.now())
     const tick = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(tick)
-  }, [work])
+  }, [working])
   const shown = work && now - work.since >= 1000 ? work : null
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-surface-floor" data-testid="starting">

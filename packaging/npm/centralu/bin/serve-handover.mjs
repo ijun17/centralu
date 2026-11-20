@@ -45,10 +45,12 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const own = { token: state.token, proofKey: state.proofKey }
   const probe = () => probeHost({ port, ...own, protocolVersion: installed })
   const work = storeWork(dataDir)
-  if (work && waitOnWork) {
+  if (work && waitOnWork && !(await probe()).running) {
     say(`the host is ${storeWorkText(work)}; waiting for it to finish before it is stopped`)
     const known = new Map()
-    while (storeWork(dataDir, known)) await sleep(500)
+    // A host that answers is past its work, whatever host.lock still says: one whose clear of the record was refused
+    // (a reader holding the file on Windows) keeps saying it until it exits
+    while (storeWork(dataDir, known) && !(await probe()).running) await sleep(500)
     // It listens within moments of its work: one that does not is taken for a start that hung, below
     await waitUntil(async () => (await probe()).running || !lockHolderIsAlive(dataDir), WORK_TO_LISTEN_MS)
   }

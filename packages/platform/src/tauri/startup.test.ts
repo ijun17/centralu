@@ -100,11 +100,12 @@ describe('a host that works on its store before it answers (#2334)', () => {
       // Before: rejected at 30 s with "agent-host did not become ready in time", the copy still running
       await vi.advanceTimersByTimeAsync(90_000)
       expect(settled).toBe(false)
-      expect(told.at(-1)).toEqual(work)
+      // Once for the work, not once per check (the screen's clock is reset by each)
+      expect(told).toEqual([work])
 
       working = false
       await vi.advanceTimersByTimeAsync(1_000)
-      expect(told.at(-1)).toBeNull()
+      expect(told).toEqual([work, null])
       ready = true
       await vi.advanceTimersByTimeAsync(1_000)
       expect(settled).toBe(true)
@@ -124,8 +125,7 @@ describe('a host that works on its store before it answers (#2334)', () => {
       const failed = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).catch((e: Error) => e.message)
       await vi.advanceTimersByTimeAsync(31_000)
       expect(await failed).toBe('agent-host did not become ready in time')
-      expect(told.length).toBeGreaterThan(0)
-      expect(told.every((w) => w === null)).toBe(true)
+      expect(told).toEqual([null])
     } finally {
       vi.useRealTimers()
     }

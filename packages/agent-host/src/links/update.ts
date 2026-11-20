@@ -202,7 +202,11 @@ export async function readSwitchStatus(c: Pick<HostControl, 'exec' | 'spec'>, se
 }
 
 const POLL_MS = 2_000
-/** Past the longest switch the switcher can take, with a link that comes back on its backoff */
+/**
+ * Past the longest switch the switcher can take, with a link that comes back on its backoff. A new version's work on a
+ * large store (#2334) has no bound and can outlast it: the hub then says it could not follow the switch to its end, and
+ * the outcome reaches it at the next status read
+ */
 const FOLLOW_MS = 15 * 60_000
 
 /** The step the row shows for the switcher's: its `restart` is the put-back's start */

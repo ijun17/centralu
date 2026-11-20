@@ -1615,6 +1615,30 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     }
   })
 
+  /*
+   * #2334: a host whose clear of its store work was refused (a reader held host.lock on Windows) keeps saying it until it
+   * exits. Before: a hub's stop waited on the record, and the next update hung with it
+   */
+  it('a hub’s stop asks a host that answers to stop, whatever host.lock still says of its work on its store', async () => {
+    const h = await heldFolder(null, [idle])
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    try {
+      const pid = holder.pid!
+      const store = { doing: 'copy', step: 76, bytes: 1, since: Date.now() }
+      writeFileSync(join(h.d, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at: Date.now(), by: 'serve', store }))
+      expect(storeWork(h.d)).toEqual(store)
+      const lines: string[] = []
+      const stopped = runStop({ env: { CC_DATA_DIR: h.d, CENTRALU_STOP_BY: 'hub', CENTRALU_STOP_FOR: 'update' }, home: h.d, entry: SOURCE_HOST, kill: () => {}, write: (l: string) => void lines.push(l) })
+      await eventually(() => h.calls.includes('host.stop forUpdate'), 10_000 * SLOW)
+      holder.kill()
+      await stopped
+      expect(JSON.parse(lines.join(''))).toMatchObject({ v: 1, stop: { ok: true, wasRunning: true } })
+    } finally {
+      holder.kill()
+      await h.server.close()
+    }
+  }, 60_000 * SLOW)
+
   it('reads the logon a host says in its hello', async () => {
     const h = await heldFolder('network', [idle])
     try {

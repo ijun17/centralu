@@ -42,8 +42,9 @@ import type { SayStoreWork } from './store/store-work.js'
 /**
  * `sayWork` puts what the host does to its store into `host.lock` (`store`, store/store-work.ts), or takes it out with
  * null. The file is replaced whole (`writeFileWhole`), so a reader never sees half of it: readers take a file they
- * cannot parse for no holder. A rename still refused after the Os tries again leaves the file as it was, and the
- * starters then wait as they did before the work was said.
+ * cannot parse for no holder. A rename still refused after the Os tries again leaves the file as it was: a failed first
+ * write leaves the starters waiting as they did before the work was said, and a failed clear leaves the record until the
+ * host exits, which is why every reader takes a host that answers for one past its work.
  */
 export type LockResult =
   | { ok: true; release: () => void; sayWork: SayStoreWork }

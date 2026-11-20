@@ -86,8 +86,8 @@ export function onHostStatus(cb: (status: HostStatus) => void): () => void {
  *
  * **A host working on its store is not late** (#2334): a copy of a large store before an update, or a long store step,
  * outlasts any fixed wait, and the host cannot answer meanwhile. While the shell reports such work the wait starts
- * over, so `timeoutMs` counts only time the host spends on nothing it said; `onStoreWork` is told what it is (null
- * once it is not said), for the screen.
+ * over, so `timeoutMs` counts only time the host spends on nothing it said; `onStoreWork` is told what it is when that
+ * changes (null once it is not said), for the screen.
  */
 async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | null) => void = () => {}): Promise<HostInfo> {
   return new Promise<HostInfo>((resolve, reject) => {
@@ -116,6 +116,7 @@ async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | n
         .then((err) => fail(err ?? 'agent-host did not become ready in time'))
     }
     let timer = setTimeout(expire, timeoutMs)
+    let saidWork: string | undefined
 
     // (1) Subscribes first
     const unlisten = listenHostStatus((p) => {
@@ -135,7 +136,10 @@ async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | n
         .then((w) => {
           if (done) return
           const work = isStoreWork(w) ? w : null
-          onStoreWork(work)
+          // Told when it changes: each check reads a new report, and a screen drawn again on each would never tick its clock
+          const key = JSON.stringify(work)
+          if (key !== saidWork) onStoreWork(work)
+          saidWork = key
           if (!work) return
           clearTimeout(timer)
           timer = setTimeout(expire, timeoutMs)
