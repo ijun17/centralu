@@ -203,6 +203,18 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(String(facts.answer)).toHaveLength(2_000)
   })
 
+  it('crosses a finished turn\'s answer longer than a report across takes cut, and its words say read_session reads the rest (#2358)', async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'start_agent' })
+    const id = sent.ok ? sent.messageId : ''
+    machine.mail!.service.report(id, { outcome: 'finished', body: '[Centralu] The session ended its turn.', answer: 'a'.repeat(3_000) })
+    await eventually(() => hub.store.mailbox.reportsOn(id).length === 1)
+    const [report] = hub.store.mailbox.reportsOn(id)
+    expect(report!.facts.answer).toBe(`${'a'.repeat(1_999)}…`)
+    expect(report!.body).toBe(reportWords('m1.w1', { outcome: 'finished', answer: 'cut' }))
+    expect(report!.body).toContain(`read_session(sessionId="m1.w1") reads the rest`)
+  })
+
   it("acts for the person on the machine only when the hub says its Assistant's send_to_session gave it", async () => {
     const { machine, hub, across } = await rig()
     const orc = (await hub.mgr.assistant()).id

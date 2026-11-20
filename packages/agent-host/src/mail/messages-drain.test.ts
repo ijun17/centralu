@@ -121,7 +121,7 @@ describe('what one wake carries', () => {
     const reply = w.send(A, { replyTo: mine.id, text: 'the answer' }).message
     const t = w.mail.task(ORC, W, { text: 'build', origin: 'start_agent', delivered: true })
     w.startTurn(W, t.id)
-    const clar = w.send(W, { to: [ORC], text: 'which branch?' }).message
+    const clar = w.send(W, { to: [ORC], text: 'which branch?', question: true }).message
     due(w)
     const toB = w.mail.drain(B).text
     expect(toB).toContain(`id="${reply.id}" kind="message" from="${A}" sender="a session of your project" needsReply="0" answers="${mine.id}"`)
@@ -243,7 +243,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
         '2 of your messages are no longer watched, and Centralu will not remind their receivers again:',
         `- ${q1.id} to beta (${B}): that session is gone.`,
         `- ${q2.id} to beta (${B}): that session is gone.`,
-        'For the others, go on without the answers, ask another session, or ask the person. Next time, send with kind="note" when you need no answer.',
+        'For the others, go on without the answers, ask another session, or ask the person. Next time, send with kind: "note" when you need no answer.',
       ].join('\n'),
     )
     // Once: a second call tells nobody again

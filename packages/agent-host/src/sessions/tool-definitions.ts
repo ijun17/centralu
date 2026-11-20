@@ -810,7 +810,7 @@ export const AGENT_BUDGET_CHARS = 1330
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind "question". In a report, say what each claim rests on and what you did not check.`,
+    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind: "question". In a report, say what each claim rests on and what you did not check.`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'close', 'find', 'watch']),
       thread: z.string().optional(),

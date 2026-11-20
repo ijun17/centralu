@@ -385,8 +385,8 @@ describe('a question to the giver holds its report until it is answered or handl
     expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
     // A plain send to the giver is no question, so it needs no reply (#2357): "Done" before the end holds nothing, and the send says how to ask
     const plain = await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })
-    expect(plain.text).toContain('). It needs no reply. When you ask whoever gave you your task something, send that question with kind="question".')
-    expect(plain.text.endsWith('kind="question".')).toBe(true)
+    expect(plain.text).toContain('). It needs no reply. When you ask whoever gave you your task something, send that question with kind: "question".')
+    expect(plain.text.endsWith('kind: "question".')).toBe(true)
     const done = read.between(addr(child), addr(parent), 'message').at(-1)!
     expect(done).toMatchObject({ needsReply: false, facts: { clarifies: task } })
     expect(done.facts.question).toBeUndefined()

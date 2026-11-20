@@ -205,7 +205,7 @@ function messageFoot(shown: readonly MessageFrameItem[], calls: MessageCalls): s
     ...(waiting === 0
       ? []
       : [
-          `${waiting} of these wait for your answer (needsReply="1"): answer each with ${calls.answer('<id>')}, or close it with ${calls.done('<id>')} if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind="question".`,
+          `${waiting} of these wait for your answer (needsReply="1"): answer each with ${calls.answer('<id>')}, or close it with ${calls.done('<id>')} if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind: "question".`,
         ]),
     ...shown
       .filter((i) => i.clarifies !== undefined)

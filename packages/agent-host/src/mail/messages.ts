@@ -62,7 +62,10 @@ export type SendInput = {
   /** 1 to 10 addresses. Empty with `replyTo`: the sender of the message answered */
   to: readonly string[]
   text: string
+  /** Whether it waits for a reply, given only when decided elsewhere (a peer across a link, the person's window); else `waitsForReply` decides */
   needsReply?: boolean
+  /** The sender needs no answer (the tool's `kind: "note"`) */
+  note?: true
   replyTo?: string
   /** A reply the sender marked as the answer to the task it replies to (the tool's `kind: "answer"`): only such a reply settles a task (`replyAnswers`) */
   answer?: boolean
@@ -185,7 +188,7 @@ export type MailChange = { messageId: string; rootId: string; recipients: string
  * each one short line and no two the same. Anything else is refused, so a choice never reaches another session as a field it might take for Centralu's
  */
 function checkedChoices(c: MailChoices, cls: SenderClass, to: readonly string[], question: boolean): MailChoices {
-  if (cls !== 'session' || !question || to.length !== 1 || to[0] !== PERSON) throw refuse('field_not_allowed', 'choices go only with a question to the person (kind "question", to "person")')
+  if (cls !== 'session' || !question || to.length !== 1 || to[0] !== PERSON) throw refuse('field_not_allowed', 'choices go only with a question to the person (kind: "question", to: "person")')
   const choices = c.map((label) => oneLineText(label, CHOICE_CHARS))
   if (choices.length < 2 || choices.length > 6 || choices.includes('') || new Set(choices).size < choices.length) throw refuse('bad_value', 'a question offers 2 to 6 choices, none empty and no two the same')
   return choices
@@ -298,9 +301,11 @@ export class MessageService {
     // The owner's answer to one is work again: a task from the owner to the one who asked
     const asWork = target !== undefined && this.answersClarification(sender, target, to)
     const kind: MailKind = asWork ? 'task' : 'message'
+    const needsReply =
+      kind === 'message' && (input.needsReply ?? waitsForReply({ question: input.question === true, note: input.note === true, reply: target !== undefined, clarifies: clarifies !== undefined }))
 
     const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
-    const choices = input.choices && checkedChoices(input.choices, cls, to, kind === 'message' && (input.needsReply ?? target === undefined))
+    const choices = input.choices && checkedChoices(input.choices, cls, to, needsReply)
     for (const [i, r] of to.entries()) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
@@ -317,7 +322,6 @@ export class MessageService {
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
 
-      const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
       const urgent = input.urgent === true
       const senderProject = this.reach.projectOf(sender)
       // The hold judges what the message is to the one hold, whatever it is stored as

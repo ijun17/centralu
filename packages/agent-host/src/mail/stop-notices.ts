@@ -425,7 +425,7 @@ ${lastWordsText(s.name, said)}`
     ...lines,
     ...(later ? ['Those still working or waiting may answer later; the answer reaches you as mail.'] : []),
     // A `lost` line says to ask again: a notice of only those has no others, and the question was one whose answer was needed
-    ...(rows.some((r) => r.why !== 'lost') ? ['For the others, go on without the answers, ask another session, or ask the person. Next time, send with kind="note" when you need no answer.'] : []),
+    ...(rows.some((r) => r.why !== 'lost') ? ['For the others, go on without the answers, ask another session, or ask the person. Next time, send with kind: "note" when you need no answer.'] : []),
     ...stopLines,
   ].join('\n')
 }

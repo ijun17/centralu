@@ -225,7 +225,7 @@ export class MailTool {
     const [only, other] = this.sessionsNamed(sessionId, word)
     const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
     const r = await this.host.work(sessionId, only && !other ? only.id : word, subject + a.text.trim(), a.ifBusy, signal)
-    return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
+    return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind: "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
   }
 
   /** The sessions here a word names: the one with that id, else those of that name but the caller (after a handoff the heir has the name of the session it replaced, and writes to that one) */
@@ -245,14 +245,12 @@ export class MailTool {
         return this.handled(me.address, this.target(me.address, this.need(a.thread, 'thread')))
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
-        const clarifies = this.service.clarifies(me.address, to.address) !== undefined
-        const needsReply = waitsForReply({ question: asks(a), note: a.kind === 'note', reply: false, clarifies })
-        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply, ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(a.subject ? { subject: a.subject } : {}), ...(asks(a) ? { question: true } : {}) })
+        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), ...(a.kind === 'note' ? { note: true } : {}), ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(a.subject ? { subject: a.subject } : {}), ...(asks(a) ? { question: true } : {}) })
         return this.sent(sent)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
-        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: waitsForReply({ question: asks(a), note: false, reply: true, clarifies: false }), ...(a.kind === 'answer' ? { answer: true } : {}), ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(asks(a) ? { question: true } : {}) })
+        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), ...(a.kind === 'answer' ? { answer: true } : {}), ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}), ...(asks(a) ? { question: true } : {}) })
         return this.sent(sent)
       }
       case 'find':
@@ -361,7 +359,7 @@ export class MailTool {
     if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the Assistant reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
     if (r.cited) lines.push(`Centralu checked the citation: the Assistant reads the person's message ${r.cited.seq} of this session with your request.`)
     // A reply to a task answers it only marked as its answer (`replyAnswers`); otherwise the task stays open and the last response answers it
-    if (answered?.kind === 'task' && !r.answers) lines.push(`Task ${answered.id} stays open: reply with kind="answer" to answer it, or your last response will.`)
+    if (answered?.kind === 'task' && !r.answers) lines.push(`Task ${answered.id} stays open: reply with kind: "answer" to answer it, or your last response will.`)
     else if (answered) {
       // A request its sender withdrew (the person closed the chain) is answered anyway, and the answer says so
       const withdrawn = this.records.recipient(answered.id, m.sender)?.settled === 'withdrawn'
@@ -544,7 +542,7 @@ function failed(e: unknown): MailToolResult {
 function waitLine(m: { needsReply: boolean; answers: boolean; clarifies: boolean }): string[] {
   if (m.needsReply) return ['It needs a reply, which reaches you as mail and wakes you if you are at rest.']
   if (m.answers) return []
-  return [m.clarifies ? 'It needs no reply. When you ask whoever gave you your task something, send that question with kind="question".' : 'It needs no reply.']
+  return [m.clarifies ? 'It needs no reply. When you ask whoever gave you your task something, send that question with kind: "question".' : 'It needs no reply.']
 }
 
 /** Whether the sender marks its message as a question (`facts.question`, #2348): `kind: "question"`, or answers offered to pick from */

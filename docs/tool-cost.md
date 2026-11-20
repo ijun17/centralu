@@ -977,10 +977,11 @@ done nothing since threads went. Not measured live.
 
 **#2357 and #2358 (the mail tool's words; owner, 2026-11-19: simple, one wording per rule, explained where it applies).** The
 description's sentence on reports takes the words every answer frame uses (`ANSWER_GROUNDS`): "In a report, say what each claim rests on and
-what you did not check." (71 → 69; the definition 1,174 → 1,172, `MAIL_BUDGET_CHARS` stays 1,175). The rule for asking the session that gave
+what you did not check." (71 → 69), and the kind is spelled as the call writes it, as every result and frame does: `kind: "question"` (+1;
+the definition 1,174 → 1,173, `MAIL_BUDGET_CHARS` stays 1,175). The rule for asking the session that gave
 the task is not in the description: ask_project's and start_agent's frames say it in one sentence (`askBeforeFinish`; start_agent's is
 unchanged, ask_project's 106 → 89 characters a task), and the send it applies to says it in its result. The wake's foot loses
-"set needsReply=true", a field the tool does not have, for 'send it with kind="question"' (+9 in a wake with a message that waits for a reply),
+"set needsReply=true", a field the tool does not have, for 'send it with kind: "question"' (+10 in a wake with a message that waits for a reply),
 and its clarification line 6 characters. Everything else (an inbox line that names what a report is about, the whole answer in a report's read,
 the reader's own messages in a chain by their first line, a refusal naming the heir) is in results, which ride in no request. Not measured live.
 

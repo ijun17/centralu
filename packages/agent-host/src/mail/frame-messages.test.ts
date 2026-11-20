@@ -77,7 +77,7 @@ describe('the frame of mail without threads', () => {
     expect(none).toContain(`</centralu-mail>\n${READ}\n</system-reminder>`)
     const some = buildMessageFrame([item(1, { needsReply: true }), item(2), item(3, { needsReply: true })]).text
     expect(some).toContain(
-      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…"), or close it with mail(action="handled", thread="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind="question".\n</system-reminder>`,
+      `${READ}\n2 of these wait for your answer (needsReply="1"): answer each with mail(action="reply", thread="<id>", text="…"), or close it with mail(action="handled", thread="<id>") if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind: "question".\n</system-reminder>`,
     )
   })
 
