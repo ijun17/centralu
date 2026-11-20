@@ -22,16 +22,17 @@ its imports), where it costs the most time. Use a real process only when the tes
 tree, a handle Windows holds.
 
 Code under test takes the OS as a parameter or a dependency with the real one as its default
-(`os: Pick<Os, 'processes'> = realOs()`), so a test passes `memoryOs()` and nothing else changes. A function that
+(`os: Pick<Os, 'processes'> = realOs()`), so a test passes `memoryOs({ as })` and nothing else changes. A function that
 reaches for `realOs()` inside its body cannot be faked: give it the parameter.
 
 ## What the lint rules allow in a test
 
-- **`local/os-imports`** (`tooling/eslint-platform-checks.js`, the list in `tooling/os-layer.js`) reads tests too. A
-  test may not import `fs`, `path`, `os`, `child_process` or the other OS modules, nor use `process.kill`,
-  `process.cwd()`, `process.execPath` or `process.env.PATH`, with two exceptions:
-  - the test or test helper of a layer module, named for it exactly (`kill-tree.test.ts` for `kill-tree.ts`); another
-    name is not one, `os.anything.test.ts` included, so moving a test beside the layer does not exempt it;
+- **`local/os-imports`** (`tooling/eslint-platform-checks.js`) reads tests too. What it refuses is listed once, in
+  `tooling/os-layer.js` (`OS_MODULES`, `INSTALLED_OS_MODULES`, `OS_PROCESS_USES`, `OS_NAMED_EXPORTS`), with two
+  exceptions:
+  - the test or test helper of a layer module, named for it exactly (`inOsLayer`: `kill-tree.test.ts` for
+    `kill-tree.ts`); another name is not one, `os.anything.test.ts` included, so moving a test beside the layer does
+    not exempt it;
   - a file on `tooling/os-allowlist.txt`, which only shrinks: a new file never goes on it.
 
   A new test reaches the OS through the layer: `const { files, paths, processes, env } = realOs()`, then
@@ -40,9 +41,8 @@ reaches for `realOs()` inside its body cannot be faked: give it the parameter.
 - **`local/platform-checks`** does not read tests: `it.skipIf(process.platform !== 'win32')` and a constant such as
   `const posix = process.platform !== 'win32'` are fine in a test. Host code asks the layer a question named for what
   differs (`traits.hasProcessGroups`), never the platform.
-- **`guard/timed-start`** reads tests for probes only: a tool asked `--version` or `--help` with no limit is refused
-  everywhere; a limit through `execFile`'s `timeout` and a synchronous run of any program are refused in host code
-  only.
+- **`guard/timed-start`** (`timedStart` in `tooling/eslint-guards.js`; its scopes in `guardConfigs`) reads tests for
+  probes only; its other checks read host code.
 
 ## An example
 
@@ -61,7 +61,7 @@ it('names the tool in a failure, not the Node its shim runs', async () => {
 })
 ```
 
-The same question with no process, on both families (from `os/exec.test.ts`):
+The same question with no process, on the POSIX family (`os/exec.test.ts`; `as: 'windows'` runs Windows' rules):
 
 ```ts
 const os = memoryOs({ as: 'posix' })
@@ -69,6 +69,7 @@ os.programs.add('/usr/bin/tool', (ctx) => {
   ctx.start('/usr/bin/helper', [])
   return new Promise(() => {})
 })
+os.programs.add('/usr/bin/helper', (ctx) => new Promise(() => void ctx.ended))
 const ran = execText('/usr/bin/tool', [], { timeoutMs: 1000 }, os).catch((e: ExecFailure) => e)
 await os.clock.advance(1000)
 expect(await ran).toMatchObject({ ended: 'timeout' })

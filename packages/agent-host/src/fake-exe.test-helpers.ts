@@ -186,7 +186,7 @@ export function fakeExe(dir: string, name: string, source: string): string {
  * For code that finds a tool on PATH and may read its shim back for what it starts (`execTool`, `launchFor`,
  * `resolveCommand`). A program started directly, by path or by a name `spawn` looks up without a shell (ssh, gh),
  * where a `.cmd` cannot run, is `fakeExe`. A test of the logic alone, with no real process, adds the program to
- * `memoryOs().programs` instead.
+ * `memoryOs({ as }).programs` instead.
  */
 export function fakeTool(dir: string, name: string, source: string): string {
   const script = join(dir, 'node_modules', `${name}.cjs`)

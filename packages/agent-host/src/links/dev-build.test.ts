@@ -442,12 +442,12 @@ describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux m
   wholeCommand({
     shell: 'posix',
     prepare: async (root, home) => {
-      const { bin, ...machine } = linuxRemote(root, NODE_V)
+      const machine = linuxRemote(root, NODE_V)
       // git is found where this machine has it; the fake tools come first
       const gitDir = dirname(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim())
       return {
         ...machine,
-        env: (over = {}) => ({ HOME: home, PATH: `${bin}:${gitDir}:/usr/bin:/bin:/usr/sbin:/sbin`, ...over }),
+        env: (over = {}) => machine.env(home, over, [gitDir]),
         packages: (v): FakePackage[] => [
           { name: 'centralu', version: v, files: { 'package.json': JSON.stringify({ name: 'centralu', version: v }), 'bin/centralu.mjs': fakeServe(v, { installInfo: INSTALL_INFO, realServe: REAL }), 'bin/serve.mjs': SERVE_SHIM, 'bin/serve-switch.mjs': SWITCH_MARK } },
           { name: '@centralu/host-linux-x64', version: v, files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } },

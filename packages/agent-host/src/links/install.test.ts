@@ -40,7 +40,6 @@ describe('the word a version is written as', () => {
     expect(String(POINTER_WORD)).toBe(String(VERSION_WORD))
   })
 })
-const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
 
 const linux: PreflightFacts = { os: 'Linux', arch: 'x86_64', glibc: '2.39', musl: false, freeKb: 50_000_000, tar: true, gzip: true, fetch: 'curl', sha: 'sha256sum' }
 const windows: PreflightFacts = { os: 'Windows', arch: 'AMD64', glibc: null, musl: false, freeKb: 50_000_000, tar: true, gzip: true, fetch: 'curl', sha: 'Get-FileHash' }
@@ -431,6 +430,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   let home: string
   let reg: FakeRegistry
   let runtime: RemoteRuntime
+  let machine: ReturnType<typeof linuxRemote>
 
   const pkgs = (version: string): FakePackage[] => [
     {
@@ -460,7 +460,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     home = join(root, 'home')
     mkdirSync(home, { recursive: true })
     // What a Node archive carries beyond what the install keeps
-    const machine = linuxRemote(root, NODE_V, { 'include/node/node.h': '/* 67 MB in the real one */', 'lib/node_modules/npm/package.json': '{}' })
+    machine = linuxRemote(root, NODE_V, { 'include/node/node.h': '/* 67 MB in the real one */', 'lib/node_modules/npm/package.json': '{}' })
     // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one, as a
     // release publishes it now: beside the platform package, which npm installs keep using
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3'), ...pkgs('9.9.4'), hostOnly('9.9.4'), ...pkgs('9.9.5'), hostOnly('9.9.5')])
@@ -473,9 +473,9 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   })
   afterEach(() => rmSync(join(home, '.centralu'), { recursive: true, force: true }))
 
-  const env = (over: Record<string, string> = {}) => ({ HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin`, ...over })
+  const env = (over: Record<string, string> = {}) => machine.env(home, over)
   const install = (version: string, o: { runtime?: RemoteRuntime; env?: Record<string, string> } = {}) => {
-    const t = new SshTunnel({ target: 'box', ssh: join(root, 'ssh'), env: env(o.env) })
+    const t = new SshTunnel({ target: 'box', ssh: machine.ssh, env: env(o.env) })
     return installRemote({ exec: (c) => t.exec(c), spec: { shell: 'posix' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
   }
   const remote = (...p: string[]) => join(home, '.centralu', 'remote', ...p)
@@ -556,7 +556,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   }, 90_000 * SLOW)
 
   it('refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing', async () => {
-    const wrong = { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: 'f'.repeat(64) } } } }
+    const wrong = { node: { version: NODE_V, archives: { 'linux-x64': { file: machine.archive.file, sha256: 'f'.repeat(64) } } } }
     await expect(install('9.9.1', { runtime: wrong })).rejects.toThrow(/does not match the SHA-256 this Centralu release pinned/)
     expect(existsSync(remote('node'))).toBe(false)
     expect(existsSync(remote('current'))).toBe(false)

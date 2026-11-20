@@ -76,7 +76,13 @@ export function linuxRemote(
   root: string,
   nodeVersion: string,
   archiveFiles: Record<string, FakeFile> = {},
-): { bin: string; ssh: string; archive: { version: string; file: string; bytes: Buffer }; runtime: RemoteRuntime } {
+): {
+  ssh: string
+  /** The remote's environment: `HOME`, and a PATH with the fake tools first, then `before`, then the system's folders */
+  env: (home: string, over?: Record<string, string>, before?: string[]) => Record<string, string>
+  archive: { version: string; file: string; bytes: Buffer }
+  runtime: RemoteRuntime
+} {
   const bin = join(root, 'bin')
   mkdirSync(bin, { recursive: true })
   const script = (path: string, text: string) => {
@@ -90,11 +96,16 @@ export function linuxRemote(
   const file = `node-v${nodeVersion}-linux-x64.tar.gz`
   const bytes = tarGz(`node-v${nodeVersion}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT', ...archiveFiles })
   return {
-    bin,
     ssh,
+    env: (home, over = {}, before = []) => ({ HOME: home, PATH: [bin, ...before, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'), ...over }),
     archive: { version: nodeVersion, file, bytes },
-    runtime: { node: { version: nodeVersion, archives: { 'linux-x64': { file, sha256: sha256(bytes) } } } },
+    runtime: pinnedRuntime('linux-x64', nodeVersion, file, bytes),
   }
+}
+
+/** The Node a remote install is pinned to: one platform's archive, by its file name and the sha256 of `bytes` */
+export function pinnedRuntime(platform: string, version: string, file: string, bytes: Buffer): RemoteRuntime {
+  return { node: { version, archives: { [platform]: { file, sha256: sha256(bytes) } } } }
 }
 
 export type FakeRegistry = {

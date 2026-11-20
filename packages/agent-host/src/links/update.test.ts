@@ -43,6 +43,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
   let home: string
   let reg: FakeRegistry
   let runtime: RemoteRuntime
+  let machine: ReturnType<typeof linuxRemote>
 
   const pkgs = (version: string): FakePackage[] => [
     {
@@ -63,7 +64,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     root = mkdtempSync(join(tmpdir(), 'cc-update-'))
     home = join(root, 'home')
     mkdirSync(home, { recursive: true })
-    const machine = linuxRemote(root, NODE_V)
+    machine = linuxRemote(root, NODE_V)
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3')])
     reg.addNodeArchive(machine.archive.version, machine.archive.file, machine.archive.bytes)
     runtime = machine.runtime
@@ -81,7 +82,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
 
   /** A HostControl as LinkedMachine gives one, with this machine as the remote; what it saw is kept */
   const control = (env: Record<string, string> = {}, o: { exec?: HostControl['exec']; followMs?: number } = {}) => {
-    const t = new SshTunnel({ target: 'box', ssh: join(root, 'ssh'), env: { HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin`, ...env } })
+    const t = new SshTunnel({ target: 'box', ssh: machine.ssh, env: machine.env(home, env) })
     const seen: string[] = []
     const c: HostControl = {
       exec: o.exec ?? ((cmd) => t.exec(cmd)),
