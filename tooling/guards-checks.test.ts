@@ -787,7 +787,9 @@ describe('guard/timed-start', () => {
     async (code) => quiet('packages/agent-host/src/sessions/x.ts', 'timed-start', code, "os.processes.runSync('cmd.exe', [], {})"),
   )
   it('reads a synchronous run in host code alone: scripts, tests and tooling run what they need', async () => {
-    for (const at of ['scripts/x.mts', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) await quiet(at, 'timed-start', "runSync(process.execPath, [], {})", "execFileSync('agy', ['--version'])")
+    const code = 'runSync(process.execPath, [], {})'
+    expect(await lines('packages/agent-host/src/x.ts', code, 'timed-start')).toHaveLength(1)
+    for (const at of ['scripts/x.mts', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) await quiet(at, 'timed-start', code, "execFileSync('agy', ['--version'])")
   })
   it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
     for (const at of ['scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {
