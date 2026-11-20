@@ -3,7 +3,7 @@
  * in, that every one runs, and that leaving happens once.
  */
 import { describe, expect, it } from 'vitest'
-import { STOPS_SETTLE_MS } from '../os/kill-tree.js'
+import { STOPS_SETTLE_MS } from '../os/stop-bounds.js'
 import { both, runSteps, type Step } from './steps.js'
 import { SHUTDOWN_BOUND_MS, Shutdown, stopPlan, type HostParts } from './shutdown.js'
 

@@ -745,9 +745,10 @@ describe('guard/timed-start', () => {
     ["const run = promisify(execFile)" + NL + "await run('git', args, { cwd, ...DEFAULTS, windowsHide: true })"],
     ["execFileSync('ps', args, { ...base, encoding: 'utf8' })"],
   ])('reports %s', async (code) => {
-    expect((await lines(file, code, 'timed-start')).length).toBe(1)
+    // Reported on its one line: for its limit, and once more when it is also a probe
+    expect(new Set(await lines(file, code, 'timed-start')).size).toBe(1)
   })
-  it.each([["execFile('claude', ['--version'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
+  it.each([["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
     await quiet(file, 'timed-start', code, "execFileSync('ps', args, { timeout: 1 })")
   })
   it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {
@@ -756,5 +757,30 @@ describe('guard/timed-start', () => {
     expect(await lines('packages/agent-host/src/os/kill-tree.ts', code, 'timed-start')).toEqual([])
     expect(await lines('packages/agent-host/src/dev-services/other.ts', code, 'timed-start')).toEqual([1])
     expect(await lines('packages/agent-host/src/sessions/x.test.ts', code, 'timed-start')).toEqual([])
+  })
+  it.each([
+    ["execFileSync('agy', ['--version'], { encoding: 'utf8' })"],
+    ["execFileSync(cmd, ['--version'], { encoding: 'utf8' })"],
+    ["const run = promisify(execFile)" + NL + "await run('claude', ['--help'])"],
+    ["spawnSync(found, ['--version'])"],
+    ["execSync('agy --version')"],
+    ["execFileSync('npm', ['-v'])"],
+    ["execFileSync('go', ['version'])"],
+    ["execSync('npm -v')"],
+    ["execFileSync('agy', ['--version=json'])"],
+    ["os.processes.runSync('codex', ['--version'], { timeoutMs: 5000 })"],
+    ["execTextSync('codex', ['--version'], { timeoutMs: 5000 })"],
+  ])('reports the probe %s in host code, scripts, tests and tooling', async (code) => {
+    for (const at of ['packages/agent-host/src/sessions/x.ts', 'scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'packages/agent-host/src/x.test.ts', 'tooling/x.test.ts', 'e2e/x.spec.ts']) {
+      expect((await lines(at, code, 'timed-start')).length, at).toBe(1)
+    }
+  })
+  it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('git', ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('ps', ['-o', 'pid'], { timeoutMs: 5000 })"], ["execFileSync('npm', ['view', id, 'version', '--json'])"], ["execFileSync('ssh', [host, '-v'])"]])('does not report %s as a probe', async (code) => {
+    await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
+  })
+  it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
+    for (const at of ['scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {
+      await quiet(at, 'timed-start', "execFileSync('ps', args, { timeout: 2000 })", "execFileSync('agy', ['--version'])")
+    }
   })
 })

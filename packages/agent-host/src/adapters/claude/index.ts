@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { AdapterCapabilities, NormalizedEvent, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
-import { launchFor, toolCommand, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
+import { toolExecutable, toolLaunch, type ToolLaunch } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import { claudeAutoCompactWindow } from './sdk-query.js'
 import { claudeApiUrl } from './api-url.js'
@@ -439,7 +439,7 @@ export class ClaudeAdapter implements AgentAdapter {
   private async statusLaunch(): Promise<ToolLaunch> {
     const exe = this.launch.windows ? this.launch.executable() : null
     if (exe && /\.exe$/i.test(exe)) return { command: (await this.launch.links.ensure(exe)).path, args: [] }
-    return launchFor(toolCommand('claude'))
+    return toolLaunch('claude')
   }
 
   async listModels() {

@@ -162,14 +162,39 @@ const gitStart = guard('git-start', { git: 'git is started here by name: go thro
   },
 }))
 
+/** What may be asked `--version` or `--help` by `child_process` directly: each answers from its own binary, with no network, sign-in or first-run work to wait on */
+const PROBE_FREE = /^(?:git|node|gpgv)(?:\.exe)?$/
+
 /**
  * A program that is given a time limit ends with the whole tree it started (`os.processes.run`, `OsProcesses.stop`), never by
  * `execFile`'s `timeout:`: that signals the pid only, and what a `.cmd` shim's `cmd.exe` started goes on running. A call to a
  * `child_process` starter (or to what `promisify` made of one) with `timeout` in its options is reported, and so is an exec-family one whose
- * options spread another object (`{ ...DEFAULTS }`): a `timeout` in what is spread cannot be seen here.
+ * options spread another object (`{ ...DEFAULTS }`): a `timeout` in what is spread cannot be seen here (`timed`; off with `{ timed: false }`).
+ *
+ * A program asked its version or help (`--version`, `--version=…`, `--help`; `-v` or `version` as its first argument) through a `child_process` starter, or
+ * through `runSync` / `execTextSync` (whose limit ends the pid only), is reported too (`probe`, #2346): in a literal argument list,
+ * or in a literal command line (`exec('x --version')`). A tool's CLI can wait on a sign-in, the network or its first run, and with
+ * no limit nothing ends it; `execText` (os/exec.ts) bounds it and ends its tree. `PROBE_FREE` and `process.execPath` are let
+ * through. Arguments held in a variable, a command line built by interpolation and a starter imported under another name are
+ * not seen.
  */
-const timedStart = guard('timed-start', { timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)" }, (_context, add) => {
+const timedStart = guard('timed-start', {
+  timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)",
+  probe: 'a program asked its version or help through child_process or runSync can wait forever (a sign-in, the network, a first run) and nothing ends it: use execText (os/exec.js), which bounds it and ends its tree',
+}, (context, add) => {
+  const timed = (context.options[0] ?? {}).timed !== false
   const made = new Set() // `const exec = promisify(execFile)`
+  const probeFree = (node) => {
+    const command = unwrap(node)
+    if (command?.type === 'MemberExpression' && nameOf(command.object) === 'process' && nameOf(command) === 'execPath') return true
+    return PROBE_FREE.test((plain(command) ?? '').trim().split(/\s+/)[0] ?? '')
+  }
+  const PROBE_FLAG = /^(?:--version(?:=.*)?|--help)$/
+  // Only as the first argument, where they are the question (`npm -v`, `go version`); later, `version` is a field (`npm view x version`)
+  const PROBE_FIRST = /^(?:-v|version)$/
+  const probing = (word, at) => PROBE_FLAG.test(word) || (at === 0 && PROBE_FIRST.test(word))
+  // The layer's synchronous runners: their limit ends the pid only (os/exec.ts `execTextSync`)
+  const pidOnly = new Set(['runSync', 'execTextSync'])
   return {
     VariableDeclarator(node) {
       const init = node.init && unwrap(node.init)
@@ -177,7 +202,14 @@ const timedStart = guard('timed-start', { timed: "'timeout' (or options spread f
     },
     CallExpression(node) {
       const callee = nameOf(node.callee)
-      if (!GIT_STARTERS.has(callee) && !made.has(callee)) return
+      const starter = GIT_STARTERS.has(callee) || made.has(callee)
+      if (!starter && !pidOnly.has(callee)) return
+      const line = plain(unwrap(node.arguments[0])) ?? ''
+      const asked =
+        node.arguments.some((a) => a.type === 'ArrayExpression' && a.elements.some((e, at) => e && probing(plain(unwrap(e)) ?? '', at))) ||
+        line.trim().split(/\s+/).slice(1).some((word, at) => probing(word, at))
+      if (asked && !probeFree(node.arguments[0])) add(node, 'probe')
+      if (!timed || !starter) return
       for (const a of node.arguments) {
         if (a.type === 'ObjectExpression' && a.properties.some((p) => (p.type === 'SpreadElement' && callee !== 'spawn') || (p.type === 'Property' && keyOf(p) === 'timeout'))) add(node, 'timed')
       }
@@ -495,6 +527,11 @@ export const guardConfigs = [
     files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`],
     ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/os/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
     rules: { 'guard/timed-start': 'error' },
+  },
+  // The scripts, tests and their helpers ask tools too (the drift checks, the measurements): a probe is read in them all (#2346)
+  {
+    files: ['scripts/**/*.{ts,mts,js,mjs}', 'packages/*/scripts/**/*.{ts,mts,js,mjs}', '**/*.test.ts', '**/*.test-helpers.ts', 'tooling/**/*.{ts,mts,js,mjs}', 'e2e/**/*.ts'],
+    rules: { 'guard/timed-start': ['error', { timed: false }] },
   },
   // The path rules are written in os/rules.ts alone
   { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/rules.ts`], rules: { 'guard/one-path-rule': 'error' } },

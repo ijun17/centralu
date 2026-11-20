@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
+import { execText } from './os/exec.js'
 import { alive as isAlive } from './process.test-helpers.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 
@@ -87,12 +88,12 @@ describe('CLI search path augmentation', () => {
     }
   })
 
-  it('whichTool returns the actual executable path (the same job as `which`)', () => {
+  it('whichTool returns the actual executable path (the same job as `which`)', async () => {
     ensureToolPath()
     const found = whichTool('node')
     expect(found).toBeTruthy()
     // It does not matter which directory — it only has to actually exist
-    expect(execFileSync(found!, ['--version'], { encoding: 'utf8' })).toMatch(/^v\d+/)
+    expect((await execText(found!, ['--version'], { timeoutMs: 30_000 })).stdout).toMatch(/^v\d+/)
   })
 
   it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
