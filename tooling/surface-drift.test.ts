@@ -174,7 +174,7 @@ describe('the real environment the run reads tools in', () => {
     if (process.platform === 'win32') writeFileSync(join(dir, 'faketool.cmd'), `@"${process.execPath}" "%~dp0\\faketool.cjs" %*\r\n`)
     else writeFileSync(join(dir, 'faketool'), `#!/bin/sh\nexec "${process.execPath}" "${join(dir, 'faketool.cjs')}" "$@"\n`, { mode: 0o755 })
     vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`)
-    const { env, dispose } = latestEnv({ timeoutMs: 10_000 * SLOW })
+    const { env, dispose } = latestEnv({ timeoutMs: 4_000 * SLOW })
     try {
       await expect(env.run('faketool', ['--version'])).rejects.toMatchObject({ ended: 'timeout' })
       const pids = treePids(pidFile)

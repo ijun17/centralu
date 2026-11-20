@@ -163,7 +163,7 @@ const gitStart = guard('git-start', { git: 'git is started here by name: go thro
 }))
 
 /** What may be asked `--version` or `--help` by `child_process` directly: each answers from its own binary, with no network, sign-in or first-run work to wait on */
-const PROBE_FREE = new Set(['git', 'node', 'gpgv'])
+const PROBE_FREE = /^(?:git|node|gpgv)(?:\.exe)?$/
 
 /**
  * A program that is given a time limit ends with the whole tree it started (`os.processes.run`, `OsProcesses.stop`), never by
@@ -171,9 +171,10 @@ const PROBE_FREE = new Set(['git', 'node', 'gpgv'])
  * `child_process` starter (or to what `promisify` made of one) with `timeout` in its options is reported, and so is an exec-family one whose
  * options spread another object (`{ ...DEFAULTS }`): a `timeout` in what is spread cannot be seen here (`timed`; off with `{ timed: false }`).
  *
- * A program asked `--version` or `--help` through a `child_process` starter is reported too (`probe`, #2346): a tool's CLI can
- * wait on a sign-in, the network or its first run, and with no limit nothing ends it; `execText` (os/exec.ts) bounds it and ends
- * its tree. `PROBE_FREE` and `process.execPath` are let through.
+ * A program asked `--version` or `--help` through a `child_process` starter is reported too (`probe`, #2346): in a literal
+ * argument list, or in a literal command line (`exec('x --version')`). A tool's CLI can wait on a sign-in, the network or its
+ * first run, and with no limit nothing ends it; `execText` (os/exec.ts) bounds it and ends its tree. `PROBE_FREE` and
+ * `process.execPath` are let through.
  */
 const timedStart = guard('timed-start', {
   timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)",
@@ -184,8 +185,9 @@ const timedStart = guard('timed-start', {
   const probeFree = (node) => {
     const command = unwrap(node)
     if (command?.type === 'MemberExpression' && nameOf(command.object) === 'process' && nameOf(command) === 'execPath') return true
-    return PROBE_FREE.has(plain(command) ?? '')
+    return PROBE_FREE.test((plain(command) ?? '').trim().split(/\s+/)[0] ?? '')
   }
+  const PROBE_FLAG = /^--(?:version|help)$/
   return {
     VariableDeclarator(node) {
       const init = node.init && unwrap(node.init)
@@ -194,7 +196,10 @@ const timedStart = guard('timed-start', {
     CallExpression(node) {
       const callee = nameOf(node.callee)
       if (!GIT_STARTERS.has(callee) && !made.has(callee)) return
-      const asked = node.arguments.some((a) => a.type === 'ArrayExpression' && a.elements.some((e) => e && ['--version', '--help'].includes(plain(unwrap(e)) ?? '')))
+      const line = plain(unwrap(node.arguments[0])) ?? ''
+      const asked =
+        node.arguments.some((a) => a.type === 'ArrayExpression' && a.elements.some((e) => e && PROBE_FLAG.test(plain(unwrap(e)) ?? ''))) ||
+        line.split(/\s+/).slice(1).some((word) => PROBE_FLAG.test(word))
       if (asked && !probeFree(node.arguments[0])) add(node, 'probe')
       if (!timed) return
       for (const a of node.arguments) {

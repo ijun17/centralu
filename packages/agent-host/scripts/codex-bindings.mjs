@@ -52,10 +52,11 @@ const codex = async (args, timeoutMs) => (await execTool('codex', args, { timeou
 const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex')
 
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
-const version = (await codex(['--version'], 30_000)).trim()
+let version = ''
 const tmp = mkdtempSync(join(tmpdir(), 'codex-bindings-'))
 
 try {
+  version = (await codex(['--version'], 30_000)).trim()
   await codex(['app-server', 'generate-ts', '--out', tmp], 300_000)
 } catch (e) {
   console.error('[codex] type generation failed — check whether the codex CLI is installed:', e.message)

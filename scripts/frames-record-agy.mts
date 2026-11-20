@@ -34,7 +34,7 @@ export function temporaryAgy(parent: string, scenario: string, signedOut: boolea
     copyFileSync(real, copy)
   }
   const before = signedOut ? '' : readFileSync(copy, 'utf8')
-  // Asked once, bounded, the first time the adapter wants it
+  // Asked once, bounded, the first time the adapter wants it; a failure is asked again
   let version: Promise<string> | undefined
   const recorded: AgyProfile = {
     ...profile,
@@ -44,7 +44,14 @@ export function temporaryAgy(parent: string, scenario: string, signedOut: boolea
       // Through the proxy that sets the model (`frames-record-agy-model.mjs`)
       return { ...started, command: process.execPath, args: [MODEL_PROXY, AGY_MODEL, 'agy', 'acp', '--gemini-dir', profile.home.geminiHome, '--disable-telemetry'], env: { ...started.env, HOME: home, USERPROFILE: home } }
     },
-    installedVersion: () => (version ??= execTool('agy', ['--version'], { timeoutMs: 30_000 }).then((r) => r.stdout.trim())),
+    installedVersion: () =>
+      (version ??= execTool('agy', ['--version'], { timeoutMs: 30_000 }).then(
+        (r) => r.stdout.trim(),
+        (e: unknown) => {
+          version = undefined
+          throw e
+        },
+      )),
   }
   let done = false
   return {

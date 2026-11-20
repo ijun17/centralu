@@ -7,7 +7,7 @@ export type ExecFailure = Error & { stdout: string; stderr: string; code: number
 /** Whether a rejection of `execText` is a program that ran and failed (it carries its output), not one that could not start */
 export const isExecFailure = (e: unknown): e is ExecFailure => e instanceof Error && 'stdout' in e && 'stderr' in e
 
-type ProbeOptions = {
+export type ProbeOptions = {
   timeoutMs: number; env?: Env; cwd?: string; maxBuffer?: number; input?: string
   /** What a failure calls the program: a tool by its name, not the Node its shim runs (`execTool`) */
   name?: string

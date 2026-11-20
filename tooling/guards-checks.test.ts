@@ -763,12 +763,13 @@ describe('guard/timed-start', () => {
     ["execFileSync(cmd, ['--version'], { encoding: 'utf8' })"],
     ["const run = promisify(execFile)" + NL + "await run('claude', ['--help'])"],
     ["spawnSync(found, ['--version'])"],
+    ["execSync('agy --version')"],
   ])('reports the probe %s in host code, scripts, tests and tooling', async (code) => {
     for (const at of ['packages/agent-host/src/sessions/x.ts', 'scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'packages/agent-host/src/x.test.ts', 'tooling/x.test.ts', 'e2e/x.spec.ts']) {
       expect((await lines(at, code, 'timed-start')).length, at).toBe(1)
     }
   })
-  it.each([["execFileSync('git', ['--version'])"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"]])('does not report %s as a probe', async (code) => {
+  it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"]])('does not report %s as a probe', async (code) => {
     await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
   })
   it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {

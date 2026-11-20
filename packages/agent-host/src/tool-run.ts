@@ -1,4 +1,4 @@
-import { execText } from './os/exec.js'
+import { execText, type ProbeOptions } from './os/exec.js'
 import { toolLaunch } from './tool-launch.js'
 
 /**
@@ -6,7 +6,7 @@ import { toolLaunch } from './tool-launch.js'
  * starts it (`toolLaunch`), and asked with `execText`, so a limit ends it with everything it started. A failure names the
  * tool. For the scripts and checks that probe a tool on PATH; an adapter that finds its tool its own way calls `execText`.
  */
-export function execTool(name: string, args: readonly string[], options: { timeoutMs: number; maxBuffer?: number; input?: string }): Promise<{ stdout: string; stderr: string }> {
+export function execTool(name: string, args: readonly string[], options: Pick<ProbeOptions, 'timeoutMs' | 'maxBuffer' | 'input'>): Promise<{ stdout: string; stderr: string }> {
   const launch = toolLaunch(name)
   return execText(launch.command, [...launch.args, ...args], { ...options, name })
 }
