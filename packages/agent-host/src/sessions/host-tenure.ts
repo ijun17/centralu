@@ -265,22 +265,6 @@ export class HostTenure {
   /** The sessions as the last host left them, read once as this host starts (the manager's constructor calls it) */
   restoreAtStart(): void {
     const { store, keeperOpts } = this.host
-    /*
-     * On startup, state is **not simply restored as-is.**
-     *
-     * When the host dies, the session's process dies with it. But the DB still holds the last
-     * state as-is, so on restart no process exists at all while the screen still says `working`.
-     * The person thinks it is running and waits, and nothing ever happens (dogfooding: "stuck on
-     * working for over 40 minutes". The workaround people found at the time was archiving and then
-     * restoring it, which worked only because archive reset state to idle — archiving has since
-     * been dropped, and this fixes it here so that workaround is no longer needed).
-     *
-     * A live state (working, waiting for approval) is **only true when a process exists**.
-     * At startup no session has a process, so every one of them is corrected to idle. It wakes
-     * again once something addresses it — that is better than showing a state that is not true.
-     * Which states those are is the one definition a stop lists the turns it ends by (`turnCut`, idle.ts, #1618): what a
-     * stop cut and what this start finds cut are the same sessions.
-     */
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `TurnContinue.wakeAfterUpdate`) */
     const cutByUpdate: SessionInfo[] = []
     /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`TurnContinue.wakeAfterUpdate`) */
@@ -288,31 +272,7 @@ export class HostTenure {
     const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
     this.updateLists = lists
     for (const s of store.sessions.listSessions()) {
-      const cut = turnCut(s)
-      /*
-       * Except where an update cut the turn (#1618): the turn goes on, in a new process. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
-       * turn running, not one that ended; the report it owes stays owed. If it cannot be continued, it is reset there
-       * (`turnLostInSwap`). Only the turn the stop listed: its
-       * conversation still ends where it ended when that stop was done (`UpdateResumeLists.cut`), so a list left behind
-       * names no later turn, such as one a stop of the person's cut after a rollback to a host that never reads lists. It
-       * holds because every listed session leaves this start with a row past the mark: the Continue's line, or the stopped
-       * mark below (`turnLostInSwap` for one that cannot be continued)
-       */
-      // One that reads at rest only by a `woken` entry (`cutTurns`): a woken turn a second update stopped before its first answer
-      const goesOn = s.state !== 'error' && !!lists?.cut(s.id, s.lastSeq, !cut)
-      const stale = cut && !goesOn
-      /*
-       * Where the last host recorded the system ending (#1397): a turn it lost is the system's, unless the session has rows from
-       * after that end (a later host's, of a build that reads no record). And a session in `error` by an `adapter_crashed` about
-       * then: its agent got the system's termination too (exit 0) and the host wrote the error before it went. It is no crash,
-       * so it is reset and marked as a lost turn is
-       */
-      const end = keeperOpts.systemEnd
-      const recent = end && (stale || s.state === 'error') ? store.messages.loadMessages(s.id, 20) : []
-      const crashedAtEnd = !cut && crashedInSystemEnd(s, recent, end)
-      const lost = stale || crashedAtEnd
-      const bySystem = crashedAtEnd || (stale && cutBySystemEnd(end, recent.at(-1)?.ts))
-      const fixed = lost ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
+      const { fixed, lost, goesOn, bySystem } = resetLiveState(s, lists, store, keeperOpts.systemEnd)
       // Started from a linked computer (#1273): kept beside the row, as its depth is
       this.host.meta.set(s.id, withHubMark(store.settings, fixed))
       if (lost) {
@@ -354,4 +314,41 @@ export class HostTenure {
     this.host.turnContinue.restore(this.host.meta.values())
     this.host.turnContinue.wakeAfterUpdate(updateCuts)
   }
+}
+
+/**
+ * The row a session starts this host with: a turn the last host was in is lost and reset to idle, since its process left
+ * with that host. `turnCut` is the one definition of a turn a stop also lists the turns it ends by (idle.ts, #1618).
+ */
+function resetLiveState(
+  s: SessionInfo,
+  lists: UpdateResumeLists | null,
+  store: HostTenureHost['store'],
+  end: SystemEnd | null | undefined,
+): { fixed: SessionInfo; lost: boolean; goesOn: boolean; bySystem: boolean } {
+  const cut = turnCut(s)
+  /*
+   * Except where an update cut the turn (#1618): the turn goes on, in a new process. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
+   * turn running, not one that ended; the report it owes stays owed. If it cannot be continued, it is reset there
+   * (`turnLostInSwap`). Only the turn the stop listed: its
+   * conversation still ends where it ended when that stop was done (`UpdateResumeLists.cut`), so a list left behind
+   * names no later turn, such as one a stop of the person's cut after a rollback to a host that never reads lists. It
+   * holds because every listed session leaves this start with a row past the mark: the Continue's line, or the stopped
+   * mark `restoreAtStart` keeps (`turnLostInSwap` for one that cannot be continued)
+   */
+  // One that reads at rest only by a `woken` entry (`cutTurns`): a woken turn a second update stopped before its first answer
+  const goesOn = s.state !== 'error' && !!lists?.cut(s.id, s.lastSeq, !cut)
+  const stale = cut && !goesOn
+  /*
+   * Where the last host recorded the system ending (#1397): a turn it lost is the system's, unless the session has rows from
+   * after that end (a later host's, of a build that reads no record). And a session in `error` by an `adapter_crashed` about
+   * then: its agent got the system's termination too (exit 0) and the host wrote the error before it went. It is no crash,
+   * so it is reset and marked as a lost turn is
+   */
+  const recent = end && (stale || s.state === 'error') ? store.messages.loadMessages(s.id, 20) : []
+  const crashedAtEnd = !cut && crashedInSystemEnd(s, recent, end)
+  const lost = stale || crashedAtEnd
+  const bySystem = crashedAtEnd || (stale && cutBySystemEnd(end, recent.at(-1)?.ts))
+  const fixed = lost ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
+  return { fixed, lost, goesOn, bySystem }
 }

@@ -3,7 +3,7 @@ import type { SessionSummary } from '@cc/core'
 import { projectLabelOf } from './names.js'
 import { computeInbox } from './inbox.js'
 import { sessionFolderOf } from './selectors.js'
-import { openProjectOf } from './screens.js'
+import { evidenceProjectOf, openProjectOf } from './screens.js'
 
 describe('openProjectOf (#1416)', () => {
   it('tints the project that holds a child started on another machine, not its parent’s', () => {
@@ -18,6 +18,25 @@ describe('openProjectOf (#1416)', () => {
       sessions: { h1: parent, 'm1.c1': child },
     }
     expect(openProjectOf(state as never)).toBe('m1.p-app')
+  })
+})
+
+describe('evidenceProjectOf', () => {
+  const sessions = {
+    s1: { id: 's1', projectId: 'p1' },
+    orch: { id: 'orch', projectId: null },
+  } as never
+
+  it("is a focused session's own project, not the project looked at last", () => {
+    expect(evidenceProjectOf({ focusedSessionId: 's1', focusedProjectId: 'p2', sessions })).toBe('p1')
+  })
+
+  it('is no project for a focused session without one, even with a project looked at last', () => {
+    expect(evidenceProjectOf({ focusedSessionId: 'orch', focusedProjectId: 'p2', sessions })).toBe(null)
+  })
+
+  it('is the project looked at last while no session is focused', () => {
+    expect(evidenceProjectOf({ focusedSessionId: null, focusedProjectId: 'p2', sessions })).toBe('p2')
   })
 })
 

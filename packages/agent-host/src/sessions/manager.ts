@@ -109,11 +109,6 @@ import type { HubsReader } from './ask-project-flow.js'
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
   SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & AssistantSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
 
-/** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
-function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
-  return Object.getPrototypeOf(o) === proto
-}
-
 /**
  * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host/adapters/contract.md), so all state
  * tracking and storage happens here.
@@ -1237,13 +1232,42 @@ export class SessionManager {
    * `meta`; it sorts it in place since #1143).
    */
   private seat(): AssistantSeatHost {
-    // What `parts()` already says (its getters still run when read through the prototype) plus what only the tools need
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getter below reads this manager's field when used
-    const self = this
-    const own: Pick<AssistantSeatHost, 'linkedReader' | 'proposals'> & Omit<AssistantSeatHost, keyof ManagerParts> = {
-      get proposals() {
-        return self.assistantSlot.proposals
+    const parts = this.parts()
+    const proposals = () => this.assistantSlot.proposals
+    return (this.seatHost ??= {
+      get store() {
+        return parts.store
       },
+      get meta() {
+        return parts.meta
+      },
+      get children() {
+        return parts.children
+      },
+      get emit() {
+        return parts.emit
+      },
+      get linkedTasks() {
+        return parts.linkedTasks
+      },
+      get proposals() {
+        return proposals()
+      },
+      agentSession: (...a) => parts.agentSession(...a),
+      answerRoutedCard: (...a) => parts.answerRoutedCard(...a),
+      autoBoundaryOpen: (...a) => parts.autoBoundaryOpen(...a),
+      builderRefOf: (...a) => parts.builderRefOf(...a),
+      createSession: (...a) => parts.createSession(...a),
+      firstTool: (...a) => parts.firstTool(...a),
+      mailTask: (...a) => parts.mailTask(...a),
+      projectTrusted: (...a) => parts.projectTrusted(...a),
+      refusesDelegation: (...a) => parts.refusesDelegation(...a),
+      rename: (...a) => parts.rename(...a),
+      routedCards: (...a) => parts.routedCards(...a),
+      send: (...a) => this.inputs.send(...a),
+      startAgent: (...a) => parts.startAgent(...a),
+      takesSendNow: (...a) => parts.takesSendNow(...a),
+      updateCentraluAsked: (...a) => parts.updateCentraluAsked(...a),
       linkedReader: () => this.linkedReader,
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
@@ -1266,12 +1290,7 @@ export class SessionManager {
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
       askedBy: (assistantId) => this.mail.hooks?.askedBy?.(assistantId) ?? null,
-    }
-    // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
-    const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()
-    Object.setPrototypeOf(own, parts)
-    if (!stands(own, parts)) throw new Error('The Assistant seat could not be set on the module parts')
-    return (this.seatHost ??= own)
+    })
   }
 
   /** The Assistant's session id, or none while it has not been made (#1447: `mail send to "assistant"`) */

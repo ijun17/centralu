@@ -3,7 +3,7 @@ import { BranchIcon, ChevronIcon } from '../../components/icons.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useShortcut } from '../../app/shortcut.js'
-import { useStore, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
+import { evidenceProjectOf, useStore, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
 import { PANEL_TABS } from '../../store/panelLayout.js'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
@@ -31,17 +31,7 @@ import { PanelGroups } from './PanelTabs.jsx'
  */
 export function EvidencePanel() {
   const open = useStore((s) => s.panelOpen)
-  const projectId = useStore((s) => {
-    /*
-     * A session with no project (the Assistant, a coordinator) **does not fall back to the last
-     * project** (a dogfooding finding, 2026-09-06): if the files and git history of the last-viewed
-     * project showed up next to it, it would read as if that session started in that folder — when
-     * it actually runs from the Assistant's home. The fallback exists for "not viewing any
-     * session at all."
-     */
-    const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
-    return sess ? sess.projectId : s.focusedProjectId
-  })
+  const projectId = useStore(evidenceProjectOf)
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const width = useStore((s) => s.panelWidth)
   const setPanelWidth = useStore((s) => s.setPanelWidth)

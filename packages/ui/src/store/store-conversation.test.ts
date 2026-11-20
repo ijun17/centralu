@@ -823,7 +823,7 @@ describe('an open question and the composer (#174)', () => {
       projects: { ...st.projects, [proj.id]: proj },
       sessions: { ...st.sessions, q174: { ...st.sessions.q174!, projectId: proj.id } },
     }))
-    await useStore.getState().handoffSession('q174', { mode: 'agent' })
+    await useStore.getState().handoffSession('q174', { tool: 'claude', deleteOld: true, mode: 'agent' })
     expect(answered).not.toHaveBeenCalled()
     expect(sent).not.toHaveBeenCalled()
     expect(useStore.getState().toast).toBe('Answer the open question first, or hand off from the record')

@@ -160,25 +160,22 @@ export type SessionsSlice = {
   /**
    * Hands off and starts fresh (a dogfooding request — the way out of the 7-13 second resume delay
    * on an old codex thread). The dying session writes a handoff note → the new session starts from
-   * that note → the old session (by default) is **actually** deleted, all the way down to the tool's
+   * that note → the old session (with deleteOld) is **actually** deleted, all the way down to the tool's
    * own original. Destruction comes last: nothing is deleted until the new session is successfully
    * up.
    *
    * tool: can also hand off to a different agent (the note is plain text, so it does not care which
-   * tool reads it). Defaults to the current tool. Switching tools does not carry over the model,
-   * effort, verbosity or speed — those are all tool-specific values, and handing codex's model name
-   * to claude would fail right at session creation.
-   * deleteOld: defaults to the mode's pairing (below): deleted for 'agent', kept for 'record'. Kept, the old session stays
-   * standing — a branch, not a switch.
-   */
-  /**
-   * mode 'record' (default since #694; #78 made it for a session whose service was cut off): asks the
-   * agent nothing and has the host build the note straight from the store's own transcript. 'agent':
-   * the departing session writes the note. deleteOld's default follows the mode: kept for 'record'.
+   * tool reads it). Switching tools does not carry over the model, effort, verbosity or speed — those
+   * are all tool-specific values, and handing codex's model name to claude would fail right at session
+   * creation.
+   * deleteOld: kept, the old session stays standing — a branch, not a switch.
+   * mode 'record' (#78 made it for a session whose service was cut off): asks the agent nothing and has
+   * the host build the note straight from the store's own transcript. 'agent': the departing session
+   * writes the note.
    */
   handoffSession(
     sessionId: string,
-    opts?: { tool?: ToolName; deleteOld?: boolean; mode?: 'agent' | 'record' },
+    opts: { tool: ToolName; deleteOld: boolean; mode: 'agent' | 'record' },
   ): Promise<void>
   updateSessionSettings(
     sessionId: string,
