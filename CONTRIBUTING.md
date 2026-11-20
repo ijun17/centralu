@@ -248,6 +248,16 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
+`CI=1 pnpm e2e --affected` runs the specs a branch changed in Chromium and then in WebKit under one lock (#2373), or in the
+one engine `E2E_BROWSER` names; each engine keeps its results in `e2e/test-results/<engine>`. Which specs is Playwright's
+`--only-changed` against the merge-base with main: the specs the branch changed, uncommitted changes included, and the specs
+that import a file it changed. A spec never imports the window's own code, so a change to the UI alone picks no spec; the run
+then says so and, when the change reaches the screen by CI's definition (`screenFiles`), asks for the specs near it by name
+(`CI=1 pnpm e2e <filter>`). On Windows, WebKit fails the scenarios that drag (#2022, above). Any local run with failures
+also says which of them the known intermittent failures issue lists (#368, the board's project.json
+`ci.knownFailuresIssue`), by the board's own matcher, each with the quote it matched; they are still failures. The issue is
+read with `gh` on each run, and when it cannot be read the run says "known-failures list unavailable" and sets nothing apart.
+
 Inside Codex's macOS seatbelt sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with
 `E2E_BROWSER=chromium` only and leave WebKit to CI. Unset `STYLE_SNAPSHOT_BROWSER=webkit`
 if present: that override selects WebKit even in a Chromium run. The perf specs respect

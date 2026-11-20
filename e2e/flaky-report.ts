@@ -1,7 +1,10 @@
-import { appendFileSync } from 'node:fs'
-import { relative } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
 import type { FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter'
+import { errorMessage } from '@cc/protocol'
 
 /**
  * Names every test that failed and then passed on Playwright's retry (playwright.config.ts `retries`, CI only).
@@ -12,7 +15,11 @@ import type { FullResult, Reporter, Suite, TestCase } from '@playwright/test/rep
  * shards' reports (its HTML report has a Flaky filter, with the failed attempt's trace). Elsewhere, plain lines.
  * The same reporter runs in `e2e report` over one engine's merged shards with `E2E_FLAKY_LABEL` set to the engine:
  * there it writes the summary's table alone, under that name, since the shards have annotated each test already.
+ * A local run with failures also says which of them the known intermittent failures issue lists (#2373).
  */
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const runGh = (args: string[]) => execFileSync('gh', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 export interface FlakyTest {
   /** The spec file, relative to the repository */
@@ -24,10 +31,10 @@ export interface FlakyTest {
   error: string
 }
 
-/** The flaky tests of a finished run, from Playwright's own verdict (`outcome() === 'flaky'`) */
-export function flakyTests(tests: TestCase[], cwd = process.cwd()): FlakyTest[] {
+/** The tests of a finished run that Playwright judged `outcome`, as `FlakyTest`s with the first failed attempt's error */
+function testsWith(tests: TestCase[], outcome: ReturnType<TestCase['outcome']>, cwd: string): FlakyTest[] {
   return tests
-    .filter((t) => t.outcome() === 'flaky')
+    .filter((t) => t.outcome() === outcome)
     .map((t) => {
       const failed = t.results.find((r) => r.status !== 'passed' && r.status !== 'skipped')
       const message = failed?.error?.message ?? failed?.errors[0]?.message ?? `the first attempt ended ${failed?.status ?? 'without passing'}`
@@ -38,6 +45,60 @@ export function flakyTests(tests: TestCase[], cwd = process.cwd()): FlakyTest[] 
         error: stripVTControlCharacters(message).split('\n').find((l) => l.trim())?.trim() ?? '',
       }
     })
+}
+
+/** The flaky tests of a finished run, from Playwright's own verdict (`outcome() === 'flaky'`) */
+export const flakyTests = (tests: TestCase[], cwd = process.cwd()): FlakyTest[] => testsWith(tests, 'flaky', cwd)
+
+/** The tests of a finished run that failed (`outcome() === 'unexpected'`) */
+export const failedTests = (tests: TestCase[], cwd = process.cwd()): FlakyTest[] => testsWith(tests, 'unexpected', cwd)
+
+/**
+ * The text of the issue that lists the known intermittent failures (the board's project.json `ci.knownFailuresIssue`), read
+ * with `gh`; or why it could not be read. One list for CI and local runs: ci_status matches against the same issue.
+ */
+export function knownFailuresText(root = ROOT, gh: (args: string[]) => string = runGh): { issue: number; text: string } | { why: string } {
+  let issue: unknown
+  try {
+    issue = JSON.parse(readFileSync(join(root, '.centralu/apps/project-board/project.json'), 'utf8'))?.ci?.knownFailuresIssue
+  } catch (e) {
+    return { why: `project.json could not be read (${errorMessage(e)})` }
+  }
+  if (typeof issue !== 'number') return { why: 'project.json names no ci.knownFailuresIssue' }
+  try {
+    return { issue, text: gh(['issue', 'view', String(issue), '--json', 'body', '--jq', '.body']) }
+  } catch (e) {
+    return { why: `gh issue view ${issue} failed (${errorMessage(e).split('\n')[0]})` }
+  }
+}
+
+/** Whether a failure is one the issue lists: the quote it matches, or null */
+export type KnownFailureMatch = (failure: { line: string; error: string }, issueText: string) => string | null
+
+/**
+ * The board's own matcher (ci.mjs `matchKnownFailure`), the one its ci_status judges CI's failures by, so a local run and CI
+ * set apart the same failures. ci.mjs is plain JavaScript without types (the app rules), so what it exports is checked here.
+ */
+export async function knownFailureMatcher(): Promise<KnownFailureMatch> {
+  const ci: unknown = await import(pathToFileURL(join(ROOT, '.centralu/apps/project-board/ci.mjs')).href)
+  const match = typeof ci === 'object' && ci !== null && 'matchKnownFailure' in ci ? ci.matchKnownFailure : null
+  if (typeof match !== 'function') throw new Error('.centralu/apps/project-board/ci.mjs exports no matchKnownFailure')
+  return (failure, issueText) => {
+    const quote: unknown = Reflect.apply(match, undefined, [failure, issueText])
+    return typeof quote === 'string' ? quote : null
+  }
+}
+
+/**
+ * What a local run prints about its failures: the ones the known intermittent failures issue lists, set apart (each with the
+ * quote it matched), so a run's own breakage is not read past. A failure stays a failure either way.
+ */
+export function knownFailureLines(failed: FlakyTest[], known: ReturnType<typeof knownFailuresText>, match: KnownFailureMatch): string[] {
+  if (!failed.length) return []
+  if ('why' in known) return [`[e2e] known-failures list unavailable: ${known.why}; no failure is set apart`]
+  const matched = failed.map((t) => ({ t, quote: match({ line: t.title, error: t.error }, known.text) })).filter((m) => m.quote)
+  if (!matched.length) return [`[e2e] none of the ${failed.length} failure(s) is a known intermittent one (#${known.issue})`]
+  return [`[e2e] ${matched.length} of ${failed.length} failure(s) are known intermittent ones (#${known.issue}):`, ...matched.map(({ t, quote }) => `[e2e]   ${t.file}:${t.line} ${t.title}: matches "${quote}"`)]
 }
 
 /** What the runner prints: an annotation per test on GitHub Actions, plain lines elsewhere */
@@ -75,11 +136,15 @@ export default class FlakyReporter implements Reporter {
     this.suite = suite
   }
 
-  onEnd(_result: FullResult): void {
-    const tests = flakyTests(this.suite?.allTests() ?? [])
+  async onEnd(_result: FullResult): Promise<void> {
+    const all = this.suite?.allTests() ?? []
+    const tests = flakyTests(all)
     const github = process.env.GITHUB_ACTIONS === 'true'
     const label = process.env.E2E_FLAKY_LABEL || undefined
     if (!label) for (const line of flakyLines(tests, github)) console.log(line)
+    // CI's own check run is matched against the issue by the board (ci_status); a local run has no such reader
+    const failed = github ? [] : failedTests(all)
+    if (failed.length) for (const line of knownFailureLines(failed, knownFailuresText(), await knownFailureMatcher())) console.log(line)
     if (!tests.length || !github) return
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${flakySummary(tests, label)}\n`)
     if (!label && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'flaky=true\n')
