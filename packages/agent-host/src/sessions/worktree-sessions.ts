@@ -51,6 +51,7 @@ import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
 import { durationText, sleep } from '../timing.js'
 import { realOs } from '../os/real.js'
+import { isUuid } from '../adapters/input-receipts.js'
 
 /** How long a project's setup command may run in a new worktree */
 const SETUP_TIMEOUT_MS = 90_000
@@ -93,6 +94,14 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
   }
 }
 
+/** The folders directly in `dir`, not links; none when it cannot be read */
+function childFolders(dir: string): string[] {
+  try {
+    return realOs().files.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return []
+  }
+}
 
 /** The line a new session shows when its worktree was set up only in part (#841 item 3); `problems` from `createWorktree` */
 export function worktreeSetupNotice(problems: readonly string[]): string {
@@ -325,6 +334,64 @@ export class WorktreeSessions {
       this.worktreeCleanup.delete(sid)
     }
     console.error(`[worktree] removed the archived session ${sid.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
+  }
+
+  /**
+   * Removes the session folders in the worktree root that a worktree removal left part way (#2344): a folder named as
+   * this host names one (`<project id>/<session id>`, the id a UUID) that no session owns, that git does not list and
+   * that has no `.git` of its own, so no git command can reach or recover it. Owned means a live or archived session has
+   * its name as its id, or has it (or a folder inside it) as its worktree or working folder.
+   *
+   * A folder no session owns that git still lists stays (`leftoverOnly`): a purge without "remove worktree" keeps it on
+   * the person's word, and "no uncommitted changes and no unpublished commits" still misses what git ignores (`.env`,
+   * local builds). Each removal and each folder kept for want of an owner is a line in the log.
+   *
+   * Run once as the host starts: the folders are listed before this returns its promise, so a worktree made by this
+   * host is never among them; ownership is read again for each folder just before it is judged.
+   */
+  sweepLeftoverWorktrees(): Promise<void> {
+    const root = this.host.worktreeRoot
+    const projects = childFolders(root)
+      .filter(isProjectId)
+      .map((projectId) => ({ projectId, folders: childFolders(join(root, projectId)).filter(isUuid).map((name) => join(root, projectId, name)) }))
+    return (async () => {
+      for (const { projectId, folders } of projects) {
+        const orphans = folders.filter((path) => !this.ownedFolder(path))
+        if (!orphans.length) continue
+        let repo: string
+        try {
+          repo = this.host.cwdOf(projectId)
+        } catch {
+          console.error(`[worktree] kept ${orphans.length} folder(s) in ${join(root, projectId)} that no session owns: no project ${projectId} is registered here`)
+          continue
+        }
+        for (const path of orphans) {
+          if (this.ownedFolder(path) || !realOs().files.existsSync(path)) continue
+          await gitWorktreeRemove(repo, path, { worktreeRoot: root, leftoverOnly: true }).then(
+            () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
+            (e: Error) => console.error(`[worktree] kept ${path}, which no session owns: ${e.message.trim()}`),
+          )
+        }
+      }
+    })()
+  }
+
+  /**
+   * Whether a live or archived session has `path`'s name as its id, or `path` or a folder inside it as its worktree or
+   * working folder. Only a path written under the worktree root is resolved: one elsewhere cannot be inside, and resolving
+   * it could wait on a drive that is not there.
+   */
+  private ownedFolder(path: string): boolean {
+    const id = basename(path)
+    if (this.host.meta.has(id) || this.host.store.trash.isTrashed(id)) return true
+    const roots = [this.host.worktreeRoot, canonicalPath(this.host.worktreeRoot)]
+    const real = canonicalPath(path)
+    const sessions = [...this.host.meta.values(), ...this.host.store.sessions.readSessions('1 = 1')]
+    return sessions.some((s) => {
+      if (s.id === id) return true
+      const used = [s.worktree?.path, this.host.store.sessions.sessionCwd(s.id)]
+      return used.some((p) => p != null && roots.some((r) => isInside(r, p)) && isInside(real, canonicalPath(p)))
+    })
   }
 
   /**

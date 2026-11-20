@@ -1,8 +1,9 @@
 import { parseArgs } from 'node:util'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { APP_VERSION, PROTOCOL_VERSION } from '@cc/protocol'
 import { Store } from '../../packages/agent-host/src/dev-services/store.js'
 import { SessionManager } from '../../packages/agent-host/src/sessions/manager.js'
+import { worktreeRootIn } from '../../packages/agent-host/src/data-dir.js'
 import { createRpcHandler } from '../../packages/agent-host/src/rpc.js'
 import { TerminalService } from '../../packages/agent-host/src/dev-services/terminal.js'
 import { CommandRunner } from '../../packages/agent-host/src/dev-services/commands.js'
@@ -55,7 +56,7 @@ const { values } = parseArgs({
 const token = values.token!
 const store = new Store(values.db!)
 const adapters = values.agent === 'replay' ? replayAdapters() : scriptedAdapters()
-const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
+const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, worktreeRootIn(dirname(values.db!)))
 // A new project's ~/Centralu (#515) is the one in this host's temporary HOME, never the home of whoever runs the suite
 mgr.projectCreation.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
 let up = false
