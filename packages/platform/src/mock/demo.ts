@@ -125,7 +125,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
    *
    * There are several things a two-line scene cannot show by hand: scroll restoration when
    * paging up, virtualization, the density of stacked collapsed tool cards, how markdown
-   * renders inside a long answer. So a whole real dogfooding transcript is moved in wholesale
+   * renders inside a long answer. So a whole real transcript is moved in wholesale
    * — closer to what this app actually receives than padding it out with made-up chatter.
    */
   talk(mock, working.id, [
@@ -290,9 +290,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
     const extra = await session(mock, centralu.id, 'claude', 'Put together the release notes')
     /*
-     * Left at rest, as the scene has always shown it: the mock's list used to ignore a state_change, so the
-     * "working" said here never reached the screen. Now that the mock keeps the host's rules (#428), saying it would
-     * put a second panel mid-response.
+     * Left at rest: the mock keeps the host's rules (#428), so saying "working" here would put a second panel
+     * mid-response.
      */
     talk(mock, extra.id, [['user', "Write release notes from this week's commits."]])
     const panels = [working.id, approving.id, asking.id, extra.id]
@@ -461,7 +460,7 @@ function installResponder(mock: MockPlatform): void {
     for (const [at, run] of steps) setTimeout(run, at)
   }
   /*
-   * An answer lets the agent go on, as the host's does (#999): it no longer ends the turn by itself. The demo's agent
+   * An answer lets the agent go on, as the host's does (#999): it does not end the turn by itself. The demo's agent
    * finishes the call it asked about with a line and ends its turn, so an approved card does not leave it working forever.
    */
   const answer = mock.agents.respondApproval.bind(mock.agents)

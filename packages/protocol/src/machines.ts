@@ -431,8 +431,8 @@ export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
 
 /**
  * A session's last response, whole (`host.lastAnswer`, #1186): its text up to the characters asked for, how long it is
- * in all, and the seq of its first message (`host.readSession`'s `around`), null when it has said nothing. A hub read
- * it from `host.readSession`'s lines, which are cut at 2,000 characters, so a long answer came back as an older line or
+ * in all, and the seq of its first message (`host.readSession`'s `around`), null when it has said nothing.
+ * `host.readSession`'s lines are cut at 2,000 characters, so a long answer read from them comes back as an older line or
  * nothing at all
  */
 export const HostLastAnswerResult = z.object({

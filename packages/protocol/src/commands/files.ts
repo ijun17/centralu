@@ -4,7 +4,7 @@ import { z } from 'zod'
  * The cap on a single attachment (#94) — counted in base64 characters. A 32MiB original comes
  * out to this length.
  *
- * There used to be no cap here at all. The overall total is capped at 500MB by
+ * The overall total is capped at 500MB by
  * `sweepAttachments`, but that cleanup never looks at files arriving through this path, so this
  * is the only thing stopping a single call from filling the disk. On top of that, the string is
  * held whole in the host's memory before it ever becomes a file — a rejection only means

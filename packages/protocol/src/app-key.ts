@@ -3,8 +3,8 @@ import { MACHINE_ID_RE } from './machines.js'
 /**
  * One app as a single string (#82, #288) — what the host stores an app's permissions, builder, origin port and grid
  * panel under, and what the UI keys its catalog, spans and drags by. An app is unique per (project, id): the `notes`
- * app of two projects is two apps. Written out by hand in a dozen places, the copies had drifted between a null check
- * and a truthiness check of the project; every place builds and reads it here.
+ * app of two projects is two apps. Copies written by hand drift (a null check against a truthiness check of the
+ * project), so every place builds and reads it here.
  */
 
 /**

@@ -4,9 +4,9 @@
  * The window holds the live state (core `applyEvent`); the host keeps its own copy for a window that reconnects and
  * for the next host after a swap (`applySessionState`, protocol session-state.ts, which the host's `applyStateHint`
  * and the mock's list run). The same event sequences go to both, and the fields a reconnect hands back must come out
- * the same after every event. The host's hand-copied table drifted before:
- * a question did not block the session, a `turn_complete` in idle ended a turn that never began, a limit came
- * down on every hint, and an answered card next to another one released the session.
+ * the same after every event. A hand-copied table drifts in exactly these places: a question that does not block
+ * the session, a `turn_complete` in idle that ends a turn that never began, a limit that comes down on every hint,
+ * and an answered card next to another one that releases the session.
  */
 import { describe, expect, it } from 'vitest'
 import { applySessionState, type NormalizedEvent, type SessionInfo, type SessionState } from '@cc/protocol'
@@ -98,7 +98,7 @@ describe('the host keeps the state the window shows', () => {
   })
 
   /*
-   * What the host states itself goes out as a state_change, and the host now applies that same statement to its copy
+   * What the host states itself goes out as a state_change, and the host applies that same statement to its copy
    * (manager `settleState`) rather than writing the state by hand.
    */
   it('the host\'s own statements read the same: resume, tool change, failed re-attach, a card\'s answer and rest', () => {

@@ -3,7 +3,7 @@
  * **there is exactly one copy of it.**
  *
  * The host uses it to judge manifests, proposed MCP servers and new apps; the UI uses it for
- * the "new app" window. It used to live only in the host (apps/contract.ts). The new-app window
+ * the "new app" window. The new-app window
  * derives an id from the name and shows it, and it has to say whether that id can be used before
  * the app is created, but the UI cannot import the host — this package is the only shelf both
  * halves can read. Writing the rule a second time in the UI would let the window pass an id the
@@ -81,8 +81,7 @@ export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
 /**
  * The judgment for a newly **proposed** name — the rule above, plus a ban on the `app-` prefix,
  * plus the reserved ids (`RESERVED_APP_IDS` unless the caller passes its own list). Returns null
- * when the name is fine. The problem is still called `'builtin'`: it is the same refusal it was
- * when the reserved ids were the built-in roster, and the UI's wording keys off it.
+ * when the name is fine. The problem is called `'builtin'`, which the UI's wording keys off.
  *
  * The `app-` prefix is not blocked during discovery (a hand-made `app-store` app is attached as
  * `app-app-store`, so it does not collide). What is blocked is the point where a new name comes

@@ -5,7 +5,7 @@ import { needsAnswer, type SessionState } from '@cc/protocol/client'
  * The UI does not infer state with if statements — every transition goes through here.
  *
  * The table and the event rules live in `@cc/protocol` (session-state.ts) because the host keeps the same state
- * for reconnects and swaps and may not import core; they are re-exported here under their old names.
+ * for reconnects and swaps and may not import core; they are re-exported here under core's names.
  */
 export {
   isWaiting,

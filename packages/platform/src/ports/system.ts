@@ -84,18 +84,17 @@ export type PlatformCapabilities = {
    *
    * macOS puts the traffic lights *inside* the overlay title bar, so our bar has to
    * leave a hole for them; other desktops draw their decorations in a separate strip
-   * and the bar owns the full width. This used to be a hardcoded `pl-[86px]` in the
-   * header, which is the exact shape of leak this package exists to prevent: the number
-   * is a fact about the window manager, not about the design. Asking for a width rather
+   * and the bar owns the full width. A hardcoded `pl-[86px]` in the header would be the
+   * exact shape of leak this package exists to prevent: the number is a fact about the
+   * window manager, not about the design. Asking for a width rather
    * than an OS name keeps ui free of platform checks.
    */
   windowControlsInset: number
   /**
    * What this machine's keyboard prints on the modifier keys we put on screen.
    *
-   * Every shortcut handler already accepts `metaKey || ctrlKey`, so the keys have always
-   * worked on Linux and Windows — only the labels lied, and they lied in 61 places because
-   * `⌘` was written out at every call site. A symbol nobody's keyboard has is worse than
+   * Every shortcut handler accepts `metaKey || ctrlKey`, so the keys work on Linux and
+   * Windows; only a label can be wrong, so no call site writes out `⌘`. A symbol nobody's keyboard has is worse than
    * no hint at all: it tells you the app is not for you.
    *
    * Asking for the *labels* rather than for an OS name is the same trade as
@@ -145,8 +144,8 @@ export type PlatformCapabilities = {
  * combination is written as one chunk.
  *
  * Why `join` exists: a Mac writes them run together, like `⌘⇧A`, but carrying that rule over
- * as-is turns into `CtrlShiftA` on other keyboards. Running them together read fine only
- * because they were symbols; the moment they become names, a separator is needed — so the
+ * as-is turns into `CtrlShiftA` on other keyboards. Running them together reads fine only
+ * for symbols; names need a separator — so the
  * side that knows the keyboard answers with it too.
  */
 export type ShortcutKeys = {

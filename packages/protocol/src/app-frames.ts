@@ -38,9 +38,9 @@ const NOT_ON_ONE_LINE =
 
 /**
  * Any text on one line (#428): every run of what `NOT_ON_ONE_LINE` names becomes one space; past `max` characters it is
- * cut, with an ellipsis. The one reduction for a name, a task line or a label: the host had ten, with different
- * character sets, and the narrower ones let a bidi override or a NEL through. Not for a path, whose spaces are its own.
- * A number or a boolean is written out; an object, an array or a function is no text (it used to read `[object Object]`).
+ * cut, with an ellipsis. The one reduction for a name, a task line or a label: a narrower copy with its own character
+ * set lets a bidi override or a NEL through. Not for a path, whose spaces are its own.
+ * A number or a boolean is written out; an object, an array or a function is no text (not `[object Object]`).
  */
 export function oneLineText(value: unknown, max = Infinity): string {
   const text =

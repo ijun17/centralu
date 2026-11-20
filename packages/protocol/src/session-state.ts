@@ -6,11 +6,9 @@ import type { NormalizedEvent } from './events.js'
  * The session state machine (product-spec FR-12), shared by both sides.
  *
  * The UI's reducer (core `applyEvent`) holds the live state; the host keeps the same state for a reconnecting
- * window and for the next host after a swap (`SessionInfo.state`, `waitingSince`, the open cards). The host
- * used to keep a hand-copied table of its own, and the copy drifted (#428): a question did not block the
- * session, a `turn_complete` in idle was taken, a limit came down on every hint. A window that reconnected was
- * then shown a different state from the one it had been showing live. Both sides now run these rules; they are
- * pure and live here because the host may not import core (docs/architecture.md §2).
+ * window and for the next host after a swap (`SessionInfo.state`, `waitingSince`, the open cards). Both sides
+ * run these rules: a hand-copied table drifts (#428), and a window that reconnects is then shown a different
+ * state from the one it was showing live. They are pure and live here because the host may not import core (docs/architecture.md §2).
  */
 
 /** Whether the state is waiting for the user to step in (what the inbox holds) */
@@ -155,8 +153,8 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
      * Not message_delta, tool_call or tool_result: output is content, and only a turn's start (an adapter's
      * `state_change: working`) and its end move the state (#1830). Output arrives after a turn ended too — a late
      * update from an agent, a background agent's card released when its process closes (claude `releaseAgents`), a
-     * result a set-aside handle still sends (manager `onEvent`) — and read as work it moved a session at rest into
-     * working with nothing left to end it: never idle again for the keeper, an update or sleep, and "stopped by quit"
+     * result a set-aside handle still sends (manager `onEvent`) — and read as work it would move a session at rest
+     * into working with nothing left to end it: never idle again for the keeper, an update or sleep, and "stopped by quit"
      * at the next start (#428). Late output is shown and the session stays at the rest its turn ended in.
      */
     case 'approval_request':
@@ -200,8 +198,8 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
    * A resolve only means "back to work" for a session that was blocked on a card. The host sends resolves late:
    * a handle being disposed (a swap, a crash) releases every request still in its map, and the manager passes
    * those through even from a set-aside handle so the card comes down; a request the CLI itself cancelled stays
-   * in that map until then. Arriving after the turn ended (waiting_input), an error or a return to idle, it used
-   * to flip the session to working with nothing left to ever end it, and in error it also cleared the banner.
+   * in that map until then. Taken after the turn ended (waiting_input), an error or a return to idle, it would
+   * flip the session to working with nothing left to ever end it, and in error it would clear the banner.
    * Outside waiting_approval it is not a state change, and not illegal either: the reducer still removes the card.
    */
   if (
@@ -212,8 +210,8 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
   }
   /*
    * A limit report does not take a session off a card it is blocked on. Codex reports its rate limits at any time
-   * (account/rateLimits/updated); taken as a transition, it moved an open-card session to limited, out of the inbox
-   * while it still waited on the person. The limit itself is still recorded (the reducer's switch).
+   * (account/rateLimits/updated); taken as a transition, it would move an open-card session to limited, out of the
+   * inbox while it still waits on the person. The limit itself is still recorded (the reducer's switch).
    */
   if (event.type === 'limit_reached' && from === 'waiting_approval') return { state: from, illegal: false }
   if (!canTransition(from, to)) return { state: from, illegal: true }
@@ -309,10 +307,8 @@ export function stepSessionState(
  * copy of a linked machine's sessions (its headers mirror, #2288) runs it too, on the same fields.
  *
  * Authority over the live state belongs to the UI (the core reducer); the host records what it needs to restore
- * (M1.5) and nothing more. It runs **the same rules** (`stepSessionState`), not a table of its own: the hand-copied
- * one drifted (#428), and a window that reconnected was shown a state it had not been showing live (a question that
- * did not block, a `turn_complete` in idle that did, a limit dropped mid-turn). The mock had a third copy, in which
- * a question left the session waiting_input.
+ * (M1.5) and nothing more. It runs **the same rules** (`stepSessionState`), not a table of its own: a hand-copied
+ * table drifts (#428), and a window that reconnects is shown a state it was not showing live.
  *
  * The clearing follows the core reducer (docs/state-management.md §2): a kind of busy never outlives being busy,
  * recovering removes the limit banner, and a card for a requestId that has died (ended by an error, an interrupt, or

@@ -55,8 +55,8 @@ type Pending = {
 }
 
 /**
- * Client-side bounds (#82). Measured on main: 100,000 calls made while disconnected were all
- * accepted and queued, each holding its frame and a timer.
+ * Client-side bounds (#82). Without them, 100,000 calls made while disconnected are all accepted
+ * and queued, each holding its frame and a timer (measured).
  *
  * 512 is far above any burst the UI makes — the largest is a resync, which reads one history page
  * per session holding a conversation, plus a handful of list calls. 64 MiB of unsent frames
@@ -85,8 +85,8 @@ export class RpcClient {
   private nextId = 1
   /**
    * The cursor into the host's events (`EventCursor`, @cc/common). Every event at or below it is a repeat and is dropped
-   * (#82): measured on main, the same seq delivered twice was dispatched twice, and a streaming delta applied twice
-   * doubles text for good. It also carries #173's first-contact rule: a first meeting takes `hello_ok.currentSeq` as its
+   * (#82): without it, the same seq delivered twice is dispatched twice (measured), and a streaming delta applied
+   * twice doubles text for good. It also carries #173's first-contact rule: a first meeting takes `hello_ok.currentSeq` as its
    * start, so the host's replay of turns finished before the screen attached is not put up as new "done" cards; the
    * list and the store (the snapshot) are the starting point instead. A reconnect sends the cursor with its host
    * lifetime (`streamEpoch`), and the host replays only when the lifetime matches.
@@ -96,9 +96,9 @@ export class RpcClient {
   private greeted = false
   /**
    * The socket answered `hello_ok` (#82). Only then are calls sent and is the connection reported
-   * as connected. Measured on main: with a wrong token the client reported `connected` the moment
-   * the socket opened, flushed its queue into a socket the host was about to close, and then
-   * reported the never-run call as `connection_lost` — "it may have reached the host".
+   * as connected. Otherwise, with a wrong token the client reports `connected` the moment the
+   * socket opens, flushes its queue into a socket the host is about to close, and then reports the
+   * never-run call as `connection_lost` — "it may have reached the host" (measured).
    */
   private ready = false
   private attempt = 0
@@ -287,10 +287,10 @@ export class RpcClient {
       if (!p) return
       /*
        * The answer goes through the method's result schema here, once (protocol.md §4). Events
-       * already did, inside `parseServerFrame`; results were declared `unknown` in the envelope and
-       * reached the screen as sent. Then a window attached to an older host (#280) read a session
-       * list without `backgroundTasks` (#305) and crashed on `undefined.filter`: the field's
-       * `.default([])` was never applied, because nothing parsed the payload.
+       * already do, inside `parseServerFrame`; results are `unknown` in the envelope. Handed on as
+       * sent, a session list from an older host (#280) without `backgroundTasks` (#305) crashes the
+       * screen on `undefined.filter`: the field's `.default([])` applies only when something parses
+       * the payload.
        */
       if (!frame.ok) return p.reject(rpcError(frame.error.message, frame.error.code, frame.error.retryable))
       /*
@@ -309,19 +309,16 @@ export class RpcClient {
   }
 
   /**
-   * If an unreadable frame is the **response being waited for**, this still ends the call
-   * (dogfooding, 2026-09-10).
+   * If an unreadable frame is the **response being waited for**, this still ends the call.
    *
    * The rule of ignoring an unknown frame is for forward compatibility, and that much is
-   * right. But that net once caught one of the host's own **failure responses**: an envelope
-   * arrived carrying an error code not in the protocol (`ENOENT`), failed validation, and the
-   * frame was silently dropped. From the caller's side, it looked not like a failure arriving
-   * but like **nothing arriving at all**, so that screen sat at 'loading' all the way to the
-   * 30-second timeout (why a file link turned into a blank screen).
+   * right. But the same net catches a **failure response** that carries an error code not in
+   * the protocol (`ENOENT`, measured): it fails validation and is dropped, and the caller sees
+   * not a failure arriving but **nothing arriving at all**, so its screen sits at 'loading' all
+   * the way to the 30-second timeout (a file link turns into a blank screen).
    *
-   * The host now sends only codes it knows about. This net is kept anyway — **an unreadable
-   * response will still arrive someday**, from a version-mismatched host, or an envelope a
-   * proxy touched. When it does, saying "could not read it" right away is always better than
+   * The host sends only codes it knows about, but **an unreadable response can still arrive**,
+   * from a version-mismatched host, or an envelope a proxy touched. When it does, saying "could not read it" right away is always better than
    * letting the screen hang.
    *
    * A successful response is not salvaged this way — passing a value that failed validation
@@ -382,16 +379,14 @@ export class RpcClient {
    * One RPC call. **The method name, the parameters and the result all come from
    * `RpcMethods`.**
    *
-   * The old signature was `call<T>(method: string, params: unknown)`. That means none of the
-   * three are checked: a typo in the name still compiles, and the result type is an
-   * **assertion**, not validation, so TypeScript believes the lie even when the host gives
-   * something else.
+   * A signature of `call<T>(method: string, params: unknown)` checks none of the three: a typo
+   * in the name still compiles, and the result type is an **assertion**, not validation, so
+   * TypeScript believes the lie even when the host gives something else. A channel written by
+   * hand leaks "the schema says A, but the channel says B" (an RPC that swallowed effort, a
+   * Codex model shape read wrong).
    *
-   * Two real bugs leaked through that gap — an RPC that swallowed effort, and a Codex model
-   * shape read wrong. Both were "the schema says A, but the hand-written channel says B." As
-   * long as the channel is written by hand, the next one leaks the same way.
-   *
-   * Now, fixing `commands.ts` **makes the compiler point at every place that has to follow.**
+   * Typed this way, fixing `commands.ts` **makes the compiler point at every place that has to
+   * follow.**
    */
   call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>
   // What resolves a call went through `parseRpcResult` for its method (see `onFrame`), which is what the signature above says
@@ -460,9 +455,9 @@ export class RpcClient {
 
   /**
    * Shuts the client down for good (#82): no reconnect timer, handshake timer or call timer is
-   * left behind, every waiting call is rejected now, and later calls fail at once. A pending
-   * reconnect timer used to survive close() (it found `closed` and did nothing, but held the
-   * process open until it fired), and a call made after close() sat for its full timeout.
+   * left behind, every waiting call is rejected now, and later calls fail at once. A reconnect
+   * timer that outlives close() holds the process open until it fires (it finds `closed` and does
+   * nothing), and a call made after close() would sit for its full timeout.
    */
   close(): void {
     this.closed = true

@@ -48,19 +48,17 @@ export function rowsFor(count: number, cols: number): number {
 /**
  * How many columns the screen gets divided into.
  *
- * §5.4's first reason for holding the grid back was "600×400 per panel and you can see
- * nothing". That reason still stands, so the column count is **computed from the screen**
- * and a panel is never divided below MIN_PANEL_W. Narrow the window and columns fall away
- * until one is left — at which point this is effectively the focus view. None of that has
- * changed.
+ * §5.4's reason for holding the grid back is "600×400 per panel and you can see nothing",
+ * so the column count is **computed from the screen** and a panel is never divided below
+ * MIN_PANEL_W. Narrow the window and columns fall away until one is left — at which point
+ * this is effectively the focus view.
  *
- * What changed is what happens above that floor (#51). This used to stop at three columns
- * and otherwise take the widest count that fit, so four panels came out 3 + 1: two empty
- * cells, and every panel half again narrower than a 2×2 would have made it. The cap stated
- * §5.4's constraint in the wrong unit. What makes a panel useless is its width in pixels,
- * which MIN_PANEL_W already says; "no more than three" was a proxy for that, and a proxy
- * that is wrong on a 2560px screen, where four columns are each wider than three columns
- * are at 1280px. So the arrangement is now chosen rather than capped:
+ * Above that floor the arrangement is chosen rather than capped (#51). What makes a panel
+ * useless is its width in pixels, which MIN_PANEL_W already says. A cap on the count ("no
+ * more than three") states that in the wrong unit: it is wrong on a 2560px screen, where four
+ * columns are each wider than three columns are at 1280px, and taking the widest count under
+ * it makes four panels come out 3 + 1: two empty cells, and every panel half again narrower
+ * than a 2×2. So:
  *
  *   of the counts that fit, take the one leaving the fewest cells empty,
  *   and where two of them tie, the one that makes panels wider.

@@ -3,10 +3,10 @@ import { NO_PATH, type ApprovalDetail } from './entities.js'
 /*
  * The "always allow" rule, written once (#428). The card's suggestion and preview (core), the matcher the UI sends,
  * the rule the manager saves and the check each adapter runs before asking all read it from here. It lives in
- * protocol because it is the one package all of them may import, like `isNewerVersion`. The copies it replaces had
- * drifted into bugs: the UI trimmed a command and the host did not, so a command with surrounding whitespace never
- * matched its own rule; core read `*` anywhere as a wildcard and the host only a trailing one; and an edit with no
- * path was offered, sent and saved as the rule "(no path)", which the host never matched.
+ * protocol because it is the one package all of them may import, like `isNewerVersion`. Separate copies drift into
+ * bugs: one side trims a command and the other does not, so a command with surrounding whitespace never matches its
+ * own rule; one reads `*` anywhere as a wildcard and the other only a trailing one; an edit with no path is offered,
+ * sent and saved as the rule "(no path)", which the host never matches.
  */
 
 /**
@@ -33,9 +33,9 @@ export function alwaysAllowKey(detail: ApprovalDetail): string {
 
 /**
  * Whether a key falls under a matcher: the same text, and nothing else (#838). A `*` is a literal character wherever
- * it stands. It used to be a wildcard at the end, but the matcher is the whole command the person approved, so
- * "always" on `cat logs/*` became the prefix rule `cat logs/` and let `cat logs/ ; curl … | sh` through with no card,
- * saved for the project. Nothing offers a pattern today; one that did would need a flag of its own beside the
+ * it stands. The matcher is the whole command the person approved: a wildcard at the end would turn "always" on
+ * `cat logs/*` into the prefix rule `cat logs/` and let `cat logs/ ; curl … | sh` through with no card, saved for the
+ * project. Nothing offers a pattern today; one that did would need a flag of its own beside the
  * matcher, never a character a command can contain.
  */
 export function matchesAllowRule(key: string, matcher: string): boolean {

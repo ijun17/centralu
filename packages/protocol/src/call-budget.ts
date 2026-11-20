@@ -1,8 +1,8 @@
 /**
  * How long a call may take, declared once (#2170). The window's client (`RpcClient`) waits this long for the host, and the
- * hub waits the same for a linked machine when it forwards the window's call (`Router`): before, the hub cut every
- * forwarded call at one flat 200 s, which ended a git commit with a slow hook, or an app call waiting on the person's
- * answer, while the machine still ran it, and left a short call waiting long after the window had given up.
+ * hub waits the same for a linked machine when it forwards the window's call (`Router`). One flat cut on the hub ends a
+ * git commit with a slow hook, or an app call waiting on the person's answer, while the machine still runs it, and
+ * leaves a short call waiting long after the window has given up.
  *
  * Data only. No frame carries a budget: each build reads this table for itself, so an older hub or window keeps its own
  * numbers and works with a newer one.
@@ -28,7 +28,7 @@ export const APP_CAPABILITY_QUESTION_MS = 5 * 60_000
 export const APP_CALL_TIMEOUT_MS = 10 * 60_000
 
 /**
- * Calls that **can revive a session** (dogfooding: a "resource upload" session — codex's thread/resume rereads its whole
+ * Calls that **can revive a session** (a "resource upload" session: codex's thread/resume rereads its whole
  * rollout file, and a 550MB thread took 13.5 seconds, with larger threads going over 25. Under the 30-second default, a
  * large thread becomes a session that can never wake up). Since the file only ever grows, the cap has to be a value that
  * can scale with size — 180 seconds covers up to the 7GB class at the measured ratio. The manager's own stage limit
@@ -42,8 +42,8 @@ const LONG_CALLS: ReadonlySet<string> = new Set([
   'agents.restartSession', // Swaps out the process and revives it again
   'agents.exportHandoffRecord', // Can scan a rollout hundreds of MB in size (#78)
   /*
-   * Calls that end in a revival (#164) — while these were missing here, the host would apply and restart on a large
-   * conversation, but the screen showed "RPC timed out" (reading what succeeded as a failure). Add a new RPC that ends
+   * Calls that end in a revival (#164) — without them here, the host applies and restarts on a large conversation
+   * while the screen shows "RPC timed out" (reading what succeeded as a failure). Add a new RPC that ends
    * in a revival here too.
    */
   'agents.updateSettings', // Swaps out the process if a resting session's settings change (restartSession)

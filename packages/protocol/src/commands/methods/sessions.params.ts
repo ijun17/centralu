@@ -56,9 +56,8 @@ export const sessionsParams = {
    * tool's conversation file and the worktree all stay until the person deletes it for good in Settings
    * (`trash.purge` / `trash.empty`). The two flags only record what that later step removes.
    *
-   * There used to be an archive ahead of this (hiding a session from the list only). It was
-   * discontinued on 2026-09-02: it had a door in (the inbox's `d`) and no door out, so to the
-   * person it was indistinguishable from deletion. The trash is that shape with its exits built in the same change: list, read, restore.
+   * The trash has its ways out (list, read, restore): a place with a way in and no way out reads to the person as
+   * deletion.
    */
   'agents.deleteSession': z.object({
     sessionId: SessionId,
@@ -70,13 +69,13 @@ export const sessionsParams = {
      */
     deleteWorktree: z.boolean().default(false),
     /**
-     * Also delete the tool-side conversation itself (dogfooding "actually delete" — measured
+     * Also delete the tool-side conversation itself (measured
      * at 550MB for a codex rollout, plus claude JSONL). The default is to keep it here too:
      * that file belongs to the tool, and keeping it around is the last way back into that tool
      * if the deletion is regretted. Only turned on when the person explicitly checks the box.
      * If deleting the original fails, our own deletion stops too — because answering "deleted"
      * while the original still exists would be the worst outcome.
-     * Since #204 the file is deleted when the session is purged from the trash, not here; the rule above holds there.
+     * The file is deleted when the session is purged from the trash (#204), not here; the rule above holds there.
      */
     deleteExternal: z.boolean().default(false),
   }),
@@ -262,12 +261,6 @@ export const sessionsParams = {
   'sessions.reorder': z.object({ projectId: ProjectId, orderedIds: z.array(z.string()) }),
   'sessions.list': z.object({}),
   'sessions.rename': z.object({ sessionId: SessionId, name: z.string() }),
-  /*
-   * sessions.setKind, which used to be here (the promote/demote from #13), was discontinued
-   * (2026-09-01). There is now only one Assistant per app (the central one), and the role
-   * that directs sessions inside a project is the worktree manager (#69) instead — a role is not
-   * chosen; it comes from the relationship.
-   */
   'sessions.markRead': z.object({ sessionId: SessionId, seq: z.number() }),
   /**
    * Done on a session in `error` (#1549): it moves to `idle` and what the person saw is read, so the sidebar's mark and the
@@ -371,7 +364,7 @@ export const sessionsParams = {
    */
   'agents.account': z.object({ tool: ToolName, ...machineParam }),
   /**
-   * The session archive (#204; "trash" is the old name, kept in the method names because the protocol only grows).
+   * The session archive (#204; the method names keep the word "trash", #1404, because the protocol only grows).
    * The person reaches these: the RPC is the UI's channel, and the Assistant's trash
    * commands make the same calls (#1219), its deletes for good only after the person's card. No other agent tool and
    * not the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.

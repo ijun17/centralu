@@ -156,8 +156,6 @@ export const appsParams = {
    * (with `app` in `visibility`) can be called. `result` is exactly the app's own answer (the
    * shape the screen's AppBridge receives). If `status` is `rejected`, the host never sent it to
    * the app at all — the reason is in `text`.
-   *
-   * This door once also served the compiled-in apps (#81); they were removed in #372.
    */
   'apps.invoke': z.object({
     appId: AppId,

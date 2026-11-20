@@ -215,12 +215,12 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
  *
  * An `approval_request` is an event, and `parseServerFrame` drops an event it cannot parse whole. A card of a kind this
  * build does not know (a newer host's, or a linked machine's on a newer build), or of a known kind with a word this
- * build does not have (`project_access` with a new `access`), used to cost the whole event: the session sat waiting
- * on a question nobody could see. Now it reads as `other`, whose text says first that it is a fallback and of which
+ * build does not have (`project_access` with a new `access`), would cost the whole event: the session sits waiting
+ * on a question nobody can see. Such a card reads as `other`, whose text says first that it is a fallback and of which
  * kind, then what the card names and says (`unknownApprovalCard`), with `about: UNKNOWN_CARD` so the window offers
  * allow and deny only: "always" on a question this build cannot describe would remember something the person never
- * read. A hub that relays a linked machine's card as such refuses "always" for it too, since a window from before this
- * change would still offer it (`Qualifier.unreadCard`). The answer still goes back under the
+ * read. A hub that relays a linked machine's card as such refuses "always" for it too, since an older window still
+ * offers it (`Qualifier.unreadCard`). The answer still goes back under the
  * card's `requestId`, and the host that raised the card applies it the way its own kind says.
  *
  * Windows released before this change still drop such a card, so a new kind that must reach them rides on `other`
@@ -326,7 +326,7 @@ export const CENTRALU_APPLY = 'centralu_apply'
 /**
  * The question an agent's apply card asks (#665), carried whole as the card's text so a window of any build reads it.
  * Here rather than with the other questions in core: the host raises this card, and the host does not import core.
- * It says what the relaunch costs: since #1895 step 3 the agent host restarts, so running turns in every session, the
+ * It says what the relaunch costs: the agent host restarts (#1895 step 3), so running turns in every session, the
  * asker's too, are cut and continued, and terminals and Run commands start again.
  */
 export const CENTRALU_APPLY_QUESTION =

@@ -30,7 +30,7 @@ export interface ApprovalRulesPort {
 }
 
 /**
- * The session archive (#204; called the trash until #1404, hence `TrashPort` and the `trash.*` protocol methods). Archiving a session moves it here; these are the ways out, and they belong to the person
+ * The session archive (#204; `TrashPort` and the `trash.*` protocol methods keep the word "trash", #1404). Archiving a session moves it here; these are the ways out, and they belong to the person
  * (Settings → Archive). Nothing here is emptied on its own, so `list` carries the total size.
  */
 export interface TrashPort {

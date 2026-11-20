@@ -23,9 +23,8 @@ export type SessionSummary = {
   /** Null only for the Assistant: a session that spans projects belongs to none of them */
   projectId: string | null
   /**
-   * Whether this is a worker or an Assistant (#13). The six places that used to decide it from projectId
-   * were gathered into this one field. The Assistant that belongs to a project (#13) has since been
-   * dropped, but deciding it in one place is still better.
+   * Whether this is a worker or an Assistant (#13). One field, so it is decided in one place rather than
+   * from projectId wherever it is asked.
    */
   kind: 'worker' | 'orchestrator' | 'coordinator' | 'assistant'
   /**
@@ -33,7 +32,7 @@ export type SessionSummary = {
    *
    * It can differ from the project's default tool, because one project can mix claude sessions and codex
    * sessions. Falling back to the project default when this is missing makes the header and the usage point
-   * at the wrong tool (dogfooding: two sessions with similar titles were taken to be on the wrong tool).
+   * at the wrong tool (two sessions with similar titles read as being on the wrong tool).
    */
   tool: ToolName
   name: string
@@ -266,9 +265,9 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     /*
      * An automatic name does not overwrite a name the person gave (FR-18, issue #5).
      *
-     * The point is that the decision rests on the **event**. It used to be decided by looking only at this
-     * side's own autoNamed, and then the second name the person gave never reached the other screens —
-     * autoNamed had already been turned off there, so the whole event was thrown away.
+     * The point is that the decision rests on the **event**. Decided from this side's own autoNamed alone,
+     * the second name the person gives never reaches the other screens — autoNamed is already off there, so
+     * the whole event is thrown away.
      *
      * A missing `auto` **counts as automatic** — the same decision as the schema's default. Written as
      * `!event.auto`, an event built by hand without going through the parser (a frame from an old version, a

@@ -40,10 +40,9 @@ export type NotifyPolicy = {
   /**
    * When a single session finishes a response **somewhere it cannot be seen**.
    *
-   * Originally the sound came only "once, when everything has finished". That fell out of step once every
-   * off-screen finish started leaving a card — the cards piled up every time but the sound came only at the
-   * end, so if two sessions finished while the person was away, two cards had quietly piled up. A card and
-   * a sound are the same event, so they go together.
+   * Every off-screen finish leaves a card, and a card and a sound are the same event, so they go together:
+   * with a sound only at the very end, two sessions that finish while the person is away pile up two cards
+   * quietly.
    */
   done: boolean
   /** Once, when every session has finished its work */
@@ -240,9 +239,9 @@ export const UiPreferences = z.object({
   /** Line height of prose and code blocks. Fixed-row views (the code viewer, the diff, the commit graph) stay as they are */
   lineHeight: LineHeight,
   /**
-   * The app-wide text size, one of `TEXT_SIZES` (a zoom factor, 1 = default). It lived in the
-   * workspace snapshot as a step index (`textScale`) before #312; it is a way of looking, not a
-   * place things are, so it moved here with the rest of Appearance. Any number is accepted and
+   * The app-wide text size, one of `TEXT_SIZES` (a zoom factor, 1 = default). A way of looking,
+   * not a place things are, so it sits here with the rest of Appearance, not in the workspace
+   * snapshot (#312). Any number is accepted and
    * lands on the nearest step, so a value from another build never throws the record away.
    */
   textSize: z.number().transform(nearestTextSize),
@@ -415,8 +414,8 @@ export function parseUiPreferences(raw: unknown): UiPreferences {
   if (!isRecord(raw)) return out
   const record = raw
   /*
-   * **Field by field.** Parsing the record as a whole meant one bad field (a theme id an
-   * older build wrote differently, say) threw away every other preference with it. Each field
+   * **Field by field.** Parsing the record as a whole lets one bad field (a theme id an
+   * older build wrote differently, say) throw away every other preference with it. Each field
    * falls back on its own.
    */
   for (const [key, field] of Object.entries(UiPreferences.shape)) {

@@ -46,7 +46,7 @@ export type PlatformStartup<T> =
  *
  * That failure has to be drawn on screen by the entry module, so it cannot disappear by being
  * thrown. Throwing at the top of a module leaves only one console line and an otherwise blank
- * page — which is exactly what happened when VITE_HOST_TOKEN was missing. The reason this
+ * page (a missing VITE_HOST_TOKEN does exactly that). The reason this
  * boundary lives here rather than in main.tsx is that it has to be testable: the entry module
  * cannot even be imported without a DOM, a bundler and a live host (#121).
  */

@@ -70,5 +70,5 @@ export interface FsPort {
   revealMessageImage(file: string): Promise<{ supported: boolean; reason?: string }>
 }
 
-// The file tree's and the viewer's shapes are the protocol's (`fs.listDir`, `fs.readFile`), named here as they always were
+// The file tree's and the viewer's shapes are the protocol's (`fs.listDir`, `fs.readFile`), named here
 export type { FsEntry, FsFile }

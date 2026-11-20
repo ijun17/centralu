@@ -58,7 +58,6 @@ export interface ProjectPort {
   /**
    * Sets the project's worktree trunk (#76): where a new worktree forks from and what "merged" is measured against.
    * baseBranch is decided by the caller — inventing a default further down would silently bake in the wrong trunk.
-   * It was chosen when making the worktree manager, which was folded into ordinary sessions (#561 part 3).
    */
   setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void>
 }

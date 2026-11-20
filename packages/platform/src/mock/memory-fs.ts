@@ -26,7 +26,7 @@ export class MemoryFs {
    *
    * The segments come from `wireSegments` rather than from a `/` written here (#47). Reading the
    * separator out of the protocol instead of assuming it is what makes this check the *same*
-   * check the host runs: both sides now name one encoding, so a path that means two things on
+   * check the host runs: both sides name one encoding, so a path that means two things on
    * two machines cannot mean the right thing here and the wrong thing there.
    */
   requireInside(rel: string): void {

@@ -9,9 +9,8 @@ import { sanitizeGridSpan } from './span.js'
  * one, the reorder in `layout.ts` and the sidebar's `moveTo` work on lists of strings, and React
  * keys its cells by one. This file is the one place a reference becomes a key and back.
  *
- * A session's key is its id, unchanged. Grid panels were keyed by session id long before apps
- * could stand there, and the test ids, the composer focus and every drag that carries a session
- * already speak in it; a session id never contains `:` (a UUID), so it cannot be mistaken for an
+ * A session's key is its id, unchanged: the test ids, the composer focus and every drag that
+ * carries a session speak in it; a session id never contains `:` (a UUID), so it cannot be mistaken for an
  * app's key, which is `app:<project id | _user>/<app id>`.
  */
 

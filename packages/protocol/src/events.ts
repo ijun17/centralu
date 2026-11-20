@@ -76,6 +76,10 @@ export const APP_VIEWS_LIVE_PER_SESSION = 3
  */
 export const STOP_NOT_CONFIRMED_LABEL = 'stop not confirmed'
 
+/** One message a mail delivery's line stands for (#2333): its id, and the chain it is in (`mail.thread`'s `threadId`, the chain's root) */
+export const MailDelivered = z.object({ threadId: z.string(), messageId: z.string() })
+export type MailDelivered = z.infer<typeof MailDelivered>
+
 /**
  * The owner of the call that produced an external app's "changed" event (M4 B-5) — exactly the
  * shape of the host runtime's caller (`AppCaller`). If a screen made the call, that screen's
@@ -86,19 +90,15 @@ export const STOP_NOT_CONFIRMED_LABEL = 'stop not confirmed'
  * causes the event to fail validation, an open screen would never receive its update again. All
  * the receiving side actually reads is `view`'s `instanceId`.
  */
-/** One message a mail delivery's line stands for (#2333): its id, and the chain it is in (`mail.thread`'s `threadId`, the chain's root) */
-export const MailDelivered = z.object({ threadId: z.string(), messageId: z.string() })
-export type MailDelivered = z.infer<typeof MailDelivered>
-
 export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.string().optional() })
 export type AppChangeCause = z.infer<typeof AppChangeCause>
 
 /**
  * A chunk of the assistant's reply. `messageId` names the message the chunk belongs to, where the tool says
  * so (codex: the agentMessage item id). The host keeps one open row per session and grows it with every
- * chunk until a recorded event closes it, so two messages with nothing recorded between them used to become
- * one row (#212). A chunk whose `messageId` differs from the open row's starts a new row. Absent means
- * "the same message as before", which is what every chunk meant before this field existed.
+ * chunk until a recorded event closes it. A chunk whose `messageId` differs from the open row's starts a new
+ * row, so two messages with nothing recorded between them stay two rows (#212). Absent means "the same
+ * message as before".
  */
 const MessageDelta = z.object({
   ...base,
@@ -136,9 +136,8 @@ const ReasoningDelta = z.object({
  *           Write, both sides of an Edit, the arguments of an MCP call, Codex's file changes with their diffs
  *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
  *
- * Before #221 the card's preview was the record: a result kept its first 300 characters (Claude) or 2,000 (Codex),
- * and a file edit kept only its path. The full text lived only in the tools' own files, which do not last (Claude
- * Code deletes a transcript after 30 days without activity). Rows written before then have neither field.
+ * The tools' own files do not last (Claude Code deletes a transcript after 30 days without activity), so the store
+ * keeps the whole record. Rows stored before #221 have neither field.
  *
  * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
  * pages) and from every stored message it reads back unless the reader asks for them by name
@@ -175,7 +174,7 @@ export const SubagentStep = z.discriminatedUnion('type', [MessageDelta, Reasonin
 export type SubagentStep = z.infer<typeof SubagentStep>
 
 /**
- * The calls that launch a native subagent (#222): Claude Code's `Agent` tool (`Task` before it was renamed) and Codex's
+ * The calls that launch a native subagent (#222): Claude Code's `Agent` tool (`Task` in older Claude Code) and Codex's
  * `spawnAgent` collab call. The card of such a call is where the subagent's steps are kept and shown.
  */
 const SUBAGENT_LAUNCH_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task', 'spawnAgent'])
@@ -186,7 +185,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   ReasoningDelta,
   /**
    * The current state of a plan the agent set (measured in #58, codex turn/plan/updated; Claude Code's TodoWrite list or
-   * its TaskCreate/TaskUpdate task list since #843).
+   * its TaskCreate/TaskUpdate task list, #843).
    *
    * **A full snapshot arrives every time** — not a delta, so the receiving side never needs to
    * remember the prior state (the same reason as settings_changed). Measured: a plan never
@@ -220,9 +219,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * A step a native subagent took (#222) — Claude Code's `Agent` tool, Codex's `spawn_agent` child thread.
    *
-   * **One wrapper kind, not a flag on the parent's events.** A subagent's tool call used to land in the parent's
-   * conversation as if the parent had made it (#98), and a field that every reader of `tool_call` has to remember to
-   * check would bring that back the first time one forgets. A reader that does not know this kind skips it (§4 of
+   * **One wrapper kind, not a flag on the parent's events.** With a flag that every reader of `tool_call` has to
+   * remember to check, the first reader that forgets puts a subagent's tool call in the parent's conversation as if
+   * the parent had made it (#98). A reader that does not know this kind skips it (§4 of
    * docs/protocol.md: an unknown type is ignored), so the conversation, the state machine, unread and the turn logic
    * stay the parent's without a line of code each.
    *
@@ -249,10 +248,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * A person's message was added to the conversation.
    *
-   * **This was unnecessary back when the UI only ever needed to draw what it itself sent.** But
-   * once the Assistant started talking to other sessions via send_to_session, there came to
-   * be two producers of user messages — from that point on, a message that never passed through
-   * the UI had no way to appear on screen at all (it was still saved, though).
+   * **The UI is not the only producer of user messages**: the Assistant's send_to_session adds
+   * them too, and a message that never passed through the UI appears on screen only through this
+   * event (without it, it is saved but never drawn).
    *
    * Why seq is sent along: the sending UI has already drawn the message optimistically, so it
    * must not draw the same message twice. The receiving side needs a way to tell that apart.
@@ -367,8 +365,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * the path case, the adapter reads the file and fills in data before emitting it. The UI
    * always draws the same single shape (a data URL).
    *
-   * Recorded as a row of its own since #40's second decision (2026-08-26: the bytes in an
-   * attachments file, the path in the row), and announced with that row's number (#868), as every
+   * Recorded as a row of its own (#40: the bytes in an attachments file, the path in the row),
+   * and announced with that row's number (#868), as every
    * recorded event is: a re-read of history matches the image by number, since the stored row holds
    * a path and no bytes.
    *
@@ -418,9 +416,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
    * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
-   * the next message resumes it), or a resume brought it back (`live: true`), whoever asked for it. Before this, `live`
-   * only came in lists and in answers to the window that woke a session, so another window, or a session woken by the
-   * assistant or an app, kept showing the old value.
+   * the next message resumes it), or a resume brought it back (`live: true`), whoever asked for it. Lists and the
+   * answer to the window that woke a session carry `live` too; this event is what reaches every other window, and a
+   * session woken by the assistant or an app.
    */
   z.object({
     ...base,
@@ -482,15 +480,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * A session's name changed.
    *
-   * **Who set it travels along with the change.** This used to carry only the title, and the
-   * receiving side decided whether to apply it purely from its own state, "is this session's
-   * name currently automatic." As a result, a name a person edited **only propagated on the
-   * first change and was silently ignored from the second one onward** (once edited once,
-   * autoNamed flipped off, and everything discarded this event afterward).
+   * **Who set it travels along with the change.** A receiver that decides from its own state
+   * alone ("is this session's name currently automatic") applies a person's first edit and
+   * **silently drops every later one**: the first edit turns autoNamed off.
    *
    * auto=false means "a person set this," and an automatic name never overwrites it again
-   * (FR-18). Omitted means it is an automatic name — a frame sent by an old version is still
-   * interpreted correctly this way.
+   * (FR-18). Omitted means it is an automatic name, which is how a frame from an older host
+   * reads.
    */
   z.object({ ...base, type: z.literal('session_title'), title: z.string(), auto: z.boolean().default(true) }),
   /** For detecting concurrent-session conflicts and highlighting recently modified files (FR-2, FR-5) */
@@ -505,8 +501,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /**
      * A failure is also recorded as a marker. Passing over it silently would let the
      * conversation continue uncompacted while the person has no way to know why the context
-     * never shrank (measured: "Not enough messages to compact." — this used to be swallowed
-     * whole).
+     * never shrank (measured: "Not enough messages to compact.").
      */
     failed: z.boolean().default(false),
     reason: z.string().optional(),
@@ -556,7 +551,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    *
    * The fields below `oncePerSession` make the line readable (#342): who is speaking, what kind of notice it is, who
    * has to act, and for a notice the host recognizes, a plain explanation first with the tool's own words on demand.
-   * All are optional: a notice stored before #342, or one the host cannot place, is drawn from `text` alone, as before.
+   * All are optional: a notice stored before #342, or one the host cannot place, is drawn from `text` alone.
    */
   z.object({
     ...base,
@@ -591,9 +586,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * This session was born from a handoff, and the predecessor's note is pinned here (#102).
    *
-   * **The reason a record is needed is the same as for the compaction marker**: back when the
-   * first message was the note in full, that text remained in the conversation on its own, but
-   * now the first message only carries a path. A note the agent wrote cannot be recreated once
+   * **A record is needed for the same reason as the compaction marker**: the first message
+   * carries only the note's path, not its text. A note the agent wrote cannot be recreated once
    * its author is gone, so it is kept somewhere that outlives the file.
    *
    * `note` being optional is deliberate — **it is never carried in a broadcast.** A note can run
@@ -639,7 +633,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     permissionPreset: PermissionPreset.optional(),
     /**
-     * Whose hand it was (#304). Absent means the Assistant, the only author this event had before.
+     * Whose hand it was (#304). Absent means the Assistant, as from a host that predates this field.
      *
      * `tool` means the agent tool switched by itself, mid-session: Claude Code falling back to another model after a
      * refusal (`model_refusal_fallback`), another Codex client changing the thread's settings
@@ -668,13 +662,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * A session was created **on the host side** (#69).
    *
-   * A session the UI creates directly is known through the RPC response, but there was no way to
-   * know about a session the host creates on its own — the manager a worktree-orphan adoption
-   * stands up, or the Assistant's create_session. An event for an unknown session goes into
-   * a holding area (pendingEvents), and the condition for draining that area is "once the
-   * session is registered," so without a registration event it stayed there forever. A session
-   * that only ever appeared via listSessions after a reconnect contradicted the create_session
-   * tool's own description, which says it appears in the list right away.
+   * A session the UI creates directly is known through the RPC response; this event announces one
+   * the host creates on its own — the manager a worktree-orphan adoption stands up, or the
+   * Assistant's create_session. An event for an unknown session waits in a holding area
+   * (pendingEvents) until the session is registered, so without this event it waits forever, and
+   * the session shows only via listSessions after a reconnect, against the create_session tool's
+   * own description, which says it appears in the list right away.
    */
   z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
   /**
@@ -822,9 +815,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * when every batched call shares a single owner — mixed owners means it is dropped (and everyone
    * listens).
    *
-   * The `external_` prefix is from when compiled-in apps had their own `app_state_changed`. That
-   * event was removed with them (#372); a host from before it may still send one, and a receiver
-   * drops it as an unknown type (docs/protocol.md §3.2).
+   * A host from before #372 may still send `app_state_changed`; a receiver drops it as an unknown
+   * type (docs/protocol.md §3.2).
    */
   z.object({
     ...appScoped,
@@ -973,10 +965,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('fs_changed'), projectId: z.string(), dirs: z.array(z.string()) }),
   /**
-   * An error — if it belongs to a session, the host records it as a marker row (#107). Which is
-   * why `persistedSeq` is carried here (#161): while it was missing, zod stripped `seq`, so a
-   * session that ended in error left the screen's `lastSeq` one behind, and reopening it showed
-   * an unread dot on a session that had already been viewed.
+   * An error — if it belongs to a session, the host records it as a marker row (#107), so it
+   * carries `persistedSeq` (#161): without it zod strips `seq`, a session that ended in error
+   * leaves the screen's `lastSeq` one behind, and reopening it shows an unread dot on a session
+   * that was already viewed.
    */
   z.object({ ...appScoped, ...persistedSeq, ...endsTurn, type: z.literal('error'), error: ProtocolError }),
 ])

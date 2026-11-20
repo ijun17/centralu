@@ -10,9 +10,9 @@ import { MAX_PANEL_H, MIN_PANEL_W } from './layout.js'
  *
  * Everything else about the grid stays as `layout.ts` says. The screen decides the number of columns (a panel is never
  * narrower than MIN_PANEL_W), the grid does not scroll, rows share the height, and the arrangement is one order — no
- * coordinates are stored. What changes is that a cell is no longer always one panel, so the columns are chosen, and the
- * panels placed, with the spans counted in. When every span is 1 × 1 the result is exactly the grid `columnsFor` and
- * `rowsFor` give, cell for cell (layout.test.ts holds the two together), so a grid where nobody set a span is unchanged.
+ * coordinates are stored. A panel may take more than one cell, so the columns are chosen, and the panels placed, with
+ * the spans counted in. When every span is 1 × 1 the result is exactly the grid `columnsFor` and `rowsFor` give, cell
+ * for cell (layout.test.ts holds the two together).
  */
 
 /** One cell, the size of every session panel and of an app panel nobody has sized */

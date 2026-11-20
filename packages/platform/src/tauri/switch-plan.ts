@@ -8,7 +8,7 @@
  * and Run commands again; with a plain stop otherwise, which ends what that keeper holds as "Quit completely" does. Then the
  * window starts a keeper of its own build. It asks first only when something is running (`restartPlan`).
  *
- * Until #1895 step 4 this was a switch: the keeper's blue-green swap, with its phases on the bar. No window asks for one now.
+ * No window asks the keeper for a blue-green swap (#1895 step 4).
  *
  * A window restarts by itself only with "Apply updates automatically when idle" on, only when nothing is running, and only
  * forward (`isNewerBuild`): opening an older build's window (a backed-up app, an older local build) must not quietly

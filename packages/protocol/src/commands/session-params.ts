@@ -20,9 +20,9 @@ export const CreateSessionParams = z.object({
    * message.
    *
    * A note the agent wrote is the one piece of material that cannot be recreated once its
-   * author is gone. Once the first message came to carry only a path, that text had nowhere to
-   * live in the conversation, so it is pinned as a marker on the session instead (the file
-   * after that point is a pure derivative and can be deleted at any time).
+   * author is gone. The first message carries only a path, so the text has no place in the
+   * conversation and is pinned as a marker on the session instead (the file is then a pure
+   * derivative and can be deleted at any time).
    */
   handoff: z
     .object({
@@ -100,10 +100,9 @@ export type CreateSessionParams = z.infer<typeof CreateSessionParams>
  * Change a session's settings. **The reason this has its own name** is so the port can use this
  * exact type too.
  *
- * The port used to re-declare `{ model?, permissionPreset? }` by hand, and when `effort` was
- * added later it was left out there. It still worked anyway — because when the store passes it
- * as a **variable**, TypeScript does not check for excess properties. A field the type said did
- * not exist was flowing through in practice.
+ * A copy declared by hand drifts without an error: when the store passes the params as a
+ * **variable**, TypeScript does not check for excess properties, so a field the copy leaves out
+ * still flows through.
  */
 export const UpdateSettingsParams = z.object({
   sessionId: SessionId,

@@ -16,7 +16,7 @@ export class PreferencesMock {
    * (issue #20). The real host keeps it on disk, so "the arrangement survives a
    * relaunch" is only testable against this mock if the mock's snapshot outlives the
    * page too. Unit tests run in node, where touching `localStorage` throws — the
-   * try/catch keeps the in-memory field serving them alone, exactly as before.
+   * try/catch keeps the in-memory field serving them alone.
    */
   readonly workspace = {
     save: async (s: WorkspaceSnapshot) => {
