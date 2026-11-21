@@ -89,15 +89,21 @@ machine it runs on.
      delivered to the wrong session). Two hubs with one label are refused as ambiguous.
    - **A host that is a machine and a hub.** It shows a hub that links it under the label offered,
      suffixed (`studio-2`) when one of its own machines has that id (`labelHere`): worked out from
-     the kept offer and its machines at each read, never stored. Text that hub writes for it still
-     says `studio.<id>`, which reads here as its own machine's session, where there is none:
-     refused. Another machine of that hub goes under the label too when one of its own machines
-     has that machine's id.
+     the kept offer and its stored machines at each read, never stored itself. Text that hub writes
+     for it still says `studio.<id>`, which reads here as its own machine's session, where there is
+     none: refused. Another machine of that hub goes under the label too when one of its own
+     machines has that machine's id. A machine added later with the id of such a label moves the
+     label, and the ids shown before it are refused from then on.
+   - **A label changes with the hub's name or machines.** A hub writes for its machines under its
+     label now, and a machine reads by the label of the hub's last offer: between a change and the
+     next offer, what the hub writes is refused there, never misdelivered.
    - **Text for the other side.** A notice or an answer written on one computer for a session on
      the other names sessions as that session's tools print them (`SessionRefs.shown` with the
      reader): a machine writes its own as `<its id there>.<id>`, a hub its own as `<its label>.<id>`
      and its other machines' as `<label>.<machine>.<id>`, which a machine reads back whether one
-     hub links it or several. A report crosses as facts, and the reading side words it.
+     hub links it or several. A machine writes for a session on another machine of its hub as that
+     machine reads it, under the label the hub offered. A report crosses as facts, and the reading
+     side words it.
    - **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
      renamed hub breaks no stored reference, only the ids an agent was shown before.
 4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are

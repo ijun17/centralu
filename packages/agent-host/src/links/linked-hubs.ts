@@ -277,9 +277,9 @@ export class LinkedHubs {
   /**
    * A hub that takes mail (#2067), as mail across calls it (`MailAcross`, docs/plans/linked-mail.md §6): on the connection
    * it offered on and no other. `you`: this machine's id there, which a hub from before item 2 does not say. `label`: the
-   * prefix its own sessions go under here (`labelHere`, remote-hub.md §3.3)
+   * prefix its own sessions go under here (`labelHere`, remote-hub.md §3.3); `offered`: the one it offered, which its other machines use
    */
-  peer(hubId: string): { id: string; name: string; label: string; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
+  peer(hubId: string): { id: string; name: string; label: string; offered: string | null; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
     // A hub that offered asks and not mail is from before it: called all the same, it answers "Unknown method", which names the cause
     const h = this.hubs.get(hubId)
     if (!h) return undefined
@@ -295,6 +295,7 @@ export class LinkedHubs {
       id: h.id,
       name: h.name,
       label: this.labelOf(h),
+      offered: h.label,
       reachable: h.client !== null,
       you: h.you,
       call: (method, params) => {

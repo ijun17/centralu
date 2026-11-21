@@ -54,7 +54,7 @@ export type AcrossPeers = {
   /** A hub, by its id, as it offered here; `you` is this machine's id there, null for a hub from before item 2 */
   hub?(id: string): (AcrossPeer & { you: string | null }) | undefined
   /** `label`: the prefix the hub's own sessions go under here (`LinkedHubs.peer`) */
-  hubs?(): (AcrossPeer & { id: string; label: string; you: string | null })[]
+  hubs?(): (AcrossPeer & { id: string; label: string; you: string | null; offered?: string | null })[]
   /** The hub that started a session here (`startingHub`), for `parent` */
   startingHub?(sessionId: string): { id: string; name: string } | null
   /** A machine this hub links, by its id */

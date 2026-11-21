@@ -55,9 +55,9 @@ export type LinkedTasks = {
   settled(taskId: string, boundMs: number, o?: { signal?: AbortSignal | undefined; until?: Promise<void> }): Promise<'settled' | 'bound' | 'aborted'>
   /**
    * The caller's ask_project tasks, newest first: open, or reported to a caller not given the report yet. The session each went to by its id as this host
-   * prints it (`MailReach.shownId`: a linked machine's `<machine>.<id>`, a hub's `<label>.<id>`), and its name
+   * prints it (`MailReach.shownId`: a linked machine's `<machine>.<id>`, a hub's `<label>.<id>`), its address and its name
    */
-  asks(callerId: string): { taskId: string; sessionId: string; name: string }[]
+  asks(callerId: string): { taskId: string; sessionId: string; to: string; name: string }[]
   /** Why work cannot go to a linked machine's session now (`MailAcross.taskRefusal`), or null */
   refusal(childId: string): string | null
   /** On a machine: the copy of the task a hub wrote for the caller's ask (`HubAskResult.taskId`) to its session `to`, so the report it sends answers it */
@@ -120,7 +120,7 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
         const m = id === null ? undefined : records.message(id)
         const to = m?.kind === 'task' && m.origin === 'ask_project' && m.sender === caller ? records.recipients(m.id)[0]?.recipient : undefined
         if (!m || !to || parseAddress(to)?.kind !== 'session') return []
-        return [{ taskId: m.id, sessionId: mail.shownId(to), name: mail.labelOf(to), at: m.createdAt }]
+        return [{ taskId: m.id, sessionId: mail.shownId(to), to, name: mail.labelOf(to), at: m.createdAt }]
       }
       const found = [
         ...records.watchedFrom(caller).flatMap((r) => ask(r.messageId)),
