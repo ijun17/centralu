@@ -49,6 +49,7 @@ export {
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
+  sidebarFloor,
 } from './layout.js'
 import { PANEL_DEFAULT, SIDEBAR_DEFAULT } from './layout.js'
 import { navigationActions, navigating } from './navigation.js'

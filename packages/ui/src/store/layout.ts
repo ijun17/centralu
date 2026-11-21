@@ -28,6 +28,12 @@ const CENTER_MIN = 360
 export const CENTER_FLOOR = 300
 
 /**
+ * The sidebar's CSS minimum: SIDEBAR_MIN while the window leaves CENTER_FLOOR beside it, then less (#2362). Two fixed
+ * minimums would push the conversation past the window's right edge below their sum. `100%` is the lanes' row, the window.
+ */
+export const sidebarFloor = (zoom: number): string => `min(${SIDEBAR_MIN / zoom}px, 100% - ${CENTER_FLOOR / zoom}px)`
+
+/**
  * The layout is in zoom coordinates and `innerWidth` in real pixels, so the room is divided by `zoom`; the minimum
  * stays in real pixels, or zooming a narrow window lets the panel eat the screen.
  */
