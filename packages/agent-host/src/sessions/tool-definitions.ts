@@ -710,7 +710,10 @@ export const DELEGATE_TOOLS = [
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host/delegation/start-agent.md; docs/tool-cost.md §17 */
+/**
+ * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host/delegation/start-agent.md.
+ * docs/tool-cost.md §17
+ */
 export const DELEGATE_BUDGET_CHARS = 450
 
 /**
@@ -839,7 +842,10 @@ export const COMPACT_TOOLS = [
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats. docs/tool-cost.md §17 */
+/**
+ * The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats.
+ * docs/tool-cost.md §17
+ */
 export const COMPACT_BUDGET_CHARS = 610
 
 /**
