@@ -278,7 +278,7 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    // A tool of an attached app, called through Centralu's `app` tool since #2231 (until then the app was an MCP server of its own)
+    // A tool of an attached app, called through Centralu's `app` tool (#2231)
     name: 'mcp-app',
     tools: ['claude'],
     session: () => {
@@ -563,7 +563,7 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562 review)
+    // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562)
     name: 'files',
     tools: ANY_TOOL,
     preset: 'auto',

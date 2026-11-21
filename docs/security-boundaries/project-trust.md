@@ -28,6 +28,21 @@ What this closed was measured with the real CLI (#152, `scripts/probe-project-tr
 `settings.local.json` allow rules and a project hook answering "allow", which turned the approval
 card off even under `safe`.
 
+What each planted file did, by the settings the session read (probe: a `.claude/` planted into a temporary folder standing in
+for a checked-out repo, the session asked to run `touch`; CLI 2.1.282, SDK 0.3.263; the user's own settings untouched).
+"Callback" is Centralu's approval card:
+
+| Planted | `safe`, all sources read (omitted) | `safe`, `['user']` |
+|---|---|---|
+| `permissions.allow` in `settings.json` | callback called | callback called |
+| `allow` in `settings.local.json` | **callback not called** | callback called |
+| `PreToolUse` hook (allow) in `settings.json` | **callback not called**, the hook runs | callback called, the hook does not run |
+
+A planted `CLAUDE.md` or `.claude/commands` is read and listed when all sources are read, and neither when only `['user']` is, under any preset.
+Under `normal` the same hook leaves the callback uncalled in both columns: the person's own bypass in `~/.claude` decides, and
+that is theirs to set everywhere. Centralu does not override the person's `defaultMode` to force a card because the folder is
+untrusted; `safe` is there for a card everywhere. A hook is itself an arbitrary command as well.
+
 How projects get trust: a project registered now starts untrusted, and the sidebar asks once when
 it is added, whether the person added it or allowed the Assistant's `add_project` card (#1220; the host names the
 project in `projects_changed.added`). The exception is a new empty folder Centralu made itself (`projects.create` or `create_project`

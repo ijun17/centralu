@@ -10,8 +10,8 @@ export type ServersHost = {
 }
 
 /**
- * A Claude session's MCP servers (FR-11): Centralu's in-process server, the one server the session is given. Apps are
- * reached through its `app` tool since #2231, so the set never changes while the session runs.
+ * A Claude session's MCP servers (FR-11): Centralu's in-process server, the only one. Apps are reached through its `app`
+ * tool (#2231), so the set never changes while the session runs.
  */
 export class ClaudeServers {
   /** The in-process server — the same object every query of this session is given */
@@ -37,12 +37,9 @@ export class ClaudeServers {
   }
 
   /**
-   * Records a `tool_use` of the `app` tool with the attachment layer (M4 B-1 — conversation-view card matching).
-   *
-   * This is not usually needed: the CLI carries the card id on the call itself (centralu-mcp.ts's
-   * `CLAUDE_TOOL_USE_META`). This keeps the same matching as the bridge's as a fallback, so the UI can still find its own
-   * card on a CLI where that mechanism changed. A card that has already received a result (`tool_result`) is removed from
-   * matching — a call refused before it ran never reaches the app at all.
+   * Records a `tool_use` of the `app` tool with the attachment layer (M4 B-1 card matching): a fallback for a CLI that
+   * stops carrying the card id on the call (centralu-mcp.ts `CLAUDE_TOOL_USE_META`). A card with a `tool_result` leaves
+   * matching: a call refused before it ran never reaches the app.
    */
   noteAppCalls(msg: unknown): void {
     const apps = this.host.opts.apps

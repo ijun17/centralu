@@ -163,20 +163,11 @@ export class CodexAdapter implements AgentAdapter {
         await client.request('thread/delete', { threadId: externalId })
       } catch (e) {
         /*
-         * **Asking to delete something that does not exist is not a failure** (dogfooding
-         * 2026-09-07: trying to delete a worktree session that had been created by mistake gave
-         * "Could not delete: no rollout found for thread id …").
-         *
-         * Measured: codex only issues the thread id at thread/start and writes the rollout file on
-         * **the first turn**. So a session that never had a single message exchanged has no file to
-         * delete, and thread/delete rejects it with -32600. Throwing that rejection as-is would stop
-         * the manager here and leave neither the session row nor the worktree deleted — the more
-         * mistaken the session, the less deletable it would become.
-         *
-         * The goal ("make sure nothing is left on the tool side") is already achieved, so we treat
-         * this as success. Any other failure is still thrown — the rule that answering "deleted"
-         * while the original still exists is the worst outcome (per the manager's own comment) still
-         * holds.
+         * **Asking to delete something that does not exist is not a failure.** Measured: codex issues the thread id at
+         * thread/start and writes the rollout file on **the first turn**, so a session with no message has no file and
+         * thread/delete rejects it with -32600 "no rollout found for thread id". Thrown, it would stop the manager and
+         * leave the session row and the worktree undeleted; nothing is left on the tool side, so it is success.
+         * Any other failure is thrown: answering "deleted" while the original still exists is the worst outcome.
          */
         if (!/no rollout found/i.test((e as Error).message)) throw e
       }
@@ -208,19 +199,14 @@ export class CodexAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const session = new CodexSession(opts, emit)
     /*
-     * **Resume works like Claude's — we do not make the person wait for it** (dogfooding: the same
-     * thread took 3 seconds in the CLI, 13+ seconds on our path. We cannot remove the cost of
-     * thread/resume re-reading the whole file, but there is no reason to make the person pay that
-     * cost in front of a "Waking…" screen — resume already knows the thread id, so handing out the
-     * handle early loses nothing. send gets queued on ready). Since #342 the answer no longer carries
-     * the history (`excludeTurns`); what Codex itself spends loading a long rollout was not measured
-     * again, so the early handle stays.
+     * **Resume works like Claude's — we do not make the person wait for it** (dogfooding: the same thread took 3 seconds
+     * in the CLI, 13+ seconds on our path, thread/resume re-reading the whole file). Resume already knows the thread id,
+     * so handing out the handle early loses nothing; send gets queued on ready. The answer carries no history
+     * (`excludeTurns`, #342), but what Codex spends loading a long rollout is not measured, so the early handle stays.
      *
-     * We do wait synchronously for 3 seconds, though: a lock error ("already has an active writer")
-     * arrives immediately (measured ~0.3s), so it has to be thrown within this window for the
-     * "open elsewhere -> split off and continue" fork-in-the-road UI to keep working as it does now.
-     * A brand-new thread (thread/start) still waits all the way to completion as before — resume is
-     * only possible once an id exists (a lesson from M1.5 defect 5).
+     * We do wait synchronously for 3 seconds, though: a lock error ("already has an active writer") arrives in ~0.3s
+     * (measured), and it has to be thrown within this window for the "open elsewhere -> continue in a fork" choice.
+     * A brand-new thread (thread/start) waits to completion: resume is only possible once an id exists (M1.5 defect 5).
      */
     if (opts.resumeExternalId) {
       session.externalId = opts.resumeExternalId

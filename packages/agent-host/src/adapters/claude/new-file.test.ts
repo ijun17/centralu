@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { newFile } from './new-file.js'
 
-/** Whether a Write makes its file, read without holding the host up (#843 review) */
+/** Whether a Write makes its file, read without holding the host up */
 let dir: string
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'cc-new-file-'))

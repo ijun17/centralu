@@ -36,13 +36,9 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
   // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer
-  // A blank project is the name, as no project is (#730 review): the card then says "another project"
+  // A blank project is the name, as no project is (#730): the card then says "another project"
   else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project).trim() || name
-  /*
-   * An agent card's title is the work handed to it (#98). While it was just the name, every card
-   * said "Agent Agent", and launching three agents side by side left no way to tell which card was
-   * which (a dogfooding session: all three showed the same line).
-   */
+  // An agent card's title is the work handed to it (#98), so agents side by side tell apart
   else if (launchesSubagent(name)) title = str(input.description, name)
   // Centralu's own servers (#730): marked, and titled by what the call does
   const parts = mcpNameParts(name)
@@ -51,11 +47,8 @@ export function toolSummary(name: string, input: Json): ToolSummary {
 }
 
 /**
- * The paths reported through `files_touched` — only from tools that **changed** a file (#185).
- *
- * `toolSummary`'s `paths` also include Read's own path (a handoff record uses it as "what was
- * looked at"). Emitting that as-is would tag a file the agent only read with "Edited by agent" in
- * the tree.
+ * The paths reported through `files_touched`: only tools that **changed** a file (#185). `toolSummary`'s `paths` also
+ * hold Read's path (a handoff record's "what was looked at"), which must not read as "Edited by agent".
  */
 export function editedPaths(s: ToolSummary): string[] {
   return FILE_EDIT_TOOLS.has(s.tool) ? s.paths : []
@@ -74,16 +67,9 @@ export function agentStats(toolUses: unknown, durationMs: unknown, status?: stri
 }
 
 /**
- * An agent card's result body — the step count plus the opening of the report.
- *
- * A card's result is cut at `RESULT_SUMMARY_CHARS` for every tool (adapters/tool-result.ts). An agent's
- * report routinely runs to tens of thousands of characters (dogfooding: 15-24KB), so only the
- * opening lands on the card, while the parent receives the full text and writes it in its own
- * words — if the card rendered the full text too, that is exactly what "the answer appears
- * twice" means.
- *
- * This returns the report uncut: its opening is the card's `summary`, and the whole of it is the
- * result's `output`, the record (#221).
+ * An agent card's result body: the step count plus the report, uncut. Its opening is the card's `summary` (cut at
+ * `RESULT_SUMMARY_CHARS`, adapters/tool-result.ts), so a 15-24KB report the parent retells does not show twice; the
+ * whole is the result's `output`, the record (#221).
  */
 export function agentReport(report: string, stats: string): string {
   return stats ? `${stats}\n\n${report}` : report
@@ -101,7 +87,7 @@ export function agentReport(report: string, stats: string): string {
 export function resultOutput(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return content == null ? '' : JSON.stringify(content)
-  // A missing item is no block: a `null` was written out as the text "null" (#1339). Anything else is kept as its JSON.
+  // A missing item is no block, never the text "null" (#1339). Anything else is kept as its JSON.
   return content
     .filter((b: unknown) => b !== null && b !== undefined)
     .filter((b: unknown) => str(asObj(b).type) !== 'image' && str(asObj(asObj(b).source).type) !== 'base64')
@@ -110,11 +96,9 @@ export function resultOutput(content: unknown): string {
 }
 
 /**
- * What an Edit, Write or NotebookEdit call would do to its file, as Codex's file changes are read (#843). The card
- * showed only the new text, cut at 400 characters: an edit read the same whatever it replaced, and a Write that makes
- * a file the same as one that overwrites it. An Edit is its removed and its added lines; a notebook cell is its new
- * source. A Write is its content: as added lines when it makes a new file (`isNew`, which the adapter finds out, since
- * it knows the working folder), under a line saying it replaces the whole file when one is there, and under a line
+ * What an Edit, Write or NotebookEdit call would do to its file, as Codex's file changes are read (#843). An Edit is its
+ * removed and its added lines; a notebook cell is its new source. A Write is its content: as added lines when it makes a new file (`isNew`, which the adapter finds out, since it
+ * knows the working folder), under a line saying it replaces the whole file when one is there, and under a line
  * saying it writes the whole file when that is not known. A Write's content is not marked as added to a file it
  * replaces, since nothing says which of its lines are new.
  */
@@ -140,7 +124,7 @@ export function claudeFileChange(name: string, input: Json, isNew?: boolean): Fi
  * `isNew` says whether a Write makes its file (`claudeFileChange`); absent when not known.
  */
 export function approvalDetail(name: string, input: Json, cwd: string, isNew?: boolean): ApprovalDetail {
-  // Running outside the sandbox is part of what is asked (#683 review): the card says so, and no list row answers it
+  // Running outside the sandbox is part of what is asked (#683): the card says so, and no list row answers it
   if (SHELL_TOOLS.has(name)) return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
   if (FILE_EDIT_TOOLS.has(name)) {
     const change = claudeFileChange(name, input, isNew)

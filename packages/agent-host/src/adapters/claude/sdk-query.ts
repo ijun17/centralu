@@ -17,10 +17,7 @@ import type { UsageQuery } from './usage.js'
 /** One message for the CLI to read, as the session's input stream holds it. `sentAs`: the id the CLI is given it under when not its own (a resend, `ClaudeRaceRetry`) */
 export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean; origin?: InputOrigin; quiet?: boolean; sentAs?: ReturnType<typeof randomUUID> }
 
-/**
- * Only the part of the SDK Query that we use.
- * We write down only the minimal surface, so external types do not leave the adapter.
- */
+/** Only the part of the SDK Query that we use, so external types do not leave the adapter */
 export type QueryHandle = AsyncIterable<ClaudeMessage> &
   UsageQuery &
   ModelQuery & {
@@ -35,10 +32,8 @@ export type QueryHandle = AsyncIterable<ClaudeMessage> &
     /** Closes the query and terminates the CLI process (sdk.d.ts) — called by dispose (#157). */
     close(): void
     /**
-     * **Replaces the whole set** of dynamically attached MCP servers (sdk.d.ts). The in-process
-     * server originally passed via `mcpServers` is also part of this set (measured in the
-     * installed sdk.mjs from 0.3.263: the initial SDK server sits in the same map) — so every call
-     * has to carry the Assistant server along with everything else.
+     * **Replaces the whole set** of dynamically attached MCP servers (sdk.d.ts), the in-process server first passed via
+     * `mcpServers` included (measured in sdk.mjs 0.3.263): every call carries the Assistant server too.
      */
     setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ added: string[]; removed: string[]; errors: Record<string, string> }>
   }
@@ -124,45 +119,27 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     env: hostAccessEnv(opts.hostAccess),
     cwd: opts.cwd,
     model: opts.model,
-    /**
-     * The SDK looks for the native CLI it bundles itself, and bundling the host breaks that
-     * path ("Native CLI binary for darwin-arm64 not found" — every session creation failed in
-     * the packaged app). This points directly at the `claude` the user already has installed.
-     * It behaves the same way in dev.
-     */
+    // The person's installed `claude`, in dev too: bundling the host breaks the SDK's lookup of the native CLI it bundles
+    // ("Native CLI binary for darwin-arm64 not found" in the packaged app)
     pathToClaudeCodeExecutable: executablePath,
     /*
-     * Under the keeper (#280 step 2) the CLI is spawned there, or an already running one is
-     * adopted, so the process outlives this host. Measured (CLI 2.1.282, SDK 0.3.263, haiku,
-     * 2026-10-04): a new `query()` whose `spawnClaudeCodeProcess` returns the pipes of a
-     * claude another host started is accepted mid-turn — its re-`initialize` re-delivers a
-     * pending approval to the new `canUseTool` at once, and the rest of a running turn
-     * (three more Bash calls, the result) arrives through it.
-     *
-     * Without a keeper the CLI is still spawned here rather than by the SDK, which signals only
-     * the CLI's own pid: in a process group of its own (Windows: a tree), stopping it also ends
-     * the helpers it started (a language server and its `tsserver`, MCP servers), and so does
-     * its exit (`local-process.ts`). Started here, it also ends with this host however the host ends, stdin's end or not
-     * (`endsWithHost`, #1654 Q3, as every tool: `startToolProcess`); the keeper's spawn leaves that flag out.
+     * Under the keeper (#280 step 2) the CLI is spawned there, or a running one adopted. Measured (CLI 2.1.282, SDK
+     * 0.3.263, haiku, 2026-10-04): a new `query()` given another host's claude's pipes is accepted mid-turn; its
+     * re-`initialize` re-delivers a pending approval to the new `canUseTool`, and the rest of the turn arrives through it.
+     * Without a keeper the CLI is still spawned here, not by the SDK (which signals only the CLI's pid): in a process group
+     * of its own (Windows: a tree), stopping or exiting ends its helpers too (a language server and its `tsserver`, MCP
+     * servers; `local-process.ts`), and it ends with this host however the host ends (`endsWithHost`, #1654 Q3, as every
+     * tool: `startToolProcess`); the keeper's spawn leaves that flag out.
      */
     spawnClaudeCodeProcess: spawn as (o: LocalSpawnSpec) => never,
-    /*
-     * Reasoning effort. It only matters when the model supports it, so deciding support is
-     * left to whatever provides the list (supportedModels) — this just passes through the
-     * value it received.
-     */
+    // Passed through: which models support it is the model list's to say (supportedModels)
     effort: opts.effort as never,
     includePartialMessages: true,
-    /*
-     * A subagent's text and thinking, not only its tool blocks (#222). sdk.d.ts: "By default, only
-     * tool_use/tool_result blocks from subagents are emitted … When true, the full subagent conversation is
-     * forwarded so consumers can render a nested transcript." The normalizer keeps them under the launch card,
-     * out of the parent's conversation (#98).
-     */
+    // A subagent's text and thinking, not only its tool blocks (#222, sdk.d.ts); kept under the launch card (#98)
     forwardSubagentText: true,
     /*
      * Thinking as readable text (#2062). Current models send thinking blocks with no text unless asked for a summary
-     * ("omitted" is their default), so a session's thinking rows came out empty. Measured (CLI 2.1.316, 2026-11-07): with
+     * ("omitted" is their default). Measured (CLI 2.1.316, 2026-11-07): with
      * the flag the blocks carry summarized text, and the output tokens stay as they were; the API documents `display` as
      * what is shown, not what is thought or billed. A flag rather than the SDK's `thinking` option, which would also pass
      * `--thinking adaptive` and so decide for the model whether it thinks. The CLI takes it since 2.1.100 at least (that
@@ -172,33 +149,20 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     // MCP servers — the Centralu tools and any attached external apps (including approved MCP servers). See mcpServers().
     ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
     /*
-     * Which settings files get read (settingSourcesFor) — assistant/coordination sessions
-     * **never read instructions from a file.**
-     *
-     * A worker session only has permissions in its own project, but it can still write files.
-     * If it wrote an instruction into the Assistant's own folder, the Assistant — which
-     * can instruct every session — would read that as its own instruction: a path from low
-     * privilege to high privilege.
-     *
-     * Measured values (probe):
+     * Which settings files get read (settingSourcesFor): assistant/coordination sessions **never read instructions from a
+     * file**, since a worker could write one into the Assistant's folder and instruct every session through it. Measured:
      *   omitted       CLAUDE.md read, 3 of the user's global hooks ran
      *   ['project']   CLAUDE.md read, 0 hooks
      *   []            nothing read at all      ← this is the only one the control tower uses
-     *
-     * The role is injected directly through `systemPrompt` below instead. It never goes
-     * through a file, so nobody can rewrite it along the way. For a project's own session,
-     * whether it receives tools (manager, builder sessions) or not (worker) makes no
-     * difference — the project's own trust decides it (#92, #152).
+     * The role comes through `systemPrompt` below instead, which no file can rewrite. A project's own session follows the
+     * project's trust whether or not it receives tools (#92, #152).
      */
     ...settingSourcesFor(opts),
     // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
     ...(opts.readableDirs?.length ? { additionalDirectories: opts.readableDirs } : {}),
     ...(opts.centraluTools
       ? {
-          /*
-           * The role is guaranteed here, not by a file. AGENTS.md is a file the person can
-           * and should edit, so nothing that must never be erased belongs there.
-           */
+          // The role is guaranteed here, not by AGENTS.md, which the person can and should edit
           ...(opts.systemPromptAppend
             ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: opts.systemPromptAppend } }
             : {}),
@@ -209,12 +173,9 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
     ...(probeIds.has(sessionId) ? { strictMcpConfig: true } : {}),
     /*
-     * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
-     * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,
-     * haiku): the CLI adds a `StructuredOutput` tool, and if the model answers in plain text
-     * first, a "[structured-output-enforce]" message makes it call that tool instead. That
-     * tool never went through `canUseTool` (no approval card appears). The answer arrives on
-     * `result.structured_output` — the normalizer moves it to `turn_complete.output`.
+     * The agent an app hands a schema (M4 D-1), a per-query option so given only at start. Measured (SDK 0.3.263, CLI
+     * 2.1.282, haiku): the CLI adds a `StructuredOutput` tool, never through `canUseTool`, and a plain-text answer gets a
+     * "[structured-output-enforce]" message; the answer is `result.structured_output` (`turn_complete.output`).
      */
     ...(opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: opts.outputSchema } } : {}),
     resume: opts.resumeExternalId,
@@ -226,21 +187,15 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     ...(opts.centraluTools && seatHas(toolProfileOf(opts), 'mail') ? { disallowedTools: ['AskUserQuestion'] } : {}),
     // allowedTools is never set (M0: it would shadow canUseTool).
     /*
-     * **The callback is passed even in auto** (#171). It used to be omitted for auto, and
-     * AskUserQuestion never reached the person — no choice card appeared, and the model moved
-     * on without an answer. Measured (probe-auto-callback.mts, a probe since removed and kept in git history, CLI 2.1.282, SDK 0.3.263,
-     * haiku, a temp folder, 2026-09-27) — passing a callback alongside bypassPermissions:
-     *
+     * **The callback is passed even in auto** (#171): without it AskUserQuestion never reaches the person. Measured with
+     * bypassPermissions (probe-auto-callback.mts in git history, CLI 2.1.282, SDK 0.3.263, haiku, 2026-09-27):
      *   AskUserQuestion                             reaches the callback (a tool asked about even before bypass)
      *   ordinary Bash                                does not reach it — bypass just lets it through
      *   Bash caught by an `ask` rule in the settings file   reaches the callback → answering allow runs it
-     *   the same request, with no callback (old-style auto)   denied — "Claude requested permissions to use Bash, but you haven't granted it yet."
-     *
-     * So auto's own callback only accepts question choices and Centralu's own tools (which every
-     * preset lets through, #382), and **denies everything else the way it used to.** Allowing it here would let our own callback approve an `ask` rule
-     * written into a trusted project's own `.claude/settings.json` — the opposite direction
-     * from #92, which exists so files from the repo cannot decide approvals. (The SDK leaves a
-     * `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning line for this combination.)
+     *   the same request, with no callback           denied — "Claude requested permissions to use Bash, but you haven't granted it yet."
+     * So auto's callback accepts only question choices and Centralu's own tools (every preset's, #382) and **denies the
+     * rest**: allowing it would approve an `ask` rule in a trusted project's `.claude/settings.json`, against #92. (The SDK
+     * logs `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` for this combination.)
      */
     canUseTool,
   })

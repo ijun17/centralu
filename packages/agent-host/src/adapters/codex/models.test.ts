@@ -14,10 +14,8 @@ describe('toModelOptions', () => {
     description: 'A description',
     hidden: false,
     /*
-     * **Uses the generated type exactly.** This shape used to be written from a guess, and the
-     * implementation was making the same guess, so the two happily agreed on the wrong shape and
-     * passed anyway. A test that checks one guess against another guarantees nothing — pinning it
-     * to the type is what nails it down.
+     * **Uses the generated type exactly.** A shape written from a guess agrees with an implementation making the same
+     * guess and passes on the wrong shape: a test that checks one guess against another guarantees nothing.
      */
     /*
      * The shape is written out here instead of importing the generated

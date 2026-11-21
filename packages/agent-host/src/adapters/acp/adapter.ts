@@ -61,7 +61,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       throw err
     })
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3); started
-    // here, it ends with this host however the host ends (`startToolProcess`, #1562 review). The session core starts it
+    // here, it ends with this host however the host ends (`startToolProcess`, #1562). The session core starts it
     const session = new AcpSession(opts, emit, {
       label,
       spec,

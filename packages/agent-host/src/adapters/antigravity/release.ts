@@ -1,11 +1,7 @@
 /**
- * The one version of Google's Antigravity ACP agent this build of Centralu installs (docs/plans/antigravity-adapter.md §3):
- * the ACP registry's entry `antigravity-acp`, copied here by hand when a release moves to a newer one, so a build always
- * downloads the archive its tests and its review saw, and checks it against the sha256 the registry published for it. A
- * newer agent is never fetched by itself: a newer Centralu pins it.
- *
- * Per platform: the archive's address, its sha256, and how the server inside it starts (the registry's `cmd` and `args`).
- * Every archive holds the server and `localharness_external`, which runs its tools and must stay in the same folder.
+ * The one version of Google's Antigravity ACP agent this build installs (docs/plans/antigravity-adapter.md §3): the ACP
+ * registry's entry `antigravity-acp`, copied here by hand, so a build downloads the archive its tests and review saw and checks
+ * the sha256 the registry published for it. A newer agent is never fetched by itself: a newer Centralu pins it.
  */
 
 export type AgyPlatformKey = 'darwin-aarch64' | 'darwin-x86_64' | 'linux-x86_64' | 'linux-aarch64' | 'windows-x86_64' | 'windows-aarch64'
@@ -16,7 +12,7 @@ export type AgyArchive = {
   /** The server's file name in the archive (the registry's `cmd` without `./`) */
   command: string
   args: readonly string[]
-  /** Every file the archive must hold, the server first; anything else in it refuses the install */
+  /** Every file the archive must hold, the server first; `localharness_external` runs its tools and must sit beside it. Any other file refuses the install */
   files: readonly string[]
 }
 

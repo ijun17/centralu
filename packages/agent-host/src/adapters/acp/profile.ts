@@ -39,7 +39,7 @@ export type AcpProfile = {
   /**
    * Which of Centralu's own tools a call is (the stdio bridge's, `CENTRALU_MCP_NAME`), by the way this tool names an
    * MCP call, or null. Such a call is answered without a card, as Claude and Codex take the bridge: each tool there carries
-   * its own rights (#1562 review)
+   * its own rights
    */
   centraluToolOf?(call: ToolCallFields): string | null
   /**
@@ -60,9 +60,9 @@ export type AcpProfile = {
 
 /**
  * How a session's process says its agent wants the person to sign in in a browser, which a session never asks for: the
- * tool's sign-in is its own process (Antigravity's `runSignIn`). Antigravity 1.4.3, whose stored sign-in no longer works
+ * tool's sign-in is its own process (Antigravity's `runSignIn`). Antigravity 1.4.3, when its stored sign-in fails
  * (the refresh fails, or the token file is damaged) while its settings still name it, starts its own browser login inside
- * `session/new`, `session/load` or a prompt and waits there up to 300 s (review of #1685). The signal is structural: the
+ * `session/new`, `session/load` or a prompt and waits there up to 300 s (#1685). The signal is structural: the
  * process's `BROWSER` helper ran (`browserFolder`), not a line of its stderr. The session then fails what it asked as not
  * signed in (`AcpToolShape.signedOut`) and ends the process
  */

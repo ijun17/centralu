@@ -5,27 +5,15 @@ import { codexHome } from './home.js'
 import { readLines } from '../../transport/json-lines.js'
 
 /**
- * The last compact summary of a dead codex process (#78) — **from the rollout file, with no
- * binary involved**.
+ * The last compact summary of a dead codex process (#78) — **from the rollout file, with no binary involved**: the
+ * first user message in a `compacted` item's replacement_history is the summary text (measured 2026-09-04), and the
+ * file is found by **file name** (`rollout-…-<threadId>.jsonl`), so it reads with the API dead or the binary broken.
+ * getConversationSummary gives only metadata and needs a live binary; so do the app-server's reads (`thread/read`,
+ * `thread/turns/list`, `thread/items/list`), where a compaction is only `{ type: "contextCompaction", id }` (measured
+ * 2026-10-03, codex-cli 0.153.4). `Thread.path` (UNSTABLE) gives the same file the name search finds.
  *
- * A summary cannot be requested from an agent whose service has stopped, but codex's compact
- * summary survives as plain text in the rollout file (measured 2026-09-04: the first user message
- * in a `compacted` item's replacement_history is the summary text itself). Since it is a local
- * file, this still reads even if the API is dead, or even if the codex binary itself is broken —
- * the file's location is also found by **file name** (`rollout-…-<threadId>.jsonl`), since the
- * getConversationSummary RPC, despite its name, only gives metadata and also requires a live binary.
- *
- * The rollout format is unofficial. So this dependency is used **only on the disaster path** — it
- * is not promoted to an always-on path that runs on every compaction (decision for #78). Any
- * failure lies down as null: without a summary, the record builder just falls back to compressing
- * the raw text, and the handoff still proceeds.
- *
- * **The app-server's read requests do not carry the summary** (measured 2026-10-03, codex-cli
- * 0.153.4). `thread/read` (with turns), `thread/turns/list` (itemsView full) and
- * `thread/items/list` all work on a thread no process holds, but a compaction is only
- * `{ type: "contextCompaction", id }` there — no text. They also need a working binary, which
- * this path must not assume. So this stays on the file. (`Thread.path`, marked UNSTABLE, gives the
- * same file the name search finds.)
+ * The rollout format is unofficial, so it is read **only on the disaster path**, never on every compaction (decision
+ * for #78). Any failure is null: the record builder then compresses the raw text, and the handoff still proceeds.
  */
 
 /** The minimum length to call something a summary — a fragment a few characters long is not promoted to "summary" */

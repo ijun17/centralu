@@ -5,25 +5,13 @@ import { changeKindOf } from './items.js'
 import { paramsOf } from './params.js'
 
 /**
- * Turns a server's approval request into the card's detail.
+ * **A file-change request carries no change** (#169): it names the item and nothing else. Measured against codex-cli
+ * 0.153.4 (scripts/probe-codex-file-approval.mts): item/started carries the fileChange with its `changes`, then
+ * item/fileChange/requestApproval {threadId, turnId, itemId, startedAtMs, reason, grantRoot} 1ms later. No version of the
+ * request has `params.item.changes`, so the changes come from the item, which the adapter remembers by id (`itemChanges`).
  *
- * **A file-change request carries no change** (#169). Measured against codex-cli 0.153.4
- * (scripts/probe-codex-file-approval.mts, preset safe, one edit of one file):
- *
- *   item/started  {item: {type: 'fileChange', id: 'exec-4d7c…', status: 'inProgress',
- *                  changes: [{path: '/…/notes.txt', kind: {type: 'update', move_path: null},
- *                             diff: '@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n'}]}, threadId, turnId, startedAtMs}
- *   request       item/fileChange/requestApproval {threadId, turnId, itemId: 'exec-4d7c…',
- *                  startedAtMs, reason: null, grantRoot: null}            — 1ms after item/started
- *   item/completed the same item, status 'completed', the same changes
- *
- * The request names the item and nothing else. This read `params.item.changes`, which no version of the
- * request has, so every card had an empty path and an empty diff and the person approved blind. The changes
- * come from the item instead, which the adapter remembers by id and passes in as `itemChanges`.
- *
- * The older `applyPatchApproval` carries its own changes, keyed by path (generated/ApplyPatchApprovalParams.ts:
- * `fileChanges: { [path]: FileChange }`, where an update has `unified_diff` and an add or a delete `content`).
- * Not measured: app-server 0.153.4 sent the v2 request above.
+ * The older `applyPatchApproval` carries its own changes keyed by path (generated/ApplyPatchApprovalParams.ts: an update
+ * has `unified_diff`, an add or a delete `content`). Not measured: app-server 0.153.4 sent the v2 request above.
  *
  * A command request carries its command and cwd at the top level (measured in the same run); `item` is
  * read first only because older versions were written against it.
@@ -36,10 +24,10 @@ export function approvalDetailFrom(
   if (method === 'item/commandExecution/requestApproval') {
     const item = asObj(params.item)
     /*
-     * Everything else the request says is kept (#683 review; generated v2 `CommandExecutionRequestApprovalParams`):
+     * Everything else the request says is kept (#683; generated v2 `CommandExecutionRequestApprovalParams`):
      * a network approval carries its host in `networkApprovalContext` and may have no command at all, `kind:
-     * 'writeStdin'` is input to a terminal already running, and `reason` is why the agent asks. Dropping them drew a
-     * card that read `Run ` and nothing, which a list row could then allow.
+     * 'writeStdin'` is input to a terminal already running, and `reason` is why the agent asks. Without them the
+     * card reads `Run ` and nothing, which a list row could then allow.
      */
     const p = paramsOf({ params }, 'item/commandExecution/requestApproval')
     const net = asObj(p.networkApprovalContext)

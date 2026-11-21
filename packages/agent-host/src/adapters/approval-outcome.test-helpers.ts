@@ -1,9 +1,9 @@
 /**
  * What an approval callback did with one call (#845): its own answer if it gave one, or `'still asking'` once a
- * card for the person went up. Both sides are things that happen. The tests used to read "it is asking" from a
- * 20–200 ms timer, which also stood for "the answer was slow": on a loaded machine an allow lost that race and the
- * test failed for load. The card is looked for after every turn of the event loop; a call that neither answers
- * nor raises a card runs into the test's own timeout.
+ * card for the person went up. Both sides are things that happen: a 20–200 ms timer read as "it is asking" also
+ * stands for "the answer was slow", so on a loaded machine an allow loses that race and the test fails for load. The
+ * card is looked for after every turn of the event loop; a call that neither answers nor raises a card runs into the
+ * test's own timeout.
  *
  * `cards` counts the cards raised so far; only one raised by this call counts.
  */

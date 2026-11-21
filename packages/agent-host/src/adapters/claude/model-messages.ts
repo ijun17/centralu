@@ -47,13 +47,9 @@ export function streamEventEvents(m: Pick<SDKPartialAssistantMessage, 'event'>, 
       out.push({ type: 'message_delta', sessionId, role: 'assistant', text: str(d.text) })
     }
     /*
-     * Thinking (measured in #58, 2026-08-26): for the model measured then, the whole body arrived
-     * encrypted, so `thinking` was "" and only `estimated_tokens` (an increment) came through. That
-     * is not true of every model: one that sends plain thinking text (a Claude session, 2026-11-05;
-     * see `reasoningStreamed` in `assistantEvents`) fills `thinking` with readable words. A delta goes
-     * out as a `reasoning_delta` carrying what it has: its `text` is stored and shown as a reasoning
-     * row (dimmed, in the conversation), its `estTokens` is **the fact of progress** — "thinking, ~N
-     * tokens" — and neither pretends content exists that is not there.
+     * Thinking: a model that encrypts it sends `thinking` "" and only `estimated_tokens` (an increment; measured in #58,
+     * 2026-08-26); one that sends plain text fills `thinking` (2026-11-05). A `reasoning_delta` carries what it has: the
+     * text as a reasoning row, `estTokens` as **the fact of progress** ("thinking, ~N tokens").
      */
     if (d?.type === 'thinking_delta') {
       const text = str(d.thinking)
@@ -136,20 +132,14 @@ export function userEvents(m: UserRead, sessionId: string): NormalizedEvent[] {
   // Words only (the summary after /compact is a string) has no tool result in it and makes no event: the marker already told it
   const content = messageBlocks(m.message)
   /*
-   * The result of launching a background agent is **not actually a result** (#98). Closing the
-   * card here would show the text meant only for the model ("never quote…") as its result, and
-   * make the card look already finished while the agent is still genuinely working. This leaves
-   * the card open with only a one-line status, and `task_notification` closes it when the agent
-   * actually finishes (`ClaudeStreamNormalizer`).
+   * A background agent's launch result is **not its result** (#98): it is text for the model ("never quote…") while
+   * the agent works on. The card stays open with a status line; `task_notification` closes it (`ClaudeStreamNormalizer`).
    */
   const launched = backgroundLaunch(m)
   if (launched) return [{ type: 'tool_output_delta', sessionId, callId: launched, text: 'Running in the background\n' }]
   /*
-   * A foreground agent's result is drawn from `tool_use_result` — the SDK says to do exactly
-   * that (sdk.d.ts: "For the Agent/Task tool the completed shape is the subagent's final report
-   * without the model-directed agentId/usage trailer, plus run totals — render from it
-   * instead of parsing the tool_result text."). Using the body as-is would put JSON starting
-   * with "[Subagent hand-back] The text below is…" on the card (measured).
+   * A foreground agent's result is drawn from `tool_use_result`, as sdk.d.ts says ("render from it instead of parsing
+   * the tool_result text"): the body is JSON starting "[Subagent hand-back] The text below is…" (measured).
    */
   const agent = asObj(m.tool_use_result)
   // The finished agent's whole report is the result's record (#221); the card shows its head
@@ -164,17 +154,11 @@ export function userEvents(m: UserRead, sessionId: string): NormalizedEvent[] {
   for (const block of content) {
     if (block.type === 'tool_result') {
       const c = block.content
-      /*
-       * The card reads the answer as the record does (#843): a list of blocks used to be cut out of its JSON, so a
-       * card, and every session reading it (read_session, recall, the handoff record), got `[{"type":"text",…` or
-       * an image's base64 instead of the text.
-       */
+      // The card reads the answer as the record does (#843): a list of blocks gives its text, never its JSON or base64
       out.push(toolResultEvent(sessionId, str(block.tool_use_id), block.is_error !== true, agentDone ?? resultOutput(c)))
       /*
-       * An image carried in a tool result (#40). This is where one arrives when a screenshot is
-       * taken or an image file is Read — the measured shape:
-       * {type:'image', source:{type:'base64', data, media_type}}. (An assistant body never
-       * carries an image — a tool result is the only way one arrives.)
+       * An image arrives only in a tool result (#40: a screenshot, a Read image file), measured as
+       * {type:'image', source:{type:'base64', data, media_type}}.
        */
       if (Array.isArray(c)) {
         for (const item of c) {
@@ -182,12 +166,7 @@ export function userEvents(m: UserRead, sessionId: string): NormalizedEvent[] {
           const part = asObj(item)
           if (str(part.type) !== 'image') continue
           const source = asObj(part.source)
-          /*
-           * A non-base64 source (a URL, say) used to vanish silently (found during the #58
-           * investigation). There is nothing we can do about failing to render it, but the fact
-           * that it failed to render still has to be shown — this uses the same box as the
-           * existing image-failure cases (too large, file missing).
-           */
+          // A non-base64 source (a URL, say, #58) cannot be drawn, so it shows in the image-failure box (too large, missing)
           if (str(source.type) !== 'base64' || !str(source.data)) {
             out.push(undrawnImageEvent(sessionId, `Cannot display an image of this format yet (source: ${str(source.type) || 'none'})`))
             continue

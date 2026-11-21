@@ -41,11 +41,9 @@ export type UsageRead = Loose<SdkUsage>
 
 /**
  * The blocks of a message's content, always a list. The CLI writes a plain string there when a message is only words,
- * as the SDK's type says — the summary it feeds back after `/compact` is one — and a reader that took the field for a
- * list threw inside the stream loop, which the adapter reported as the whole process crashed. A string reads as one
- * text block (as the imported history does, history.ts `readableMessage`); anything else that is not a list reads as
- * none, and an element that is not an object is left out: the SDK's types say what the CLI sends, and the readers
- * stay as careful as they were for a CLI that strays.
+ * as the SDK's type says (the summary it feeds back after `/compact` is one); a reader throwing on it inside the stream
+ * loop reads as the whole process crashed. A string reads as one text block (as history.ts `readableMessage`); anything
+ * else not a list reads as none, and an element that is not an object is left out, for a CLI that strays from its types.
  */
 export function messageBlocks(message: { readonly content?: string | readonly ContentBlock[] } | null | undefined): ReadBlock[] {
   return blocksOf(message?.content)

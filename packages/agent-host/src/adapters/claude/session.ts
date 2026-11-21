@@ -151,7 +151,7 @@ export class ClaudeSession implements SessionHandle {
     this.livePreset = opts.permissionPreset
     this.turnStart = new TurnStartWait(() => this.notStarted(), opts.agentVersion)
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
-    // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
+    // An app's mark only for an app attached here (#730): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     this.ledger = new MidTurnLedger(sessionId, (e) => this.emit(e), {
@@ -340,12 +340,9 @@ export class ClaudeSession implements SessionHandle {
       liveQueries.delete(q)
       this.settleGoalKnown()
       /*
-       * **An exception from a process we ourselves closed is not a crash** (#157). Same rule as
-       * the clean-exit branch above. If settings change after a stopped turn (the last result
-       * was `error_during_execution`), the old CLI ends still carrying an error result, and the
-       * SDK turns that into a thrown exception, "Claude Code returned an error result: …". This
-       * used to surface as adapter_crashed, and the manager would treat the brand-new process it
-       * had just started as dead and close it.
+       * **An exception from a process we ourselves closed is not a crash** (#157), as in the clean-exit branch. After a
+       * stopped turn (`error_during_execution`) a settings change ends the old CLI with an error result, which the SDK
+       * throws ("Claude Code returned an error result: …"); as adapter_crashed, the manager would close the new process.
        */
       if (this.closed) return
       /*
@@ -546,7 +543,7 @@ export class ClaudeSession implements SessionHandle {
 
   /**
    * Inputs that will run as a turn and have not: waiting in the queue the CLI reads, or read and not named by a finished turn's result (`personInputs`),
-   * and the tracked ones (mail, an update's Continue, a parent's note) no turn took yet, which the ledger counts (#2318 review). Quiet inputs start no turn
+   * and the tracked ones (mail, an update's Continue, a parent's note) no turn took yet, which the ledger counts (#2318). Quiet inputs start no turn
    */
   queuedInputs(): number {
     return this.untrackedInputs() + this.ledger.untaken
@@ -577,20 +574,12 @@ export class ClaudeSession implements SessionHandle {
 
   private sendInput(text: string, uuid = centraluInputId(), note?: InputReceipt, origin?: InputOrigin, quiet?: boolean): void {
     /*
-     * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
-     * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model
-     * read the literal characters and role-played the hook ("Goal achieved!" with no hook behind
-     * it), so every /goal was answered here with a refusal. The installed CLI 2.1.282 runs it
-     * through the same `query()` path we use — measured: `goal` is in `supportedCommands()` and in
-     * the init message's `slash_commands`, the CLI answers "Goal set: <condition>" itself (a
-     * synthetic message, not the model), registers its Stop hook, and keeps the turn going until the
-     * condition holds. What the stream says about it, and how the badge reads that, is in
-     * `ClaudeGoalTracker` (normalize.ts).
-     *
-     * So the decision is made by capability: a CLI that advertises `goal` gets the command, one that
-     * does not (older) still gets the honest one-liner. A `/goal` sent before the command list has
-     * answered waits for it (`goalKnown`, milliseconds after start), and whatever is sent after it
-     * waits behind it, so the order the person typed is the order the CLI reads.
+     * `/goal` goes to the CLI only when it advertises `goal` (`supportedCommands()`, the init's `slash_commands`): CLI
+     * 2.1.282 runs it through `query()`, answers "Goal set: <condition>" itself and keeps the turn going until the
+     * condition holds (measured 2026-10-03; the stream's side is `ClaudeGoalTracker`). A CLI without it (SDK 0.3.231 and
+     * 0.3.263 of 2026-09-07) has the model read the text and role-play the hook ("Goal achieved!"), so it gets the honest
+     * one-liner. A `/goal` sent before the command list answered waits for it (`goalKnown`, milliseconds after start),
+     * and what is sent after waits behind it, so the CLI reads in the order the person typed.
      */
     const goal = isGoalCommand(text)
     if (!this.sendGate && !(goal && this.goalCommand === undefined)) {
@@ -721,12 +710,8 @@ export class ClaudeSession implements SessionHandle {
   private contextWindow: number | null = null
 
   /**
-   * Interrupt.
-   *
-   * **Both** of the following have to happen. This used to only deny the pending approval, which
-   * only freed a turn that was waiting on a tool — if the model was simply thinking, nothing
-   * happened at all. A button that does not stop anything when pressed is exactly the kind of
-   * silent failure this project forbids.
+   * Interrupt. **Both** of the following have to happen: denying the pending approval alone frees only a turn waiting
+   * on a tool, never a model that is thinking.
    *
    *   1) Deny the pending approval: if `canUseTool` is holding a promise, it is stuck there with
    *      no point to clean up at even once the interrupt signal arrives. So it is released first.
@@ -880,13 +865,10 @@ export class ClaudeSession implements SessionHandle {
     this.cards.releaseQuestions('Session closed')
     this.releaseAgents('The session closed before this agent reported back')
     /*
-     * **Terminates the process** (#157). This used to only end the input generator — the SDK just
-     * closes the CLI's stdin, and the CLI keeps running the turn it was already on (including any
-     * remaining tool calls in auto, where nothing ever asks). In a swapped-out session, the old
-     * process and the new process ended up both writing into the same conversation. `close()`
-     * closes stdin and sends SIGTERM if it has not ended (sdk.d.ts: "Close the query and
-     * terminate the underlying process"). The usage window is also reclaimed here.
-     *
+     * **Terminates the process** (#157): ending the input generator only closes the CLI's stdin, and the CLI runs on
+     * its turn (auto's tool calls included), so a swapped-out session's old and new process would both write the
+     * conversation. `close()` closes stdin and sends SIGTERM if it has not ended (sdk.d.ts). The usage window is
+     * reclaimed here too.
      * On Windows there is no SIGTERM to send: the SDK (0.3.263, sdk.mjs `close`) ends stdin, waits
      * 2 s, then another 5 s, and only then kills a process that is still there. A CLI that is not mid-
      * turn leaves on the EOF by itself, so a sign-in refresh it may be writing (#353) gets to finish.

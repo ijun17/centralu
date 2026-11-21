@@ -47,7 +47,7 @@ export function useSessionNotes(session: NotedSession | undefined, away: boolean
 export function AwayNote({ machine }: { machine: string | null }) {
   const name = useMachineName(machine) ?? 'Its machine'
   return (
-    <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="away-note">
+    <p className="border-t border-line px-conversation py-1.5 text-xs text-ink-faint" data-testid="away-note">
       {name} is away — this is what was last heard from it. It picks up again when the machine reconnects.
     </p>
   )
@@ -73,7 +73,7 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
   if (!note.shown || !stop) return null
   return (
     <div
-      className={`${note.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} grid grid-cols-1 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted`}
+      className={`${note.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} grid grid-cols-1 border-t border-line-chrome px-conversation py-1.5 text-xs leading-body text-ink-muted`}
       aria-hidden={note.leaving || undefined}
       data-testid="stop-note"
       data-kind={stop.kind}
@@ -143,7 +143,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
   if (error && !waking) {
     return (
       <p
-        className="flex items-center gap-2 border-t border-line-chrome px-4 py-1.5 text-xs leading-body text-ink-muted"
+        className="flex items-center gap-2 border-t border-line-chrome px-conversation py-1.5 text-xs leading-body text-ink-muted"
         data-testid="dormant-note"
       >
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
@@ -185,7 +185,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
    */
   if (!waking) return null
   return (
-    <p className="border-t border-line px-4 py-1.5 text-xs text-ink-faint" data-testid="dormant-note">
+    <p className="border-t border-line px-conversation py-1.5 text-xs text-ink-faint" data-testid="dormant-note">
       Waking session…
     </p>
   )

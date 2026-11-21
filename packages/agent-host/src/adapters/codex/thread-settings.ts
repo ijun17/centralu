@@ -72,10 +72,9 @@ export function threadSettingsChanged(
  *    what runs.
  *  - A model is recorded and the thread answers with another one (the provider put its own in the place of the one asked
  *    for): the answer wins, with a warning, for the same reason. Never one model on screen and another running.
- * The effort is adopted only together with the model: a session that keeps its model and has no effort chosen is on the
- * tool's default, and Codex answers a default with a concrete value (`threadSettingsChanged`), which would turn "default"
- * into a fixed effort on every wake. A recorded effort needs no look: it is sent with every turn.
- * Nothing differs: nothing returns. `answered` is `threadSettingsOf` of the answer.
+ * The effort is adopted only together with the model: a session keeping its model with no effort chosen is on the tool's
+ * default, which Codex answers with a concrete value (`threadSettingsChanged`), so "default" would become a fixed effort
+ * on every wake. A recorded effort is sent with every turn. Nothing differs: nothing returns (`answered`: `threadSettingsOf`).
  */
 export function reconcileOpenedThread(
   sessionId: string,

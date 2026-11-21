@@ -10,14 +10,9 @@ import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../
 
 
 /**
- * What the tool **actually answered** — the body that goes on the card.
- *
- * This used to read only `aggregatedOutput`/`output`, but those are fields of commandExecution.
- * **An MCP call carries its answer in a different place** (generated/v2/ThreadItem.ts: `result`
- * and `error`). So when an MCP call failed, the screen showed only a red line with not a single
- * character of reason — during dogfooding, "why does this skill only fail in this session" had to
- * be figured out by asking the agent itself (measured 2026-09-08: the same tool had succeeded in
- * another session 90 seconds earlier, while the failed one's card was blank).
+ * What the tool **actually answered** — the body that goes on the card. `aggregatedOutput`/`output` are
+ * commandExecution's: **an MCP call carries its answer in `result` and `error`** (generated/v2/ThreadItem.ts), without
+ * which a failed MCP call's card is a red line with not a single character of reason (dogfooding 2026-09-08).
  *
  * Order: command output, then error message, then result content. Error comes before result
  * because when both exist, the reason for failure is what a person needs to know first.
@@ -52,8 +47,8 @@ export function resultSummary(item: Record<string, unknown>): string {
 /**
  * Whether a completed tool item went through (#843). Every status but `completed` says it did not: a command or a
  * file change the person declined ends `declined` (generated v2 `CommandExecutionStatus`, `PatchApplyStatus`), a
- * collab call `interrupted` (`CollabAgentToolCallStatus`), and any of them `failed`. Only `failed` was read, so a
- * declined command or edit closed its card as green. A dynamic tool also says `success: false`.
+ * collab call `interrupted` (`CollabAgentToolCallStatus`), and any of them `failed`. A dynamic tool also says
+ * `success: false`. Each of these ends the card failed, never green.
  */
 export function codexItemOk(item: Record<string, unknown>): boolean {
   const status = str(item.status)
@@ -95,9 +90,8 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
   }
   if (type === 'mcpToolCall') {
     /*
-     * The name lives in **the top-level server and tool** (generated/v2/ThreadItem.ts). We used
-     * to read invocation.tool, which made every one of Codex's MCP calls collapse into a single
-     * 'MCP' — this surfaced while running the Assistant on Codex.
+     * The name lives in **the top-level server and tool** (generated/v2/ThreadItem.ts): `invocation.tool` alone
+     * collapses every one of Codex's MCP calls into a single 'MCP'.
      */
     const tool = str(item.tool) || str(asObj(item.invocation).tool)
     const server = str(item.server)
@@ -120,14 +114,9 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
       return { tool, title: project || tool, paths: [], ...(mark ? { centralu: mark.centralu } : {}) }
     }
     /*
-     * **The arguments go on the title too** (dogfooding 2026-09-08).
-     *
-     * There was a case where the same tool kept failing in only one session. The cause was a single
-     * argument name — the call that worked used `{message: …}`, the one that failed used
-     * `{query: …}`, and the server answered that difference with nothing more than "An unexpected
-     * error occurred". Since the screen only showed the tool name, the two calls looked identical,
-     * and a person had to open the rollout file to find out. With arguments on the card, that
-     * difference is visible at a glance.
+     * **The arguments go on the title too** (dogfooding 2026-09-08): two calls of one tool can differ only in an
+     * argument name (`{message: …}` worked, `{query: …}` drew only "An unexpected error occurred"), and by the tool
+     * name alone they look identical.
      */
     const args = argsPreview(item.arguments ?? asObj(item.invocation).arguments)
     const name = [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool'
@@ -146,7 +135,7 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
   }
   /*
    * A collab call (generated/v2/ThreadItem.ts `collabAgentToolCall`): spawning a child agent, waiting for it, sending
-   * it more work. The card used to say "collabAgentToolCall" twice. It is named by the collab tool now, so a
+   * it more work. It is named by the collab tool, not by its type, so a
    * `spawnAgent` card is recognised as the one that launched a subagent (#222, `launchesSubagent`), and it reads as the
    * work handed over: the prompt's first line, as a Claude agent card reads as its description (#98).
    */
@@ -157,12 +146,7 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
 }
 
-/**
- * The arguments, into one line (a tag on the card title).
- *
- * The goal is to show the **shape**, not the exact value, so it is cut short — it is enough to
- * see what was sent under what name, and the full body is on the result card anyway.
- */
+/** The arguments, into one line on the card title: their **shape** (what was sent under what name), cut short: the full body is on the result card */
 function argsPreview(raw: unknown): string {
   let value: unknown = raw
   if (typeof raw === 'string') {
@@ -193,7 +177,7 @@ export function fileChangesOf(item: Record<string, unknown>): FileChange[] {
 
 /**
  * What a change does to its file (generated v2 `PatchChangeKind`: `{type: 'add'}`, `{type: 'delete'}`,
- * `{type: 'update', move_path}`), kept for the card and the list rows (#683 review): a delete or a move must not read
+ * `{type: 'update', move_path}`), kept for the card and the list rows (#683): a delete or a move must not read
  * as an ordinary edit. An update with a `move_path` is a move.
  */
 export function changeKindOf(kind: Record<string, unknown>): Pick<FileChange, 'change' | 'movePath'> {

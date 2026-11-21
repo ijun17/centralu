@@ -6,8 +6,8 @@ import { matchesAllowRule } from '@cc/protocol'
  *
  * **One rule for both adapters: 'always' adds the matcher it was given, and nothing without one.** The matcher is
  * what the UI computed and showed ("Always allow in this session: …"), and the manager saves exactly that matcher, so
- * the rule here, the saved rule and the screen are the same. Claude used to fall back to the command text when no
- * matcher came: a rule nobody saved or named, live until the process restarted (#428). An 'always' without a matcher
+ * the rule here, the saved rule and the screen are the same. Falling back to the command text when no matcher came
+ * would make a rule nobody saved or named, live until the process restarts (#428). An 'always' without a matcher
  * (a kind the UI has no matcher for) allows that one call.
  */
 export class AlwaysAllowRules {

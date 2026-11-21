@@ -77,16 +77,12 @@ export type CreateSessionOpts = {
    *
    * When untrusted, tool settings committed to the repository never reach this session: Claude
    * does not read `.claude/`'s settings, hooks and commands or CLAUDE.md, and Codex does not read
-   * `.codex/`'s settings, hooks and rules or AGENTS.md. The user's own settings (`~/.claude`,
-   * `~/.codex`) still apply as usual — decision 3 only turns off the repository's own share.
+   * `.codex/`'s settings, hooks and rules or AGENTS.md. The user's own settings (`~/.claude`, `~/.codex`) still apply.
    *
-   * **Absent means untrusted.** What gets trusted is decided by the manager from what the session
-   * **is** (`settingFilesFor`): a session belonging to a project (worker, manager, or the session
-   * that creates a project app) receives that project's trust, and the session that creates a
-   * user-folder app receives trust even without a project — that folder belongs to the user
-   * (decision 3). Every time the manager starts a session (creation or waking), it reads this from
-   * the repository and passes it down: if trust changes, a running session only gets the new value
-   * the next time it starts up.
+   * **Absent means untrusted.** The manager decides it from what the session **is** (`settingFilesFor`): a project's
+   * session (worker, manager, the one that creates a project app) gets that project's trust, and the one that creates a
+   * user-folder app gets trust without a project, since that folder is the user's (decision 3). It is read from the
+   * repository at every start (creation or waking), so a running session gets a changed trust only when it next starts.
    */
   projectTrusted?: boolean
   /**
@@ -100,9 +96,8 @@ export type CreateSessionOpts = {
    * settings (`settingSources: []`). Codex turns off the repository layer (`.codex/`, AGENTS.md)
    * per thread, while the user's own `~/.codex` is still read as usual.
    *
-   * This is independent of whether the session receives tools (`centraluTools`) — the worktree
-   * manager and the session that creates the worktree also receive tools, but since they belong to
-   * a project, they follow `projectTrusted` instead.
+   * Independent of `centraluTools`: the worktree manager and the session that creates the worktree get tools but follow
+   * `projectTrusted`, since they belong to a project.
    */
   noSettingFiles?: boolean
   /**
@@ -114,16 +109,11 @@ export type CreateSessionOpts = {
    */
   noCodeIntelligence?: boolean
   /**
-   * Folders outside the working folder that **must be read** (#142) — currently just the one
-   * folder holding an inherited handoff note.
-   *
-   * The note lives in the data folder (`<data>/handoff/<project id>/`), while the successor's cwd
-   * is the project. The two tools differ here:
-   *  - Claude **asks** before reading outside the working folder. Measured (SDK 0.3.263 bundled
-   *    with CLI 2.1.263, haiku, permissionMode 'default', 2026-09-29): Reading a file outside it
-   *    invoked canUseTool as `Read` (i.e. an approval card). Giving the same folder as
-   *    `additionalDirectories` let it read without the callback. So Claude receives this value as
-   *    `additionalDirectories`.
+   * Folders outside the working folder that **must be read** (#142): the folder holding an inherited handoff note
+   * (`<data>/handoff/<project id>/`), while the successor's cwd is the project. The two tools differ here:
+   *  - Claude **asks** before reading outside the working folder, so it receives this as `additionalDirectories`. Measured
+   *    (SDK 0.3.263 / CLI 2.1.263, haiku, permissionMode 'default', 2026-09-29): a read outside invoked canUseTool as `Read`
+   *    (an approval card); with the folder in `additionalDirectories` it read without the callback.
    *  - Codex does not block reads at all. In the generated type (codex-cli 0.153.4
    *    `SandboxPolicy`), neither the readOnly nor the workspaceWrite sandbox has a read scope — the
    *    only thing it restricts is the writable roots (`writableRoots`). So Codex does not use this
@@ -165,9 +155,7 @@ export type CreateSessionOpts = {
    */
   /*
    * An MCP server the person approved (propose_mcp_server) does not arrive here separately — it
-   * becomes a user-folder app and arrives through `apps` instead (M4 A-7). The old
-   * `extraMcpServers` used to load that server raw into the adapter settings, so its calls went
-   * through neither mediation nor logging.
+   * becomes a user-folder app and arrives through `apps` instead (M4 A-7), so its calls go through mediation and logging.
    */
   apps?: SessionApps
   /**
@@ -266,7 +254,7 @@ export type HistoryMessage =
       ts?: number
       /**
        * An input Centralu itself wrote into the conversation (the person's message, a caller's, its mail or note), known
-       * by the id Centralu gave the line, not by its words (#1618 review). Absent where the tool keeps no id of ours.
+       * by the id Centralu gave the line, not by its words (#1618). Absent where the tool keeps no id of ours.
        */
       sent?: true
     }
@@ -477,9 +465,8 @@ export interface AgentAdapter {
    * Who this tool is, for the screens that draw a row per tool.
    *
    * It lives on the adapter because the adapter is the only thing that knows the tool
-   * exists. This used to be a `TOOL_META` record in `@cc/protocol` listing two vendors by
-   * name, so adding a third meant editing the shared protocol — an adapter that cannot
-   * introduce itself is not really a plug-in point.
+   * exists. A record in `@cc/protocol` listing vendors by name would make adding one an edit of
+   * the shared protocol — an adapter that cannot introduce itself is not really a plug-in point.
    */
   readonly descriptor: ToolDescriptor
 
@@ -583,21 +570,17 @@ export interface AgentAdapter {
   /**
    * **Splits off** a new thread from a locked conversation — returns a new externalId.
    *
-   * Why this is needed: depending on the tool, only one writer can hold a given conversation at a
-   * time. codex blocks this with a lock ("already has an active writer"), and when that happens
-   * there was no way at all to continue that conversation from this app — short of the person going
-   * to close the other app.
+   * Depending on the tool, only one writer can hold a conversation at a time: codex blocks this with a lock ("already has an
+   * active writer"), leaving no way to continue it from this app short of the person closing the other app.
    *
    * But **only writing is blocked.** What we confirmed by measurement:
    *   thread/resume  blocked
-   *   thread/read    works even while locked (we were already reading through our own store)
+   *   thread/read    works even while locked
    *   thread/fork    works even while locked
    *
-   * So this is a fork in the road, not a dead end. We leave the original untouched and continue
-   * from the copy instead. Claude never needed it for that (it never locks, and a concurrent resume
-   * simply works, measured), but implements it for the second use: a fork a requester chose for a
-   * busy session (#677, `ifBusy: "fork"`), a sub-session that starts from a copy of the conversation.
-   * An adapter without it leaves it unimplemented, and a fork is then not offered.
+   * So we leave the original untouched and continue from the copy. Claude never locks (a concurrent resume works, measured)
+   * but implements it for a fork a requester chose for a busy session (#677, `ifBusy: "fork"`). Unimplemented: a fork is
+   * not offered.
    */
   forkConversation?(externalId: string, cwd: string): Promise<string>
 

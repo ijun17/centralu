@@ -9,37 +9,15 @@ function textOfContent(content: unknown): string {
 }
 
 /**
- * What a Claude session's `/goal` is doing, read from what the CLI actually puts on the stream
- * (2026-10-03) — so a Claude goal draws the same badge a Codex goal does.
- *
- * The CLI's own goal event (`active_goal`) does not reach a headless session (see `normalizeMessage`),
- * and the SDK has no goal API. What does arrive, measured through `query()` with streaming input and
- * the installed CLI 2.1.282 (SDK 0.3.263, haiku, a temp git folder):
- *
- *   /goal <condition>    an assistant message with no stream deltas (model "<synthetic>"), text
- *                        "Goal set: <condition>"; then the model works in the same turn
- *   /goal                "Goal active: <condition> (not yet evaluated | N turn[s])" plus an optional
- *                        "\nLast check: <reason>" line, or "No goal set. Usage: `/goal <condition>`";
- *                        a result with num_turns 0 follows
- *   /goal clear          "Goal cleared: <condition>" or "No goal set" (stop, off, reset, none and cancel
- *                        are the same command)
- *   not met at Stop      a user message with isSynthetic: true, text
- *                        "Stop hook feedback:\n[<condition>]: <reason>"; the CLI keeps the same turn
- *                        going by itself, and there is still exactly one result at the end
- *   met                  **nothing** — no message between the model's last words and the turn's
- *                        result (includeHookEvents adds nothing either: the goal hook is a prompt hook)
- *   interrupted          the result is subtype success too, and the goal stays set ("Goal active" after)
- *   resumed              the CLI restores the goal from its transcript and says nothing on the stream
- *
- * Those replies are the CLI's words, not a typed field — so a reply is only read as one while a
- * `/goal` we passed through is waiting for its answer (`commandSent`), and Stop hook feedback only
- * while its bracket holds the condition we know is set (a person's own prompt Stop hook has the same
- * shape). "Met" is inferred: the goal's Stop hook blocks every stop until the condition holds, so a
- * turn in which the model ran under the goal and that ends in success, without us interrupting it,
- * ended because the hook let it. That is the CLI's met, its "impossible" (it gives up and clears)
- * and its unrecoverable-error clear alike — all three clear the goal. Two endings it cannot tell
- * apart, read in the CLI rather than measured: a check deferred while background work is still
- * running, and an evaluator timeout. There the badge clears early; `/goal` shows the truth again.
+ * What a Claude session's `/goal` is doing, read off the stream so it draws a Codex goal's badge (`active_goal` does not reach a
+ * headless session, see `normalizeMessage`; the SDK has no goal API). Measured 2026-10-03 with `query()` and CLI 2.1.282 (SDK 0.3.263):
+ *   not met at Stop   a user message with isSynthetic: true, "Stop hook feedback:\n[<condition>]: <reason>"; the CLI goes on with
+ *                     the same turn, one result at the end. Read only while its bracket holds the condition we know (a person's
+ *                     own prompt Stop hook has the same shape)
+ *   met               **nothing** before the result (includeHookEvents adds nothing: the goal hook is a prompt hook)
+ *   interrupted       a success result, the goal still set ("Goal active" after)
+ *   resumed           the goal restored from the transcript, nothing on the stream
+ * "Met" is inferred, see `push`.
  */
 export class ClaudeGoalTracker {
   private goal: SessionGoal | null = null
@@ -100,6 +78,10 @@ export class ClaudeGoalTracker {
       const drove = this.drove
       this.drove = false
       const success = str(m.subtype) === 'success' && m.is_error !== true
+      // The goal's Stop hook blocks every stop until the condition holds, so a success we did not interrupt after a model call under
+      // the goal is the CLI's met, its "impossible" (it gives up and clears) or an unrecoverable-error clear: all three clear the goal.
+      // Not told apart (read in the CLI, not measured): a check deferred behind background work, an evaluator timeout; the badge
+      // clears early there, and `/goal` shows the truth again.
       if (this.goal && drove && success && !opts.interrupted) return this.set(null)
     }
     return []
@@ -108,7 +90,12 @@ export class ClaudeGoalTracker {
   /**
    * One synthetic reply to a `/goal` command — the goal it states (null for none), `'other'` for the
    * command's own refusals (an untrusted folder, hooks disabled, a condition too long), and undefined
-   * for a message that is not the reply.
+   * for a message that is not the reply. The CLI's words, not a typed field, so read only while a `/goal` we passed
+   * through waits (`commandSent`). Measured (see the class), each an assistant message with no deltas (model "<synthetic>"):
+   *   /goal <condition>    "Goal set: <condition>"; then the model works in the same turn
+   *   /goal                "Goal active: <condition> (not yet evaluated | N turn[s])" plus an optional "\nLast check: <reason>"
+   *                        line, or "No goal set. Usage: `/goal <condition>`"; a result with num_turns 0 follows
+   *   /goal clear          "Goal cleared: <condition>" or "No goal set" (stop, off, reset, none and cancel are the same command)
    */
   private readReply(text: string): SessionGoal | null | 'other' | undefined {
     const set = /^Goal set: ([\s\S]+)$/.exec(text)
