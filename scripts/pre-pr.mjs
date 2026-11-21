@@ -88,7 +88,10 @@ export function isVitestFile(path) {
   return /\.test\.[cm]?[jt]sx?$/.test(path) && !/(?:^|\/)e2e\//.test(path)
 }
 
-// --- Reading the tools' answers --------------------------------------------------------------------
+/** A file `pnpm lint` reads: what ESLint's configuration covers, by extension. */
+export const isLintable = (path) => /\.[cm]?[jt]sx?$/.test(path)
+
+// --- The stack ------------------------------------------------------------------------------------
 
 /**
  * The pull request heads of a stack, oldest first: every ref whose tip is one of `commits` (the
@@ -106,9 +109,6 @@ export function stackHeads({ commits, refs, head }) {
   if (!by.get(head.sha).names.includes(head.name)) by.get(head.sha).names.unshift(head.name)
   return [...by.values()].sort((a, b) => (at.get(a.sha) ?? Infinity) - (at.get(b.sha) ?? Infinity))
 }
-
-/** A file `pnpm lint` reads: what ESLint's configuration covers, by extension. */
-export const isLintable = (path) => /\.[cm]?[jt]sx?$/.test(path)
 
 // --- Running things ------------------------------------------------------------------------------
 
@@ -229,12 +229,12 @@ export const realRunners = {
   },
 }
 
+// --- The checks ----------------------------------------------------------------------------------
+
 /** The whole run's time: every phase draws from what is left of it. The board stops the script a little after (pre-pr.mjs there). */
 export const TOTAL_LIMIT_MS = 25 * 60_000
 /** The least time a phase needs to be worth starting; with less it is reported as not run, not cut off half way. */
 export const PHASE_MIN_MS = 60_000
-
-// --- The checks ----------------------------------------------------------------------------------
 
 /** Where the repository-wide guards are declared, with the files each reads; read through scripts/pre-pr-guards.mjs */
 const GUARDS_FILE = 'tooling/guards.ts'

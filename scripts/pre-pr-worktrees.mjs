@@ -32,7 +32,8 @@ export function canonical(path) {
     return path
   }
 }
-/** The lockfile a checkout's last `pnpm install` installed: pnpm's copy of it */
+
+/** The lockfile a checkout's last `pnpm install` installed: pnpm's copy of it. */
 export const INSTALLED_LOCK = 'node_modules/.pnpm/lock.yaml'
 
 /** The folders named node_modules in a checkout: its root's and each workspace package's (two levels down). */

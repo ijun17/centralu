@@ -17,8 +17,8 @@ import { canonical } from '../scripts/pre-pr-worktrees.mjs'
 /**
  * Much of what these tests do is synchronous work (git, tsc and vitest through `execFileSync`) that holds the worker's event loop,
  * and vitest's worker gives up on the answer to a report after 60 s ("Timeout calling onTaskUpdate", tooling/vitest-stall-watch.ts).
- * On a loaded runner tooling/pre-pr.test.ts hit it with every test passing. Called in a test file, this gives the loop a turn after
- * each test, so a report is answered between tests and not only when the file ends.
+ * On a loaded runner a file of these tests reaches it with every test passing. Called in a test file, this gives the loop a turn
+ * after each test, so a report is answered between tests and not only when the file ends.
  */
 export const yieldBetweenTests = () => afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
 
