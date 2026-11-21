@@ -43,13 +43,16 @@ type Pass = { report: Report | null; timedOut: boolean }
 const recordedReport = (name: string, root: string) =>
   JSON.parse(readFileSync(fileURLToPath(new URL(`./fixtures/pre-pr/${name}`, import.meta.url)), 'utf8').replaceAll('<root>', root.split('\\').join('/')))
 
+/** Starts, with `start`, a real tool that SIGINT ends, as Ctrl-C ends it; throws what `start` throws for it */
+const endedBySigint = (start: typeof execFileSync) => start(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGINT', stdio: 'ignore' })
+
 /**
  * A real tool ended by SIGINT, as Ctrl-C ends it, started as pre-pr starts its tools; its runner answers a failure, as a real one
  * does. Node names the signal it sent on every system, though on Windows the end is TerminateProcess.
  */
 function interruptedTool() {
   try {
-    runTool(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGINT', stdio: 'ignore' })
+    endedBySigint(runTool)
   } catch {
     // the failure every runner answers for it
   }
@@ -605,7 +608,7 @@ describe('pre-pr on a stack of two pull requests', () => {
       "src/a.test.mjs: its version at base does not load with this pull request's other changes reverted (Error: Cannot find module ./helper.js), so which of its tests are new is not known: they were not judged.",
     ])
     // Verified names the check as passed only for the files it judged
-    expect(r.passed).toContain('no new test passes without the change (1 test file(s) not judged: see the warnings)')
+    expect(r.passed).toContain('no new test passes without the change, in the test files judged (1 left out: see the warnings)')
   })
 
   it('reports the first new test that passes with the other changes reverted, and none that fails or was there', () => {
@@ -777,8 +780,7 @@ describe('pre-pr on a stack of two pull requests', () => {
 
   it('knows an interrupt of the git the tier starts itself, not through runTool, by how it ended', () => {
     const fake = fakeRunners()
-    const tier = () => execFileSync(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGINT', stdio: 'ignore' })
-    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tier } })).toThrow('interrupted')
+    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tier: () => endedBySigint(execFileSync) } })).toThrow('interrupted')
     expect(fake.calls.lint).toEqual([])
   }, 60_000 * SLOW)
 

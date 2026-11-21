@@ -20,7 +20,7 @@ describe('the repository-wide guards', () => {
 
   it('names every tooling test that reads the repository, as a guard or with why it is not one', () => {
     const tests = execFileSync('git', ['ls-files', '-z', '--', 'tooling'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.[cm]?tsx?$/.test(f))
-    const reads = tests.filter((f) => /'ls-files'|readdirSync\(.*recursive: true|pre-pr: guard/.test(readFileSync(join(ROOT, f), 'utf8'))).sort()
+    const reads = tests.filter((f) => /['"`]ls-files['"`]|readdirSync\(.*recursive: true|pre-pr: guard/.test(readFileSync(join(ROOT, f), 'utf8'))).sort()
     const named = [...GUARDS.map((g) => g.test), ...Object.keys(NOT_GUARDS)].sort()
     expect(named, 'tooling/guards.ts: each test that reads the repository (git ls-files, a recursive readdir, the mark pre-pr: guard) in GUARDS or NOT_GUARDS, and no other').toEqual(reads)
   })

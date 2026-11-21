@@ -618,6 +618,16 @@ function importedPaths(from, text) {
   })
 }
 
+/** The text of the file at `path` in `dir`, or null where there is none: an import's path as guessed (importedPaths) may name none, or a folder. */
+function textIn(dir, path) {
+  try {
+    return readFileSync(join(dir, path), 'utf8')
+  } catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'EISDIR') return null
+    throw e
+  }
+}
+
 /**
  * The changes (`{ status, path }`) the revert check puts back to the base: all but the tests' own files (isTestFile). A file under
  * e2e/ that a changed vitest file reaches through e2e/ imports, at any depth, goes back too, whatever it is: vitest runs nothing
@@ -652,14 +662,7 @@ function revertStep(c) {
   const top = c.top()
   // The guards check reads the head's declaration, which this step puts back to the base
   if (c.want('guards')) c.declared()
-  const sources = revertedChanges(c.changed, (path) => {
-    try {
-      return readFileSync(join(top, path), 'utf8')
-    } catch {
-      // An import's path as guessed (importedPaths) that is no file, or is a folder
-      return null
-    }
-  })
+  const sources = revertedChanges(c.changed, (path) => textIn(top, path))
   c.log(`Running ${tests.length} test file(s) with ${sources.length} other change(s) reverted to ${c.base}`)
   for (const s of sources) {
     if (s.status === 'A') rmSync(join(top, s.path), { force: true })
@@ -797,7 +800,7 @@ const PASSED = {
   'repo-guards': () => 'the repository-wide guards',
   revert: (_heads, warnings) => {
     const leftOut = warnings.filter((w) => w.check === 'revert').length
-    return `no new test passes without the change${leftOut ? ` (${leftOut} test file(s) not judged: see the warnings)` : ''}`
+    return `no new test passes without the change${leftOut ? `, in the test files judged (${leftOut} left out: see the warnings)` : ''}`
   },
 }
 

@@ -11,6 +11,7 @@
  */
 import { losesTargets } from './doc-refs.js'
 import { OS_ALLOWLIST } from './os-layer.js'
+// @ts-expect-error — a plain .mjs script, so pre-pr and the board can run it with Node alone
 import { RULES_FILE as TIER_RULES } from '../scripts/tier.mjs'
 
 export interface Guard {
