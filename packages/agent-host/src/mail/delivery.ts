@@ -93,9 +93,10 @@ export type MailInput = {
 /**
  * What the tool says of the inputs given it (`SessionHandle.turnInputs`, `turnStartInputs`): `took`, at a turn's end, the ids that turn took in, as
  * `SessionHandle.turnInputs` answers (undefined also when its process went with them; `turnInputs` below files the mail of either undefined or null
- * in that turn); `opened`, at a turn's opening, the ids it runs for
+ * in that turn), and `finished`, whether it ended as a turn does: not stopped, and not cut to be continued (#2369); `opened`, at a turn's opening,
+ * the ids it runs for
  */
-export type TurnInputs = { took: readonly string[] | null | undefined } | { opened: readonly string[] }
+export type TurnInputs = { took: readonly string[] | null | undefined; finished: boolean } | { opened: readonly string[] }
 
 export type MailSessions = {
   receiver(sessionId: string): ReceiverState
@@ -162,7 +163,7 @@ export class MailDelivery {
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
   /** Mail given into a running turn, by recipient: the input id the tool was given it under, and its messages, until that turn ends (`turnInputs`) */
-  private readonly joined = new Map<string, { id: string; ids: readonly string[] }[]>()
+  private readonly joined = new Map<string, { id: string; ids: readonly string[]; at: number }[]>()
   /** Mail a turn ended without taking, held queued in the tool for a turn after (Claude folds a message in only at a tool round): not in any turn yet */
   private readonly queued = new Map<string, { id: string; ids: readonly string[] }[]>()
   /**
@@ -583,7 +584,7 @@ export class MailDelivery {
         this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
         this.records.markRead(recipient, drained.inline, deliveredAt)
       })
-      if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
+      if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds, at: deliveredAt }])
       if (!quiet && !joins) this.lastWake.set(recipient, this.now())
       // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
       if (waiting) {
@@ -617,8 +618,10 @@ export class MailDelivery {
   /**
    * What the tool said of the inputs given the recipient (docs/plans/mailbox.md §10.6.3). At a turn's end, mail given into it that the turn did not take
    * is still queued in the tool, to run as a turn after: its rows leave that turn (no turn yet), so neither that turn's last response nor its stop
-   * answers or releases it, and a queued one a later turn takes in is that turn's. At an opening, the queued mail it runs for is the new turn's, and
-   * that mail started it, as a wake does: its starter is that mail's (`starterOf`), which the pair's warning counts (§7.5)
+   * answers or releases it, and a queued one a later turn takes in is that turn's. A task a finished turn took in while it ran is given again at rest
+   * (#2369). At an opening, the queued mail it runs for is the new turn's, and that mail started it, as a wake does: its starter is that mail's
+   * (`starterOf`), which the pair's warning counts (§7.5). What was given into a turn is known in memory only: after a host restart, a turn's end
+   * answers or files that mail as its rows say
    */
   turnInputs(recipient: string, turn: TurnInputs): void {
     const party = parseAddress(recipient)
@@ -634,6 +637,13 @@ export class MailDelivery {
       const left = given.filter((g) => !named.includes(g.id))
       if (left.length > 0) this.records.fileInTurn(recipient, left.flatMap((g) => g.ids), null)
       queued.push(...left)
+      /*
+       * A task the turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369): it is
+       * given again at rest, its frame saying it came during the turn before, so a model that did it says so instead of doing it twice. A turn
+       * stopped keeps it, so its giver is told of the stop; a turn cut to be continued keeps it for the turn that continues
+       */
+      const now = this.now()
+      if (turn.finished) for (const g of given.filter((g) => named.includes(g.id))) this.records.undeliver(recipient, g.ids.filter((id) => this.records.message(id)?.kind === 'task'), g.at, { at: now })
     }
     const ran = queued.filter((q) => named?.includes(q.id))
     const ids = ran.flatMap((q) => q.ids)

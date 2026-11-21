@@ -33,7 +33,7 @@ export interface MigrationHost {
   vacuumAfterStep(report?: (done: VacuumDone) => void): void
 }
 
-/** What every file of steps stands on: `this.db` and the store's own `vacuumAfterStep` */
+/** What every file of steps stands on: `this.db`, the store's own `vacuumAfterStep`, and `addColumn` */
 export abstract class MigrationRange {
   constructor(private readonly host: MigrationHost) {}
 
@@ -43,6 +43,12 @@ export abstract class MigrationRange {
 
   protected vacuumAfterStep(report?: (done: VacuumDone) => void): void {
     this.host.vacuumAfterStep(report)
+  }
+
+  /** Adds a column the table lacks. A table that does not exist (a test's partial schema) is left alone */
+  protected addColumn(table: string, column: string, type: string): void {
+    const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(${table})`).all()
+    if (cols.length > 0 && !cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
   }
 
   abstract steps(): MigrationStep[]

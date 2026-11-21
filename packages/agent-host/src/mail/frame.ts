@@ -133,6 +133,8 @@ export type MessageFrameItem = {
   /** The body, only when the words flow down */
   inline?: string
   maybeRepeated?: boolean
+  /** A task a turn of the receiver took in while it ran, given again at rest (`RecipientRow.givenAgainAt`, #2369) */
+  givenAgain?: boolean
 }
 
 /** What another party's message is, said by the wake and by the tool's read alike */
@@ -193,6 +195,7 @@ function messageLine(i: MessageFrameItem): string {
     attr('waitingOn', i.waitingOn, isCount) +
     (i.personNote ? ' personNote="1"' : '') +
     (i.maybeRepeated ? ' maybeRepeated="1"' : '') +
+    (i.givenAgain ? ' givenAgain="1"' : '') +
     (i.inline === undefined ? '' : ' inline="1"')
   )
 }
@@ -207,6 +210,9 @@ function messageFoot(shown: readonly MessageFrameItem[], calls: MessageCalls): s
       : [
           `${waiting} of these wait for your answer (needsReply="1"): answer each with ${calls.answer('<id>')}, or close it with ${calls.done('<id>')} if it needs nothing from you. Centralu reminds you of those left open. An answer needs no reply unless you send it with kind: "question".`,
         ]),
+    ...shown
+      .filter((i) => i.givenAgain)
+      .map((i) => `${isMessageId(i.messageId) ? i.messageId : 'unknown'} came while your last turn ran, so it is given again (givenAgain="1"). If that turn already did it, say so in one line.`),
     ...shown
       .filter((i) => i.clarifies !== undefined)
       .map((i) => `${isMessageId(i.messageId) ? i.messageId : 'unknown'} is about the work you gave: a reply to it is given as work again, and its turn is reported to you.`),

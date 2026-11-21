@@ -2,7 +2,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { BusyAnswer, IfBusy } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
-import type { AnswerGiven, LinkedTasks } from '../mail/delegation.js'
+import type { AnswerGiven, GivenTask, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
@@ -50,8 +50,8 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
-  /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
-  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void
+  /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns the task, and how to withdraw it when it could not go in */
+  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): GivenTask
   /**
    * A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); a `note` needs no reply (#2258);
    * `depth`, the agent depth a linked machine's session's ask gives it (`MailInput.depth`). Returns its id
@@ -80,8 +80,11 @@ export type MailHooks = {
   turnInputs?(sessionId: string, turn: TurnInputs): void
   /** The Assistant's turn ended as a turn does: each session whose request it carried is told what it gets back, and those requests are settled (S12, §7.6) */
   requestTurnEnded?(assistantId: string): void
-  /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
-  answered?(callerId: string, childId: string, how?: AnswerGiven): void
+  /**
+   * A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled.
+   * False when that answer does not answer the task the call waited on (`taskId`, else the caller's newest; `answerRecorder`)
+   */
+  answered?(callerId: string, childId: string, how?: AnswerGiven, taskId?: string): boolean
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
   /** The Assistant's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
@@ -210,7 +213,7 @@ export class MailSessionsView {
     this.host.children.onPersonWork(hooks.personWork)
     this.host.children.onOpenTasks(hooks.openTasks ? (id, side) => hooks.openTasks?.(id, side) ?? [] : undefined)
     this.host.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
-    this.host.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
+    this.host.children.onAnswered(hooks.answered ? (callerId, childId, how, taskId) => hooks.answered?.(callerId, childId, how, taskId) ?? true : undefined)
     this.host.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
 

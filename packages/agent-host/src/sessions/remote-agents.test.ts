@@ -121,7 +121,10 @@ let more: Record<string, unknown>
 
 function agents(): RemoteAgents {
   const children = new ChildOwnership(store)
-  children.onAnswered((callerId, childId) => void tasks.answered.push(`${callerId}>${childId}`))
+  children.onAnswered((callerId, childId) => {
+    tasks.answered.push(`${callerId}>${childId}`)
+    return true
+  })
   const host = {
     children,
     store,

@@ -415,11 +415,11 @@ export function centraluToolsFor(
         if (opts.name) host.rename(info.id, opts.name)
         if (opts.firstMessage) {
           // Written before the words go in, so a card the turn raises at once finds this seat's work open (docs/plans/mailbox.md §10.6.4)
-          const withdraw = reportBack ? host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage) : undefined
+          const given = reportBack ? host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage) : undefined
           try {
             await host.send(info.id, opts.firstMessage, undefined, sender)
           } catch (e) {
-            withdraw?.()
+            given?.withdraw()
             throw e
           }
         }
@@ -684,7 +684,7 @@ export function centraluToolsFor(
 
       // Only comes back when asked for, silent by default: a task is the request, and its reply or last response comes back (mailbox.md §10.6.3).
       // Written before the words go in, so a card the turn raises at once finds this seat's work open (§10.6.4)
-      const withdraw = reportBack ? host.children.delegated(assistantId, sessionId, 'send_to_session', text) : undefined
+      const given = reportBack ? host.children.delegated(assistantId, sessionId, 'send_to_session', text) : undefined
       try {
         // Tagged with its source and kept in the store/UI. The adapter's reporting gate only ever fires for
         // a lower-privilege reportBack.
@@ -694,7 +694,7 @@ export function centraluToolsFor(
           name: orch?.name ?? 'Assistant',
         })
       } catch (e) {
-        withdraw?.()
+        given?.withdraw()
         return { ok: false, error: (e as Error).message }
       }
       return { ok: true }
