@@ -690,7 +690,7 @@ describe('a hub linked to another host (#82)', () => {
       mirror: storeMirror(store),
       ...nothingOwed(),
       registry: storeRegistry(store),
-      tunnelFor: () => new DirectTunnel(lineFor(1)),
+      tunnelFor: () => new DirectTunnel(() => lineFor(1)),
       hubSelf: () => ({ id: 'hub-0000000a', name: 'Desk' }),
     })
     cleanups.push(() => links.stop())

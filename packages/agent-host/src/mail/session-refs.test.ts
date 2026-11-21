@@ -8,10 +8,10 @@ const HOST = 'hub-0000000a'
 const here = (id: string, name: string): HereSession => ({ id, name, project: null, state: 'idle' })
 const entry = (address: string, name: string): FoundEntry => ({ address, name, project: null, machine: 'Remote box', role: 'session', state: 'idle', busy: false, at: 1 })
 
-function refs(o: { sessions?: HereSession[]; machines?: string[]; hubs?: { id: string; label: string; name: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
+function refs(o: { sessions?: HereSession[]; machines?: string[]; hubs?: { id: string; label: string; name: string; you?: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
   const computers: RefComputers = {
     machine: (id) => (o.machines ?? []).includes(id),
-    hubs: () => o.hubs ?? [],
+    hubs: () => (o.hubs ?? []).map((h) => ({ you: null, ...h })),
     mirrored: (name) => (o.mirror ?? []).filter((e) => e.name === name),
   }
   return new SessionRefs({ hostId: HOST, sessions: () => o.sessions ?? [here('a', 'alpha'), here('b', 'beta')], assistantId: () => o.assistant ?? null, computers: () => computers })
@@ -42,6 +42,7 @@ describe('what a tool reads a session argument as', () => {
     const r = refs()
     expect(refusal(() => r.ref('a', 'session:b'))).toBe('"session:b" is not a session\'s address. For that session, write "b". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".')
     expect(refusal(() => r.ref('a', 'Session:nobody'))).toMatch(/^"Session:nobody" is not a session's address\. Name a session by/)
+    expect(refusal(() => r.ref('a', 'session:/b'))).toMatch(/^"session:\/b" is not a session's address\. For that session, write "b"\./)
     expect(refusal(() => r.ref('a', 'app:x'))).toMatch(/is not a session's address/)
   })
 
@@ -59,6 +60,8 @@ describe('what a tool reads a session argument as', () => {
     expect(r.ref('a', 'studio.h1')).toEqual({ address: 'session:hub-0000000b/h1' })
     expect(r.ref('a', 'hub-0000000b.h1')).toEqual({ address: 'session:hub-0000000b/h1' })
     expect(r.ref('a', 'm2.w1')).toEqual({ address: 'session:hub-0000000b/m2.w1' })
+    // This machine's own session as the hub names it
+    expect(refs({ hubs: [{ ...hub, you: 'm1' }] }).ref('a', 'm1.b')).toEqual({ word: 'b', here: [here('b', 'beta')] })
     // Several hubs: another machine's id is no hub's to guess
     expect(refs({ hubs: [hub, { id: 'hub-0000000c', label: 'desk', name: 'Desk' }] }).ref('a', 'm2.w1')).toEqual({ address: `session:${HOST}/m2.w1` })
   })
@@ -78,6 +81,13 @@ describe('the id read_session and agent_session take', () => {
     )
   })
 
+  it("refuses a name a session here and one of this hub's machines both have, as mail does", () => {
+    const r = refs({ machines: ['m1'], mirror: [entry(`session:${HOST}/m1.w1`, 'beta')] })
+    expect(r.sessionId({ id: 'a', askedBy: null }, 'beta')).toEqual({ ok: false, error: `2 sessions are named "beta": b (idle), session:${HOST}/m1.w1 (Remote box, idle). Give the id of one.` })
+    // An id is the one session, whatever a machine's session is named
+    expect(r.sessionId({ id: 'a', askedBy: null }, 'b')).toEqual({ ok: true, id: 'b' })
+  })
+
   it('passes a word that names no session on as it is, for the tool to judge (an archived id, a start request)', () => {
     expect(refs().sessionId({ id: 'a', askedBy: null }, 'ag-1234')).toEqual({ ok: true, id: 'ag-1234' })
   })
@@ -87,7 +97,7 @@ describe('the id read_session and agent_session take', () => {
     const caller = { id: 'a', askedBy: null }
     expect(['assistant', 'parent', 'person', 'twin', 'studio.h1', 'session:b'].map((t) => r.sessionId(caller, t))).toEqual([
       { ok: false, error: 'There is no Assistant yet.' },
-      { ok: false, error: 'This session was not started by another session.' },
+      { ok: false, error: 'No session on this computer started this one.' },
       { ok: false, error: 'The person is not a session.' },
       { ok: false, error: '2 sessions are named "twin": b (idle), c (idle). Give the id of one.' },
       { ok: false, error: '"session:hub-0000000b/h1" is a session on Studio, which this tool does not reach from this computer. Mail reaches a session on another computer.' },

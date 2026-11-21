@@ -12,7 +12,8 @@ export type SessionRef = { role: RoleWord } | { address: string } | { word: stri
 /** The computers a `<computer>.<id>` can name, read at each call: a hub's machines, or the hubs that link a machine */
 export type RefComputers = {
   machine(id: string): boolean
-  hubs(): readonly { id: string; label: string; name: string }[]
+  /** `you`: this machine's id there, under which that hub names this machine's sessions */
+  hubs(): readonly { id: string; label: string; name: string; you: string | null }[]
   /** The sessions of this hub's machines named `name` exactly, from its mirror: no computer is asked */
   mirrored(name: string): FoundEntry[]
 }
@@ -21,14 +22,14 @@ export type SessionRefsDeps = {
   hostId: string
   sessions(): HereSession[]
   assistantId(): string | null
-  computers?(): RefComputers
+  computers(): RefComputers
 }
 
 const FORMS = 'Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".'
 
 const NO_ROLE: Record<RoleWord, string> = {
   assistant: 'There is no Assistant yet.',
-  parent: 'This session was not started by another session.',
+  parent: 'No session on this computer started this one.',
   person: 'The person is not a session.',
 }
 
@@ -51,12 +52,12 @@ export class SessionRefs {
     if (p?.kind === 'session' && p.host === this.d.hostId && !p.sessionId.includes('.')) return this.word(callerId, p.sessionId)
     if (p) return { address: t }
     if (/^(session|app):/i.test(t)) {
-      const rest = t.slice(t.indexOf(':') + 1)
+      const rest = t.slice(Math.max(t.indexOf(':'), t.lastIndexOf('/')) + 1)
       const meant = this.word(callerId, rest).here.length === 1 ? ` For that session, write ${JSON.stringify(rest)}.` : ''
       throw refuse('bad_address', `${JSON.stringify(oneLineText(t, 80))} is not a session's address.${meant} ${FORMS}`)
     }
     const word = this.word(callerId, t)
-    return word.here.length > 0 ? word : (this.qualified(t) ?? word)
+    return word.here.length > 0 ? word : (this.qualified(callerId, t) ?? word)
   }
 
   /**
@@ -72,9 +73,12 @@ export class SessionRefs {
         return id ? { ok: true, id } : { ok: false, error: NO_ROLE[ref.role] }
       }
       if ('address' in ref) return this.idOf(ref.address)
-      const found: { id?: string; address?: string; line: string }[] = ref.here.length
-        ? ref.here.map((s) => ({ id: s.id, line: `${s.id} (${s.state})` }))
-        : (this.d.computers?.().mirrored(ref.word) ?? []).map((e) => ({ address: e.address, line: `${e.address} (${e.machine ?? 'another computer'}, ${e.state})` }))
+      // An id here is the one session; a name is looked for on this hub's machines too, as mail looks for it on every computer
+      const exact = ref.here.length === 1 && ref.here[0]?.id === ref.word
+      const found: { id?: string; address?: string; line: string }[] = [
+        ...ref.here.map((s) => ({ id: s.id, line: `${s.id} (${s.state})` })),
+        ...(exact ? [] : this.d.computers().mirrored(ref.word)).map((e) => ({ address: e.address, line: `${e.address} (${e.machine ?? 'another computer'}, ${e.state})` })),
+      ]
       const [only] = found
       if (!only) return { ok: true, id: ref.word }
       if (found.length > 1) return { ok: false, error: `${found.length} sessions are named ${JSON.stringify(ref.word)}: ${found.slice(0, 8).map((f) => f.line).join(', ')}. Give the id of one.` }
@@ -88,7 +92,7 @@ export class SessionRefs {
   private idOf(address: string): { ok: true; id: string } | { ok: false; error: string } {
     const p = parseAddress(address)
     if (p?.kind === 'session' && p.host === this.d.hostId) return { ok: true, id: p.sessionId }
-    const hub = p?.kind === 'session' ? this.d.computers?.().hubs().find((h) => h.id === p.host) : undefined
+    const hub = p?.kind === 'session' ? this.d.computers().hubs().find((h) => h.id === p.host) : undefined
     return { ok: false, error: `${JSON.stringify(oneLineText(address, 120))} is ${hub ? `a session on ${hub.name}` : 'not a session'}, which this tool does not reach from this computer. Mail reaches a session on another computer.` }
   }
 
@@ -100,18 +104,19 @@ export class SessionRefs {
   }
 
   /**
-   * `<computer>.<id>` as the address it names: a machine this hub links, a hub that links this machine by its label (or its id,
-   * which older builds printed), another machine of the one hub there is, as that hub names it, or else a machine of this
-   * host's, linked or not: mail across says which. null for a text of another shape
+   * `<computer>.<id>` as what it names: a machine this hub links, this machine's own session as a hub names it, a hub that links
+   * this machine by its label (or its id, which older builds printed), another machine of the one hub there is, as that hub names
+   * it, or else a machine of this host's, linked or not: mail across says which. null for a text of another shape
    */
-  private qualified(t: string): { address: string } | null {
+  private qualified(callerId: string, t: string): SessionRef | null {
     const dot = t.indexOf('.')
     const computer = t.slice(0, dot)
     const id = t.slice(dot + 1)
-    const c = this.d.computers?.()
-    if (dot <= 0 || !c || !MACHINE_ID_RE.test(computer) || !isSessionId(id)) return null
+    const c = this.d.computers()
+    if (dot <= 0 || !MACHINE_ID_RE.test(computer) || !isSessionId(id)) return null
     if (c.machine(computer)) return { address: sessionAddress(this.d.hostId, t) }
     const hubs = c.hubs()
+    if (hubs.some((h) => h.you === computer)) return this.word(callerId, id)
     const named = hubs.filter((h) => h.label === computer || h.id === computer)
     if (named.length > 1) throw refuse('ambiguous', `${named.length} computers that link this one go by ${computer}: ${named.map((h) => JSON.stringify(h.name)).join(' and ')}. Write to the session by its name.`)
     const [hub] = named

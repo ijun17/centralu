@@ -100,7 +100,7 @@ export class MailTool {
   constructor(
     private readonly service: MessageService,
     private readonly records: MailboxRecords,
-    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel' | 'elsewhere'>,
+    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel'>,
     private readonly host: MailToolHost,
   ) {
     this.now = host.now ?? Date.now
@@ -314,9 +314,9 @@ export class MailTool {
   }
 
   /**
-   * A party the call names: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an absolute address, or a
-   * session of this host by its id or its exact name (any case; `session:<this host>/<name>` too, which is what an agent gets back when it writes a name).
-   * Several sessions of one name are refused with their addresses: a guess could send the words to the wrong one
+   * A party the call names, as `SessionRefs` reads it: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an
+   * address, or a session of this host by its id or exact name (any case). Several sessions of one name are refused with their addresses: a guess
+   * could send the words to the wrong one
    */
   private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const ref = this.host.refs.ref(sessionId, to)
@@ -341,12 +341,8 @@ export class MailTool {
     if ('address' in ref) return ref
     const { word, here: named } = ref
     if (word === sessionId) throw refuse('bad_value', 'a message is for someone else')
-    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
-    // A child this host started on a linked machine (#2067): the service refuses it in its own words (elsewhere), not as a session it never had
-    // (a name with spaces is no session id, and makes no address)
-    if (!only && parseAddress(own + word) && this.reach.elsewhere(own + word)) return { address: own + word }
     if (only) {
       const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`}, ${s.state})`)
       throw refuse('ambiguous', `${named.length} sessions are named ${JSON.stringify(word)}: ${shown.join(', ')}${named.length > shown.length ? ', and more' : ''}. Send to one of them by its address.`)
