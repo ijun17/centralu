@@ -161,7 +161,7 @@ test("the conversation's scrollbar is drawn over its content, and the native one
 /**
  * The conversation column (design-system §7, #2408): past `--container-conversation` the rows and the composer stop at
  * that width, centred in the pane, while the scroller keeps the pane's width; a code block wider still scrolls inside
- * its bubble. A pane narrower than the column keeps 16px a side, as before.
+ * its bubble. A pane narrower than the column keeps 16px a side.
  */
 test('past its width the conversation column stops and is centred, the composer on it; narrower, 16px a side (#2408)', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 900 })
@@ -197,6 +197,20 @@ test('past its width the conversation column stops and is centred, the composer 
   }
   expect(wide.pre.right).toBeLessThanOrEqual(wide.bubble.right)
   expect(wide.pre.scrolls).toBe(true)
+
+  // A note under the rows (here why the turn stopped) keeps its words on the column, its line the pane's width
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await emitEvent(page, 0, { type: 'error', error: { code: 'internal', message: 'boom', retryable: true } })
+  const note = page.getByTestId('stop-note')
+  await expect(note).toBeVisible()
+  const words = await note.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const s = getComputedStyle(el)
+    return { box: r.right - r.left, left: r.left + parseFloat(s.paddingLeft), right: r.right - parseFloat(s.paddingRight) }
+  })
+  expect(words.box).toBeCloseTo(wide.pane.right - wide.pane.left, 0)
+  expect(words.left).toBeCloseTo(wide.bubble.left, 0)
+  expect(words.right).toBeCloseTo(wide.bubble.right, 0)
 
   await page.setViewportSize({ width: 700, height: 900 })
   await expect.poll(async () => {
