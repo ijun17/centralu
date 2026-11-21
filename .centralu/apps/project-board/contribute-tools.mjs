@@ -272,9 +272,8 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
         ),
       )
     }
-    const ran = [...(exempt.lint ? [] : ['lint on the changed files']), ...(exempt.tsc ? [] : [`tsc at ${res.heads.length} head(s)`]), ...(exempt.orphans ? [] : ['no orphans']), ...(exempt.deps ? [] : ['no dependency errors']), ...(exempt['repo-guards'] ? [] : ['the repository-wide guards']), ...(exempt.revert ? [] : ['no new test passes without the change'])]
     note = [
-      `\`pnpm pre-pr\` passed at ${String(res.head ?? '').slice(0, 10)}${ran.length ? `: ${ran.join(', ')}` : ''}.`,
+      `\`pnpm pre-pr\` passed at ${String(res.head ?? '').slice(0, 10)}${res.passed.length ? `: ${res.passed.join(', ')}` : ''}.`,
       ...res.exempted.map((x) => `Not run, the ${x.check} check: ${x.reason}`),
       ...res.warnings.map((w) => `Warning (${w.check}): ${w.message}`),
       // The risk tier by the paths changed (#1259): a line in Verified, and the label the merge queue reads

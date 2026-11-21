@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { SLOW } from './test-timing.js'
 import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, nameStatus, isGuardTest, isTestFile, filesRunMs, isVitestFile, nodeBin, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, vitestTests } from '../scripts/pre-pr.mjs'
+import { GUARD_INPUTS, failuresOf, guardFiles, guardWarnings, nameStatus, isGuardTest, isTestFile, filesRunMs, isVitestFile, nodeBin, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, vitestTests } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
 
@@ -104,6 +104,11 @@ describe('what pre-pr reads', () => {
     ['tooling/fake-gh.test-helpers.ts', true, false],
     ['e2e/grid.spec.ts', true, false],
     ['e2e/ux/klm.test.ts', true, false],
+    ['e2e/ux/core.task.ts', true, false],
+    ['e2e/fixtures/usage-donut-gap.ts', true, false],
+    // The harness is code vitest tests: reverted like any other
+    ['e2e/flaky-report.ts', false, false],
+    ['e2e/playwright.config.ts', false, false],
     ['tooling/fixtures/a.json', true, false],
     ['packages/ui/src/x.tsx', false, false],
     ['scripts/pre-pr.mjs', false, false],
@@ -334,6 +339,8 @@ describe('pre-pr on a stack of two pull requests', () => {
     // Nothing found: every step runs, and each says its time
     const ok = run({ log: (m: string) => logged.push(m), exempt: { revert: 'x' } })
     expect(ok.ok).toBe(true)
+    // What held, in the words the pull request's Verified gives it; the exempted check is not among them
+    expect(ok.passed).toEqual(['lint on the changed files', 'tsc at 2 head(s)', 'no orphans', 'no dependency errors', 'the repository-wide guards'])
     expect(logged.filter((m) => /^[\w-]+: \d+ s$/.test(m)).map((m) => m.split(':')[0])).toEqual(['lint', 'lint', 'tsc', 'dependency-cruiser', 'repo-guards', 'store-step', 'guards'])
   })
 
@@ -359,13 +366,14 @@ describe('pre-pr on a stack of two pull requests', () => {
     const calls: { files: string[]; o?: { testNamePattern?: string; env?: Record<string, string> } }[] = []
     // passing; the allowlist's tests skipped on this system; or doc-refs failing and the allowlist's tests renamed
     let state: 'passing' | 'skipped here' | 'failing' = 'passing'
+    let failure = 'Error: a section that does not exist'
     const vitest = (dir: string, files: string[], o?: { testNamePattern?: string; env?: Record<string, string>; namesOnly?: boolean }) => {
       if (!files[0]?.startsWith('tooling/')) return fake.runners.vitest(dir, files, o)
       calls.push({ files, o })
       const docs = files[0] === 'tooling/doc-refs.test.ts'
       const status = state === 'failing' && docs ? 'failed' : state !== 'passing' && !docs ? 'skipped' : 'passed'
       const ancestorTitles = docs ? ['refs'] : [state === 'failing' ? 'the list of files' : 'the allowlist']
-      return { timedOut: false, report: { testResults: [{ name: join(dir, files[0]), status, assertionResults: [{ ancestorTitles, title: 'holds', status, failureMessages: ['Error: a section that does not exist'] }] }] } }
+      return { timedOut: false, report: { testResults: [{ name: join(dir, files[0]), status, assertionResults: [{ ancestorTitles, title: 'holds', status, failureMessages: [failure] }] }] } }
     }
     const guarded = (over: Record<string, unknown> = {}) => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest }, exempt: { revert: 'x' }, ...over })
     // A branch older than a guard has no file of it to run
@@ -390,6 +398,33 @@ describe('pre-pr on a stack of two pull requests', () => {
       ['repo-guards', 'tooling/os-layer.test.ts has no test named like "the allowlist": REPO_GUARDS in scripts/pre-pr.mjs names a guard that is not there.'],
     ])
     expect(guarded({ exempt: { revert: 'x', 'repo-guards': 'a doc reference the next PR adds' } }).ok).toBe(true)
+    // An assertion's message is kept to the stack: what was expected and what was there name what failed
+    failure = 'AssertionError: expected [ Array(1) ] to deeply equal []\n\n- Expected\n+ Received\n\n- []\n+ [\n+   "notes.md: a heading that is not there"\n+ ]\n    at Object.<anonymous> (tooling/doc-refs.test.ts:9:3)'
+    const [docs] = guarded().findings.map((f: { message: string }) => f.message)
+    expect(docs).toContain('tooling/doc-refs.test.ts > refs > holds fails: \nAssertionError: expected [ Array(1) ] to deeply equal []\n- Expected\n')
+    expect(docs).toContain('+   "notes.md: a heading that is not there"\n+ ]')
+    expect(docs).not.toContain('at Object')
+  })
+
+  it('says so when the branch removes a repository-wide guard that main has', () => {
+    const fake = fakeRunners()
+    const vitest = (dir: string, files: string[], o?: { namesOnly?: boolean }) =>
+      files[0]?.startsWith('tooling/')
+        ? { timedOut: false, report: { testResults: [{ name: join(dir, files[0]), status: 'passed', assertionResults: [{ ancestorTitles: ['the allowlist'], title: 'holds', status: 'passed', failureMessages: [] }] }] } }
+        : fake.runners.vitest(dir, files, o)
+    const guarded = () => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest }, exempt: { revert: 'x' } })
+    git(repo, 'checkout', '-q', 'main')
+    write('tooling/doc-refs.test.ts', 'x\n')
+    write('tooling/os-layer.test.ts', 'x\n')
+    commit('main: the guards')
+    git(repo, 'checkout', '-q', 'top')
+    git(repo, 'merge', '-q', '--no-edit', 'main')
+    expect(guarded().ok).toBe(true)
+    git(repo, 'rm', '-q', 'tooling/os-layer.test.ts')
+    commit('top: no os guard')
+    expect(guarded().findings.map((f: { check: string; message: string }) => [f.check, f.message])).toEqual([
+      ['repo-guards', 'tooling/os-layer.test.ts is not at this head, though it was where the branch left main: REPO_GUARDS in scripts/pre-pr.mjs names it. Keep it, or change REPO_GUARDS with it.'],
+    ])
   })
 
   it('counts a test that the base had skipped as already there, so un-skipping one is no news', () => {
@@ -450,6 +485,18 @@ describe('pre-pr on a stack of two pull requests', () => {
     }
     prePr({ cwd: repo, head: 'deps', main: 'main', fetch: false, runners, limitMs: 300_000, now: () => clock.now })
     expect(limits[0]).toBe(1000)
+  })
+
+  it('does not judge the tests a run ended early left unrun, when no new test passed in it', () => {
+    const fake = fakeRunners()
+    // The stop reporter ended the run, yet no test it ran is a new pass to pre-pr: the two named the tests differently
+    const vitest = (dir: string, files: string[], o?: { known?: { file: string; name: string }[]; namesOnly?: boolean }) => {
+      const r = fake.runners.vitest(dir, files, o)
+      if (o?.known) for (const f of r.report?.testResults ?? []) for (const t of f.assertionResults) if (t.status === 'passed') t.status = 'pending'
+      return r
+    }
+    const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest } })
+    expect(r.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: the run was ended early, yet no new test passed in it/)])
   })
 
   it('does not judge a test when a vitest pass gave no report or a tool was stopped, and says so', () => {
@@ -624,6 +671,14 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(() => run({ exempt: { revert: '  ' } })).toThrow('An exemption from revert needs its reason.')
     expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are lint, tsc, orphans, deps, repo-guards, store-step, revert, guards.')
+  })
+
+  it('says an interrupt that stopped a tool, not the failure the tool then gave', () => {
+    let interrupted = false
+    const fake = fakeRunners()
+    const lint = () => ((interrupted = true), { ok: false, out: 'terminated' })
+    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, lint }, stopped: () => interrupted })).toThrow('interrupted')
+    expect(fake.calls.tsc).toEqual([])
   })
 
   it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {
@@ -870,7 +925,7 @@ describe('pre-pr and the guards a branch adds', () => {
   const notes = (first: string, last: string) => `${[first, ...Array.from({ length: 8 }, (_, i) => `line ${i + 2}`), last].join('\n')}\n`
   /**
    * A pull request: a branch off main, served as refs/pull/N/head, listed with its files. It changes src/notes.txt, as the branch
-   * does, unless `apart`: the guards run only against a pull request that changes a file the branch changes
+   * does, unless `apart`
    */
   const openPr = (number: number, files: Record<string, string>, over: Record<string, unknown> = {}, apart = false) => {
     git(repo, 'checkout', '-q', '-b', `pr${number}`, 'main')
@@ -1012,8 +1067,8 @@ describe('pre-pr and the guards a branch adds', () => {
       ],
     }
     expect(failuresOf(report, root)).toEqual([
-      { file: 'tooling/a.test.ts', name: 'g > one', line: 'Error: boom' },
-      { file: 'tooling/b.test.ts', name: '', line: 'Cannot find module ./x' },
+      { file: 'tooling/a.test.ts', name: 'g > one', line: 'Error: boom', detail: ['Error: boom'] },
+      { file: 'tooling/b.test.ts', name: '', line: 'Cannot find module ./x', detail: ['Cannot find module ./x'] },
     ])
     expect(guardWarnings({ failing: [], skipped: [], unchecked: [] }, ['a.test.ts'])).toEqual([])
   })
@@ -1028,25 +1083,47 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(guardsOf(r)).toEqual(['#21 "pull request 21" (pr21) would fail tooling/guard.test.ts > no banned in src with this branch merged in: AssertionError: src/bad.txt holds "banned". Fix it in this change, or tell its author.'])
     // The guard ran against 21 and 22 only: not the draft, not this branch's own
     expect(vitestCalls).toEqual([['tooling/guard.test.ts'], ['tooling/guard.test.ts']])
-    expect(r.notes).toContain('tooling/guard.test.ts run against 2 open pull request(s) that change a file this branch changes: 1 would fail, 0 skipped, 0 not reached.')
+    expect(r.notes).toContain('tooling/guard.test.ts run against 2 open pull request(s): 1 would fail, 0 skipped, 0 not reached.')
     expect(r.findings).toEqual([])
     expect(r.ok).toBe(true)
   })
 
-  it('runs the guard only against the pull requests that change a file this branch changes', () => {
+  it('runs the guard against a pull request that shares no file with the branch: the one it breaks need not', () => {
     addGuard()
-    const near = openPr(21, { 'src/bad.txt': 'a banned word\n' })
     const apart = openPr(22, { 'src/bad2.txt': 'a banned word\n' }, {}, true)
-    const r = run(runners([near, apart]))
+    const r = run(runners([apart]))
     expect(vitestCalls).toEqual([['tooling/guard.test.ts']])
-    // One whose files the list does not hold all of, and whose diff gh refuses, is run against rather than passed over
-    vitestCalls.length = 0
-    const huge = { ...apart, changedFiles: 3001 }
-    const refused = run(runners([huge], { gh: (args: string[]) => (args[1] === 'list' ? JSON.stringify([huge]) : (() => { throw new Error('diff too large') })()) }))
-    expect(vitestCalls).toEqual([['tooling/guard.test.ts']])
-    expect(guardsOf(refused)).toEqual([expect.stringMatching(/^#22 /)])
-    expect(guardsOf(r)).toEqual([expect.stringMatching(/^#21 "pull request 21" \(pr21\) would fail/)])
-    expect(r.notes).toContain('tooling/guard.test.ts run against 1 open pull request(s) that change a file this branch changes: 1 would fail, 0 skipped, 0 not reached.')
+    expect(guardsOf(r)).toEqual([expect.stringMatching(/^#22 "pull request 22" \(pr22\) would fail/)])
+  })
+
+  it('runs nothing against the open pull requests when the branch changes no guard, and says so', () => {
+    write('src/a.txt', 'mine\n')
+    commit('feat: no guard')
+    const r = run(runners([openPr(21, { 'src/bad.txt': 'a banned word\n' })], { gh: noGh }))
+    expect(vitestCalls).toEqual([])
+    expect(r.notes).toContain('No repository-wide guard test (or a file one reads) is added or changed: not run against the open pull requests.')
+  })
+
+  it('runs a guard test whose allowlist the branch changes, as if the branch changed the test', () => {
+    write('tooling/os-layer.test.ts', GUARD)
+    write('tooling/os-allowlist.txt', 'a\n')
+    commit('feat: the os guard')
+    git(repo, 'checkout', '-q', 'main')
+    git(repo, 'merge', '-q', '--ff-only', 'feat')
+    git(repo, 'checkout', '-q', 'feat')
+    write('tooling/os-allowlist.txt', 'a\nb\n')
+    commit('feat: allow one more')
+    run(runners([openPr(21, { 'src/p21.txt': 'fine\n' })]))
+    expect(vitestCalls).toEqual([['tooling/os-layer.test.ts']])
+  })
+
+  it('maps each allowlist to a guard test that is in this repository', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    for (const [input, guard] of Object.entries<string>(GUARD_INPUTS)) {
+      expect(existsSync(join(root, input)), input).toBe(true)
+      expect(isGuardTest(guard), guard).toBe(true)
+      expect(existsSync(join(root, guard)), guard).toBe(true)
+    }
   })
 
   it('skips a pull request that does not merge cleanly, or needs other dependencies, and says so', () => {
@@ -1075,7 +1152,7 @@ describe('pre-pr and the guards a branch adds', () => {
     const r = run(runners(prs), { guardsLimitMs: 1500 })
     expect(vitestCalls).toHaveLength(2)
     expect(guardsOf(r)).toEqual(['tooling/guard.test.ts was not run against: #26 (time limit reached).'])
-    expect(r.notes).toContain('tooling/guard.test.ts run against 3 open pull request(s) that change a file this branch changes: 0 would fail, 0 skipped, 1 not reached.')
+    expect(r.notes).toContain('tooling/guard.test.ts run against 3 open pull request(s): 0 would fail, 0 skipped, 1 not reached.')
   })
 
   it('tries the merge before the time, so a pull request that does not merge is not blamed on the clock', () => {

@@ -399,12 +399,14 @@ not run; it prints each step's time as it goes. In that order:
   The numbers themselves come from the brief that gave you the work; a session whose brief names
   none and that finds it needs a step stops and asks (this check is only the backstop);
 - `revert`: each new or changed test file, run with every other change of the pull request reverted to its
-  base: a new test that passes there protects nothing, and is reported. The run ends at the first such test.
-  A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
+  base: a new test that passes there protects nothing, and is reported. The run stops at the first such test (one more
+  may finish with it). A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
 - `guards`: a repository-wide guard test your branch adds or changes (any `tooling/*.test.ts`, a test that scans the
-  whole repository from its root, or a file saying `pre-pr: guard`) is run against each other open, non-draft
-  pull request that changes a file your branch changes, its head merged with your branch, and the ones it would
-  fail are listed with the first line of the failure. This never refuses: the list is printed and goes into **Verified**
+  whole repository from its root, or a file saying `pre-pr: guard`), or a file one reads (`GUARD_INPUTS` in
+  scripts/pre-pr.mjs), is run against each other open, non-draft pull request, its head merged with your branch: a
+  guard breaks another pull request through what that one adds, in files yours need not touch. A branch that changes
+  no guard skips this check, with a line saying so. The ones it would fail are listed with the first line of the
+  failure. This never refuses: the list is printed and goes into **Verified**
   (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
   merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked. One
