@@ -199,7 +199,10 @@ test('past its width the conversation column stops and is centred, the composer 
   expect(wide.pre.scrolls).toBe(true)
 
   await page.setViewportSize({ width: 700, height: 900 })
-  await expect.poll(async () => (await measure()).bubble.left - (await measure()).pane.left).toBeCloseTo(16, 0)
+  await expect.poll(async () => {
+    const { bubble, pane } = await measure()
+    return bubble.left - pane.left
+  }).toBeCloseTo(16, 0)
   const narrow = await measure()
   for (const part of [narrow.bubble, narrow.card]) {
     expect(part.left - narrow.pane.left).toBeCloseTo(16, 0)
