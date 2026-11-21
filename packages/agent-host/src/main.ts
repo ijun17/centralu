@@ -75,7 +75,7 @@ import { hubSelfId, linkDepsFor, storeProjectOrder } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
 import { LinkedApps } from './links/linked-apps.js'
-import { appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './links/apps-across.js'
+import { appsBackNotice, appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './links/apps-across.js'
 import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
@@ -692,8 +692,11 @@ const links = new Links(linkDepsFor(store, {
   hubMail: true,
   // This hub's apps used by the agents its sessions started on a machine (#1938, §13.5)
   hubApps: true,
-  // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review); the tasks it says never arrived are settled (#2289)
-  onOfferAnswered: (machineId, lacks) => hostMailbox.across.offerAnswered(machineId, lacks),
+  // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review); the tasks it says never arrived are settled (#2289); a session whose app call it refused while away hears it is back
+  onOfferAnswered: (machineId, lacks) => {
+    hostMailbox.across.offerAnswered(machineId, lacks)
+    linkedApps.back(machineId)
+  },
   openTasks: (machineId) => hostMailbox.across.openTasksTo(machineId),
   // What the person asked for here and a machine did not do (#2330) reaches them as Centralu's notice in the Inbox
   tellPerson: (body, dedupeKey) => void hostMailbox.service.notice(PERSON, { body, facts: {}, dedupeKey }),
@@ -740,7 +743,9 @@ hostMailbox.across.usePeers(
 mgr.useMachineTasks((id) => links.get(id)?.takesTasks)
 mgr.useLinkedHubs(hubs)
 // The hosts whose apps a session here uses (#1938): this hub's machines, and the hub that started a session here
-linkedApps.usePeers(appsPeers({ machines: links, hubs, settings: store.settings }))
+linkedApps.usePeers(appsPeers({ machines: links, hubs, settings: store.settings }), appsBackNotice(hostMailbox.service, hubSelfId(store)))
+// A hub back is one that offers again: one that offers apps offers mail too
+hubs.onMailOffer((hubId) => linkedApps.back(hubId))
 mgr.apps.useLinkedNotices(linkedNotices({ machines: links, hubs }))
 mgr.useHubName(hubName)
 mgr.layout.useLinkedSessions((id) => links.knowsSession(id))

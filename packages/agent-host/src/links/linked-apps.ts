@@ -66,6 +66,11 @@ const START_LIST_MS = TOOL_LIST_WAIT_MS + SLACK_MS
 
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 const LOST_KEPT = 500
+/** How long ago a call refused while its host was away is still told once that host is back: older, its session has moved on */
+export const AWAY_TOLD_MS = 10 * 60_000
+
+/** Gives a session here Centralu's notice under `dedupeKey` */
+export type TellSession = (sessionId: string, body: string, dedupeKey: string) => void
 
 export class LinkedApps {
   /** `<host id>\0<session id>` → what that host last listed for the session; `missed`: why the last ask got no list */
@@ -74,15 +79,19 @@ export class LinkedApps {
   private labels = new Map<string, string>()
   /** Runs whose call lost its link: `run_status` asks the app's host about them. The oldest go past `LOST_KEPT` */
   private lost = new Set<string>()
+  /** By host id: its name, and the apps each session here called there while it was away, with when (`back`) */
+  private refusedAway = new Map<string, { name: string; sessions: Map<string, Map<string, number>> }>()
 
   /** The linked hosts a session here may use apps of (`appsPeers`): none until the links are wired (`usePeers`) */
   private peers: AppsPeers = { machines: () => [], startedBy: () => null }
+  private tell: TellSession = () => {}
 
   constructor(private readonly deps: LinkedAppsDeps = {}) {}
 
-  /** The hosts this one links and is linked by, once they exist: main.ts makes this before them */
-  usePeers(peers: AppsPeers): void {
+  /** The hosts this one links and is linked by, once they exist, and how a session here hears one is back: main.ts makes this before them */
+  usePeers(peers: AppsPeers, tell: TellSession = this.tell): void {
     this.peers = peers
+    this.tell = tell
   }
 
   /** Whether a ref names an app of a linked host: its project is qualified */
@@ -98,6 +107,44 @@ export class LinkedApps {
   /** A session was deleted: what its hosts listed for it goes */
   forget(sessionId: string): void {
     for (const k of this.lists.keys()) if (k.endsWith(`\0${sessionId}`)) this.lists.delete(k)
+    for (const host of this.refusedAway.values()) host.sessions.delete(sessionId)
+  }
+
+  /**
+   * A linked host may be reachable again: each session here whose app call it refused while away, within `AWAY_TOLD_MS`, and
+   * that can call it now, is told once, naming the apps. None is called again by itself: a call may change something, and the
+   * session decides. The caller's signal (an offer answered) also comes when the host is still away, so each session's
+   * record waits until it can call the host.
+   */
+  back(hostId: string): void {
+    const host = this.refusedAway.get(hostId)
+    if (!host) return
+    const now = Date.now()
+    for (const [sessionId, apps] of host.sessions) {
+      if (!this.peersOf(sessionId).some((p) => p.id === hostId && p.reachable && p.answers)) continue
+      host.sessions.delete(sessionId)
+      const names = [...apps].filter(([, at]) => now - at <= AWAY_TOLD_MS).map(([name]) => name)
+      if (names.length === 0) continue
+      const which = names.length === 1 ? `${names[0]} was` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} were`
+      const body = `[Centralu] ${host.name} is reachable again; ${which} not called while it was away. Call ${names.length === 1 ? 'it again if it is' : 'them again if they are'} still needed.`
+      this.tell(sessionId, body, `reachable-again:${hostId}:${sessionId}:${now}`)
+    }
+    if (host.sessions.size === 0) this.refusedAway.delete(hostId)
+  }
+
+  /** A call of a copy withheld for its hub's app (`withheldWhy`) was refused: one while that hub is away is told when it is back */
+  withheldCall(sessionId: string, name: string): void {
+    const hub = this.givingHub(sessionId)
+    if (hub && !hub.reachable) this.calledAway(hub, sessionId, name)
+  }
+
+  /** The session called an app of `host`, refused as that host is away */
+  private calledAway(host: AppsPeer, sessionId: string, name: string): void {
+    const kept = this.refusedAway.get(host.id) ?? { name: host.name, sessions: new Map<string, Map<string, number>>() }
+    this.refusedAway.set(host.id, kept)
+    const apps = kept.sessions.get(sessionId) ?? new Map<string, number>()
+    kept.sessions.set(sessionId, apps)
+    apps.set(name, Date.now())
   }
 
   /**
@@ -234,7 +281,11 @@ export class LinkedApps {
     if (!hit) return failed('', 'That app is not offered to this session from its computer now. Nothing ran.')
     const { peer, app } = hit
     const what = `${app.name} on ${peer.name}`
-    if (!peer.reachable) return failed('', awayRefusal(peer.name, NOT_REACHABLE, `${what} was not called; nothing ran`))
+    if (!peer.reachable) {
+      // A tool not in a list the session has would be refused there anyway; with no list yet, it may be one
+      if (!opts.notListed || !app.tools) this.calledAway(peer, sessionId, opts.name ?? ref.appId)
+      return failed('', awayRefusal(peer.name, NOT_REACHABLE, `${what} was not called; nothing ran`))
+    }
     if (!peer.answers) return failed('', `Update Centralu on ${peer.name} to use its apps from here. Nothing ran.`)
     const call = randomUUID()
     let runId = ''

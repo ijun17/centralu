@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
+import { sessionAddress } from '../mail/address.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { appsPeers, linkedNotices } from './apps-across.js'
+import type { AppsPeer } from './linked-apps.js'
 import { recordStartingHub } from '../sessions/hub-preset.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -26,10 +28,10 @@ const child: RemoteAgent = { sessionId: 'm1.w1', callerId: 'h1', machineId: 'm1'
  * by the hub, `w2`, which the machine records as started by it but the hub has no record of, and `w3`, an ordinary session of
  * the machine's own
  */
-async function world(o: { hubApps?: boolean } = {}) {
-  const machine = await machineHost({ sessions: ['w1', 'w2', 'w3'], apps: true })
+async function world(o: { hubApps?: boolean; mail?: true } = {}) {
+  const machine = await machineHost({ sessions: ['w1', 'w2', 'w3'], apps: true, ...(o.mail ? { mail: o.mail } : {}) })
   machine.apps!.plant(kit, 'p-remote', 'board')
-  const hub = await hubHost(machine.port, { ...(o.hubApps !== false ? { apps: true } : {}), children: [child] })
+  const hub = await hubHost(machine.port, { ...(o.hubApps !== false ? { apps: true } : {}), ...(o.mail ? { mail: o.mail } : {}), children: [child] })
   await hub.mgr.setProjectTrusted('p-hub', true)
   hub.apps?.plant(kit, 'p-hub', 'board')
   await eventually(() => hub.machine().status === 'connected')
@@ -101,6 +103,20 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     expect(boardRuns(hub, 'p-hub')).toHaveLength(1)
   })
 
+  it('tells the agent in its mail, once the hub offers again, that its call while the hub was away did not run', async () => {
+    const { machine, hub, attach } = await world({ mail: true })
+    const live = attach('w1')
+    expect(text(await live.call('app-board', 'peek', {}))).toBe('peeked')
+    await machine.bounce(undefined, async () => {
+      await eventually(() => machine.hubs.appsPeer(hub.id)?.reachable === false)
+      expect(text(await live.call('app-board', 'peek', {}))).toMatch(/Hub mac is not reachable.*nothing ran/)
+    })
+    const mail = () => machine.store.mailbox.pendingFor(sessionAddress(machine.id, 'w1'), Number.MAX_SAFE_INTEGER).map((p) => p.message.body)
+    await eventually(() => mail().some((b) => b.includes('reachable again')))
+    expect(mail().filter((b) => b.includes('reachable again'))).toEqual(['[Centralu] Hub mac is reachable again; board was not called while it was away. Call it again if it is still needed.'])
+    expect(boardRuns(hub, 'p-hub')).toHaveLength(1)
+  })
+
   it("delivers the hub's app's notice to the agent that uses it, and to no other session there", async () => {
     const { machine, hub, attach } = await world()
     await attach('w1').call('app-board', 'peek', {})
@@ -116,13 +132,21 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     if (usedBefore) expect(text(await attach('w1').call('app-board', 'peek', {}))).toBe('peeked')
     // As a restarted host: no list kept, and its hub has not offered since; the session's record names the hub
     machine.apps!.linked.forget('w1')
-    machine.apps!.linked.usePeers({ machines: () => [], startedBy: () => ({ hub: { id: hub.id, name: hub.name }, link: undefined }) })
+    const told: [string, string][] = []
+    const hubLink: { now?: AppsPeer } = {}
+    machine.apps!.linked.usePeers({ machines: () => [], startedBy: () => ({ hub: { id: hub.id, name: hub.name }, link: hubLink.now }) }, (id, body) => void told.push([id, body]))
     const live = attach('w1')
     expect(live.current().map((s) => s.server)).toEqual(['app-board'])
     const r = await live.call('app-board', 'peek', {})
     expect(r.isError).toBe(true)
     expect(text(r)).toMatch(/Hub mac is not reachable.*nothing ran.*copy of board is not used/)
     expect(boardRuns(machine, 'p-remote')).toEqual([])
+    // A signal while the hub is still away tells nothing; once it is back, the session hears that its call did not run
+    machine.apps!.linked.back(hub.id)
+    expect(told).toEqual([])
+    hubLink.now = { id: hub.id, name: hub.name, reachable: true, answers: true, gives: true, call: () => Promise.reject(new Error('unused')) }
+    machine.apps!.linked.back(hub.id)
+    expect(told).toEqual([['w1', '[Centralu] Hub mac is reachable again; board was not called while it was away. Call it again if it is still needed.']])
   })
 
   it("answers that the hub did not answer in time when it is linked but its list does not come, and never runs the copy", async () => {

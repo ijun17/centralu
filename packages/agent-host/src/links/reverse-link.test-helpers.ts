@@ -21,7 +21,7 @@ import { MailPerson, personSessions } from '../mail/person.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
 import { recordStartingHub, startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
-import { appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './apps-across.js'
+import { appsBackNotice, appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './apps-across.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { hostApps } from './apps-across.test-helpers.js'
 
@@ -117,7 +117,8 @@ export async function machineHost(
     const mail: HostMail | null = o.mail ? delivering(wireHostMail(mgr, store, { hostId: id, ...(o.mail === 'delivered' ? { delivery: LIVE } : {}) }), o.mail === 'delivered') : null
     mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
     const apps = o.apps ? hostApps(store, mgr) : null
-    apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }))
+    apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }), mail ? appsBackNotice(mail.service, id) : undefined)
+    if (apps) hubs.onMailOffer((hubId) => apps.linked.back(hubId))
     if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
     const appsAcross =
       apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
@@ -156,9 +157,10 @@ export async function machineHost(
   const holdOffer = (until: Promise<void>) => void (held = until)
   /** Its answers to `method` from now on wait for `until` */
   const holdMethod = (method: string, until: Promise<void>) => void heldMethods.set(method, until)
-  /** Its host goes away and comes back on the same port, as one swapped in place does; `until`: its answers to offers wait for it */
-  const bounce = async (until?: Promise<void>) => {
+  /** Its host goes away and comes back on the same port, as one swapped in place does; `until`: its answers to offers wait for it; `away`: runs before it is back */
+  const bounce = async (until?: Promise<void>, away?: () => Promise<void>) => {
     await server.close()
+    await away?.()
     held = until
     server = serve(port)
     await server.listen()
@@ -265,7 +267,15 @@ export async function hubHost(
           }),
           ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across ? { onOfferAnswered: (id: string, lacks: readonly string[]) => across.offerAnswered(id, lacks), openTasks: (id: string) => across.openTasksTo(id) } : {}),
+          ...(across || apps
+            ? {
+                onOfferAnswered: (id: string, lacks: readonly string[]) => {
+                  across?.offerAnswered(id, lacks)
+                  apps?.linked.back(id)
+                },
+              }
+            : {}),
+          ...(across ? { openTasks: (id: string) => across.openTasksTo(id) } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
@@ -286,7 +296,7 @@ export async function hubHost(
     ...o.deps,
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links, ...(mail ? { mail: personOf(mgr, mail) } : {}) }), machines: () => links.all() })
-  apps?.linked.usePeers(appsPeers({ machines: links }))
+  apps?.linked.usePeers(appsPeers({ machines: links }), mail ? appsBackNotice(mail.service, hubSelfId(store)) : undefined)
   if (apps) mgr.apps.useLinkedNotices(linkedNotices({ machines: links }))
   // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it
   across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => name, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))

@@ -1,8 +1,10 @@
 import type { LinkedAppNoticeParams } from '@cc/protocol'
 import type { ExternalApps } from '../apps/external/runtime.js'
+import { sessionAddress } from '../mail/address.js'
+import type { MessageService } from '../mail/messages.js'
 import { startingHub } from '../sessions/hub-preset.js'
 import { LinkedAppCalls } from './linked-app-calls.js'
-import type { AppsPeers } from './linked-apps.js'
+import type { AppsPeers, TellSession } from './linked-apps.js'
 import type { LinkedHubs } from './linked-hubs.js'
 import { qualify, splitQualified } from './machine-ids.js'
 
@@ -80,4 +82,9 @@ export function linkedNotices(o: { machines?: Machines; hubs?: Pick<LinkedHubs, 
     if (hub) return hub.call('appNotice', params, 30_000).then(() => undefined)
     return null
   }
+}
+
+/** How a session here hears that a linked host which refused its app call is back (`LinkedApps.back`): Centralu's notice in its mail */
+export function appsBackNotice(service: Pick<MessageService, 'notice'>, hostId: string): TellSession {
+  return (sessionId, body, dedupeKey) => void service.notice(sessionAddress(hostId, sessionId), { body, facts: {}, dedupeKey })
 }

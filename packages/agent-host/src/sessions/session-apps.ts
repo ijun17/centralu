@@ -568,7 +568,10 @@ class Attachment implements SessionAppAttachment {
       hit = this.find(server)
     }
     if (!hit) return failure(`This session has no app named ${appNameOf(server)}.`)
-    if (hit.withheld) return failure(hit.withheld)
+    if (hit.withheld) {
+      this.hub.opts.linked?.withheldCall(this.session.id, appNameOf(server))
+      return failure(hit.withheld)
+    }
     const tools = await this.tools(server)
     const spec = tools.find((t) => t.name === tool)
     /*
