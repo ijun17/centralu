@@ -10,6 +10,7 @@ import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { isOrdinary } from './tool-profiles.js'
 import { sessionAddress } from '../mail/address.js'
+import { heldLine } from '../mail/across-core.js'
 import { linkedWords } from './remote-agents.js'
 import { unfinished } from '../mail/delegation.js'
 
@@ -338,7 +339,10 @@ export class AskProjectFlow {
     const frame = askFrame(callerProject, opts.task, { name: asker, sessionId: callerId, mailable: false })
     const sent = await tasks.send(callerId, chosen.id, frame, { origin: 'ask_project', depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) return { ok: false, error: `Could not hand the task to ${label}: ${sent.text}` }
-    return this.awaitAsk(callerId, of({ taskId: sent.messageId, sessionId: chosen.id }, chosen.name), reader, signal)
+    const ask = of({ taskId: sent.messageId, sessionId: chosen.id }, chosen.name)
+    // Held for its link (#2354): nothing went, so there is nothing to wait for yet
+    if (sent.held) return { ok: true, state: 'working', project: ask.project, sessionId: ask.sessionId, sessionName: ask.sessionName, notice: heldLine(sent.computer) }
+    return this.awaitAsk(callerId, ask, reader, signal)
   }
 
   /**

@@ -754,7 +754,7 @@ export class MailboxRecords {
     )
   }
 
-  /** The sender was told of these released rows */
+  /** The sender was told what became of these rows: released (D25), or held for their link too long to go by itself (`MailAcross.retryOwed`) */
   markTold(rows: readonly RowKey[], at: number): void {
     const told = this.db.prepare(`UPDATE mail_recipients SET told_at = ? WHERE message_id = ? AND recipient = ? AND told_at IS NULL`)
     this.transaction(() => {

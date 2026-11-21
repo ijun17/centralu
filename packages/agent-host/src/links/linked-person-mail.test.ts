@@ -204,7 +204,7 @@ describe('the person marks done a thread with a machine that is not connected (#
 
 describe('which hub a machine session’s mail to the person goes to (`MailAcross.personTarget`)', () => {
   const across = (peers: { hubs: string[]; started?: { id: string; name: string }; linked?: string[] }) => {
-    const a = new MailAcross({ hostId: 'hub-m', service: {} as never, records: { acrossRows: () => [], dueRecipients: () => [] } as never, reach: {} as never, ownEntries: () => [] })
+    const a = new MailAcross({ hostId: 'hub-m', service: { goesAcross: () => {} } as never, records: { acrossRows: () => [], dueRecipients: () => [] } as never, reach: {} as never, ownEntries: () => [] })
     const peer = (id: string) => ({ id, name: `Hub ${id}`, reachable: true, you: 'm1', call: async () => undefined })
     a.usePeers({ selfName: () => 'Remote box', hubs: () => peers.hubs.map(peer), hub: (id) => ((peers.linked ?? peers.hubs).includes(id) ? peer(id) : undefined), startingHub: () => peers.started ?? null })
     return a
@@ -353,7 +353,7 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     const s = settings(JSON.stringify([{ id: 'hub-a', name: 'Desk', you: 'm1', at: Date.now() }]))
     const h = hubs(s)
     h.offer(2, { hub: { id: 'hub-b', name: 'Laptop' }, on: false, mail: true, you: 'm1' })
-    const a = new MailAcross({ hostId: 'hub-m', service: {} as never, records: { acrossRows: () => [], dueRecipients: () => [] } as never, reach: {} as never, ownEntries: () => [] })
+    const a = new MailAcross({ hostId: 'hub-m', service: { goesAcross: () => {} } as never, records: { acrossRows: () => [], dueRecipients: () => [] } as never, reach: {} as never, ownEntries: () => [] })
     a.usePeers({ selfName: () => 'Remote box', hubs: () => h.mailHubs(), hub: (id) => h.peer(id), startingHub: () => null })
     expect(h.mailHubs().map((x) => [x.id, x.reachable])).toEqual([['hub-a', false], ['hub-b', true]])
     expect(a.personTarget('s', false)).toEqual({ several: true })

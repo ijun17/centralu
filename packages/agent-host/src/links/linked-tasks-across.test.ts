@@ -9,7 +9,8 @@ import { MAILBOX_RETENTION } from '../dev-services/store/mailbox.js'
 import { LINK_HOLD_MS, type AcrossPeers } from '../mail/across-core.js'
 import { HOST, W, addr, world } from '../mail/messages.test-helpers.js'
 import { mailReach } from '../mail/reach.js'
-import { openTaskParties } from '../mail/delegation.js'
+import { linkedTasksOf, openTaskParties } from '../mail/delegation.js'
+import { bodyLimit } from '../mail/rules.js'
 import { reportWords } from '../mail/last-response.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
@@ -471,8 +472,63 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(answers).toHaveLength(1))
     expect(sent[0]).not.toHaveProperty('task')
     answers[0]!({ ok: false, why: 'gone', text: 'w1 is gone from Remote box.' })
-    await vi.waitFor(() => expect(noticesTo(w)).toEqual([expect.stringContaining('was not sent when the link came back: w1 is gone from Remote box.')]))
+    await vi.waitFor(() => expect(noticesTo(w)).toEqual([expect.stringContaining('held while the link was down, was not sent: w1 is gone from Remote box.')]))
     expect(w.records.message(held.ok ? held.messageId : '')).toBeUndefined()
+  })
+  it('held mail goes one after another once the link is back, and is not dropped while it is going (#2354)', async () => {
+    const { w, across, answers, sent, machine, child } = hubWorld({ tasks: true, clock: true })
+    machine.reachable = false
+    const ids: string[] = []
+    for (const text of ['first', 'second']) {
+      const r = await across.send('orc', { to: child, text, needsReply: false })
+      ids.push(r.ok ? r.messageId : '')
+    }
+    machine.reachable = true
+    across.changed()
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    // It may be written there already: dropping it now would lose the copy its answer and rows come back to
+    expect(() => w.mail.done(addr('orc'), ids[0]!)).toThrow(/is being sent now/)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(sent.map((s) => s.id)).toEqual([ids[0]])
+    answers[0]!({ ok: true, messageId: ids[0], to: 'w1' })
+    await vi.waitFor(() => expect(answers).toHaveLength(2))
+    expect(sent.map((s) => s.id)).toEqual(ids)
+  })
+
+  it('held for a computer no longer linked is refused once a change is seen: deleted here, its sender told, its task ended (#2354)', async () => {
+    const { w, across, sent, machine, child } = hubWorld({ tasks: true, clock: true })
+    machine.reachable = false
+    const held = await across.sendTask('orc', child, 'review the branch', { origin: 'agent_session' })
+    const id = held.ok ? held.messageId : ''
+    across.usePeers({ selfName: () => 'Hub box', machine: () => undefined })
+    across.changed()
+    await vi.waitFor(() => expect(noticesTo(w)).toEqual([expect.stringContaining(`${id} to `)]))
+    expect(noticesTo(w)[0]).toContain('was not sent: That computer is no longer linked to this one')
+    expect(w.records.recipients(id)).toEqual([])
+    expect(linkedTasksOf(w.mail, w.records, across, () => () => {}).standing(id)).toMatchObject({ state: 'ended' })
+    expect(sent).toEqual([])
+  })
+
+  it('a held reply settles what it answers when it goes, not when it is held (#2354)', async () => {
+    const { w, across, answers, machine, child } = hubWorld({ tasks: true, clock: true })
+    const asked = w.mail.send(W, { to: [addr('orc')], text: 'which branch?', needsReply: true }).message
+    machine.reachable = false
+    const held = await across.send('orc', { to: child, text: 'main', needsReply: false, replyTo: asked.id })
+    expect(held).toMatchObject({ ok: true, held: true })
+    expect(w.records.recipient(asked.id, addr('orc'))?.settled).toBeNull()
+    machine.reachable = true
+    across.changed()
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    answers[0]!({ ok: true, messageId: held.ok ? held.messageId : '', to: 'w1' })
+    await vi.waitFor(() => expect(w.records.recipient(asked.id, addr('orc'))?.settled).toBe('answered'))
+  })
+
+  it('mail from the person is refused while the link is down, not held; a body too long with the line held mail goes with is refused (#2354)', async () => {
+    const { w, across, machine, child } = hubWorld({ tasks: true, clock: true })
+    machine.reachable = false
+    expect(await across.sendFrom(PERSON, { to: child, text: 'yes', needsReply: false })).toMatchObject({ ok: false, why: 'link_down' })
+    expect(await across.send('orc', { to: child, text: 'x'.repeat(bodyLimit('session') - 10), needsReply: false })).toMatchObject({ ok: false, why: 'too_long' })
+    expect(w.records.heldForLink()).toEqual([])
   })
 })
 

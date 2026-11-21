@@ -49,6 +49,8 @@ const REFUSALS = [
   'removed',
   'untrusted_project',
   'answered',
+  // held mail across that is going now (#2354)
+  'busy',
   // a pull request watch where gh is not installed or not signed in (§18.3)
   'unavailable',
 ] as const

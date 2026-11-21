@@ -24,7 +24,7 @@ export type AcrossSent = { ok: true; messageId: string; to: string; address: str
  */
 export const LINK_HOLD_MS = 10 * 60_000
 
-/** What a send held for its link says, in the mail tool's answer and a delegation's alike */
+/** What a send held for its link says, in the mail tool's answer, a delegation's and the inbox alike */
 export const heldLine = (computer: string): string =>
   `${computer} is not reachable right now, so it is held here and goes when the link is back, saying when it was written. Held longer than ${durationText(LINK_HOLD_MS)}, it waits for you to send it or drop it.`
 
@@ -95,7 +95,7 @@ export type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; ses
 export const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 
 /** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
-export type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }; computer: string; at: number; task?: Work }
+export type Unsure = { sender: string; to: string; fields: Kept; computer: string; at: number; task?: Work }
 
 /** Work given across a link (#1948 step 6): the copy kept here is a task (a note) from that tool, whichever side's word comes first */
 export type Work = { origin: DelegationOrigin; note?: true }
@@ -107,6 +107,9 @@ const sameMessage = (a: Unsure['fields'], b: Unsure['fields']): boolean =>
 /** How long, and how many, unsure sends are kept: a copy is kept for one only while it is likely to be heard of */
 const UNSURE_MS = 24 * 60 * 60_000
 const UNSURE_MAX = 500
+
+/** What a send across keeps in its copy here: the fields that cross, and that its sender marked it as a question (#2348, `MailFacts.question`), which only this side reads */
+export type Kept = { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }
 
 /** The other side's answer to one call (`AcrossCore.ask`): written there, or refused; `maybe`: it may have been written there */
 export type Answer = { ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }
@@ -206,7 +209,7 @@ export class AcrossCore {
    * one, kept as unsure until the other side answers. A send again that changes any of them is another message: under the
    * same id the other side would keep the first, and its urgency or question would be lost (#2067 re-check)
    */
-  protected idFor(sender: string, to: string, fields: Unsure['fields'], computer: string, task?: Work): string {
+  protected idFor(sender: string, to: string, fields: Kept, computer: string, task?: Work): string {
     const now = this.now()
     for (const [id, u] of this.unsure) {
       if (now - u.at > UNSURE_MS) this.unsure.delete(id)

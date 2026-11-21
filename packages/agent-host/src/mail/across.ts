@@ -1,12 +1,12 @@
 import { HostMailParams, HubFindResult, HubMailResult, TASK_REPORT_ANSWER_MAX, errorMessage, oneLineText, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
 import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
-import type { DelegationOrigin } from './messages.js'
+import type { TaskAcross } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
 import { answerKept, reportWords } from './last-response.js'
 import { mailCalls } from './frame.js'
-import { LINK_HOLD_MS, older, unreachable, type AcrossMachine, type AcrossPeer, type AcrossSent, type Answer, type Work } from './across-core.js'
+import { LINK_HOLD_MS, older, unreachable, type AcrossMachine, type AcrossPeer, type AcrossSent, type Answer, type Kept, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
 import { MAILBOX_RETENTION, type MailRow, type PendingRow } from '../dev-services/store/mailbox.js'
 
@@ -33,13 +33,11 @@ export function mayReachAcross(_from: string, _to: string): boolean {
 /** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
 type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[]; question?: true }
 /** The fields of a send that cross */
-type Fields = { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }
+type Fields = Omit<Kept, 'question'>
 /** What only the recipient's side reads, on a hub's side: the person's Inbox shows a subject and a question's choices */
 type Extra = { subject?: string; choices?: string[] }
-/** What a send across keeps in its copy here: the fields that cross, and that its sender marked it as a question (#2348, `MailFacts.question`), which only this side reads */
-type Kept = Fields & { question?: true }
 /** A task as it goes to a machine (`HostMailParams.task`), and as its copy here keeps it */
-type GivenTask = { origin: NonNullable<HostMailParams['task']>['origin']; note?: true; forPerson?: true; depth?: number }
+type GivenTask = Omit<TaskAcross, 'origin'> & { origin: NonNullable<HostMailParams['task']>['origin'] }
 /** How a send reaches the other side (`MailAcross.way`) */
 type Way = { peer: AcrossPeer; method: 'host.mail' | 'hub.mail'; params(id: string, text: string): HostMailParams | HubMailParams; older(r: Answer): Answer }
 
@@ -70,6 +68,11 @@ export class MailAcross extends AcrossReceipts {
   /** On a machine: tasks it told a hub never arrived (`lacking`), by hub, so one hub's many cannot push another's out under `LACKED_MAX` */
   private readonly lacked = new Map<string, Set<string>>()
 
+  constructor(...args: ConstructorParameters<typeof AcrossReceipts>) {
+    super(...args)
+    this.d.service.goesAcross((id) => this.sending.has(id))
+  }
+
   // ── Sending from here ──
 
   /**
@@ -86,7 +89,7 @@ export class MailAcross extends AcrossReceipts {
    * that comes back answers it. A machine that does not take tasks is refused `older`, and nothing is written. `forPerson` is
    * said only for this host's Assistant's `send_to_session`; `depth`, the agent depth the session there works at on it
    */
-  async sendTask(senderId: string, to: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent> {
+  async sendTask(senderId: string, to: string, text: string, task: TaskAcross): Promise<AcrossSent> {
     const sender = this.d.service.sessionAddress(senderId)
     // As an agent's other calls on a machine (#1532): one that is down is tried now, and one just connected has answered this hub's offer, which says
     // whether it takes tasks, before it is read
@@ -257,7 +260,8 @@ export class MailAcross extends AcrossReceipts {
     if (input.to === 'parent') return sessionId ? this.toParent(sessionId, sender, kept) : { ok: false, why: 'bad_address', text: 'only a session has a parent.' }
     const way = this.way(sender, input.to, fields, extra)
     if ('why' in way) return { ok: false, ...way }
-    if (!way.peer.reachable) return this.hold(sender, input.to, { ...kept, ...extra }, way.peer)
+    // Mail from the person is refused, not held: held mail waits on its sender's mail tool, and the person writes in the Inbox
+    if (!way.peer.reachable) return isPerson(sender) ? unreachable(way.peer) : this.hold(sender, input.to, { ...kept, ...extra }, way.peer)
     const id = this.idFor(sender, input.to, kept, way.peer.name)
     const r = way.older(this.settle(id, await this.ask(way.peer, way.method, way.params(id, input.text))))
     return this.wrote(sender, input.to, kept, way.peer.name, r)
@@ -306,6 +310,7 @@ export class MailAcross extends AcrossReceipts {
    * other side's rows settle it, so nothing more is held
    */
   private hold(sender: string, to: string, copy: Kept & Extra & { task?: GivenTask }, peer: AcrossPeer): AcrossSent {
+    if (writtenLate(this.now(), this.selfName(), copy.text).length > bodyLimit('session')) return { ok: false, why: 'too_long', text: `${tooLongText('session')}, with the line held mail goes with` }
     const { subject: _s, choices: _c, task, ...fields } = copy
     const id = this.idFor(sender, to, fields, peer.name, task && { origin: task.origin, ...(task.note ? { note: true as const } : {}) })
     if (this.d.records.message(id)) return unreachable(peer)
@@ -321,17 +326,32 @@ export class MailAcross extends AcrossReceipts {
 
   /**
    * Centralu's mail owed to the other side (`AcrossReceipts.retryOwed`), and the sends held for their link, at a connect or any change. A held one whose
-   * side can take it now goes by itself while it is younger than `LINK_HOLD_MS`. An older one waits for its sender, told once (`markTold`) in one notice
-   * for all it holds then (`heldTooLong`): it may be out of date, and only the sender knows
+   * side can take it now goes by itself while it is younger than `LINK_HOLD_MS`, one after another in the order written. An older one waits for its
+   * sender, told once (`markTold`) in one notice for all it holds then (`heldTooLong`): it may be out of date, and only the sender knows. One to a
+   * computer no longer linked can never go: it is refused (`refusedHeld`)
    */
   protected override retryOwed(): void {
     super.retryOwed()
+    const go: PendingRow[] = []
     const late = new Map<string, PendingRow[]>()
     for (const p of this.d.records.heldForLink()) {
-      if (this.sending.has(p.message.id) || !this.ready(p.row.recipient)) continue
-      if (this.now() - p.message.createdAt < LINK_HOLD_MS) void this.resend(p).catch((e: unknown) => this.d.log?.(`[mail] ${p.message.id}, held for its link, could not be sent: ${errorMessage(e)}`))
+      const side = this.sending.has(p.message.id) ? 'down' : this.side(p.row.recipient)
+      if (side === 'down') continue
+      if (side === 'gone' || this.now() - p.message.createdAt < LINK_HOLD_MS) go.push(p)
       else if (p.row.toldAt === null) late.set(p.message.sender, [...(late.get(p.message.sender) ?? []), p])
     }
+    for (const p of go) this.sending.add(p.message.id)
+    void (async () => {
+      for (const p of go) {
+        try {
+          await this.resend(p)
+        } catch (e) {
+          this.d.log?.(`[mail] ${p.message.id}, held for its link, could not be sent: ${errorMessage(e)}`)
+        } finally {
+          this.sending.delete(p.message.id)
+        }
+      }
+    })()
     for (const [sender, rows] of late) {
       this.d.service.notice(sender, heldTooLong(rows.map((p) => ({ id: p.message.id, to: this.foreignName(p.row.recipient)?.name ?? p.row.recipient, body: p.message.body }))))
       this.d.records.markTold(rows.map((p) => p.row), this.now())
@@ -343,61 +363,64 @@ export class MailAcross extends AcrossReceipts {
     const p = this.d.records.heldForLink(sender).find((h) => h.message.id === id)
     if (!p) return { ok: false, why: 'unknown_message', text: `${oneLineText(id, 200)} is no message of yours held for its link.` }
     if (this.sending.has(id)) return { ok: false, why: 'busy', text: `${id} is being sent now.` }
-    if (!this.ready(p.row.recipient)) return { ok: false, why: 'link_down', text: `the computer of ${oneLineText(this.foreignName(p.row.recipient)?.name ?? p.row.recipient, 200)} is still not reachable, so ${id} stays held.` }
-    return this.resend(p)
-  }
-
-  /** Whether held mail to `to` can go now: its side is reachable, and a machine has answered this connection's offer, before which it takes no mail */
-  private ready(to: string): boolean {
-    const r = this.route(to)
-    if (r?.kind === 'hub') return this.peers?.hub?.(r.hubId)?.reachable === true
-    const m = r?.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
-    return m?.reachable === true && m.tasks !== undefined
+    if (this.side(p.row.recipient) === 'down') return { ok: false, why: 'link_down', text: `the computer of ${oneLineText(this.foreignName(p.row.recipient)?.name ?? p.row.recipient, 200)} is still not reachable, so ${id} stays held.` }
+    this.sending.add(id)
+    try {
+      return await this.resend(p)
+    } finally {
+      this.sending.delete(id)
+    }
   }
 
   /**
-   * Mail held for its link goes now, under its own id, its words led by when they were written, so the reader there knows they come late. Taken there, its
-   * row is delivered as a send that went at once is. Refused there, it is deleted here and its sender told why. Its answer lost, it stays held and goes
-   * again under its id, which the other side takes as the message it has
+   * Where held mail to `to` stands: `ready` to go (its side is reachable, and a machine has answered this connection's offer, before which it takes no
+   * mail), `down` for now, or `gone`: its computer is no longer linked to this one
+   */
+  private side(to: string): 'ready' | 'down' | 'gone' {
+    const r = this.route(to)
+    const hub = r?.kind === 'hub' ? this.peers?.hub?.(r.hubId) : undefined
+    const m = r?.kind === 'machine' ? this.peers?.machine?.(r.machineId) : undefined
+    if (!hub && !m) return 'gone'
+    return (hub?.reachable ?? false) || (m?.reachable === true && m.tasks !== undefined) ? 'ready' : 'down'
+  }
+
+  /**
+   * Mail held for its link goes now, under its own id, its words led by when they were written (`writtenLate`), so the reader there knows they come late.
+   * Taken there, its row is delivered as a send that went at once is (`heldWent`). Refused there, or its computer no longer linked, it is deleted here and
+   * its sender told why. Its answer lost, it stays held and goes again under its id, which the other side takes as the message it has. The caller marks
+   * it `sending` while it goes
    */
   private async resend({ row, message: m }: PendingRow): Promise<AcrossSent> {
     const to = row.recipient
-    const text = `[Written at ${new Date(m.createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC on ${this.selfName()}, while the link between the computers was down.]\n\n${m.body}`
+    const text = writtenLate(m.createdAt, this.selfName(), m.body)
     const origin = HostMailParams.shape.task.unwrap().shape.origin.safeParse(m.origin)
     const fields = { text: m.body, needsReply: m.needsReply, ...(m.urgent ? { urgent: true } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) }
     const extra = { ...(m.subject ? { subject: m.subject } : {}), ...(m.choices ? { choices: m.choices } : {}) }
-    this.sending.add(m.id)
-    try {
-      let peer: AcrossPeer
-      let r: Answer
-      if (origin.success) {
-        const there = this.taskPeer(to)
-        if ('why' in there) return this.refusedHeld(m, to, there)
-        peer = there.m
-        r = await this.ask(peer, 'host.mail', this.taskParams(m.sender, there.sessionId, text, m.id, { origin: origin.data, ...(m.kind === 'message' ? { note: true as const } : {}), ...(m.facts.hubAssistant ? { forPerson: true as const } : {}), ...(m.facts.agentDepth ? { depth: m.facts.agentDepth } : {}) }))
-      } else {
-        const way = this.way(m.sender, to, fields, extra)
-        if ('why' in way) return this.refusedHeld(m, to, way)
-        peer = way.peer
-        r = way.older(await this.ask(peer, way.method, way.params(m.id, text)))
-      }
-      this.settle(m.id, r)
-      if (!r.ok) return r.maybe ? { ok: false, why: r.why, text: r.text } : this.refusedHeld(m, to, r)
-      // Delivered before the hold is let go: a host that stops between sends it again, which the other side takes as the one it has
-      this.d.records.markDelivered(to, [m.id], this.now(), null)
-      this.d.records.hold(to, [m.id], null)
-      this.names.set(to, `${r.to} on ${peer.name}`)
-      return { ok: true, messageId: m.id, to: r.to, address: to, computer: peer.name }
-    } finally {
-      this.sending.delete(m.id)
+    let peer: AcrossPeer
+    let r: Answer
+    if (origin.success) {
+      const there = this.taskPeer(to)
+      if ('why' in there) return this.refusedHeld(m, to, there)
+      peer = there.m
+      r = await this.ask(peer, 'host.mail', this.taskParams(m.sender, there.sessionId, text, m.id, { origin: origin.data, ...(m.kind === 'message' ? { note: true as const } : {}), ...(m.facts.hubAssistant ? { forPerson: true as const } : {}), ...(m.facts.agentDepth ? { depth: m.facts.agentDepth } : {}) }))
+    } else {
+      const way = this.way(m.sender, to, fields, extra)
+      if ('why' in way) return this.refusedHeld(m, to, way)
+      peer = way.peer
+      r = way.older(await this.ask(peer, way.method, way.params(m.id, text)))
     }
+    this.settle(m.id, r)
+    if (!r.ok) return r.maybe ? { ok: false, why: r.why, text: r.text } : this.refusedHeld(m, to, r)
+    this.d.service.heldWent(m, to)
+    this.names.set(to, `${r.to} on ${peer.name}`)
+    return { ok: true, messageId: m.id, to: r.to, address: to, computer: peer.name }
   }
 
   /** Held mail the other side refused, or that can no longer go there: deleted here, as nothing was written there, and its sender told why */
   private refusedHeld(m: MailRow, to: string, r: { why: string; text: string }): AcrossSent {
     this.d.records.deleteRows([{ messageId: m.id, recipient: to }])
     const name = oneLineText(this.foreignName(to)?.name ?? to, 200)
-    this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, was not sent when the link came back: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })
+    this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, was not sent: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })
     return { ok: false, why: r.why, text: r.text }
   }
 
@@ -704,6 +727,10 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
 }
 
 const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`
+
+/** The words of mail held for its link as they go, led by when and where they were written, so the reader there knows they come late */
+const writtenLate = (at: number, computer: string, body: string): string =>
+  `[Written at ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC on ${computer}, while the link between the computers was down.]\n\n${body}`
 
 /**
  * The notice to a sender whose mail held for its link is older than `LINK_HOLD_MS` when the link is back: one per sender and round, naming each

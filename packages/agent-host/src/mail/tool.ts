@@ -1,7 +1,6 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { LINK_HOLD, ROLE_VIA, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
-import { durationText } from '../timing.js'
-import { LINK_HOLD_MS, heldLine } from './across-core.js'
+import { heldLine } from './across-core.js'
 import { CENTRALU, PERSON, isPerson, parseAddress } from './address.js'
 import { NOT_AN_INSTRUCTION, UNTRUSTED_LINES, escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
@@ -26,8 +25,7 @@ const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => strin
 const HELD_WHY: Record<InboxView['held'][number]['why'], (m: MailRow, calls: MessageCalls) => string> = {
   loop: () => 'waits until the person lets it go',
   policy: (m) => `waits until the person trusts ${m.senderProject ?? 'your project'}`,
-  [LINK_HOLD]: (m, calls) =>
-    `its computer is not reachable. It goes by itself when the link is back within ${durationText(LINK_HOLD_MS)} of writing; ${calls.send(m.id)} sends it once the link is back, ${calls.done(m.id)} drops it`,
+  [LINK_HOLD]: (m, calls) => `${heldLine('its computer')} Send it with ${calls.send(m.id)} once the link is back, or drop it with ${calls.done(m.id)}`,
 }
 
 /**

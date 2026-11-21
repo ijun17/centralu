@@ -146,6 +146,9 @@ export type InboxView = {
   /** `loop`: a row an earlier build held for its turns, which waits for the person's Resume; `link`: mail across held while its link is down (`LINK_HOLD`) */
   held: { row: RecipientRow; message: MailRow; why: HoldReason | 'loop' | typeof LINK_HOLD }[]
 }
+/** Work given a session on another computer, as it crosses (`MailAcross.sendTask`) and its copy here keeps it: a note, for the person (#2258), at an agent depth */
+export type TaskAcross = { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }
+
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
 
 export type DrainOptions = {
@@ -206,6 +209,8 @@ export class MessageService {
   /** Tasks across a link a handoff re-pointed, for `takeMoves` */
   private readonly queuedMoves: { from: string; to: string; ids: string[] }[] = []
   private running = false
+  /** Which held mail `MailAcross` is sending now: a drop of it is refused, as it may be written there already */
+  private goingAcross: (id: string) => boolean = () => false
   /** Who hears that a session stopped or went (mailbox.md §10.6.1) */
   readonly stops: StopNotices
 
@@ -371,11 +376,12 @@ export class MessageService {
    * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer).
    *
    * `held`: written before it goes, as the link to that host is down (#2354): its row is undelivered and held for the link (`LINK_HOLD`) until it goes
-   * (`MailAcross.retryOwed`), so the copy keeps all that goes then: a task's depth and whether it is for the person, a question's subject and choices
+   * (`heldWent`), so the copy keeps all that goes then: a task's depth and whether it is for the person, a question's subject and choices. What it
+   * answers is settled when it goes, not before
    */
   sentAcross(
     sender: string,
-    input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true; subject?: string; choices?: MailChoices; task?: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }; held?: true },
+    input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true; subject?: string; choices?: MailChoices; task?: TaskAcross; held?: true },
   ): MailRow {
     return this.run(() => {
       const now = this.now()
@@ -387,9 +393,30 @@ export class MessageService {
         { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work, facts, subject: input.subject ?? null, choices: input.choices ?? null },
         [this.row(input.to, input.held ? { dueAt: now, held: LINK_HOLD } : { dueAt: now, deliveredAt: now })],
       )
-      if (target && replyAnswers(target, input) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
+      if (!input.held) this.settleAnswered(sender, stored)
       return stored
     })
+  }
+
+  /** Mail across held for its link (`sentAcross` with `held`) went: its row delivered, the hold let go, and what it answers settled as a send's is */
+  heldWent(m: MailRow, to: string): void {
+    this.run(() => {
+      const now = this.now()
+      this.records.markDelivered(to, [m.id], now, null)
+      this.records.hold(to, [m.id], null)
+      this.settleAnswered(m.sender, m)
+    })
+  }
+
+  /** The sender's own row on the message `m` replies to, settled when `m` answers it (`replyAnswers`) */
+  private settleAnswered(sender: string, m: MailRow): void {
+    const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
+    if (target && replyAnswers(target, m) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', this.now(), m.id)
+  }
+
+  /** `MailAcross` says which of the mail held for its link it is sending now */
+  goesAcross(check: (id: string) => boolean): void {
+    this.goingAcross = check
   }
 
   /**
@@ -523,6 +550,7 @@ export class MessageService {
       const mine = m.sender === by
       // Mail across held for its link never went (#2354): withdrawn, it is deleted here, and nothing is told across
       const held = mine ? this.records.recipients(id).filter((r) => r.held === LINK_HOLD && r.settled === null) : []
+      if (held.length > 0 && this.goingAcross(id)) throw refuse('busy', `${id} is being sent now, so it can no longer be dropped.`)
       if (held.length > 0) return { settled: this.records.deleteRows(held.map((r) => ({ messageId: id, recipient: r.recipient }))), how: 'dropped' }
       const row = mine ? undefined : this.records.recipient(id, by)
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))

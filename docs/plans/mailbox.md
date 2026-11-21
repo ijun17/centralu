@@ -776,7 +776,7 @@ sends.
 | `settled` | null, or `answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy` (D8) |
 | `settled_at`, `answer_id` | when, and the reply that settled it (`answered`); `answer_id` set with `settled` null is an answer still held (D8) |
 | `reminded`, `reminded_at` | how many delivered reminders named this row (0 to 2), and the last one's time |
-| `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender's gathered notice listed it; null until then |
+| `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender was told what became of the row (its gathered notice listed it, or held for its link it is too old to go by itself, linked-mail.md §12); null until then |
 
 Only watched rows (§4) count for waiting (§10.3), and only those of `needsReply` messages to sessions are reminded. A
 task is never reminded: its report settles it.

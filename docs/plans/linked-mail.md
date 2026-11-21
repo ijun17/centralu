@@ -12,8 +12,9 @@ per-link numbering, and the one outbox is the rows this host owes the other side
   (2) `session:<other host>/<id>` addresses reach a session on a linked host, and the receipts (delivered, read,
   answered) come back. (3) Names of sessions on linked hosts resolve as #2066 resolves this host's, with the same
   refusal for an ambiguous name.
-- **Link down:** a send to a computer that is linked and down now is held here and goes when the link is back (#2354,
-  §12). One to a computer no longer linked, from an older build, or still connecting is refused at once, with the reason.
+- **Link down:** a session's send to a computer that is linked and down now is held here and goes when the link is back
+  (#2354, §12). One from the person, or to a computer no longer linked, from an older build, or still connecting, is
+  refused at once, with the reason.
 - **Retry:** a send the link refuses is not written anywhere, so the `repeat` guard never counts it and the sender can
   send the same text again.
 - **Guards** (#2014, #2035) warn the person and never block agent mail. They run where the message is written.
@@ -487,37 +488,42 @@ machines' open work beside its own, and a row from a machine opens there.
 
 ## 12. Mail held while a link is down (#2354)
 
-The owner reversed §1's "nothing is held" (#2354): a session that mails a computer whose link is down for a moment had
-to notice the refusal, remember the message and send it again, and most did not. Now the sending host keeps it and sends
-it itself when the link is back, through the outbox it already has for Centralu's own notices and reports (§6).
+A session that mails a computer whose link is down for a moment would have to notice a refusal, remember the message
+and send it again, and most do not. So the sending host keeps it and sends it itself when the link is back, through the
+outbox it already has for Centralu's own notices and reports (§6).
 
-- **What is held.** A message or a task (`MailAcross.send`, `sendFrom`, `sendTask`) to a session on a computer that is
-  linked and not reachable now, the person's mail across included (the person's address is a session of the hub, §7a).
-  Its copy is written at once (`sentAcross` with `held`), under the id `idFor` gives, with its one row undelivered and
-  `held = 'link'` (`LINK_HOLD`; the column is free text, so no store step). The copy keeps what goes later: a task's
-  depth and whether the Assistant gave it for the person (`agentDepth`, `hubAssistant`), a question's subject and
-  choices. The answer is ok and says the mail is held and goes when the link is back (`heldLine`, one wording for the
-  mail tool and a delegation's notice). Still refused: a computer no longer linked, an older build, a machine still
-  connecting, and `parent` from a hub's child, whose address only the hub names, so there is no recipient to hold a copy
-  for (§3).
+- **What is held.** A session's message or task (`MailAcross.send`, `sendTask`) to a session on a computer that is
+  linked and not reachable now, mail to the hub's person included (the person's address is a session of the hub, §7a). Its copy is written at once (`sentAcross` with `held`), under the id `idFor` gives, with
+  its one row undelivered and `held = 'link'` (`LINK_HOLD`; the column is free text, so no store step). The copy keeps
+  what goes later: a task's depth and whether the Assistant gave it for the person (`agentDepth`, `hubAssistant`), a
+  question's subject and choices. What a held reply answers is settled when it goes (`heldWent`), not before. The answer
+  is ok and says the mail is held and goes when the link is back (`heldLine`, one wording for the mail tool, a
+  delegation's notice, the Assistant's send_to_session and create_session, and the inbox); ask_project answers
+  `working` at once, as there is nothing to wait for yet. Still refused: mail from the person (they write in the
+  Inbox, and a held message waits on its sender's mail tool), a computer no longer linked, an older build, a machine still
+  connecting, a body that is too long with the line it goes with, and `parent` from a hub's child, whose address only
+  the hub names, so there is no recipient to hold a copy for (§3).
 - **Who acts on it.** The sender, never the person: the person's held list (`heldRows`) leaves `link` out, and a task
   held so is not in a machine's offer (`openTasksToward`), which would read it as lost there (§10). The sender's `inbox`
-  lists it as held; `handled` on it deletes it here (nothing went, so nothing is told across); to replace it, the sender
-  drops it and sends again.
+  lists it as held; `handled` on it deletes it here (nothing went, so nothing is told across), and is refused `busy`
+  while it is going, as it may be written there already; to replace it, the sender drops it and sends again. A task
+  dropped or refused stands as ended (`LinkedTasks.standing`).
 - **When it goes.** At a connect or any change (`retryOwed`, the one loop that passes what is owed to the other side), a
   held row whose side can take it now (reachable, and a machine past this connection's offer, before which it takes no
-  mail) goes by itself if it was written less than `LINK_HOLD_MS` (10 minutes) ago, under its own id. Its words go led by
+  mail) goes by itself if it was written less than `LINK_HOLD_MS` (10 minutes) ago, under its own id, one after another
+  in the order written. Its words go led by
   `[Written at <UTC time> on <computer>, while the link between the computers was down.]`, so a reader knows it is late;
   this is in the text, so a build from before this shows it too. The other side writes it as any send (a second send of
-  an id it has is taken as the one it has), and the row here is then delivered and no longer held. A refusal there
-  deletes the copy and tells the sender why; an answer lost keeps it held, and it goes again under its id.
+  an id it has is taken as the one it has), and the row here is then delivered and no longer held. A refusal there, or a
+  computer no longer linked, deletes the copy and tells the sender why; an answer lost keeps it held, and it goes again
+  under its id.
 - **Older than `LINK_HOLD_MS`.** It does not go by itself: what was news ten minutes ago may be out of date, and only the
   sender knows. The sender gets one Centralu notice for all it holds then (id, to whom, first line), with what to do per
-  message: `mail send` with `thread` = its id sends it now, `handled` drops it. The rows are marked told (`told_at`),
-  so no row is named twice. Ten minutes covers a link that drops and comes back by itself, which is most of them; a
-  computer off for the night is the case where asking first is right.
+  message: `mail send` with `thread` = its id sends it now, `handled` drops it. The rows are marked told (`told_at`:
+  the sender was told what became of the row), so no row is named twice. Ten minutes covers a link that drops and comes
+  back by itself, which is most of them; a computer off for the night is the case where asking first is right.
 - **A restart.** Held rows are in the store, so they outlive this host and the other one. After a restart they go at the
   first connect, under the same age rule, measured from when each was written; a send is never made twice by this host
-  (`sending`), and the other side takes a repeated id as the message it has.
+  at once (`sending`), and the other side takes a repeated id as the message it has.
 - **App calls** across a link that is down are still refused (`awayRefusal`) and never replayed: a call may have effects
   its caller has to watch.

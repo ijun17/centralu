@@ -597,7 +597,7 @@ const HANDLERS: ToolHandlers = {
     // Reported unless asked not to (#1233)
     const reportBack = args.reportBack !== false
     const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, preset: args.preset, firstMessage: args.firstMessage, reportBack })
-    const sent = args.firstMessage === undefined ? '' : ' — sent the first instruction' + (reportBack ? '; you are told when its turn ends' : '')
+    const sent = args.firstMessage === undefined ? '' : r.held ? ` — the first instruction is not sent yet. ${r.held}` : ' — sent the first instruction' + (reportBack ? '; you are told when its turn ends' : '')
     return {
       text: r.ok ? `Created: ${r.name} [${r.sessionId}]${sent}` : `Could not create it — ${r.error}`,
       isError: !r.ok,
@@ -608,6 +608,7 @@ const HANDLERS: ToolHandlers = {
     const { sessionId, ifBusy } = args
     const reportBack = args.reportBack === true
     const r = await tools.sendToSession(sessionId, args.text, reportBack, ifBusy)
+    if (r.ok && r.held) return { text: r.held }
     // A busy session: sent as mail, or the fork asked for
     if (r.ok && r.busy) {
       const b = r.busy
