@@ -5,12 +5,12 @@ import { join } from 'node:path'
  * The one walk over an app folder (M4 C-4, E-1, E-3): what is an app's code, and how deep it goes. Every reader of an app
  * folder walks it through here; discovery's watched subfolders read one level only, with this file's skip rule. One depth
  * (`APP_FOLDER_DEPTH`) for all: with separate walks an edit deeper than the fingerprint looked, in an imported app, would never
- * restart it, nor would a version capture or restore those files. Two skip rules: `hiddenName` (never moved into an app or
- * listed: dot names such as `.git`, `.env`, and `.claude/` and `.codex/`, where an imported bundle's hook could run without the
- * person's confirmation, and `__MACOSX`, what macOS's compressor adds beside an archive's content) and `outsideAppCode`, the
- * default (`hiddenName` plus `node_modules`: walking dependencies takes tens of thousands of entries per measurement and, as
- * `node_modules` sorts before `server.mjs`, would crowd the app's files out of the file cap; an import still copies what it
- * brings). A link is never followed (`Dirent` does not follow links): each reader decides what a link means to it (`link`).
+ * restart it, nor would a version capture or restore those files. Two skip rules:
+ * - `hiddenName`: never moved into an app or listed; dot names such as `.git`, `.env`, and `.claude/` and `.codex/` (an imported
+ *   bundle's hook could run without the person's confirmation), and `__MACOSX` (what macOS's compressor adds beside an archive).
+ * - `outsideAppCode`, the default: `hiddenName` plus `node_modules` (tens of thousands of entries per measurement, and it sorts before
+ *   `server.mjs`, so it would crowd the app's files out of the file cap; an import still copies what it brings).
+ * A link is never followed (`Dirent` does not follow links): each reader decides what a link means to it (`link`).
  * Entries come in name order, so the same folder always walks the same.
  */
 

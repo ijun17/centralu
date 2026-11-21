@@ -17,11 +17,12 @@ import { ZipError, readZipEntries, readZipEntry, type ZipEntry } from './zip.js'
  * staging** a folder or a zip (a file on this machine, or an https address), and builds what the person reviews. It goes only
  * as far as staging: the destination is an empty folder the caller supplies (the staging area in the data folder, which
  * discovery does not scan, so nothing unvalidated starts or attaches to a session); moving it into the user folder plus the
- * person's confirmation is the runtime door's job (handover in `runtime.ts`). **Links are never followed** (one pointing
- * outside refuses the import, one pointing inside is only listed; a link entry in a zip is the oldest form of a zip-slip
- * attack), **a name never writes outside** (the written path is built only from segments that pass validation), and **a name
- * starting with a dot is never moved:** `.git`, `.env`, and `.claude/` and `.codex/`, settings a building session reads in the
- * app folder, so an imported hook could run without the person's confirmation (`hiddenName`, `folder-walk.ts`).
+ * person's confirmation is the runtime door's job (handover in `runtime.ts`). What is blocked beyond the doc:
+ * - **Links are never followed**: one pointing outside refuses the import, one pointing inside is only listed; a link entry in
+ *   a zip is the oldest form of a zip-slip attack.
+ * - **A name never writes outside**: the written path is built only from segments that pass validation.
+ * - **A name starting with a dot is never moved**: `.git`, `.env`, and `.claude/` and `.codex/`, settings a building session
+ *   reads in the app folder, so an imported hook could run without the person's confirmation (`hiddenName`, `folder-walk.ts`).
  */
 
 export const IMPORT_LIMITS = {

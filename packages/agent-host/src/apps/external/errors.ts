@@ -12,13 +12,14 @@ import type { AppErrorBundle } from '@cc/protocol'
 /**
  * The bundle as the host holds it: the protocol's `AppErrorBundle` without `sentAt`, which is kept apart (by kind and time,
  * `ErrorLog` in error-log.ts) so a bundle replaced when stderr is re-captured stays sent. Derived from the protocol's type,
- * never copied by hand (a copy drifted, #428). What its fields hold: - `message`: a one-line reason: why it failed to start,
- * the shape it ended in, or the failure a tool returned. - `stderr`: the last lines of the app's stderr, secrets masked. -
- * `tool`, `args`: the failed tool and a summary of that call's arguments, secrets masked by name (tool errors only). -
- * `denied`: the failure came from a person's decision (D-4): the person denied this call's request (or one further up its
- * chain), so it is not a bug in the app: the screen states the decision (to reverse it: the app's record panel, Permissions →
- * Forget) and it is not sent to the building session, which would "fix" working code. Tool failures only. - `text`: the text
- * that can be sent to the building session as-is.
+ * never copied by hand (a copy drifted, #428). What its fields hold:
+ * - `message`: a one-line reason: why it failed to start, the shape it ended in, or the failure a tool returned.
+ * - `stderr`: the last lines of the app's stderr, secrets masked.
+ * - `tool`, `args`: the failed tool and a summary of that call's arguments, secrets masked by name (tool errors only).
+ * - `denied`: the failure came from a person's decision (D-4): the person denied this call's request (or one further up its
+ *   chain), so it is not a bug in the app: the screen states the decision (to reverse it: the app's record panel, Permissions →
+ *   Forget) and it is not sent to the building session, which would "fix" working code. Tool failures only.
+ * - `text`: the text that can be sent to the building session as-is.
  */
 export type HeldErrorBundle = Omit<AppErrorBundle, 'sentAt'>
 

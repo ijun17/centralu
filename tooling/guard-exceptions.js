@@ -312,7 +312,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/apps/external/app-process.ts': 37,
     'packages/agent-host/src/apps/external/change-reflector.ts': 39,
     'packages/agent-host/src/apps/external/error-log.ts': 42,
-    'packages/agent-host/src/apps/external/errors.ts': 50,
+    'packages/agent-host/src/apps/external/errors.ts': 51,
     'packages/agent-host/src/apps/external/placement.ts': 38,
     'packages/agent-host/src/apps/external/runtime-types.ts': 64,
     'packages/agent-host/src/apps/external/scaffold.ts': 44,

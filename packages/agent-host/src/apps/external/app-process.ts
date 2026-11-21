@@ -247,8 +247,8 @@ export class AppProcess {
    * within the grace period, **its descendants** are ended too. A group we created (detached) is collected group-wide even after
    * a clean exit: SIGTERM, then SIGKILL (`stopGroup`; a helper that ignores SIGTERM is otherwise orphaned under launchd); a live
    * group's pgid is not reused, so this never reaches another's group. Windows has no groups: what the app left is found by
-   * parent links and ended (`collectLeftovers`, a process listing of ~0.5 s) once the app has exited, as only then is the window
-   * of its leftovers known. `awaitTree` waits for that, for a caller about to move or delete the app's folder (Windows refuses
+   * parent links and ended (`collectLeftovers`, a process listing of ~0.5 s, so by default it runs after this returns) once the app has exited, as only
+   * then is the window of its leftovers known. `awaitTree` waits for that, for a caller about to move or delete the app's folder (Windows refuses
    * while a process has it as its working directory), and for the app's own exit up to `EXIT_WAIT_MS` (#1818): on a loaded
    * machine the exit can land after both waits.
    */

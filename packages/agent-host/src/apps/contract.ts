@@ -59,7 +59,7 @@ export function mcpServerNameError(name: string): string | null {
  * Validation for a MCP server name **as proposed** to a person: the rules above plus a ban on the `app-` prefix (M4 A-5). An
  * app's own id may start with it (`app-store` attaches as `app-app-store`, so it never collides); a proposed server may not: an
  * approved `app-notes` would land in the slot of app `notes`'s own proxy server, the adapter expands the app afterward so the
- * app wins, and the approved server silently disappears. A tool under an `app-` name also skips approval through an app's
+ * app wins, and the approved server silently disappears. A tool under an `app-` name can also skip approval through an app's
  * read-only annotation, so that slot must belong only to an app the runtime itself knows about.
  */
 export function proposedMcpServerNameError(name: string): string | null {
