@@ -82,7 +82,7 @@ describe('what a handoff gave away', () => {
     expect(handed(flow).handedOverAnswer('heir', 'child')).toBeUndefined()
   })
 
-  // Review of #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
+  // #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
   it('a mail send by the original that stayed hears where the work went, as agent_session did', async () => {
     children.recordHandedOver('child', 'caller', 'heir')
     const flow = new DelegationFlow(hostWith({ meta, children }))
@@ -393,7 +393,7 @@ describe("a child's turn and the call waiting on it", () => {
     }
   })
 
-  // Review of #1948: another session's child on a linked machine was asked about and refused as work, not sent as mail
+  // #1948: another session's child on a linked machine was asked about and refused as work, not sent as mail
   it("mail to another session's child on a linked machine is plain mail, asked about by nobody", async () => {
     const asked: string[] = []
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ sessionId: 'm1.c1', callerId: 'someone', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }]))
@@ -403,7 +403,7 @@ describe("a child's turn and the call waiting on it", () => {
   })
 })
 
-// Review of #1948: start_agent, ask_project, a fork and a mail send each gave work by a copy of their own; one way now, at its owner
+// #1948: start_agent, ask_project, a fork and a mail send each gave work by a copy of their own; one way now, at its owner
 describe('work is given one way', () => {
   it('no source but the flow itself registers a delegated turn: every giver goes through delegate', () => {
     const src = fileURLToPath(new URL('..', import.meta.url))

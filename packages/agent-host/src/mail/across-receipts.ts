@@ -11,7 +11,7 @@ import { clipped } from './last-response.js'
 
 /**
  * How far before the kept mark (`toldAt`) crossing rows are read again: a row's `settled_at` can be the other side's
- * time, merged from its rows, and a clock behind this one would put a row settled after the mark before it (#2067 re-check)
+ * time, merged from its rows, and a clock behind this one would put a row settled after the mark before it (#2067)
  */
 const TOLD_SLACK_MS = 10 * 60_000
 

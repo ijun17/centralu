@@ -520,7 +520,7 @@ describe('a hub linked to another host (#82)', () => {
     await eventually(() => hub.links.list()[0]!.logon === null)
   })
 
-  /** #1224's review: the sign-in's serve waits for the host's work to end, 30 minutes at most, and the row says which */
+  /** The sign-in's serve waits for the host's work to end, 30 minutes at most, and the row says which (#1224) */
   it('keeps the hand-over a machine’s host says, from its hello and its host_handover events, on the row only', async () => {
     let handover: { state: 'waiting' | 'gave_up'; since: number } | null = { state: 'waiting', since: 7 }
     const remote = await remoteHost(0, new Store(), { logon: () => 'network', handover: () => handover })

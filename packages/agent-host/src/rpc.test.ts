@@ -67,7 +67,7 @@ describe('host.stop', () => {
   })
 
   /*
-   * #1224's review: the hand-over into the Windows sign-in asked the activity, then stopped, over two calls; a turn the
+   * #1224: the hand-over into the Windows sign-in asked the activity, then stopped, over two calls; a turn the
    * hub started in between was ended with the host. `ifIdle` checks and acts in one step on the host, counting calls in
    * flight (one may be about to start a turn), and from its yes on refuses every new call
    */

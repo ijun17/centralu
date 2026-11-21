@@ -594,7 +594,7 @@ describe('worktree sessions', () => {
     expect(wtMgr.listSessions().filter((x) => x.worktree).length).toBe(0)
   })
 
-  // Review of #1118: reading the fork point now throws git's own error, which escaped without saying what failed
+  // #1118: reading the fork point now throws git's own error, which escaped without saying what failed
   it('a repository git refuses to read fails the worktree with that reason, said as a worktree failure (#841)', async () => {
     execFileSync('git', ['config', 'core.repositoryformatversion', '99'], { cwd: repo })
     try {

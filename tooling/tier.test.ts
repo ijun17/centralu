@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — a plain .mjs script, so pre-pr and the board can run it with Node alone
-import { classify, globToRegExp, parseArgs, parseRules, RULES_FILE, subjectsOf, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
+import { classify, globNames, globToRegExp, parseArgs, parseRules, RULES_FILE, subjectsOf, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
 
 /**
  * Risk tiers by path (#1259 step 2): the repository's own .centralu/tiers.json on representative
@@ -84,6 +84,12 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'centralu serve', paths: ['packaging/npm/centralu/bin/serve-run.mjs'], tier: 'deep', rule: 'processes' },
   { name: 'the keeper', paths: ['apps/desktop/src-tauri/keeper/src/keeper/front_door.rs'], tier: 'deep', rule: 'processes' },
   { name: 'the host\'s start', paths: ['packages/agent-host/src/lifecycle/start.ts'], tier: 'deep', rule: 'processes' },
+  { name: 'removing a worktree (#1875)', paths: ['packages/agent-host/src/dev-services/git-worktree.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'emptying the trash (#1875)', paths: ['packages/agent-host/src/sessions/session-trash.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'restoring an app version', paths: ['packages/agent-host/src/apps/external/versions.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'the delete most removals go through', paths: ['packages/agent-host/src/dev-services/data-folder.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'an app project a failed start leaves', paths: ['packages/agent-host/src/sessions/app-sessions.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'the leftovers of a carried app folder', paths: ['packages/agent-host/src/apps/external/carry.ts'], tier: 'deep', rule: 'deletion' },
   { name: 'app secrets', paths: ['packages/agent-host/src/apps/external/secrets.ts'], tier: 'deep', rule: 'trust' },
   { name: 'the desktop shell\'s install', paths: ['apps/desktop/src-tauri/src/shell/install.rs'], tier: 'deep', rule: 'processes' },
   { name: 'a release script', paths: ['scripts/release-npm.mts'], tier: 'deep', rule: 'release' },
@@ -187,10 +193,15 @@ describe('the repository\'s tier rules', () => {
     expect(tierLine(tierOf(['AGENTS.md']), RULES)).toBe('Tier: light, from `AGENTS.md` (no rule matches: light).')
   })
 
-  it('matches every glob against at least one file in the repository, so a rename cannot drop a path silently', () => {
+  it('matches every glob, and every name of its {a,b} lists, against a file in the repository, so a rename cannot drop a path silently', () => {
     const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean)
     const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
-    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
+    const dead = raw.rules.flatMap((r) =>
+      [...r.paths, ...(r.except ?? [])]
+        .flatMap((g): string[] => globNames(g))
+        .filter((g) => !files.some((f) => globToRegExp(g).test(f)))
+        .map((g) => `${r.id}: ${g}`),
+    )
     expect(dead).toEqual([])
   })
 })
@@ -209,6 +220,13 @@ describe('the rules file and its globs', () => {
     expect(re('**/{fixtures,tests}/**').test('x/tests/y.rs')).toBe(true)
     expect(re('tauri*.conf.json').test('tauriXconf.json')).toBe(false)
     expect(() => globToRegExp('a**b')).toThrow('** stands only for whole folders')
+  })
+
+  it('spells out each {a,b} list of names as globs of its own, and keeps a list of kinds after a wildcard', () => {
+    expect(globNames('a/{b,c}/{d,e}.ts')).toEqual(['a/b/d.ts', 'a/b/e.ts', 'a/c/d.ts', 'a/c/e.ts'])
+    expect(globNames('docs/**/*.{md,txt}')).toEqual(['docs/**/*.{md,txt}'])
+    expect(globNames('scripts/{a,b}-*.{mts,mjs}')).toEqual(['scripts/{a,b}-*.{mts,mjs}'])
+    expect(globNames('a/{b,c}/*.{md,txt}')).toEqual(['a/b/*.{md,txt}', 'a/c/*.{md,txt}'])
   })
 
   it('takes a rule\'s exceptions out of it', () => {

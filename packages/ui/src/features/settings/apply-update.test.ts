@@ -260,7 +260,7 @@ describe('applyWords', () => {
   })
 
   /**
-   * Review of #1895 step 3: an absent `restartsHost` does not mean "the keeper holds them". On Windows and Linux (whose
+   * #1895 step 3: an absent `restartsHost` does not mean "the keeper holds them". On Windows and Linux (whose
    * check is empty), in a browser, in a window before its first check and in one not attached to a keeper, agents do not
    * keep going and the update does not apply by itself once idle, so the words promise neither
    */

@@ -375,7 +375,7 @@ export class MachineFlow {
   }
 
   /**
-   * add_machine (#1219; the security review of #1238): nothing connects before the person allows it. The target is
+   * add_machine (#1219, #1238): nothing connects before the person allows it. The target is
    * checked and resolved with `ssh -G` (no connection, no key loaded), and the card shows what ssh would reach: host,
    * user, port, and a proxy when one is set. After Allow, one BatchMode ssh probes what runs there; a target that does
    * not answer, or runs nothing this computer can link, is linked nowhere and the answer says why, with no second card.

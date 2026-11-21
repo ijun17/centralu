@@ -161,7 +161,7 @@ describe("the Assistant's tool list as root apps are trusted (#1205)", () => {
     expect(hub.reach(ORCH, { projectId: 'p9', appId: 'app9' })).toMatchObject({ reachable: false, reason: 'untrusted' })
   })
 
-  // Review of #1252: the reason names what the person can fix, trusting the project again
+  // #1252: the reason names what the person can fix, trusting the project again
   it("says a root app it attached is untrusted once its project loses trust, and refuses its calls", async () => {
     const { hub, access, apps } = world(3)
     const live = hub.attach(ORCH)

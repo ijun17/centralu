@@ -568,7 +568,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: false, again: true })
   })
 
-  // Review of #1929: what a host that takes a kept session over mid-turn reads
+  // #1929: what a host that takes a kept session over mid-turn reads
   describe('across a keeper swap', () => {
     it('a work turn the person wrote into stays the work’s, with the person noted', () => {
       give('s', 'caller-1', 'caller')

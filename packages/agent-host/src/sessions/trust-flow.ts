@@ -208,7 +208,7 @@ export class TrustFlow {
   }
 
   /**
-   * Taking trust away asks too (RVIA's review of #1325, the reviewer's decision): it is not only narrowing. An untrusted
+   * Taking trust away asks too (#1325, the reviewer's decision): it is not only narrowing. An untrusted
    * project's sessions read the person's own settings only (`settingSourcesFor`), so the project's own deny rules and
    * the hooks that block tools stop applying to its agents, `auto` sessions included; and its idle sessions restart.
    */

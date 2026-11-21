@@ -519,7 +519,7 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host().used.gone([]).map((g) => g.id)).toEqual(['aaaaaaaa'])
   })
 
-  // #1717 recheck, F2: the restore of a key record. Skipped, the first note stays and the second withdrawal is judged by its date
+  // #1717: the restore of a key record. Skipped, the first note stays and the second withdrawal is judged by its date
   it('forgets the note of a key record that serve.json names again, so a later withdrawal starts a new week and is reported, also after a restart', () => {
     const f = folder()
     const key = hubKey()

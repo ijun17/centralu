@@ -566,7 +566,7 @@ describe('a session the Assistant creates', () => {
 })
 
 /*
- * #1547 re-check: create_session names a project as ask_project does (one tiered match, exact then any case, over this
+ * #1547: create_session names a project as ask_project does (one tiered match, exact then any case, over this
  * computer and the machines), and a qualified name speaks only of its own machine.
  */
 describe('create_session by name across machines (#1547)', () => {

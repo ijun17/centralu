@@ -802,7 +802,7 @@ describe('starting another agent in the same project', () => {
       expect(reportsTo(s, child!.id)).toEqual([])
     })
 
-    // Review of #1948: start_agent gives work through DelegationFlow.delegate, which fails the wait as every giver's (#839)
+    // #1948: start_agent gives work through DelegationFlow.delegate, which fails the wait as every giver's (#839)
     it('a task that could not go in fails the wait on it, so nothing waits on a turn that never starts', async () => {
       allowProject()
       const s = await session()
