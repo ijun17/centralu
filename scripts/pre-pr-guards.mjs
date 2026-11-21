@@ -7,8 +7,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { git } from './pre-pr-worktrees.mjs'
-import { nameStatus } from './pre-pr.mjs'
+import { git, nameStatus } from './pre-pr-worktrees.mjs'
 
 const [from, to] = process.argv.slice(2)
 const root = process.cwd()
