@@ -9,7 +9,7 @@ import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { failuresOf, guardWarnings, isTestFile, filesRunMs, isVitestFile, nodeBin, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, vitestTests } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
-import { removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
+import { GUARD_REFS, removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { interruptsSoFar, runTool } from '../scripts/interrupts.mjs'
 import { GUARDS } from './guards.js'
@@ -823,20 +823,26 @@ describe('pre-pr on a stack of two pull requests', () => {
   it('cleans up after a run that was killed: by --cleanup, or by the next run once its process is gone', () => {
     const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
     const root = git(repo, 'rev-parse', '--show-toplevel')
-    // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies
+    const guardRefs = () => git(repo, 'for-each-ref', '--format=%(refname)', `${GUARD_REFS}/`)
+    // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies, and
+    // the head of a pull request it fetched for the guards
     const leave = (id: string, pid: number) => {
       const dir = runDir(id)
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'owner.json'), JSON.stringify({ pid, root }))
       git(repo, 'worktree', 'add', '--detach', '-q', join(dir, 'wt-1'), 'top')
       symlinkSync(deps, join(dir, 'wt-1', 'src', 'node_modules'), 'junction')
+      git(repo, 'update-ref', `${GUARD_REFS}/${id}/21`, 'top')
       return dir
     }
     try {
       writeFileSync(join(deps, 'keep.js'), 'keep')
       const killed = leave(`killed-${process.pid}`, 999_999)
+      // A run's refs whose folder is gone: --cleanup of any run takes them too
+      git(repo, 'update-ref', `${GUARD_REFS}/gone-${process.pid}/22`, 'top')
       execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
       expect(existsSync(killed)).toBe(false)
+      expect(guardRefs()).toBe('')
       expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
       expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
 
@@ -845,8 +851,10 @@ describe('pre-pr on a stack of two pull requests', () => {
       const swept = sweepStale(root, { isAlive: (pid: number) => pid === process.pid })
       expect(swept).toEqual([dead])
       expect(existsSync(living)).toBe(true)
+      expect(guardRefs()).toBe(`${GUARD_REFS}/living-${process.pid}/21`)
       expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
       expect(removeRun(living, root)).toEqual([])
+      expect(guardRefs()).toBe('')
       expect(readdirSync(deps)).toEqual(['keep.js'])
     } finally {
       rmSync(deps, { recursive: true, force: true })
@@ -1066,6 +1074,7 @@ describe('pre-pr and the guards a branch adds', () => {
   // How long a test file takes where it is not `step`
   const fileMs: Record<string, number> = {}
   const vitestCalls: string[][] = []
+  const vitestPatterns: (string | undefined)[] = []
   const runners = (prs: unknown[], extra: Record<string, unknown> = {}) => {
     const fake = fakeRunners()
     return {
@@ -1073,8 +1082,9 @@ describe('pre-pr and the guards a branch adds', () => {
       gh: () => JSON.stringify(prs),
       // `needs-install` in a worktree: its dependencies would need an install, which a guard run does not do
       prepare: (dir: string, _root: string, options?: { linkOnly?: boolean }) => (options?.linkOnly && existsSync(join(dir, 'needs-install')) ? false : undefined),
-      vitest: (dir: string, files: string[]) => {
+      vitest: (dir: string, files: string[], options?: { testNamePattern?: string }) => {
         vitestCalls.push(files)
+        vitestPatterns.push(options?.testNamePattern)
         // The files run side by side: the pass ends with the slowest
         const startTime = clock.t
         clock.t += Math.max(...files.map((f) => fileMs[f] ?? step))
@@ -1136,6 +1146,7 @@ describe('pre-pr and the guards a branch adds', () => {
     step = 1000
     for (const f of Object.keys(fileMs)) delete fileMs[f]
     vitestCalls.length = 0
+    vitestPatterns.length = 0
     // Each test copies the template's repository and its own origin: no test writes to another's
     repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
     bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
@@ -1220,6 +1231,26 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(r.notes).toContain('tooling/guard.test.ts run against 2 open pull request(s): 1 would fail, 0 skipped, 0 not reached.')
     expect(r.findings).toEqual([])
     expect(r.ok).toBe(true)
+  })
+
+  it("holds a pull request only to each guard's own tests, as the head is held, and names them to vitest when every guard does", () => {
+    const declare = (guards: object[], message: string) => {
+      write('tooling/guards.ts', `${JSON.stringify(guards)}\n`)
+      commit(message)
+    }
+    write('tooling/guard.test.ts', `${GUARD}no other in src :: src :: other\n`)
+    write('tooling/plain.test.ts', 'no worse in src :: src :: worse\n')
+    write('src/notes.txt', notes('feat', 'line 10'))
+    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }], 'feat: a guard of one test')
+    const pr = openPr(21, { 'src/bad.txt': 'banned and other\n' })
+    const only = ['#21 "pull request 21" (pr21) would fail tooling/guard.test.ts > no banned in src with this branch merged in: AssertionError: src/bad.txt holds "banned". Fix it in this change, or tell its author.']
+    expect(guardsOf(run(runners([pr])))).toEqual(only)
+    expect(vitestPatterns).toEqual(['banned'])
+    // With a guard of a whole file in the run, vitest runs every test of both: the other one's failure is not the guard's
+    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }, { test: 'tooling/plain.test.ts' }], 'feat: a guard of a whole file')
+    vitestPatterns.length = 0
+    expect(guardsOf(run(runners([pr])))).toEqual(only)
+    expect(vitestPatterns).toEqual([undefined])
   })
 
   it('runs the guard against a pull request that shares no file with the branch: the one it breaks need not', () => {

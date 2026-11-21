@@ -18,17 +18,23 @@ describe('the repository-wide guards', () => {
     expect(missing, `tooling/guards.ts declares what the repository does not have: ${missing.join(', ')}`).toEqual([])
   })
 
-  it('names every tooling test that reads the repository, as a guard or with why it is not one', () => {
+  it('names every tooling test once, as a guard or under why it is not one', () => {
     const tests = execFileSync('git', ['ls-files', '-z', '--', 'tooling'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.[cm]?tsx?$/.test(f))
-    const reads = tests.filter((f) => /['"`]ls-files['"`]|readdirSync\(.*recursive: true|pre-pr: guard/.test(readFileSync(join(ROOT, f), 'utf8'))).sort()
-    const named = [...GUARDS.map((g) => g.test), ...Object.keys(NOT_GUARDS)].sort()
-    expect(named, 'tooling/guards.ts: each test that reads the repository (git ls-files, a recursive readdir, the mark pre-pr: guard) in GUARDS or NOT_GUARDS, and no other').toEqual(reads)
+    const named = [...GUARDS.map((g) => g.test), ...Object.values(NOT_GUARDS).flat()]
+    const unnamed = tests.filter((t) => !named.includes(t))
+    const wrong = named.filter((t, i) => !tests.includes(t) || named.indexOf(t) !== i)
+    expect(
+      { unnamed, wrong },
+      `tooling/guards.ts: add each test to GUARDS, or to NOT_GUARDS under why it is not a guard (not named: ${unnamed.join(', ') || 'none'}); name each once, and only tests that are there (${wrong.join(', ') || 'none'})`,
+    ).toEqual({ unnamed: [], wrong: [] })
   })
 
   it('counts a change to a guard test or to a file it reads, and to nothing else', () => {
     expect(changedGuards([change('tooling/os-allowlist.txt', 'a\n', 'a\nb\n')])).toEqual(['tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/os-tests.ts', 'a', 'b')])).toEqual(['tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/doc-refs.ts', 'a', 'b')])).toEqual(DOC_REFS)
+    // An exception added for a file another pull request deletes or renames fails there
+    expect(changedGuards([change('tooling/guard-exceptions.js', 'a', 'b')])).toEqual(['tooling/guards-checks.test.ts'])
     expect(changedGuards([change('tooling/os-layer.test.ts', 'a', 'b'), change('tooling/doc-refs.test.ts', 'a', null)])).toEqual([...DOC_REFS, 'tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/heavy-store.test.ts', 'a', 'b'), change('packages/ui/src/a.ts', null, 'b'), change('docs/notes.txt', '## 1. One\n', null)])).toEqual([])
   })

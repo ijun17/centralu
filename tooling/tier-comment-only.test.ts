@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -182,5 +182,15 @@ describe('pnpm tier with a comment-only change in a deep file (#2352)', () => {
     git('commit', '-q', '-am', 'utf-8')
     git('branch', '-f', 'main', 'HEAD')
     expect(change({ [EVENTS]: 'export const x = 1 // b\n' }).tier).toBe('light')
+  })
+
+  it('throws when git cannot read a file, as when it is interrupted, rather than judge the file by its name', () => {
+    write(EVENTS, withComment()[EVENTS])
+    git('commit', '-q', '-am', 'a comment')
+    const blob = git('rev-parse', `top:${EVENTS}`)
+    const object = join(repo, '.git/objects', blob.slice(0, 2), blob.slice(2))
+    chmodSync(object, 0o644)
+    rmSync(object)
+    expect(() => tierOfChange({ root: repo, base: 'main', head: 'top' })).toThrow(`git cat-file blob ${blob}`)
   })
 })

@@ -2,7 +2,7 @@
 // again without reaching through a link into the checkout's own node_modules.
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { runTool } from './interrupts.mjs'
 
 export const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', LANG: 'C' }
@@ -165,13 +165,50 @@ export function removeWorktree(wt, root) {
   return null
 }
 
+/** Where a run keeps the heads of the open pull requests it fetched (runGuards, pre-pr.mjs): `<GUARD_REFS>/<run id>/<number>` */
+export const GUARD_REFS = 'refs/centralu-pre-pr-guards'
+
+/** The refs of the checkout at `root` under `prefix`; none when the checkout is gone */
+function refsUnder(root, prefix) {
+  try {
+    return git(root, ['for-each-ref', '--format=%(refname)', `${prefix}/`]).split('\n').filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function deleteRefs(root, refs) {
+  for (const ref of refs) {
+    try {
+      git(root, ['update-ref', '-d', ref])
+    } catch {
+      // gone already: a sweep and the run itself may both reach it
+    }
+  }
+}
+
+/** Deletes the guard refs of the run `runId`: the run itself when its guards are done, or whoever removes what it left */
+export const removeGuardRefs = (root, runId) => deleteRefs(root, refsUnder(root, `${GUARD_REFS}/${runId}`))
+
 /**
- * Takes a run's folder away: the links in each worktree first, then the worktree (through git, so
+ * Deletes the guard refs of every run whose folder is gone: a run killed after it fetched, whose folder was removed by
+ * hand. A run makes its folder before it fetches and removes its refs before its folder. Answers those runs' ids.
+ */
+export function sweepGuardRefs(root) {
+  const byRun = Map.groupBy(refsUnder(root, GUARD_REFS), (ref) => ref.slice(GUARD_REFS.length + 1).split('/')[0])
+  const gone = [...byRun.keys()].filter((id) => !existsSync(runDir(id)))
+  for (const id of gone) deleteRefs(root, byRun.get(id))
+  return gone
+}
+
+/**
+ * Takes a run away: its guard refs, then the links in each worktree, then the worktree (through git, so
  * the checkout forgets it), then the folder. Safe on a run that died halfway: it reads nothing but
- * the folder. Answers what it could not remove.
+ * the folder and the refs. Answers what it could not remove.
  */
 export function removeRun(dir, root) {
   const left = []
+  removeGuardRefs(root, basename(dir).slice(RUN_PREFIX.length))
   if (!existsSync(dir)) return left
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (!e.isDirectory() || !e.name.startsWith('wt-')) continue

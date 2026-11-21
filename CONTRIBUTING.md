@@ -392,8 +392,9 @@ not run; it prints each step's time as it goes. In that order:
   cycle, a layer rule);
 - `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references, the OS allowlist, the old name,
   the tiers' globs and more), at your head: they fail on a file your branch did not touch. A guard is declared there with the files
-  it reads. A tooling test that reads the repository (`git ls-files`, a recursive readdir, or the mark `pre-pr: guard` when it
-  reads it through a module) is declared there, or listed in its `NOT_GUARDS` with why; `tooling/guards.test.ts` fails otherwise;
+  it reads, and the names of its tests when not all of the file's are the guard. Every test under `tooling/` is named there once:
+  a guard holds the files of a folder, or of the repository, to a rule, and any other test is listed in `NOT_GUARDS` under why it
+  is not one; `tooling/guards.test.ts` fails on a test named nowhere;
 - `store-step`: a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
   that main already has or another open pull request adds (#1203): two parallel changes picking the
   same number each pass CI alone and clash when the second lands. It reads the open pull requests
@@ -410,7 +411,7 @@ not run; it prints each step's time as it goes. In that order:
   that loses a section, heading or anchor) is run against each other open, non-draft pull request, its head merged with your branch: a
   guard breaks another pull request through what that one adds, in files yours need not touch. A branch that changes
   no guard skips this check, with a line saying so. The ones it would fail are listed with the first line of the
-  failure. This never refuses: the list is printed and goes into **Verified**
+  failure: only a guard's own tests count, as at your head. This never refuses: the list is printed and goes into **Verified**
   (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
   merge cleanly with your branch, or whose lockfile (merged with yours) is not the one your checkout last installed
@@ -434,7 +435,8 @@ test that cannot fail without the change, and why), leave that check out with th
 `--exempt revert="<why>"` (or any other check above). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
 `skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted (Ctrl-C, Ctrl-Break), it knows it by
-how the tool it was running ended, removes its worktrees itself and exits 130; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
+how the tool it was running ended, removes its worktrees itself and exits 130; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`, which also deletes the pull request heads
+that any run whose folder is gone fetched for the guards). Do not
 delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees hold links to your checkout's
 `node_modules` (each workspace package's link points at the worktree's own copy, so `tsc` sees one
 declaration of each class), and a recursive delete may follow them.

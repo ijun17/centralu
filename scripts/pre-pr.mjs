@@ -50,7 +50,8 @@
 //   node scripts/pre-pr.mjs [--head <ref>] [--base <ref>] [--main <ref>] [--stack <ref>]... [--exempt <check>=<reason>]...
 //                           [--only <check>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--limit <seconds>]
 //                           [--guards-limit <seconds>]
-//   node scripts/pre-pr.mjs --cleanup <run-id>     removes what a run that was killed left behind
+//   node scripts/pre-pr.mjs --cleanup <run-id>     removes what a run that was killed left behind, and the guard refs of
+//                                                  any run whose folder is gone
 //
 // --head defaults to HEAD, --main to <remote>/main, --base (what the pull request merges into: a lower
 // pull request's branch in a stack) to main. Unless --no-fetch, the remote is fetched first. The heads of
@@ -65,7 +66,7 @@ import { join, posix, resolve } from 'node:path'
 import { endedByInterrupt, interruptsSoFar, runTool } from './interrupts.mjs'
 import { isMain } from './is-main.mjs'
 import { relFile, testKey } from './pre-pr-stop-reporter.mjs'
-import { ENV, canonical, git, mirrorModules, removeRun, removeWorktree, runDir, sweepStale, unlinkLinks } from './pre-pr-worktrees.mjs'
+import { ENV, GUARD_REFS, canonical, git, mirrorModules, removeGuardRefs, removeRun, removeWorktree, runDir, sweepGuardRefs, sweepStale, unlinkLinks } from './pre-pr-worktrees.mjs'
 import { tierOfChange, unjudged } from './tier.mjs'
 
 // --- What a path is ------------------------------------------------------------------------------
@@ -415,7 +416,7 @@ export const TOTAL_LIMIT_MS = 25 * 60_000
 export const PHASE_MIN_MS = 60_000
 
 /**
- * Runs `guards` (files of this branch) against each of `prs` (open, not the stack's own) with this branch
+ * Runs `guards` (as the head declares them: `{ test, tests }`) against each of `prs` (open, not the stack's own) with this branch
  * merged in: a commit of the pull request's head and `head`, made from a merge that did not conflict. Answers
  * `{ failing, skipped, unchecked }`; never throws for one pull request's trouble. `makeWorktree(commit)`
  * answers a worktree, or null when its dependencies would need an install. `needMs` is how long one run of the guards is known to
@@ -427,7 +428,7 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
   const skipped = []
   const unchecked = []
   const deadline = now() + limitMs
-  const space = `refs/centralu-pre-pr-guards/${runId}`
+  const space = `${GUARD_REFS}/${runId}`
   const ident = { GIT_AUTHOR_NAME: 'pre-pr', GIT_AUTHOR_EMAIL: 'pre-pr@localhost', GIT_COMMITTER_NAME: 'pre-pr', GIT_COMMITTER_EMAIL: 'pre-pr@localhost' }
   try {
     try {
@@ -459,16 +460,19 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
           skipped.push({ pr, why: `its lockfile with this branch merged in is not the one this checkout last installed (${INSTALLED_LOCK}), and a guard run installs nothing; a pnpm install here may change that` })
           continue
         }
-        const present = guards.filter((g) => existsSync(join(wt, g)))
+        const present = guards.filter((g) => existsSync(join(wt, g.test)))
         if (!present.length) continue
         log(`guards against #${pr.number}`)
         const timeoutMs = Math.max(1000, Math.min(perPrMs, deadline - now()))
-        const { report, timedOut } = runners.vitest(wt, present, { timeoutMs })
+        // Only the tests that are the guards, when each says which: one pattern for the run, so each file's are kept below
+        const testNamePattern = present.every((g) => g.tests) ? present.map((g) => g.tests).join('|') : undefined
+        const { report, timedOut } = runners.vitest(wt, present.map((g) => g.test), { timeoutMs, testNamePattern })
         if (!report) {
           skipped.push({ pr, why: noReport(timedOut, timeoutMs) })
           continue
         }
-        const fails = failuresOf(report, wt)
+        // A file that did not load fails every guard of it
+        const fails = failuresOf(report, wt).filter((f) => !f.name || present.some((g) => g.test === f.file && isGuardTest(g, f.name)))
         if (fails.length) failing.push({ pr, failures: fails })
       } catch (e) {
         if (String(e.message) === 'interrupted') throw e
@@ -478,16 +482,13 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
       }
     }
   } finally {
-    for (const pr of prs) {
-      try {
-        git(root, ['update-ref', '-d', `${space}/${pr.number}`])
-      } catch {
-        // never made, or already gone
-      }
-    }
+    removeGuardRefs(root, runId)
   }
   return { failing, skipped, unchecked }
 }
+
+/** Whether the test named `name` (ancestors and title, as {@link vitestTests} names it) is one of the guard `g`'s */
+const isGuardTest = (g, name) => !g.tests || new RegExp(g.tests).test(name)
 
 /** A failure of {@link failuresOf} as a line names it: its file, and its test when it has one. */
 const failureLabel = (f) => `${f.file}${f.name ? ` > ${f.name}` : ''}`
@@ -578,8 +579,7 @@ function repoGuardsStep(c) {
     for (const f of fails) c.findings.push({ check: 'repo-guards', message: `${failureLabel(f)} fails: ${f.detail.length > 1 ? `\n${f.detail.join('\n')}` : f.line}` })
     // A pattern that matches no test any more would pass in silence. By name: a test vitest filtered out and one skipped on this
     // system both read as skipped
-    const named = (t) => !g.tests || new RegExp(g.tests).test(t.name)
-    if (!vitestTests(report, c.top()).some(named)) {
+    if (!vitestTests(report, c.top()).some((t) => isGuardTest(g, t.name))) {
       c.findings.push({ check: 'repo-guards', message: `${g.test}${g.tests ? ` has no test named like "${g.tests}"` : ' ran no test'}: ${GUARDS_FILE} declares a guard that is not there.` })
     }
   }
@@ -732,7 +732,8 @@ function guardsStep(c) {
     c.warnings.push({ check: 'guards', message: `No guard was run against the open pull requests: ${declared.error}` })
     return
   }
-  const guards = declared.changed.filter((g) => existsAt(c.root, c.at.head, g))
+  const changed = (declared.guards ?? []).filter((g) => declared.changed.includes(g.test) && existsAt(c.root, c.at.head, g.test))
+  const guards = changed.map((g) => g.test)
   if (!guards.length) {
     c.notes.push(`No guard of ${GUARDS_FILE} (its test, or a file it reads) is changed: not run against the open pull requests.`)
     return
@@ -749,7 +750,7 @@ function guardsStep(c) {
   // How long the guards took in the revert check's run: the least one run of them needs
   const guardMs = c.revertReport ? filesRunMs(c.revertReport, c.top(), guards) : 0
   c.log(`Guard(s) ${guards.join(', ')}: against ${prs.length} open pull request(s), at most ${Math.round(guardsMs / 1000)} s`)
-  const res = runGuards({ root: c.root, remote: c.remote, runId: c.runId, runners: c.runners, prs, head: c.at.head, guards, makeWorktree: (commit) => c.worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, c.root), limitMs: guardsMs, now: c.now, log: c.log, check: c.check, needMs: guardMs, perPrMs: Math.max(GUARDS_PER_PR_MS, Math.ceil(guardMs * 1.5)) })
+  const res = runGuards({ root: c.root, remote: c.remote, runId: c.runId, runners: c.runners, prs, head: c.at.head, guards: changed, makeWorktree: (commit) => c.worktree(commit, { linkOnly: true }), dropWorktree: (wt) => removeWorktree(wt, c.root), limitMs: guardsMs, now: c.now, log: c.log, check: c.check, needMs: guardMs, perPrMs: Math.max(GUARDS_PER_PR_MS, Math.ceil(guardMs * 1.5)) })
   c.warnings.push(...guardWarnings(res, guards))
   c.notes.push(`${guards.join(', ')} run against ${prs.length} open pull request(s): ${res.failing.length} would fail, ${res.skipped.length} skipped, ${res.unchecked.length} not reached.`)
 }
@@ -1018,6 +1019,8 @@ function main() {
     if (o.cleanup !== undefined) {
       const root = resolve(git(process.cwd(), ['rev-parse', '--show-toplevel']).trim())
       const left = removeRun(runDir(o.cleanup), root)
+      // Also what runs killed earlier left without a folder to find it by
+      sweepGuardRefs(root)
       for (const l of left) console.error(`Left ${l}.`)
       process.exitCode = left.length ? 2 : 0
       return

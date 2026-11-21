@@ -5,9 +5,9 @@
  * every branch, and its guards check runs the ones a branch changes (the test, or a file it reads) against every other open pull
  * request. A guard is declared here with what it reads, each file named once, where its owner names it.
  *
- * A tooling test that reads the repository is in GUARDS or in NOT_GUARDS with why (tooling/guards.test.ts): one that runs
- * `git ls-files`, walks a folder with a recursive readdir, or carries the mark `pre-pr: guard`, which a test that reads the
- * repository through a module of its own carries. A declaration removed then fails until the test is named in one of the two.
+ * Every test under tooling/ is named once, in GUARDS or in NOT_GUARDS under why it is not one (tooling/guards.test.ts): a test
+ * is a guard when it holds the files of a folder, or of the repository, to a rule, so a file another pull request adds there
+ * can fail it. A new test, or a declaration removed, fails until it is named again.
  */
 import { losesTargets } from './doc-refs.js'
 import { OS_ALLOWLIST } from './os-layer.js'
@@ -47,7 +47,7 @@ export const GUARDS: readonly Guard[] = [
   },
   { test: 'tooling/desktop-permissions.test.ts', reads: [] },
   { test: 'tooling/e2e-browser-sandbox.test.ts', tests: 'every Playwright config under e2e', reads: [] },
-  { test: 'tooling/guards.test.ts', tests: 'reads the repository', reads: ['tooling/guards.ts'] },
+  { test: 'tooling/guards.test.ts', tests: 'names every tooling test', reads: ['tooling/guards.ts'] },
   {
     test: 'tooling/project-board-queue.test.ts',
     tests: 'names files and commands that exist',
@@ -56,15 +56,130 @@ export const GUARDS: readonly Guard[] = [
   },
   { test: 'tooling/styles.test.ts', tests: 'borders are solid tokens|our own classes are actually used', reads: [] },
   { test: 'tooling/tier.test.ts', tests: 'matches every glob', reads: [TIER_RULES, 'scripts/tier.mjs'] },
+  { test: 'tooling/actions-pinned.test.ts', reads: [] },
+  { test: 'tooling/e2e-webkit-twins.test.ts', reads: [] },
+  { test: 'tooling/workflow-runners.test.ts', reads: [] },
+  // The format each list of the folder is held to
+  { test: 'tooling/type-aware-lint.test.ts', tests: 'keeps every list sorted', reads: ['tooling/lint-allowlist.ts'] },
+  // The platforms the folder's host-only packages are held to
+  { test: 'tooling/host-package.test.ts', tests: 'is exactly the platforms', reads: ['packaging/remote-runtime.json'] },
+  // Each exception names a tracked file: another pull request that deletes or renames one fails it
+  { test: 'tooling/guards-checks.test.ts', tests: 'has exceptions that only shrink', reads: ['tooling/guard-exceptions.js'] },
+  // The modules the app's build reaches from its entries, held to what may load first and to the calls left out of what ships
+  { test: 'tooling/startup-bundle.test.ts', reads: ['tooling/window-build.test-helpers.ts'] },
+  { test: 'tooling/pure-calls.test.ts', tests: 'the window bundle', reads: ['tooling/pure-calls.mjs', 'tooling/window-build.test-helpers.ts'] },
 ]
 
-/** The tooling tests that read the repository and are not guards, each with why: what another pull request adds cannot fail them */
-export const NOT_GUARDS: Readonly<Record<string, string>> = Object.fromEntries(
-  ['tooling/guards-checks.test.ts', 'tooling/test-data-dir-checks.test.ts', 'tooling/test-time-limits-checks.test.ts'].map((t) => [
-    t,
-    'lists the tracked files only to check that each exception of its lint rule names one; lint holds every file to the rule',
-  ]),
-)
+/** The tests under tooling/ that are not guards, by why: no file another pull request adds is held to a rule of theirs */
+export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
+  'lists no folder of the repository: it tests code it imports, on inputs it makes and files it names': [
+    'tooling/agent-adapter-checks.test.ts',
+    'tooling/app-theme.test.ts',
+    'tooling/apt-install.test.ts',
+    'tooling/boundaries.test.ts',
+    'tooling/browser-bootstrap.test.ts',
+    'tooling/bundle-budget.test.ts',
+    'tooling/bundle-out.test.ts',
+    'tooling/bundle-stage.test.ts',
+    'tooling/claude-permission-probe.test.ts',
+    'tooling/codex-agent-card.test.ts',
+    'tooling/conpty-files.test.ts',
+    'tooling/content-manifest.test.ts',
+    'tooling/dependency-cruiser.test.ts',
+    'tooling/desktop-csp.test.ts',
+    'tooling/dev-live.test.ts',
+    'tooling/drift-workflow.test.ts',
+    'tooling/e2e-engine.test.ts',
+    'tooling/e2e-flaky-report.test.ts',
+    'tooling/e2e-host-fixture.test.ts',
+    'tooling/e2e-lock.test.ts',
+    'tooling/e2e-warm-engine.test.ts',
+    'tooling/e2e-web-server.test.ts',
+    'tooling/engines.test.ts',
+    'tooling/fake-gh.test.ts',
+    'tooling/first-paint.test.ts',
+    'tooling/free-port.test.ts',
+    'tooling/guards-ts-checks.test.ts',
+    'tooling/heavy-store.test.ts',
+    'tooling/icon-check.test.ts',
+    'tooling/icon-studio.test.ts',
+    'tooling/keeper-executable.test.ts',
+    'tooling/keeper-shutdown-bound.test.ts',
+    'tooling/keeper-test-processes.test.ts',
+    'tooling/key-pairing-vector.test.ts',
+    'tooling/launcher-autostart.test.ts',
+    'tooling/launcher-cmd.test.ts',
+    'tooling/launcher-install.test.ts',
+    'tooling/launcher-keys.test.ts',
+    'tooling/launcher-node-floor.test.ts',
+    'tooling/launcher-platform.test.ts',
+    'tooling/launcher-semver.test.ts',
+    'tooling/launcher-serve.test.ts',
+    'tooling/launcher-swap.test.ts',
+    'tooling/launcher-switch.test.ts',
+    'tooling/lint-allowlist.test.ts',
+    'tooling/lint-ceiling.test.ts',
+    'tooling/macos-minos.test.ts',
+    'tooling/mail-mock-parity.test.ts',
+    'tooling/mock-capability-parity.test.ts',
+    'tooling/node-pin.test.ts',
+    'tooling/npm-protocol-version.test.ts',
+    'tooling/platform-checks.test.ts',
+    'tooling/pre-pr-worktrees.test.ts',
+    'tooling/project-board-app.test.ts',
+    'tooling/project-board-ci.test.ts',
+    'tooling/project-board-code-age.test.ts',
+    'tooling/project-board-queue-batches.test.ts',
+    'tooling/project-board-queue-conflicts.test.ts',
+    'tooling/project-board-queue-guard.test.ts',
+    'tooling/project-board-queue-integrate.test.ts',
+    'tooling/project-board-queue-model.test.ts',
+    'tooling/project-board-queue-screen.test.ts',
+    'tooling/project-board-risk.test.ts',
+    'tooling/project-board-system.test.ts',
+    'tooling/project-board-wait-checks.test.ts',
+    'tooling/project-board-wait-policy.test.ts',
+    'tooling/release-guard.test.ts',
+    'tooling/release-registry.test.ts',
+    'tooling/release-workflow.test.ts',
+    'tooling/remove-tree.test.ts',
+    'tooling/rpc-recovery.test.ts',
+    'tooling/runner-sandbox.test.ts',
+    'tooling/screen-protocol-rules.test.ts',
+    'tooling/shell-bundle.test.ts',
+    'tooling/shell-release-workflow.test.ts',
+    'tooling/smoke-processes.test.ts',
+    'tooling/stop-leftover-apt.test.ts',
+    'tooling/surface-drift.test.ts',
+    'tooling/test-timing.test.ts',
+    'tooling/tier-comment-only.test.ts',
+    'tooling/ux-engine.test.ts',
+    'tooling/ux-klm.test.ts',
+    'tooling/vitest-data-dir.test.ts',
+    'tooling/vitest-stall-watch.test.ts',
+    'tooling/vitest-tmp-root.test.ts',
+  ],
+  "lists the tracked files only to check that each exception of its lint rule names one, and the rule's ceiling is no exception": [
+    'tooling/test-data-dir-checks.test.ts',
+    'tooling/test-time-limits-checks.test.ts',
+  ],
+  'lists packaging/npm only to copy or serve what the code under test reads there, which lists the same folder': [
+    'tooling/local-update.test.ts',
+    'tooling/project-board-release.test.ts',
+    'tooling/stamp-version.test.ts',
+  ],
+  "lists the board app's folder only to see that the tool run it tests wrote no data file there": [
+    'tooling/project-board-contribute.test.ts',
+    'tooling/project-board-reader.test.ts',
+  ],
+  "reads tooling/guards.ts through the reader it tests, which takes every guard as changed from the empty tree whatever else is there": ['tooling/pre-pr.test.ts'],
+  'a fixture: a tooling test runs it in a vitest of its own': [
+    'tooling/fixtures/leak/leak-probe.test.ts',
+    'tooling/fixtures/listed/inner.test.ts',
+    'tooling/fixtures/listed/outer.test.ts',
+    'tooling/fixtures/stall/stall-probe.test.ts',
+  ],
+}
 
 /** A file a branch changes: its path, and its text before and after (null where there is no file), read when asked */
 export interface Change {

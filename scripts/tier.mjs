@@ -388,10 +388,12 @@ function commentOnlyPaths(root, entries, rules) {
   const ts = judged.length ? typescriptAt(root) : null
   if (!ts) return new Set()
   const utf8 = new TextDecoder('utf-8', { fatal: true })
-  // as text only when it is UTF-8: two bytes that both decode to U+FFFD would look alike
+  // as text only when it is UTF-8: two bytes that both decode to U+FFFD would look alike. A git that fails, an
+  // interrupted one too, throws: tierOfChange's callers answer that as deep, or stop on the interrupt
   const text = (sha) => {
+    const bytes = execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
     try {
-      return utf8.decode(execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }))
+      return utf8.decode(bytes)
     } catch {
       return null
     }

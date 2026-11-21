@@ -5,8 +5,6 @@
  *
  * The rule is checked on virtual paths, as platform-checks.test.ts does, so no file is created; the selection is
  * checked on virtual files laid over the repository (`osSelector`).
- *
- * pre-pr: guard (it reads every tracked file through repoFiles, tooling/os-tests.ts)
  */
 import { execFile, execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
