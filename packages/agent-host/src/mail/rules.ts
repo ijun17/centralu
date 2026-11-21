@@ -321,3 +321,12 @@ export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind
 export function hash16(parts: readonly string[]): string {
   return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 16)
 }
+
+/**
+ * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
+ * a task only by a reply marked as its answer that asks nothing back. Any other reply to a task is a message in its thread, and the task stays open, so
+ * the last response at rest still answers it: an early "On it" closes nothing
+ */
+export function replyAnswers(target: Pick<MailRow, 'kind' | 'needsReply'>, reply: { needsReply: boolean; answer?: boolean }): boolean {
+  return target.kind === 'task' ? reply.answer === true && !reply.needsReply : target.kind === 'message' && target.needsReply
+}

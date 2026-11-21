@@ -147,6 +147,9 @@ three. This round kept them as they are; §6 has the answer.
 (`delivery.ts`, `person.ts`, `tool.ts`, `delegation.ts`, `host-mail.ts`) would hold the modules.
 #1948 (one channel) and the cross-host mail of #2067 change these same lines: the split waits until #2067 has landed,
 and no module here is shaped for it.
+Moved so far: `held-mail.ts` (`HeldMail`, `MessageService.holds`) with the person's acts on held mail: `dismissProject`,
+`trustChanged` and `resumeHeld`, and `replyAnswers` into `rules.ts`, which both read. The delivery-state writes
+(`resendHeld`, `hold`, `dismissHeld`) are still in `MessageService`.
 
 ## 3. `sessions/remote-agents.ts` (1,560 lines)
 

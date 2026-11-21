@@ -386,12 +386,12 @@ export class MailPerson {
     if (target.threadId === undefined) return
     const roots = new Set(this.rootsOf(target.threadId))
     const ids = new Set(this.records.heldRows().flatMap((r) => (r.held === 'loop' && roots.has(this.records.message(r.messageId)?.rootId ?? '') ? [r.messageId] : [])))
-    for (const id of ids) this.service.resumeHeld(id)
+    for (const id of ids) this.service.holds.resumeHeld(id)
   }
 
   /** The person trusted a project (§7.4): what its sessions sent that was held for it goes, in order, and the callers refused are told */
   trusted(projectId: string): void {
-    for (const address of this.service.trustChanged(projectId)) {
+    for (const address of this.service.holds.trustChanged(projectId)) {
       const party = parseAddress(address)
       if (party?.kind === 'session') this.delivery.poke(party.sessionId)
     }
@@ -400,7 +400,7 @@ export class MailPerson {
 
   /** A project was deleted: the mail held for its trust is dropped and its senders are told, naming it as it was named (§7.4) */
   projectDeleted(projectId: string, name: string): void {
-    this.service.dismissProject(projectId, name)
+    this.service.holds.dismissProject(projectId, name)
     this.service.announce()
   }
 

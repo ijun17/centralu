@@ -253,7 +253,7 @@ describe('the one hold (D12)', () => {
     expect(w.records.refusedRecords('px')).toHaveLength(3)
 
     w.projects.set('px', { trusted: true, name: 'Pex' })
-    expect(w.mail.trustChanged('px').sort()).toEqual([X, Y])
+    expect(w.mail.holds.trustChanged('px').sort()).toEqual([X, Y])
     expect(w.records.refusedRecords('px')).toEqual([])
     const told = w.records.pendingFor(X, w.clock.t + 10_000)
     expect(told).toHaveLength(1)
@@ -273,7 +273,7 @@ describe('the one hold (D12)', () => {
     expect(messagesTo(C)).toEqual([])
 
     w.projects.set('px', { trusted: true })
-    expect(w.mail.trustChanged('px').sort()).toEqual([C, ORC].sort())
+    expect(w.mail.holds.trustChanged('px').sort()).toEqual([C, ORC].sort())
     expect(messagesTo(C).map((p) => p.message.id)).toEqual([one.id, answer.id, two.id])
     expect(w.rowOf(two.id, ORC).held).toBeNull()
     expect(w.rowOf(q.id, X)).toMatchObject({ settled: 'answered', answerId: answer.id })
@@ -299,7 +299,7 @@ describe('the one hold (D12)', () => {
     )
 
     // Dismissed: the answer is gone and the question is open again
-    expect(w.mail.dismissProject('px')).toMatchObject({ rows: 1, senders: [X] })
+    expect(w.mail.holds.dismissProject('px')).toMatchObject({ rows: 1, senders: [X] })
     expect(w.rowOf(q.id, X)).toMatchObject({ settled: null, answerId: null })
     expect(w.records.message(answer.message.id)).toBeUndefined()
 
@@ -307,7 +307,7 @@ describe('the one hold (D12)', () => {
     const q2 = w.send(A, { to: [X], text: 'another question' }).message
     const a2 = w.send(X, { replyTo: q2.id, text: 'another answer' }).message
     w.projects.set('px', { trusted: true })
-    w.mail.trustChanged('px')
+    w.mail.holds.trustChanged('px')
     expect(w.rowOf(q2.id, X)).toMatchObject({ settled: 'answered', answerId: a2.id })
   })
 
@@ -319,7 +319,7 @@ describe('the one hold (D12)', () => {
     w.mail.refused('x', { tool: 'start_agent', target: 'session c', firstLine: 'build', projectId: 'px' })
     w.send(A, { to: [B], text: 'unrelated' })
 
-    const out = w.mail.dismissProject('px')
+    const out = w.mail.holds.dismissProject('px')
     expect(out.rows).toBe(3)
     expect(out.senders.sort()).toEqual([X, Y])
     expect(w.records.message(alone.id)).toBeUndefined()
@@ -333,7 +333,7 @@ describe('the one hold (D12)', () => {
     expect(toY).toHaveLength(1)
     expect(toY[0]?.message.body).toBe(`The person dismissed 2 of your messages that were waiting for project Pex to be trusted (${shared.id}, ${another.id}). They were not delivered and will not be.`)
     // A second dismissal tells nobody again
-    expect(w.mail.dismissProject('px')).toEqual({ rows: 0, senders: [] })
+    expect(w.mail.holds.dismissProject('px')).toEqual({ rows: 0, senders: [] })
     expect(w.records.pendingFor(Y, w.clock.t + 10_000)).toHaveLength(1)
   })
 
@@ -414,10 +414,10 @@ describe('cause and clarifications (D9, §9.7)', () => {
     // As the earlier build left it: the row held, the question open with the answer's id
     w.records.hold(A, [answer.id], 'loop')
     w.db.prepare(`UPDATE mail_recipients SET settled = NULL, settled_at = NULL WHERE message_id = ? AND recipient = ?`).run(q.id, B)
-    expect(w.mail.resumeHeld(answer.id)).toBe(1)
+    expect(w.mail.holds.resumeHeld(answer.id)).toBe(1)
     expect(w.rowOf(answer.id, A).held).toBe('released')
     expect(w.rowOf(q.id, B)).toMatchObject({ settled: 'answered', answerId: answer.id })
-    expect(w.mail.resumeHeld(answer.id)).toBe(0)
+    expect(w.mail.holds.resumeHeld(answer.id)).toBe(0)
   })
 
   it('a message caused by a task from its recipient is stored with clarifies and is no request; the owner’s answer to it is stored as a task with reply_to', () => {
@@ -475,7 +475,7 @@ describe('cause and clarifications (D9, §9.7)', () => {
     const answer = w.send(X, { replyTo: done.id, text: 'second job done', answer: true }).message
     expect([w.rowOf(early.id, X), w.rowOf(done.id, X)]).toEqual([expect.objectContaining({ settled: null, answerId: null }), expect.objectContaining({ settled: null, answerId: answer.id })])
     w.projects.set('px', { trusted: true })
-    w.mail.trustChanged('px')
+    w.mail.holds.trustChanged('px')
     expect(w.rowOf(early.id, X).settled).toBeNull()
     expect(w.rowOf(done.id, X)).toMatchObject({ settled: 'answered', answerId: answer.id })
   })
@@ -800,7 +800,7 @@ describe('what the deep review of #1899 found', () => {
   it('dismissProject counts a message once, whatever the number of rows it was held in', () => {
     const w = world()
     const m = w.send(X, { to: [A, B, C], text: 'to three' }).message
-    expect(w.mail.dismissProject('px')).toEqual({ rows: 3, senders: [X] })
+    expect(w.mail.holds.dismissProject('px')).toEqual({ rows: 3, senders: [X] })
     const notice = w.records.pendingFor(X, w.clock.t + 10_000)[0]
     expect(notice?.message.body).toBe(`The person dismissed 1 of your messages that were waiting for project Pex to be trusted (${m.id}). They were not delivered and will not be.`)
   })
@@ -816,7 +816,7 @@ describe('what the deep review of #1899 found', () => {
     expect(w.rowOf(q.id, X)).toMatchObject({ settled: null, answerId: answer.message.id })
 
     w.projects.set('px', { trusted: true })
-    expect(w.mail.trustChanged('px')).toEqual([A])
+    expect(w.mail.holds.trustChanged('px')).toEqual([A])
     expect(w.rowOf(answer.message.id, A).held).toBeNull()
     expect(w.rowOf(q.id, X)).toMatchObject({ settled: 'answered' })
   })
