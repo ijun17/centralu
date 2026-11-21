@@ -167,6 +167,8 @@ describe('every id printed reads back as the session it names (`shown`, then `re
     for (const r of [machine, twoHubs]) {
       expect(printed.map((p) => r.ref('a', p))).toEqual([{ address: `session:${HOST}/h1` }, { word: 'b', here: [here('b', 'beta')] }, { address: `session:${HOST}/m2.x` }])
     }
+    // And the forms older builds printed, under the hub's id
+    expect([`${HOST}.h1`, `${HOST}.m2.x`].map((t) => machine.ref('a', t))).toEqual([{ address: `session:${HOST}/h1` }, { address: `session:${HOST}/m2.x` }])
   })
 
   it('on a host that is a machine of one hub and a hub of its own machines: no id names the other side of either', () => {
@@ -177,10 +179,6 @@ describe('every id printed reads back as the session it names (`shown`, then `re
     expect(addresses.slice(0, 3).map((a) => both.ref('a', both.shown(a)))).toEqual(addresses.slice(0, 3).map((address) => ({ address })))
     // The hub's own text names its session under the label it offers: read here as this host's machine studio, where no such session is
     expect(both.ref('a', 'studio.h1')).toEqual({ address: `session:${M}/studio.h1` })
-  })
-
-  it('reads the hub-id forms older builds printed as that hub', () => {
-    expect([`${HOST}.h1`, `${HOST}.m2.x`].map((t) => machine.ref('a', t))).toEqual([{ address: `session:${HOST}/h1` }, { address: `session:${HOST}/m2.x` }])
   })
 
   it("finds a linked machine's session whose name is shaped like an address by that name, as one here", () => {
