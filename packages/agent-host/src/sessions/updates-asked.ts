@@ -90,7 +90,7 @@ export class UpdatesAsked {
         uncarded = true
         return null
       }
-      // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
+      // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665)
       const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
       if (decision === 'always') this.updateApplyConsents.add(sessionId)
       else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'

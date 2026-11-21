@@ -36,7 +36,7 @@ export type RemoteAgent = {
   /** The branch of the worktree it was started in there, if one */
   worktree?: string
   /**
-   * The preset the machine started it under (#1273 review): a send is refused once the caller has less, as a local
+   * The preset the machine started it under (#1273): a send is refused once the caller has less, as a local
    * child's is (`agent-session-actions.ts`). Absent from a record made before #1273, when it was `normal` at most
    */
   preset?: PermissionPreset
@@ -51,7 +51,7 @@ type StoredRemoteAgent = RemoteAgent & { owed?: unknown; whose?: unknown; given?
 const LEGACY = ['owed', 'whose', 'given', 'queued', 'sent', 'turn'] as const
 
 /**
- * How long a start waits for the machine to say its instructions for agents now (#1161 review), once the child is made
+ * How long a start waits for the machine to say its instructions for agents now (#1161), once the child is made
  * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
  */
 export const INSTRUCTIONS_WAIT_MS = 5_000
@@ -59,7 +59,7 @@ export const INSTRUCTIONS_WAIT_MS = 5_000
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
 
-/** An at-rest child's answer when no report on a task of the caller's came back: nothing of a turn that was not the caller's is read (#1038 review) */
+/** An at-rest child's answer when no report on a task of the caller's came back: nothing of a turn that was not the caller's is read (#1038) */
 const NOTHING_REPORTED = '(no report on a task you gave it has come back)'
 
 /** What a start on a machine that takes no work from this hub says to do (#1948 step 6) */
@@ -93,7 +93,7 @@ export type AgentPlaces = {
  * names the machine. Its work goes as mail (#1948 step 6, docs/plans/mailbox.md §10.6): a start and each send are a task
  * across the link, which that machine's delivery gives the child (held while it is busy) and its engine reports; the
  * report comes back answering the task here, as a local child's does, and a call that waits reads it. Whose a turn there
- * is, is that machine's to say: nothing here reads the person's own turns on it (#1038 review, RV13).
+ * is, is that machine's to say: nothing here reads the person's own turns on it (#1038, RV13).
  */
 export class RemoteAgents {
   /** Whether a machine takes this hub's tasks (`LinkedMachineConnection.takesTasks`, #1948 step 6). Set by main.ts */
@@ -146,7 +146,7 @@ export class RemoteAgents {
   /**
    * The caller's children on linked machines, as agent_session list shows them (#690), each with its machine and the
    * state that machine reports (as last known when it cannot be asked): a state word, nothing of any turn. One gone from
-   * its machine, or whose machine was removed, is dropped from the record here (#1038 review).
+   * its machine, or whose machine was removed, is dropped from the record here (#1038).
    */
   async rows(callerId: string): Promise<AgentListRow[]> {
     const mine = this.records().filter((r) => r.callerId === callerId)
@@ -160,7 +160,7 @@ export class RemoteAgents {
         continue
       }
       const there = listed?.find((s) => s.sessionId === r.sessionId)
-      // Its machine's row as a child here reads (`agentLook`), with the tasks its machine relays (#2146 review)
+      // Its machine's row as a child here reads (`agentLook`), with the tasks its machine relays (#2146)
       const state: AgentListRow['state'] = there
         ? agentLook({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption })
         : this.openTask(r) ? 'working' : 'finished'
@@ -171,7 +171,7 @@ export class RemoteAgents {
 
   /**
    * How many children the project's sessions started on linked machines are working now (#1038): a task their caller gave is open (not reported,
-   * withdrawn or released). A removed machine's child is out of reach for good, and holds no place (#1038 review)
+   * withdrawn or released). A removed machine's child is out of reach for good, and holds no place (#1038)
    */
   workingIn(projectId: string): number {
     const mine = this.records().filter((r) => this.host.meta.get(r.callerId)?.projectId === projectId)
@@ -181,7 +181,7 @@ export class RemoteAgents {
   }
 
   /**
-   * The caller is gone (trashed): its children's records go (#1038 review). Each stays on its machine, and goes back to that machine's project in
+   * The caller is gone (trashed): its children's records go (#1038). Each stays on its machine, and goes back to that machine's project in
    * the sidebar
    */
   forgetCaller(callerId: string): void {
@@ -256,7 +256,7 @@ export class RemoteAgents {
     }
     const name = given ?? (branch ? undefined : agentName(basis))
     /*
-     * Decided from the caller as it is now, after every wait above (#1273 review): a caller that left `auto` while the
+     * Decided from the caller as it is now, after every wait above (#1273): a caller that left `auto` while the
      * machine was asked gets its own preset's card and child, never the `auto` it no longer has
      */
     const callerNow = this.callerPreset(callerId)
@@ -276,7 +276,7 @@ export class RemoteAgents {
       ...(there && !there.auto ? { autoWithheld: there.withheld } : {}),
     }
     /*
-     * Asked each time (#1038 review), with no "always": nothing is remembered for another machine. Except for an `auto`
+     * Asked each time (#1038), with no "always": nothing is remembered for another machine. Except for an `auto`
      * caller whose child runs `auto` there too (owner decision 2026-10-19, #1273): the person let this session act
      * without asking, and that machine's own switch lets a linked computer's `auto` reach it. A `normal` or `safe`
      * caller, or a machine whose switch is off or that cannot take `auto`, is asked
@@ -304,7 +304,7 @@ export class RemoteAgents {
     if (decision === null || ctl.signal.aborted || signal?.aborted) {
       return { ok: false, error: signal?.aborted ? 'The call was withdrawn before the session was created, so none was.' : `No session was created: the question to the person was withdrawn or not answered in time. ${ASK_THE_PERSON}` }
     }
-    // The caller's preset may have changed while the card stood: never a child above it (#1273 review)
+    // The caller's preset may have changed while the card stood: never a child above it (#1273)
     const lowered = this.loweredError(callerId, preset, `so nothing was started on ${machine.name}`)
     if (lowered) return { ok: false, error: lowered }
     // A place is held from here until the child counts (its task open), so starts at once cannot pass the ceiling together
@@ -351,7 +351,7 @@ export class RemoteAgents {
      * since. A `normal` child there is what the card is for, so the one made is deleted unstarted (no task was sent)
      */
     const childPreset: PermissionPreset = made.preset ?? remotePreset(c.preset)
-    // Read again now: the caller's preset may have dropped while the machine made it (#1273 review)
+    // Read again now: the caller's preset may have dropped while the machine made it (#1273)
     const above = !presetWithin(childPreset, this.callerPreset(callerId))
     if (above || (unasked && childPreset !== 'auto')) {
       const why = above
@@ -366,7 +366,7 @@ export class RemoteAgents {
     const label = labelOf(this.host.store.messages, caller)
     /*
      * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
-     * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
+     * (#1161): the card may have stood a while, and a machine connected on demand was listed from its mirror
      */
     const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target))
     const rec: RemoteAgent = {
@@ -385,9 +385,9 @@ export class RemoteAgents {
       // Where its worktree forked from, as the machine said (#1488); a machine from before it says nothing
       made.worktreeBase ?? '',
       model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : '',
-      // Not passed across (#1038 review): said, rather than dropped without a word
+      // Not passed across (#1038): said, rather than dropped without a word
       opts.lsp ? `lsp is not passed to another machine: it starts as ${machine.name} starts a session` : '',
-      // As the machine started it: a switch turned off after its answer leaves a carded start under normal (#1273 review)
+      // As the machine started it: a switch turned off after its answer leaves a carded start under normal (#1273)
       there ? autoNotice(machine.name, there.auto && childPreset !== 'auto' ? { auto: false, withheld: 'machine_off' } : there) : '',
     ].filter(Boolean).join('; ') || undefined
     const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
@@ -403,7 +403,7 @@ export class RemoteAgents {
 
   /**
    * The instructions of the machine's copy of the project as it has them now (#1161 item 2), or as it listed them
-   * before the card when it cannot say (#1161 review): a reader without the read, one that fails or throws, one that
+   * before the card when it cannot say (#1161): a reader without the read, one that fails or throws, one that
    * does not answer within `INSTRUCTIONS_WAIT_MS`. Never a reason the start stops; a machine that predates them listed
    * none, so its child starts without them, as it did before.
    */
@@ -451,7 +451,7 @@ export class RemoteAgents {
         return { ok: true, state: 'at_rest', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: this.host.linkedTasks?.lastAnswer(callerId, rec.sessionId) ?? NOTHING_REPORTED, sessionState: now.state }
       }
       case 'send': {
-        // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)
+        // Never work for a child above its caller (#1273), as a local child's send (agent-session-actions.ts)
         const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
         if (above) return { ok: false, error: above }
         const refused = this.gateError(callerId)
@@ -470,7 +470,7 @@ export class RemoteAgents {
         return { ok: true, state: 'stopped', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
       }
       case 'delete': {
-        // Gone already (#1038 review): deleted there, or its machine removed, while the hub could not see it
+        // Gone already (#1038): deleted there, or its machine removed, while the hub could not see it
         const listed = await reader.list().catch(() => null)
         if (listed && this.gone(rec, reader, listed)) {
           this.forget(rec.sessionId)
@@ -595,7 +595,7 @@ export class RemoteAgents {
   }
 
   /**
-   * Whether the child is no longer anywhere (#1038 review): its machine removed from Centralu, or the machine's sessions
+   * Whether the child is no longer anywhere (#1038): its machine removed from Centralu, or the machine's sessions
    * (read now, or as last known when it cannot be asked) do not have it
    */
   private gone(rec: RemoteAgent, reader: LinkedSessions, listed: readonly OrchestratedSession[]): boolean {
@@ -649,7 +649,7 @@ export class RemoteAgents {
   // ── The link ────────────────────────────────────────────────────────────────────────────
 
   /**
-   * A machine's link is up again, or the machine was removed (the hub's resync of it): a child gone from it is forgotten (#1038 review), and holds
+   * A machine's link is up again, or the machine was removed (the hub's resync of it): a child gone from it is forgotten (#1038), and holds
    * no place under the ceiling. Read as `list` reads it; not at all if it cannot be read
    */
   private async caughtUp(machineId: unknown): Promise<void> {
@@ -707,7 +707,7 @@ export class RemoteAgents {
     return this.host.meta.get(callerId)?.permissionPreset ?? 'safe'
   }
 
-  /** Why a start stops when the caller's preset fell below the child's while it went on (#1273 review), or null */
+  /** Why a start stops when the caller's preset fell below the child's while it went on (#1273), or null */
   private loweredError(callerId: string, preset: PermissionPreset, what: string): string | null {
     const now = this.callerPreset(callerId)
     return presetWithin(preset, now) ? null : `This session now runs under ${now}, below the ${preset} the child would have run under, ${what}. Start it again if it is still wanted. ${ASK_THE_PERSON}`

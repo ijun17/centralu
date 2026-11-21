@@ -161,8 +161,8 @@ describe('session lifecycle', () => {
   })
 
   /*
-   * A rename must never fail while the UI shows a success face (issue #5). It used to silently
-   * return when the session did not exist, and the RPC still answered {ok:true}.
+   * A rename must never fail while the UI shows a success face (issue #5). It must not silently return when the session does
+   * not exist while the RPC still answers {ok:true}.
    */
   it('renaming a nonexistent session comes back as a failure', async () => {
     await expect(rpc('sessions.rename', { sessionId: 'nope', name: 'My session' })).rejects.toThrow(/not found/i)
@@ -312,8 +312,7 @@ describe('automatic continuation', () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // The state after a host restart: the record and external_id exist, only the process is missing.
-    // Bring down only the process (the same state as a host restart) — this used to be produced by
-    // archive/restore.
+    // Bring down only the process (the same state as a host restart)
     await mgr.tenure.disposeAll()
     expect(mgr.isLive(s.id)).toBe(false)
 
@@ -334,8 +333,7 @@ describe('automatic continuation', () => {
   it('when it truly cannot resume, it throws a reason instead of swallowing it silently', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    // Bring down only the process (the same state as a host restart) — this used to be produced by
-    // archive/restore.
+    // Bring down only the process (the same state as a host restart)
     await mgr.tenure.disposeAll()
     // A situation where the tool itself fails to start.
     adapter.failCreate = 'Could not start the tool'
@@ -381,7 +379,7 @@ describe('a settings change actually takes effect', () => {
   })
 
   /*
-   * #659 review: the Assistant's settings tool on a linked machine reaches that machine's `agents.updateSettings`.
+   * #659: the Assistant's settings tool on a linked machine reaches that machine's `agents.updateSettings`.
    * Without its origin the machine announced the change as a person's, and the hub's window raised no toast.
    */
   it("announces a change as the Assistant's when the call says so, with no person flag (#659)", async () => {
@@ -490,8 +488,7 @@ describe('a settings change actually takes effect', () => {
     const s = (await rpc('agents.createSession', {
       projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal',
     })) as { id: string }
-    // Bring down only the process (the same state as a host restart) — this used to be produced by
-    // archive/restore.
+    // Bring down only the process (the same state as a host restart)
     await mgr.tenure.disposeAll()
 
     await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
@@ -971,12 +968,10 @@ describe('while-alive facts are carried in the list', () => {
 })
 
 /**
- * Deleting the tool's own original too (dogfooding: "actually delete it").
- *
- * Our delete used to clear only our DB, leaving the codex rollout (measured at 550MB) and claude
- * JSONL behind. deleteExternal removes the original only when the person explicitly checks the
- * box. Order is the contract: if deleting the original fails, our side is not deleted either —
- * because the worst outcome is answering "deleted" while the original survives.
+ * Deleting the tool's own original too (dogfooding: "actually delete it"). Our delete clears only our DB unless the person
+ * checks the box; deleteExternal then also removes the codex rollout (measured at 550MB) and claude JSONL. Order is the
+ * contract: if deleting the original fails, our side is not deleted either — because the worst outcome is answering "deleted"
+ * while the original survives.
  */
 describe("deleting the tool's own original too (deleteExternal)", () => {
   class ExternallyDeletableAdapter extends FakeAdapter {

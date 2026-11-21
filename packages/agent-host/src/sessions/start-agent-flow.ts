@@ -107,20 +107,16 @@ export class AgentStartFlow {
   }
 
   /**
-   * start_agent (#561): an ordinary session starts another agent (Claude or Codex) in its own project on a task.
-   *
-   *   1. Who may: an ordinary session of a trusted project (the rule ask_project and attach_app follow, #382), and
-   *      not one as deep below a session the person started as the agent depth allows (#867, `agentDepthRefusal`;
-   *      1 by default, so only the person's own sessions start agents). No preset opens it, `auto` included.
+   * start_agent (#561): an ordinary session starts another agent in its own project on a task.
+   *   1. Who may: an ordinary session of a trusted project (#382), not one deeper below a session the person started than the
+   *      agent depth allows (#867, `agentDepthRefusal`; 1 by default: only the person's own sessions). No preset opens it, `auto` too.
    *   2. How many: at most `AGENT_CEILING` children run at once in a project, over all its sessions.
-   *   3. The person's consent (`ensureAgentConsent`): the project's trust for a `normal` caller (#673); otherwise a
-   *      card, answered once, always for this session, or always for this project.
-   *   4. The child: a visible session in the caller's folder, marked `askedBy` the caller, on the tool, model and
-   *      effort asked for (or the project's own, as a session the person opens there), under **the caller's own
-   *      permission preset**: never more than the caller has, and nothing the caller can change afterwards.
-   *   5. The task goes in a frame (`agentFrame`) recorded as sent by the caller, and the call waits on the turn the
-   *      way ask_project does (`AgentRunWait`, `ASK_WAIT_MS`). With `wait: false`, or past the bound, it answers
-   *      "working" and the caller is told when the turn ends (the reportBack path); agent_session waits again.
+   *   3. The person's consent (`ensureAgentConsent`): the project's trust for a `normal` caller (#673), else a card, answered
+   *      once, always for this session, or always for this project.
+   *   4. The child: a visible session in the caller's folder, marked `askedBy` the caller, on the tool, model and effort asked
+   *      for (or the project's own), under **the caller's own permission preset** (never more, nothing it can change later).
+   *   5. The task goes in a frame sent as the caller; the call waits on the turn as ask_project does (`ASK_WAIT_MS`). With
+   *      `wait: false`, or past the bound, it answers "working", the caller is told when the turn ends, agent_session waits again.
    */
   async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     // A child on a linked machine (#1038) is made over the link, behind its own card that names the machine
@@ -212,7 +208,7 @@ export class AgentStartFlow {
     const untrusted = fromAssistant ? null : this.host.trustGate(callerId, project.id, 'starting agents')
     if (untrusted) return done({ ok: false, error: untrusted })
     /*
-     * The same job already waiting on the person (#673 review): a call cut short by a host swap's drain is told to call
+     * The same job already waiting on the person (#673): a call cut short by a host swap's drain is told to call
      * again, and a model that does gets the handle it never read, not a second card for the same work
      */
     const waiting = [...this.host.children.agentStarts.values()].find(
@@ -339,10 +335,10 @@ export class AgentStartFlow {
   /**
    * The child itself, once the person (or the project's trust) allowed it (#561, #673): counted again, made in the
    * caller's folder or a new worktree, named, and given the task. A card may have stood for hours, so what the start
-   * rests on is read again first (#673 review): the caller is still here, its project still trusted, it is still above
+   * rests on is read again first (#673): the caller is still here, its project still trusted, it is still above
    * the agent depth (#867), and its preset is no higher than the one the person read on the card (`approvedPreset`).
    *
-   * **The place is taken before the first wait** (#673 review): the ceiling is checked and a place reserved in one
+   * **The place is taken before the first wait** (#673): the ceiling is checked and a place reserved in one
    * synchronous step (`agentStartReserved`), held until the child's delegation counts it or the start fails. Checked
    * and counted on either side of `createSession`, eight calls at once all passed a ceiling of four.
    */
@@ -440,7 +436,7 @@ export class AgentStartFlow {
 
     // The caller's own folder (a worktree session's is its worktree), so the two work on the same files; or a new
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
-    // The Assistant's child: a folder of its own, never the Assistant's (#994 review)
+    // The Assistant's child: a folder of its own, never the Assistant's (#994)
     const scratch = project.id === ASSISTANT_PLACE ? newAssistantAgentFolder() : null
     const cwd = scratch ?? (worktree ? project.path : (this.host.store.sessions.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path))
     let child: SessionInfo
@@ -473,7 +469,7 @@ export class AgentStartFlow {
       if (scratch) await realOs().files.promises.rm(scratch, { recursive: true, force: true }).catch(() => {})
       return done({ ok: false, error: `Could not start the session: ${(e as Error).message}` })
     }
-    // Its depth stays even when the caller is deleted later (#897 review)
+    // Its depth stays even when the caller is deleted later (#897)
     recordAgentDepth(this.host, child.id, callerId)
     // Making the session took a while: what the start rests on is read again, with no wait before the delegation
     const callerNow = this.host.meta.get(callerId)

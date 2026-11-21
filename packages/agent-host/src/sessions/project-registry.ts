@@ -91,9 +91,8 @@ export class ProjectRegistry {
 
   async projectInfo(id: string, path: string, adopted = this.adoptedNow()): Promise<ProjectInfo> {
     /*
-     * **Reads the stored value.** 'claude' used to be hardcoded here, which meant the DB's
-     * default_tool column was never read anywhere — and since nothing wrote to it either, nobody
-     * noticed (2026-08-27, caught by a test while adding the remember-tool feature).
+     * **Reads the stored value.** a hardcoded 'claude' would leave the DB's default_tool column unread, and with nothing
+     * writing to it either, nobody would notice.
      */
     const row = this.projectRow(id)
     const git = await gitSummary(path, { trusted: row?.trusted ?? false })

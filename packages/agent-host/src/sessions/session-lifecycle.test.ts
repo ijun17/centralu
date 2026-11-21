@@ -370,10 +370,10 @@ describe('a setting changed while waking or restarting still reaches the process
 })
 
 /*
- * A report the Assistant asked for (#166). Neither adapter emits turn_complete for a failed
- * turn, only error — so the manager, which used to report only on turn_complete, never reported
- * the failure, and the leftover flag then reported an unrelated later turn as "finished."
- * Now the task is the request (docs/plans/mailbox.md §10.6.3): its answer is a report on it, a stop is the stop notice's.
+ * A report the Assistant asked for (#166). Neither adapter emits turn_complete for a failed turn, only error — so a manager
+ * reporting only on turn_complete would never report the failure, and a leftover flag would report an unrelated later turn as
+ * "finished." The task is the request (docs/plans/mailbox.md §10.6.3): its answer is a report on it, a stop is the stop
+ * notice's.
  */
 describe('a report goes exactly once, however the turn ends (#166)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -422,8 +422,8 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
   })
 
   /*
-   * #1233: words sent while that turn still runs are a note into the same work, and keep the report asked for. They
-   * used to clear it (this test said so), and the Assistant never heard the end of work it had asked to hear of.
+   * #1233: words sent while that turn still runs are a note into the same work, and keep the report asked for. They must not
+   * clear it, or the Assistant never hears the end of work it asked to hear of.
    */
   it('keeps the task asked for when more words go into the running turn without one: its answer comes once', async () => {
     const { worker, tools, w, reports } = await setup()
@@ -446,9 +446,8 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 })
 
 /*
- * A session deleted or switched to another tool while waiting (#163). Waking used to wait for the
- * process and then seat the handle and rewrite the row without checking whether the session still
- * existed or was still the same tool.
+ * A session deleted or switched to another tool while waiting (#163). A wake that waits for the process must not seat the
+ * handle and rewrite the row without checking whether the session still exists and is still the same tool.
  */
 describe('deleting or switching tools while a session is waking up (#163)', () => {
   async function sleeping() {
@@ -570,9 +569,8 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
 })
 
 /*
- * Changing settings mid-turn (#164). Neither adapter applies settings live, so changing a setting
- * used to swap the process out immediately — the running turn vanished, while the UI still said
- * "(from next turn)."
+ * Changing settings mid-turn (#164). Neither adapter applies settings live, so changing a setting must not swap the process out
+ * immediately: the running turn would vanish, while the UI still says "(from next turn)."
  */
 describe('a setting changed mid-turn is applied once the turn ends (#164)', () => {
   it('does not bring the process down while working, and swaps it for one with the new settings once the turn ends', async () => {

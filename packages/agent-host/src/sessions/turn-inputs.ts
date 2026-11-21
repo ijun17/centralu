@@ -44,11 +44,9 @@ export class TurnInputs {
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   readonly turnObservers = new Map<string, Set<AgentRunWait>>()
   /**
-   * Sends a message.
-   *
-   * If there is no process, it is **resumed first and then sent.** It used to reply with "this
-   * session is not running", which just pushes a machine-side problem onto the person — all the
-   * person wants is to keep talking, and the means to continue (external_id) is already ours to use.
+   * Sends a message. If there is no process, it is **resumed first and then sent.** It does not reply "this session is not
+   * running", which pushes a machine-side problem onto the person: all the person wants is to keep talking, and the means to
+   * continue (external_id) is already ours to use.
    */
   async send(
     sessionId: string,
@@ -127,7 +125,7 @@ export class TurnInputs {
      * time.
      */
     /*
-     * What "always" remembers is the host's own key for the card it answers (#838 review), not what the window sent: a
+     * What "always" remembers is the host's own key for the card it answers (#838), not what the window sent: a
      * window from before #838 (during a swap) sends a command ending in `*`, or a flagged one, as its matcher, and the
      * adapter and the store would keep it. A matcher that is not the card's key remembers nothing; the call is allowed once.
      */

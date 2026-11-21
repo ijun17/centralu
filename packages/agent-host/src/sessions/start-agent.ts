@@ -33,7 +33,7 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
   return PRESET_RANK[child] <= PRESET_RANK[parent]
 }
 
-/** Why a send gives no work to a child that now runs above its caller (#1273 review), here or on a linked machine; null when it may */
+/** Why a send gives no work to a child that now runs above its caller (#1273), here or on a linked machine; null when it may */
 export function aboveCallerError(name: string, child: PermissionPreset, caller: PermissionPreset): string | null {
   return presetWithin(child, caller) ? null : `"${name}" now has more permissions (${child}) than this session (${caller}), so this session cannot give it work. Tell the person.`
 }
