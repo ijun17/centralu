@@ -834,6 +834,31 @@ describe('guard/comments (#2355)', () => {
   ])('lets %j through', async (text) => {
     await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
   })
+  it.each([
+    ['// Two sounds: - a ring - a beep', [2]],
+    ['// In order: 1. read it 2. write it', [2]],
+    ['// - a ring - a beep - a buzz', [2]],
+    // A list re-wrapped as a paragraph: one marker on a line, another ending the next
+    ['/**\n * What it holds: - `a`: one thing,\n * and more. - `b`: another. -\n * `c`: the last.\n */', [3]],
+    ['// a ring -\n// a beep -\n// a buzz', [2]],
+    ['// One - a ring\n// two - a beep', [2]],
+    ['// x - a - b\n//\n// y - c - d', [2, 4]],
+  ])('reports list items run into the text of %j', async (text, at) => {
+    expect(await lines(file, 'f()' + NL + text, 'comments')).toEqual(at)
+  })
+  it.each([
+    ['// Pages 3-5 and 7-9 hold it.'],
+    ['// Step 1. Read the file.'],
+    ['// It is at least 1. Counted along\n// a setting of 2. A session'],
+    ['// The host starts it - the keeper waits.'],
+    ['// The margin is 16 * level - 30 - gutter.'],
+    ['/**\n * Two sounds:\n * - a ring - loud\n * - a beep\n * 1. read it\n * 2. write it\n */'],
+    ['/**\n * One - a\n *\n * Two - b\n */'],
+    ['/**\n * Holds:\n * - `a` - the first\n * - `b` - the second\n */'],
+    ['/**\n * @param a - the first\n * @param b - the second\n */'],
+  ])('lets the list markers of %j through', async (text) => {
+    await quiet(file, 'comments', 'f()' + NL + text, '/* Two sounds: - a ring - a beep */')
+  })
   it('holds a file header to 3 lines of text', async () => {
     expect(await lines(file, '// one\n// two\n// three\n\n' + code(3), 'comments')).toEqual([])
     expect(await lines(file, block(3) + NL + NL + code(3), 'comments')).toEqual([])

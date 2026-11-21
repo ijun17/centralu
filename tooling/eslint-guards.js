@@ -394,8 +394,8 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
  * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
  * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
  * history ("used to", not the passive "is used to"; a sentence opening with "Previously"; a "#N review" tag), a file header over 3
- * lines of text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
- * Adjacent line comments are one block.
+ * lines of text, a comment block over COMMENT_BLOCK_LINES lines of text, a source file over COMMENT_SHARE comment lines,
+ * and a paragraph that runs two list items into its text (#2406). Adjacent line comments are one block.
  */
 const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often|then|always|now|all|both|again|even|too)`
 const HISTORY = [
@@ -403,6 +403,41 @@ const HISTORY = [
   /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
   /#\d+[\s*]+review\b/gi,
 ]
+/**
+ * An item marker after other text on its line: a `- `, or a `-` ending the line (a list re-wrapped as a paragraph puts its
+ * markers anywhere), and `N. ` (`3-5` and the sum `n - 30` are none). Two spaced dashes of punctuation in one paragraph read
+ * as a list too.
+ */
+const INLINE_DASH = /(?<=\S\s+)-(?:\s+(?=[^\s\d])|$)/g
+const INLINE_NUMBER = /(?<=\S\s+)\d+\.\s+(?=[^\s\d])/g
+/** A line that is an item itself (`- `, `N. `, `@param`): its `- name - what` counts within the line alone */
+const ITEM_LINE = /^(?:-|\d+\.|@\w+)\s/
+
+/**
+ * The paragraphs of a comment's text that run two list items into their text: the line (from 0) of the first, and how many.
+ * `N. ` counts only when one line holds two, as a sentence may end in a number.
+ */
+function listsRunIn(text) {
+  const found = []
+  let first = -1
+  let n = 0
+  for (const [i, line] of [...text.split('\n'), ''].entries()) {
+    const body = line.replace(/^[\s*/]+/, '').trimEnd()
+    const numbers = body.match(INLINE_NUMBER)?.length ?? 0
+    const items = (body.match(INLINE_DASH)?.length ?? 0) + (numbers >= 2 ? numbers : 0)
+    if (ITEM_LINE.test(body)) {
+      if (items >= 2) found.push({ line: i, n: items })
+    } else if (items > 0) {
+      if (first < 0) first = i
+      n += items
+    }
+    if (body) continue
+    if (n >= 2) found.push({ line: first, n })
+    first = -1
+    n = 0
+  }
+  return found
+}
 const HEADER_LINES = 3
 const COMMENT_BLOCK_LINES = 10
 const COMMENT_SHARE = 0.35
@@ -430,6 +465,7 @@ const comments = guard(
   'comments',
   {
     history: '"{{text}}" tells history: say what the code does and why, now; git and the issues keep the history (#2355)',
+    list: 'this paragraph runs {{n}} list items into its text: put one item per line (#2406)',
     header: 'the file header is {{n}} lines: at most 3 say what the file is; the rest goes to a document or away (#2355)',
     block: 'a {{n}}-line comment: keep what the code cannot carry in at most {{max}} lines, and point to the document or runtime-lessons rule for the rest (#2355)',
     share: '{{pct}}% of this file is comment lines (at most {{max}}%): delete what restates the code, point to documents for the rest (#2355)',
@@ -454,6 +490,7 @@ const comments = guard(
             add(at(g.start + (g.text.slice(0, from).match(/\n/g)?.length ?? 0)), 'history', { text: (m[1] ?? m[0]).replace(/[\s*]+/g, ' ').trim() }, 'history')
           }
         }
+        for (const { line, n } of listsRunIn(g.text)) add(at(g.start + line), 'list', { n }, 'list')
       }
       const firstCode = program.tokens[0]?.loc.start.line ?? Infinity
       for (const [i, g] of groups.entries()) {
