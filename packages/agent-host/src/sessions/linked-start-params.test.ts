@@ -100,7 +100,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'normal', startedFromHub: true })
   })
 
-  // #1273 review (owner decision): the switch only restricts, so a damaged record reads as off, never as on
+  // #1273 (owner decision): the switch only restricts, so a damaged record reads as off, never as on
   it('reads a damaged record as off, and an absent switch as on', async () => {
     store.settings.setAppSetting('ui_preferences', 'not a json object')
     expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
@@ -111,7 +111,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     expect(await rpc('host.hubAuto', {})).toEqual({ allowed: true })
   })
 
-  // #1273 review: a machine with no window of its own is set from the hub's Settings → Machines
+  // #1273: a machine with no window of its own is set from the hub's Settings → Machines
   it('takes the switch from the hub, and answers it as it now reads', async () => {
     expect(await rpc('host.setHubAuto', { allowed: false })).toEqual({ allowed: false })
     expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
@@ -120,7 +120,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'auto' })
   })
 
-  // #1273 review: the mark lives beside the row, and a session read back from the store lost it
+  // #1273: the mark lives beside the row, so a session read back from the store must carry it
   it('keeps the mark through a host restart and through the session archive and back', async () => {
     const child = await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })
     await rpc('agents.deleteSession', { sessionId: child.id })

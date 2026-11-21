@@ -6,9 +6,8 @@ import { ASSISTANT_PLACE } from './start-agent-terms.js'
 import { FILL, namedCall } from './tool-seats.js'
 
 /**
- * Whether a session may start an agent now (#561, #673, #867): what the start rests on in its caller, and the
- * per-project ceiling with the places starts under way hold. Moved out of `AgentStartFlow` as it was (#428); what it
- * reaches of the manager is `DelegationHost`.
+ * Whether a session may start an agent now (#561, #673, #867): what the start rests on in its caller, and the per-project
+ * ceiling with the places starts under way hold. It reaches the manager only through `DelegationHost`.
  */
 export class AgentStartGates {
   constructor(
@@ -21,8 +20,8 @@ export class AgentStartGates {
   ) {}
 
   /**
-   * Places taken by starts between their ceiling check and the child's delegation (#673 review) — project id -> how
-   * many. Counted by `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
+   * Places taken by starts between their ceiling check and the child's delegation: project id -> how many. Counted by
+   * `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
    */
   private readonly agentStartReserved = new Map<string, number>()
 
@@ -56,11 +55,11 @@ export class AgentStartGates {
     const configured = this.host.uiPreferences().agentCeiling
     const ceiling = configured ?? (this.host.autoBoundaryOpen(callerId) ? 0 : AGENT_CEILING)
     if (ceiling === 0) return null
-    // A start under way holds its place from its check (#673 review); a request still waiting on the person holds none
+    // A start under way holds its place from its check; a request still waiting on the person holds none
     const running =
       [...this.host.children.delegations.values()].filter((d) => {
         const child = this.host.meta.get(d.sessionId)
-        // A session gone is no one's (#994 review); one with no project is the Assistant's place (#853)
+        // A session gone is no one's; one with no project is the Assistant's place (#853)
         return d.agent && !d.settled && !!child && (child.projectId ?? ASSISTANT_PLACE) === projectId
       }).length +
       (this.agentStartReserved.get(projectId) ?? 0) +
@@ -73,12 +72,11 @@ export class AgentStartGates {
 }
 
 /**
- * What a child's start rests on in its caller, read once the person allowed it and again once its session exists,
- * right before its delegation is registered: the caller is still here, its project still registered and trusted
- * (or the caller is `auto`), and it is still above the agent depth (#867), which `auto` does not open. A child on a
- * linked machine rests on the same, after its card and before each send to it (`RemoteAgents`), where a caller with no
- * project (`null`) has none registered. Nothing is logged: an `auto` caller's crossing into an untrusted project was
- * logged once, at the start's first gate.
+ * What a child's start rests on in its caller, read once the person allowed it and again once its session exists, right before
+ * its delegation is registered: the caller is still here, its project still registered and trusted (or the caller is `auto`),
+ * and it is still above the agent depth (#867), which `auto` does not open. A child on a linked machine rests on the same,
+ * after its card and before each send to it (`RemoteAgents`), where a caller with no project (`null`) has none registered.
+ * Nothing is logged: an `auto` caller's crossing into an untrusted project was logged once, at the start's first gate.
  */
 export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' | 'children' | 'uiPreferences' | 'trustGate'>, callerId: string, projectId: string | null): string | null {
   const caller = host.meta.get(callerId)

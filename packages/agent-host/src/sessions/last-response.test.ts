@@ -277,7 +277,7 @@ describe('a task is answered by its reply or by the last response at rest (§10.
   })
 
   /*
-   * The error's words are its tool's (#1186 review): a CLI's result text or a hook's output can be what the repository wrote, so they never reach the
+   * The error's words are its tool's (#1186): a CLI's result text or a hook's output can be what the repository wrote, so they never reach the
    * model of the session that gave the work; the stop notice says how the turn ended, and read_session shows the words as data. Main checked this on
    * the relayed report; the stop notice is the one path for a stop now
    */

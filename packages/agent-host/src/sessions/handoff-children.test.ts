@@ -449,7 +449,7 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
         initialPrompt: 'Take over.', handoff: { from: 'Caller', note: 'NOTE', fromSessionId: caller },
       })).id
       const note = readFileSync(handoffNotePath(w.caller.id, caller), 'utf8')
-      // Another project's session: what the new session can do is ask_project and the cards, not agent_session's verbs (#693 review)
+      // Another project's session: what the new session can do is ask_project and the cards, not agent_session's verbs (#693)
       expect(note).toContain(`"Sprites" (project ${w.target.name}) — working — handle: ${target}. Call ask_project with project "${w.target.name}" and no task to wait for its answer`)
       expect(note).not.toContain('as on a session you started')
       // The other project's session is not the new session's child: its owner on the row stays as it was

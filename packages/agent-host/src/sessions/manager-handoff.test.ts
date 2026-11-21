@@ -127,7 +127,7 @@ describe('the handoff lineage in a note (#1487)', () => {
     expect(got.text).toContain('The agent’s own note')
 
     // A handoff names a live session of its own project: another project's, an archived one and an unknown id are refused,
-    // so a marker cannot point a session at text it was never given (#1487 review)
+    // so a marker cannot point a session at text it was never given (#1487)
     const otherDir = mkdtempSync(join(tmpdir(), 'cc-1487-other-'))
     const other = (await rpc('projects.add', { path: otherDir })) as { id: string; path: string }
     const stranger = (await rpc('agents.createSession', { projectId: other.id, cwd: other.path, tool: 'claude' })) as SessionInfo
@@ -330,7 +330,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
   itSymlink("startup cleanup and session deletion do not follow the link and delete files in the user's repository", async () => {
     const p = (await rpc('projects.add', { path: repo })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
-    // Exactly the shape the old cleanup used to delete: a `*.md` named anything but a session id — both at
+    // Exactly the shape a cleanup that followed the link would delete: a `*.md` named anything but a session id — both at
     // the repository root and outside the repository the link points to.
     const orphan = join(data, 'handoff', p.id, 'gone-session.md')
     mkdirSync(join(data, 'handoff', p.id), { recursive: true })

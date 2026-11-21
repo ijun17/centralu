@@ -84,9 +84,8 @@ describe("the Centralu tools see only this app's sessions", () => {
   })
 
   /*
-   * A directed message keeps its provenance (FR-11 leftover).
-   * It used to be saved, but as a row indistinguishable from something the person said — for the
-   * screen to answer "did I ask for this?" the row itself has to carry who sent it.
+   * A directed message keeps its provenance (FR-11 leftover): it is saved as a row distinguishable from something the person
+   * said, since for the screen to answer "did I ask for this?" the row itself has to carry who sent it.
    */
   it('a directed message is saved with its source (from) in the payload and delivered as-is to the target adapter', async () => {
     const { a, orc, tools } = await setup()
@@ -738,9 +737,9 @@ describe('the Assistant', () => {
   })
 
   /*
-   * #1233: work the Assistant hands out with create_session's first message is its own turn, and it hears when that
-   * turn ends, as start_agent's caller does. It used to be a plain send: nobody owned the turn, nobody was owed its end,
-   * and the Assistant's own new session even counted as busy for it.
+   * #1233: work the Assistant hands out with create_session's first message is its own turn, and it hears when that turn ends,
+   * as start_agent's caller does. It is not a plain send, where nobody owns the turn, nobody is owed its end, and the
+   * Assistant's own new session counts as busy for it.
    */
   describe('create_session with a first message (#1233)', () => {
     const created = async (args: Record<string, unknown>) => {
@@ -846,9 +845,8 @@ describe("the Assistant's app guide and settings (#30)", () => {
   })
 
   /*
-   * This used to be refused — applying it meant a restart, which killed an in-progress turn (and
-   * missed waiting_approval). Now, like the person's own path, it is deferred until the turn ends
-   * (#164).
+   * update_session_settings does not interrupt a working session's turn: like the person's own path, applying it is deferred
+   * until the turn ends (#164), as a restart would kill an in-progress turn (and miss waiting_approval).
    */
   it("update_session_settings — does not interrupt a working session's turn, and applies once it ends (#164)", async () => {
     const p = await addProject()

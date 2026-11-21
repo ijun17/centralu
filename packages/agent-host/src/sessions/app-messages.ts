@@ -4,17 +4,13 @@ import { frameField } from '@cc/protocol'
 export type AppMessageSource = { appId: string; projectId: string | null; name: string }
 
 /**
- * The route an app's text takes to reach the agent — only the header differs; the containment is
- * the same.
- *
- *   inline   `ui/message` from an inline app view (B-1, B-4). The person read it and chose to send it.
- *   pinned   `ui/message` from a pinned view (B-4). It came from outside the conversation; the person
- *            chose this conversation to send it to.
- *   request  Agent work the app asked for (D-1, `run_agent`). The person neither wrote nor read it —
- *            the app's code sent the text, and that session's final answer goes back to the app.
- *   notice   A notice the app posted into a session that called it earlier (#1161 item 1, the broker's
- *            `notify`): a merge queue saying a pull request landed. The person neither wrote nor read it,
- *            and nothing goes back to the app.
+ * The route an app's text takes to reach the agent; only the header differs, the containment is the same. `inline` is
+ * `ui/message` from an inline app view (B-1, B-4): the person read it and chose to send it. `pinned` is `ui/message` from a
+ * pinned view (B-4): it came from outside the conversation, and the person chose this conversation to send it to. `request` is
+ * agent work the app asked for (D-1, `run_agent`): the app's code sent the text, the person neither wrote nor read it, and that
+ * session's final answer goes back to the app. `notice` is a notice the app posted into a session that called it earlier (#1161
+ * item 1, the broker's `notify`: a merge queue saying a pull request landed): the person neither wrote nor read it, and nothing
+ * goes back.
  */
 export type AppMessageVia = AppViewPlace | 'request' | 'notice'
 
@@ -27,18 +23,15 @@ export type AppMessageVia = AppViewPlace | 'request' | 'notice'
 export type AppViewPlace = 'inline' | 'pinned'
 
 /**
- * The shape in which an app's message is handed to the agent (M4 B-1, B-4, D-1, the same rule as #120).
- *
- * **The app wrote it.** The app's code can carry outside data over verbatim, and that path is
- * exactly the length of a prompt injection (the plan's "security boundary": text an app hands over
- * is wrapped as someone else's words). The report frame (#120) drops the body and points at
- * read_session instead, but an app's message is sent for the model to read, so the body cannot be
- * dropped — instead the header discloses the source, and `> ` is prefixed to **every line** of the
- * body to contain it inside a quote. Even if the body fabricates a `[Centralu] …` header or a
- * "Human:" field, it stays a single quoted line. The app name goes through the single-line field
- * rule (frameField). The header for work the app asked for (`request`) also states that the person
- * neither read the text nor granted it any permission, and that the final answer goes back to the
- * app — the agent in that session is not conversing with the person.
+ * The shape in which an app's message is handed to the agent (M4 B-1, B-4, D-1; the same rule as #120). **The app wrote it:**
+ * its code can carry outside data over verbatim, and that path is exactly the length of a prompt injection (the plan's
+ * "security boundary": text an app hands over is wrapped as someone else's words). The report frame (#120) drops the body and
+ * points at read_session, but an app's message is sent for the model to read, so the body stays: the header discloses the
+ * source, and `> ` is prefixed to **every line** of the body to contain it in a quote, so even a body that fabricates a
+ * `[Centralu] …` header or a "Human:" field stays one quoted line. The app name goes through the single-line field rule
+ * (frameField). The header for work the app asked for (`request`) also states that the person neither read the text nor granted
+ * it any permission and that the final answer goes back to the app: the agent in that session is not conversing with the
+ * person.
  */
 export function appMessageFrame(app: AppMessageSource, text: string, via: AppMessageVia = 'inline'): string {
   const body = text

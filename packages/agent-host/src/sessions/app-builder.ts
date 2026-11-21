@@ -2,19 +2,13 @@ import { relative } from 'node:path'
 import { frameField, type ExternalAppInfo } from '@cc/protocol'
 
 /**
- * The role prompt for a building session (M4 C-2) — the guidance a session that creates and edits
- * one app receives.
- *
- * **Given as a role prompt, not a file.** The app folder's AGENTS.md and CLAUDE.md state the same
- * rules, but that file cannot be relied on: a project app's building session has its cwd at the
- * project root, so it does not go looking for the app folder's own guidance on its own, and once a
- * project's trust is revoked, its setting files are not read at all (decision 3, the manager's
- * settingFilesFor). A user-folder app's session has the app folder as its cwd and trusts that
- * folder, so it does read that guidance (Claude reads CLAUDE.md, Codex reads AGENTS.md). The core
- * of the rule is carried here, and the file is pointed to for the details.
- *
- * It is baked into `roleAppend` when the session is created, and the same text is loaded again on
- * every resume (the same physical mechanism as a coordinating session).
+ * The role prompt for a building session (M4 C-2): the guidance a session that creates and edits one app receives. **Given as a
+ * role prompt, not a file.** The app folder's AGENTS.md and CLAUDE.md state the same rules, but cannot be relied on: a project
+ * app's building session has its cwd at the project root, so it does not go looking for the app folder's own guidance, and once
+ * a project's trust is revoked its setting files are not read at all (decision 3, the manager's settingFilesFor). A user-folder
+ * app's session has the app folder as its cwd and trusts it, so it does read that guidance (Claude reads CLAUDE.md, Codex
+ * AGENTS.md). The core of the rule is carried here and the file is pointed to for the details. It is baked into `roleAppend`
+ * when the session is created and loaded again on every resume.
  */
 export function builderRole(app: ExternalAppInfo, cwd: string): string {
   // The manifest's name is the app author's text: one line and quoted, so it cannot add a rule of its own (#838)

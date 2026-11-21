@@ -397,7 +397,7 @@ describe('install_machine', () => {
     expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
   })
 
-  // #1399 review: the call was answered "still under way", so how the update ends reaches its caller some other way
+  // #1399: the call was answered "still under way", so how the update ends reaches its caller some other way
   it('tells the caller in its conversation when an update it was answered "still under way" for fails later, and when it ends', async () => {
     ops.running({ working: 2 })
     ops.slowUpdate(200, 40)

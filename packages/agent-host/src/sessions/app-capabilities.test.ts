@@ -6,21 +6,13 @@ import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
 import { brokerSaid, brokerWorld, type BrokerWorld } from './app-broker.test-helpers.js'
 
 /**
- * **Whether** and **where** a capability approval stands (M4 D-4, #2237) — checked with a real
- * manager, runtime, app process and store.
- *
- * Whether: what an app declares runs with no card, unless the lowest preset among the calls open
- * into the app is `safe` (`AppSessions.callersPreset`, the reading that also holds the app's agent).
- * Where, when it is asked:
- *
- *   a chain started from a session  that session's approval card (`approval_request`'s
- *                                   `capability`) — the same spot, the same answer path, as an
- *                                   adapter's own card
- *   a chain started from the UI     that app's question (`apps.questions`) — drawn by a fixed
- *                                   screen and answered through `apps.answerQuestion`
- *
- * The answer is remembered in the store (`app_permissions`). Nobody answers in place of the person
- * (`answerCapabilities: null`) — the test inspects the card and answers it itself.
+ * **Whether** and **where** a capability approval stands (M4 D-4, #2237), checked with a real manager, runtime, app process and
+ * store. Whether: what an app declares runs with no card, unless the lowest preset among the calls open into the app is `safe`
+ * (`AppSessions.callersPreset`, the reading that also holds the app's agent). Where, when it is asked: a chain started from a
+ * session asks on that session's approval card (`approval_request`'s `capability`), the same spot and answer path as an
+ * adapter's own card; a chain started from the UI asks as that app's question (`apps.questions`), drawn by a fixed screen and
+ * answered through `apps.answerQuestion`. The answer is remembered in the store (`app_permissions`). Nobody answers in place of
+ * the person (`answerCapabilities: null`): the test inspects the card and answers it itself.
  */
 
 let w: BrokerWorld

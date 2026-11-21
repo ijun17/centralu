@@ -104,54 +104,32 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
   }
 
 /**
- * The original's children, moved to the session that took over by a handoff (#693, #738), and the section of the
- * handoff note that lists them. Moved out of the session manager as it was (#428); what it reaches of the manager is
- * `HandoffChildrenHost`.
+ * The original's children, moved to the session that took over by a handoff (#693, #738), and the section of the handoff note
+ * that lists them. What it reaches of the manager is `HandoffChildrenHost`.
  */
 export class HandoffChildren {
   constructor(private readonly host: HandoffChildrenHost) {}
 
   /**
-   * A handoff moves the original's children to the session that took over (#693, #738, #1475). Left with the original,
-   * their reports woke a session the person no longer works in, the new session could not reach them with
-   * agent_session (only the starter can), and once the original was deleted they had nobody at all.
-   *
-   * Every child moves, the settled ones too (finished, reported or read, nothing pending: "finished; waiting for more
-   * work" in the note): a settled child is often still in use, and one left with the original could not be listed or
-   * archived by the session that carries the work on, nor would its next report reach it. What else is owed moves with
-   * them: a report not yet delivered, an ask_project answer not yet read, and a
-   * start_agent request whose card still stands. `scope` is whether the original goes, and so what of its mail moves:
-   * - `kept`: a handoff that keeps the original. The mail those children sent it moves; the rest stays with it, to read
-   *   and answer.
-   * - `goes`: a handoff whose original the window removes next. All its unsettled mail moves too.
-   * - `removed`: the original is being removed now (`trashSessionOnce`), after a handoff that kept it or one whose
-   *   window did not say it would remove it. Its children themselves go to the session that inherited its handoff
-   *   (`askedBy`/`parentSessionId`, with the tasks, reports and delegations that are theirs), since an orphan is worse;
-   *   that session is told in its conversation (its note was read long ago), and the original, about to go, is told
-   *   nothing. What the original asked for and the person never answered stays behind: its start_agent requests are
-   *   withdrawn and dropped by the session archive as before, so no card appears in another session
-   *   because this one was deleted, and nothing is delivered in a session that did not ask for it.
-   *
-   * Everything stored moves in one transaction (`Store.moveChildren`), and only then the host's memory, all without an
-   * await, so no event lands between the two. A crash before the commit leaves every link on the original, after it
-   * every link on the new session; a host that takes over after a swap reads one owner either way. If the store
-   * refuses, nothing moves and the original keeps them. Returns what moved, for the handoff note.
-   *
-   * An original that stays (a handoff that keeps it) is told in its conversation what went where, a call of its own
-   * still waiting on one of them ends with where it went (so the answer is read once, by the new session, which is then
-   * owed the report that wait had taken down), and a later agent_session or ask_project about one of them says so.
-   *
-   * **No permission check here.** The caller must have established that the new session may take over the original:
-   * the person's handoff (the window's RPC), and the Assistant's handoff_session (#694), which reaches this through
-   * `createSession` only after `HandoffFlow` has checked its authority over the original (the Assistant, a
-   * project's ordinary session in its view, not mid-turn, the person's card unless `auto`). Any other agent-facing path
-   * must check its own authority the same way before it does.
+   * A handoff moves the original's children to the session that took over (#693, #738, #1475): left with the original, their
+   * reports would wake a session the person no longer works in, the new session could not reach them with agent_session (only
+   * the starter can), and once the original was deleted they would have nobody. Every child moves, the settled ones too (often
+   * still in use), with what else is owed: a report not yet delivered, an ask_project answer not yet read, a start_agent
+   * request whose card still stands. `scope` is whether the original goes, and so what of its mail moves: `kept` (the original
+   * stays: the mail those children sent it moves, the rest stays with it to read and answer), `goes` (the window removes it
+   * next: all its unsettled mail moves too), `removed` (it is being removed now, see below). Everything stored moves in one
+   * transaction (`Store.moveChildren`), then the host's memory with no await between, so a host that takes over after a swap
+   * reads one owner either way. An original that stays is told what went where, and a call of its own still waiting on one of
+   * them ends with where it went.
    */
   moveChildren(from: string, to: string, scope: 'kept' | 'goes' | 'removed'): MovedChild[] {
+    // **No permission check here.** The caller must have established that the new session may take over the original: the person's handoff
+    // (the window's RPC), or the Assistant's handoff_session (#694), which reaches this through `createSession` only after `HandoffFlow` has
+    // checked its authority over the original. Any other agent-facing path must check its own authority the same way before it does.
     const original = this.host.meta.get(from)
     const heir = this.host.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
-    // Its children on linked machines go to the heir too (#1038 review), and the tasks it gave them with its mail below (#1948 step 6)
+    // Its children on linked machines go to the heir too (#1038), and the tasks it gave them with its mail below (#1948 step 6)
     const remote = this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
@@ -207,7 +185,7 @@ export class HandoffChildren {
       const state = stateOf(s)
       sessions.push(id)
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
-      // What the new session can actually do with it, by what moved (#693 review)
+      // What the new session can actually do with it, by what moved (#693)
       const told = owing.has(id)
       const can = project !== undefined
         ? `Call ask_project with project "${project}" and no task to wait for its answer${told ? '; you are told of its cards and answer them with agent_session (answer) as far as you may' : ''}. It is that project's session: agent_session does nothing else with it.`
@@ -296,6 +274,11 @@ export class HandoffChildren {
         this.host.hostCards.closeAsk(ask, 'deny', { moveTo: to })
       }
     })
+    // `removed`: the original is being removed now (`trashSessionOnce`). Its children go to the session that inherited its handoff
+    // (`askedBy`/`parentSessionId`, with the tasks, reports and delegations that are theirs), since an orphan is worse; that session
+    // is told in its conversation (its note was read long ago), and the original, about to go, is told nothing. What the original
+    // asked for and the person never answered stays behind: its start_agent requests are withdrawn and dropped by the session
+    // archive, so no card appears in another session because this one was deleted, and nothing is delivered where it was not asked.
     if (scope === 'removed') {
       const items = moved.map((c) => `${movedLabel(c)} (${c.state})`)
       this.host.onEvent({

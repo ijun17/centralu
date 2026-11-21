@@ -620,9 +620,11 @@ const COMMENTS_SWEPT = [
   'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   `${HOST_SRC}/*.ts`,
-  `${HOST_SRC}/{keeper,lifecycle,mail,os,transport,views}/**/*.ts`,
+  `${HOST_SRC}/{keeper,lifecycle,mail,os,sessions,transport,views}/**/*.ts`,
   `${HOST_SRC}/links/**/*.ts`,
 ]
+/** A file no swept glob reaches yet: the unit test pins that the guard reads nothing there. The sweep that reaches its folder moves it to one still unswept */
+export const COMMENTS_UNSWEPT_EXAMPLE = `${HOST_SRC}/adapters/x.ts`
 
 /**
  * The files each rule reads. A block per scope, one rule or two each: what the unit test each came from walked.

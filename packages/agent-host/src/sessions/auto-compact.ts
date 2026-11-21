@@ -19,7 +19,7 @@ export function autoCompactTokens(setting: AutoCompact, window: number | null): 
 
 /**
  * What the next start of a session passes, from one place: the launch (`SessionStarts`) and the session menu's answer
- * (`agents.autoCompact`) both ask it, so what the menu says is what the start does (#1376 review).
+ * (`agents.autoCompact`) both ask it, so what the menu says is what the start does (#1376).
  */
 export function autoCompactPlan(setting: AutoCompact, windows: ModelWindows, m: Pick<SessionInfo, 'tool' | 'model' | 'projectId'>): { controlled: boolean; share: number; tokens: number | null } {
   return { controlled: setting.controlled, share: setting.share, tokens: autoCompactTokens(setting, windows.of(m)) }
@@ -29,24 +29,15 @@ export function autoCompactPlan(setting: AutoCompact, windows: ModelWindows, m: 
 type Known = { window: number; model: string | null }
 
 /**
- * The context window of each model, as the tools reported it (the window the context gauge shows), kept per tool and model
- * name across restarts. A tool reports a window with its token readings, so one is known after a model's first turn; a model
- * nobody has read a window from gets nothing at its first start, and the value from the next.
- *
- * **A reading taken under the setting says less than the model's window.** Claude's CLI reports the smaller of the model's
- * window and the `autoCompactWindow` it was started with (measured, CLI 2.1.296: a 1M model started at 133,000 reports 133,000;
- * a 200k one started at 613,000 reports 200,000). `started` is told the largest window such a process can report (the
- * adapter's `windowCeilingFor`), and `note` reads a reading against it:
- *  - below it, the reading is the model's real window, whatever was known: it is recorded, so a record that was too large
- *    corrects itself and Centralu's share applies again;
- *  - at it, the window is only known to be at least that. If the tool names the model (`resolved`) and it is the one the record
- *    was taken for, the record stands; if it is another (the alias, the project default or the person's own setting moved to
- *    another model) the record is dropped, so the next start passes nothing and learns the real window, which also lets a record
- *    that was too small rise.
- * A process without the setting, and a tool that reports the model's own window either way (Codex), always record what they read.
- *
- * The key is the tool and the model name; a session on the tool's default model has none of its own, and the default differs
- * between projects, so it is keyed by its project too.
+ * The context window of each model, as the tools reported it (the window the context gauge shows), kept per tool and model name
+ * across restarts; a session on the tool's default model is keyed by its project too, as the default differs between projects.
+ * A tool reports a window with its token readings, so one is known after a model's first turn; a model nobody has read a window
+ * from gets nothing at its first start, and the value from the next. **A reading taken under the setting says less than the
+ * model's window:** Claude's CLI reports the smaller of the model's window and the `autoCompactWindow` it was started with
+ * (measured, CLI 2.1.296: a 1M model started at 133,000 reports 133,000; a 200k one started at 613,000 reports 200,000).
+ * `started` is told the largest window such a process can report (the adapter's `windowCeilingFor`), and `note` reads a reading
+ * against it. A process without the setting, and a tool that reports the model's own window either way (Codex), always record
+ * what they read.
  */
 export class ModelWindows {
   private readonly known = new Map<string, Known | null>()
@@ -97,7 +88,14 @@ export class ModelWindows {
     this.settings.deleteAppSetting(`auto_compact_ceiling:${sessionId}`)
   }
 
-  /** A reading of the session's window, with the model the tool says it is for when it says */
+  /**
+   * A reading of the session's window, with the model the tool says it is for when it says. Below the process's ceiling the
+   * reading is the model's real window, whatever was known: it is recorded, so a record that was too large corrects itself and
+   * Centralu's share applies again. At it, the window is only known to be at least that: if the tool names the model
+   * (`resolved`) and it is the one the record was taken for, the record stands; if it is another (the alias, the project
+   * default or the person's own setting moved to another model) the record is dropped, so the next start passes nothing and
+   * learns the real window, which also lets a record that was too small rise.
+   */
   note(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>, window: number, resolved?: string): void {
     if (!Number.isFinite(window) || window <= 0) return
     const key = this.key(m)

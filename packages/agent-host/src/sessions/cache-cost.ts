@@ -1,17 +1,15 @@
 import type { CacheBilling } from '../adapters/contract.js'
 
 /**
- * What the prompt cache costs, as ratios to the price of an uncached input token (#1492, docs/agent-host/prompt-cache.md). The hit rate is by
- * tokens, which hides that a write costs far more than a read: weighted by these ratios the same traffic reads 96% by tokens and has
- * writes at about 43% of what the cache cost. Ratios only, never money: the prices move, the ratios between a provider's own kinds of
- * input have not.
- *
- *  - **Anthropic** (Claude): a read is 0.1, a five-minute write 1.25, a one-hour write 2. The split is the API's own (`cache_creation`).
- *  - **OpenAI** (Codex), by model: from GPT-5.6 on a read is 0.1 (0.05 on Sol) and a write, for a cache that lives 30 minutes, 1.25;
- *    before it caching was automatic and a write cost the same as uncached input (1). A model whose name says no generation (a
- *    session on the tool's default before the adapter stamped the model it runs, an hour stored without one) is priced as the
- *    current generation, not the old. Codex does not report writes, so the input it
- *    did not read from the cache stands in for them: it is what the provider caches for the next request, as for a rebuild.
+ * What the prompt cache costs, as ratios to the price of an uncached input token (#1492, docs/agent-host/prompt-cache.md). The
+ * hit rate is by tokens, which hides that a write costs far more than a read: weighted by these ratios the same traffic reads
+ * 96% by tokens and has writes at about 43% of what the cache cost. Ratios only, never money: the prices move, the ratios
+ * between a provider's own kinds of input have not. **Anthropic** (Claude): a read is 0.1, a five-minute write 1.25, a one-hour
+ * write 2; the split is the API's own (`cache_creation`). **OpenAI** (Codex), by model: from GPT-5.6 on a read is 0.1 (0.05 on
+ * Sol) and a write, for a cache that lives 30 minutes, 1.25; before it caching was automatic and a write cost the same as
+ * uncached input (1). A model whose name says no generation (a session on the tool's default before the adapter stamped the
+ * model it runs, or one stored without a model) is priced as the current generation. Codex does not report writes, so the input
+ * it did not read from the cache stands in for them: it is what the provider caches for the next request, as for a rebuild.
  */
 
 export type CachePrices = { read: number; write5m: number; write1h: number }

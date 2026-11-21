@@ -1,25 +1,15 @@
 /**
- * The app guide given to the Assistant (#30).
- *
- * **It is code, not a file — that is the whole point of this file.** If docs/ were read at
- * runtime, every session with write access to that folder could edit the Assistant's
- * knowledge — one step removed from the attack that succeeded before by planting an AGENTS.md
- * (a hole confirmed by measurement, which is why assistant-home.ts turned off reading folder
- * documents). The content here is compiled into the build, so changing it must go through a pull
- * request in this repository.
- *
- * That is also why it is not auto-extracted from docs/. Extracting it would pull in the whole
- * 44KB specification and bury the Assistant's context — this guide's job is "explain the app
- * to the person," and for that job a summary a person chose is better than the raw source. When
- * docs change, a person updates this file too.
- *
- * **The one exception: the tool list is not written by hand** (M4 P-4). The hand-written list was
- * wrong twice: it kept advertising `archive_session` even after the archive feature was removed
- * (58d2335), and it knew nothing at all about the control-rail app's tools (#81, since removed). Which seat can
- * call which tool is already decided by the tool registry (centralu-tools.ts), so that
- * decision is taken as-is and rendered here (`GuideSeats`). The registry is also compiled code,
- * so the reason above (nothing is read from a file at runtime) still holds. Tool names left in
- * the hand-written text are checked against the registry by app-guide.test.ts.
+ * The app guide given to the Assistant (#30). **It is code, not a file:** a guide read from docs/ at runtime could be edited by any
+ * session with write access to that folder, one step from the attack that succeeded before by planting an AGENTS.md (confirmed
+ * by measurement, which is why assistant-home.ts stopped reading folder documents). A change goes through a pull request here.
+ */
+
+/**
+ * Not extracted from docs/ either: the whole 44KB specification would bury the Assistant's context, and for "explain the app to
+ * the person" a summary a person chose beats the raw source, so a person updates this file when the docs change. The tool list is
+ * the exception (M4 P-4): written by hand it advertised a removed `archive_session` and knew nothing of the control-rail app's
+ * tools, so it is rendered from the registry (`GuideSeats`; centralu-tools.ts decides which seat calls what, and is compiled code
+ * too), and tool names left in the hand-written text are checked against it by app-guide.test.ts.
  */
 
 export const APP_GUIDE_TOPICS = ['overview', 'sessions', 'assistant', 'apps', 'approvals', 'settings', 'updates'] as const
