@@ -395,10 +395,11 @@ export class AppSessions {
      * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the lowest preset
      * among the sessions with a call open into the app now** (`appAgentPreset`, `AppCalls.agentCallers`), whatever run id the
      * app cites: no session gains through an app what its own preset withholds. An inline view counts as its conversation's
-     * session; through `call_app` an app is held as its caller is; a call whose chain can no longer be followed, or nothing
-     * open at all, gives `safe`. Not `safe` always, though the prompt is not the person's (the app's code sent it, and data
-     * pulled in from outside can be mixed into it: a prompt injection channel): it is held besides by no Centralu server and no
-     * apps (`session-app-wiring.ts`), no Centralu updates (`updates-asked.ts`), the project's trust for its files
+     * session; through `call_app` an app is held as its caller is. Only calls from a screen opened in the window, with no
+     * session's call open, give `auto`; a call whose chain can no longer be followed, or nothing open at all, gives `safe`. Not
+     * `safe` always, though the prompt is not the person's (the app's code sent it, and data pulled in from outside can be
+     * mixed into it: a prompt injection channel): it is held besides by no Centralu server and no apps
+     * (`session-app-wiring.ts`), no Centralu updates (`updates-asked.ts`), the project's trust for its files
      * (`launch-inputs.ts`), and no other session answering a card raised here (`answersApproval`, routed-cards.ts). The person
      * may lower it in the session's settings.
      */

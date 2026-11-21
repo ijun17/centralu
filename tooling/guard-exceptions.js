@@ -366,7 +366,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/sessions/agent-depth.ts': 38,
     'packages/agent-host/src/sessions/agent-start-gates.ts': 38,
     'packages/agent-host/src/sessions/app-agents.ts': 38,
-    'packages/agent-host/src/sessions/app-messages.ts': 47,
+    'packages/agent-host/src/sessions/app-messages.ts': 44,
     'packages/agent-host/src/sessions/ask-project.ts': 40,
     'packages/agent-host/src/sessions/assistant-home.ts': 36,
     'packages/agent-host/src/sessions/assistant-slot.ts': 38,

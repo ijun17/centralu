@@ -15,23 +15,20 @@ export type AppMessageSource = { appId: string; projectId: string | null; name: 
 export type AppMessageVia = AppViewPlace | 'request' | 'notice'
 
 /**
- * Where on screen the app's message came from (M4 B-4) — an inline view (under that conversation's
- * card) or a pinned view (outside the conversation, where the person picked which conversation to
- * send it to). There is one frame, and only the line that discloses the source differs: the agent
- * must never be wrong about "what sent this message inside this conversation".
+ * There is one frame, and only the line that discloses the source differs: the agent must never be wrong about "what sent this
+ * message inside this conversation".
  */
 export type AppViewPlace = 'inline' | 'pinned'
 
 /**
  * The shape in which an app's message is handed to the agent (M4 B-1, B-4, D-1; the same rule as #120). **The app wrote it:**
- * its code can carry outside data over verbatim, and that path is exactly the length of a prompt injection (the plan's
- * "security boundary": text an app hands over is wrapped as someone else's words). The report frame (#120) drops the body and
- * points at read_session, but an app's message is sent for the model to read, so the body stays: the header discloses the
- * source, and `> ` is prefixed to **every line** of the body to contain it in a quote, so even a body that fabricates a
- * `[Centralu] …` header or a "Human:" field stays one quoted line. The app name goes through the single-line field rule
- * (frameField). The header for work the app asked for (`request`) also states that the person neither read the text nor granted
- * it any permission and that the final answer goes back to the app: the agent in that session is not conversing with the
- * person.
+ * its code can carry outside data over verbatim, and that path is a prompt-injection channel (the plan's "security boundary":
+ * text an app hands over is wrapped as someone else's words). The report frame (#120) drops the body and points at
+ * read_session, but an app's message is sent for the model to read, so the body stays: the header discloses the source, and
+ * **every line** of the body is quoted with `>` to contain it, so even a body that fabricates a `[Centralu] …` header or a
+ * "Human:" field stays one quoted line. The app name goes through the single-line field rule (frameField). The header for work
+ * the app asked for (`request`) also states that the person neither read the text nor granted it any permission and that the
+ * final answer goes back to the app: the agent in that session is not conversing with the person.
  */
 export function appMessageFrame(app: AppMessageSource, text: string, via: AppMessageVia = 'inline'): string {
   const body = text

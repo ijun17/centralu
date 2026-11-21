@@ -9,10 +9,10 @@ import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join, relative, sep } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { ARCHIVE_ALLOWED, COMMENT_SHARE_HELD, COMMENTS_LEFT, EXCEPTIONS } from './guard-exceptions.js'
-import { COMMENTS_UNSWEPT_EXAMPLE, commentShareOf, guardConfigs, guards } from './eslint-guards.js'
+import { COMMENTS_SWEPT_HOST_FOLDERS, COMMENTS_UNSWEPT_HOST_FOLDERS, commentShareOf, guardConfigs, guards } from './eslint-guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = guardLinter()
@@ -885,9 +885,13 @@ describe('guard/comments (#2355)', () => {
   })
   it('reads only the folders whose comments are swept', async () => {
     expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
-    expect(await lines('packages/agent-host/src/os/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
-    expect(await lines('packages/agent-host/src/sessions/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
-    expect(await lines(COMMENTS_UNSWEPT_EXAMPLE, 'f()\n// It used to wait.', 'comments')).toEqual([])
+    const hostSrc = 'packages/agent-host/src'
+    const reads = (file: string) => lines(file, 'f()\n// It used to wait.', 'comments')
+    expect(await reads(`${hostSrc}/x.ts`)).toEqual([2])
+    for (const folder of COMMENTS_SWEPT_HOST_FOLDERS) expect(await reads(`${hostSrc}/${folder}/x.ts`), folder).toEqual([2])
+    for (const folder of COMMENTS_UNSWEPT_HOST_FOLDERS) expect(await reads(`${hostSrc}/${folder}/x.ts`), folder).toEqual([])
+    const onDisk = readdirSync(join(ROOT, hostSrc), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    expect([...COMMENTS_SWEPT_HOST_FOLDERS, ...COMMENTS_UNSWEPT_HOST_FOLDERS].sort()).toEqual(onDisk.sort())
     // A file in COMMENTS_LEFT is not read yet
     expect(COMMENTS_LEFT.length).toBeGreaterThan(0)
     expect(await lines(COMMENTS_LEFT[0]!, 'f()\n// It used to wait.', 'comments')).toEqual([])
