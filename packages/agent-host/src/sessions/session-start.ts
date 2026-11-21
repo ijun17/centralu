@@ -143,6 +143,8 @@ export class SessionStarts {
        * contract: a window's first message is the person's. Stored and broadcast as that sender's, as `send`'s `from`.
        */
       initialFrom?: { sessionId: string; name: string }
+      /** The Assistant's words on the original of a handoff it made (`HandoffChildren.moveChildren`), given the successor's id. Not in the RPC contract */
+      handedOffBy?: (successorId: string) => { opens: string; closes: string }
       /**
        * A script or the RPC started the session (the connection holds the limited credential, not the window's token): the work is the person's, written
        * down in the mailbox before the first message goes in, and answered in their Inbox as any task is (mailbox.md §10.6.3). The message is the script's, not
@@ -499,7 +501,10 @@ export class SessionStarts {
        * The apps the original attached are listed with them (#1638); they were copied before this session started.
        */
       const moved = fromSessionId
-        ? [...this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'goes' : 'kept'), ...this.host.handoffChildren.carriedApps(id, leftBehind)]
+        ? [
+            ...this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'goes' : 'kept', params.handedOffBy?.(id)),
+            ...this.host.handoffChildren.carriedApps(id, leftBehind),
+          ]
         : []
       if (moved.length) {
         const movedBlock = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session']))

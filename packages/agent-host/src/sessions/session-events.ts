@@ -158,6 +158,8 @@ export class SessionEvents {
       this.host.record.recordToolSettings(e)
       return
     }
+    // A task's ending a restart's own line already named (#2360, `RestartPolicy.endingSaid`)
+    if (this.host.restartPolicy.endingSaid(e)) return
     // Text the tool repeats on every start (#304): one stored line per session is enough
     if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.host.store.handoffs.hasNotice(e.sessionId, e.text)) return
     let seq: number | null = null

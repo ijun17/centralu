@@ -106,7 +106,8 @@ Implementation rules:
     mid-turn change applies when the turn ends, whatever runs in the background or is unknown. Any other deferred
     restart (a model, an app set) also waits while listed background work runs, at most one hour
     (`applyDeferredRestart`, in `RestartPolicy`, `sessions/restart-policy.ts`). A restart that ends background work, or work that is unknown, says so in the
-    conversation first (a `restart` notice naming the tasks).
+    conversation first (a `restart` notice naming the tasks); a named task's own "stopped" line is then left out of the
+    conversation, and one it could not name keeps its line (#2360, `RestartPolicy.endingSaid`).
 - **The CLI version a process runs is reported once per process, as `agent_version`** (#297). Claude: the init
   message's `claude_code_version` (init comes again with every query; only a change is sent). Codex: the `initialize`
   answer's `userAgent`, `<client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0:

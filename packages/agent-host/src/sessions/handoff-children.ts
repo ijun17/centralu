@@ -119,16 +119,22 @@ export class HandoffChildren {
    * stays: the mail those children sent it moves, the rest stays with it to read and answer), `goes` (the window removes it
    * next: all its unsettled mail moves too), `removed` (it is being removed now, see below). Everything stored moves in one
    * transaction (`Store.moveChildren`), then the host's memory with no await between, so a host that takes over after a swap
-   * reads one owner either way. An original that stays is told what went where, and a call of its own still waiting on one of
-   * them ends with where it went.
+   * reads one owner either way. An original that stays is told what went where, in one line with `handedOffBy`'s words when
+   * the Assistant handed it off (#694, #2360), and a call of its own still waiting on one of them ends with where it went.
    */
-  moveChildren(from: string, to: string, scope: 'kept' | 'goes' | 'removed'): MovedChild[] {
+  moveChildren(from: string, to: string, scope: 'kept' | 'goes' | 'removed', handedOffBy?: { opens: string; closes: string }): MovedChild[] {
     // **No permission check here.** The caller must have established that the new session may take over the original: the person's handoff
     // (the window's RPC), or the Assistant's handoff_session (#694), which reaches this through `createSession` only after `HandoffFlow` has
     // checked its authority over the original. Any other agent-facing path must check its own authority the same way before it does.
     const original = this.host.meta.get(from)
     const heir = this.host.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
+    // The Assistant's words name the successor (still under its opening's name here), so what moved goes "to it"
+    const successor = handedOffBy ? 'it' : `“${heir.name}” [${to}]`
+    const tellOriginal = (...parts: string[]) => {
+      const text = (handedOffBy ? [handedOffBy.opens, ...parts, handedOffBy.closes] : parts).filter(Boolean).join(' ')
+      if (text) this.host.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text })
+    }
     // Its children on linked machines go to the heir too (#1038), and the tasks it gave them with its mail below (#1948 step 6)
     const remote = this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
@@ -237,6 +243,7 @@ export class HandoffChildren {
       )
     } catch (e) {
       console.error(`[agent-host] handoff left the children and the mail with ${from.slice(0, 8)}: ${(e as Error).message}`)
+      tellOriginal()
       return []
     }
     const childCount = moved.length
@@ -244,7 +251,7 @@ export class HandoffChildren {
     const foldedSessions = new Set(moved.filter((c) => c.folded).map((c) => c.handle))
     moved.push(...threads.map((t) => movedMessage(t, t.kind === 'report' && t.about !== undefined && foldedSessions.has(t.about))))
     if (!moved.length) {
-      if (stays.length) this.host.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text: `Nothing moved to “${heir.name}” [${to}]. ${stayText}` })
+      if (stays.length || handedOffBy) tellOriginal(handedOffBy ? '' : `Nothing moved to ${successor}.`, stayText)
       return stays
     }
     /*
@@ -290,12 +297,12 @@ export class HandoffChildren {
       const items = moved.filter((c) => !c.folded).map((c) => `${movedLabel(c)} (${c.state})`)
       const folded = moved.filter((c) => c.folded && !c.message).length
       const finished = `${folded} finished session${folded === 1 ? '' : 's'}`
-      this.host.onEvent({
-        type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff',
-        text: (items.length
-          ? `Handed over to “${heir.name}” [${to}], which follows them from now on: ${items.join('; ')}. This session no longer does.${folded ? ` ${finished} also moved to “${heir.name}”.` : ''}`
-          : `${finished} moved to “${heir.name}” [${to}], which follows ${folded === 1 ? 'it' : 'them'} from now on. This session no longer does.`) + (stayText ? ` ${stayText}` : ''),
-      })
+      tellOriginal(
+        items.length
+          ? `${handedOffBy ? 'It follows these' : `Handed over to ${successor}, which follows them`} from now on: ${items.join('; ')}. This session no longer does.${folded ? ` ${finished} also moved to ${handedOffBy ? 'it' : `“${heir.name}”`}.` : ''}`
+          : `${finished} moved to ${successor}, which follows ${folded === 1 ? 'it' : 'them'} from now on. This session no longer does.`,
+        stayText,
+      )
     }
     console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail message(s)`)
     return [...moved, ...stays]

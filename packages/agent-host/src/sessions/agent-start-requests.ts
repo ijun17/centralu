@@ -65,9 +65,10 @@ export class AgentStartRequests {
    * How a start_agent request ended (#673), once: the row goes, a wait on its handle returns, and unless a session
    * started, the person is shown why in the caller's session (not only the model, in a tool result). A request whose
    * call already answered "pending" is told to the caller as a message, since no call is left to answer it.
-   * A refusal the person gave on the card while the call waited needs no line: the card itself says "Denied".
+   * `onCard`: while the call still waits, its card says how it ended, and no line repeats it (#2360): a refusal the person
+   * gave there reads "Denied", a start that failed after it was allowed reads "Failed" with the reason.
    */
-  endAgentStart(requestId: string | undefined, ended: { childId: string } | { error: string; person: string; denied?: boolean }): void {
+  endAgentStart(requestId: string | undefined, ended: { childId: string } | { error: string; person: string; onCard?: boolean }): void {
     const rec = requestId ? this.host.children.agentStarts.get(requestId) : undefined
     if (!rec || rec.ended) return
     rec.ended = 'childId' in ended ? { childId: ended.childId } : { error: ended.error }
@@ -77,7 +78,7 @@ export class AgentStartRequests {
     if ('childId' in ended) return
     const { callerId } = rec.req
     if (!this.host.meta.has(callerId)) return
-    if (!ended.denied || rec.detached) {
+    if (!ended.onCard || rec.detached) {
       this.host.onEvent({ type: 'notice', sessionId: callerId, level: 'warning', from: 'Centralu', label: 'agent request', audience: 'you', text: ended.person })
     }
     if (rec.detached) void this.tellAgentStartEnded(rec.req, ended.error)
@@ -133,7 +134,7 @@ export class AgentStartRequests {
       if (decision === null && this.host.disposing) return
       const consent = this.starts.agentConsentFrom(req.callerId, req.projectId, decision)
       if (!consent.ok) {
-        this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), denied: consent.why === 'denied' })
+        this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), onCard: consent.why === 'denied' })
         return
       }
       await this.startWhenMemory(rec)
@@ -215,7 +216,7 @@ export class AgentStartRequests {
     if ('key' in r) this.endAgentStart(req.requestId, { childId: r.d.sessionId })
     else {
       const error = r.done.ok ? 'No session was created.' : r.done.error
-      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
+      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error), onCard: true })
     }
   }
 

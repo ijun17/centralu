@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
+import { BackgroundEvents } from '../adapters/background-events.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -20,6 +21,8 @@ import { SessionManager } from './manager.js'
 class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'
   disposed = false
+  /** What the process says as it goes down, as an adapter's release does */
+  lastWords: NormalizedEvent[] = []
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
@@ -33,6 +36,7 @@ class Handle implements SessionHandle {
   }
   interrupt() {}
   async dispose() {
+    for (const e of this.lastWords) this.emit(e)
     this.disposed = true
   }
 }
@@ -123,6 +127,23 @@ describe('a restart held back by background work (#648)', () => {
     expect(restart).toHaveBeenCalledWith(id, cause)
     expect(b.session(id).live).toBe(true)
     expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
+  })
+
+  it("leaves out a task's own stopped line when the restart's line named it, and keeps one it did not name (#2360)", async () => {
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
+    // Started after the list was last sent: the restart cannot name it
+    const watcher: BackgroundTask = { ...shell, id: 'watch', description: 'vitest --watch', parentCallId: 'toolu_2' }
+    old.lastWords = new BackgroundEvents(id).event([], [shell, watcher].map((t) => ({ ...t, status: 'stopped' as const, summary: 'Ended with the session process' })))
+    store.settings.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
+
+    await b.mgr.launches.refreshToolDefinitions()
+    expect(old.disposed).toBe(true)
+    expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
+    const endings = events.flatMap((e) => (e.type === 'notice' && e.sessionId === id && e.label === 'background task' ? [e.text] : []))
+    expect(endings).toEqual(['Background shell "vitest --watch" stopped: Ended with the session process'])
+    // The list of background work still hears both endings
+    expect(events).toContainEqual(expect.objectContaining({ type: 'background_tasks', sessionId: id, ended: [expect.objectContaining({ id: 'dev' }), expect.objectContaining({ id: 'watch' })] }))
   })
 
   it.each([

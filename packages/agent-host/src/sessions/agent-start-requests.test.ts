@@ -158,6 +158,39 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   })
 })
 
+describe('a start allowed on the card that then fails (#2360)', () => {
+  const failedLines = (parent: string) =>
+    store.messages.loadMessages(parent, 50).flatMap((m) => {
+      const p = m.payload as NormalizedEvent
+      return p.type === 'notice' && p.label === 'agent request' ? [p.text] : []
+    })
+  const failNextStart = (claude: Adapter) => {
+    claude.createSession = async () => {
+      throw new Error('the CLI did not come up')
+    }
+  }
+
+  it('while the call waits, its card says Failed with the reason: no line repeats it', async () => {
+    const a = host()
+    const { parent, call, requestId } = await asking(a)
+    failNextStart(a.claude)
+    a.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('the CLI did not come up') })
+    expect(failedLines(parent)).toEqual([])
+  })
+
+  it('once the call answered "pending", the line is what tells the person', async () => {
+    const a = host()
+    const { parent, requestId } = await asking(a)
+    await a.mgr.tenure.disposeAll()
+    const b = host()
+    failNextStart(b.claude)
+    b.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    await eventually(() => failedLines(parent).length > 0)
+    expect(failedLines(parent)).toEqual([expect.stringMatching(/^The request to start Claude Code \(“long work”\) was allowed, but no agent was started: .*the CLI did not come up/)])
+  })
+})
+
 describe('a start allowed but waiting for memory (#686)', () => {
   it('outlives the host without a second card, and the next host starts it when memory recovers', async () => {
     let free = 512 * 1024 ** 2

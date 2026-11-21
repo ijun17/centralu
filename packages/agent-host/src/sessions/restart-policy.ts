@@ -8,6 +8,7 @@ import type {
 import {
   liveBackgroundTasks,
 } from '@cc/protocol'
+import { endedTaskName } from '../adapters/background-events.js'
 import type { SessionHandle } from '../adapters/contract.js'
 import { launchPreset } from '../adapters/edit-grant.js'
 import type { Store } from '../dev-services/store.js'
@@ -130,9 +131,18 @@ export class RestartPolicy {
     this.host.store.settings.deleteAppSetting(this.host.backgroundTasksKey(sessionId))
   }
 
+  /** The tasks a restart's line named (`endedTaskName`) while their process goes down: their own "stopped" lines are not repeated (#2360) */
+  readonly namedEndings = new Map<string, ReadonlySet<string>>()
+
+  endingSaid(e: NormalizedEvent): boolean {
+    if (e.type !== 'notice' || e.label !== 'background task') return false
+    const named = this.namedEndings.get(e.sessionId)
+    return !!named && [...named].some((name) => e.text.startsWith(`${name} stopped`))
+  }
+
   /**
-   * Says in the conversation that a restart is about to end the session's background work (#648): the tool's own
-   * ending of each task follows in the list, but a person whose dev server stopped should read why where they look.
+   * Says in the conversation that a restart is about to end the session's background work (#648), naming the tasks: a
+   * person whose dev server stopped should read why where they look. Each named task's own ending is then `endingSaid`.
    */
   noticeBackgroundStopped(sessionId: string, cause: RebuildCause | undefined): void {
     const m = this.host.meta.get(sessionId)
@@ -152,7 +162,9 @@ export class RestartPolicy {
           ? `Restarting the agent to apply ${why}. Any background work it started before Centralu was updated ` +
             `(a dev server, a watcher) stops with it; ask the agent to start it again if you still need it.`
           : null
-    if (text) this.host.onEvent({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'restart', text })
+    if (!text) return
+    this.host.onEvent({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'restart', text })
+    if (tasks.length > 0) this.namedEndings.set(sessionId, new Set(tasks.map(endedTaskName)))
   }
 
   /**

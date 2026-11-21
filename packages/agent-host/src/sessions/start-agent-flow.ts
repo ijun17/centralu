@@ -292,7 +292,7 @@ export class AgentStartFlow {
         const ended = this.host.children.agentStarts.get(request.requestId)?.ended
         if (ended && 'error' in ended) return done({ ok: false, error: ended.error })
         const how = consent.why === 'denied' ? 'denied' : signal.aborted ? 'cancelled' : 'withdrawn'
-        this.endAgentStart(request.requestId, { error: consent.error, person: agentStartPersonText(request, how), denied: consent.why === 'denied' })
+        this.endAgentStart(request.requestId, { error: consent.error, person: agentStartPersonText(request, how), onCard: consent.why === 'denied' })
       }
       return done(consent)
     }
@@ -318,7 +318,7 @@ export class AgentStartFlow {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
       else {
         const error = r.done.ok ? 'No session was created.' : r.done.error
-        this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'failed', error) })
+        this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'failed', error), onCard: true })
       }
     }
     /*

@@ -17,6 +17,10 @@ const NONE: ReadonlySet<string> = new Set()
 
 const KIND_WORDS: Record<BackgroundTask['kind'], string> = { agent: 'agent', shell: 'shell', mcp: 'MCP task', other: 'task' }
 
+/** How an ending's line names its task: what a restart that already named the task matches it by (`RestartPolicy.endingSaid`) */
+export const endedTaskName = (t: Pick<BackgroundTask, 'kind' | 'description'>): string =>
+  `Background ${KIND_WORDS[t.kind]} "${oneLineText(t.description, 80)}"`
+
 /**
  * The conversation's one line for a task that ended failed or stopped (#2230), whatever its kind: which task, how it ended and
  * the reason when the tool gave one. A task that completed leaves none. The list of background work shows only the current burst,
@@ -30,7 +34,7 @@ function endedNotice(sessionId: string, t: BackgroundTask): NormalizedEvent[] {
       type: 'notice',
       sessionId,
       level: t.status === 'failed' ? 'warning' : 'info',
-      text: `Background ${KIND_WORDS[t.kind]} "${oneLineText(t.description, 80)}" ${t.status}${why}`,
+      text: `${endedTaskName(t)} ${t.status}${why}`,
       from: 'Centralu',
       label: 'background task',
     },

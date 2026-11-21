@@ -82,7 +82,8 @@ below retained for `safe` and `normal`:
    request ends when it is answered,
    when the caller withdraws it (`agent_session stop`), when its call is cancelled while the card stands, or when the
    caller is deleted; each end without a child leaves a notice in the caller's session for the person
-   (`Centralu · agent request`), apart from a denial on a card the call was still waiting on, which the card shows.
+   (`Centralu · agent request`), apart from what a card the call was still waiting on shows (#2360): a denial there, or
+   a start that failed after it was allowed, which the call's card shows as Failed with the reason.
    In the window, a card raised in a session off screen leaves a card in the top right (`Notices`, kind
    `agent_start`) even while the app is in front, and clicking it opens that session.
    The wait of `wait: true` is cut to what is left of `START_AGENT_CALL_MS` (270 s), so setup and wait together stay

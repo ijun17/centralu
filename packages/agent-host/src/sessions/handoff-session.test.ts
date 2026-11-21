@@ -175,6 +175,15 @@ describe('handoff_session (#694)', () => {
     expect(info(child).askedBy).toBe(heir.id)
     const path = /`([^`]+\.md)`/.exec(claude.handles.get(heir.id)!.sent[0]!)![1]!
     expect(readFileSync(path, 'utf8')).toContain(`handle: ${child}`)
+    // One line on the original tells the handoff and what went with it (#2360)
+    const lines = store.messages.loadMessages(target, 50).flatMap((m) => {
+      const p = m.payload as NormalizedEvent
+      return p.type === 'notice' && p.label === 'handoff' ? [p.text] : []
+    })
+    expect(lines).toEqual([
+      `The Assistant “Assistant” handed this session off to a fresh claude session [${heir.id}], which starts from a note built from the record. ` +
+        'It follows these from now on: "Write the lexer" (working). This session no longer does. This session stays; remove it when you no longer need it.',
+    ])
   })
 
   it('for a session above the Assistant\'s preset: a card in the Assistant asks the person; a refusal starts nothing, an allowance hands off', async () => {
