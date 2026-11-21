@@ -13,7 +13,8 @@
  * Known gaps, shared: a name rebound through a `let`, a function that is handed what the rule looks for, and a
  * spelling that needs types (a `Reflect` call, an alias of an imported function).
  */
-import { guard, keyOf, nameOf, plain, stringNodes, unwrap } from './eslint-guard-kit.js'
+import { guard, keyOf, nameOf, plain, relativeFile, stringNodes, unwrap } from './eslint-guard-kit.js'
+import { COMMENT_SHARE_HELD } from './guard-exceptions.js'
 import { variableOf } from './eslint-const-init.js'
 import { tsConfigs, tsRules } from './eslint-guards-ts.js'
 
@@ -387,17 +388,20 @@ const comments = guard(
     header: 'the file header is {{n}} lines: at most 3 say what the file is; the rest goes to a document or away (#2355)',
     block: 'a {{n}}-line comment: keep what the code cannot carry in at most {{max}} lines, and point to the document or runtime-lessons rule for the rest (#2355)',
     share: '{{pct}}% of this file is comment lines (at most {{max}}%): delete what restates the code, point to documents for the rest (#2355)',
+    held: 'tooling/guard-exceptions.js holds this file at {{held}}% comment lines and it has {{pct}}%: lower the number, or remove the line at 35% or less',
   },
   (context, add) => ({
     Program(program) {
       const source = context.sourceCode
       const groups = []
+      // A comment after code on its line stands alone: trailing notes on consecutive lines are not one block
+      const ownLine = (c) => (source.getTokenBefore(c)?.loc.end.line ?? 0) < c.loc.start.line
       for (const c of source.getAllComments()) {
         const last = groups.at(-1)
-        if (c.type === 'Line' && last?.type === 'Line' && last.end === c.loc.start.line - 1) {
+        if (c.type === 'Line' && last?.type === 'Line' && last.ownLine && ownLine(c) && last.end === c.loc.start.line - 1) {
           last.text += '\n' + c.value
           last.end = c.loc.end.line
-        } else groups.push({ type: c.type, text: c.value, start: c.loc.start.line, end: c.loc.end.line })
+        } else groups.push({ type: c.type, ownLine: ownLine(c), text: c.value, start: c.loc.start.line, end: c.loc.end.line })
       }
       for (const g of groups) {
         for (const re of HISTORY) {
@@ -421,9 +425,12 @@ const comments = guard(
       const commentLines = new Set()
       for (const c of source.getAllComments()) for (let l = c.loc.start.line; l <= c.loc.end.line; l++) if (!code.has(l) && source.lines[l - 1].trim()) commentLines.add(l)
       const lines = code.size + commentLines.size
-      if (lines >= SHARE_FROM_LINES && commentLines.size > COMMENT_SHARE * lines) {
-        add(at(1), 'share', { pct: Math.round((100 * commentLines.size) / lines), max: Math.round(100 * COMMENT_SHARE) }, 'share')
-      }
+      if (lines < SHARE_FROM_LINES) return
+      const pct = Math.round((100 * commentLines.size) / lines)
+      const held = COMMENT_SHARE_HELD.files[relativeFile(context)]
+      const max = held ?? Math.round(100 * COMMENT_SHARE)
+      if (pct > max) add(at(1), 'share', { pct, max }, 'share')
+      else if (held !== undefined && pct < held) add(at(1), 'held', { pct, held }, 'held')
     },
   }),
 )
@@ -570,7 +577,7 @@ const UI = ['packages/ui/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps
 const HOST_SRC = 'packages/agent-host/src'
 /** Where guard/comments reads: a folder joins when its comments have been swept (#2355) */
 const COMMENTS_SWEPT = [
-  'packages/{protocol,core,common,platform}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
+  'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
 ]
 

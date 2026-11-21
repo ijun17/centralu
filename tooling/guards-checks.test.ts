@@ -829,6 +829,25 @@ describe('guard/comments (#2355)', () => {
     expect(await lines('packages/core/src/x.test.ts', third(8), 'comments')).toEqual([])
     expect(await lines(file, '// a\nf()\n// b\ng()', 'comments')).toEqual([])
   })
+  it('does not join notes after code on consecutive lines into one block', async () => {
+    const trailing = Array.from({ length: 12 }, (_, i) => `const a${i} = ${i} // note ${i}`).join(NL)
+    expect(await lines(file, 'f()' + NL + trailing, 'comments')).toEqual([])
+    const own = Array.from({ length: 12 }, (_, i) => `// note ${i}`).join(NL)
+    expect(await lines(file, 'f()' + NL + own, 'comments')).toEqual([2])
+  })
+  it('holds a listed file at its own share, which may only go down', async () => {
+    const held = 'packages/platform/src/ports/system.ts'
+    // code first, then the comments in blocks of five, each followed by a line of code
+    const shareOf = (comments: number, codeLines: number) =>
+      [code(codeLines), ...Array.from({ length: comments }, (_, i) => `// n${i}`).flatMap((c, i) => (i % 5 === 4 ? [c, 'f()'] : [c]))].join(NL)
+    const messages = async (text: string) => {
+      const [result] = await eslint.lintText(text, { filePath: join(ROOT, held), warnIgnored: false })
+      return (result?.messages ?? []).filter((m) => m.ruleId === 'guard/comments').map((m) => m.message.slice(0, 60))
+    }
+    expect(await messages(shareOf(40, 4))).toEqual([expect.stringMatching(/^\d+% of this file/)])
+    expect(await messages(shareOf(5, 40))).toEqual([expect.stringContaining('holds this file')])
+    expect(await lines(file, shareOf(40, 4), 'comments')).toEqual([1])
+  })
   it('reads only the folders whose comments are swept', async () => {
     expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
     expect(await lines('packages/agent-host/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
