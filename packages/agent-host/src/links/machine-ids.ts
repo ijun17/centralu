@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { MACHINE_ID_RE } from '@cc/protocol'
+import { ROLE_WORDS } from '../mail/address.js'
 
 /**
  * Machine-qualified ids (remote mode as linked hosts, docs/plans/remote-hub.md §3.3). A hub shows a linked machine's ids to its
@@ -64,9 +65,25 @@ export function decodeNumber(value: number): { slot: number; n: number } | null 
 
 /** A machine id from the name the person gave, made unique: `ubuntu`, `ubuntu-2`, or a random one */
 export function newMachineId(name: string, taken: ReadonlySet<string>): string {
+  return unique(slugOf(name) ?? `m-${randomBytes(3).toString('hex')}`, taken) ?? `m-${randomBytes(4).toString('hex')}`
+}
+
+/**
+ * The prefix a hub's own sessions go under on its machines, as `<machine>.<id>` names a machine's on the hub: from its name,
+ * never one of its machines' ids or a role word, and the same at every offer while neither changes. Display only: mail
+ * stores and sends addresses, so a renamed hub breaks no stored reference
+ */
+export function hubLabel(name: string, machines: Iterable<string>): string {
+  return unique(slugOf(name) ?? 'hub', new Set([...machines, ...ROLE_WORDS])) ?? 'hub'
+}
+
+function slugOf(name: string): string | null {
   const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 24)
-  const base = slug && MACHINE_ID_RE.test(slug) ? slug : `m-${randomBytes(3).toString('hex')}`
+  return slug && MACHINE_ID_RE.test(slug) ? slug : null
+}
+
+function unique(base: string, taken: ReadonlySet<string>): string | null {
   if (!taken.has(base)) return base
   for (let i = 2; i < 1000; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`
-  return `m-${randomBytes(4).toString('hex')}`
+  return null
 }

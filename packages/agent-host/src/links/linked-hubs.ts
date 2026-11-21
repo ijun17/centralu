@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { SettingAccess } from '../dev-services/store/settings.js'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { LOOKUP_MS } from './machine-reach.js'
+import { hubLabel } from './machine-ids.js'
 import type { AppsPeer } from './linked-apps.js'
 import type { StartingHub } from '../sessions/hub-preset.js'
 
@@ -19,7 +20,7 @@ import type { StartingHub } from '../sessions/hub-preset.js'
  */
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null; upAt: number; offered: boolean }
+type Hub = { id: string; name: string; label: string | null; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; apps: boolean; you: string | null; upAt: number; offered: boolean }
 // `upAt`: the last time its link was known up (an offer, or the end of the connection it offered on). `offered`: it offered on
 // this run; a hub kept from an earlier run (`MAIL_HUBS_KEY`) has not, and stands only for mail to the person until it does
 
@@ -50,7 +51,7 @@ export type LinkedHubsDeps = {
  * written while a hub is away is refused naming it rather than kept here unseen (#1987). An app setting, no store step: an older build never reads it
  */
 export const MAIL_HUBS_KEY = 'mail_hubs'
-const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.string().max(200), you: z.string().max(200).nullable(), at: z.number() })).max(50)
+const KeptMailHubs = z.array(z.object({ id: z.string().min(1).max(200), name: z.string().max(200), label: z.string().max(200).nullable().default(null), you: z.string().max(200).nullable(), at: z.number() })).max(50)
 /**
  * How long a hub that takes mail is known after its link was last up. This host cannot learn that a hub was removed while
  * away, so mail to the person names it as away meanwhile, which is the right answer for one that is only off. 30 days
@@ -90,7 +91,7 @@ export class LinkedHubs {
     const read = KeptMailHubs.safeParse(kept)
     // One down past `KEPT_MAIL_HUB_MS` is forgotten at its first use (`peer`)
     for (const h of read.success ? read.data : []) {
-      this.hubs.set(h.id, { id: h.id, name: h.name || h.id, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false })
+      this.hubs.set(h.id, { id: h.id, name: h.name || h.id, label: h.label, client: null, projects: null, asks: false, mail: true, apps: false, you: h.you, upAt: h.at, offered: false })
     }
   }
 
@@ -129,7 +130,7 @@ export class LinkedHubs {
     // A hub connected now is up now
     const now = Date.now()
     for (const h of this.hubs.values()) if (h.client !== null) h.upAt = now
-    const list = [...this.hubs.values()].filter((h) => h.mail && !this.expired(h)).map((h) => ({ id: h.id, name: h.name, you: h.you, at: h.upAt }))
+    const list = [...this.hubs.values()].filter((h) => h.mail && !this.expired(h)).map((h) => ({ id: h.id, name: h.name, label: h.label, you: h.you, at: h.upAt }))
     this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
   }
 
@@ -149,7 +150,7 @@ export class LinkedHubs {
     const prev = this.hubs.get(o.hub.id)
     const projects = o.on ? (prev?.projects ?? null) : null
     const name = oneLineText(o.hub.name, 120) || o.hub.id
-    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, apps, you: o.you ?? null, upAt: Date.now(), offered: true })
+    this.hubs.set(o.hub.id, { id: o.hub.id, name, label: o.hub.label ?? null, client, projects, asks: o.on, mail, apps, you: o.you ?? null, upAt: Date.now(), offered: true })
     if (mail || prev?.mail) this.keepMailHubs()
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
@@ -272,9 +273,10 @@ export class LinkedHubs {
 
   /**
    * A hub that takes mail (#2067), as mail across calls it (`MailAcross`, docs/plans/linked-mail.md §6): on the connection
-   * it offered on and no other. `you`: this machine's id there, which a hub from before item 2 does not say
+   * it offered on and no other. `you`: this machine's id there, which a hub from before item 2 does not say. `label`: the
+   * prefix its own sessions go under here, made from its name when it offered none (remote-hub.md §3.3)
    */
-  peer(hubId: string): { id: string; name: string; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
+  peer(hubId: string): { id: string; name: string; label: string; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
     // A hub that offered asks and not mail is from before it: called all the same, it answers "Unknown method", which names the cause
     const h = this.hubs.get(hubId)
     if (!h) return undefined
@@ -289,6 +291,7 @@ export class LinkedHubs {
     return {
       id: h.id,
       name: h.name,
+      label: h.label ?? hubLabel(h.name, []),
       reachable: h.client !== null,
       you: h.you,
       call: (method, params) => {

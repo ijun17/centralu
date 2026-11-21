@@ -14,6 +14,9 @@ const APP_RE = new RegExp(`^app:(${SEGMENT})/(${SEGMENT})/(${SEGMENT})$`)
 
 export const PERSON = 'person'
 export const CENTRALU = 'centralu'
+/** The words a tool's session argument takes for a role, not a session (docs/plans/mailbox.md D15, D16) */
+export const ROLE_WORDS = ['assistant', 'parent', PERSON] as const
+export type RoleWord = (typeof ROLE_WORDS)[number]
 
 export type Party =
   | { kind: 'session'; host: string; sessionId: string }

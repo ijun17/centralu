@@ -886,3 +886,20 @@ describe("an answer's calls in the Assistant's form", () => {
     ])
   })
 })
+
+describe('the session a tool takes', () => {
+  it('read_session and agent_session take the session their argument names, as mail reads it, or refuse before anything runs', async () => {
+    const asked: string[] = []
+    const tools = toolsWith({
+      session: (text) => (text === 'Parser' ? { ok: true, id: 'c1' } : { ok: false, error: 'The person is not a session.' }),
+      agentSession: async (opts) => (asked.push(opts.sessionId), { ok: true, state: 'working', sessionId: 'c1', sessionName: 'Parser', tool: 'codex', reported: true }),
+      readSession: async (id) => (asked.push(id), { ok: true, state: 'idle', lines: ['{"role":"user","text":"go"}'] }),
+    })
+    const as = { sessionId: 's', profile: 'reader' } as const
+    expect((await runCentraluTool(tools, 'agent_session', { sessionId: 'Parser', action: 'status' }, as)).isError).toBeFalsy()
+    expect((await runCentraluTool(tools, 'read_session', { sessionId: 'Parser' }, as)).isError).toBeFalsy()
+    expect(await runCentraluTool(tools, 'agent_session', { sessionId: 'person', action: 'status' }, as)).toEqual({ text: 'The person is not a session.', isError: true })
+    expect(await runCentraluTool(tools, 'read_session', { sessionId: 'person' }, as)).toEqual({ text: 'Could not read it — The person is not a session.', isError: true })
+    expect(asked).toEqual(['c1', 'c1'])
+  })
+})

@@ -18,6 +18,7 @@ import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { REFUSAL_TEXT, WARNING_TEXT, firstLineOf, hourlyKey } from './rules.js'
 import { MailTool, type MailToolHost } from './tool.js'
+import { SessionRefs } from './session-refs.js'
 import { MailAcross } from './across.js'
 import { entryOf } from './find.js'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
@@ -295,6 +296,12 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return turn ? { turnSeq: turn.turnSeq, requests: requests.flatMap((r) => { const party = parseAddress(r.asker); return party?.kind === 'session' ? [{ sessionId: party.sessionId, messageId: r.messageId }] : [] }) } : null
     },
   }
+  const refs = new SessionRefs({
+    hostId,
+    sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
+    assistantId: () => sessions.assistantId(),
+    computers: () => across.refComputers(),
+  })
   const tool = new MailTool(service, records, reach, {
     personMessage: (sessionId, seq) => {
       const row = store.messages.loadMessagesFrom(sessionId, seq - 1, 1).find((r) => r.seq === seq)
@@ -305,7 +312,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return s && { address: addressOf(id), askedBy: s.askedBy ?? null, ...(s.startedFromHub ? { fromHub: true } : {}) }
     },
     assistantId: () => sessions.assistantId(),
-    sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
+    refs,
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
     across,
@@ -355,6 +362,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) watches.changed(addressOf(e.sessionId), 'asked', e.requestId)
     },
     tool: (id, args, signal) => tool.call(id, args, signal),
+    session: (id, text) => refs.sessionId({ id, askedBy: sessions.sessionInfo(id)?.askedBy ?? null }, text),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
     sendTask: taskSender(service),

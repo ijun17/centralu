@@ -354,3 +354,15 @@ describe('watch, and close with its id (docs/plans/mailbox.md §18.2)', () => {
 })
 
 void stops
+
+describe('a session named the way no tool takes', () => {
+  it('a half address is refused as one, with the id to write, never as a name a computer that is away may have', async () => {
+    const w = hostWorld()
+    w.across.usePeers({ selfName: () => 'here', machineDirectory: () => ({ entries: [], away: [{ name: 'studio', why: 'not reachable right now' }] }) })
+    expect(await w.tool.call('a', { action: 'send', to: 'session:b', text: 'hi' })).toEqual({
+      text: 'Refused (bad_address): "session:b" is not a session\'s address. For that session, write "b". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".',
+      isError: true,
+    })
+    expect(w.store.mailbox.feedOf(A, { limit: 5 })).toEqual([])
+  })
+})
