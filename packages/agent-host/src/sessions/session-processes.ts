@@ -387,8 +387,7 @@ export class SessionProcesses {
     this.host.restartPolicy.clearBackgroundHold(sessionId)
     const h = this.host.handles.get(sessionId)
     if (h) {
-      this.host.restartPolicy.noticeBackgroundStopped(sessionId, cause)
-      await h.dispose().catch(() => {})
+      await this.host.restartPolicy.disposeForRestart(sessionId, h, cause)
       // Stamped **after** dispose finishes — so even the outgoing process's last flush falls inside the
       // marker
       this.host.externals.stampExternalSynced(sessionId)

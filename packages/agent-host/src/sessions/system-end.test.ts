@@ -76,7 +76,9 @@ describe('a session the system ended under the host (#1397)', () => {
     for (const id of [crashed, inTurn]) {
       expect(info(b, id)).toMatchObject({ state: 'idle', interruption: { reason: 'shutdown' } })
       expect(w.store.sessions.listSessions().find((s) => s.id === id)).toMatchObject({ state: 'idle', interruption: { reason: 'shutdown' } })
-      expect(rowsOf(id).at(-1)).toContain('This turn stopped before it finished: the computer shut down, restarted or signed out while it was running')
+      expect(rowsOf(id).at(-1)).toContain('The computer shut down, restarted or signed out while this turn was running, so it stopped before it finished.')
+      // The record only: the note above the composer offers Continue (#2360)
+      expect(rowsOf(id).at(-1)).not.toContain('Send a message')
     }
   })
 

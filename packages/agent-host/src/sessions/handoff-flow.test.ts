@@ -17,7 +17,6 @@ let turnObservers: Map<string, Set<AgentRunWait>>
 /** Each step the flow took of the manager, in order */
 let steps: string[]
 let created: Parameters<HandoffFlowHost['createSession']>[0][]
-let notices: NormalizedEvent[]
 let answer: HostAskAnswer
 let auto: boolean
 let host: HandoffFlowHost
@@ -39,7 +38,6 @@ beforeEach(() => {
   turnObservers = new Map()
   steps = []
   created = []
-  notices = []
   answer = 'allow'
   auto = false
   host = {
@@ -76,10 +74,6 @@ beforeEach(() => {
       return target({ id: 'heir', name: 'New session', tool: params.tool })
     },
     rename: (id, name) => void steps.push(`rename ${id} ${name}`),
-    onEvent: (e) => {
-      steps.push(`notice ${e.sessionId}`)
-      notices.push(e)
-    },
   }
 })
 afterEach(() => {
@@ -101,14 +95,18 @@ describe('from the record', () => {
     quiet()
     const r = await flowOf().handoff('orch', meta.get('t1')!, { instructions: '  keep the tests green  ' })
     expect(r).toEqual({ ok: true, state: 'done', sessionId: 'heir', sessionName: 'Long run', tool: 'claude', mode: 'record', from: 't1', path: '/data/handoff/p1/t1.md' })
-    expect(steps).toEqual(['toolProblem claude', 'card other', 'record t1 claude', 'create', 'rename heir Long run', 'notice t1'])
+    expect(steps).toEqual(['toolProblem claude', 'card other', 'record t1 claude', 'create', 'rename heir Long run'])
     expect(created[0]).toMatchObject({
       projectId: 'p1', cwd: '/work/p1', tool: 'claude', model: 'opus', effort: 'high', verbosity: 'low', serviceTier: 'priority', permissionPreset: 'normal',
       initialFrom: { sessionId: 'orch', name: 'Assistant' },
       handoff: { from: 'Long run', note: 'the record', fromSessionId: 't1' },
     })
     expect(created[0]!.initialPrompt).toContain('keep the tests green')
-    expect(notices[0]).toMatchObject({ type: 'notice', sessionId: 't1', label: 'handoff', text: expect.stringContaining('This session stays') })
+    // The original's one line is written as the successor is made, with what moved (#2360): the flow gives its words
+    expect(created[0]!.handedOffBy('heir')).toEqual({
+      opens: 'The Assistant “Assistant” handed this session off to a fresh claude session [heir], which starts from a note built from the record.',
+      closes: 'This session stays; remove it when you no longer need it.',
+    })
   })
 
   it('to another tool, carries none of the tool-specific settings', async () => {
@@ -131,7 +129,7 @@ describe('from the record', () => {
     expect(await flow.handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true, state: 'done' })
   })
 
-  it('a successor that cannot be created is a failure, with no rename and no notice, and the session freed', async () => {
+  it('a successor that cannot be created is a failure, with no rename, and the session freed', async () => {
     quiet()
     const flow = flowOf()
     host.createSession = async () => {
@@ -140,7 +138,6 @@ describe('from the record', () => {
     }
     expect(await flow.handoff('orch', meta.get('t1')!, {})).toEqual({ ok: false, error: 'Nothing was handed off: the project folder is gone' })
     expect(steps.slice(-1)).toEqual(['create'])
-    expect(notices).toEqual([])
     // Asked again, it fails the same way, not as a handoff still under way
     expect(await flow.handoff('orch', meta.get('t1')!, {})).toEqual({ ok: false, error: 'Nothing was handed off: the project folder is gone' })
   })
@@ -155,7 +152,7 @@ describe('no card when the handoff guards nothing', () => {
     quiet()
     callerWith('normal')
     expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true, state: 'done' })
-    expect(steps).toEqual(['toolProblem claude', 'record t1 claude', 'create', 'rename heir Long run', 'notice t1'])
+    expect(steps).toEqual(['toolProblem claude', 'record t1 claude', 'create', 'rename heir Long run'])
     callerWith('auto')
     steps = []
     expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true })
@@ -318,7 +315,7 @@ describe('from a note the session writes', () => {
     const r = await flowOf().handoff('orch', meta.get('t1')!, { mode: 'agent' })
     expect(r).toMatchObject({ ok: true, state: 'done', sessionId: 'heir', mode: 'agent' })
     expect(steps.filter((s) => !s.startsWith('auto') && !s.startsWith('toolProblem'))).toEqual([
-      'send t1 from Assistant (the handoff prompt)', 'note t1 after 7', 'create', 'rename heir Long run', 'notice t1',
+      'send t1 from Assistant (the handoff prompt)', 'note t1 after 7', 'create', 'rename heir Long run',
     ])
     expect(created[0]!.handoff.note).toBe('the note it wrote')
     expect(turnObservers.size).toBe(0)

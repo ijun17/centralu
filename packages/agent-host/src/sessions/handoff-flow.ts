@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { busyWith, handoffOpening, handoffPrompt, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
+import { busyWith, handoffOpening, handoffPrompt, SESSION_HANDOFF, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { HandoffResult } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { AgentRunWait } from './app-agents.js'
@@ -36,12 +36,12 @@ export type HandoffFlowHost = {
     /** Who sent the opening: the Assistant, so it is stored and shown as its words, never the person's (FR-11) */
     initialFrom: { sessionId: string; name: string }
     handoff: { from: string; note: string; fromSessionId: string }
+    handedOffBy: (successorId: string) => { opens: string; closes: string }
   }): Promise<SessionInfo>
   rename(sessionId: string, name: string): void
   send(sessionId: string, text: string, attachments: undefined, from: { sessionId: string; name: string }): Promise<void>
   exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }>
   exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
-  onEvent(e: NormalizedEvent): void
   /** Waits that read a session's turn as it ends (`AgentRunWait`), as start_agent's observers do */
   readonly turnObservers: Map<string, Set<AgentRunWait>>
 }
@@ -309,12 +309,13 @@ export class HandoffFlow {
       initialPrompt: handoffOpening(target.name, note.text, note.path, instructions ? { from: `The Assistant (${JSON.stringify(callerName)})`, text: instructions } : undefined),
       initialFrom: { sessionId: callerId, name: callerName },
       handoff: { from: target.name, note: note.text, fromSessionId: target.id },
+      // The original's one line about it, with what moved (#2360)
+      handedOffBy: (id) => ({
+        opens: `The Assistant “${callerName}” handed this session off to a fresh ${tool} session [${id}], which starts from a note ${mode === 'record' ? 'built from the record' : 'this session wrote'}.`,
+        closes: 'This session stays; remove it when you no longer need it.',
+      }),
     })
     this.host.rename(info.id, target.name)
-    this.host.onEvent({
-      type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'handoff',
-      text: `The Assistant “${callerName}” handed this session off to a fresh ${tool} session [${info.id}], which starts from a note ${mode === 'record' ? 'built from the record' : 'this session wrote'}. This session stays; remove it when you no longer need it.`,
-    })
     console.error(`[agent-host] assistant ${callerId.slice(0, 8)} handed off ${target.id.slice(0, 8)} -> ${info.id.slice(0, 8)} (${mode}, ${tool})`)
     return { ok: true, state: 'done', sessionId: info.id, sessionName: target.name, tool, mode, from: target.id, path: note.path }
   }

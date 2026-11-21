@@ -393,7 +393,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
     const last = store.messages.loadMessages(s.id, 5).at(-1)!
     expect(last.payload).toMatchObject({ type: 'notice', level: 'warning', from: 'Centralu' })
-    expect(JSON.stringify(last.payload)).toContain('Centralu quit or restarted while this turn was running')
+    expect(last.payload).toMatchObject({ text: 'Centralu quit or restarted while this turn was running, so it stopped before it finished.' })
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 

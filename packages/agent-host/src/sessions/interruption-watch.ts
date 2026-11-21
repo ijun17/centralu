@@ -9,11 +9,14 @@ import type { SessionTrashHost } from './session-trash.js'
  */
 export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 'meta'> & Pick<SessionTrashHost, 'record'>
 
-/** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the system ended under the host (#1397) */
-const LOST_TURN_LINE = {
-  quit: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
-  shutdown: `This turn stopped before it finished: ${SHUTDOWN_WORDS} while it was running. Send a message to continue.`,
-} as const
+/**
+ * The conversation's record of a turn lost with its process (#698): Centralu quit, or the system ended under the host (#1397).
+ * Only what happened: the note above the composer offers Continue (#2360)
+ */
+const lostTurnLine = (reason: 'quit' | 'shutdown'): string => {
+  const cause = reason === 'quit' ? 'Centralu quit or restarted' : SHUTDOWN_WORDS.charAt(0).toUpperCase() + SHUTDOWN_WORDS.slice(1)
+  return `${cause} while this turn was running, so it stopped before it finished.`
+}
 
 /**
  * A session's `interruption` (#698), kept with its events: the turn's ending as `interruptionAfter` reads it, the
@@ -84,7 +87,7 @@ export class InterruptionWatch {
       level: 'warning',
       from: 'Centralu',
       label: 'stopped',
-      text: LOST_TURN_LINE[reason],
+      text: lostTurnLine(reason),
     }
     const seq = this.host.record.persistMessage(notice, m)
     if (!announce) return

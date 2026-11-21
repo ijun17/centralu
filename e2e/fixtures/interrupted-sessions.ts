@@ -82,7 +82,7 @@ export function interruptedSessionTests() {
     await newSession(page, 'alpha')
     // What a start sends no window, but lists: idle, the quit line unread, the reason (the mock gets it by the event)
     await emit(page, [
-      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.' },
+      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'Centralu quit or restarted while this turn was running, so it stopped before it finished.' },
       { type: 'interruption', sessionId: s, interruption: { reason: 'quit', at: Date.now() } },
     ])
 
@@ -99,7 +99,7 @@ export function interruptedSessionTests() {
     const s = await newSession(page, 'alpha')
     await newSession(page, 'alpha')
     await emit(page, [
-      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'This turn stopped before it finished: the computer shut down, restarted or signed out while it was running. Send a message to continue.' },
+      { type: 'notice', sessionId: s, level: 'warning', from: 'Centralu', label: 'stopped', text: 'The computer shut down, restarted or signed out while this turn was running, so it stopped before it finished.' },
       { type: 'interruption', sessionId: s, interruption: { reason: 'shutdown', at: Date.now() } },
     ])
 

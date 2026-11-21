@@ -49,7 +49,7 @@ the session to write it (`mode: "agent"`) stays an option in both.
   tool titles and paths stay on one line, and the predecessor's name is JSON-quoted (#797), so no line of the
   session's own text can start a row either. Creating it
   moves the original's children ([handoff.md](handoff.md), scope `kept`): **the original always stays**, and is told in its
-  conversation who took over. The person removes it.
+  conversation, in one line, who took over and what moved with it (#2360). The person removes it.
 - **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the Assistant's message, waits
   for the turn to end and reads the note from the store (`exportHandoffNote`). The turn's end is read as start_agent
   reads a child's (`AgentRunWait` among `turnObservers`, #428): a turn that fails, hits a limit or is stopped, or ends
