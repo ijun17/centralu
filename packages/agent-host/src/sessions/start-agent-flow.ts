@@ -318,7 +318,9 @@ export class AgentStartFlow {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
       else {
         const error = r.done.ok ? 'No session was created.' : r.done.error
-        this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'failed', error), onCard: true })
+        // On the card only while this call still waits to answer with it: not past its bound or cancel (`signal`), nor once handed over
+        const onCard = !signal.aborted && request.callerId === callerId
+        this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'failed', error), onCard })
       }
     }
     /*

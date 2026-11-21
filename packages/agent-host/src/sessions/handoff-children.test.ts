@@ -288,6 +288,26 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
   })
 
+  it.each([
+    ['with a working child', true, 'It follows these from now on: "Port the parser" (working); 1 finished session.'],
+    ['with only a finished one', false, 'It follows 1 finished session from now on.'],
+  ])("tells the original of an Assistant's handoff in one line %s, after the Assistant's words (#2360)", async (_what, withWorking, follows) => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const settled = await startChild(h, parent, 'quick check')
+    h.claude.handles.get(settled)!.answer('checked')
+    await eventually(() => reports(parent, settled).length === 1)
+    if (withWorking) h.mgr.rename(await startChild(h, parent, 'long work'), 'Port the parser')
+    await writeHandoffNote(project, parent, 'NOTE BODY: where things stand')
+    const heir = (await h.mgr.createSession({
+      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', initialPrompt: 'You are taking over. Read the note.',
+      handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
+      handedOffBy: (id) => ({ opens: `The Assistant handed this session off to [${id}].`, closes: 'This session stays.' }),
+    })).id
+    const lines = events.flatMap((e) => (e.type === 'notice' && e.sessionId === parent && e.label === 'handoff' ? [e.text] : []))
+    expect(lines).toEqual([`The Assistant handed this session off to [${heir}]. ${follows} This session no longer does. This session stays.`])
+  })
+
   it('tells an original that stays what went where, in its conversation', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

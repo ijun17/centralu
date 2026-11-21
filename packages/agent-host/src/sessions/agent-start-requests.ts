@@ -216,7 +216,7 @@ export class AgentStartRequests {
     if ('key' in r) this.endAgentStart(req.requestId, { childId: r.d.sessionId })
     else {
       const error = r.done.ok ? 'No session was created.' : r.done.error
-      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error), onCard: true })
+      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
     }
   }
 

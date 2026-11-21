@@ -179,6 +179,25 @@ describe('a start allowed on the card that then fails (#2360)', () => {
     expect(failedLines(parent)).toEqual([])
   })
 
+  it('a call cancelled while the session was being made no longer shows how it ended: the line does', async () => {
+    const a = host()
+    const project = await a.mgr.projectCreation.addProject(root)
+    await a.mgr.setProjectTrusted(project.id, true)
+    const parent = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
+    const cancel = new AbortController()
+    const call = a.mgr.startAgent(parent, { task: 'long work', wait: false }, cancel.signal)
+    await eventually(() => !!card(a.mgr, parent))
+    let fail!: (e: Error) => void
+    a.claude.createSession = () => new Promise((_resolve, reject) => (fail = reject))
+    a.mgr.inputs.respondApproval(parent, card(a.mgr, parent)!.requestId, 'allow')
+    await eventually(() => fail !== undefined)
+    cancel.abort()
+    fail(new Error('the CLI did not come up'))
+    await call
+    await eventually(() => failedLines(parent).length > 0)
+    expect(failedLines(parent)).toEqual([expect.stringContaining('was allowed, but no agent was started')])
+  })
+
   it('once the call answered "pending", the line is what tells the person', async () => {
     const a = host()
     const { parent, requestId } = await asking(a)

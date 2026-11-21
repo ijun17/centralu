@@ -131,8 +131,11 @@ export class RestartPolicy {
     this.host.store.settings.deleteAppSetting(this.host.backgroundTasksKey(sessionId))
   }
 
-  /** The tasks a restart's line named (`endedTaskName`) while their process goes down: their own "stopped" lines are not repeated (#2360) */
-  readonly namedEndings = new Map<string, ReadonlySet<string>>()
+  /**
+   * The tasks a restart's line named while their process goes down: their own "stopped" lines are not repeated (#2360).
+   * By `endedTaskName`, as the line names them, so a same-named task the line did not name loses its line too.
+   */
+  private readonly namedEndings = new Map<string, ReadonlySet<string>>()
 
   endingSaid(e: NormalizedEvent): boolean {
     if (e.type !== 'notice' || e.label !== 'background task') return false
@@ -140,11 +143,23 @@ export class RestartPolicy {
     return !!named && [...named].some((name) => e.text.startsWith(`${name} stopped`))
   }
 
+  /** Ends a session's process for a restart, having said what background work stops with it */
+  async disposeForRestart(sessionId: string, h: SessionHandle, cause: RebuildCause | undefined): Promise<void> {
+    this.noticeBackgroundStopped(sessionId, cause)
+    try {
+      await h.dispose()
+    } catch {
+      // Gone either way: the restart goes on
+    } finally {
+      this.namedEndings.delete(sessionId)
+    }
+  }
+
   /**
    * Says in the conversation that a restart is about to end the session's background work (#648), naming the tasks: a
    * person whose dev server stopped should read why where they look. Each named task's own ending is then `endingSaid`.
    */
-  noticeBackgroundStopped(sessionId: string, cause: RebuildCause | undefined): void {
+  private noticeBackgroundStopped(sessionId: string, cause: RebuildCause | undefined): void {
     const m = this.host.meta.get(sessionId)
     if (!m || !this.host.handles.has(sessionId)) return
     const why =
