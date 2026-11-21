@@ -12,21 +12,13 @@ import { localImagePath } from './localImages.js'
 import { ReplyImage } from './ReplyImage.jsx'
 
 /**
- * Rendering the agent's response.
+ * Rendering the agent's response. While streaming, the markdown arrives incomplete (an open code fence, a truncated
+ * link); react-markdown renders the partial result without throwing, so it is used as-is. Code and quotes are set
+ * apart by background brightness and spacing, not color.
  *
- * While streaming, the markdown **arrives incomplete** (an open code fence, a truncated link).
- * react-markdown does not throw on that kind of input and just renders the partial result, so
- * this uses it as-is.
- *
- * Styling follows the grayscale rule — code and quotes are set apart by background brightness
- * and spacing, not color.
- *
- * `projectRoot` is the session's project directory, or null when it has none (the
- * assistant). It is what decides whether a backticked path is a file the person can open —
- * see `parseFileRef`.
- *
- * `sessionId` is given for an agent's reply, and only there: a local image in it is read by that session's host,
- * which reads only a path one of the session's replies wrote (`ReplyImage`). Elsewhere a local image is not loaded.
+ * `projectRoot` is the session's project directory (null for the assistant): it decides whether a backticked path is a
+ * file the person can open (`parseFileRef`). `sessionId` is given only for an agent's reply: a local image in it is
+ * read by that session's host, which reads only a path one of the session's replies wrote (`ReplyImage`).
  */
 export const Markdown = memo(function Markdown({
   text: written,
@@ -179,23 +171,11 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           return <>{children}</>
         },
         /*
-         * A path the agent typed opens in the viewer (#39).
-         *
-         * The click can do exactly one thing: hand a string to `openFile`, which reads
-         * it through `fs.readFile(projectId, …)` and shows it read-only. That is the
-         * safety property, and it is why this is a `<button>` and not an `<a href>` —
-         * the text comes out of a model, so there must be no attribute anywhere on this
-         * element that a browser would try to *interpret*. No href, therefore no scheme,
-         * therefore nothing for `javascript:` to be smuggled into. (Right-click reveal
-         * goes through `fs.reveal`, which refuses anything above the project root — the
-         * same property, kept on the host side.)
-         *
-         * `<code>` stays inside so the thing still looks like the code span it was, and
-         * so the surrounding `.cc-md` rules (including the `pre code` reset) keep
-         * applying untouched.
-         *
-         * `node` is react-markdown's own handle on the AST and is dropped rather than
-         * spread: passed through, it lands in the DOM as `node="[object Object]"`.
+         * A path the agent typed opens in the viewer (#39). The click only hands a string to `openFile`, which reads it
+         * through `fs.readFile(projectId, …)` read-only. That is why this is a `<button>`, not an `<a href>`: the text
+         * comes from a model, so no attribute here may be one a browser would interpret (no href, no `javascript:`).
+         * `<code>` stays inside so the `.cc-md` rules keep applying. `node` is dropped, not spread: passed through,
+         * it lands in the DOM as `node="[object Object]"`.
          */
         code: ({ node: _node, children, ...props }) => {
           const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null

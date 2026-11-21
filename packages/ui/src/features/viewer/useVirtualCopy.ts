@@ -3,18 +3,16 @@ import { caretAt, selectedText, type Caret, type CopyLine } from './copy.js'
 import { letterOf } from '../../app/keys.js'
 
 /**
- * Copy and ⌘A for a pane with virtualized rows, the code viewer's and the diff's: one rule, so they cannot drift (#428,
- * #424). Spread the returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
+ * Copy and ⌘A for a pane with virtualized rows, the code viewer's and the diff's: one rule (#428, #424). Spread the
+ * returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
  * - The copy is rebuilt from `lines` (`selectedText`): the DOM holds only the rows near the viewport. A selection that
- *   leaves the pane copies the pane's part (`edgeCaret`); one that does not touch the pane is left to the browser.
- * - The anchor end is remembered while its row exists: the browser walks it out of the rows once the list scrolls far
- *   enough. A new `resetKey` or `contentKey` forgets it, so one file's anchor never leaks into the next.
- * - ⌘A claims `wholeText` and paints the mounted rows: without a live selection the browser fires no `copy`. The claim
- *   ends on any mouse press, a selection that leaves the rows, or Shift with a key that extends a selection (#842 item
- *   9). A mouse press alone is not enough: text then selected by keyboard elsewhere (the composer, a field) would copy as
- *   the whole file. A range collapsed by scrolling recycling its rows keeps the claim and is painted again (#36).
- * - The pane takes focus once per `resetKey` when `ready`, so ⌘A lands here: on the document, ⌘C copies only the
- *   mounted rows (#118). Once per key, so it never takes focus back from a search box mid-typing.
+ *   leaves the pane copies the pane's part (`edgeCaret`); one that does not touch it is left to the browser.
+ * - The anchor end is remembered while its row exists: the browser walks it out of the rows once the list scrolls far.
+ *   A new `resetKey` or `contentKey` forgets it.
+ * - ⌘A claims `wholeText` and paints the mounted rows: with no live selection the browser fires no `copy`. The claim
+ *   ends on a mouse press, a selection leaving the rows, or Shift with a key that extends a selection (#842 item 9:
+ *   a press alone would let text selected elsewhere copy as the whole file); row recycling keeps it (#36).
+ * - The pane takes focus once per `resetKey` when `ready`, so ⌘A lands here: on the document, ⌘C copies only the rows.
  */
 export function useVirtualCopy({
   scrollRef,

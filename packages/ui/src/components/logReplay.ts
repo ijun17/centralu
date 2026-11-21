@@ -1,11 +1,7 @@
 /**
- * Joins a command's stored log and its live output into one stream for a log view. The view subscribes to live
- * output first and reads the log second, so nothing falls between; live chunks are held until the log lands. The hold
- * ends on every answer: a failed read or one for another run would otherwise keep a dev server's output in memory and
- * the pane blank. A failed read leaves a dim line where the log would be, so output from mid-run is not taken for all.
- *
- * The exit line takes the same hold: a run that ended before the log answered would have its exit line drawn above
- * the log and again after it (#1143 U18).
+ * Joins a command's stored log and its live output into one stream for a log view. The view subscribes to live output
+ * first and reads the log second; live chunks and the exit line (#1143 U18) are held until the log answers, so nothing
+ * falls between or shows twice. A failed read ends the hold and leaves a dim line, so mid-run output is not taken for all.
  */
 export type LogReplay = {
   /** A live chunk of this run's output */

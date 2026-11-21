@@ -86,21 +86,13 @@ export function UserAttachment({ att }: { att: ChatAttachment }) {
 }
 
 /**
- * The composer's attachments, before sending (#284).
+ * The composer's attachments, before sending (#284). An image shows as a thumbnail, not an `IMG` chip, since a pasted
+ * screenshot's name is generated and says nothing; a file keeps its chip, and so does an image that cannot be drawn.
  *
- * An image shows as a small thumbnail rather than an `IMG` chip: a pasted screenshot's name is
- * generated, so a chip says nothing about which image it is, and the person would find out only
- * after sending. A file keeps its chip, and so does an image that cannot be drawn (AttachmentThumb).
- *
- * **Every item sits in a row of one fixed height** (`h-12`, the thumbnail's height). Items of
- * different heights would make the strip, and with it the composer, grow and shrink as a thumbnail
- * is added, removed or falls back to a chip — the composer jumping under the hand while typing,
- * and the measured card height (composerH) shifting the conversation's bottom margin each time.
- * With one row height the strip only changes height when it wraps to another row, and several
- * thumbnails wrap into even rows.
- *
- * Memoised: the strip's props do not change on a keystroke (the draft's attachment array keeps its
- * identity when only the text changes), so typing does not re-render the thumbnails.
+ * Every item sits in a row of one fixed height (`h-12`, the thumbnail's height): otherwise the strip, and the composer
+ * with it, would jump as a thumbnail is added, removed or falls back to a chip, and the measured card height (composerH)
+ * would shift the conversation's bottom margin each time. Memoised: the strip's props keep their identity on a keystroke
+ * (the draft's attachment array), so typing does not re-render the thumbnails.
  */
 export const AttachmentStrip = memo(function AttachmentStrip({
   attachments,

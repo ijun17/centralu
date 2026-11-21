@@ -25,18 +25,13 @@ export type AutoApplyInput = {
 }
 
 /**
- * Whether "Apply updates automatically when idle" relaunches now, and if not, what it waits for.
- *
- * - Only with the setting on, an install finished, and a relaunch that starts another build.
- * - Never from a window that already runs the installed version: that window is the relaunched
- *   one, and a relaunch from it would loop.
- * - Never while busy: a session working, waiting for an approval or a question, a terminal or a
- *   command running (the host's one idle rule, `hostBusy`, reported through the keeper). Unknown
- *   counts as busy, as it does for the switch's question.
- * - Never while someone is typing.
- * - Never from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing
- *   reports whether the host is busy there, and waiting for a report that never comes would only say "something is
- *   running" for good. The person presses the button. With a keeper the report is there, so it waits for idle.
+ * Whether "Apply updates automatically when idle" relaunches now, and if not, what it waits for. It relaunches only
+ * with the setting on, an install finished, and a relaunch that starts another build. Never:
+ * - from a window that already runs the installed version: it is the relaunched one, and relaunching would loop;
+ * - while busy: a session working or waiting for an approval or question, a terminal or command running (the host's one
+ *   idle rule, `hostBusy`, via the keeper); unknown counts as busy, as for the switch's question; or while typing;
+ * - from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing reports
+ *   whether the host is busy there, so the person presses the button.
  */
 export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingFor?: string } {
   const u = i.update

@@ -12,20 +12,11 @@ function quoted(text: string): ReactNode[] {
 
 /**
  * A tool's notice made readable (#342), a line of the conversation like every marker (`MarkLine`, #2338 option 1).
- *
- * The capsule says who is speaking and what kind of notice (`Codex · config warning`) and whose it is to act on (`for you` /
- * `for Centralu`). It opens to the plain explanation, or the tool's text when there is none; under it, what the explanation
- * names (one setting per line) and the hint. The tool's own words stay one click away, so a cause the explanation did not
- * anticipate is never lost.
- *
- * A `config.toml` warning and a deprecation addressed to Centralu would read like the same
- * kind of problem. So a notice for the person starts open and one for Centralu starts closed (owner, 2026-11-17, #2338), and
- * `for Centralu` is fainter than `for you`: a notice the person cannot act on does not look like one they must. A notice whose
- * audience the host did not place starts open.
- * The host places the audience, not this rule from the notice's level: Centralu's lines about a compaction are placed for Centralu, so they start
- * closed with a head that says what happened (owner, 2026-11-18), while an `info` notice the host did not place keeps its words open. A notice from
- * Centralu that is for Centralu does not say `for Centralu` (`audienceShown`): the speaker is the one it is for, so the words add nothing and the head
- * would read "Centralu · … · for Centralu". It still starts closed: the rule above reads the audience, not what is printed.
+ * The capsule says who is speaking, what kind of notice and whose it is to act on; it opens to the plain explanation
+ * (or the tool's text when there is none), what that names, and the hint. The tool's own words stay one click away.
+ * Which notices start open or closed, and the fainter `for Centralu`: docs/design-system.md §7. The host places the
+ * audience, not this rule from the notice's level. A notice from Centralu for Centralu does not print `for Centralu`
+ * (`audienceShown`) but still starts closed, since the rule reads the audience, not what is printed.
  */
 export function NoticeMark({ notice }: { notice: NoticeLine }) {
   // The line a mail delivery leaves, and the messages it opens to (#2332, #2333)

@@ -5,20 +5,13 @@ import { useStore } from '../store/store.js'
 
 /**
  * How a popover, a menu or a modal goes away, written once (#428).
- *
- * - Escape closes the innermost open thing only (`stopPropagation`, so the inbox or a modal under it stays), in the
- *   capture phase on the window, so a row that stops its own events cannot swallow it. A composition's Esc (#181) is not one.
- * - A press outside every element of `refs` closes it (capture phase too). `refs` holds the trigger too, or its
- *   mousedown closes and its click reopens (unless the trigger copes, as the sidebar menus' do). Leave `refs` out when
- *   a backdrop or a modal's scrim catches outside presses.
- * - The window losing focus closes it unless `closeOnBlur` is off: a click into an app's view never reaches this
- *   document as a mousedown, but it takes focus. A backdrop covers the view, so a popover with one does not need it.
- * - A window opening over the screen (the palette, the inbox, settings, usage) closes it unless `closeOverWindow` is
- *   off: those windows hear Escape after this capture listener, so a popover left under them would take the key.
- * - `returnFocusTo` gets focus back after Escape (the person is on the keyboard), not after a press outside or a blur,
- *   and only when focus is the popover's or nobody's: WebKit does not focus a button on click, so a composer may still
- *   hold the keyboard.
- *
+ * - Escape closes the innermost open thing only (`stopPropagation`), in the capture phase on the window, so a row that
+ *   stops its own events cannot swallow it. A composition's Esc (#181) is not one.
+ * - A press outside `refs` closes it; `refs` holds the trigger too, or its mousedown closes and its click reopens.
+ *   Leave `refs` out when a backdrop or a modal's scrim catches outside presses.
+ * - The window losing focus closes it unless `closeOnBlur` is off: a click into an app's view takes focus but is no mousedown here.
+ * - A window opening over the screen closes it unless `closeOverWindow` is off: those windows hear Escape after this listener.
+ * - `returnFocusTo` gets focus after Escape only, when focus is the popover's or nobody's (WebKit does not focus a button on click).
  * `onClose` may be a new function every render; the listeners stay.
  */
 export function useDismiss({
