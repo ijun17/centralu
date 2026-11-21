@@ -4,22 +4,14 @@ import type { PlatformPath } from 'node:path'
 import { retarget, type OsFamily } from './rules.js'
 
 /**
- * The `Os`'s tree copy (`cpSync`, `promises.cp`), one definition for the real OS and the in-memory one (#1650,
- * docs/plans/os-layer.md §7.1). It never walks into a link: every link in the tree, the root too, is made again as a link.
- * Of what is behind one it asks only whether it is a folder (on Windows, to make the right kind) and, with `links`,
- * where it really leads (to tell one into the tree); of the target's parents, which entries they are (to refuse a copy
- * into itself). So a link can neither make a copy endless nor end the
- * process, whatever it leads to. Changes made while it copies cannot either: an entry is copied as what `lstat` or the
- * listing says it is, whichever says link; only a folder swapped for a link in the instant between its `lstat` and its
- * listing is listed through that link, once, and its entries are copied by the same rules.
- *
- * Node's own `cpSync` follows links in places and ended the host on a tree with a link in a circle (`a -> b -> a`,
- * `x -> x`: exit 0xC0000409 on Windows, an uncaught C++ `filesystem_error`, abort, on Linux) and on Windows on any
- * junction back into the tree, which it copied as the folder it leads to. Checking the tree first could not close it: a
- * link changed between the check and the copy still ended the process (10 of 40 copies on Windows, #1650 review).
- *
- * The copy is written once, as the steps it takes (`copySteps`); `copyTreeSync` and `copyTreeAsync` carry them out
- * with an `Os`'s own sync or promise calls, so the asynchronous copy never blocks the event loop.
+ * The `Os`'s tree copy (`cpSync`, `promises.cp`), one definition for the real and the in-memory OS (#1650,
+ * docs/plans/os-layer.md §7.1). It never walks into a link: every link in the tree, the root too, is made again as a link,
+ * asking of what is behind one only whether it is a folder (on Windows, for the right kind) and, with `links`, where it leads.
+ * An entry is copied as what `lstat` or the listing says, so a change while copying cannot make it endless either. Node's
+ * `cpSync` follows links in places and ended the host on a link in a circle (`a -> b -> a`: exit 0xC0000409 on Windows, a C++
+ * `filesystem_error` abort on Linux) and on a Windows junction back into the tree; checking first did not close it (10 of 40
+ * copies). The steps are written once (`copySteps`) and carried out with an `Os`'s sync or promise calls, so the async copy
+ * never blocks the event loop
  */
 
 /** What the copy asks of the files, sync or not: the `Os`'s own calls of the same names */
@@ -97,12 +89,11 @@ const kindOf = (e: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink()
   e.isSymbolicLink() ? 'link' : e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other'
 
 /**
- * The kind of link a copy makes on Windows for a link whose target is `target`, by what it leads to: to a folder, a
- * junction when the target is a whole path on a drive (it needs no right, where a directory symlink needs Developer
- * Mode or an administrator, as a file symlink does), else a directory symlink (a relative target, or a share, which a
- * junction cannot hold); to a file or to nothing, a file symlink. Node's APIs cannot tell a junction from a directory symlink to a whole path
- * (`readlink`, `lstat` and the listing answer the same), and both lead to the same place for the host, so the copy
- * keeps what they have in common. POSIX has one kind of link: no kind is given there.
+ * The kind of link a copy makes on Windows for a link whose target is `target`: to a folder, a junction when the target is a
+ * whole drive path (it needs no right, where a directory symlink needs Developer Mode or an administrator), else a directory
+ * symlink (a relative target or a share, which a junction cannot hold); to a file or nothing, a file symlink. Node cannot tell
+ * a junction from a directory symlink to a whole path (`readlink`, `lstat` and the listing answer alike) and both lead to the
+ * same place, so the copy keeps what they share. POSIX has one kind: none is given
  */
 export function copiedLinkKind(target: string, toFolder: boolean, family: OsFamily): LinkKind | undefined {
   if (family !== 'windows') return undefined
@@ -111,22 +102,15 @@ export function copiedLinkKind(target: string, toFolder: boolean, family: OsFami
 }
 
 /**
- * The steps of copying `from` to `to`, Node's `cp` with the options the `Os` offers:
- * - Node's refusals first: the same file (`ERR_FS_CP_EINVAL`), a folder into itself (`ERR_FS_CP_EINVAL`: a parent of
- *   `to` that is `from` by `dev` and `ino`, as Node's `checkParentPaths`, so through a link, a share to the same disk
- *   (`\\localhost\C$\…`) or a bind mount too; parents not made yet are passed over, where Node stops at the first),
- *   a folder onto a non-folder and back (`ERR_FS_CP_DIR_TO_NON_DIR`, `ERR_FS_CP_NON_DIR_TO_DIR`, at the root and
- *   below it), a folder without `recursive` (`ERR_FS_EISDIR`), anything not a file, folder or link
- *   (`ERR_FS_CP_UNKNOWN`: a FIFO, which `copyFile` would wait on for ever). The parent of `to` is made.
- * - A folder is made with its source's mode once its entries are in; one already there is copied into, its mode kept.
- * - A file: one there is replaced (`force`, the default), or kept, or `ERR_FS_CP_EEXIST` with `errorOnExist`; the copy
- *   takes the source's mode, and with `preserveTimestamps` its access and change times.
- * - A link (by the listing or `lstat`, whichever says link, so a reparse point `lstat` cannot read is never walked
- *   into): made again with its target as written with `verbatimSymlinks`, else a relative one read from the link's
- *   folder (Node's rule). With `links`, a whole target inside `links.from`, as written or where the link really leads,
- *   is made leading to the same place inside `links.to` (`retarget`); a relative one is kept as written, which leads
- *   into the copy already if it led into the tree. One there that is a link is replaced; anything else is `EEXIST`.
- * - An entry gone since its folder was listed is not copied.
+ * The steps of copying `from` to `to`, Node's `cp` with the options the `Os` offers. Node's refusals come first: the same file
+ * or a folder into itself (`ERR_FS_CP_EINVAL`: a parent of `to` that is `from` by `dev` and `ino`, as `checkParentPaths`, so
+ * through a link, a share to the same disk or a bind mount too), a folder onto a non-folder and back, a folder without
+ * `recursive`, anything not a file, folder or link (a FIFO, which `copyFile` would wait on for ever). A folder takes its
+ * source's mode once its entries are in; a file there is replaced (`force`), kept, or `ERR_FS_CP_EEXIST` with `errorOnExist`,
+ * and takes the source's mode and, with `preserveTimestamps`, its times. A link (by the listing or `lstat`, so a reparse point
+ * `lstat` cannot read is never walked into) is made again with its target as written with `verbatimSymlinks`, else read from
+ * the link's folder as Node does; with `links`, a whole target inside `links.from` leads inside `links.to` (`retarget`). An
+ * entry gone since its folder was listed is not copied
  */
 export function* copySteps(
   from: string,
@@ -418,8 +402,8 @@ export function copyTreeSync(
 }
 
 /**
- * The step's answer, or `ETIMEDOUT` once `ms` have passed without one (`CopyTreeOptions.stepMs`). Only for the steps that read
- * a name (a stat, a listing, a link): a file's copy takes as long as the file is large, and is not a question the OS fails to answer
+ * The step's answer, or `ETIMEDOUT` once `ms` pass without one (`CopyTreeOptions.stepMs`); only for steps that read a name, as
+ * a file's copy takes as long as the file is large and is no question the OS fails to answer
  */
 function answeredWithin(answer: Promise<CopyAnswer>, ms: number | undefined, step: CopyStep): Promise<CopyAnswer> {
   if (ms === undefined || step.op === 'copyFile') return answer

@@ -3,33 +3,16 @@ import { randomInt } from 'node:crypto'
 import { tryParseJson } from '../json-value.js'
 
 /**
- * Per-app origin ports (M4 B-3, spike S-1).
- *
- * An app that breaks under an opaque origin (5 of 86 public apps, S-8) is given its own origin:
- * `http://127.0.0.1:<that app's port>`. WebKit keeps browser storage **separated by origin**, so
- * the port has to preserve two properties.
- *
- *   Fixed     The same app gets the same port across runs. Otherwise the app's storage disappears
- *             on every run.
- *   Immutable A port once given to an app is **never given to a different app again**, even after
- *             that app is deleted. That origin's storage remains in WebKit, so reissuing the port
- *             would let a new app read someone else's storage.
- *
- * So the assignment table (key → port) and the retired list are stored on the host side, and the
- * table never shrinks.
- *
- * The port range is 20000–32767. This avoids macOS's ephemeral port range (49152–65535) and
- * Linux's (32768–60999) — picking from there would risk the OS briefly lending the same number to
- * an outgoing connection.
- *
- * If another program is holding an assigned port, that app is moved to a new port and the old one
- * is retired. The app loses that origin's storage. In exchange, the view comes up. Keeping state on
- * the server is a principle of this design, so losing storage is a smaller cost than the view never
- * coming up at all. The fact of the move is recorded in the host log.
- *
- * Cookies sit outside this isolation. In dev and web modes, where the top level is
- * `http://127.0.0.1`, all ports share cookies (measured for S-1: Chromium, WebKit, WKWebView).
- * localStorage and IndexedDB are separated.
+ * Per-app origin ports (spike S-1). An app that breaks under an opaque origin (5 of 86 public apps, S-8) gets its own origin,
+ * `http://127.0.0.1:<its port>`; WebKit separates browser storage by origin, so the port is fixed (the same app gets the same
+ * port across runs, or its storage disappears each run) and immutable (a port once given is never given to another app, even
+ * after deletion, as that origin's storage remains in WebKit and a new app would read it). So the assignment table (key to
+ * port) and the retired list are stored on the host side and the table never shrinks. The range is 20000–32767, avoiding
+ * macOS's ephemeral range (49152–65535) and Linux's (32768–60999), where the OS might briefly lend the number to an outgoing
+ * connection. If another program holds an assigned port the app moves to a new one and the old is retired, losing that origin's
+ * storage but coming up (state lives on the server by this design), and the host log records the move. Cookies sit outside this
+ * isolation: in dev and web modes, where the top level is `http://127.0.0.1`, all ports share cookies (measured for S-1:
+ * Chromium, WebKit, WKWebView); localStorage and IndexedDB are separated
  */
 
 export type PortBook = {

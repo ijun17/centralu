@@ -2,21 +2,12 @@ import { inflateRawSync } from 'node:zlib'
 import { errorMessage } from '@cc/protocol'
 
 /**
- * Zip reading (M4 E-3) — unpacks an imported app's bundle **while validating it**. Three reasons
- * this is read here rather than pulling in a library.
- *
- *   1. What has to be blocked depends on this file's own shape: entry names (zip slip), symlink
- *      entries, a declared size that disagrees with the actual unpacked size (a zip bomb),
- *      encryption. A general-purpose library defaults toward "unpacking it anyway" for these. Here,
- *      anything unrecognized is rejected.
- *   2. We decide where the unpacked output is written: this file only returns bytes, and building
- *      the path and writing the file is the caller's job (`imports.ts`), using the name it has
- *      already validated — the validated string is the string that gets used.
- *   3. What is actually needed is small: two methods, stored (0) and deflate (8), no ZIP64 (our cap
- *      is well under 4GiB).
- *
- * The format is PKWARE APPNOTE 6.3.x. The central directory is authoritative (the size in the local
- * header is 0 when a data descriptor is present).
+ * Zip reading that unpacks an imported app's bundle while validating it, here and not a library: what must be blocked depends
+ * on this file's shape (entry names for zip slip, symlink entries, a declared size that disagrees with the unpacked size,
+ * encryption) and a general library defaults toward unpacking anyway, where anything unrecognized is rejected here. It only
+ * returns bytes: the caller builds the path from the name it validated (`imports.ts`), so the validated string is the one used.
+ * The need is small: stored (0) and deflate (8), no ZIP64. PKWARE APPNOTE 6.3.x; the central directory is authoritative (the
+ * local header's size is 0 with a data descriptor)
  */
 
 export class ZipError extends Error {
@@ -50,7 +41,7 @@ export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
 
 /**
  * `readZipEntries` for an archive too large to hold in memory (Antigravity's, ~110 MB): only the end of the file and its
- * central directory are read, through `read(position, length)`, with the same checks
+ * central directory are read through `read(position, length)`, with the same checks
  */
 export function readZipEntriesFrom(size: number, read: (pos: number, len: number) => Buffer, maxEntries: number): ZipEntry[] {
   const tailStart = Math.max(0, size - EOCD_SEARCH)
@@ -95,7 +86,8 @@ export function readZipEntriesFrom(size: number, read: (pos: number, len: number
     const nameEnd = p + 46 + nameLen
     if (nameEnd > limit) throw new ZipError('The zip file is damaged (entry name out of range)')
     const name = cd.toString('utf8', p + 46, nameEnd)
-    // A name that does not decode as UTF-8 (an old code page) is never guessed at — writing a file under a guessed name would differ from the list the person saw
+    // A name that does not decode as UTF-8 (an old code page) is never guessed at — writing a file under a guessed name would
+    // differ from the list the person saw
     if (name.includes('�')) throw new ZipError('An entry name is not UTF-8; re-create the archive with UTF-8 names')
     if (flags & 0x1) throw new ZipError(`Encrypted entries are not supported: ${name}`)
     if (compressedSize === 0xffffffff || size === 0xffffffff || offset === 0xffffffff) throw new ZipError('ZIP64 archives are not supported')
@@ -113,9 +105,8 @@ function unixMode(madeBy: number, external: number): number {
 }
 
 /**
- * An entry's kind. A symlink (`S_IFLNK`) can only be recognized by its Unix mode. Unpacking a
- * symlink as a regular file turns its content (the path it points at) into a file; unpacking it as
- * an actual symlink is the oldest form of a zip-slip attack.
+ * An entry's kind. A symlink (`S_IFLNK`) is recognized only by its Unix mode; unpacked as a regular file it turns the path it
+ * points at into a file, and unpacked as a real symlink it is the oldest zip-slip attack
  */
 function kindOf(name: string, mode: number, external: number): ZipEntry['kind'] {
   const type = mode & 0o170000
@@ -126,10 +117,8 @@ function kindOf(name: string, mode: number, external: number): ZipEntry['kind'] 
 }
 
 /**
- * The content of one entry. Unpacks **only up to the declared size** (`maxOutputLength`) — if the
- * unpacked output would exceed it, stops right there (a zip bomb). Rejects if the declared size, the
- * actual size, or the CRC disagree: the file that gets written must match the list (with its
- * declared size) the person saw.
+ * The content of one entry, unpacked only up to the declared size (`maxOutputLength`; a zip bomb stops there). Rejects when the
+ * declared size, the actual size or the CRC disagree: the written file must match the list the person saw
  */
 export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
   const raw = zipEntryBytes(buf, e)

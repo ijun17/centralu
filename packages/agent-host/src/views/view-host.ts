@@ -11,22 +11,13 @@ import { viewDocumentFromResource, type ViewDocument } from './view-document.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * App view hosting (M4 B-3a).
- *
- * A single view is **an instance created by one tool call** (per the spec: a view has no state of
- * its own). When the app runtime sees `_meta.ui.resourceUri` in a result, it creates the instance
- * with `open()`, and that id goes to the UI. The UI gets the address with `frame()` (RPC
- * `apps.viewFrame`) and loads the sandbox proxy. Every route to that address sits behind the host
- * port's secret path (transport/http.ts).
- *
- * This layer does not know the app process. Reading the document is left to `ViewSource` (filled
- * in by the runtime); interpreting the spec (what counts as a view, CSP, permissions) happens
- * here.
- *
- * A hub also serves the views of its linked machines (#82, docs/plans/remote-hub.md §11): an
- * instance id of the form `<machine>.<id>` is open on that machine, which hands over the app's raw
- * document (`RemoteViews`), and everything else (the address, the proxy page, the CSP, the per-app
- * origin port from this host's own book) is this host's, exactly as for its own instances.
+ * App view hosting. A view is an instance created by one tool call (a view has no state of its own, per the spec): when the app
+ * runtime sees `_meta.ui.resourceUri` in a result it creates the instance with `open()`, the UI gets its address with `frame()`
+ * (`apps.viewFrame`) and loads the sandbox proxy, and every route to it sits behind the host port's secret path
+ * (transport/http.ts). This layer does not know the app process: `ViewSource` (filled by the runtime) reads the document and
+ * interpreting the spec (what counts as a view, CSP, permissions) happens here. A hub also serves the views of its linked
+ * machines (#82, docs/plans/remote-hub.md §11): an id `<machine>.<id>` is open on that machine, which hands over the app's raw
+ * document (`RemoteViews`), and the address, proxy page, CSP and per-app origin port are this host's, as for its own instances
  */
 
 /** One app. If the same id exists in two projects, they are different apps. `projectId: null` is a user-folder app */
@@ -145,19 +136,13 @@ export type ViewHostOptions = {
 export const MAX_INSTANCES = 1000
 
 /**
- * How long a leased view outlives the window that held it (#392).
- *
- * A fixed view is closed by the window that opened it (`apps.closeView`). A window that reloads
- * or closes never says so: the new page starts with no views and opens its own, and the old
- * instances held their apps open (no idle shutdown, A-3) for the rest of the host's life. Reloads
- * repeat, so each one added a set. So a view opened with a lease belongs to the connection that
- * opened it, and once that connection ends the view waits this long for a window to claim it again
- * (`apps.holdViews`, sent after every reconnect) before it is closed.
- *
- * Five minutes covers what ends a connection without ending the window: a network blip, the host
- * swapped behind the front door (the next host restores the view and waits the same time), a
- * sleeping laptop whose host slept too (timers stop with it). A window that comes back later
- * finds the view gone and opens it again, as after an app restart.
+ * How long a leased view outlives the window that held it (#392). A window that reloads or closes never says so, and the old
+ * instances held their apps open (no idle shutdown) for the rest of the host's life, each reload adding a set; so a view opened
+ * with a lease belongs to the connection that opened it and, once that ends, waits this long for a window to claim it again
+ * (`apps.holdViews`, sent after every reconnect) before it is closed. Five minutes covers what ends a connection without ending
+ * the window: a network blip, the host swapped behind the front door (the next host restores the view and waits the same time),
+ * a sleeping laptop whose host slept too. A window that comes back later finds the view gone and opens it again, as after an
+ * app restart
  */
 export const LEASE_GRACE_MS = 5 * 60_000
 
@@ -339,15 +324,11 @@ export class ViewHost {
   }
 
   /**
-   * Opens again, **under their old ids**, the instances a previous host handed over (#280: a build
-   * switch replaces the host while the window stays open). The id is what the UI holds; keeping it
-   * means an open view's next call, or its next `apps.viewFrame`, finds its instance as if no swap
-   * had happened.
-   *
-   * Each one holds its app again, exactly as `open()` does, and one whose app no longer exists is
-   * skipped (`retain` throws) — its view gets "not open" and the UI's failure path, as before. An
-   * id that is malformed or already open is skipped too: the record is a file, and an id must
-   * never be shared by two instances. Returns the ids opened.
+   * Opens again, under their old ids, the instances a previous host handed over (#280): the id is what the UI holds, so an open
+   * view's next call or `apps.viewFrame` finds its instance as if nothing swapped. Each holds its app again as `open()` does;
+   * one whose app no longer exists is skipped (`retain` throws) and its view gets "not open" and the UI's failure path. A
+   * malformed or already open id is skipped too, as the record is a file and an id must never be shared by two instances.
+   * Returns the ids opened
    */
   restore(views: readonly OpenView[], now = Date.now()): string[] {
     const opened: string[] = []
@@ -394,15 +375,10 @@ export class ViewHost {
   }
 
   /**
-   * The address the UI loads the view at (RPC `apps.viewFrame`).
-   *
-   * **The instance decides the app.** The `app` the caller provides is only checked against the
-   * instance's own app; a mismatch is treated as nonexistent. So claiming app B's name with app
-   * A's view id opens nothing.
-   *
-   * The document is read once here and stored on the instance. Reopening the view (calling
-   * `frame()` again) reads it fresh — this is meant to keep a reopened view from showing stale HTML
-   * after the app has been edited.
+   * The address the UI loads the view at (`apps.viewFrame`). The instance decides the app: the caller's `app` is only checked
+   * against the instance's own and a mismatch is treated as nonexistent, so claiming app B's name with app A's view id opens
+   * nothing. The document is read once here and stored on the instance; calling `frame()` again reads it fresh, so a reopened
+   * view does not show stale HTML after the app was edited
    */
   async frame(p: { app: AppRef; instanceId: string; hostOrigin: string }): Promise<ViewFrame> {
     const remote = REMOTE_INSTANCE_ID.test(p.instanceId)

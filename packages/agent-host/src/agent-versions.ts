@@ -2,22 +2,13 @@ import { runsOlderCli, type AgentVersions, type NormalizedEvent, type SessionInf
 import type { SessionIdle } from './idle.js'
 
 /**
- * Moving sessions to a newly installed agent CLI (#297).
- *
- * Every session runs its own agent process, started from the CLI installed at the time. An update
- * to `claude` or `codex` reaches a session only when its process starts again, and with the keeper
- * (#280) that can be never: the keeper holds the processes across app restarts. This service knows
- * both sides, the installed version (read here, periodically and when a window gains focus) and the
- * version each session runs (`SessionInfo.agentVersion`, from the process itself), and restarts a
- * session on the installed CLI:
- *
- *   - when the person asks, for every session that is idle right now (`applyNow`, the header's action);
- *   - by itself, with `autoApply` on (the default, the owner's decision of 2026-10-05), once a
- *     session has been fully idle for `quietMs`.
- *
- * The restart is the manager's "Restart agent" (`restartSession`): the process is disposed and the
- * session resumes in a new one, so the conversation continues. Under the keeper that disposal stops
- * the held child and the resume spawns a new one; nothing is re-attached.
+ * Moving sessions to a newly installed agent CLI (#297). Every session runs its own agent process, started from the CLI
+ * installed then, so an update reaches a session only when its process starts again, which under the keeper (#280) can be
+ * never. This service reads the installed version (periodically and when a window gains focus) and the version each session
+ * runs (`SessionInfo.agentVersion`) and restarts a session on the installed CLI: when the person asks, for every session idle
+ * now (`applyNow`), or by itself with `autoApply` on (the default, owner 2026-10-05) once a session has been idle for
+ * `quietMs`. The restart is the manager's `restartSession`: the process is disposed and the session resumes in a new one, so
+ * the conversation continues
  */
 
 /** What this needs from the session manager */
@@ -57,10 +48,9 @@ export type AgentVersionDeps = {
   readSeen?: () => Record<string, string>
   writeSeen?: (seen: Record<string, string>) => void
   /**
-   * **The seam for #270's capability check.** Called once for every installed CLI whose version
-   * changed (not for the first sighting). #270 proposes re-running the probes for what a tool could
-   * not do ("`/goal` needs the interactive CLI") when its version moves; nothing implements that
-   * yet, so the default writes one line to host.log saying so.
+   * The seam for #270's capability check: called once per installed CLI whose version changed (not the first sighting). #270
+   * proposes re-running the probes for what a tool could not do when its version moves; nothing implements it yet, so the
+   * default writes one line to host.log
    */
   capabilityCheck?: (change: ToolVersionChange) => void
   now?: () => number
@@ -68,10 +58,8 @@ export type AgentVersionDeps = {
 }
 
 /**
- * How often the installed versions are read while the host runs. Ten minutes: reading is a file
- * per tool (npm's `package.json`), and an update made in a terminal should not take an hour to
- * reach the header. The window gaining focus asks too, which is when someone who just updated
- * comes back.
+ * How often installed versions are read while the host runs: ten minutes, as reading is a file per tool (npm's `package.json`)
+ * and an update made in a terminal should not take an hour to reach the header. The window gaining focus asks too
  */
 const CHECK_INTERVAL_MS = 10 * 60 * 1000
 
@@ -79,18 +67,16 @@ const CHECK_INTERVAL_MS = 10 * 60 * 1000
 const FOCUS_FRESH_MS = 30 * 1000
 
 /**
- * How long a session must have been quiet before it is moved by itself. A turn that just ended is
- * the moment the person reads the answer and starts typing the next message; a restart then would
- * land in the middle of it. A minute of nothing from the session (no event of any kind) says the
- * moment has passed. Asking by hand (`applyNow`) does not wait.
+ * How long a session must be quiet before it is moved by itself: a turn that just ended is when the person reads the answer and
+ * starts typing, and a restart then would land in the middle. A minute with no event of any kind says the moment has passed.
+ * `applyNow` does not wait
  */
 const QUIET_MS = 60 * 1000
 
 /**
- * The events after which a session may have become restartable, or changed the version it runs: the end of a turn or
- * of a wait, background work changing, a process coming or going. Only these schedule a look. Everything else (a
- * streaming chunk, a tool card) only moves the quiet period along: it arrives mid-turn, many times a second, and a look
- * already scheduled re-reads the quiet period when it fires.
+ * The events after which a session may have become restartable or changed its version: the end of a turn or wait, background
+ * work changing, a process coming or going. Only these schedule a look; others (a streaming chunk, a tool card) arrive many
+ * times a second mid-turn and only move the quiet period along
  */
 const MAY_SETTLE: ReadonlySet<NormalizedEvent['type']> = new Set([
   'agent_version',
@@ -110,11 +96,9 @@ export type RestartDecision =
   | { restart: false; why: 'not_live' | 'current' | 'recent' | 'restarting' | Extract<SessionIdle, { idle: false }>['reason'] }
 
 /**
- * Whether to restart one session on the installed CLI now.
- *
- * Only a live session whose process runs an older version than the installed one (unknown on
- * either side is not older: nothing is restarted on a guess), that is fully idle by the shared rule
- * (`sessionIdle`, idle.ts), and that has been quiet for `quietMs`.
+ * Whether to restart one session on the installed CLI now: only a live session whose process runs an older version than the
+ * installed one (unknown on either side is not older: nothing is restarted on a guess), fully idle by `sessionIdle` (idle.ts)
+ * and quiet for `quietMs`
  */
 export function restartDecision(input: {
   session: Pick<SessionInfo, 'live' | 'agentVersion'>
@@ -144,9 +128,8 @@ export class AgentVersionService {
   /** `<session> <version>` of each failed move already said, so a session tried again on each quiet spell says it once */
   private failedSaid = new Set<string>()
   /**
-   * When this host started hearing. A session it has not heard from since counts as quiet from here, not from the
-   * beginning of time: a host that just replaced another (a restart, a switched build) does not know what the person
-   * was doing a second ago.
+   * When this host started hearing: a session not heard from since counts as quiet from here, as a host that just replaced
+   * another does not know what the person was doing a second ago
    */
   private readonly since: number
 
@@ -191,8 +174,8 @@ export class AgentVersionService {
   }
 
   /**
-   * Reads the installed versions, or answers with the last reading when `force` is off and it is
-   * fresh (a window gaining focus). Never throws: a tool that cannot be read reads as null.
+   * Reads the installed versions, or answers the last reading when `force` is off and it is fresh (a window gaining focus).
+   * Never throws: a tool that cannot be read reads as null
    */
   async check(force: boolean): Promise<AgentVersions> {
     if (this.inFlight) return this.inFlight
@@ -243,9 +226,9 @@ export class AgentVersionService {
   }
 
   /**
-   * Restarts every live session that runs an older CLI and is idle right now — the person asked, so
-   * the quiet period does not apply. The rest are listed as busy. `keepQuiet`: not the person's own button (an agent
-   * asked, #1219), so a session that said something within the quiet period is left too, as the automatic move leaves it.
+   * Restarts every live session that runs an older CLI and is idle now, the quiet period not applying as the person asked; the
+   * rest are listed as busy. `keepQuiet` (an agent asked, not the person's button, #1219) also leaves a session that said
+   * something within the quiet period
    */
   async applyNow(opts: { keepQuiet?: boolean } = {}): Promise<{ restarted: string[]; busy: string[] }> {
     const restarted: string[] = []
@@ -261,9 +244,9 @@ export class AgentVersionService {
   }
 
   /**
-   * Hears every session event. A session that just said something is not quiet; one that may have
-   * become idle is looked at again once the quiet period has passed. A process reporting a version
-   * newer than the last reading means the CLI was updated since: read again.
+   * Hears every session event: a session that just said something is not quiet, and one that may have become idle is looked at
+   * again after the quiet period. A process reporting a newer version than the last reading means the CLI was updated since:
+   * read again
    */
   observe(e: NormalizedEvent): void {
     if (!e.sessionId) return

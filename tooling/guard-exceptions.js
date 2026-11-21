@@ -238,6 +238,44 @@ export const ARCHIVE_ALLOWED = [
 ]
 
 /**
+ * Files inside a swept folder that guard/comments does not read yet, because another change is editing them or their header cannot be
+ * changed without a tool reading it as a comment it must keep (#2355); each sweep removes the lines it clears
+ */
+export const COMMENTS_LEFT = [
+  'packages/agent-host/src/app-home-view.test.ts',
+  'packages/agent-host/src/app-list-events.test.ts',
+  'packages/agent-host/src/app-secrets.test.ts',
+  'packages/agent-host/src/app-versions.test.ts',
+  'packages/agent-host/src/app-views.test.ts',
+  'packages/agent-host/src/builder-requests.test.ts',
+  'packages/agent-host/src/data-dir.test.ts',
+  'packages/agent-host/src/data-dir.ts',
+  'packages/agent-host/src/drain.test.ts',
+  'packages/agent-host/src/env-path.test.ts',
+  'packages/agent-host/src/external-app-runs.test.ts',
+  'packages/agent-host/src/external-apps.test.ts',
+  'packages/agent-host/src/host-requests.test.ts',
+  'packages/agent-host/src/inline-views.test.ts',
+  'packages/agent-host/src/log-file.test.ts',
+  'packages/agent-host/src/log-file.ts',
+  'packages/agent-host/src/main.ts',
+  'packages/agent-host/src/os.ts',
+  'packages/agent-host/src/os/kill-tree.test.ts',
+  'packages/agent-host/src/os/real.test.ts',
+  'packages/agent-host/src/project-settings-events.test.ts',
+  'packages/agent-host/src/rpc.test.ts',
+  'packages/agent-host/src/transport/limited-token.test.ts',
+  'packages/agent-host/src/transport/link-keys.test.ts',
+  'packages/agent-host/src/transport/link-proof.test.ts',
+  'packages/agent-host/src/transport/server.test-helpers.ts',
+  'packages/agent-host/src/transport/server.test.ts',
+  'packages/agent-host/src/update-apply.test.ts',
+  'packages/agent-host/src/updates.test.ts',
+  'packages/agent-host/src/user-app-adoption.test.ts',
+  'packages/agent-host/src/views/view-host.test.ts',
+]
+
+/**
  * The source files `guard/comments` holds above its 35% share of comment lines (#2355), each at its share now. Most are
  * type declarations whose fields each keep one line the type cannot say (what absence means, what an older peer does, a
  * unit, a security consequence); the rest keep platform facts, races or measured numbers. The guard holds each number as a
@@ -246,6 +284,12 @@ export const ARCHIVE_ALLOWED = [
  */
 export const COMMENT_SHARE_HELD = {
   files: {
+    'packages/agent-host/src/idle.ts': 44,
+    'packages/agent-host/src/keeper-link.ts': 41,
+    'packages/agent-host/src/os/kill-tree.ts': 36,
+    'packages/agent-host/src/os/port.ts': 37,
+    'packages/agent-host/src/rpc-error.ts': 40,
+    'packages/agent-host/src/update-switches.ts': 41,
     'packages/core/src/grid/layout.ts': 44,
     'packages/platform/src/ports/apps.ts': 38,
     'packages/platform/src/ports/fs.ts': 49,

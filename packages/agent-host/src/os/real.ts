@@ -387,7 +387,7 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
  * on the child ends the tree in no order: a program ended by taskkill reports success to an MSYS shell (Git for Windows'
  * `sh` sees status 0 from a `sleep` ended so), so a parent still running could take a stopped script's success and go
  * on, as git made the commit a stop was meant to prevent (#2141). With the child gone first, nothing above a process
- * outlives it. Read after, the table would miss a grandchild whose parent Node ended with the child (#2142 review).
+ * outlives it. Read after, the table would miss a grandchild whose parent Node ended with the child (#2142).
  *
  * The price: a stop waits for the table (0.3–0.75 s), where `taskkill /T` took about 60 ms. A table that cannot be read,
  * or not within `STOP_LIST_MS` (a machine starved of CPU took over 10 s, #1773), leaves `taskkill /T`. `sweep` then finds

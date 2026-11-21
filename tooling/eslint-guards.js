@@ -16,7 +16,7 @@
 import { Linter } from 'eslint'
 import tseslint from 'typescript-eslint'
 import { guard, keyOf, nameOf, plain, relativeFile, stringNodes, unwrap } from './eslint-guard-kit.js'
-import { COMMENT_SHARE_HELD } from './guard-exceptions.js'
+import { COMMENT_SHARE_HELD, COMMENTS_LEFT } from './guard-exceptions.js'
 import { variableOf } from './eslint-const-init.js'
 import { tsConfigs, tsRules } from './eslint-guards-ts.js'
 
@@ -619,6 +619,8 @@ const HOST_SRC = 'packages/agent-host/src'
 const COMMENTS_SWEPT = [
   'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
+  `${HOST_SRC}/*.ts`,
+  `${HOST_SRC}/{keeper,os,transport,views}/**/*.ts`,
 ]
 
 /**
@@ -697,7 +699,7 @@ export const guardConfigs = [
   // Every shipped reader of a session's kind, on both sides of the wire (#2133)
   { files: ['packages/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'], ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'], rules: { 'guard/assistant-kind': 'error' } },
   // The folders whose comments have been swept (#2355); each sweep adds its own
-  { files: COMMENTS_SWEPT, rules: { 'guard/comments': 'error' } },
+  { files: COMMENTS_SWEPT, ignores: COMMENTS_LEFT, rules: { 'guard/comments': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))
 

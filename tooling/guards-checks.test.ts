@@ -883,6 +883,9 @@ describe('guard/comments (#2355)', () => {
   })
   it('reads only the folders whose comments are swept', async () => {
     expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
-    expect(await lines('packages/agent-host/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
+    expect(await lines('packages/agent-host/src/sessions/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
+    // A file in COMMENTS_LEFT is not read yet
+    expect(await lines('packages/agent-host/src/main.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
   })
 })
