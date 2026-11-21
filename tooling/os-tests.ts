@@ -472,9 +472,11 @@ export function piecesOf(wholes: readonly string[], candidates: readonly string[
   for (const whole of wholes) {
     const pieces = candidates.filter((f) => !taken.has(f) && mayBePieceOf(whole, f, files))
     if (pieces.length === 0 || pieces.length > SPLIT_MAX_PIECES) continue
-    const lost = lines(files.base(whole)) - lines(files.now(whole))
+    const now = files.now(whole)
+    const lost = lines(files.base(whole)) - lines(now)
     const size = pieces.reduce((sum, f) => sum + lines(files.now(f)), 0)
-    if (lost <= 0 || size > lost + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
+    // A file still there was cut only if it lost lines: a new test beside one left as it was is no piece of it
+    if ((now !== null && lost <= 0) || size > lost + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
     for (const f of pieces) taken.add(f)
     out.set(whole, pieces)
   }
@@ -484,7 +486,7 @@ export function piecesOf(wholes: readonly string[], candidates: readonly string[
 /**
  * The files that may take the allowlist line of a file this change removed (`os-layer.test.ts` and `tightened` both ask):
  * the pieces (`piecesOf`) of each file of `main`'s list that is gone now, among the `candidates` (files the list would gain:
- * the lines the list has that main's has not, or the offenders it lacks). A file that fits none is a new offender, as before.
+ * the lines the list has that main's has not, or the offenders it lacks). A file that fits none is a new offender.
  */
 export const splitPieces = (main: readonly string[], current: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> =>
   piecesOf(main.filter((f) => !current.includes(f) && files.now(f) === null), candidates, files)
@@ -493,17 +495,17 @@ export const splitPieces = (main: readonly string[], current: readonly string[],
  * The tests of `tests` that this change cut (`piecesOf`) from a test the selection picked at main's merge base, and that it
  * does not pick now (#2402), each under the test it was cut from. The selection is made file by file, so a piece whose own
  * text earns it nothing (the OS question stayed in the other piece) would leave Windows without a word. `changed` are the
- * tests changed or removed since the base, and `pickedAtBase` asks the selection there.
+ * tests changed or removed since the base, and `pickedAtBase` asks the selection there (with this change's `EVERY_OS_TESTS`).
  */
 export function droppedPieces(tests: readonly string[], picked: ReadonlySet<string>, changed: readonly string[], files: SplitFiles, pickedAtBase: (test: string) => boolean): Map<string, string[]> {
-  const unpicked = tests.filter((t) => !picked.has(t) && files.base(t) === null)
+  const unpicked = tests.filter((t) => !picked.has(t))
   const wholes = changed.filter((w) => unpicked.some((t) => mayBePieceOf(w, t, files)) && pickedAtBase(w))
   return piecesOf(wholes, unpicked, files)
 }
 
 /** `droppedPieces` of the repository since `base`, for the tests the selection picks now */
 export function droppedPiecesSince(base: string, tests: readonly string[], picked: ReadonlySet<string>): Map<string, string[]> {
-  const changed = execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=DM', base, '--'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(isTestFile)
+  const changed = execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=DM', base, '--'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.(ts|tsx|mts|mjs)$/.test(f))
   const atBase = osSelector(new Map(), treeAt(base))
   return droppedPieces(tests, picked, changed, splitFilesAt(base), (t) => atBase.whyEveryOs(t) !== null)
 }

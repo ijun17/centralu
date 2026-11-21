@@ -484,8 +484,8 @@ describe('the tests that run on every OS', () => {
     expect(dropped([], split, () => false)).toEqual(new Map())
     // The whole removed: its pieces are named all the same
     expect(dropped([], at({ [whole]: text(1400) }, { [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports, prs]]]))
-    // A new test beside a picked one that lost no lines, or more than it lost, or one that was there at the base, is no piece
-    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1400), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
+    // A new test beside a picked one that lost no lines (however small), longer than what it lost, or one that was there at the base, is no piece
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1400), [reports]: text(20), [prs]: text(20) }))).toEqual(new Map())
     expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1300), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
     expect(dropped([whole], at({ [whole]: text(1400), [prs]: text(370) }, { [whole]: text(1030), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports]]]))
   })
@@ -497,7 +497,7 @@ describe('the tests that run on every OS', () => {
       if (!base) return
       const { all, picked } = await pickedOnRepo()
       const dropped = [...droppedPiecesSince(base, all, new Set(picked))].map(([whole, pieces]) => `${pieces.join(', ')} (from ${whole})`)
-      expect(dropped, `cut from a test that runs on every OS, these run on Linux only: name each in EVERY_OS_TESTS (tooling/os-layer.js) with its reason, or give it what picked the whole`).toEqual([])
+      expect(dropped, `cut from a test that runs on every OS, these run on Linux only: name each in EVERY_OS_TESTS (tooling/os-layer.js) with its reason, or give it what picked the whole (a new test named after a shortened one is taken for a piece of it)`).toEqual([])
     },
     120_000 * SLOW,
   )
