@@ -785,8 +785,10 @@ describe('guard/timed-start', () => {
   })
 })
 
-describe('guard/no-history-comments (#2355)', () => {
+describe('guard/comments (#2355)', () => {
   const file = 'packages/core/src/x.ts'
+  const code = (n: number) => Array.from({ length: n }, (_, i) => `const a${i} = ${i}`).join(NL)
+  const block = (n: number) => ['/**', ...Array.from({ length: n - 2 }, (_, i) => ` * line ${i}`), ' */'].join(NL)
   it.each([
     ['// This used to wait for the host.'],
     ['/** The list used to be sorted here. */'],
@@ -794,8 +796,8 @@ describe('guard/no-history-comments (#2355)', () => {
     ['// Previously the host sent it twice.'],
     ['// The host sends it once. Previously it sent it twice.'],
     ['/**\n * - Previously: two sends\n */'],
-  ])('reports history in %j', async (code) => {
-    expect((await lines(file, code, 'no-history-comments')).length).toBe(1)
+  ])('reports history in %j', async (text) => {
+    expect((await lines(file, 'f()' + NL + text, 'comments')).length).toBe(1)
   })
   it.each([
     ['// The key is used to sign requests.'],
@@ -805,11 +807,27 @@ describe('guard/no-history-comments (#2355)', () => {
     ['// The waiting list is\n// used to sort.'],
     ['// It was previously sent: a repeat is dropped.'],
     ["const a = 'it used to wait'"],
-  ])('lets %j through', async (code) => {
-    await quiet(file, 'no-history-comments', code, '// It used to wait.')
+  ])('lets %j through', async (text) => {
+    await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
+  })
+  it('holds a file header to 3 lines', async () => {
+    expect(await lines(file, '// one\n// two\n// three\n' + code(3), 'comments')).toEqual([])
+    expect(await lines(file, '// one\n// two\n// three\n// four\n' + code(3), 'comments')).toEqual([1])
+  })
+  it('holds a comment block to 10 lines', async () => {
+    expect(await lines(file, code(1) + NL + block(10) + NL + code(1), 'comments')).toEqual([])
+    expect(await lines(file, code(1) + NL + block(11) + NL + code(1), 'comments')).toEqual([2])
+  })
+  it('holds a source file to 35% comment lines, from 30 lines, tests aside', async () => {
+    // 20 code lines, then n two-line comments each followed by a line of code
+    const third = (n: number) => [code(20), ...Array.from({ length: n }, (_, i) => `// note ${i}${NL}// more${NL}const b${i} = ${i}`)].join(NL)
+    expect(await lines(file, third(4), 'comments')).toEqual([])
+    expect(await lines(file, third(8), 'comments')).toEqual([1])
+    expect(await lines('packages/core/src/x.test.ts', third(8), 'comments')).toEqual([])
+    expect(await lines(file, '// a\nf()\n// b\ng()', 'comments')).toEqual([])
   })
   it('reads only the folders whose comments are swept', async () => {
-    expect(await lines('packages/core/src/x.ts', '// It used to wait.', 'no-history-comments')).toEqual([1])
-    expect(await lines('packages/agent-host/src/x.ts', '// It used to wait.', 'no-history-comments')).toEqual([])
+    expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
+    expect(await lines('packages/agent-host/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
   })
 })

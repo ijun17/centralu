@@ -362,37 +362,70 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
 })
 
 /**
- * A comment says what the code is and why, now; its history is in git and the issues (CONTRIBUTING.md "What is expected
- * of code", #2355). Two phrasings that are history and little else: "used to" (not the passive "is used to", "can be used
- * to") and a sentence that opens with "Previously". Adjacent line comments are read as one text, so a phrase split over
- * two lines is read whole.
+ * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
+ * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
+ * history ("used to", not the passive "is used to"; a sentence opening with "Previously"), a file header over 3 lines, a
+ * comment block over COMMENT_BLOCK_LINES lines, and a source file over COMMENT_SHARE comment lines. Adjacent line
+ * comments are one block.
  */
-const ADVERB = '(?:\\w+ly|only|also|not|just|still|never|often)'
+const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often)`
 const HISTORY = [
-  new RegExp(`(?<!\\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\\s*]+(?:${ADVERB}[\\s*]+)?)\\bused[\\s*]+to\\b`, 'gi'),
+  new RegExp(String.raw`(?<!\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\s*]+(?:${ADVERB}[\s*]+)?)\bused[\s*]+to\b`, 'gi'),
   /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
 ]
-const noHistoryComments = guard('no-history-comments', { history: '"{{text}}" tells history: say what the code does and why, now; git and the issues keep the history (#2355)' }, (context, add) => ({
-  Program() {
-    const groups = []
-    for (const c of context.sourceCode.getAllComments()) {
-      const last = groups.at(-1)
-      if (c.type === 'Line' && last?.type === 'Line' && last.end === c.loc.start.line - 1) {
-        last.text += '\n' + c.value
-        last.end = c.loc.end.line
-      } else groups.push({ type: c.type, node: c, text: c.value, start: c.loc.start.line, end: c.loc.end.line })
-    }
-    for (const g of groups) {
-      for (const re of HISTORY) {
-        for (const m of g.text.matchAll(re)) {
-          const at = m.index + m[0].length - (m[1] ?? m[0]).length
-          const line = g.start + (g.text.slice(0, at).match(/\n/g)?.length ?? 0)
-          add({ loc: { start: { line, column: 0 }, end: { line, column: 0 } } }, 'history', { text: (m[1] ?? m[0]).replace(/[\s*]+/g, ' ').trim() })
+const HEADER_LINES = 3
+const COMMENT_BLOCK_LINES = 10
+const COMMENT_SHARE = 0.35
+/** Below this many lines a file's share says little: two comments in a six-line file are a third of it */
+const SHARE_FROM_LINES = 30
+const isTestFile = (file) => /\.test\.|test-helpers\./.test(file)
+const at = (line) => ({ loc: { start: { line, column: 0 }, end: { line, column: 0 } } })
+const comments = guard(
+  'comments',
+  {
+    history: '"{{text}}" tells history: say what the code does and why, now; git and the issues keep the history (#2355)',
+    header: 'the file header is {{n}} lines: at most 3 say what the file is; the rest goes to a document or away (#2355)',
+    block: 'a {{n}}-line comment: keep what the code cannot carry in at most {{max}} lines, and point to the document or runtime-lessons rule for the rest (#2355)',
+    share: '{{pct}}% of this file is comment lines (at most {{max}}%): delete what restates the code, point to documents for the rest (#2355)',
+  },
+  (context, add) => ({
+    Program(program) {
+      const source = context.sourceCode
+      const groups = []
+      for (const c of source.getAllComments()) {
+        const last = groups.at(-1)
+        if (c.type === 'Line' && last?.type === 'Line' && last.end === c.loc.start.line - 1) {
+          last.text += '\n' + c.value
+          last.end = c.loc.end.line
+        } else groups.push({ type: c.type, text: c.value, start: c.loc.start.line, end: c.loc.end.line })
+      }
+      for (const g of groups) {
+        for (const re of HISTORY) {
+          for (const m of g.text.matchAll(re)) {
+            const from = m.index + m[0].length - (m[1] ?? m[0]).length
+            add(at(g.start + (g.text.slice(0, from).match(/\n/g)?.length ?? 0)), 'history', { text: (m[1] ?? m[0]).replace(/[\s*]+/g, ' ').trim() }, 'history')
+          }
         }
       }
-    }
-  },
-}))
+      const firstCode = program.tokens[0]?.loc.start.line ?? Infinity
+      for (const [i, g] of groups.entries()) {
+        const n = g.end - g.start + 1
+        if (i === 0 && g.start < firstCode) {
+          if (n > HEADER_LINES) add(at(g.start), 'header', { n }, 'header')
+        } else if (n > COMMENT_BLOCK_LINES) add(at(g.start), 'block', { n, max: COMMENT_BLOCK_LINES }, 'block')
+      }
+      if (isTestFile(context.filename)) return
+      const code = new Set()
+      for (const t of program.tokens) for (let l = t.loc.start.line; l <= t.loc.end.line; l++) code.add(l)
+      const commentLines = new Set()
+      for (const c of source.getAllComments()) for (let l = c.loc.start.line; l <= c.loc.end.line; l++) if (!code.has(l) && source.lines[l - 1].trim()) commentLines.add(l)
+      const lines = code.size + commentLines.size
+      if (lines >= SHARE_FROM_LINES && commentLines.size > COMMENT_SHARE * lines) {
+        add(at(1), 'share', { pct: Math.round((100 * commentLines.size) / lines), max: Math.round(100 * COMMENT_SHARE) }, 'share')
+      }
+    },
+  }),
+)
 
 /** The protocol does not know about vendors (#59): no tool name in its code */
 const noToolNames = guard('no-tool-names', { tool: "the protocol names a tool ('{{text}}'): an adapter introduces itself, so a vendor is never written on the shelf both sides reach (#59)" }, (_context, add) => {
@@ -525,7 +558,7 @@ export const guards = {
     'assistant-kind': assistantKind,
     'held-files': heldFiles,
     'one-path-rule': onePathRule,
-    'no-history-comments': noHistoryComments,
+    comments,
     ...tsRules,
   },
 }
@@ -534,8 +567,8 @@ export const guards = {
 const TESTS = ['**/*.test.ts', '**/*.test-helpers.ts']
 const UI = ['packages/ui/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps/desktop/src/**/*.{ts,tsx}']
 const HOST_SRC = 'packages/agent-host/src'
-/** Where guard/no-history-comments reads: a folder joins when its comments have been swept (#2355) */
-const HISTORY_CLEARED = [
+/** Where guard/comments reads: a folder joins when its comments have been swept (#2355) */
+const COMMENTS_SWEPT = [
   'packages/{protocol,core,common,platform}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
 ]
@@ -615,8 +648,8 @@ export const guardConfigs = [
   { files: [`${HOST_SRC}/adapters/{acp,frames,cursor-agent}/*.test.ts`], rules: { 'guard/no-sleeps': 'error' } },
   // Every shipped reader of a session's kind, on both sides of the wire (#2133)
   { files: ['packages/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'], ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'], rules: { 'guard/assistant-kind': 'error' } },
-  // The folders whose comments have been cleared of history (#2355); each sweep adds its own
-  { files: HISTORY_CLEARED, rules: { 'guard/no-history-comments': 'error' } },
+  // The folders whose comments have been swept (#2355); each sweep adds its own
+  { files: COMMENTS_SWEPT, rules: { 'guard/comments': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))
 
