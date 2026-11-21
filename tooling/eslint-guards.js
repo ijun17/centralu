@@ -393,7 +393,7 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
 /**
  * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
  * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
- * history ("used to", not the passive "is used to"; a sentence opening with "Previously"; a "#N review" tag), a file header over 3
+ * history ("used to", not the passive "is used to"; a sentence opening with "Previously"; a review tag: "#N review", "review of #N", "#N re-check"), a file header over 3
  * lines of text, a comment block over COMMENT_BLOCK_LINES lines of text, a source file over COMMENT_SHARE comment lines,
  * and a paragraph that runs two list items into its text (#2406). Adjacent line comments are one block.
  */
@@ -401,7 +401,8 @@ const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often|then|alw
 const HISTORY = [
   new RegExp(String.raw`(?<!\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\s*]+(?:${ADVERB}[\s*]+)?)\bused[\s*]+to\b`, 'gi'),
   /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
-  /#\d+[\s*]+review\b/gi,
+  /#\d+[\s*]+(?:review|re-?check)\b/gi,
+  /\b(?:review|re-?check)[\s*]+of[\s*]+#\d+/gi,
 ]
 /**
  * An item marker after other text on its line: a `- `, or a `-` ending the line (a list re-wrapped as a paragraph puts its

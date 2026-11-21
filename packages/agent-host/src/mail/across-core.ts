@@ -211,7 +211,7 @@ export class AcrossCore {
    * The id a send to `to` goes under: the one of an unsure send of the same message by the same sender (its words, what it
    * answers, whether it is urgent and wants a reply), so the other side takes it as the message it may have, else a new
    * one, kept as unsure until the other side answers. A send again that changes any of them is another message: under the
-   * same id the other side would keep the first, and its urgency or question would be lost (#2067 re-check)
+   * same id the other side would keep the first, and its urgency or question would be lost (#2067)
    */
   protected idFor(sender: string, to: string, fields: Kept, computer: string, task?: Work): string {
     const now = this.now()

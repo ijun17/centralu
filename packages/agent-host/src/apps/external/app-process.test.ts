@@ -187,7 +187,7 @@ describe("a Python app's stderr", () => {
   }, 30_000 * SLOW)
 
   /*
-   * Only the streams (a review of #964): PYTHONUTF8=1 also made UTF-8 what open() and the locale default to, so an app
+   * Only the streams (#964): PYTHONUTF8=1 also made UTF-8 what open() and the locale default to, so an app
    * reading its own code page's files (cp949 on a Korean Windows) without naming an encoding failed. Compared with the
    * same Python started directly, so the answer is this machine's own.
    */

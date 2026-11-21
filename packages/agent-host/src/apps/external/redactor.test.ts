@@ -48,7 +48,7 @@ describe('a secret is masked in a run record however JSON spells it', () => {
     expect(failure!.result).toContain('[redacted:PASS]')
   })
 
-  // Review of #1075: copied into a plain object, a parsed `__proto__` key went to the prototype setter and was lost
+  // #1075: copied into a plain object, a parsed `__proto__` key went to the prototype setter and was lost
   it('keeps a key named __proto__, in the arguments, a failed result and a canonical hash', () => {
     const redact = redactor({ PASS: 'hunter2-secret' })
     const value = JSON.parse('{"__proto__":{"token":"hunter2-secret"},"isError":true}') as Record<string, unknown>

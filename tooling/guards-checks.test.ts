@@ -816,6 +816,9 @@ describe('guard/comments (#2355)', () => {
     ['/**\n * - Previously: two sends\n */'],
     ['// The pane keeps the claim (#842 review)'],
     ['/** Asked once (#730\n * review item 2) */'],
+    ['// The pane keeps the claim (review of #1072)'],
+    ['// Asked once (deep review of\n// #1687)'],
+    ['// The pane keeps the claim (#2142 re-check)'],
   ])('reports history in %j', async (text) => {
     expect((await lines(file, 'f()' + NL + text, 'comments')).length).toBe(1)
   })
@@ -831,6 +834,8 @@ describe('guard/comments (#2355)', () => {
     ["const a = 'it used to wait'"],
     ['// The pane keeps the claim (#842)'],
     ['// A change the owner chose (#842 reviewer)'],
+    ['// It reviews the claim of #1072'],
+    ['// A re-check of the host (#2142)'],
   ])('lets %j through', async (text) => {
     await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
   })

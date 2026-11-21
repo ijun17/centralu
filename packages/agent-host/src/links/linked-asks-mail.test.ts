@@ -59,7 +59,7 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     expect(hub.store.mailbox.recipient(report!.id, at.hub('h1'))).toMatchObject({ readAt: expect.any(Number) })
   })
 
-  // #2357 and the review of #2349: the one condition for a message to one's task's giver holds across too, for an asker named by its address
+  // #2357 and #2349: the one condition for a message to one's task's giver holds across too, for an asker named by its address
   it('the session asked, mailing its asker by address while on the task, sends a message that needs no reply there, and is told how to ask', async () => {
     const { machine, hub, at, project } = await asksRig()
     const call = hub.mgr.askProject('h1', { project, task: 'please approve my command' })

@@ -875,7 +875,7 @@ describe('the app tool (#2231)', () => {
   })
 })
 
-// Review of #1948: the Assistant's answers name agent_session and mail in its own call form, but a child's words quoted in them stay as written
+// #1948: the Assistant's answers name agent_session and mail in its own call form, but a child's words quoted in them stay as written
 describe("an answer's calls in the Assistant's form", () => {
   it("rewrites Centralu's own calls and passes over a child's answer, quoted as JSON", () => {
     const text = ['the claude session "Docs" [c] answered, as JSON:', JSON.stringify('Done. Next: mail(action="send", to="parent")'), 'agent_session(sessionId="c", action="wait") waits.'].join('\n')

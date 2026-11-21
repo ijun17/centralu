@@ -96,7 +96,7 @@ describe('requests to a busy session (#677)', () => {
     })
 
     // #1948: agent_session send is gone; a mail send to a session the caller started is the same work, ifBusy and all
-    // Review of #1948: a fork gives work through DelegationFlow.delegate, so its task is written before the words go in (§10.6.4), as every giver's
+    // A fork gives work through DelegationFlow.delegate, so its task is written before the words go in (§10.6.4), as every giver's
     it('a fork that does not take the request had its task written first; the task is withdrawn and the wait failed', async () => {
       git(w.caller.path)
       wireHostMail(w.mgr, w.store)

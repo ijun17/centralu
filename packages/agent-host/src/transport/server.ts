@@ -913,7 +913,7 @@ export class HostServer {
    * whole replay is priced before any is sent (#82): one that would not fit the budget is not started, and the client gets
    * `resyncRequired` with the current seq and reloads its snapshot. Starting it and cutting the socket halfway would leave the
    * cursor where it was, and the next reconnect would ask for the same oversized window, a loop that never converges (the
-   * livelock the review of #91 found; measured: a 2,000 x 50 kB history replayed to a stalled peer left 99.6 MB buffered)
+   * livelock of #91; measured: a 2,000 x 50 kB history replayed to a stalled peer left 99.6 MB buffered)
    */
   private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined): void {
     const window = this.log.since(afterSeq, streamEpoch)
