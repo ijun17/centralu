@@ -14,8 +14,10 @@ function isNote(m: StoredMessage): boolean {
  *
  * Why it is "the text after the last tool call" and not simply "the last piece of text": an agent
  * writes text, calls a tool, and writes again. Text before a tool call is a plan, not an answer.
- * A reasoning summary (`reasoning`) is skipped since it is not an answer, and the scan stops the
- * moment it meets a tool call, a tool result, an approval, a marker or something a person said.
+ * A reasoning summary (`reasoning`) is skipped since it is not an answer, and so is a tool's result after the answer's
+ * last text: its call came before that text, and some tools say a call finished after the text that ended the turn
+ * (Antigravity 1.4.3's recordings; an ACP turn's end closes the calls still open, #2351). The scan stops the moment it
+ * meets a tool call, a tool's result before that text, an approval, a marker or something a person said.
  * If there is no text at the end (the turn ended on a tool call), the answer is empty — an
  * earlier plan is never handed back pretending to be the answer.
  *
@@ -29,40 +31,38 @@ function isNote(m: StoredMessage): boolean {
  * The one rule for "the turn's answer" (#428): a delegation's and a child's answer, an app's agent's, the report's
  * preview (`lastResponse`) and the session list's (`previewOf`) all read it here; they used to keep four.
  */
-export function turnAnswer(messages: readonly StoredMessage[], opts: { afterSeq?: number; acrossNotes?: boolean } = {}): string {
-  const parts: string[] = []
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]!
-    if (opts.afterSeq !== undefined && m.seq <= opts.afterSeq) break
-    if (m.role === 'assistant' && m.kind === 'reasoning') continue
-    if (m.role === 'assistant' && m.kind === 'text') {
-      parts.unshift(String((m.payload as { text?: unknown }).text ?? ''))
-      continue
-    }
-    if (opts.acrossNotes && isNote(m)) continue
-    break
-  }
-  return parts.join('\n\n').trim()
+export function turnAnswer(messages: readonly StoredMessage[], opts: AnswerOpts = {}): string {
+  return answerRows(messages, opts)
+    .map((m) => String((m.payload as { text?: unknown }).text ?? ''))
+    .join('\n\n')
+    .trim()
 }
 
 /**
  * The seq of the first message of `turnAnswer`'s answer in the same rows, or null when the turn has no final text
  * (#1186): read_session finds the answer there (`around`), read from an offset to its end
  */
-export function turnAnswerSeq(messages: readonly StoredMessage[], opts: { afterSeq?: number; acrossNotes?: boolean } = {}): number | null {
-  let first: number | null = null
+export function turnAnswerSeq(messages: readonly StoredMessage[], opts: AnswerOpts = {}): number | null {
+  return answerRows(messages, opts)[0]?.seq ?? null
+}
+
+type AnswerOpts = { afterSeq?: number; acrossNotes?: boolean }
+
+/** The text rows of `turnAnswer`'s answer, oldest first */
+function answerRows(messages: readonly StoredMessage[], opts: AnswerOpts): StoredMessage[] {
+  const rows: StoredMessage[] = []
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]!
     if (opts.afterSeq !== undefined && m.seq <= opts.afterSeq) break
-    if (m.role === 'assistant' && m.kind === 'reasoning') continue
+    if ((m.role === 'assistant' && m.kind === 'reasoning') || (m.kind === 'tool_result' && rows.length === 0)) continue
     if (m.role === 'assistant' && m.kind === 'text') {
-      first = m.seq
+      rows.unshift(m)
       continue
     }
     if (opts.acrossNotes && isNote(m)) continue
     break
   }
-  return first
+  return rows
 }
 
 /** The rows of one turn (#1604): those after the row it began after, and up to the row the next turn began after when it has been left */

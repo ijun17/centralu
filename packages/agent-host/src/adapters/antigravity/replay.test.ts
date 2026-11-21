@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { PermissionPreset } from '@cc/protocol'
+import type { PermissionPreset, StoredMessage } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
 import { fakeCentraluTools } from '../frames/fakes.test-helpers.js'
 import { callOrder, of, replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
+import { turnAnswer } from '../../sessions/turn-answer.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { agyRecording, driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, sentFrames, sessionOpts, tempData, turnEnded } from './agent-files.test-helpers.js'
 
@@ -152,6 +153,23 @@ describe('Antigravity 1.4.3, replayed', () => {
     const denied = of(w.events, 'tool_call').find((c) => c.summary.tool === 'Bash')!
     expect(of(w.events, 'tool_result').find((r) => r.callId === denied.callId)).toMatchObject({ ok: false })
     expect(of(w.events, 'turn_complete')).toHaveLength(2)
+  })
+
+  it('deny: the read finishes after the answer that ends the turn, and the turn’s answer is still that text (#2351)', async () => {
+    const w = world(recording('deny'))
+    const handle = await open(w)
+    await turn(w, handle, 'Read the file', 'allow')
+    await handle.dispose()
+    // The turn's rows as the host stores them: the text as one row per message, each tool step a row of its own
+    const rows: StoredMessage[] = []
+    for (const e of w.events) {
+      const last = rows.at(-1)
+      if (e.type === 'message_delta' && last?.kind === 'text') (last.payload as { text: string }).text += e.text
+      else if (e.type === 'message_delta') rows.push({ sessionId: 's', seq: rows.length + 1, role: 'assistant', kind: 'text', payload: { text: e.text }, ts: 0 })
+      else if (e.type === 'tool_call' || e.type === 'tool_result') rows.push({ sessionId: 's', seq: rows.length + 1, role: 'system', kind: e.type, payload: e, ts: 0 })
+    }
+    expect(rows.at(-1)?.kind).toBe('tool_result')
+    expect(turnAnswer(rows)).toContain('decoy_note')
   })
 
   it('load: a conversation opened again in a new process with session/load; its replay is not shown again', async () => {

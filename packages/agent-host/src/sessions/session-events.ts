@@ -325,11 +325,12 @@ export class SessionEvents {
      * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's.
      * Told so no matter how the turn ends (#166): two adapters emit no turn_complete for a failed turn
      */
-    // The mail given into the turn that it did not take waits in the tool for a turn after, and is not this turn's (§10.6.3); one whose process went took all with it
-    if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken })
     const workEnded = endedTurn && !ownTurn && !!e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId)
     // The end of a turn an update cut, before its Continue is in, is not the work's stop: the continued turn's end answers
-    const stopWhy = workEnded && e.sessionId && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
+    const continuing = !!e.sessionId && this.host.restartPolicy.continuingTurns.has(e.sessionId)
+    const stopWhy = workEnded && e.sessionId && !continuing ? stopOf(e, nowInterrupted) : null
+    // The mail given into the turn that it did not take waits in the tool for a turn after, and is not this turn's (§10.6.3); one whose process went took all with it
+    if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken, finished: workEnded && !continuing && !stopWhy })
     if (stopWhy && e.sessionId) {
       this.host.reports.turnStopped(e.sessionId)
       // A stop Centralu waits to continue is told when the wait ends (#1415: told once, when the work continues)

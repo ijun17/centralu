@@ -66,3 +66,13 @@ describe("a turn's response, read from where the turn began (#1604)", () => {
     expect(lastResponseSeq(rows, { after: 1, through: 3 })).toBe(2)
   })
 })
+
+describe("a tool's result in a turn's answer (#2351)", () => {
+  const result = (seq: number) => row(seq, 'system', 'tool_result')
+
+  it('after the last text, as a tool that closes its calls at the turn end writes it, does not hide the answer; before it, its call outside the rows read, it still ends the answer', () => {
+    expect(turnAnswer([asked(1, 'task'), tool(2), said(3, 'the answer'), result(4)], { afterSeq: 1 })).toBe('the answer')
+    // The text before a result is a plan
+    expect(turnAnswer([asked(1, 'task'), said(2, 'a plan'), result(3), said(4, 'the answer'), result(5)], { afterSeq: 1 })).toBe('the answer')
+  })
+})

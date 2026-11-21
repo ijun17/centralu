@@ -1981,6 +1981,13 @@ neither releases it nor names it. When the tool opens a turn for it (`turnStartI
 releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`): `started_by` `mail`, its task the work message and the starter
 (C8 below). This closes step 2's open low: a message that needs a reply, taken only after the turn ended, was filed under the turn before.
 
+A task a turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369): when the turn
+ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`
+with `again`), its frame marked `givenAgain="1"` with a line saying that if the last turn already did it, the session says so in one line.
+A stopped turn keeps it, so its giver is told of the stop; a cut turn keeps it for the turn that continues. A call that waited on the task
+and returned the turn's answer settles it before it goes again, and a settled task is not given again. What went into a turn is known in
+memory only: after a host restart that turn's end answers or files it as its rows say.
+
 **At rest** is the one rule `agentLook` (protocol session-state.ts) calls `finished`: no turn, no card, none of its own background work
 (`workTasks`), and the turn did not stop short (an error, a limit, an interruption). Not the turn Centralu starts to compact a conversation:
 that end is not the work's. A turn an update cut is no stop while Centralu continues it (#1975): the continued turn's end answers, also when it ends
