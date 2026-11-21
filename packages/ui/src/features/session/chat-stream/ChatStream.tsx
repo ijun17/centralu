@@ -328,7 +328,7 @@ export function ChatStream({
          * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
          * not the layout.
          */
-        className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
+        className={`cc-scroll-overlay min-h-0 flex-1 overflow-y-auto px-conversation pt-4 text-md leading-body ${
           bottomPeek ? 'pb-14' : 'pb-4'
         } ${settling ? 'invisible' : ''}`}
         /* The empty space the card will settle onto. Follows size, not state, so there is no
@@ -470,7 +470,7 @@ export function ChatStream({
       */}
       {((reading && !gaveUp) || settling) && (
         <div
-          className="pointer-events-none absolute inset-0 z-[6] overflow-hidden px-4 pt-4"
+          className="pointer-events-none absolute inset-0 z-[6] overflow-hidden px-conversation pt-4"
           data-testid="chat-skeleton-cover"
         >
           <ChatSkeleton late />

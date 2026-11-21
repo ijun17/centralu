@@ -188,6 +188,9 @@
   --radius-bubble: 14px;
   --radius-full: calc(infinity * 1px);
 
+  /* The conversation column's widest (docs/design-system.md §7), in rem so it follows the text size; see px-conversation */
+  --container-conversation: 48rem;
+
   --font-weight-*: initial;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -207,6 +210,15 @@
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
   --color-surface-raised: var(--color-surface-reading-raised);
+}
+
+/*
+ * The conversation column (docs/design-system.md §7, #2408): a box as wide as the pane whose content stops at
+ * `--container-conversation`, centred, with 1rem a side below that. Padding, not a narrower box: the scroller, its
+ * thumb and the lines above the notes and the composer keep the pane's full width.
+ */
+@utility px-conversation {
+  padding-inline: max(1rem, calc((100% - var(--container-conversation)) / 2));
 }
 
 /*
