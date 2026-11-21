@@ -1,34 +1,16 @@
 import { isRecord, type RpcMethodName } from '@cc/protocol'
 
 /**
- * What a connection holding the **limited** credential may call (#1405).
- *
- * The full token is the window's: it calls everything, and the window shows its own confirmations
- * first. Anything else of this user (an agent, a script an agent wrote, a tool, `pnpm dev:live`) is
- * meant to hold the limited credential (`limited-token.ts`), and each method says what that one does:
- *
- *   everyday   runs: reading, creating and messaging sessions, renaming, what the OS user could do
- *              by hand anyway (git, files, terminals, stopping a process)
- *   asks       irreversible or trust-widening: deletes beyond what the trash brings back, moves out of
- *              reach what the trash does not fully restore, widens what agents, apps or machines may do
- *              without the person, or brings in code that later runs unasked. Waits for the person's
- *              card in the window and runs once allowed (host-requests.ts); refused at once when no
- *              window that shows the card is attached
- *   window     the person's own answers (a card, a question, an apply) and the window's own state,
- *              written whole: refused, and never a card (a card that answers a card means nothing)
- *   link       host-to-host calls of a hub linked to this host, which holds this host's full token
- *   bridge     a session's own tool channel; a Codex bridge has its own credential for it, and through
- *              it a limited caller could act as an `auto` session, whose tool cards are skipped
- *
- * `{ asks, when }` is for a method that asks only for some parameters (raising a preset, turning a switch
- * on); the function is given the parameters as sent, before they are parsed, so it reads them
- * defensively and asks when in doubt. `when` says it in words, for docs/generated/method-rights.md.
- * A method whose answer depends on the host's state too reads it from `RightsHost`, the second argument;
- * a host that gives none (a test, a server without it) makes every such call ask.
- *
- * The table is keyed by `RpcMethodName` with no default, as `ROUTES` is (`links/routes.ts`): a method
- * added to the protocol does not compile until someone decides what the limited credential does with
- * it. The classification and its rule are in docs/security-boundaries/credentials.md ("Who holds full power").
+ * What a connection holding the limited credential may call (#1405; the rule: docs/security-boundaries/credentials.md "Who
+ * holds full power"). The full token is the window's; anything else of this user holds the limited credential
+ * (`limited-token.ts`), and each method says what that does. `everyday` runs (reading, creating and messaging sessions, what
+ * the OS user could do by hand). `asks` is irreversible or trust-widening: it waits for the person's card (host-requests.ts)
+ * and is refused at once with no window showing it. `window` is the person's own answers and the window's state, refused and
+ * never a card. `link` is a hub's host-to-host calls, which hold the full token. `bridge` is a session's own tool channel (a
+ * Codex bridge has its own credential, as through it a limited caller could act as an `auto` session). `{ asks, when }` asks
+ * only for some parameters: it gets them as sent, before parsing, and asks when in doubt, `when` saying it for
+ * docs/generated/method-rights.md. The table is keyed by `RpcMethodName` with no default, so a new protocol method does not
+ * compile until someone decides
  */
 export type Rights =
   | 'everyday'
@@ -81,10 +63,9 @@ const presetRaised = (params: unknown): boolean => {
 const switchedOn = (key: string) => (params: unknown): boolean => fields(params)[key] !== false
 
 /**
- * The preferences that widen what agents may do, or hide the person's own notice of a card
- * (as the Assistant's `set_preferences` cards them): a ceiling or depth set at all (raising or
- * removing it), approval notifications or their sound turned off. The hub-auto switch is not among them: turning it on
- * or off runs unasked (owner decision 2026-11-05)
+ * The preferences that widen what agents may do or hide the person's own notice of a card (as the Assistant's `set_preferences`
+ * cards them): a ceiling or depth set at all, approval notifications or their sound turned off. The hub-auto switch is not
+ * among them: turning it on or off runs unasked (owner decision 2026-11-05)
  */
 const prefsWiden = (params: unknown): boolean => {
   const patch = fields(fields(params).patch)
@@ -123,7 +104,10 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.deleteSession': 'asks',
   /** Moves the session to the archive when that loses nothing, and says so otherwise (#1512): the card names the move */
   'agents.archiveIfAtRest': 'asks',
-  /** Reads what an archive would lose (#1595): nothing moves; it names unfinished mail threads, which only the window reads (mail.thread), so the window's class */
+  /**
+   * Reads what an archive would lose (#1595): nothing moves; it names unfinished mail threads, which only the window reads
+   * (mail.thread), so the window's class
+   */
   'agents.archiveLosses': 'window',
   'agents.deleteAgentChild': 'asks',
   'agents.mcpProposals': 'everyday',
@@ -381,7 +365,10 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
    * launcher says it with the limited credential and no full one crosses a port for it; `host.stop` does far more
    */
   'host.handover': 'everyday',
-  /** The window telling the serve host the system is ending (#1970): said with the window's full credential. An everyday one could plant a false end that relabels a real crash as the system's (#1397) */
+  /**
+   * The window telling the serve host the system is ending (#1970): said with the window's full credential. An everyday one could
+   * plant a false end that relabels a real crash as the system's (#1397)
+   */
   'host.systemEnding': 'window',
   'host.hubOffer': 'link',
   // From a hub that offered on the same connection only (rpc.ts), as `host.hubOffer` (#2067 item 2)

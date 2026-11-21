@@ -59,37 +59,16 @@ import { copyTreeAsync, copyTreeSync } from './copy.js'
 import { runChild } from './run.js'
 
 /**
- * The OS in memory (#1599, docs/plans/os-layer.md §7.1): a file tree, a process table and a clock that follow Windows'
- * or POSIX (Linux's) rules, on any OS. Logic tests run on it instead of the machine, so Windows' rules are tested on
- * Linux and leave the Windows job; `real.test.ts` holds it to the real OS on each OS the tests run on.
- *
- * What it follows, by family (measured on Windows 11 with Node 22, and Linux's own rules):
- * - **Names.** Windows: `\` or `/`, drives (`C:\`), case kept and ignored (`realpathNativeSync` answers the stored case,
- *   `realpathSync` the case given), paths normalized by name before they are read (`a\link\..` is `a`). POSIX: `/`, case
- *   counts, `..` taken after a link is followed.
- * - **Links.** Windows: a symlink needs a right (`symlinks: false` refuses one with `EPERM`); a junction needs none, is
- *   always absolute (a relative target is read from its folder), is a link to `lstat` and a folder listing, and one to a
- *   file cannot be followed (`ENOENT`). Removing a link never touches its target.
- * - **What Windows holds.** A running process's working folder cannot be renamed or removed (`EBUSY`; `rmSync` says `EPERM` from Node 23, `rmSyncImplementation`); a folder below
- *   which something is held open (a file, a watch, a working folder) cannot be renamed (`EPERM`); a file open in this
- *   process can be renamed and deleted but not replaced (`EPERM`); a running program's file can be renamed but not
- *   deleted or replaced (`EPERM`). POSIX holds none of these.
- * - **Refusals.** The codes each family gives (`unlink` of a folder: `EPERM` / `EISDIR`; a path through a file: `ENOENT`
- *   / `ENOTDIR`; a copy onto a folder: `EPERM` / `EISDIR`; a folder renamed onto one: `EPERM` / replaced if empty,
- *   else `ENOTEMPTY`).
- * - **Processes.** Programs are functions a test adds (`programs.add`); a start finds them as the OS would (PATH, and on
- *   Windows PATHEXT, `.exe`/`.com` and a batch file refused with `EINVAL`). Windows: only TERM, KILL, INT and QUIT
- *   end a process (exit `null` and the signal), any other name Node knows is `ENOSYS`, one it does not is
- *   `ERR_UNKNOWN_SIGNAL` (`signalRefusal`), and `stop` ends the child first (as Node's `kill`: `SIGTERM`), then its tree,
- *   parents first (code 1, as `taskkill /F`). POSIX: groups, a signal a program
- *   may trap, `stop` sends TERM and KILL after the grace on the clock. Output closes before `'exit'`, `'close'` follows.
- * - **Time** moves only by `clock.advance(ms)`: timers, grace periods and file times read it.
- *
- * Not modeled: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares (UNC),
- * `\\?\` paths, permissions beyond the mode bits (and on Windows the read-only bit), hard links to folders, file
- * locking between processes, a program's file read through a link, PTYs, an `'overlapped'` fd 3 (refused), SQLite
- * (`sqlite.open` is `ENOSYS`), and a disk's size (`freeBytesSync` answers `FREE_BYTES` wherever something is, and no
- * write is ever refused for room).
+ * The OS in memory (#1599, docs/plans/os-layer.md §7.1): a file tree, process table and clock following Windows' or POSIX
+ * (Linux's) rules on any OS, so logic tests run on it and `real.test.ts` holds it to the real OS (measured on Windows 11, Node
+ * 22). Windows: `\` or `/`, drives, case kept and ignored, paths normalized by name before reading (`a\link\..` is `a`); a
+ * symlink needs a right (`symlinks: false` refuses with `EPERM`), a junction needs none and is always absolute. A running
+ * process's working folder cannot be renamed or removed (`EBUSY`; `rmSync` says `EPERM` from Node 23), nor a folder with
+ * something held open below it renamed; a file open in this process can be renamed and deleted but not replaced; a running
+ * program's file can be renamed but not deleted or replaced. Only TERM, KILL, INT and QUIT end a Windows process
+ * (`signalRefusal`) and `stop` ends the child then its tree, parents first (code 1, as `taskkill /F`). Time moves only by
+ * `clock.advance(ms)`. Not modeled: 8.3 and reserved names, ADS, UNC shares, `\\?\` paths, permissions beyond the mode bits,
+ * hard links to folders, file locking between processes, PTYs, an `'overlapped'` fd 3, SQLite (`ENOSYS`), a disk's size
  */
 
 /** The free space every disk in memory reports: 1 TiB, more than anything a test writes */

@@ -11,25 +11,14 @@ import { createRpcHandler } from './rpc.js'
 import { canSymlink, itSymlink, linkDir, linkFile } from './link.test-helpers.js'
 
 /**
- * Never steps through a link inside the project and out — **from the RPC door** (#86).
- *
- * Several tests already check the same rule: fs.test.ts, watch.test.ts, git.test.ts,
- * fs-read-safety.test.ts. All of them call the dev-service functions directly. So one thing is
- * left uncovered — **does the door the webview actually knocks on reach that function.** If the
- * manager gets swapped for a helper that bypasses the guard, or a new fs method gets added, the
- * tests above stay green while a hole opens up. #86 bundles not one function but **five
- * surfaces**, so there has to be one place with proof that all five stay closed when knocked on
- * from outside.
- *
- * The repository is a real `git init`. In a plain temp directory, both `git ls-files` and
- * `check-ignore` return empty-handed, and that would pass green for having nothing to look at,
- * not for nothing leaking.
- *
- * There are three decoy shapes, because the way a link gets presented to the guard differs by
- * shape:
- *   leakfile        the last segment is a file outside
- *   nest/leak/…     a middle segment is a directory outside
- *   link/../evil    a path that climbs back up with `..` **after** following a link (the split #119 closed)
+ * Never steps through a link inside the project and out, from the RPC door (#86). The dev-service tests (fs.test.ts,
+ * watch.test.ts, git.test.ts, fs-read-safety.test.ts) call the functions directly, which leaves uncovered whether the door the
+ * webview knocks on reaches them: a manager swapped for a helper that bypasses the guard, or a new fs method, would leave them
+ * green while a hole opens. #86 spans five surfaces, so one place proves all five stay closed from outside. The repository is a
+ * real `git init`, as in a plain temp directory `git ls-files` and `check-ignore` return nothing and the test would pass for
+ * having nothing to look at. Three decoy shapes, as the way a link reaches the guard differs: `leakfile` (the last segment is a
+ * file outside), `nest/leak/…` (a middle segment is a directory outside) and `link/../evil` (a path that climbs with `..` after
+ * following a link, the split #119 closed)
  */
 
 let fixture = ''
@@ -65,7 +54,7 @@ beforeEach(async () => {
   if (canSymlink) linkFile(join(outside, 'secret.txt'), join(root, 'leakfile'))
   mkdirSync(join(root, 'nest'))
   linkDir(outside, join(root, 'nest', 'leak'))
-  // The link's target sits deeper than the link itself — the shape where the guard and the syscall used to disagree (#119)
+  // The link's target sits deeper than the link itself: the shape where the guard and the syscall disagreed (#119)
   mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
   mkdirSync(join(root, 'sub', 'evil'))
   linkDir(join(root, 'sub', 'deep'), join(root, 'link'))
@@ -193,7 +182,7 @@ describe('surface 5 — paths passed through to the OS', () => {
     }
   })
 
-  // "Delete project and trash folder" has its own door (#838 review): the file tree's trash never reaches the folder
+  // "Delete project and trash folder" has its own door (#838): the file tree's trash never reaches the folder
   it('the project folder goes to the trash only through its own purpose, or an older window’s literal root', async () => {
     linkDir('.', join(root, 'old-build'))
     const folder = { path: realpathSync(root) }
@@ -220,23 +209,13 @@ describe('surface 5 — paths passed through to the OS', () => {
 })
 
 /**
- * A hard link is **a case this guard cannot answer** — so it is not blocked, and this pins down
- * the fact that it is not blocked.
- *
- * A symbolic link has a target to follow, so it can be labeled "outside." A hard link has no
- * target: the directory entry itself sits inside the project, and it is merely **a different name
- * for the same inode** as the file outside. The rule that the checked string is exactly the string
- * used is already upheld here.
- *
- * The reasoning behind this decision is what happens if link count (`nlink > 1`) is used to
- * reject. Cloning this very repository with `git clone --local` gives 214 of 670 files an nlink of
- * 2 — because git links `.git/objects` with hard links, and pnpm does the same on a filesystem
- * without clonefile. That is a value that would turn a third of an ordinary clone into "files that
- * cannot be opened."
- *
- * So the defense sits elsewhere: sending a hard link to the trash deletes **only the project-side
- * name**, and the outside file remains. `fs.resolve` returning the path inside the project is the
- * proof of that.
+ * A hard link is a case this guard cannot answer, so it is not blocked, and this pins that down. A symbolic link has a target
+ * to follow and can be labeled "outside"; a hard link has none, as the entry sits inside the project as another name for the
+ * same inode as the file outside, and the checked string is exactly the string used. Rejecting by link count (`nlink > 1`)
+ * would turn a third of an ordinary clone into "files that cannot be opened": `git clone --local` gives 214 of 670 files an
+ * nlink of 2, as git links `.git/objects` and pnpm does the same without clonefile. So the defense sits elsewhere: sending a
+ * hard link to the trash deletes only the project-side name and the outside file remains, which `fs.resolve` returning the path
+ * inside the project proves
  */
 describe('hard link — a limit that cannot be answered by path alone', () => {
   it('the path passed to the OS is the name inside the project — trash does not delete the outside file', async () => {

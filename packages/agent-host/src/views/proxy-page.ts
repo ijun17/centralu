@@ -1,34 +1,15 @@
 import { createHash } from 'node:crypto'
 
 /**
- * The sandbox proxy page (M4 B-3, spike S-1 `harness/static/sandbox.js`).
- *
- * An app view runs inside two nested iframes. The outer one is this page (the origin of the host's
- * port), and the inner one is the app's HTML. This page does two things: builds the inner frame
- * according to the rules, and shuttles messages between our view (the parent) and the app's view
- * (the child). While shuttling, it reads the theme's side from what the parent sends, to keep its
- * own color scheme matching (`DEFAULT_COLOR_SCHEME` below); it never changes a message.
- *
- * It follows the rules the spike settled on exactly.
- *   - `sandbox` is applied **before** the document is inserted. The opaque method is `srcdoc`.
- *     `document.write` is not used. In the reference host's version of that method, the view
- *     inherited the proxy's own origin, and it ended up reaching other proxies' addresses
- *     (including secret paths) and their storage (measured).
- *   - A frame is distinguished by `event.source`, not by origin. Every opaque origin is `"null"`.
- *     Origin is checked a second time afterward. If the inner frame is opaque but reports an
- *     origin other than `"null"`, something has swapped out the inner document.
- *   - The parent's origin is not read via `document.referrer` — it is empty under `tauri://`. The
- *     host embeds the value it already checked against the allow list directly into the page.
- *
- * The view's HTML arrives as JSON inside this same response. The spec's reference flow has the
- * parent send the HTML via `postMessage` (`sandbox-resource-ready`). Here, the host reads the
- * document itself and embeds it in the same response as the CSP. That way the policy and the
- * document are decided in one place, and the parent view never touches the app's HTML.
- *
- * Message ordering: the parent (AppFrame) wires up the bridge **before** loading this page. An
- * iframe's `contentWindow` stays the same object across navigation, so the inner view's first
- * `ui/initialize` reaches a bridge that is already listening. So no readiness signal
- * (`sandbox-proxy-ready`) needs to be exchanged.
+ * The sandbox proxy page: the outer of an app view's two nested iframes (the origin of the host's port); the inner is the app's HTML.
+ * It builds the inner frame and relays messages between the parent and the app's view, reading the theme side from what the parent sends
+ * (`DEFAULT_COLOR_SCHEME`) and never changing a message. The rules, as the spike settled them (docs/security-boundaries/app-views.md):
+ * `sandbox` is applied before the document is inserted, as an opaque `srcdoc` (never `document.write`, which let a view inherit the proxy's
+ * origin and reach other proxies' addresses and storage, measured); a frame is told by `event.source`, not origin (every opaque origin is
+ * `"null"`), and an opaque inner frame reporting another origin means the document was swapped; the parent's origin is embedded after the
+ * allow-list check, not read from `document.referrer` (empty under `tauri://`). The view's HTML arrives as JSON in this response, so the
+ * policy and document are decided in one place and the parent never touches it. AppFrame wires the bridge before loading this page, so
+ * the view's first `ui/initialize` reaches a listener and no `sandbox-proxy-ready` is needed
  */
 
 export type ProxyPageConfig =
@@ -36,9 +17,8 @@ export type ProxyPageConfig =
   | { mode: 'app'; hostOrigin: string; sandbox: string; allow: string; src: string; appOrigin: string }
 
 /**
- * The proxy script. Kept as a string because this is code that runs **inside the proxy page**, not
- * in the host. Under the per-app origin method, the CSP allows only this script's hash
- * (`PROXY_SCRIPT_HASH`).
+ * The proxy script, a string because it runs inside the proxy page, not the host; under the per-app origin method the CSP
+ * allows only its hash (`PROXY_SCRIPT_HASH`)
  */
 export const PROXY_SCRIPT = `(function () {
   'use strict'
@@ -80,11 +60,7 @@ export const PROXY_SCRIPT = `(function () {
 
 export const PROXY_SCRIPT_HASH = `sha256-${createHash('sha256').update(PROXY_SCRIPT).digest('base64')}`
 
-/**
- * JSON to place inside a `<script type="application/json">` block. `<` is escaped so that the
- * app's HTML cannot close the block early with `</script>`. `\\u003c` inside a JSON string is the
- * same character.
- */
+/** JSON for a `<script type="application/json">` block, with `<` escaped so the app's HTML cannot close it with `</script>` */
 function embedJson(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, '\\u003c')
@@ -95,27 +71,13 @@ function embedJson(value: unknown): string {
 }
 
 /**
- * The proxy page's color scheme — must match the host view's: the side of the theme that shows
- * (#312), which AppFrame sets on the frame element and tells the view as `theme`.
- *
- * If a frame element's color scheme differs from the document inside it, Chromium paints that
- * document's background **opaque** (CSS Color Adjustment: a rule meant to keep a light document
- * embedded in a dark surrounding readable; Playwright's WebKit does the same). A proxy that did
- * not state a color scheme counted as a light document, so a white canvas covered the entire app
- * view on the dark theme, and a template view using the host's light text color became unreadable
- * against it. Stating the same scheme makes it transparent — the inner frame inherits it, so an
- * app view that states its color scheme from the theme it was given (ext-apps'
- * `applyDocumentTheme`, and our own template) also sits transparently on the host's background.
- * An app that states nothing counts as light: transparent on a light theme, and on a dark one it
- * gets the browser's light canvas laid underneath it (its default black text remains readable).
- * WKWebView keeps child frames transparent, so under Tauri this mostly matters for what the
- * scheme does inside the view (form controls, scrollbars) — this page draws nothing of its own.
- *
- * The page follows the theme without being served again: the script reads the side from the
- * address's fragment (`#color-scheme=light`, set by AppFrame before the first paint), then from
- * every host context the bridge passes through (the `ui/initialize` answer and
- * `host-context-changed`). A side is only ever `light` or `dark`; anything else is ignored. This
- * default is for an address without a fragment (a UI from before the theme reached apps).
+ * The proxy page's color scheme, matching the host view's visible theme side (#312). When a frame element's scheme differs from the
+ * document inside it, Chromium (and Playwright's WebKit) paints that document opaque (CSS Color Adjustment), so a proxy that stated no scheme
+ * laid a white canvas over a dark view. The same scheme keeps it transparent, and an app that states its scheme from the theme it was given
+ * sits transparently too; one that states nothing counts as light and gets the light canvas under it on a dark theme. WKWebView keeps child
+ * frames transparent, so under Tauri this mostly affects form controls and scrollbars. The script follows the theme without a new serve: the
+ * address fragment (`#color-scheme=`, set before first paint), then every host context the bridge passes (`ui/initialize`,
+ * `host-context-changed`); only `light` or `dark` count. The default covers an address with no fragment
  */
 const DEFAULT_COLOR_SCHEME = 'dark'
 

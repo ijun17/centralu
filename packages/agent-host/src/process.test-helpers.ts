@@ -25,20 +25,14 @@ export function alive(pid: number): boolean {
 }
 
 /**
- * What a test may still end by its pid (#1308). A pid names a process only while that process runs: once the test has
- * seen it end, the number is free, and on Windows `process.kill` on a number someone else has since been given is
- * TerminateProcess (exit 1) on their program: a cleanup that checks `alive(pid)` first cannot tell the two apart. So a
- * cleanup ends only the pids this ledger has not seen end, and a test reports every end it sees through `alive` or
- * `sawEnd`.
- *
- * The ledger knows only the ends the test looked at. A cleanup that runs after the code under test was asked to stop
- * the processes (a `dispose()`, a `stop()`) has not looked: use `endAfter`, which looks first, and do not call `end`
- * there.
- *
- * Where the test holds the `ChildProcess` it spawned, call `kill` on that instead: Node sends nothing after the child
- * has exited. This is for what the test has only a number of (a grandchild, a pid read from a file).
- *
- * `isAlive` is a parameter so a test can stand for a number that was freed and given to another process.
+ * What a test may still end by its pid (#1308). A pid names a process only while it runs: once the test has seen it end the
+ * number is free, and on Windows `process.kill` on a number someone else was given is TerminateProcess on their program, which
+ * a cleanup checking `alive(pid)` first cannot tell apart. So a cleanup ends only the pids this ledger has not seen end, and a
+ * test reports every end it sees through `alive` or `sawEnd`. The ledger knows only the ends the test looked at: a cleanup
+ * after the code under test was asked to stop its processes (`dispose()`, `stop()`) has not looked, so use `endAfter`, which
+ * looks first, and not `end`. Where the test holds the `ChildProcess`, call `kill` on that instead; this is for what it has
+ * only a number of (a grandchild, a pid read from a file). `isAlive` is a parameter so a test can stand for a number that was
+ * freed and given to another process
  */
 export function ownProcesses(isAlive: (pid: number) => boolean = alive) {
   const seenEnd = new Set<number>()

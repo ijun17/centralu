@@ -2,17 +2,8 @@ import type { ExternalApps } from './apps/external/runtime.js'
 import type { ViewSource } from './views/view-host.js'
 
 /**
- * The one-line join between app views (views/) and the external app runtime (apps/external/)
- * (M4 B-3 ↔ A).
- *
- * The two layers do not know about each other. The view side declares `ViewSource` as "reads the
- * document, reports the source method, and holds the app open while it is open," and the runtime
- * holds the function that actually does that. Here the two are put face to face. main.ts and the
- * tests share this same function, so the seam the tests run through is the same seam the host
- * uses (the same arrangement as `app-run-ledger.ts`).
- *
- * An app is identified by (project, id). The `AppRef` shape is the same on both layers, so it is
- * passed through as is.
+ * The join between app views (views/) and the external app runtime (apps/external/), which do not know each other: the view side declares
+ * `ViewSource`, the runtime holds the function behind it. main.ts and the tests share it, so tests run through the host's own seam
  */
 export function runtimeViewSource(apps: ExternalApps): ViewSource {
   return {

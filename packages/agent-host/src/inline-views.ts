@@ -6,45 +6,24 @@ import type { ViewHost } from './views/view-host.js'
 import { rpcError } from './rpc-error.js'
 
 /**
- * An app view inside a conversation (M4 B-1) — when a session's agent calls an app tool that has a
- * view, the view attaches under that call's card (item 1 of the plan's "two places a view is
- * born," the spec's original intended use).
- *
- * This layer does three things.
- *   1. Listens for a session's app calls (`SessionAppsHub.onCall`), and if that tool declares
- *      `_meta.ui.resourceUri`, opens a view instance (`ViewHost.open` — holds the app open while it
- *      is open). Emits an `app_view` event with the input when the call starts and the result when
- *      it ends. Per the spec, the view receives tool-input → tool-result (or tool-cancelled).
- *   2. **Checks that the view belongs to that app before opening it** (the plan's "block
- *      impersonation"). If the `ui://` the tool declared is not in that app's `resources/list`, it
- *      is not opened, and a rejection is recorded. The same applies if the result points at a
- *      different view.
- *   3. Closes the instance — when the UI says so, when the session is deleted, and when the app
- *      disappears or can no longer run.
- *
- * This layer never changes the call. Even when the view fails to open (rejected, no matching card),
- * the call still runs and the agent still gets its result — the view is an addition for the person,
- * never a condition of the call.
- *
- * Who made the call is known by the attachment (session-apps.ts). Which card it belongs to is
- * either reported by the adapter or matched by `callId` (Claude: the request's `_meta`; Codex:
- * matched against the call start the adapter observed). The manager and the runtime know nothing
- * about this layer — the host (main.ts) and the tests wire it in with `attachInlineViews` (the same
- * arrangement as app-view-source.ts).
+ * An app view inside a conversation: when a session's agent calls an app tool that has a view, the view attaches under that
+ * call's card. It listens for a session's app calls (`SessionAppsHub.onCall`) and, if the tool declares `_meta.ui.resourceUri`,
+ * opens a view instance (`ViewHost.open`, which holds the app open), emitting an `app_view` event with the input at the call's
+ * start and the result at its end. It checks the view belongs to that app before opening it (the plan's "block impersonation"):
+ * a `ui://` not in that app's `resources/list`, or a result pointing at another view, is not opened and a rejection is
+ * recorded. It closes the instance when the UI says so, the session is deleted, or the app disappears or can no longer run. It
+ * never changes the call: even when the view fails to open the call runs and the agent gets its result. The card is reported by
+ * the adapter or matched by `callId` (Claude: the request's `_meta`; Codex: the call start the adapter observed); main.ts and
+ * the tests wire it with `attachInlineViews`
  */
 
 type AppViewEvent = Extract<NormalizedEvent, { type: 'app_view' }>
 
 /**
- * The numbers for views inside a conversation (B-1). The defaults are the product's values, and
- * tests use smaller ones.
- *
- * **What reopening needs is kept only in the host's memory.** To reopen a view without calling the
- * tool again (calling it again would change the app's state again), the input and result of that
- * call have to exist. The result is the app's own, unexamined, so its contents are unknown, and the
- * run record (A-6) keeps only a summary of the arguments — so this is never written to disk, and
- * its size is capped. It disappears when the host restarts, and at that point the placeholder only
- * offers "open app."
+ * The numbers for views inside a conversation; the defaults are the product's, tests use smaller ones. What reopening needs is
+ * kept only in the host's memory: reopening without calling the tool again (which would change the app's state again) needs
+ * that call's input and result, the result is the app's own and unexamined, and the run record keeps only a summary of the
+ * arguments, so it is never written to disk and its size is capped; after a host restart the placeholder only offers "open app"
  */
 export type InlineLimits = {
   /** The number of views kept open at once in one conversation — once exceeded, the oldest open one is closed first (the plan: only a handful of live views) */
@@ -136,9 +115,8 @@ export class InlineViews {
   }
 
   /**
-   * The UI took the view down (`apps.closeView`). true if it was a view inside a conversation —
-   * closes the instance and releases the app. Any other instance (a fixed view) is closed by the
-   * caller directly on ViewHost.
+   * The UI took the view down (`apps.closeView`): true if it was a view inside a conversation, which closes the instance and
+   * releases the app; any other instance (a fixed view) is closed by the caller on ViewHost
    */
   close(instanceId: string): boolean {
     const v = this.byInstance.get(instanceId)
@@ -148,15 +126,11 @@ export class InlineViews {
   }
 
   /**
-   * Reopens a collapsed view (RPC `apps.inlineReopen`) — **never calls the tool again.** Opens a
-   * new instance and returns the input and outcome that were being kept (AppFrame resends them per
-   * the spec). If the call is still running, it is returned without an outcome, and `result` or
-   * `cancelled` arrives as usual once it finishes. If it is already open, this is that same
-   * instance.
-   *
-   * Checks again whether the view belongs to that app — the app may have changed while collapsed.
-   * Opening it applies the cap again (a different view may get closed). Fails with a reason if it
-   * cannot be reopened.
+   * Reopens a collapsed view (`apps.inlineReopen`), never calling the tool again: opens a new instance and returns the kept
+   * input and outcome (AppFrame resends them per the spec); a running call is returned without an outcome and `result` or
+   * `cancelled` arrives once it finishes; an open one is that same instance. It checks again that the view belongs to the app
+   * (it may have changed while collapsed), applies the cap again (a different view may get closed) and fails with a reason if
+   * it cannot be reopened
    */
   async reopen(sessionId: string, callId: string): Promise<ReopenedView> {
     const v = this.bySession.get(sessionId)?.get(callId)
@@ -196,11 +170,10 @@ export class InlineViews {
   }
 
   /**
-   * The views held for one conversation (RPC `apps.inlineViews`) — the basis (`kept`) a reopened UI
-   * uses to decide whether to offer "Reopen" on a past card's placeholder. Also reports an open
-   * instance: since a reopened UI does not know that instance (there is no frame to resend the
-   * input and result to), it is closed and the app released, and reopened again if the person wants
-   * it. No body is carried — it arrives when reopened.
+   * The views held for one conversation (`apps.inlineViews`): the basis (`kept`) a reopened UI uses to offer "Reopen" on a past
+   * card's placeholder. An open instance is reported too: a reopened UI does not know it (no frame to resend the input and
+   * result to), so it is closed and the app released, and reopened if the person wants. No body is carried; it arrives when
+   * reopened
    */
   list(sessionId: string): { callId: string; appId: string; projectId: string | null; tool: string; kept: boolean; instanceId: string | null }[] {
     return [...(this.bySession.get(sessionId)?.values() ?? [])]
@@ -215,15 +188,11 @@ export class InlineViews {
   }
 
   /**
-   * Takes back a view the previous host had open in a conversation, after a planned hand-over
-   * (view-handover.ts; ViewHost has already opened the instance under its old id). Without this,
-   * the instance would still serve its view but belong to no conversation: its messages would go
-   * out as a fixed view's, to whichever conversation the caller named, and deleting the session
-   * would not close it.
-   *
-   * The slot is **not kept for reopening.** Its input and result were never written down (see
-   * InlineLimits), so once this view is closed its card offers "open app", as after any restart.
-   * A conversation's live cap is not applied again: these were within it on the previous host.
+   * Takes back a view the previous host had open in a conversation after a planned hand-over (view-handover.ts; ViewHost
+   * already opened the instance under its old id). Without it the instance would serve its view but belong to no conversation:
+   * its messages would go out as a fixed view's and deleting the session would not close it. The slot is not kept for reopening
+   * (its input and result were never written down, see `InlineLimits`) and the conversation's live cap is not applied again, as
+   * these were within it on the previous host
    */
   adopt(v: { sessionId: string; callId: string; ref: AppRef; tool: string; uri: string; instanceId: string }): void {
     if (this.disposed || this.byInstance.has(v.instanceId)) return
@@ -252,10 +221,8 @@ export class InlineViews {
 
   private async onCall(c: SessionAppCall): Promise<void> {
     /*
-     * Does this tool have a view — checked against **the list the agent receives** (the model
-     * tools). Exactly as the app declared it. Usually a list already read exists (the agent calls
-     * only after receiving the list). If not, the call is already in the middle of starting the
-     * app anyway, so that list is waited on.
+     * Does this tool have a view: checked against the list the agent receives (the model tools), exactly as the app declared
+     * it. Usually a list was already read; if not, the call is already starting the app, so that list is waited on
      */
     const known = this.deps.rt.knownTools(c.ref, 'model') ?? (await this.deps.rt.tools(c.ref, 'model').catch(() => null))
     const def = known?.find((t) => t.name === c.tool)
@@ -307,10 +274,9 @@ export class InlineViews {
 
     const o = await c.outcome
     /*
-     * If the result points at **a different view**, that is impersonation — per the spec, a view
-     * comes from the tool's declaration, not from the result. This never reads that field of the
-     * result, but a result trying to claim another app's view is never passed through to that view
-     * as is either.
+     * A result pointing at another view is impersonation: per the spec a view comes from the tool's declaration, not the
+     * result. That field is never read, and a result claiming another app's view is never passed through to the view as is
+     * either
      */
     const claimed = o.result ? resultViewUri(o.result) : null
     if (claimed !== null && claimed !== ui.uri) {
@@ -329,13 +295,10 @@ export class InlineViews {
   }
 
   /**
-   * Recomputes the size being kept, and keeps it within the cap. Returns true if it is kept.
-   *
-   * If one call exceeds the cap, its input and outcome are discarded and the slot is left as
-   * unable to be reopened (an already-open view lives on as is — nothing already given to a view is
-   * ever taken back from it). If the per-conversation or total cap is exceeded, the oldest **slot
-   * without an open instance** is dropped first — dropping the slot of an open view would leave the
-   * message it sends (ui/message) with no owner.
+   * Recomputes the size kept and holds it within the cap; true if kept. A call over the cap loses its input and outcome and the
+   * slot cannot be reopened (an already-open view lives on: nothing given to a view is taken back). Over the per-conversation
+   * or total cap, the oldest slot without an open instance goes first, as dropping an open view's slot would leave its message
+   * (ui/message) with no owner
    */
   private keep(v: InlineView): boolean {
     this.keptBytes -= v.bytes
@@ -379,9 +342,8 @@ export class InlineViews {
   }
 
   /**
-   * Keeps one conversation's live views within the cap — closes and reports (`closed`) the oldest
-   * open one first. The UI sends that view a teardown and collapses it into a placeholder. The view
-   * just opened is never the one closed.
+   * Keeps one conversation's live views within the cap: closes and reports (`closed`) the oldest open one first, which the UI
+   * tears down and collapses to a placeholder; the view just opened is never the one closed
    */
   private capLive(sessionId: string, keep: InlineView): void {
     const open = [...(this.bySession.get(sessionId)?.values() ?? [])].filter((x) => x.instanceId).sort((a, b) => a.openedAt - b.openedAt)
@@ -403,11 +365,9 @@ export class InlineViews {
   }
 
   /**
-   * Does this view belong to this app — its `ui://` has to be in the resource list that app
-   * serves. The document is only ever read from the instance's own app anyway (ViewHost), but a
-   * declaration claiming someone else's name is cut off here with a recorded reason: the person
-   * building the app needs to know why the view is not opening. A resource template is not
-   * accepted (v1).
+   * Whether this view belongs to this app: its `ui://` must be in the resource list the app serves. The document is only read
+   * from the instance's own app (ViewHost), but a declaration claiming someone else's name is cut off here with a recorded
+   * reason, as the person building the app needs to know why the view does not open. A resource template is not accepted (v1)
    */
   private async refusal(ref: AppRef, uri: string): Promise<string | null> {
     let listed: { uri: string }[]
@@ -443,11 +403,10 @@ export class InlineViews {
   }
 
   /**
-   * The reason this app's view cannot be rendered — the app disappeared, its project is no longer
-   * trusted, its manifest is broken, or it was turned off here. Since a view's HTML is also that app's code, all three cases
-   * close the view and never reopen it (the same rule as the fixed view, B-2). A crashed or stopped
-   * app is not one of these — the view's next call restarts the app. The reason is written in plain
-   * language, since it stands as is in the view.
+   * The reason this app's view cannot be rendered: the app disappeared, its project is no longer trusted, its manifest is
+   * broken, or it was turned off here. A view's HTML is that app's code, so all of these close the view and never reopen it
+   * (the rule of the fixed view); a crashed or stopped app is not one, as the view's next call restarts it. The reason is plain
+   * language, as it stands as is in the view
    */
   private unavailable(ref: AppRef): string | null {
     const info = this.deps.rt.list().find((a) => sameApp(a, ref))
@@ -473,10 +432,9 @@ export class InlineViews {
   }
 
   /**
-   * The app disappeared or can no longer run — closes any open view and reports the reason. Since
-   * a view's HTML is also that app's code, the view of a project that lost trust is never kept
-   * rendered (the same rule as the fixed view, B-2). A crashed or stopped app is not closed —
-   * the view's next call restarts the app.
+   * The app disappeared or can no longer run: closes any open view and reports the reason. A view's HTML is the app's code, so
+   * the view of a project that lost trust is never kept rendered (the fixed view's rule); a crashed or stopped app is not
+   * closed, as the next call restarts it
    */
   private recheckApps(): void {
     if (this.byInstance.size === 0) return
@@ -498,7 +456,7 @@ export class InlineViews {
   }
 }
 
-/** The length written as JSON — the ruler used to measure the size being kept. An unwritable value counts as infinite (never kept) */
+/** The length written as JSON — the ruler that measures the size being kept. An unwritable value counts as infinite (never kept) */
 function jsonLength(v: unknown): number {
   try {
     return JSON.stringify(v)?.length ?? 0
@@ -515,9 +473,9 @@ function resultViewUri(result: CallToolResult): string | null {
 }
 
 /**
- * The host's seam — main.ts and the tests wire this in with the same function. Listens for calls
- * on the manager's own attachment (hub), and emits events through the manager's record and
- * broadcast path (`mgr.apps`, session-app-wiring.ts). Call this after the runtime has been attached (`useExternalApps`).
+ * The host's seam, wired by main.ts and the tests with the same function: listens for calls on the manager's own attachment
+ * (hub) and emits events through the manager's record and broadcast path (`mgr.apps`, session-app-wiring.ts). Call it after the
+ * runtime was attached (`useExternalApps`)
  */
 export function attachInlineViews(
   apps: { sessionAppsHub(): SessionAppsHub | null; recordAppView(e: AppViewEvent): void },

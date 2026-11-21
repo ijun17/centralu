@@ -14,10 +14,8 @@ import { createRpcHandler } from './rpc.js'
 
 /**
  * Deleting a project also ends its terminals and Run-menu executions (#177).
- *
- * Both use the path as their key, and the manager knows nothing about them. Previously
- * `projects.delete` called only the manager, so the deleted project's dev server kept holding its
- * port until the app quit, and re-adding the same folder brought the pre-deletion terminal back to
+ * Both use the path as their key, and the manager knows nothing about them. Without ending them the deleted project's dev server
+ * would keep holding its port until the app quits, and re-adding the same folder would bring the pre-deletion terminal back to
  * life in the list. Observed from the RPC door that the webview knocks on.
  *
  * The fake pty has no pid, so tree-kill falls back to `pty.kill(signal)` — that call is the proof
