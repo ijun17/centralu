@@ -175,15 +175,6 @@ describe('the guards', () => {
     expect(warnings().find((m) => m.facts.guardRefused?.sender === B)?.body).toBe(`Centralu refused mail from ${w.mail.labelOf(B)} to you: the same text again within 10 minutes. ${w.mail.labelOf(B)} was told; nothing else was stopped.`)
   })
 
-  it('a session writes to the Assistant only while its tool can put a request’s steps to the person; an answer to the Assistant is no request', () => {
-    const w = world()
-    const q = w.send(ORC, { to: [B], text: 'which?' }).message
-    w.state.asks = false
-    expect(refusedFor(() => w.send(B, { to: [ORC], text: 'may I?' }))).toBe('assistant_asks')
-    expect(refusedFor(() => w.send(B, { replyTo: q.id, text: 'this one' }))).toBe('NOT REFUSED')
-    // The Assistant itself writes to whomever it likes
-    expect(refusedFor(() => w.send(ORC, { to: [B], text: 'carry on' }))).toBe('NOT REFUSED')
-  })
 })
 
 describe('done', () => {

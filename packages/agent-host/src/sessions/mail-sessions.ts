@@ -1,6 +1,6 @@
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { BusyAnswer, IfBusy } from '../adapters/contract.js'
-import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
+import { cardOrTurn, errorMessage } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, GivenTask, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
@@ -9,7 +9,6 @@ import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
 import type { MailToolArgs, MailToolResult } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { TurnInputs } from '../mail/delivery.js'
-import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { ChildReports, SessionLastResponse } from './child-reports.js'
@@ -91,8 +90,6 @@ export type MailHooks = {
   turnStarted?(sessionId: string, turn: TurnStart): void
   /** The Assistant's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
   roleMoved?(toSessionId: string): void
-  /** The session whose request the Assistant's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
-  askedBy?(assistantId: string): Asker | null
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
@@ -357,17 +354,6 @@ export class MailSessionsView {
       mailTool: (id) => this.canReadMail(id),
       mailCommand: (id) => this.host.tools.toolProfileOf(id) === 'assistant' && assistantHasMailCommand(),
     }
-  }
-
-  /**
-   * Why sessions may not ask the Assistant now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
-   * person's card; that needs the Assistant's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
-   * the Assistant run a command or write a file unasked, so it is not taken
-   */
-  assistantAsks(): string | null {
-    const assistant = [...this.host.meta.values()].find((m) => isAssistantKind(m.kind))
-    if (!assistant || this.host.adapters.get(assistant.tool)?.capabilities.gatesSteps === true) return null
-    return 'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
   }
 
   /** `ChildOwnership.latestTurnInputs`: who gave what may have entered the session's latest turn, which a stop notice quotes only to its one asker */

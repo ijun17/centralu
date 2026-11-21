@@ -694,11 +694,6 @@ export type CentraluTools = {
    */
   session?(text: string): { ok: true; id: string } | { ok: false; error: string }
   /**
-   * Runs one tool or command of this seat, asking the person first when a session's request is what the Assistant's turn is (#1447, §9.7). The
-   * runner calls it around every tool; absent, or in a turn that is not a session's request, it just runs
-   */
-  whenAsked?(call: { name: string; args: Record<string, unknown> }, signal: AbortSignal | undefined, run: () => Promise<{ text: string; isError?: boolean }>): Promise<{ text: string; isError?: boolean }>
-  /**
    * This session's apps (#2231), what the `app` tool lists and calls: its live attachment, or null when the session has no
    * live agent (nothing calls then) or the host runs no apps. Absent on a bundle that has no session behind it
    */

@@ -5,7 +5,6 @@ import type { ToolProfile } from '../apps/contract.js'
 import type { AskProjectFlow } from './ask-project-flow.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
-import type { WhenAsked } from './asked-gate.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 import { toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import { profileAllows } from './tool-seats.js'
@@ -31,8 +30,6 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   sessionRef: (sessionId: string, text: string) => { ok: true; id: string } | { ok: false; error: string }
   /** The `compact_self` tool of a session (#1451) */
   readonly selfCompaction: Pick<SelfCompaction, 'request'>
-  /** One step of the Assistant, asked about when a session's request is its turn (#1447) */
-  whenAsked: WhenAsked
 }
 
 /**
@@ -102,8 +99,6 @@ export class SessionTools {
     return {
       ...this.host.centraluToolsFor(sessionId),
       ...this.appAndMailTools(sessionId),
-      // A session may have asked for the turn the Assistant is in (#1447): its steps that change something ask the person first
-      whenAsked: (call, signal, run) => this.host.whenAsked(sessionId, call, signal, run, (text) => ({ text, isError: true })),
     }
   }
 

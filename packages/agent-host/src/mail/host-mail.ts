@@ -9,7 +9,6 @@ import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
-import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
 import { answerRecorder, delegationRecorder, linkedTasksOf, openTaskParties, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
@@ -36,8 +35,6 @@ export type HostMailSessions = {
   /** Whether the session's seat has the `mail` tool (`reader` or `assistant`) */
   canReadMail(id: string): boolean
   assistantId(): string | null
-  /** Why sessions may not ask the Assistant now, or null when they may (§7.6) */
-  assistantAsks(): string | null
   /** Whether the session reaches `mail` as a command behind `centralu_run` (the Assistant) */
   mailCommand(id: string): boolean
   /** Whether the session's turn goes on from the host before (kept, or continued after an update): its mail turn row is read back */
@@ -77,7 +74,6 @@ export function mailSessionsOf(
     listSessions: () => mgr.listSessions(),
     canReadMail: (id) => seats.mailTool(id),
     assistantId: () => mgr.assistantId(),
-    assistantAsks: () => mgr.mail.assistantAsks(),
     mailCommand: (id) => seats.mailCommand(id),
     keptInTurn: (id) => mgr.tenure.keptInTurn(id),
     mailSessions: () => mgr.mail.mailSessions(),
@@ -166,7 +162,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     foreign: (address) => far.across?.foreignName(address),
     hubPerson: (hostId) => far.across?.isHub(hostId) === true,
     assistantId: () => sessions.assistantId(),
-    assistantAsks: () => sessions.assistantAsks() === null,
     // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session
     appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
     project: (projectId) => {
@@ -282,20 +277,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     across: (address) => across.foreign(address),
     ...opts.delivery,
   })
-  const askedByHost: AskedByHost = {
-    session: (id) => {
-      const s = sessions.sessionInfo(id)
-      return s && { name: s.name, projectId: s.projectId ?? null }
-    },
-    project: (id) => projects().find((p) => p.id === id),
-    untrusted: (projectId) => reach.untrusted(projectId),
-    cites: (messageId) => store.mailbox.message(messageId)?.facts.cites ?? null,
-    requestsInTurn: (id) => {
-      const turn = mailTurns.current(id)
-      const requests = turn ? service.requestsIn(addressOf(id), turn) : []
-      return turn ? { turnSeq: turn.turnSeq, requests: requests.flatMap((r) => { const party = parseAddress(r.asker); return party?.kind === 'session' ? [{ sessionId: party.sessionId, messageId: r.messageId }] : [] }) } : null
-    },
-  }
   const refs = new SessionRefs({
     hostId,
     sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
@@ -314,7 +295,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     assistantId: () => sessions.assistantId(),
     refs,
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
-    askerOf: (id) => askerFacts(askedByHost, id),
+    // The host's record, never anything the session wrote; a gone session's project is unknown, so it is not trusted (fail closed)
+    askerOf: (id) => {
+      const s = sessions.sessionInfo(id)
+      const projectId = s ? (s.projectId ?? null) : 'gone'
+      const project = projectId === null ? undefined : projects().find((p) => p.id === projectId)
+      return { name: s?.name ?? id.slice(0, 8), project: project?.name ?? null, trusted: !reach.untrusted(projectId) }
+    },
     across,
     watches,
     ...(sessions.work ? { work: sessions.work } : {}),
@@ -327,7 +314,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   }
   const hooks: MailHooks = {
     address: addressOf,
-    askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => {
       service.stops.partyGone(addressOf(id))
       watches.gone(addressOf(id))

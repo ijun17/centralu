@@ -1,11 +1,7 @@
 import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
-import { createdPreset, centraluToolsFor, type AssistantSeatHost } from './assistant-seat.js'
-import { parseAddress } from '../mail/address.js'
-import { presetWithin } from './start-agent.js'
-import { matchProjects } from './ask-project.js'
-import { AskedGate } from './asked-gate.js'
+import { centraluToolsFor, type AssistantSeatHost } from './assistant-seat.js'
 import { MailNotAtRest } from '../mail/delivery.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
@@ -55,7 +51,6 @@ import { worktreesFolder } from '../data-dir.js'
 import type {
   MachineInfo,
   NormalizedEvent,
-  PermissionPreset,
   SessionInfo,
   ToolName,
   MachineAskConsent,
@@ -67,9 +62,6 @@ import {
   autoContinueOf,
   withoutToolRecord,
   errorMessage,
-  ASSISTANT_CHANGE,
-  oneLineText,
-  PermissionPreset as PresetSchema,
   isAssistantKind,
 } from '@cc/protocol'
 import type { AgentAdapter, LinkedSessions, CentraluTools, SessionHandle } from '../adapters/contract.js'
@@ -208,8 +200,6 @@ export class SessionManager {
   readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
   readonly hostCards: HostCards
-  /** The Assistant's steps that ask the person when a session asked for the turn (#1447) */
-  private readonly askedGate: AskedGate
   /** The Assistant's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
   private readonly linkedReports: LinkedReports
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
@@ -321,46 +311,6 @@ export class SessionManager {
     this.restartPolicy = new RestartPolicy(this.parts())
     this.worktrees = new WorktreeSessions(this.parts())
     this.hostCards = new HostCards(this.parts())
-    this.askedGate = new AskedGate({
-      askedBy: (id) => this.mail.hooks?.askedBy?.(id) ?? null,
-      // Allow or deny only, under every preset: `auto` does not answer a session's request for the person (§9.7)
-      ask: async (id, question, signal) => {
-        const answer = await this.hostCards.askHost(id, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
-        return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
-      },
-      cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      // Work handed on to a session no looser than the asking one, the one check about power (docs/plans/cited-requests.md §4); where it goes is the Assistant's judgement
-      noLooser: (asker, call) => {
-        const me = this.meta.get(asker.sessionId)
-        if (!me) return false
-        const seatId = this.assistantId()
-        const seat = (seatId === null ? undefined : this.meta.get(seatId))?.permissionPreset ?? 'safe'
-        // A session of this host by id or mail address; one on a linked machine is not known here, so its preset is not either
-        const of = (v: unknown): PermissionPreset | undefined => {
-          if (typeof v !== 'string') return undefined
-          const party = parseAddress(v.trim())
-          return this.meta.get(party?.kind === 'session' ? party.sessionId : v.trim())?.permissionPreset
-        }
-        const preset =
-          // What `createdPreset` gives in this asked turn (one this host does not hold, on a linked machine, is taken as trusted: the higher default)
-          call.name === 'create_session' ? (createdPreset(seat, { trusted: this.createdInTrusted(call.args.project) }, PresetSchema.safeParse(call.args.preset).data, me.permissionPreset) ?? undefined)
-          : call.name === 'start_agent' ? seat // its child runs under the caller's preset (start-agent-flow.ts)
-          : call.name === 'handoff_session' ? (call.args.sessionId === undefined ? seat : of(call.args.sessionId)) // the new session keeps the old one's
-          : call.name === 'ask_project' ? of(call.args.session)
-          : call.name === 'mail' ? of(call.args.to)
-          : of(call.args.sessionId)
-        return preset !== undefined && presetWithin(preset, me.permissionPreset)
-      },
-      done: (asker, act) => {
-        const cites = asker.cites
-        const cited = cites ? this.store.messages.loadMessagesFrom(asker.sessionId, cites.seq - 1, 1).find((r) => r.seq === cites.seq) : undefined
-        const words = cited && typeof cited.payload === 'object' && cited.payload !== null && 'text' in cited.payload ? String(cited.payload.text) : ''
-        const why = cites
-          ? `On your message from ${Math.max(1, Math.round((Date.now() - cites.at) / 60_000))} min ago (${JSON.stringify(oneLineText(words, 60))}), the Assistant did this for this session's request`
-          : "For this session's request, which cites no message of yours, the Assistant did this"
-        this.events.onEvent({ type: 'notice', sessionId: asker.sessionId, level: 'info', from: 'Centralu', label: 'request record', text: `${why}: ${oneLineText(act, 300)}` })
-      },
-    })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
@@ -754,18 +704,6 @@ export class SessionManager {
   private cardRests: CardRests
 
   /**
-   * Whether a project create_session names is trusted here, matched as create_session matches it (`matchProjects`: id,
-   * then name, then any case); one this host does not hold, or a name two projects share, reads as trusted, the looser
-   * default (#1739's gate)
-   */
-  private createdInTrusted(project: unknown): boolean {
-    const all = this.store.projects.listProjects()
-    const found = matchProjects(typeof project === 'string' ? project : '', all.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })))
-    const [only, second] = found
-    return only && !second ? all.find((p) => p.id === only.id)?.trusted === true : true
-  }
-
-  /**
    * Usage over time (docs/agent-host/usage.md "Usage over time"): the figures an earlier run of this host stored come back into the
    * cache ledger, and the recorder starts writing this run's. A store that cannot be read costs the history only.
    */
@@ -879,12 +817,6 @@ export class SessionManager {
       sessionRef: (id, text) => self.mail.hooks?.session?.(id, text) ?? { ok: true, id: text },
       refusesDelegation: (callerId, target, call) => self.mail.hooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mail.hooks?.roleMoved?.(toId),
-      whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      requestTurn: (id) => ({
-        active: () => self.askedGate.active(id),
-        ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal),
-        done: (tool, input) => self.askedGate.cliDone(id, tool, input),
-      }),
       compactEvent: (e, ended) => {
         try {
           self.selfCompaction.observe(e, ended)
@@ -1290,7 +1222,6 @@ export class SessionManager {
       usageHistory: (p) => this.usageHistory(p),
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
-      askedBy: (assistantId) => this.mail.hooks?.askedBy?.(assistantId) ?? null,
     })
   }
 

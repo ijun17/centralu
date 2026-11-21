@@ -110,14 +110,7 @@ function isToolName(name: string): name is keyof typeof TOOL_ARGS {
 
 /** A tool whose arguments its schema has already read: the handler itself */
 function runParsed<N extends keyof CentraluToolArgs>(name: N, args: CentraluToolArgs[N], call: ToolCall): Promise<ToolOutput> {
-  const run = () => Promise.resolve(HANDLERS[name](args, call))
-  /*
-   * The one place every tool and command passes (a command run through centralu_run too): a session's request asks the
-   * person before it acts (#1447, §9.7). Not `app`, whose call the hub asks about itself (`Attachment.call`), knowing
-   * whether the app's tool only reads; its list only reads
-   */
-  if (name === 'app') return run()
-  return call.tools.whenAsked ? call.tools.whenAsked({ name, args }, call.signal, run) : run()
+  return Promise.resolve(HANDLERS[name](args, call))
 }
 
 const HANDLERS: ToolHandlers = {

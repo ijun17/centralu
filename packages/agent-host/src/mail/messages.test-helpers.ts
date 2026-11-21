@@ -42,7 +42,6 @@ export function world() {
     ['p2', { trusted: true }],
     ['px', { trusted: false, name: 'Pex' }],
   ])
-  const state = { asks: true }
   const host: ReachHost = {
     hostId: HOST,
     session: (id) => {
@@ -50,7 +49,6 @@ export function world() {
       return s && { projectId: s.projectId, askedBy: s.askedBy ?? null, here: s.here ?? true, canReadMail: s.canReadMail ?? true, host: 'here', ...(s.name ? { name: s.name } : {}) }
     },
     assistantId: () => 'orc',
-    assistantAsks: () => state.asks,
     appCalledBy: () => false,
     project: (id) => projects.get(id),
     // The sessions of one project, and of the Assistant's none, are one group
@@ -86,7 +84,7 @@ export function world() {
     if (!r) throw new Error(`no row ${id} for ${recipient}`)
     return r
   }
-  return { store, db, mail, reach, records: store.mailbox, clock, sessions, projects, state, turns, startTurn, send, message, rowOf }
+  return { store, db, mail, reach, records: store.mailbox, clock, sessions, projects, turns, startTurn, send, message, rowOf }
 }
 
 /** What a refused call said it was refused for; 'NOT REFUSED' when it was not */

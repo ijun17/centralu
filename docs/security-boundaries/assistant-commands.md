@@ -3,9 +3,8 @@
 **`create_session`** (#838) starts the session under the preset it names, or else under the default a new session
 gets (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one, owner decision 2026-11-05), never
 above the Assistant's own preset and never above `normal` in an untrusted project, named or not: a default above a
-cap is held to it, and a preset named above one is refused with nothing made (`createdPreset`). In a turn a session's
-request started (#1739), the default is also held to the asking session's preset, so the work it hands on takes no
-request card; a preset named above the asker's still does. There is no card for the caps, as there was none before:
+cap is held to it, and a preset named above one is refused with nothing made (`createdPreset`). A turn a session's
+request started is no different: the asking session's preset is no cap (#2411). There is no card for the caps, as there was none before:
 the cap is the rule. So an `auto` assistant may create `auto` sessions in trusted projects, and a `safe` one only
 `safe` ones. On a linked machine the request carries `normal` at most, and an `auto` one goes as the caller's preset
 (`fromHub`), so it runs `auto` there only while that machine's own "Allow auto from a linked computer" switch is on

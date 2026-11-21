@@ -862,12 +862,6 @@ describe('the app tool (#2231)', () => {
     expect(none.text).toBe('This session has no apps.')
   })
 
-  it("is not put through the request gate by the runner: the hub's call asks, knowing whether the app's tool only reads", async () => {
-    const whenAsked = vi.fn(async (_c: unknown, _s: unknown, run: () => Promise<{ text: string }>) => run())
-    await runCentraluTool(toolsWith({ apps: () => appsWith(), whenAsked }), 'app', { action: 'list' }, { sessionId: 's', profile: 'assistant' })
-    expect(whenAsked).not.toHaveBeenCalled()
-  })
-
   it("find_apps names the session's own apps when it finds nothing to attach", async () => {
     const tools = toolsWith({ apps: () => appsWith(), findApps: async () => ({ ok: true, apps: [] }) })
     const out = await runCentraluTool(tools, 'find_apps', { query: 'notes' }, { sessionId: 's', profile: 'reader' })

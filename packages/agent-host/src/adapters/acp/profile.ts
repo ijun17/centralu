@@ -14,7 +14,6 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   exclusiveWriter: false,
   backgroundTasks: false,
   midTurnInput: false,
-  gatesSteps: false,
   toolDeferral: false,
   instructionChannel: 'server',
   processModel: 'per-session',
@@ -25,10 +24,7 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   roleText: false,
 }
 
-/**
- * Everything one tool adds to the generic ACP adapter (docs/plans/acp-adapter.md §2): the only place a tool is named.
- * Data and small hooks; the turn logic is the core's.
- */
+/** Everything one tool adds to the generic ACP adapter (docs/plans/acp-adapter.md §2), the only place a tool is named: data and small hooks */
 export type AcpProfile = {
   readonly descriptor: ToolDescriptor
   readonly capabilities: AdapterCapabilities

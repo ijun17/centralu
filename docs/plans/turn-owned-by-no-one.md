@@ -274,6 +274,10 @@ Rules:
 
 ### 4.2 The asked gate, re-keyed on the request message (C11)
 
+**Since #2411 (owner, 2026-11-21)** there is no asked gate: a request's turn runs as the person's own, judged by the instruction in the
+request's header ([cited-requests.md](cited-requests.md)). The reading built here stays: `MessageService.requestsIn` decides whom the
+turn's end reports to, and the same rule (`inOpenTurn`) where a request's words are shown; the rest of this section records the gate it served.
+
 **Today.** The orchestrator's turn has one asker or none (`askedBy`, `mail/asked-by.ts:44`). It is the
 `asker` of `MailTurns.open` (`mail/turns.ts:62-63`, memory only), set in `begin()` from the drain's `picked` group
 (`messages.ts:589`, one asker per wake), and rebuilt after a restart from the turn row's `message_id` (`closeStale`,

@@ -306,11 +306,11 @@ export class MessageService {
 
     const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
     const choices = input.choices && checkedChoices(input.choices, cls, to, needsReply)
-    for (const [i, r] of to.entries()) {
+    for (const r of to) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
       if (r === sender) throw refuse('bad_value', 'a message is for someone else')
-      const why = this.reach.mayWrite(sender, r, requests[i])
+      const why = this.reach.mayWrite(sender, r)
       if (why !== null) throw refuse(why, this.refusalText(why, r))
     }
 
@@ -666,7 +666,7 @@ export class MessageService {
     const heldBack: DrainResult['heldBack'] = []
     for (const { row, message } of this.records.pendingFor(recipient, now, opts.again === true)) {
       const request = this.isRequest(message, recipient)
-      if (message.sender === recipient || this.reach.mayWrite(message.sender, recipient, request) !== null || opts.skip?.(message, row)) continue
+      if (message.sender === recipient || this.reach.mayWrite(message.sender, recipient) !== null || opts.skip?.(message, row)) continue
       // A request to the Assistant never joins its running turn: one asker a turn (docs/plans/turn-owned-by-no-one.md §4.2)
       if (opts.joining && toAssistant && this.askerOf(message, recipient) !== undefined) continue
       if (this.reminderSettled(message, recipient)) {
@@ -984,7 +984,6 @@ export class MessageService {
       gone: this.goneText(to),
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
       elsewhere: REFUSAL_TEXT.elsewhere(to),
-      assistant_asks: REFUSAL_TEXT.assistant_asks(),
       not_allowed: REFUSAL_TEXT.not_allowed(),
     }
     return text[why] ?? why
@@ -1021,7 +1020,7 @@ export class MessageService {
 
   /**
    * Whether a message is a request to the Assistant (§7.6): from a session to the Assistant, unless it answers a `needsReply` message or a task the
-   * assistant sent that session, or is a clarification. Only requests are counted by `ask_rate` and raise the person's cards
+   * assistant sent that session, or is a clarification. Only requests are counted by `ask_rate`
    */
   private isRequest(m: Pick<MailRow, 'sender' | 'kind' | 'replyTo' | 'facts'>, recipient: string): boolean {
     if ((m.kind !== 'message' && m.kind !== 'task') || m.sender === recipient || !this.reach.isAssistant(recipient)) return false

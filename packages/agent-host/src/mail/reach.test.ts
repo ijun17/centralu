@@ -67,7 +67,6 @@ describe('who may write to whom (§7.1)', () => {
       hostId: 'hub-aaaaaaaa',
       session: (id) => (id === 'a' || id === 'b' ? { projectId: 'p1', askedBy: null, here: true, canReadMail: true, host: 'here' } : undefined),
       assistantId: () => null,
-      assistantAsks: () => true,
       appCalledBy: (_app, session) => session === 'a',
       project: () => ({ trusted: true }),
       askGroupMembers: () => [],
@@ -75,17 +74,6 @@ describe('who may write to whom (§7.1)', () => {
     expect(reach.mayWrite(app, A)).toBeNull()
     expect(reach.mayWrite(app, B)).toBe('not_allowed')
     expect(reach.mayWrite(app, PERSON)).toBe('not_allowed')
-  })
-
-  it('refuses a request to the Assistant while its tool cannot put each step to the person, but not an answer or the Assistant’s own word', () => {
-    const { reach, state } = world()
-    state.asks = false
-    expect(reach.mayWrite(A, ORC)).toBe('assistant_asks')
-    expect(reach.mayWrite(A, ORC, false)).toBeNull()
-    expect(reach.mayWrite(ORC, A)).toBeNull()
-    expect(reach.mayWrite(A, B)).toBeNull()
-    state.asks = true
-    expect(reach.mayWrite(A, ORC)).toBeNull()
   })
 })
 

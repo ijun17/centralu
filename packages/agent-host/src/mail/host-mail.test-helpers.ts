@@ -43,7 +43,6 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     listSessions: () => Object.keys(table).flatMap((id) => info(id) ?? []),
     canReadMail: () => true,
     assistantId: () => 'orc',
-    assistantAsks: () => null,
     mailCommand: () => false,
     keptInTurn: (id) => opts.kept?.has(id) ?? false,
     mailSessions: () => ({

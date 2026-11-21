@@ -8,7 +8,6 @@ import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { rpcError } from '../rpc-error.js'
 import { AppAccess, writeAppFlag, type AppFlag } from './app-access.js'
-import type { WhenAsked } from './asked-gate.js'
 import type { AppSessions, AppSessionsHost } from './app-sessions.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HostCards } from './host-cards.js'
@@ -45,8 +44,6 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
     readonly hostCards: Pick<HostCards, 'askCapability' | 'askHost'>
     migrateApprovedMcpServers: AssistantProposals['migrateApprovedMcpServers']
-    /** An app tool's call, asked about when a session's request is the session's turn (§9.7, #1447) */
-    whenAsked: WhenAsked
   }
 
 /**
@@ -119,7 +116,6 @@ export class SessionAppWiring {
     const settings = this.host.store.settings
     this.appsHub = new SessionAppsHub(rt, {
       ...opts,
-      whenAsked: (id, call, signal, run, refused) => this.host.whenAsked(id, call, signal, run, refused),
       // The person's say on an app call, at the call (#2231): the preset now, the person's own bypass on the live agent, the host's card
       approval: {
         preset: (id) => (this.host.meta.get(id) ?? this.starting.get(id))?.permissionPreset ?? 'safe',
