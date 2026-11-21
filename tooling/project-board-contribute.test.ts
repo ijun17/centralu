@@ -919,6 +919,9 @@ const copyOf = (url: string) => /^(.*?cc-board-pre-pr-[^\\/]+)/.exec(fileURLToPa
 const prePrAnswers = (a: unknown) => writeFileSync(join(root, 'pre-pr-answer.json'), JSON.stringify(a))
 /** The refs a call fetched under: refs/centralu-pre-pr/<one of its own>, read from its --head */
 const spaceOf = (args: string[]) => /^(refs\/centralu-pre-pr\/[^/]+)\/feat\/tools$/.exec(args[args.indexOf('--head') + 1]!)![1]!
+/** What pre-pr says held on a clean run of a stack with `heads` heads, every check run */
+const passedAll = (heads: number) => ['lint on the changed files', `tsc at ${heads} head(s)`, 'no orphans', 'no dependency errors', 'the repository-wide guards', 'no new test passes without the change']
+
 const PR_PLAIN = {
   title: 'feat(apps): add contribution tools to the board',
   head: 'feat/tools',
@@ -1049,20 +1052,20 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
   it('checks every pull request under a stacked one, and says in Verified that it passed', async () => {
     const c = prePrCheckout()
     patchState((s) => (s.prs['5'] = pr(5, { headRefName: 'feat/low', baseRefName: 'main' })))
-    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.low }, { sha: c.tools }], head: c.tools })
+    prePrAnswers({ ok: true, findings: [], notes: [], passed: passedAll(2), heads: [{ sha: c.low }, { sha: c.tools }], head: c.tools })
     runtime()
     const r = await call('open_pr', { ...PR_PLAIN, base: 'feat/low', path: c.work })
     expect(r.isError, r.text).toBe(false)
     const args = prePrCalls()[0]!.args
     const ns = spaceOf(args)
     expect(args).toEqual(['--json', '--no-fetch', '--run-id', ns.split('/').pop(), '--remote', 'origin', '--limit', '1680', '--head', `${ns}/feat/tools`, '--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
-    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 2 head(s), no orphans, no dependency errors, lint on the changed files, no new test passes without the change.`)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`## Verified\n\nTests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: lint on the changed files, tsc at 2 head(s), no orphans, no dependency errors, the repository-wide guards, no new test passes without the change.`)
   })
 
   it('writes the tier pre-pr answers into Verified and labels the pull request with it (#1259)', async () => {
     const c = prePrCheckout()
     const line = 'Tier: deep, from `packages/protocol/src/a.ts` (protocol); the other files: 1 auto.'
-    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'deep', line, because: ['packages/protocol/src/a.ts'] } })
+    prePrAnswers({ ok: true, findings: [], notes: [], passed: passedAll(1), heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'deep', line, because: ['packages/protocol/src/a.ts'] } })
     runtime()
     const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
     expect(r.isError, r.text).toBe(false)
@@ -1183,6 +1186,7 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     const c = prePrCheckout()
     prePrAnswers({
       ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools,
+      passed: passedAll(1).slice(0, -1),
       warnings: [{ check: 'main', message: 'feat/tools does not contain main: 1 commit(s) behind.' }],
       exempted: [{ check: 'revert', reason: 'The new test guards a Windows path this branch only documents.' }],
     })
@@ -1197,17 +1201,18 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'revert=The new test guards a Windows path this branch only documents.'])
     expect(r.data.warnings).toEqual(['[main] feat/tools does not contain main: 1 commit(s) behind.'])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(
-      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: tsc at 1 head(s), no orphans, no dependency errors, lint on the changed files.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
+      `Tests.\n\n\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}: lint on the changed files, tsc at 1 head(s), no orphans, no dependency errors, the repository-wide guards.\nNot run, the revert check: The new test guards a Windows path this branch only documents.\nWarning (main): feat/tools does not contain main: 1 commit(s) behind.`,
     )
   })
 
-  it('passes an exemption from the store step check on to pre-pr', async () => {
+  it.each(['tsc', 'orphans', 'deps', 'lint', 'repo-guards', 'store-step', 'guards', 'revert'])('passes an exemption from %s on to pre-pr', async (check) => {
     const c = prePrCheckout()
-    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, warnings: [], exempted: [{ check: 'store-step', reason: 'Number 60 was assigned to this branch.' }] })
+    prePrAnswers({ ok: true, findings: [], notes: [], passed: [], heads: [{ sha: c.tools }], head: c.tools, warnings: [], exempted: [{ check, reason: 'The reason it stands.' }] })
     runtime()
-    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { 'store-step': 'Number 60 was assigned to this branch.' } })
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work, prePrExempt: { [check]: 'The reason it stands.' } })
     expect(r.isError, r.text).toBe(false)
-    expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', 'store-step=Number 60 was assigned to this branch.'])
+    expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', `${check}=The reason it stands.`])
+    expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}.\nNot run, the ${check} check: The reason it stands.`)
   })
 
   it('opens nothing when the call is cancelled, and stops pre-pr\'s whole process tree and cleans up after it', async () => {

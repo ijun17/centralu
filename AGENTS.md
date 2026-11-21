@@ -66,7 +66,7 @@ nothing does, so your own check and the review must catch it.
 
 ## How work is done
 
-Before opening a PR, run `pnpm pre-pr`, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request) and write its [Situations checked](CONTRIBUTING.md#situations-checked).
+Before opening a PR, run `pnpm pre-pr`, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request), have a sub-agent run its [diff review](CONTRIBUTING.md#the-diff-review-before-the-pull-request) and write its [Situations checked](CONTRIBUTING.md#situations-checked).
 Before saying done, get the review your change's tier asks for (`pnpm tier`; light: a sub-agent of
 another model reads the diff against the self-check, deep: a separate review session with
 real-environment cases) and record in Verified who reviewed and what they found

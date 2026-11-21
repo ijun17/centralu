@@ -1,13 +1,18 @@
-import { execFileSync, execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, filesRunMs, isVitestFile, mirrorModules, nodeBin, nodeModulesDirs, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, removeRun, runDir, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, sweepStale, unlinkLinks, vitestTests } from '../scripts/pre-pr.mjs'
+import { failuresOf, guardWarnings, isTestFile, filesRunMs, isVitestFile, nodeBin, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, vitestTests } from '../scripts/pre-pr.mjs'
+// @ts-expect-error — a plain .mjs script, as above
+import { canonical, GUARD_REFS, removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
+// @ts-expect-error — a plain .mjs script, as above
+import { interruptsSoFar, runTool } from '../scripts/interrupts.mjs'
+import { GUARDS } from './guards.js'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools (pnpm
@@ -25,22 +30,45 @@ afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
 
 // No automatic maintenance: a commit starts a detached `git maintenance run --auto` that holds objects/maintenance.lock after the
 // commit returns, and the copy of a template made right then (cpSync) meets the lock vanishing: ENOENT on its .git/objects
+/** Git's empty tree: a diff from it holds every file */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', LC_ALL: 'C', ...NO_GIT_MAINTENANCE }
 const gitIn = (env: NodeJS.ProcessEnv, cwd: string, args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', env }).trim()
 const git = (cwd: string, ...args: string[]) => gitIn(GIT_ENV, cwd, args)
 
-type Report = { testResults: { name: string; assertionResults: { ancestorTitles: string[]; title: string; status: string }[] }[] }
+type Report = { testResults: { name: string; status?: string; message?: string; assertionResults: { ancestorTitles: string[]; title: string; status: string }[] }[] }
 type Pass = { report: Report | null; timedOut: boolean }
+
+/** A vitest JSON report recorded from a real run (tooling/fixtures/pre-pr), with `root` where the recording's checkout was */
+const recordedReport = (name: string, root: string) =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(`./fixtures/pre-pr/${name}`, import.meta.url)), 'utf8').replaceAll('<root>', root.split('\\').join('/')))
+
+/** Starts, with `start`, a real tool that SIGINT ends, as Ctrl-C ends it; throws what `start` throws for it */
+const endedBySigint = (start: typeof execFileSync) => start(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGINT', stdio: 'ignore' })
+
+/**
+ * A real tool ended by SIGINT, as Ctrl-C ends it, started as pre-pr starts its tools; its runner answers a failure, as a real one
+ * does. Node names the signal it sent on every system, though on Windows the end is TerminateProcess.
+ */
+function interruptedTool() {
+  try {
+    endedBySigint(runTool)
+  } catch {
+    // the failure every runner answers for it
+  }
+  return { ok: false, out: 'terminated', timedOut: false }
+}
 
 /**
  * `linkTo`: each worktree gets a real link (a junction on Windows) at src/node_modules to that folder,
  * as prepare's links into the checkout's dependencies are, so the clean-up is tested on the real thing.
  */
 function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: boolean; linkTo?: string } = {}) {
-  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], names: [] as string[][], timeouts: [] as (number | undefined)[] }
+  const calls = { prepare: [] as string[], tsc: [] as string[], lint: [] as string[][], vitest: [] as string[][], names: [] as string[][], timeouts: [] as (number | undefined)[], known: [] as (string[] | undefined)[] }
   return {
     calls,
     runners: {
+      tier: realRunners.tier,
       prepare: (dir: string) => {
         const sha = git(dir, 'rev-parse', 'HEAD')
         calls.prepare.push(sha)
@@ -64,23 +92,40 @@ function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: bo
         calls.lint.push(files)
         return opts.lintFails ? { ok: false, out: 'src/b.mjs\n  1:1  error  Unsafe type assertion  @typescript-eslint/no-unsafe-type-assertion' } : { ok: true, out: '' }
       },
+      // The declaration (tooling/guards.ts) is JSON here, `[{ test, tests?, reads? }]`, where the real one is TypeScript that
+      // scripts/pre-pr-guards.mjs reads; a guard is changed when the commits change its test or a file it reads
+      guards: (dir: string, from: string, to: string) => {
+        const file = join(dir, 'tooling', 'guards.ts')
+        if (!existsSync(file)) return { guards: null, changed: [] }
+        const declared = JSON.parse(readFileSync(file, 'utf8')) as { test: string; tests?: string; reads?: string[] }[]
+        const paths = git(dir, 'diff', '--name-only', from, to).split('\n')
+        return { guards: declared.map(({ test, tests }) => ({ test, tests })), changed: declared.filter((g) => [g.test, ...(g.reads ?? [])].some((f) => paths.includes(f))).map((g) => g.test) }
+      },
       // A line `title :: file :: text` is a test that passes when the file holds the text; a fourth field `skip` makes it a skipped
-      // one. With `namesOnly` none runs: every test is named, as skipped
-      vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean }): Pass => {
+      // one. With `namesOnly` none runs: every test is named, as skipped. With `known` the run ends at the first passing test not
+      // among them, as pre-pr-stop-reporter.mjs ends it: the tests after it are pending. A line `does not load :: <message>` makes
+      // the file one that does not load, as the real vitest reports it (a test below checks that)
+      vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean; known?: { file: string; name: string }[] }): Pass => {
         calls.timeouts.push(o?.timeoutMs)
         ;(o?.namesOnly ? calls.names : calls.vitest).push(files)
+        if (!o?.namesOnly) calls.known.push(o?.known?.map((t) => `${t.file} > ${t.name}`))
+        let ended = false
+        const unloaded = (file: string) => /^does not load :: (.*)$/m.exec(readFileSync(join(dir, file), 'utf8'))?.[1]
         return {
           timedOut: false,
           report: {
             testResults: files.map((file) => ({
               name: join(dir, file),
-              assertionResults: readFileSync(join(dir, file), 'utf8')
+              ...(unloaded(file) ? { status: 'failed', message: unloaded(file) } : {}),
+              assertionResults: unloaded(file) ? [] : readFileSync(join(dir, file), 'utf8')
                 .split('\n')
                 .filter((l) => l.includes(' :: '))
                 .map((l) => {
                   const [title, target, text, skip] = l.split(' :: ').map((s) => s.trim()) as [string, string, string, string | undefined]
                   const ok = existsSync(join(dir, target)) && readFileSync(join(dir, target), 'utf8').includes(text)
-                  return { ancestorTitles: [], title, status: o?.namesOnly || skip ? 'skipped' : ok ? 'passed' : 'failed' }
+                  const status = ended ? 'pending' : o?.namesOnly || skip ? 'skipped' : ok ? 'passed' : 'failed'
+                  if (status === 'passed' && o?.known && !o.known.some((t) => t.file === file && t.name === title)) ended = true
+                  return { ancestorTitles: [], title, status }
                 }),
             })),
           },
@@ -97,6 +142,11 @@ describe('what pre-pr reads', () => {
     ['tooling/fake-gh.test-helpers.ts', true, false],
     ['e2e/grid.spec.ts', true, false],
     ['e2e/ux/klm.test.ts', true, false],
+    ['e2e/ux/core.task.ts', true, false],
+    ['e2e/fixtures/usage-donut-gap.ts', true, false],
+    // The harness is code vitest tests: reverted like any other
+    ['e2e/flaky-report.ts', false, false],
+    ['e2e/playwright.config.ts', false, false],
     ['tooling/fixtures/a.json', true, false],
     ['packages/ui/src/x.tsx', false, false],
     ['scripts/pre-pr.mjs', false, false],
@@ -144,6 +194,24 @@ describe('what pre-pr reads', () => {
     expect(passingNewTests({ reverted: tests, base: [{ file: 'a/x.test.ts', name: 'three', status: 'passed' }] })).toEqual([tests[0]])
   })
 
+  it('names a file from a root given by another spelling of its folder, as vitest reports it by its real path', () => {
+    // A link stands in for a Windows temporary folder's 8.3 name: both reach the folder vitest names by its real path
+    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-spelling-'))
+    try {
+      mkdirSync(join(base, 'real'))
+      symlinkSync(join(base, 'real'), join(base, 'link'), 'junction')
+      const name = join(canonical(join(base, 'real')), 'a', 'x.test.ts')
+      const report = { testResults: [{ name, status: 'failed', message: 'no', startTime: 1, endTime: 5, assertionResults: [{ ancestorTitles: [], title: 'one', status: 'failed', failureMessages: ['no'] }] }] }
+      const root = join(base, 'link')
+      expect(vitestTests(report, root).map((t: { file: string }) => t.file)).toEqual(['a/x.test.ts'])
+      expect(failuresOf(report, root).map((f: { file: string }) => f.file)).toEqual(['a/x.test.ts'])
+      expect(filesRunMs(report, root, ['a/x.test.ts'])).toBe(4)
+    } finally {
+      unlinkLinks(base)
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
   it('names the tests of a file with the real vitest without running one, the skipped and todo ones too', () => {
     // A folder of its own that reaches this checkout's dependencies, so no test file lands among the repository's
     const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-names-'))
@@ -162,13 +230,40 @@ describe('what pre-pr reads', () => {
           '',
         ].join('\n'),
       )
-      const named = realRunners.vitest(dir, ['names.test.ts'], { timeoutMs: 60_000 * SLOW, namesOnly: true })
+      // And one that does not load, as a base file may not with the pull request's test helpers: a failure of the file, no test
+      writeFileSync(join(dir, 'broken.test.ts'), "import { gone } from './gone.js'\nimport { it } from 'vitest'\nit('uses it', () => gone())\n")
+      const named = realRunners.vitest(dir, ['names.test.ts', 'broken.test.ts'], { timeoutMs: 60_000 * SLOW, namesOnly: true })
       expect(named.timedOut).toBe(false)
+      expect(failuresOf(named.report, dir)).toEqual([{ file: 'broken.test.ts', name: '', line: expect.stringContaining('gone.js'), detail: expect.any(Array) }])
       const tests = vitestTests(named.report, dir)
       expect(tests.map((t: { name: string }) => t.name).sort()).toEqual(['a block > inside too', 'a skipped block > inside', 'is not run here', 'is skipped', 'is todo', 'runs'])
       // None ran: the first would have failed
       expect(new Set(tests.map((t: { status: string }) => t.status))).toEqual(new Set(['skipped']))
       expect(vitestTests(null, dir)).toEqual([])
+    } finally {
+      unlinkLinks(dir)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 90_000 * SLOW)
+
+  it('ends a real vitest run at the first passing test that is not known, the rest left pending', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-stop-'))
+    try {
+      symlinkSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules'), join(dir, 'node_modules'), 'junction')
+      const later = Array.from({ length: 5 }, (_, i) => `  it('later ${i}', async () => { await new Promise((r) => setTimeout(r, 500)); expect(1).toBe(2) })`)
+      writeFileSync(
+        join(dir, 'stop.test.ts'),
+        ["import { describe, expect, it } from 'vitest'", "describe('g', () => {", "  it('known', () => expect(1).toBe(1))", "  it('new', () => expect(1).toBe(1))", ...later, '})', ''].join('\n'),
+      )
+      const r = realRunners.vitest(dir, ['stop.test.ts'], { timeoutMs: 60_000 * SLOW, known: [{ file: 'stop.test.ts', name: 'g > known' }] })
+      const status = Object.fromEntries(vitestTests(r.report, dir).map((t: { name: string; status: string }) => [t.name, t.status]))
+      expect(status['g > known']).toBe('passed')
+      expect(status['g > new']).toBe('passed')
+      // The test running when the run is ended may finish; the ones after it never start
+      expect(Object.values(status).filter((v) => v === 'pending').length).toBeGreaterThanOrEqual(3)
+      // Without `known` nothing ends the run
+      const all = realRunners.vitest(dir, ['stop.test.ts'], { timeoutMs: 60_000 * SLOW })
+      expect(vitestTests(all.report, dir).filter((t: { status: string }) => t.status === 'pending')).toEqual([])
     } finally {
       unlinkLinks(dir)
       rmSync(dir, { recursive: true, force: true })
@@ -187,165 +282,9 @@ describe('what pre-pr reads', () => {
     expect(filesRunMs({ testResults: [{ name: join(root, 'a.test.ts'), startTime: 1000 }, { name: join(root, 'b.test.ts'), startTime: 0, endTime: 3000 }] }, root, ['a.test.ts', 'b.test.ts'])).toBe(3000)
   })
 
-  it('mirrors the checkout\'s dependencies into a worktree with the same lockfile, workspace packages pointing at the worktree, and unlinks them without touching the checkout (#1254)', () => {
-    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-deps-'))
-    try {
-      const root = join(base, 'checkout')
-      const tree = join(base, 'worktree')
-      for (const dir of ['node_modules/.pnpm', 'node_modules/left-pad', 'packages/ui/node_modules/react', 'packages/ui/node_modules/@cc', 'packages/core/src']) mkdirSync(join(root, dir), { recursive: true })
-      for (const dir of ['packages/ui', 'packages/core/src']) mkdirSync(join(tree, dir), { recursive: true })
-      writeFileSync(join(root, 'node_modules/left-pad/index.js'), 'keep')
-      writeFileSync(join(root, 'node_modules/.modules.yaml'), 'layoutVersion: 5\n')
-      // A link to a file: a junction cannot be one, and Windows makes it without a word
-      writeFileSync(join(root, 'node_modules/.pnpm/shim.txt'), 'a file')
-      let fileLink = true
-      try {
-        symlinkSync(join(root, 'node_modules/.pnpm/shim.txt'), join(root, 'node_modules/shim.txt'), 'file')
-      } catch {
-        fileLink = false // Windows without the privilege for a file link
-      }
-      writeFileSync(join(root, 'packages/ui/node_modules/react/index.js'), 'keep')
-      writeFileSync(join(root, 'packages/core/src/x.ts'), 'checkout')
-      writeFileSync(join(tree, 'packages/core/src/x.ts'), 'worktree')
-      // How pnpm links a workspace package: a link inside a scope folder, to the package's folder
-      symlinkSync(join(root, 'packages/core'), join(root, 'packages/ui/node_modules/@cc/core'), 'junction')
-      writeFileSync(join(root, 'node_modules/.pnpm/lock.yaml'), 'lockfileVersion: 9\n')
-      writeFileSync(join(tree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\r\n')
-      expect(nodeModulesDirs(root)).toEqual(['node_modules', 'packages/ui/node_modules'])
-      realRunners.prepare(tree, root)
-      expect(readFileSync(join(tree, 'packages/ui/node_modules/react/index.js'), 'utf8')).toBe('keep')
-      expect(readFileSync(join(tree, 'node_modules/left-pad/index.js'), 'utf8')).toBe('keep')
-      // pnpm's state names the checkout's store: a pnpm install into the worktree would trust it
-      expect(existsSync(join(tree, 'node_modules/.modules.yaml'))).toBe(false)
-      if (fileLink) expect(readFileSync(join(tree, 'node_modules/shim.txt'), 'utf8')).toBe('a file')
-      // The workspace package is the worktree's own, whichever way it is reached: no path back into the checkout
-      expect(readFileSync(join(tree, 'packages/ui/node_modules/@cc/core/src/x.ts'), 'utf8')).toBe('worktree')
-      expect(realpathSync.native(join(tree, 'packages/ui/node_modules/@cc/core'))).toBe(realpathSync.native(join(tree, 'packages/core')))
-      // Everything else leads to the checkout's own dependencies
-      expect(realpathSync.native(join(tree, 'packages/ui/node_modules/react'))).toBe(realpathSync.native(join(root, 'packages/ui/node_modules/react')))
-      // .pnpm, left-pad, react and @cc/core; the copy of a file is not a link
-      expect(unlinkLinks(tree)).toBe(4)
-      expect(existsSync(join(tree, 'node_modules/left-pad'))).toBe(false)
-      expect(existsSync(join(tree, 'packages/ui/node_modules/@cc/core'))).toBe(false)
-      expect(unlinkLinks(tree)).toBe(0)
-      // The revert check takes the links away and prepares again, over the folders they leave: all of it back
-      realRunners.prepare(tree, root)
-      expect(readFileSync(join(tree, 'packages/ui/node_modules/react/index.js'), 'utf8')).toBe('keep')
-      expect(readFileSync(join(tree, 'packages/ui/node_modules/@cc/core/src/x.ts'), 'utf8')).toBe('worktree')
-      expect(unlinkLinks(tree)).toBe(4)
-      rmSync(tree, { recursive: true, force: true })
-      expect(readFileSync(join(root, 'node_modules/left-pad/index.js'), 'utf8')).toBe('keep')
-      expect(readFileSync(join(root, 'packages/ui/node_modules/react/index.js'), 'utf8')).toBe('keep')
-      expect(readFileSync(join(root, 'packages/core/src/x.ts'), 'utf8')).toBe('checkout')
-    } finally {
-      rmSync(base, { recursive: true, force: true })
-    }
-  })
-
-  it('leaves out a workspace package the worktree does not have, and a node_modules it has no place for', () => {
-    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-deps-'))
-    try {
-      const root = join(base, 'checkout')
-      const tree = join(base, 'worktree')
-      for (const dir of ['node_modules', 'packages/ui/node_modules/@cc', 'packages/gone', 'packages/old/node_modules/z']) mkdirSync(join(root, dir), { recursive: true })
-      mkdirSync(join(tree, 'packages/ui'), { recursive: true })
-      symlinkSync(join(root, 'packages/gone'), join(root, 'packages/ui/node_modules/@cc/gone'), 'junction')
-      expect(mirrorModules(root, tree)).toBe(2)
-      expect(readdirSync(join(tree, 'packages/ui/node_modules/@cc'))).toEqual([])
-      expect(existsSync(join(tree, 'packages/old'))).toBe(false)
-    } finally {
-      rmSync(base, { recursive: true, force: true })
-    }
-  })
-
-  /**
-   * The failure itself (#1254): a class declared in the worktree, and the same file reached through the checkout's
-   * link to the workspace package. Seen on macOS (/var -> /private/var) and on the Windows runner (a temporary folder
-   * named RUNNER~1 on one side, runneradmin on the other); tsc follows the links the same way on Windows here.
-   * `reach` is the way the caller names the two folders: tsc must see one spelling of each.
-   */
-  function typeChecks(prefix: string, reach: (base: string) => { root: string; tree: string }): void {
-    const base = mkdtempSync(join(tmpdir(), prefix))
-    const { root, tree } = reach(base)
-    try {
-      const here = dirname(fileURLToPath(import.meta.url))
-      const sources: Record<string, string> = {
-        'tsconfig.json': JSON.stringify({ compilerOptions: { noEmit: true, strict: true, module: 'esnext', moduleResolution: 'bundler', target: 'es2022' }, include: ['packages/*/src'] }),
-        'packages/core/package.json': JSON.stringify({ name: '@cc/core', version: '0.0.0', type: 'module', exports: { '.': './src/index.ts' } }),
-        'packages/core/src/index.ts': 'export class Clock { private ticks = 0; now() { return this.ticks } }\n',
-        // Both ways in, as apps/web does: a package name, and a relative path to the same sources
-        'packages/ui/src/index.ts': "import { Clock } from '@cc/core'\nimport { Clock as Same } from '../../core/src/index'\nexport const clock: Same = new Clock()\n",
-      }
-      for (const dir of [root, tree]) {
-        for (const [file, text] of Object.entries(sources)) {
-          mkdirSync(dirname(join(dir, file)), { recursive: true })
-          writeFileSync(join(dir, file), text)
-        }
-      }
-      mkdirSync(join(root, 'node_modules/.pnpm'), { recursive: true })
-      mkdirSync(join(root, 'packages/ui/node_modules/@cc'), { recursive: true })
-      symlinkSync(join(here, '..', 'node_modules', 'typescript'), join(root, 'node_modules/typescript'), 'junction')
-      symlinkSync(join(root, 'packages/core'), join(root, 'packages/ui/node_modules/@cc/core'), 'junction')
-      writeFileSync(join(root, 'node_modules/.pnpm/lock.yaml'), 'lockfileVersion: 9\n')
-      writeFileSync(join(tree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
-      realRunners.prepare(tree, root)
-      const result = realRunners.tsc(tree)
-      expect(result.out).toBe('')
-      expect(result.ok).toBe(true)
-      // And again after the revert check's unlink and prepare: typescript is still there to run
-      unlinkLinks(tree)
-      realRunners.prepare(tree, root)
-      expect(realRunners.tsc(tree)).toEqual({ ok: true, out: '', timedOut: false })
-    } finally {
-      // Links first: `typescript` in both folders leads into this repository's own node_modules, which no delete may follow
-      unlinkLinks(tree)
-      unlinkLinks(root)
-      rmSync(realpathSync.native(base), { recursive: true, force: true })
-    }
-  }
-
-  // The temporary folder as the system hands it out: on the Windows runner that is the 8.3 short form, on macOS /var
-  const plain = (base: string) => ({ root: join(base, 'checkout'), tree: join(base, 'worktree') })
-
-  it('type-checks a worktree whose workspace package is reached both by path and by name as one declaration', { timeout: 60_000 * SLOW }, () => {
-    typeChecks('cc-prepr-tsc-', plain)
-  })
-
-  // A folder named by two spellings is two folders to tsc, wherever the second spelling comes from. On Windows a child
-  // keeps the spelling of the folder it was started in, so a link to the folder is a second spelling there; elsewhere the
-  // system resolves a working folder, and this only shows that a caller's link is harmless
-  it('type-checks a worktree and a checkout that the caller names through a link to their folder', { timeout: 60_000 * SLOW }, () => {
-    typeChecks('cc-prepr-alias-', (base) => {
-      mkdirSync(join(base, 'real'))
-      const alias = join(base, 'alias')
-      symlinkSync(join(base, 'real'), alias, 'junction')
-      mkdirSync(join(alias, 'checkout'))
-      mkdirSync(join(alias, 'worktree'))
-      return { root: join(alias, 'checkout'), tree: join(alias, 'worktree') }
-    })
-  })
-
-  // The Windows runner's temporary folder (RUNNER~1 in the user's profile): the same folder in its 8.3 short form
-  it.skipIf(process.platform !== 'win32')('type-checks a worktree and a checkout that the caller names in the 8.3 short form of their folder', { timeout: 60_000 * SLOW }, (ctx) => {
-    // realpathSync.native writes the long name out (the plain one keeps a short name as it was given)
-    const shortOf = (dir: string) => execSync(`for %I in ("${realpathSync.native(dir)}") do @echo %~sI`, { encoding: 'utf8', shell: 'cmd.exe' }).trim()
-    const probe = mkdtempSync(join(tmpdir(), 'cc-prepr-probe-'))
-    const has83 = shortOf(probe).toLowerCase() !== realpathSync.native(probe).toLowerCase()
-    rmSync(probe, { recursive: true })
-    // A volume with 8.3 names switched off (a Dev Drive) has none to give
-    if (!has83) ctx.skip()
-    typeChecks('cc-prepr-short-', (base) => {
-      mkdirSync(join(base, 'checkout'))
-      mkdirSync(join(base, 'worktree'))
-      const short = shortOf(base)
-      expect(realpathSync.native(short).toLowerCase()).toBe(realpathSync.native(base).toLowerCase())
-      return { root: join(short, 'checkout'), tree: join(short, 'worktree') }
-    })
-  })
-
   it('reads its arguments, and refuses one it does not know', () => {
-    expect(parseArgs(['--head', 'origin/x', '--base', 'origin/y', '--stack', 'a', '--stack', 'b', '--exempt', 'revert=a=b', '--run-id', '12-3', '--no-fetch', '--json'])).toEqual({
-      fetch: false, json: true, head: 'origin/x', base: 'origin/y', stack: ['a', 'b'], exempt: { revert: 'a=b' }, runId: '12-3',
+    expect(parseArgs(['--head', 'origin/x', '--base', 'origin/y', '--stack', 'a', '--stack', 'b', '--exempt', 'revert=a=b', '--run-id', '12-3', '--no-fetch', '--json', '--only', 'lint', '--only', 'tsc'])).toEqual({
+      fetch: false, json: true, head: 'origin/x', base: 'origin/y', stack: ['a', 'b'], exempt: { revert: 'a=b' }, runId: '12-3', only: ['lint', 'tsc'],
     })
     expect(parseArgs(['--limit', '90', '--guards-limit', '30'])).toMatchObject({ limitMs: 90_000, guardsLimitMs: 30_000 })
     expect(() => parseArgs(['--skip'])).toThrow(/Unknown argument --skip/)
@@ -380,6 +319,9 @@ describe('the repositories this file builds', () => {
     }
   })
 })
+
+/** The guards of the repositories below, as the fake reads them (fakeRunners) */
+const DECLARED = `${JSON.stringify([{ test: 'tooling/doc-refs.test.ts', tests: 'holds|finds no reference' }, { test: 'tooling/os-layer.test.ts', tests: 'the allowlist' }])}\n`
 
 describe('pre-pr on a stack of two pull requests', () => {
   let repo = ''
@@ -432,22 +374,134 @@ describe('pre-pr on a stack of two pull requests', () => {
     rmSync(repo, { recursive: true, force: true })
   })
 
-  it('asks the base only about a changed file that is not new and has a passing test', () => {
-    // Every test of the file fails without the change: the first pass already decides
+  it('asks the base which tests a changed file had before the run, and only of a file that is not new', () => {
     git(repo, 'checkout', '-q', '-b', 'solo', 'main')
     write('src/a.test.mjs', 'knows two :: src/a.mjs :: value = 2\n')
+    write('src/c.test.mjs', 'has c :: src/c.mjs :: c\n')
     commit('solo')
     const solo = run({ head: 'solo' })
-    expect(solo.calls.vitest).toEqual([['src/a.test.mjs']])
-    expect(solo.calls.names).toEqual([])
+    expect(solo.calls.names).toEqual([['src/a.test.mjs']])
+    expect(solo.calls.vitest).toEqual([['src/a.test.mjs', 'src/c.test.mjs']])
+    // The run is given the base's tests, so it can end at the first new one that passes
+    expect(solo.calls.known).toEqual([['src/a.test.mjs > keeps a value']])
     expect(solo.findings).toEqual([])
-    // One that passes asks, and its new test is named
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nstill exports :: src/a.mjs :: export\n')
     commit('solo: a test that guards nothing')
-    const loose = run({ head: 'solo' })
-    expect(loose.calls.vitest).toEqual([['src/a.test.mjs']])
-    expect(loose.calls.names).toEqual([['src/a.test.mjs']])
-    expect(loose.findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
+    expect(run({ head: 'solo' }).findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
+  })
+
+  it('stops at the first check that finds something, names the ones it did not run, and prints each step\'s time', () => {
+    const logged: string[] = []
+    const r = run({ log: (m: string) => logged.push(m) }, undefined, { lintFails: true })
+    expect(r.findings.map((f: { check: string }) => f.check)).toEqual(['lint'])
+    expect(r.calls.tsc).toEqual([])
+    expect(r.calls.vitest).toEqual([])
+    expect(r.notes).toContain('Not run, since lint found something: tsc, orphans, deps, repo-guards, store-step, revert, guards. Fix it, then run the one that failed with pnpm pre-pr --only <check>, and the whole run once more before the pull request.')
+    expect(logged.filter((m) => /^lint: \d+ s$/.test(m))).toHaveLength(1)
+    // Nothing found: every step runs, and each says its time
+    const ok = run({ log: (m: string) => logged.push(m), exempt: { revert: 'x' } })
+    expect(ok.ok).toBe(true)
+    // What held, in the words the pull request's Verified gives it; the exempted check is not among them
+    expect(ok.passed).toEqual(['lint on the changed files', 'tsc at 2 head(s)', 'no orphans', 'no dependency errors', 'the repository-wide guards'])
+    expect(logged.filter((m) => /^[\w-]+: \d+ s$/.test(m)).map((m) => m.split(':')[0])).toEqual(['lint', 'lint', 'tsc', 'dependency-cruiser', 'repo-guards', 'store-step', 'guards'])
+  })
+
+  it('runs only the checks --only names, and none the run would stop on before them', () => {
+    const r = run({ only: ['revert'] }, ['src/lonely.mjs'], { lintFails: true })
+    expect(r.calls.lint).toEqual([])
+    expect(r.calls.tsc).toEqual([])
+    expect(r.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
+    // Of the two checks one dependency-cruiser run answers, only the one named
+    const orphans = run({ only: ['orphans'] }, ['src/lonely.mjs'], { cycle: true })
+    expect(orphans.findings.map((f: { check: string }) => f.check)).toEqual(['orphans'])
+    // tsc alone builds every head of the stack, and nothing else
+    const tsc = run({ only: ['tsc'] })
+    expect(tsc.calls.tsc).toHaveLength(2)
+    expect(tsc.calls.lint).toEqual([])
+    expect(tsc.ok).toBe(true)
+    expect(() => run({ only: ['all'] })).toThrow('No check is called all; the checks are lint, tsc, orphans, deps, repo-guards, store-step, revert, guards.')
+    expect(() => run({ only: ['lint'], exempt: { lint: 'x' } })).toThrow('lint is both run alone (--only) and exempted: one or the other.')
+  })
+
+  it('runs the repository-wide guards of every branch at the head, against main, and refuses what they fail', () => {
+    const fake = fakeRunners()
+    const calls: { files: string[]; o?: { testNamePattern?: string; env?: Record<string, string> } }[] = []
+    // passing; the allowlist's tests skipped on this system; or doc-refs failing and the allowlist's tests renamed
+    let state: 'passing' | 'skipped here' | 'failing' = 'passing'
+    const failure = 'Error: a section that does not exist'
+    let recorded = false
+    const vitest = (dir: string, files: string[], o?: { testNamePattern?: string; env?: Record<string, string>; namesOnly?: boolean }) => {
+      if (!files[0]?.startsWith('tooling/')) return fake.runners.vitest(dir, files, o)
+      calls.push({ files, o })
+      const docs = files[0] === 'tooling/doc-refs.test.ts'
+      if (recorded && docs) return { timedOut: false, report: recordedReport('doc-refs-failing.json', dir) }
+      const status = state === 'failing' && docs ? 'failed' : state !== 'passing' && !docs ? 'skipped' : 'passed'
+      const ancestorTitles = docs ? ['refs'] : [state === 'failing' ? 'the list of files' : 'the allowlist']
+      return { timedOut: false, report: { testResults: [{ name: join(dir, files[0]), status, assertionResults: [{ ancestorTitles, title: 'holds', status, failureMessages: [failure] }] }] } }
+    }
+    const guarded = (over: Record<string, unknown> = {}) => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest }, exempt: { revert: 'x' }, ...over })
+    // A branch older than a guard has no file of it to run
+    expect(guarded().ok).toBe(true)
+    expect(calls).toEqual([])
+    write('tooling/doc-refs.test.ts', 'x\n')
+    write('tooling/os-layer.test.ts', 'x\n')
+    write('tooling/guards.ts', DECLARED)
+    commit('the guards')
+    expect(guarded().ok).toBe(true)
+    const main = git(repo, 'rev-parse', 'main')
+    expect(calls).toEqual([
+      { files: ['tooling/doc-refs.test.ts'], o: expect.objectContaining({ testNamePattern: 'holds|finds no reference', env: { CC_LINT_BASE: main } }) },
+      { files: ['tooling/os-layer.test.ts'], o: expect.objectContaining({ testNamePattern: 'the allowlist', env: { CC_LINT_BASE: main } }) },
+    ])
+    // Tests the pattern names that this system skips are there: nothing to say
+    state = 'skipped here'
+    expect(guarded().ok).toBe(true)
+    // A failure is a finding; a pattern that no longer names a test is one too, not a pass
+    state = 'failing'
+    expect(guarded().findings.map((f: { check: string; message: string }) => [f.check, f.message])).toEqual([
+      ['repo-guards', 'tooling/doc-refs.test.ts > refs > holds fails: Error: a section that does not exist'],
+      ['repo-guards', 'tooling/os-layer.test.ts has no test named like "the allowlist": tooling/guards.ts declares a guard that is not there.'],
+    ])
+    expect(guarded({ exempt: { revert: 'x', 'repo-guards': 'a doc reference the next PR adds' } }).ok).toBe(true)
+    // A real failing run (recorded): the finding is the guard's message, which names what it found, up to the stack
+    recorded = true
+    const [docs] = guarded().findings.map((f: { message: string }) => f.message)
+    expect(docs).toBe(
+      [
+        'tooling/doc-refs.test.ts > guard/doc-refs > finds no reference to a section that is not there fails: ',
+        'AssertionError: references to a section that is not there:',
+        'docs/README.md:72: docs/architecture.md has no section 99',
+        'docs/README.md:72: docs/releasing.md has no heading "No such heading"',
+        ': expected [ …(2) ] to deeply equal []',
+      ].join('\n'),
+    )
+  })
+
+  it('says so when the branch removes a guard tooling/guards.ts declares, or the declaration main has', () => {
+    const fake = fakeRunners()
+    const vitest = (dir: string, files: string[], o?: { namesOnly?: boolean }) =>
+      files[0]?.startsWith('tooling/')
+        ? { timedOut: false, report: { testResults: [{ name: join(dir, files[0]), status: 'passed', assertionResults: [{ ancestorTitles: ['the allowlist'], title: 'holds', status: 'passed', failureMessages: [] }] }] } }
+        : fake.runners.vitest(dir, files, o)
+    const guarded = () => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest }, exempt: { revert: 'x' } })
+    git(repo, 'checkout', '-q', 'main')
+    write('tooling/doc-refs.test.ts', 'x\n')
+    write('tooling/os-layer.test.ts', 'x\n')
+    write('tooling/guards.ts', DECLARED)
+    commit('main: the guards')
+    git(repo, 'checkout', '-q', 'top')
+    git(repo, 'merge', '-q', '--no-edit', 'main')
+    expect(guarded().ok).toBe(true)
+    git(repo, 'rm', '-q', 'tooling/os-layer.test.ts')
+    commit('top: no os guard')
+    expect(guarded().findings.map((f: { check: string; message: string }) => [f.check, f.message])).toEqual([
+      ['repo-guards', 'tooling/os-layer.test.ts is not at this head, though tooling/guards.ts declares it: keep it, or change the declaration with it.'],
+    ])
+    git(repo, 'rm', '-q', 'tooling/guards.ts')
+    commit('top: no declaration')
+    expect(guarded().findings.map((f: { check: string; message: string }) => [f.check, f.message])).toEqual([
+      ['repo-guards', 'tooling/guards.ts is not at this head, though it was where the branch left main: keep it, with the guards it declares.'],
+    ])
   })
 
   it('counts a test that the base had skipped as already there, so un-skipping one is no news', () => {
@@ -470,7 +524,8 @@ describe('pre-pr on a stack of two pull requests', () => {
     const r = run({ limitMs: 59_000 })
     expect(r.calls.tsc).toEqual([])
     expect(r.calls.vitest).toEqual([])
-    expect(r.findings.map((f: { check: string; message: string }) => [f.check, /: not run: out of time/.test(f.message)])).toEqual([['tsc', true], ['tsc', true], ['lint', true], ['revert', true]])
+    // The first check cannot start, and the run stops there
+    expect(r.findings.map((f: { check: string; message: string }) => [f.check, /: not run: out of time/.test(f.message)])).toEqual([['lint', true]])
     expect(r.ok).toBe(false)
     // An exempted check is left out, not reported as not run
     expect(run({ limitMs: 59_000, exempt: { tsc: 'x', lint: 'x', revert: 'x' } }).ok).toBe(true)
@@ -494,12 +549,14 @@ describe('pre-pr on a stack of two pull requests', () => {
     const clock = { now: 0 }
     const fake = fakeRunners()
     const limits: (number | undefined)[] = []
+    const prepared = new Set<string>()
     const runners = {
       ...fake.runners,
-      // The revert check's install (the dependencies changed) comes after the lint check, and takes more than the whole time
+      // The revert check's install (the dependencies changed) is the second given to the head's worktree, and takes more than the whole time
       prepare: (dir: string) => {
         fake.runners.prepare(dir)
-        if (fake.calls.lint.length) clock.now = 400_000
+        if (prepared.has(dir)) clock.now = 400_000
+        prepared.add(dir)
       },
       vitest: (dir: string, files: string[], o?: { timeoutMs?: number; namesOnly?: boolean }) => (limits.push(o?.timeoutMs), fake.runners.vitest(dir, files, o)),
     }
@@ -507,34 +564,76 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(limits[0]).toBe(1000)
   })
 
+  it('does not judge the tests a run ended early left unrun, when no new test passed in it', () => {
+    const fake = fakeRunners()
+    // The stop reporter ended the run, yet no test it ran is a new pass to pre-pr: the two named the tests differently
+    const vitest = (dir: string, files: string[], o?: { known?: { file: string; name: string }[]; namesOnly?: boolean }) => {
+      const r = fake.runners.vitest(dir, files, o)
+      if (o?.known) for (const f of r.report?.testResults ?? []) for (const t of f.assertionResults) if (t.status === 'passed') t.status = 'pending'
+      return r
+    }
+    const r = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest } })
+    expect(r.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: the run was ended early, yet no new test passed in it/)])
+  })
+
   it('does not judge a test when a vitest pass gave no report or a tool was stopped, and says so', () => {
     const fake = fakeRunners()
     const stopped = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tsc: () => ({ ok: false, out: '', timedOut: true }) } })
     expect(stopped.findings.filter((f: { check: string }) => f.check === 'tsc').map((f: { message: string }) => f.message.split(': not run')[0]).length).toBe(2)
     expect(stopped.findings.filter((f: { message: string }) => /tsc fails/.test(f.message))).toEqual([])
-    // The first pass: no report
-    const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: () => ({ report: null, timedOut: false }) } })
+    // The run of the changed tests: no report
+    const named = (vitest: () => Pass) => ({ ...fake.runners, vitest: (dir: string, files: string[], o?: { namesOnly?: boolean }) => (o?.namesOnly ? fake.runners.vitest(dir, files, o) : vitest()) })
+    const first = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: named(() => ({ report: null, timedOut: false })) })
     expect(first.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(first.findings[0].message).toMatch(/not run: vitest gave no report/)
     // ...and one that was stopped at the limit it was given says that, so the step that ran out is named. It is how the step ended
     // that tells, not the clock: a crash with the time used up reads as a crash
     const clock = { now: 0 }
-    const limited = (timedOut: boolean) => ({ ...fake.runners, vitest: () => ((clock.now = 300_000), { report: null, timedOut }) })
+    const limited = (timedOut: boolean) => named(() => ((clock.now = 300_000), { report: null, timedOut }))
     const outOfTime = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(true) })
     expect(outOfTime.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/^The changed tests \(src\/a\.test\.mjs, src\/b\.test\.mjs\): not run: vitest was stopped after 300 s, the most it was given, before it had finished/)])
     clock.now = 0
     const crashed = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, limitMs: 300_000, now: () => clock.now, runners: limited(false) })
     expect(crashed.findings.map((f: { message: string }) => f.message)).toEqual([expect.stringMatching(/not run: vitest gave no report \(it did not start, or crashed\)/)])
-    // The base's names: none, and no test of the first pass looks new
+    // The base's names: none, so no test is judged
     const second = prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, vitest: (dir: string, files: string[], o?: { namesOnly?: boolean }) => (o?.namesOnly ? { report: null, timedOut: false } : fake.runners.vitest(dir, files, o)) } })
     expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: vitest gave no report .*so no test was judged/.test(f.message)])).toEqual([['revert', true]])
   })
 
-  it('reports each new test that passes with the other changes reverted, and none that fails or was there', () => {
+  it('reverts the e2e/ files a changed vitest test reaches through imports, as the code it checks, and keeps the e2e fixtures it does not', () => {
+    git(repo, 'checkout', '-q', '-b', 'e2e', 'main')
+    write('e2e/fixtures/gap.ts', "import { deep } from './deep.js'\nexport const gap = 2\n")
+    write('e2e/fixtures/deep.ts', 'export const deep = 3\n')
+    write('e2e/fixtures/other.ts', 'export const other = 2\n')
+    write('src/gap.test.ts', "import { gap } from '../e2e/fixtures/gap.js'\nknows the gap :: e2e/fixtures/gap.ts :: gap = 2\nknows the deep :: e2e/fixtures/deep.ts :: deep = 3\nknows the other :: e2e/fixtures/other.ts :: other = 2\n")
+    commit('e2e')
+    expect(run({ head: 'e2e' }).findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/gap.test.ts: "knows the other"'])
+  })
+
+  it('leaves out a changed file whose base version does not load, saying so: every test of it would count as new', () => {
+    git(repo, 'checkout', '-q', '-b', 'base', 'main')
+    write('src/a.test.mjs', 'does not load :: Error: Cannot find module ./helper.js\n')
+    commit('base: a test of a helper this pull request renames')
+    git(repo, 'checkout', '-q', '-b', 'renamed')
+    write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\nguards nothing :: src/a.mjs :: export\n')
+    write('src/c.test.mjs', 'has c :: src/c.mjs :: c\n')
+    write('src/c.mjs', 'export const c = 1\n')
+    commit('renamed')
+    const r = run({ head: 'renamed', base: 'base', main: 'base' })
+    expect(r.calls.vitest).toEqual([['src/c.test.mjs']])
+    expect(r.findings).toEqual([])
+    expect(r.warnings.filter((w: { check: string }) => w.check === 'revert').map((w: { message: string }) => w.message)).toEqual([
+      "src/a.test.mjs: its version at base does not load with this pull request's other changes reverted (Error: Cannot find module ./helper.js), so which of its tests are new is not known: they were not judged.",
+    ])
+    // Verified names the check as passed only for the files it judged
+    expect(r.passed).toContain('no new test passes without the change, in the test files judged (1 left out: see the warnings)')
+  })
+
+  it('reports the first new test that passes with the other changes reverted, and none that fails or was there', () => {
     const r = run()
+    // b.test.mjs's "has a" passes without the change too, but the run ended at the first
     expect(r.findings.filter((f: { check: string }) => f.check === 'revert').map((f: { message: string }) => f.message)).toEqual([
       'src/a.test.mjs: "still exports" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
-      'src/b.test.mjs: "has a" passes with this pull request\'s other changes reverted to main, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.',
     ])
     // The changed files ran once, at the head's version; the base's version was only listed, to learn which tests were there
     expect(r.calls.vitest).toEqual([['src/a.test.mjs', 'src/b.test.mjs']])
@@ -544,7 +643,8 @@ describe('pre-pr on a stack of two pull requests', () => {
 
   it('counts a failed test and a file that did not load as failing without the change, a skipped test as neither (#1806)', () => {
     const fake = fakeRunners()
-    const vitest = (dir: string, files: string[]) => ({
+    // The base's names load; the run, in the reverted tree, is the one below
+    const vitest = (dir: string, files: string[], o?: { namesOnly?: boolean }) => o?.namesOnly ? fake.runners.vitest(dir, files, o) : ({
       timedOut: false,
       report: { testResults: files.map((file) => ({
         name: join(dir, file),
@@ -591,7 +691,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     commit('main fixes it too')
     git(repo, 'checkout', '-q', 'top')
     const r = run()
-    expect(r.findings.filter((f: { check: string }) => f.check === 'revert').map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"', 'src/b.test.mjs: "has a"'])
+    expect(r.findings.filter((f: { check: string }) => f.check === 'revert').map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/a.test.mjs: "still exports"'])
     expect(r.warnings.some((f: { check: string }) => f.check === 'main')).toBe(true)
   })
 
@@ -608,7 +708,8 @@ describe('pre-pr on a stack of two pull requests', () => {
     const top = git(repo, 'rev-parse', 'top')
     expect(r.heads.map((h: { names: string[] }) => h.names[0])).toEqual(['lower', 'top'])
     expect(r.calls.tsc).toEqual([lower, top])
-    expect(r.calls.prepare).toEqual([lower, top])
+    // The head's worktree first: lint reads it before tsc
+    expect(r.calls.prepare).toEqual([top, lower])
     const tsc = r.findings.filter((f: { check: string }) => f.check === 'tsc')
     expect(tsc).toHaveLength(1)
     expect(tsc[0].message).toContain(`tsc fails at lower (${lower.slice(0, 10)})`)
@@ -674,10 +775,32 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.findings.map((f: { check: string }) => f.check)).toEqual(['orphans'])
     const t = run({ exempt: { tsc: 'a generated file is missing here', orphans: 'moved in the next PR' } })
     expect(t.calls.tsc).toEqual([])
-    expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert', 'revert'])
+    expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(() => run({ exempt: { revert: '  ' } })).toThrow('An exemption from revert needs its reason.')
-    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are tsc, orphans, deps, lint, store-step, guards, revert.')
+    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are lint, tsc, orphans, deps, repo-guards, store-step, revert, guards.')
   })
+
+  it('knows an interrupt by how the tool it ended ended, and says that, not the failure the tool then gave', () => {
+    const fake = fakeRunners()
+    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, lint: interruptedTool } })).toThrow('interrupted')
+    expect(fake.calls.tsc).toEqual([])
+    // A tool that failed on its own is its check's finding, and the interrupt of an earlier run is not this one's
+    const failed = () => {
+      try {
+        runTool(process.execPath, ['-e', 'process.exit(1)'], { stdio: 'ignore' })
+      } catch {
+        // its failure, which the runner answers
+      }
+      return { ok: false, out: 'src/b.mjs: an error' }
+    }
+    expect(prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, lint: failed } }).findings.map((f: { check: string }) => f.check)).toEqual(['lint'])
+  }, 60_000 * SLOW)
+
+  it('knows an interrupt of the git the tier starts itself, not through runTool, by how it ended', () => {
+    const fake = fakeRunners()
+    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tier: () => endedBySigint(execFileSync) } })).toThrow('interrupted')
+    expect(fake.calls.lint).toEqual([])
+  }, 60_000 * SLOW)
 
   it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {
     const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
@@ -685,8 +808,9 @@ describe('pre-pr on a stack of two pull requests', () => {
       writeFileSync(join(deps, 'keep.js'), 'keep')
       let tscs = 0
       const fake = fakeRunners({ linkTo: deps })
-      const runners = { ...fake.runners, tsc: (dir: string) => (tscs++, fake.runners.tsc(dir)) }
-      expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners, runId: 'interrupted-test', stopped: () => tscs > 0 })).toThrow('interrupted')
+      // The first head's tsc is interrupted
+      const runners = { ...fake.runners, tsc: (dir: string) => (tscs++ === 0 ? interruptedTool() : fake.runners.tsc(dir)) }
+      expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners, runId: 'interrupted-test' })).toThrow('interrupted')
       expect(tscs).toBe(1)
       expect(existsSync(runDir('interrupted-test'))).toBe(false)
       expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
@@ -694,35 +818,66 @@ describe('pre-pr on a stack of two pull requests', () => {
     } finally {
       rmSync(deps, { recursive: true, force: true })
     }
+  }, 60_000 * SLOW)
+
+  it.each<[string, number, boolean]>([
+    ['exits 130, as a tool that caught SIGINT does', 130, true],
+    ['exits 1', 1, false],
+    ['exits 124, as run-limited.mjs does at its limit', 124, false],
+    // Windows' exit status for Ctrl-C and Ctrl-Break; elsewhere a status is one byte
+    ...(process.platform === 'win32' ? [["exits with Windows' status for Ctrl-C", 0xc000013a, true] as [string, number, boolean]] : []),
+  ])('counts a real tool that %s as interrupted: %s', (_what, code, interrupted) => {
+    const before = interruptsSoFar()
+    expect(() => runTool(process.execPath, ['-e', `process.exit(${code})`], { stdio: 'ignore' })).toThrow()
+    expect(interruptsSoFar() - before).toBe(interrupted ? 1 : 0)
   })
+
+  it('does not count a tool its time limit killed as interrupted', () => {
+    const before = interruptsSoFar()
+    expect(() => runTool(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGKILL', stdio: 'ignore' })).toThrow()
+    expect(interruptsSoFar()).toBe(before)
+  }, 60_000 * SLOW)
 
   it('cleans up after a run that was killed: by --cleanup, or by the next run once its process is gone', () => {
     const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
     const root = git(repo, 'rev-parse', '--show-toplevel')
-    // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies
+    const guardRefs = () => git(repo, 'for-each-ref', '--format=%(refname)', `${GUARD_REFS}/`)
+    // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies, and
+    // the head of a pull request it fetched for the guards
     const leave = (id: string, pid: number) => {
       const dir = runDir(id)
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'owner.json'), JSON.stringify({ pid, root }))
       git(repo, 'worktree', 'add', '--detach', '-q', join(dir, 'wt-1'), 'top')
       symlinkSync(deps, join(dir, 'wt-1', 'src', 'node_modules'), 'junction')
+      git(repo, 'update-ref', `${GUARD_REFS}/${id}/21`, 'top')
       return dir
     }
     try {
       writeFileSync(join(deps, 'keep.js'), 'keep')
       const killed = leave(`killed-${process.pid}`, 999_999)
-      execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
-      expect(existsSync(killed)).toBe(false)
-      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
-      expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
-
       const dead = leave(`dead-${process.pid}`, 999_998)
       const living = leave(`living-${process.pid}`, process.pid)
+      // Refs whose run folder is gone: --cleanup of any run takes those of a run, the board's too, whose process is gone. It keeps
+      // those of a living process (its folder may be under another TMPDIR), of an id with no pid, and of a run with a folder
+      const orphans = { dead: ['999997-1', 'board-999996-3'], kept: [`${process.pid}-1`, `gone-${process.pid}`] }
+      for (const id of [...orphans.dead, ...orphans.kept]) git(repo, 'update-ref', `${GUARD_REFS}/${id}/22`, 'top')
+      execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
+      expect(existsSync(killed)).toBe(false)
+      const keptRefs = orphans.kept.map((id) => `${GUARD_REFS}/${id}/22`)
+      expect(guardRefs().split('\n').sort()).toEqual([`${GUARD_REFS}/dead-${process.pid}/21`, `${GUARD_REFS}/living-${process.pid}/21`, ...keptRefs].sort())
+      for (const ref of keptRefs) git(repo, 'update-ref', '-d', ref)
+      // The checkout's own, the dead run's and the living one's
+      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(3)
+      expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
+
       const swept = sweepStale(root, { isAlive: (pid: number) => pid === process.pid })
       expect(swept).toEqual([dead])
       expect(existsSync(living)).toBe(true)
+      expect(guardRefs()).toBe(`${GUARD_REFS}/living-${process.pid}/21`)
       expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
       expect(removeRun(living, root)).toEqual([])
+      expect(guardRefs()).toBe('')
       expect(readdirSync(deps)).toEqual(['keep.js'])
     } finally {
       rmSync(deps, { recursive: true, force: true })
@@ -853,7 +1008,12 @@ ${ns.map(step).join('')}    ]
     expect(stepFiles(r)).toEqual([])
     expect(r.ok).toBe(true)
     // The list, and the file names of the one pull request: no full diff of a pull request that touches no step
-    expect(calls).toEqual([['pr', 'list', '--state', 'open', '--limit', '500', '--json', 'number,title,headRefName,headRefOid,isDraft'], ['pr', 'diff', '9', '--name-only']])
+    expect(calls).toEqual([['pr', 'list', '--state', 'open', '--limit', '500', '--json', 'number,title,headRefName,headRefOid,isDraft,changedFiles,files'], ['pr', 'diff', '9', '--name-only']])
+    // A list that holds all of a pull request's files answers them without a diff
+    calls.length = 0
+    const listed = { ...unrelated, changedFiles: 1, files: [{ path: 'README.md' }] }
+    expect(run({}, (args) => (calls.push(args), args[1] === 'list' ? JSON.stringify([listed]) : '')).ok).toBe(true)
+    expect(calls.map((a) => a[1])).toEqual(['list'])
     // A branch that adds no step never calls gh
     git(repo, 'checkout', '-q', '-b', 'plain', 'main')
     write('docs/a.md', 'a\n')
@@ -914,13 +1074,20 @@ describe('pre-pr and the guards a branch adds', () => {
     git(repo, 'add', '-A')
     git(repo, 'commit', '-q', '-m', message)
   }
-  /** A pull request: a branch off main, served as refs/pull/N/head */
-  const openPr = (number: number, files: Record<string, string>, over: Record<string, unknown> = {}) => {
+  /** src/notes.txt with its first and last lines as given: the branch changes the first, a pull request the last, and they merge */
+  const notes = (first: string, last: string) => `${[first, ...Array.from({ length: 8 }, (_, i) => `line ${i + 2}`), last].join('\n')}\n`
+  /**
+   * A pull request: a branch off main, served as refs/pull/N/head, listed with its files. It changes src/notes.txt, as the branch
+   * does, unless `apart`
+   */
+  const openPr = (number: number, files: Record<string, string>, over: Record<string, unknown> = {}, apart = false) => {
     git(repo, 'checkout', '-q', '-b', `pr${number}`, 'main')
     for (const [path, text] of Object.entries(files)) write(path, text)
+    if (!apart) write('src/notes.txt', notes('line 1', `pr ${number}`))
     commit(`pr ${number}`)
     git(repo, 'push', '-q', 'origin', `pr${number}:refs/pull/${number}/head`)
-    const pr = { number, title: `pull request ${number}`, headRefName: `pr${number}`, headRefOid: git(repo, 'rev-parse', 'HEAD'), isDraft: false, ...over }
+    const paths = git(repo, 'diff', '--name-only', 'main', 'HEAD').split('\n')
+    const pr = { number, title: `pull request ${number}`, headRefName: `pr${number}`, headRefOid: git(repo, 'rev-parse', 'HEAD'), isDraft: false, changedFiles: paths.length, files: paths.map((path) => ({ path })), ...over }
     git(repo, 'checkout', '-q', 'feat')
     return pr
   }
@@ -930,6 +1097,7 @@ describe('pre-pr and the guards a branch adds', () => {
   // How long a test file takes where it is not `step`
   const fileMs: Record<string, number> = {}
   const vitestCalls: string[][] = []
+  const vitestPatterns: (string | undefined)[] = []
   const runners = (prs: unknown[], extra: Record<string, unknown> = {}) => {
     const fake = fakeRunners()
     return {
@@ -937,8 +1105,9 @@ describe('pre-pr and the guards a branch adds', () => {
       gh: () => JSON.stringify(prs),
       // `needs-install` in a worktree: its dependencies would need an install, which a guard run does not do
       prepare: (dir: string, _root: string, options?: { linkOnly?: boolean }) => (options?.linkOnly && existsSync(join(dir, 'needs-install')) ? false : undefined),
-      vitest: (dir: string, files: string[]) => {
+      vitest: (dir: string, files: string[], options?: { testNamePattern?: string }) => {
         vitestCalls.push(files)
+        vitestPatterns.push(options?.testNamePattern)
         // The files run side by side: the pass ends with the slowest
         const startTime = clock.t
         clock.t += Math.max(...files.map((f) => fileMs[f] ?? step))
@@ -965,8 +1134,10 @@ describe('pre-pr and the guards a branch adds', () => {
       ...extra,
     }
   }
+  // The guards at the head are not what is under test here: their runs would take the clock's time
+  const AT_HEAD = { 'repo-guards': 'the guards at the head are tested above' }
   const run = (rs: ReturnType<typeof runners>, over: Record<string, unknown> = {}) =>
-    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, ...over, exempt: { revert: 'the fake guard is not what is under test', ...(over.exempt as object) } })
+    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, ...over, exempt: { revert: 'the fake guard is not what is under test', ...AT_HEAD, ...(over.exempt as object) } })
   const guardsOf = (r: { warnings: { check: string; message: string }[] }) => r.warnings.filter((w) => w.check === 'guards').map((w) => w.message)
   const noGh = () => {
     throw new Error('gh was called')
@@ -982,6 +1153,7 @@ describe('pre-pr and the guards a branch adds', () => {
     git(repo, 'init', '-q', '-b', 'main')
     git(repo, 'remote', 'add', 'origin', templateBare)
     write('src/a.txt', 'fine\n')
+    write('src/notes.txt', notes('line 1', 'line 10'))
     commit('main')
     git(repo, 'checkout', '-q', '-b', 'feat')
     template = repo
@@ -997,6 +1169,7 @@ describe('pre-pr and the guards a branch adds', () => {
     step = 1000
     for (const f of Object.keys(fileMs)) delete fileMs[f]
     vitestCalls.length = 0
+    vitestPatterns.length = 0
     // Each test copies the template's repository and its own origin: no test writes to another's
     repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
     bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
@@ -1012,22 +1185,31 @@ describe('pre-pr and the guards a branch adds', () => {
 
   const addGuard = () => {
     write('tooling/guard.test.ts', GUARD)
+    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/guard.test.ts', tests: 'banned' }])}\n`)
+    write('src/notes.txt', notes('feat', 'line 10'))
     commit('feat: a guard')
   }
-
-  it('knows a repository-wide guard when the branch adds one', () => {
-    expect(isGuardTest('tooling/brand.test.ts')).toBe(true)
-    expect(isGuardTest('tooling/fixtures/x.test.ts')).toBe(false)
-    expect(isGuardTest('tooling/guard.mjs')).toBe(false)
-    expect(isGuardTest('packages/ui/src/a.test.ts', "const files = execFileSync('git', ['ls-files'], { cwd: REPO_ROOT })")).toBe(true)
-    expect(isGuardTest('packages/ui/src/a.test.ts', 'mkdirSync(dir, { recursive: true })')).toBe(false)
-    expect(isGuardTest('packages/ui/src/a.test.ts', '// pre-pr: guard\n')).toBe(true)
-    expect(isGuardTest('e2e/a.test.ts', "execFileSync('git', ['ls-files'], { cwd: ROOT })")).toBe(false)
+  /**
+   * The guard with the fix it comes with: main has a banned word and the branch removes it, so the guard fails without the
+   * branch, the revert check finds nothing, and the run goes on to the guards
+   */
+  const addGuardWithFix = () => {
+    git(repo, 'checkout', '-q', 'main')
+    write('src/old.txt', 'banned once\n')
+    commit('main: a banned word')
+    git(repo, 'checkout', '-q', 'feat')
+    git(repo, 'reset', '-q', '--hard', 'main')
+    rmSync(join(repo, 'src', 'old.txt'))
     addGuard()
-    write('src/b.test.ts', 'plain\n')
-    commit('feat: a plain test')
-    expect(guardFiles(repo, git(repo, 'rev-parse', 'main'), git(repo, 'rev-parse', 'HEAD'))).toEqual(['tooling/guard.test.ts'])
-  })
+  }
+
+  it("reads the guards tooling/guards.ts declares, and the ones a range of commits changes, with the checkout's own tsx", () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const declared = GUARDS.map(({ test, tests }) => (tests ? { test, tests } : { test }))
+    // From the empty tree every file is new, each guard's test with it
+    expect(realRunners.guards(root, EMPTY_TREE, 'HEAD')).toEqual({ guards: declared, changed: GUARDS.map((g) => g.test) })
+    expect(realRunners.guards(root, 'HEAD', 'HEAD')).toEqual({ guards: declared, changed: [] })
+  }, 60_000 * SLOW)
 
   it('reads the first line of a failure, or of a file that did not load', () => {
     const root = join(tmpdir(), 'r')
@@ -1038,8 +1220,23 @@ describe('pre-pr and the guards a branch adds', () => {
       ],
     }
     expect(failuresOf(report, root)).toEqual([
-      { file: 'tooling/a.test.ts', name: 'g > one', line: 'Error: boom' },
-      { file: 'tooling/b.test.ts', name: '', line: 'Cannot find module ./x' },
+      { file: 'tooling/a.test.ts', name: 'g > one', line: 'Error: boom', detail: ['Error: boom'] },
+      { file: 'tooling/b.test.ts', name: '', line: 'Cannot find module ./x', detail: ['Cannot find module ./x'] },
+    ])
+    // A real report (recorded): vitest's JSON has no diff, so what a failure says is the guard's message, which names what it found
+    expect(failuresOf(recordedReport('os-allowlist-failing.json', root), root)).toEqual([
+      {
+        file: 'tooling/os-layer.test.ts',
+        name: 'the allowlist > says no more than is true: every listed file exists and still touches the OS, and every such file is listed',
+        line: 'AssertionError: tooling/os-allowlist.txt is not what `tsx tooling/os-tests.ts --offenders` prints. Listed, but gone or no longer touching the OS: packages/protocol/src/index.ts. Touching the OS, not listed: none: expected { …(2) } to deeply equal { extra: [], missing: [] }',
+        detail: [expect.stringMatching(/^AssertionError: /)],
+      },
+      {
+        file: 'tooling/os-layer.test.ts',
+        name: "the allowlist > lists nothing main's list does not: no new line but a file git sees renamed",
+        line: "AssertionError: tooling/os-allowlist.txt lists more than main's (packages/protocol/src/index.ts): put the new code behind the OS layer instead (docs/plans/os-layer.md): expected [ 'packages/protocol/src/index.ts' ] to deeply equal []",
+        detail: [expect.stringMatching(/^AssertionError: /)],
+      },
     ])
     expect(guardWarnings({ failing: [], skipped: [], unchecked: [] }, ['a.test.ts'])).toEqual([])
   })
@@ -1059,6 +1256,56 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(r.ok).toBe(true)
   })
 
+  it("holds a pull request only to each guard's own tests, as the head is held, and names them all to vitest", () => {
+    const declare = (guards: object[], message: string) => {
+      write('tooling/guards.ts', `${JSON.stringify(guards)}\n`)
+      commit(message)
+    }
+    write('tooling/guard.test.ts', `${GUARD}no other in src :: src :: other\n`)
+    write('tooling/plain.test.ts', 'no worse in src :: src :: worse\n')
+    write('src/notes.txt', notes('feat', 'line 10'))
+    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }], 'feat: a guard of one test')
+    const pr = openPr(21, { 'src/bad.txt': 'banned and other\n' })
+    const only = ['#21 "pull request 21" (pr21) would fail tooling/guard.test.ts > no banned in src with this branch merged in: AssertionError: src/bad.txt holds "banned". Fix it in this change, or tell its author.']
+    expect(guardsOf(run(runners([pr])))).toEqual(only)
+    expect(vitestPatterns).toEqual(['banned'])
+    // Two guards' patterns in one run: a test one names in its own file only, so the other file's "other" is no guard of it
+    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }, { test: 'tooling/plain.test.ts', tests: 'worse|other' }], 'feat: a second guard')
+    vitestPatterns.length = 0
+    expect(guardsOf(run(runners([pr])))).toEqual(only)
+    expect(vitestPatterns).toEqual(['banned|worse|other'])
+  })
+
+  it('runs the guard against a pull request that shares no file with the branch: the one it breaks need not', () => {
+    addGuard()
+    const apart = openPr(22, { 'src/bad2.txt': 'a banned word\n' }, {}, true)
+    const r = run(runners([apart]))
+    expect(vitestCalls).toEqual([['tooling/guard.test.ts']])
+    expect(guardsOf(r)).toEqual([expect.stringMatching(/^#22 "pull request 22" \(pr22\) would fail/)])
+  })
+
+  it('runs nothing against the open pull requests when the branch changes no guard, and says so', () => {
+    write('src/a.txt', 'mine\n')
+    commit('feat: no guard')
+    const r = run(runners([openPr(21, { 'src/bad.txt': 'a banned word\n' })], { gh: noGh }))
+    expect(vitestCalls).toEqual([])
+    expect(r.notes).toContain('No guard of tooling/guards.ts (its test, or a file it reads) is changed: not run against the open pull requests.')
+  })
+
+  it('runs a guard whose read file the branch changes, as if the branch changed the test', () => {
+    write('tooling/os-layer.test.ts', GUARD)
+    write('tooling/os-allowlist.txt', 'a\n')
+    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/os-layer.test.ts', tests: 'banned', reads: ['tooling/os-allowlist.txt'] }])}\n`)
+    commit('feat: the os guard')
+    git(repo, 'checkout', '-q', 'main')
+    git(repo, 'merge', '-q', '--ff-only', 'feat')
+    git(repo, 'checkout', '-q', 'feat')
+    write('tooling/os-allowlist.txt', 'a\nb\n')
+    commit('feat: allow one more')
+    run(runners([openPr(21, { 'src/p21.txt': 'fine\n' })]))
+    expect(vitestCalls).toEqual([['tooling/os-layer.test.ts']])
+  })
+
   it('skips a pull request that does not merge cleanly, or needs other dependencies, and says so', () => {
     addGuard()
     const conflicting = openPr(24, { 'tooling/guard.test.ts': 'no other in src :: src :: other\n' })
@@ -1066,14 +1313,14 @@ describe('pre-pr and the guards a branch adds', () => {
     const r = run(runners([conflicting, install]))
     expect(vitestCalls).toEqual([])
     expect(guardsOf(r)).toEqual([
-      'tooling/guard.test.ts was not run against: #24 (does not merge cleanly with this branch (tooling/guard.test.ts)); #26 (needs other dependencies than this checkout has (a different lockfile)).',
+      'tooling/guard.test.ts was not run against: #24 (does not merge cleanly with this branch (tooling/guard.test.ts)); #26 (its lockfile with this branch merged in is not the one this checkout last installed (node_modules/.pnpm/lock.yaml), and a guard run installs nothing; a pnpm install here may change that).',
     ])
     expect(r.ok).toBe(true)
   })
 
   it('does not start the guards with less time than they need', () => {
     addGuard()
-    const r = run(runners([openPr(21, { 'src/p21.txt': 'fine\n' })]), { limitMs: 59_000 })
+    const r = run(runners([openPr(21, { 'src/p21.txt': 'fine\n' })]), { limitMs: 59_000, only: ['guards'] })
     expect(vitestCalls).toEqual([])
     expect(guardsOf(r)).toEqual(['tooling/guard.test.ts: not run: out of time (59 s of the 59 s left).'])
   })
@@ -1112,10 +1359,10 @@ describe('pre-pr and the guards a branch adds', () => {
   // their ten minutes cutting two runs off half way and learned nothing. The guards took as long in the revert check's run as one
   // run of them needs at the least: a pull request is started with that much time left or not at all, and given more than five minutes when it took more.
   const withRevert = (rs: ReturnType<typeof runners>, over: Record<string, unknown> = {}) =>
-    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, ...over })
+    prePr({ cwd: repo, head: 'feat', main: 'main', remote: 'origin', fetch: false, runners: rs, now: () => clock.t, exempt: AT_HEAD, ...over })
 
   it('starts a pull request only with as much time left as one run of the guards took, and says what was left', () => {
-    addGuard()
+    addGuardWithFix()
     step = 30_000
     const prs = [21, 22, 26].map((n) => openPr(n, { [`src/p${n}.txt`]: 'fine\n' }))
     // 100 s in all: the revert check's run takes 30 s, and the guards have 70 s left. #21 runs (40 s left), #22 runs (10 s left), and #26 would be cut off
@@ -1125,8 +1372,8 @@ describe('pre-pr and the guards a branch adds', () => {
   })
 
   it('sizes the guard runs by the guards, not by the slowest test the pull request changed', () => {
-    addGuard()
-    write('src/slow.test.mjs', 'slow :: src :: nothing-here\n')
+    addGuardWithFix()
+    write('src/slow.test.mjs', 'slow :: src :: once\n')
     commit('feat: a slow test')
     step = 30_000
     fileMs['src/slow.test.mjs'] = 300_000
@@ -1139,7 +1386,7 @@ describe('pre-pr and the guards a branch adds', () => {
   })
 
   it('gives a guard run more than five minutes when the changed tests took longer, and says when it was cut off', () => {
-    addGuard()
+    addGuardWithFix()
     const prs = [openPr(21, { 'src/p21.txt': 'fine\n' })]
     const given: (number | undefined)[] = []
     // The revert check's run takes 400 s; the guards' run is stopped at the limit it is given
@@ -1149,7 +1396,7 @@ describe('pre-pr and the guards a branch adds', () => {
         vitest: (dir: string, files: string[], o?: { timeoutMs?: number }) => {
           if (calls++ === 0) {
             clock.t += clockStep
-            return { timedOut: false, report: { testResults: files.map((file) => ({ name: join(dir, file), status: 'passed', startTime: 0, endTime: clockStep, assertionResults: [{ ancestorTitles: [], title: 'no banned in src', status: 'passed' }] })) } }
+            return { timedOut: false, report: { testResults: files.map((file) => ({ name: join(dir, file), status: 'passed', startTime: 0, endTime: clockStep, assertionResults: [{ ancestorTitles: [], title: 'no banned in src', status: 'failed', failureMessages: ['src/old.txt holds "banned"'] }] })) } }
           }
           given.push(o?.timeoutMs)
           clock.t += o?.timeoutMs ?? 0
@@ -1174,7 +1421,7 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(run(runners([], { gh: noGh })).ok).toBe(true)
     addGuard()
     const r = run(runners([], { gh: noGh }), { exempt: { guards: 'a guard that only reads docs' } })
-    expect(r.exempted.map((x: { check: string }) => x.check).sort()).toEqual(['guards', 'revert'])
+    expect(r.exempted.map((x: { check: string }) => x.check).sort()).toEqual(['guards', 'repo-guards', 'revert'])
     // gh unreadable: a warning, not a failure of the run
     const unreadable = run(
       runners([], {
