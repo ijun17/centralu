@@ -427,8 +427,8 @@ export class MailDelivery {
         if (!m || !(isSendNote(m) || m.kind === 'task') || parseAddress(m.sender)?.kind !== 'session') continue
         this.service.notice(m.sender, {
           body: `Your ${m.kind === 'task' ? 'task' : 'note'} ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
-          facts: { quiet: true, noteFailed: { message: id, to: recipient } },
-          dedupeKey: `notefailed:${id}:${recipient}`,
+          facts: { quiet: true, heldFailed: { message: id, to: recipient } },
+          dedupeKey: `heldfailed:${id}:${recipient}`,
         })
       } catch (e) {
         console.error(`[mail] ${recipient}: its sender could not be told that ${id} failed (${errorMessage(e)})`)

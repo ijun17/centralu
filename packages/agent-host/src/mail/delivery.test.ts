@@ -164,12 +164,12 @@ describe('a delivery that fails', () => {
     const task = w.mail.task(C, B, { text: 'land #12', origin: 'agent_session', delivered: false })
     for (let i = 0; i < 9; i++) await w.advance(15 * 60_000)
     expect([note.id, task.id].map((id) => w.rowOf(id, B).held)).toEqual(['failed', 'failed'])
-    const told = w.store.mailbox.feedOf(A, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.noteFailed !== undefined)
-    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ quiet: true, noteFailed: { message: note.id, to: B } }) })])
+    const told = w.store.mailbox.feedOf(A, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.heldFailed !== undefined)
+    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ quiet: true, heldFailed: { message: note.id, to: B } }) })])
     expect(told[0]!.body).toContain('the tool said no')
     // A task's giver hears nothing else until the person sends it again
-    const giver = w.store.mailbox.feedOf(C, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.noteFailed !== undefined)
-    expect(giver).toEqual([expect.objectContaining({ facts: expect.objectContaining({ quiet: true, noteFailed: { message: task.id, to: B } }) })])
+    const giver = w.store.mailbox.feedOf(C, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.heldFailed !== undefined)
+    expect(giver).toEqual([expect.objectContaining({ facts: expect.objectContaining({ quiet: true, heldFailed: { message: task.id, to: B } }) })])
     expect(giver[0]!.body).toContain(`Your task ${task.id}`)
   })
 
@@ -186,8 +186,8 @@ describe('a delivery that fails', () => {
     for (let i = 0; i < 9; i++) await w.advance(15 * 60_000)
     expect([first.id, second.id].map((id) => w.rowOf(id, B).held)).toEqual(['failed', 'failed'])
     expect(logged.mock.calls.flat().join(' ')).toContain(`told that ${first.id} failed (the store is busy)`)
-    const told = w.store.mailbox.feedOf(C, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.noteFailed !== undefined)
-    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ noteFailed: { message: second.id, to: B } }) })])
+    const told = w.store.mailbox.feedOf(C, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.heldFailed !== undefined)
+    expect(told).toEqual([expect.objectContaining({ facts: expect.objectContaining({ heldFailed: { message: second.id, to: B } }) })])
     vi.restoreAllMocks()
   })
 

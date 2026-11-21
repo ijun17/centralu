@@ -10,15 +10,12 @@ export const MAIL_ACCEPT_MS = 90_000
  *
  * A tool silent for `MAIL_ACCEPT_MS` counts as having taken it: a wake given while a turn runs waits behind it, and the tool names it only
  * when a turn takes it, so waiting for that would hold the mailbox for the whole turn. A Claude Code at rest that does not say it read it fails
- * it well before (`TURN_START_MS`); one counted with no turn running has no turn coming for it, which its caller tells as a stop. If it fails
- * the input after that (a CLI slow to start that closes with the wake still queued, a Codex whose `turn/start` is rejected late) it never ran
- * it, so `late` is told and the mailbox puts the mail back; a failure after the tool took the input is not told, since sending it again could
- * run the work twice.
- */
-/**
- * `id`: the name the tool is given the input by, which a turn's end names back (`SessionHandle.turnInputs`). `taken`: told once, in the same step
- * the tool took the input or it was counted, before the tool's next event is handled: a turn can begin and end in one read, and its end must
- * find the delivery recorded. `counted`: the wait ran out with the tool still silent, so whether a turn will run it is not known
+ * it well before (`TURN_START_MS`). If it fails the input after that (a CLI slow to start that closes with the wake still queued, a Codex whose
+ * `turn/start` is rejected late) it never ran it, so `late` is told and the mailbox puts the mail back; a failure after the tool took the input
+ * is not told, since sending it again could run the work twice.
+ *
+ * `id`: the name the tool is given the input by, which a turn's end names back (`SessionHandle.turnInputs`). `taken`: as `MailInput.taken`.
+ * `counted`: the wait ran out with the tool still silent, so whether a turn will run it is not known
  */
 export async function takeInput(handle: SessionHandle, text: string, o: { late?: (e: Error) => void; id?: string; taken?: () => void } = {}): Promise<'taken' | 'counted'> {
   const origin = { kind: 'channel', server: 'centralu' } as const

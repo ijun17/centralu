@@ -127,6 +127,33 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     expect(told.flatMap((m) => m.facts.unanswered ?? [])).toEqual([expect.objectContaining({ id: task.id, why: 'error' })])
   })
 
+  it('is not stopped when its wake waits behind a long turn past the count: the turn after that one runs it and answers', async () => {
+    const machine = await machineHost({ mail: true, sessions: ['w1', 'w2'], claude })
+    const at = (id: string) => sessionAddress(machine.id, id)
+    // Its process runs and said what it tracks; the person's long turn runs now
+    await machine.mgr.inputs.send('w2', 'hello')
+    await eventually(() => running(machine, 'w2') === 'waiting_input')
+    await machine.mgr.inputs.send('w2', 'a long job of my own')
+    await eventually(() => claudeCli.ran('a long job of my own'))
+    const realTimeout = globalThis.setTimeout
+    const short = (ms?: number) => ms === MAIL_ACCEPT_MS && (new Error().stack ?? '').includes('takeInput')
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => realTimeout(fn, short(ms) ? 500 : ms)) as typeof setTimeout)
+    machine.mail!.delivery.start()
+    cleanups.push(() => machine.mail!.delivery.stop())
+    // It joins the running turn, and the CLI holds it for the turn after: counted as taken while that turn runs
+    const task = machine.mail!.service.task(at('w1'), at('w2'), { text: 'say hello', origin: 'agent_session', delivered: false })
+    await eventually(async () => {
+      void machine.mail!.delivery.process(at('w2'))
+      return machine.store.mailbox.recipient(task.id, at('w2'))?.deliveredAt != null
+    })
+    await new Promise((resolve) => realTimeout(resolve, 50))
+    expect(machine.store.mailbox.recipient(task.id, at('w2'))).toMatchObject({ releasedAt: null, settled: null })
+    claudeCli.finish('mine is done')
+    await eventually(() => machine.store.mailbox.reportsOn(task.id).length === 1)
+    expect(machine.store.mailbox.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'finished', answer: expect.stringContaining('say hello') })
+    expect(machine.store.mailbox.feedOf(at('w1'), { limit: 20 }).filter((m) => m.kind === 'notice' && Array.isArray(m.facts.unanswered))).toEqual([])
+  })
+
   it('is answered by a turn that begins and ends in one read: a quick task to a session asleep, and to one whose process runs', async () => {
     const { machine, at } = await asleep()
     machine.mail!.delivery.start()
