@@ -788,7 +788,8 @@ describe('guard/timed-start', () => {
 describe('guard/comments (#2355)', () => {
   const file = 'packages/core/src/x.ts'
   const code = (n: number) => Array.from({ length: n }, (_, i) => `const a${i} = ${i}`).join(NL)
-  const block = (n: number) => ['/**', ...Array.from({ length: n - 2 }, (_, i) => ` * line ${i}`), ' */'].join(NL)
+  // A JSDoc of n lines of text (its /** and */ lines carry none)
+  const block = (n: number) => ['/**', ...Array.from({ length: n }, (_, i) => ` * line ${i}`), ' */'].join(NL)
   it.each([
     ['// This used to wait for the host.'],
     ['/** The list used to be sorted here. */'],
@@ -810,8 +811,10 @@ describe('guard/comments (#2355)', () => {
   ])('lets %j through', async (text) => {
     await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
   })
-  it('holds a file header to 3 lines', async () => {
+  it('holds a file header to 3 lines of text', async () => {
     expect(await lines(file, '// one\n// two\n// three\n' + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(3) + NL + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(4) + NL + code(3), 'comments')).toEqual([1])
     expect(await lines(file, '// one\n// two\n// three\n// four\n' + code(3), 'comments')).toEqual([1])
   })
   it('holds a comment block to 10 lines', async () => {

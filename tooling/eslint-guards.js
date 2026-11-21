@@ -364,9 +364,9 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
 /**
  * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
  * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
- * history ("used to", not the passive "is used to"; a sentence opening with "Previously"), a file header over 3 lines, a
- * comment block over COMMENT_BLOCK_LINES lines, and a source file over COMMENT_SHARE comment lines. Adjacent line
- * comments are one block.
+ * history ("used to", not the passive "is used to"; a sentence opening with "Previously"), a file header over 3 lines of
+ * text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
+ * Adjacent line comments are one block.
  */
 const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often)`
 const HISTORY = [
@@ -409,7 +409,8 @@ const comments = guard(
       }
       const firstCode = program.tokens[0]?.loc.start.line ?? Infinity
       for (const [i, g] of groups.entries()) {
-        const n = g.end - g.start + 1
+        // Lines of text: a `/**` or ` */` line alone carries none
+        const n = g.text.split('\n').filter((l) => /[^\s*/]/.test(l)).length
         if (i === 0 && g.start < firstCode) {
           if (n > HEADER_LINES) add(at(g.start), 'header', { n }, 'header')
         } else if (n > COMMENT_BLOCK_LINES) add(at(g.start), 'block', { n, max: COMMENT_BLOCK_LINES }, 'block')
