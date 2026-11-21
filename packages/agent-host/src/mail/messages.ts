@@ -343,7 +343,7 @@ export class MessageService {
       if (held.length > 0) this.changed(stored, [PERSON])
 
       // The sender's own row on what it answers (`replyAnswers`): settled, or while the answer is held, marked so it stays open until the person lets the
-      // answer through (D8, `trustChanged`). A task so answered gets no last response
+      // answer through (D8, `HeldMail.trustChanged`). A task so answered gets no last response
       const answers = target !== undefined && replyAnswers(target, { needsReply, answer: input.answer === true })
       if (target && answers && this.records.recipient(target.id, sender)) {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
@@ -725,7 +725,7 @@ export class MessageService {
 
   /**
    * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust has its own way out, and so does a
-   * row an earlier build held `loop` (`resumeHeld`)
+   * row an earlier build held `loop` (`HeldMail.resumeHeld`)
    */
   resendHeld(recipient: string, ids: readonly string[]): number {
     return this.run(() => {

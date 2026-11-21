@@ -1,6 +1,6 @@
 /**
- * The person's acts on mail held for them (docs/plans/mailbox.md §7.4): trusting or dismissing a project, and resuming what an earlier build held.
- * `MessageService.holds` holds it; it writes through the service's transaction and its Centralu notices
+ * The person's acts on mail held for them (docs/plans/mailbox.md §7.4): trusting or dismissing a project, and resuming what an earlier build held
+ * (`MessageService.holds`). Each runs in the service's transaction (`run`), since what `changed` queues goes to the listeners only once that commits
  */
 import type { MailFacts, MailKind, MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
@@ -13,7 +13,7 @@ type HeldMailDeps = {
   reach: Pick<MailReach, 'projectLabel'>
   now: () => number
   run: <T>(fn: () => T) => T
-  notice: (recipient: string, m: { kind: MailKind; body: string; facts: MailFacts; dedupeKey: string }) => { id: string }
+  notice: (recipient: string, m: { kind: MailKind; body: string; facts: MailFacts; dedupeKey: string }) => unknown
   changed: (m: Pick<MailRow, 'id' | 'rootId'>, recipients: readonly string[]) => void
 }
 
