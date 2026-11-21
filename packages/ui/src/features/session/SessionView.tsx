@@ -14,7 +14,7 @@ import { ChatStream } from './chat-stream/ChatStream.jsx'
 import { SessionStart } from './SessionStart.jsx'
 import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
-import { AwayNote, DormantNote, ErrorNote, InterruptedNote, useSessionNotes } from './SessionNotes.jsx'
+import { AwayNote, DormantNote, StopNote, useSessionNotes } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 import { COMPOSER_REACH } from './foldedComposer.js'
@@ -259,6 +259,7 @@ export function SessionPane({
         setRunOpen={setRunOpen}
         headerExtra={headerExtra}
         headerDrag={headerDrag}
+        stop={notes.stop}
       />
 
       {/* Outside the composer, whose height decides the fold */}
@@ -286,13 +287,9 @@ export function SessionPane({
           not as a failure after */}
       {away ? <AwayNote machine={session.machine ?? null} /> : notes.dormant && <DormantNote sessionId={session.id} />}
 
-      {/* A turn stopped by nobody here (#698); the state alone
+      {/* Why the last turn stopped (#698, #1415); the state alone
           looks like a turn that ended */}
-      {notes.error && <ErrorNote sessionId={session.id} />}
-
-      {notes.interrupted && session.interruption && (
-        <InterruptedNote sessionId={session.id} interruption={session.interruption} />
-      )}
+      <StopNote key={session.id} sessionId={session.id} stop={notes.stop} />
 
       {/* Folded: absolutely placed over the reserved space
           (docs/design-system.md §7) */}

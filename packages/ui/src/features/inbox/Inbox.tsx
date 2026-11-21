@@ -1,5 +1,5 @@
 import { usePresence } from '../../components/presence.js'
-import { groupTasks, isInTurn, openTaskCount, shownTasks, taskKey, type InboxItem } from '@cc/core'
+import { groupTasks, openTaskCount, shownTasks, taskKey, turnStop, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -16,8 +16,6 @@ import { CONTINUE_WORDS, type MailTaskRow } from '@cc/protocol/client'
 import {
   Kbd,
   StateDot,
-  canContinue,
-  waitStands,
   formatWaiting,
   waitingTone,
 } from '../../components/primitives.jsx'
@@ -405,6 +403,7 @@ function Nothing() {
 function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; project: string; active: boolean; settled: boolean; onOpen: () => void }) {
   const markDone = useStore((s) => s.markDone)
   const send = useStore((s) => s.send)
+  const stop = turnStop(it)
   return (
     <li
       data-cursor={active || undefined}
@@ -435,7 +434,7 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
               title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
               data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
             >
-              {it.arrival ? arrivalAsks(it.arrival.asks) : inboxStateLabel(it)}
+              {it.arrival ? arrivalAsks(it.arrival.asks) : inboxStateLabel(it, stop)}
             </span>
             {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
             <WaitingTime since={it.waitingSince} />
@@ -445,7 +444,7 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
           Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
           still has its conversation. A stop Centralu continues by itself (#1415) says when, and this sends it now.
         */}
-        {canContinue(it.interruption) && !isInTurn(it.state) && (
+        {(stop?.kind === 'wait' || stop?.kind === 'stopped') && (
           <button
             className="mr-1.5 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink transition-colors hover:bg-surface-hover"
             onClick={() => void send(it.id, CONTINUE_WORDS)}
@@ -453,7 +452,7 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
             title={`Sends "${CONTINUE_WORDS}"`}
             data-testid={`inbox-continue-${it.id}`}
           >
-            {waitStands(it.interruption) ? 'Continue now' : 'Continue'}
+            {stop.kind === 'wait' ? 'Continue now' : 'Continue'}
           </button>
         )}
         {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}

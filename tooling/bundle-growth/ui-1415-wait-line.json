@@ -1,0 +1,4 @@
+{
+  "bytes": 800,
+  "reason": "One note says why the last turn stopped (#1415). CI measured 1,962,705 B against main's 1,961,961 B (24ecaa29e), +744 B, all in the main chunk: the turnStop selector, formatWhen, turnStopLabel and the StopNote that replaces the error and interrupted notes. Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}

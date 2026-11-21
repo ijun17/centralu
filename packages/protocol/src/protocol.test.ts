@@ -635,6 +635,12 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     sessionId: 's1',
     interruption: { reason: 'network', at: 1, detail: 'API Error: Connection refused (ECONNREFUSED)' },
   },
+  // A usage limit's stop with its reset and the wait Centralu continues it after (#1415)
+  {
+    type: 'interruption',
+    sessionId: 's1',
+    interruption: { reason: 'limit', at: 1, detail: "You've hit your usage limit", resetAt: 2, autoContinue: { at: 60_002, tries: 0 } },
+  },
   { type: 'interruption', sessionId: 's1', interruption: null },
 ]
 

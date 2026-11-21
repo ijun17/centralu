@@ -1,6 +1,7 @@
 import type { BackgroundTask, Interruption, SessionState, ToolName } from '@cc/protocol/client'
+import { turnStop } from '@cc/core'
 import { useToolMeta } from '../../../store/selectors.js'
-import { Tooltip, interruptionLabel, stateLabel } from '../../../components/primitives.jsx'
+import { Tooltip, interruptionLabel, stateLabel, turnStopLabel } from '../../../components/primitives.jsx'
 import { lookOf } from '../../session/look.js'
 import { backgroundNote } from '../../session/BackgroundTasks.jsx'
 import { usePresence } from '../../../components/presence.js'
@@ -32,7 +33,10 @@ export function ToolMark({
   const note = background ? backgroundNote(background.tasks) : null
   // The dot fades in and, when the last task ends, out (usePresence keeps it for its exit)
   const dot = usePresence(note !== null)
-  const base = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
+  // Why the turn stopped, in the note's and the inbox's words; a failed turn's is the state's word already
+  const stop = turnStop({ state, interruption })
+  const why = stop && stop.kind !== 'error' ? turnStopLabel(stop, Date.now()) : interruption ? interruptionLabel(interruption) : null
+  const base = `${meta.label} · ${stateLabel(state)}${why ? ` · ${why}` : ''}`
   const lines = note ? [`${base} · ${note.summary}`, ...note.running] : [base]
   const label = lines.join('\n')
   const look = lookOf({ state, interruption, openQuestions, unread })

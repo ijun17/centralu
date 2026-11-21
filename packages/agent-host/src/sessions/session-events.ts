@@ -556,7 +556,7 @@ export class SessionEvents {
    */
   async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
     const [sessionId, text, , from, relayed, fromApp] = args
-    // The person's own Continue (the inbox's, the header's Continue now): told as the work going on once it went in, as the stop if it did not
+    // The person's own Continue (the inbox's, the Continue now above the composer): told as the work going on once it went in, as the stop if it did not
     const continued = text === CONTINUE_WORDS && !from && !relayed && !fromApp ? this.host.turnContinue.personContinues(sessionId) : null
     const held = this.host.turnContinue.supersede(sessionId)
     try {

@@ -183,9 +183,8 @@ hold.
 A state the person has to recognise should read the same everywhere. Today: "Awaiting approval"
 (`components/primitives.tsx`, `approval/ApprovalCard.tsx`), "Needs approval" (`inbox/Inbox.tsx`) and
 "<name> asks for approval" (`inbox/InboxPill.tsx`) are the same state. The inbox is "Waiting"
-(`inbox/Inbox.tsx`) and "Waiting list" (`palette/CommandPalette.tsx`). A stop is "Stopped: network"
-(`components/primitives.tsx`) beside "A network error ended the last turn before it finished."
-(`session/SessionNotes.tsx`).
+(`inbox/Inbox.tsx`) and "Waiting list" (`palette/CommandPalette.tsx`). A stop reads "Stopped: network" in the inbox,
+the sidebar's tooltip and the note above the composer alike (`components/primitives.tsx`, `turnStopLabel`).
 
 ### 1.13 Voice, as it is
 

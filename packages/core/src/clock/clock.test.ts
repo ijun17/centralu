@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatClock, formatDay } from './clock.js'
+import { formatClock, formatDay, formatWhen } from './clock.js'
 
 /** Built from local fields, so the expected text does not depend on the machine's time zone */
 const local = (y: number, mo: number, d: number, h = 0, mi = 0, s = 0) => new Date(y, mo - 1, d, h, mi, s).getTime()
@@ -37,5 +37,20 @@ describe('formatDay', () => {
   it('adds the year when it is not this year', () => {
     expect(formatDay(local(2025, 10, 16), NOW)).toBe('Oct 16, 2025')
     expect(formatDay(local(2027, 1, 1), NOW)).toBe('Jan 1, 2027')
+  })
+})
+
+describe('formatWhen', () => {
+  const now = local(2026, 11, 20, 12, 0)
+  it('writes the clock alone for a moment today, from its first minute to its last', () => {
+    expect(formatWhen(local(2026, 11, 20, 17, 2), now)).toBe('17:02')
+    expect(formatWhen(local(2026, 11, 20, 0, 0), now)).toBe('00:00')
+    expect(formatWhen(local(2026, 11, 20, 23, 59), now)).toBe('23:59')
+  })
+  it('says the day with the clock on any other day, and the year when it is not this one', () => {
+    expect(formatWhen(local(2026, 11, 21, 0, 0), now)).toBe('Nov 21, 00:00')
+    expect(formatWhen(local(2026, 11, 23, 17, 2), now)).toBe('Nov 23, 17:02')
+    expect(formatWhen(local(2026, 11, 19, 23, 59), now)).toBe('Nov 19, 23:59')
+    expect(formatWhen(local(2030, 1, 1, 1, 20), now)).toBe('Jan 1, 2030, 01:20')
   })
 })

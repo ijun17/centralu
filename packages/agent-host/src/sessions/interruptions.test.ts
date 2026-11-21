@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { sendWork } from './cross-project.test-helpers.js'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AdapterCapabilities, Interruption, NormalizedEvent, ToolName } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
@@ -1442,7 +1442,7 @@ describe('a turn a usage limit stopped (#1415)', () => {
 
   it("the tool's limit event that ended a turn marks it limit; one at rest marks nothing", () => {
     const e: NormalizedEvent = { type: 'limit_reached', sessionId: S, resumeAt: new Date(5_000).toISOString() }
-    expect(interruptionAfter(e, 1_000, true)).toEqual({ reason: 'limit', at: 1_000 })
+    expect(interruptionAfter(e, 1_000, true)).toEqual({ reason: 'limit', at: 1_000, resetAt: 5_000 })
     expect(interruptionAfter(e, 1_000, false)).toBeUndefined()
     expect(stopOf(e, { reason: 'limit', at: 1_000 })).toBe('limit')
   })
@@ -1453,5 +1453,44 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(stopOf(limit, interruptionAfter(limit, 1_000, true))).toBe('limit')
     expect(interruptionAfter(limitError('The model refused the request'), 1_000, true)).toBeNull()
     expect(interruptionAfter(limit, 1_000, false)).toBeUndefined()
+  })
+
+  it("says the limit's reset: the tool's data first, else the time its words name, else none", () => {
+    const now = new Date(2026, 10, 20, 12, 0).getTime()
+    const data = new Date(2026, 10, 20, 17, 0)
+    expect(interruptionAfter({ type: 'limit_reached', sessionId: S, resumeAt: data.toISOString() }, now, true)).toEqual({ reason: 'limit', at: now, resetAt: data.getTime() })
+    const codex = limitError("You've hit your usage limit. Upgrade to Pro or try again at Nov 23rd, 2026 5:02 PM.")
+    expect(interruptionAfter(codex, now, true)).toMatchObject({ reason: 'limit', resetAt: new Date(2026, 10, 23, 17, 2).getTime() })
+    // A rate-limit update the session already holds outranks the words
+    expect(interruptionAfter(codex, now, true, { limit: { resumeAt: data.toISOString() } })).toMatchObject({ resetAt: data.getTime() })
+    expect(interruptionAfter(limitError("You've hit your usage limit"), now, true)).not.toHaveProperty('resetAt')
+    expect(interruptionAfter({ type: 'limit_reached', sessionId: S }, now, true)).toEqual({ reason: 'limit', at: now })
+  })
+
+  it("a limit report at rest gives a standing limit stop its reset, and touches nothing else", () => {
+    const now = new Date(2026, 10, 20, 12, 0).getTime()
+    const report = (at: Date): NormalizedEvent => ({ type: 'limit_reached', sessionId: S, resumeAt: at.toISOString() })
+    const later = new Date(2026, 10, 20, 19, 0)
+    const stop: Interruption = { reason: 'limit', at: 1, detail: 'try again later', autoContinue: { at: now + 1_800_000, tries: 0 } }
+    expect(interruptionAfter(report(later), now, false, { interruption: stop })).toEqual({ ...stop, resetAt: later.getTime() })
+    // The same reset again changes nothing; another stop, no stop, or a report with no time is left alone
+    expect(interruptionAfter(report(later), now, false, { interruption: { ...stop, resetAt: later.getTime() } })).toBeUndefined()
+    expect(interruptionAfter(report(later), now, false, { interruption: { reason: 'network', at: 1 } })).toBeUndefined()
+    expect(interruptionAfter(report(later), now, false, {})).toBeUndefined()
+    expect(interruptionAfter({ type: 'limit_reached', sessionId: S }, now, false, { interruption: stop })).toBeUndefined()
+  })
+
+  it("a credits or spend limit has no reset: its resumeAt is the primary window's, at the turn's end and at rest", () => {
+    const now = new Date(2026, 10, 20, 12, 0).getTime()
+    const window = new Date(2026, 10, 20, 15, 0).toISOString()
+    const credits: NormalizedEvent = { type: 'limit_reached', sessionId: S, resumeAt: window, credits: true }
+    expect(interruptionAfter(credits, now, true)).toEqual({ reason: 'limit', at: now })
+    // A turn its words end while the session holds a credits limit
+    const words = limitError("You've hit your usage limit. Upgrade to Pro or try again at 5:02 PM.")
+    expect(interruptionAfter(words, now, true, { limit: { resumeAt: window, credits: true } })).not.toHaveProperty('resetAt')
+    // At rest: a standing stop gets no reset from it, and a reset said before goes
+    const stop: Interruption = { reason: 'limit', at: 1 }
+    expect(interruptionAfter(credits, now, false, { interruption: stop })).toBeUndefined()
+    expect(interruptionAfter(credits, now, false, { interruption: { ...stop, resetAt: 5 } })).toEqual(stop)
   })
 })

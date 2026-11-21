@@ -1,6 +1,6 @@
-import { formatClock, formatDay } from '@cc/core'
+import { formatClock, formatDay, formatWhen } from '@cc/core'
 
-export { formatClock, formatDay }
+export { formatClock, formatDay, formatWhen }
 
 /**
  * One way every screen writes a size, a count and a length of time (#428); a moment is written in core, which needs it

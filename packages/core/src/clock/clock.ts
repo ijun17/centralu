@@ -13,6 +13,14 @@ export function formatClock(at: number | Date, opts: { seconds?: boolean } = {})
   return opts.seconds ? `${hm}:${two(d.getSeconds())}` : hm
 }
 
+/** "17:02" today, "Nov 23, 17:02" on another day: a time waited for, which a bare clock would place on the wrong day */
+export function formatWhen(at: number | Date, now: number | Date = Date.now()): string {
+  const d = new Date(at)
+  const n = new Date(now)
+  const today = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate()
+  return today ? formatClock(d) : `${formatDay(d, n)}, ${formatClock(d)}`
+}
+
 /** "Oct 16", or "Oct 16, 2025" when the year is not `now`'s */
 export function formatDay(at: number | Date, now: number | Date = Date.now()): string {
   const d = new Date(at)

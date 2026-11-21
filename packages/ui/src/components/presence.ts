@@ -25,3 +25,10 @@ export function usePresence(open: boolean, ms = LEAVE_MS): { shown: boolean; lea
   }, [leaving, ms])
   return { shown: open || leaving, leaving: !open && leaving }
 }
+
+/** The last non-null `value`, set while rendering so the frame that loses it still draws it as it fades out */
+export function useHeld<T>(value: T | null | undefined): T | null {
+  const [held, setHeld] = useState<T | null>(value ?? null)
+  if (value != null && value !== held) setHeld(value)
+  return value ?? held
+}

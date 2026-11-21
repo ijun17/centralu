@@ -5,7 +5,6 @@ import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { inTurn } from '../idle.js'
 import { updateNote, type Stopped } from '../lifecycle/update-stopped.js'
 import type { WaitEnd } from '../mail/stop-notices.js'
-import { planLimitResetAt } from './error-kind.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 
 /**
@@ -160,7 +159,8 @@ export type RetryPhase = 'waiting' | 'sending' | 'handed'
 /** A held retry and the error it stands in for, to say if the turn ends without it */
 type Held = { timer: ReturnType<typeof setTimeout> | null; message: string; phase: RetryPhase }
 /** A stop's wait: its cause, its tool (the account it waits with), and for a limit when */
-type StopWait = { cause: StopCause; tool: ToolName; at?: number; tries: number; phase: 'waiting' | 'due' | 'sending' }
+/** `reset`: the limit's reset the wait was timed from (`Interruption.resetAt`), so a later report of another reset retimes it */
+type StopWait = { cause: StopCause; tool: ToolName; at?: number; reset?: number; tries: number; phase: 'waiting' | 'due' | 'sending' }
 
 export class TurnContinue {
   /** Retries an overloaded turn's work used since it was done */
@@ -221,6 +221,7 @@ export class TurnContinue {
    */
   armAfter(e: NormalizedEvent, m: SessionInfo, endedTurn: boolean): void {
     const i = m.interruption
+    if (!endedTurn && e.type === 'limit_reached') return this.retime(m)
     if (!endedTurn || (i?.reason !== 'network' && i?.reason !== 'limit')) return
     const cause = i.reason
     if (!this.host.settings()[cause] || (e.type === 'limit_reached' ? e.credits : m.limit?.credits) || this.host.leaving() || this.host.compactTurn(m.id)) return
@@ -232,10 +233,19 @@ export class TurnContinue {
       return
     }
     const now = Date.now()
-    const worded = e.type === 'error' ? planLimitResetAt(e.error.message, now) : undefined
-    const at = cause === 'limit' ? resetAt(e.type === 'limit_reached' ? e.resumeAt : m.limit?.resumeAt, worded, now) : undefined
+    const at = cause === 'limit' ? continueAt(i.resetAt, now) : undefined
     i.autoContinue = at === undefined ? { tries } : { at, tries }
-    this.wait(m.id, { cause, tool: m.tool, at, tries, phase: 'waiting' })
+    this.wait(m.id, { cause, tool: m.tool, at, ...(cause === 'limit' && i.resetAt !== undefined ? { reset: i.resetAt } : {}), tries, phase: 'waiting' })
+  }
+
+  /** A limit report at rest gave the standing limit stop another reset (`interruptionAfter`): its wait goes by that one */
+  private retime(m: SessionInfo): void {
+    const i = m.interruption
+    const w = this.stops.get(m.id)
+    if (i?.reason !== 'limit' || !i.autoContinue || i.resetAt === undefined || w?.cause !== 'limit' || w.phase !== 'waiting' || w.reset === i.resetAt) return
+    w.at = continueAt(i.resetAt, Date.now())
+    w.reset = i.resetAt
+    i.autoContinue = { ...i.autoContinue, at: w.at }
   }
 
   /** The stops a host before this one left waiting (stored with each session): taken up again as they were */
@@ -245,7 +255,7 @@ export class TurnContinue {
       const a = i?.autoContinue
       if (!a || (i.reason !== 'network' && i.reason !== 'limit')) continue
       this.stopTries.set(m.id, { cause: i.reason, n: a.tries })
-      this.wait(m.id, { cause: i.reason, tool: m.tool, at: a.at, tries: a.tries, phase: 'waiting' })
+      this.wait(m.id, { cause: i.reason, tool: m.tool, at: a.at, ...(i.resetAt !== undefined ? { reset: i.resetAt } : {}), tries: a.tries, phase: 'waiting' })
     }
   }
 
@@ -613,13 +623,8 @@ export class TurnContinue {
   }
 }
 
-/**
- * When a usage limit's continue goes: its reset and a margin. The reset the tool's data says first (ISO), else the one its words say (`worded`, a
- * Codex 429's "try again at 6:17 PM"); with neither, a slow retry
- */
-function resetAt(resumeAt: string | undefined, worded: number | undefined, now: number): number {
-  const said = resumeAt ? Date.parse(resumeAt) : NaN
-  const reset = Number.isFinite(said) ? said : worded
+/** When a usage limit's continue goes: its reset (`Interruption.resetAt`, `limitReset`) and a margin; with none known, a slow retry */
+function continueAt(reset: number | undefined, now: number): number {
   return reset !== undefined ? Math.max(reset, now) + RESET_MARGIN_MS : now + NO_RESET_RETRY_MS
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
+import type { TurnStop } from '@cc/core'
 import { useCapability } from '../app/PlatformProvider.jsx'
-import { formatDuration } from '../app/format.js'
+import { formatDuration, formatWhen } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'
 
 /** The state indicator (FR-12): urgency by brightness, kind by shape, no colour; the brightest is what waits on me */
@@ -19,7 +20,7 @@ const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string 
 export const stateLabel = (state: SessionState): string => SIGNAL[state].label
 
 /** Why the last turn did not finish (#698), one wording; `reconnecting` has not stopped: the tool is still trying */
-export function interruptionLabel(i: Interruption): string {
+export function interruptionLabel(i: Pick<Interruption, 'reason'>): string {
   switch (i.reason) {
     case 'network':
       return 'Stopped: network'
@@ -36,22 +37,25 @@ export function interruptionLabel(i: Interruption): string {
   }
 }
 
-/** A stopped turn the person can continue with one message (#698); reconnecting goes on by itself */
-export const canContinue = (i: Interruption | null | undefined): i is Interruption => !!i && i.reason !== 'reconnecting'
+/** "at 17:02", "at Nov 23, 17:02", or "soon" once the time has passed and nothing said otherwise yet */
+const waitedFor = (at: number, now: number): string => (at <= now ? 'soon' : `at ${formatWhen(at, now)}`)
 
 /**
- * Whether Centralu continues the stop by itself (#1415), the one test for the header, the composer's line and the
- * inbox. A limit wait always has its time (the reset, or 30 minutes after the stop); one without shows no wait.
+ * Why the last turn stopped (`turnStop`), one wording for the note above the composer, the inbox row and the sidebar's
+ * tooltip (docs/ux-writing.md 1.12); the tool's own words stay in the conversation's line
  */
-export const waitStands = (i: Interruption | null | undefined): i is Interruption =>
-  !!i?.autoContinue && (i.reason === 'network' || (i.reason === 'limit' && i.autoContinue.at !== undefined))
-
-/** The wait of a stop Centralu continues by itself (#1415), from `Interruption.autoContinue`; null when none */
-export function autoContinueLabel(i: Interruption, clock: (d: Date) => string): string | null {
-  const at = i.autoContinue?.at
-  if (!waitStands(i)) return null
-  // A standing wait with a time is a limit's (`waitStands`); a network wait has none
-  return at === undefined ? 'Network lost · continues when the network is back' : `Usage limit · continues at ${clock(new Date(at))}`
+export function turnStopLabel(stop: TurnStop, now: number): string {
+  switch (stop.kind) {
+    case 'wait': {
+      // A standing wait with a time is a limit's (`waitStands`); a network wait has none
+      const at = stop.interruption.autoContinue?.at
+      return at === undefined ? 'Network lost · continues when the network is back' : `Usage limit · continues ${waitedFor(at, now)}`
+    }
+    case 'stopped':
+      return `${interruptionLabel(stop)}${stop.resetAt !== undefined ? ` · resets ${waitedFor(stop.resetAt, now)}` : ''}`
+    case 'error':
+      return 'Stopped: error'
+  }
 }
 
 export function StateDot({ state }: { state: SessionState }) {
