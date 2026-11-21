@@ -124,7 +124,7 @@ enum Choice {
 
 struct TauriSink(AppHandle);
 
-/// The direct path's sink: the window's, telling the serve fallback when an attempt is ready (#1223 review)
+/// The direct path's sink: the window's, telling the serve fallback when an attempt is ready (#1223)
 fn direct_sink(start: &Start, app: AppHandle) -> Arc<dyn StatusSink> {
     Arc::new(FallbackSink { inner: TauriSink(app), fallback: start.fallback.clone() })
 }
@@ -152,7 +152,7 @@ struct Start {
     bundled: Option<PathBuf>,
     /// The data folder's `centralu` launcher, when the plan runs the serve host through it (#1223, `Host::Serve`).
     serve: Option<PathBuf>,
-    /// The way back to the bundled host when `serve --window` ends before its ready line (#1223 review)
+    /// The way back to the bundled host when `serve --window` ends before its ready line (#1223)
     fallback: Arc<ServeFallback>,
     #[cfg_attr(not(unix), allow(dead_code))]
     resources: Option<PathBuf>,
@@ -164,7 +164,7 @@ fn start_plan(app: &AppHandle) -> Start {
     let serve = centralu_keeper_core::os::serve_launcher();
     let mut facts = Facts::window(Env::current(), found.is_some(), serve.is_some());
     /*
-     * Only a serve that says it takes --window and speaks this window's protocol is used (#1223 review): the hub
+     * Only a serve that says it takes --window and speaks this window's protocol is used (#1223): the hub
      * installed it, of whatever version. Asked only where the plan would choose it, so no other window pays for it.
      */
     if start_plan::plan(&facts).host == Some(Host::Serve) {

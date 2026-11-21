@@ -113,7 +113,7 @@ pub enum Stopped {
 
 /// Asks a keeper answering on `sock` to stop (`stop`, which any process of this user may ask for: its host ends what it
 /// runs as a quit does), and waits up to `limit` for the keeper to be gone: its `lock` (`keeper.lock`) free. Not its
-/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`, PR 7 review); the lock goes with
+/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`); the lock goes with
 /// the keeper's process, which exits only once its host has.
 pub fn stop_and_wait(sock: &Path, lock: &Path, limit: Duration) -> Stopped {
     if !alive(sock) {

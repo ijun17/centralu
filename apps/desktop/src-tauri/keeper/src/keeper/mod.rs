@@ -1,10 +1,10 @@
 //! The keeper (#280, option C step 1).
 //!
 //! The keeper is **its own executable, `centralu-keeper`** (#440), shipped next to the window's
-//! executable and linking no Tauri and no webview; `centralu --keeper` refuses (`exe.rs`, #461).
-//! For macOS privacy permissions it is the app that started it (the shell in a macOS release,
-//! `content.rs`): macOS judges a process by the app that started its tree (the responsible process,
-//! measured for #440 in docs/spikes/2026-10-thin-shell-tcc.md).
+//! executable and linking no Tauri and no webview; `centralu --keeper` refuses unless a debug window
+//! asks (`exe.rs`, #461). For macOS privacy permissions it is the app that started it: macOS judges a
+//! process by the app that started its tree (the responsible process, measured for #440 in
+//! docs/spikes/2026-10-thin-shell-tcc.md).
 //!
 //! What it does:
 //!   - holds the host: launches it, restarts it by the same rules as the window's direct path, stops it;

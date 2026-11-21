@@ -233,7 +233,7 @@ impl Reason {
         match self {
             Reason::HostCommand => "CC_HOST_CMD is set: the window runs that host itself",
             Reason::NoKeeperHere => "the keeper is built on unix sockets, descriptor passing and flock; Windows has no keeper yet",
-            // Why Linux is direct: docs/plans/keeper-removal.md §2.4
+            // Why Linux is direct: docs/plans/keeper-removal.md §2.4.
             Reason::LinuxDirect => "a Linux window is the host's parent: there is no permission model for a keeper to hold",
             Reason::DebugDirect => "a debug build is the host's parent unless CC_USE_KEEPER=1",
             Reason::KeeperAnswers => "a keeper already answers on keeper.sock",

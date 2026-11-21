@@ -64,7 +64,7 @@ fn check_native_path(path: &Path, final_link_allowed: bool) -> Result<(), Native
         return Err(NativePathError::NonAbsolute(path.to_path_buf()));
     }
     // `components()` drops a trailing separator and a trailing `.`: `link/` and `link/.` would be checked as `link`
-    // (whose final link the entry check allows) while the OS follows the link (#838 review). Refused as written.
+    // (whose final link the entry check allows) while the OS follows the link (#838). Refused as written.
     if ends_like_a_folder(path) {
         return Err(NativePathError::TrailingSeparator(path.to_path_buf()));
     }

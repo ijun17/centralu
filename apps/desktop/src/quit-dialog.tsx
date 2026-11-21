@@ -54,7 +54,7 @@ export function QuitDialog({
   serve?: boolean
   strays: Stray[]
   /**
-   * Why the leftover processes could not be listed (#841 item 7, #990 review): the host refuses while the keeper cannot
+   * Why the leftover processes could not be listed (#841 item 7, #990): the host refuses while the keeper cannot
    * say which processes it holds. Said, so an empty list does not read as "nothing is left running"
    */
   straysError?: string | null

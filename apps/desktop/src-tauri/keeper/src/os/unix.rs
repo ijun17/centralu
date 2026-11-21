@@ -68,11 +68,10 @@ pub const DESCRIPTOR_LIMIT: u64 = 10_240;
  * is lower; never lowers it. Returns the limit before and after when it changed.
  *
  * A keeper started from Finder or launchd gets a soft limit of 256, and every relay through the
- * front door holds two descriptors: about a hundred relays reach it, and with it every accept and
+ * front door holds two descriptors: about a hundred relays use it up, and with it every accept and
  * spawn fails (#840 item 3). What the keeper starts gets the limit it had before back
- * (`original_descriptor_limit`): a program that still uses
- * `select` cannot take a descriptor at or past `FD_SETSIZE` (1,024), which a limit of 10,240 would
- * let it be given.
+ * (`original_descriptor_limit`): a program that still uses `select` cannot take a descriptor at or
+ * past `FD_SETSIZE` (1,024), which a limit of 10,240 would let it be given.
  */
 pub fn raise_descriptor_limit() -> Option<(u64, u64)> {
     let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };

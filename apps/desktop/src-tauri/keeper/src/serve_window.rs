@@ -1,4 +1,4 @@
-//! Whether the window may use the data folder's `centralu serve` host, and the way back to its own (#1223 review).
+//! Whether the window may use the data folder's `centralu serve` host, and the way back to its own (#1223).
 //!
 //! On Windows, with serve installed in the data folder, the window runs `centralu serve --window` instead of a host
 //! of its own (`start_plan::Host::Serve`). That serve is whatever version a linked hub installed. A serve from before

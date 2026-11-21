@@ -27,7 +27,7 @@ pub(crate) const KEEPER_TOO_OLD_TO_UPDATE: &str = "The background keeper cannot 
 /// update only once that host has said so at its start
 pub(crate) const HOST_NOT_UP_FOR_UPDATE: &str = "The agent host is not running yet. Try again once it is up.";
 
-/// What the keeper's view says of a stop for an update (#1895 step 4, PR 3 review)
+/// What the keeper's view says of a stop for an update (#1895 step 4, PR 3)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UpdateStop {
     /// No view yet
@@ -91,7 +91,7 @@ mod tests {
         assert!(!with_keeper(ready, UpdateStop::Unknown).ready, "no view yet: nothing is known of the keeper");
     }
 
-    /// Review: a keeper's host that is starting, restarting or failed reads "cannot stop for an update" in the view, since
+    /// A keeper's host that is starting, restarting or failed reads "cannot stop for an update" in the view, since
     /// only a running host says it can. "Apply now" waits for it, rather than calling the keeper too old: a keeper of this
     /// build gets no bar to restart it from
     #[test]
@@ -637,7 +637,7 @@ impl KeeperLink {
      * commands again, as after "Apply now". An earlier keeper gets a plain stop, which ends what it holds as "Quit completely"
      * does; the bar asks first before any plain stop. Which stop goes is read from the view now, not from the one the bar
      * planned with: a host that went down in between turns a planned stop for an update into a plain stop, which is harmless,
-     * since such a keeper holds nothing once its host is gone (review). Either way this window stays: the attach loop (`run`) sees the
+     * since such a keeper holds nothing once its host is gone. Either way this window stays: the attach loop (`run`) sees the
      * connection end when the keeper has exited and starts a keeper of this window's build. The keeper removes its socket before
      * it stops anything, so nothing reaches it on its way out, and the next one waits for its lock. Returns once the keeper took
      * the request: a stop for an update answers once its host is gone.
@@ -769,7 +769,7 @@ mod update_stop_tests {
     }
 
     /**
-     * Review of #1895 step 3: with background mode on, a refused stop for an update does not fall through to the relaunch
+     * #1895 step 3: with background mode on, a refused stop for an update does not fall through to the relaunch
      * (the check meant for an older keeper that cannot hold on), where the relaunched window would find the same keeper and
      * nothing would apply. And the refusal gives the keeper's own reason, not "With background mode off the running agents
      * would stop".
@@ -791,7 +791,7 @@ mod update_stop_tests {
     }
 
     /**
-     * Review of #1895 step 3: a keeper stopping for an update that this window's "Apply now" did not ask for (a restart into
+     * #1895 step 3: a keeper stopping for an update that this window's "Apply now" did not ask for (a restart into
      * this build) removes its socket and runs on for up to the stop's bound, with no `stopping_for_update` of this window's set.
      * "Quit completely" is then refused, saying why, and the window attaches on, rather than fail on the missing socket with
      * no reason the person could act on and, already marked shutting down, never attach again.
@@ -851,7 +851,7 @@ mod update_stop_tests {
     }
 
     /**
-     * Review of #1895 step 3: "Quit completely" while "Apply now" has the keeper stopping for an update could only end as that
+     * #1895 step 3: "Quit completely" while "Apply now" has the keeper stopping for an update could only end as that
      * stop (the turns it cut continue at the next start, and no quit mark is left for a linked hub). It is refused at once,
      * nothing is sent to the keeper, and the relaunch goes on; the person quits in the relaunched window.
      */

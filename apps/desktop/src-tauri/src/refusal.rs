@@ -1,12 +1,11 @@
 //! Why signed content was refused, shown in a native window (#634, docs/security-boundaries/signed-content.md
 //! "Signed content").
 //!
-//! When the shell refuses this window's content as not what was signed, the person is told by a dialog
-//! drawn here, not by the web UI's build bar: that UI is fed by the host, and the host is the very
-//! thing whose content failed to verify, so it could hide or rewrite what it says. A dialog drawn here,
-//! in the window process (the signed app bundle), cannot be
-//! suppressed by the host: it needs nothing from the host, only what the shell wrote to
-//! `<data>/shell-status.json`, read by the window itself.
+//! When the shell refuses this window's content, the person is told by a dialog drawn here, not by the
+//! web UI's build bar: that UI is fed by the host, and the host is the very thing whose content failed
+//! to verify, so it could hide or rewrite what it says. A dialog drawn here, in the window process (the
+//! signed app bundle), cannot be suppressed by the host: it needs nothing from the host, only what the
+//! shell wrote to `<data>/shell-status.json`, read by the window itself.
 //!
 //! **Show, do not run.** This only tells. Nothing here starts, trusts or unlocks the content it names;
 //! what keeps running is what the window starts itself (docs/plans/thin-shell.md §6).

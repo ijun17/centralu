@@ -28,7 +28,7 @@ pub(super) fn direct_launcher(start: &Start) -> Launcher {
             });
         }
         if let (Some(Host::Serve), Some(launcher)) = (host, &serve) {
-            // A `serve --window` that ended before its ready line hands every later attempt to the bundled host (#1223 review)
+            // A `serve --window` that ended before its ready line hands every later attempt to the bundled host (#1223)
             match (fallback.next(), &bundled) {
                 (Pick::Bundle, Some(dir)) => {
                     let mut launch = host_proc::bundled_launch(&dir.join("main.mjs"), &[])?;
@@ -85,7 +85,7 @@ mod tests {
         assert!(l.env.is_empty());
     }
 
-    /// #1223's review: a `serve --window` attempt that ends before its ready line makes the next one the bundled host
+    /// #1223: a `serve --window` attempt that ends before its ready line makes the next one the bundled host
     #[test]
     fn the_launcher_runs_the_bundled_host_after_a_serve_attempt_that_never_got_ready() {
         use centralu_keeper_core::start_plan::{Build, Env, Facts, Os, Shell};

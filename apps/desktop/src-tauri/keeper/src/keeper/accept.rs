@@ -242,7 +242,7 @@ mod tests {
         assert!(raised.1 > 256 && raised.1 <= crate::os::DESCRIPTOR_LIMIT, "{raised:?}");
         assert_eq!(few_descriptors::soft_limit(), raised.1);
         assert_eq!(crate::os::raise_descriptor_limit(), None, "already as high as it goes");
-        // What the keeper starts gets the limit it had before back (#840 item 3, review).
+        // What the keeper starts gets the limit it had before back (#840 item 3).
         let mut c = std::process::Command::new("/bin/sh");
         c.args(["-c", "ulimit -n"]);
         crate::os::original_descriptor_limit(&mut c);

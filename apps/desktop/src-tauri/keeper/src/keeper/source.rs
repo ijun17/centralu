@@ -3,9 +3,9 @@
 //! A host started by the keeper never runs from a bundle (#280): the running app may be the
 //! build-output bundle that `pnpm app:open` opens in place, which the next `tauri build` rewrites
 //! on disk, and a host holds its code in memory but reads the Codex bridge, `schema.sql` and
-//! `app-template/` from its folder on demand, so it could mix two builds. The keeper copies the bundle's `resources/host` folder to
-//! `<data>/hosts/<key>/` first and runs it from there. Rebuilding, replacing or deleting the
-//! bundle afterwards cannot touch the running host.
+//! `app-template/` from its folder on demand, so it could mix two builds. The keeper copies the
+//! bundle's `resources/host` folder to `<data>/hosts/<key>/` first and runs it from there.
+//! Rebuilding, replacing or deleting the bundle afterwards cannot touch the running host.
 //!
 //! A keeper the macOS shell started runs its hosts from the verified content copy instead,
 //! `<data>/content/<version>/host/` (thin-shell plan §5): already a copy no bundle change can

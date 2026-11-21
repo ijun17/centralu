@@ -53,7 +53,7 @@ fn a_built_host_needs_the_app_version_and_the_keeper_reports_it() {
     assert_eq!(KeeperInfo::of_this_process(&dir, own_build(&by_hand)).version, crate::keeper::DEV_VERSION);
 }
 
-/// #1501 review: `run` itself refuses a built host without `--app-version`, before it touches the data
+/// #1501: `run` itself refuses a built host without `--app-version`, before it touches the data
 /// folder. The folder here sits under a file, so a keeper that went on would fail creating it, with 1.
 #[test]
 fn a_keeper_told_a_built_host_without_the_app_version_does_not_start() {
@@ -161,7 +161,7 @@ fn a_window_whose_status_push_fails_is_closed_and_detached() {
 }
 
 /**
- * #840 item 5, review: with background mode off (the default), the window the keeper closed may
+ * #840 item 5: with background mode off (the default), the window the keeper closed may
  * be its last, and its detach must not stop the keeper at once, host, agents and terminals with
  * it: a window that was only stalled would come back to a new keeper with nothing. It is waited
  * for (`REATTACH_GRACE`), and the next attach spends that.
@@ -567,7 +567,7 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
         assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
         (k.judge_window_for_update(&s), k.may_tell_system_ending(&s))
     };
-    // The window may also still tell the host the system is ending (#2119 review), which the path rule alone refuses
+    // The window may also still tell the host the system is ending (#2119), which the path rule alone refuses
     assert_eq!(judged(&mut window_proc), (Ok(()), true), "the attached window after its executable was replaced");
     let (stranger_judged, stranger_ending) = judged(&mut stranger);
     assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
@@ -797,7 +797,7 @@ fn a_host_that_ignores_the_stop_for_an_update_is_terminated_once_the_wait_is_up(
 }
 
 /**
- * Review of #1895 step 3: a stop for an update from a process that is not a window (an agent's Bash, any tool of this user)
+ * #1895 step 3: a stop for an update from a process that is not a window (an agent's Bash, any tool of this user)
  * would end the keeper and have every cut turn continued with "Centralu was updated". Over the real socket, from this test
  * binary (not a window): refused, and nothing stops.
  */

@@ -430,7 +430,7 @@ impl Keeper {
 }
 
 /// The refusal of a stop for an update to a process that is not a Centralu window attached to this keeper, in words true
-/// for whoever asks (#2119 review): any other process (an agent's shell) gets it, and so does the person's own window
+/// for whoever asks (#2119): any other process (an agent's shell) gets it, and so does the person's own window
 /// when this keeper does not know it (one started after the install, or a window whose attach could not be taken again);
 /// for that window, quitting and reopening runs the installed build, which is the update
 pub(super) const NOT_A_WINDOW: &str = "window_only: only a Centralu window attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it ran, quit Centralu and open it again to finish the update";

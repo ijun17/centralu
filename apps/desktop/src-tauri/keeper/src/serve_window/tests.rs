@@ -50,7 +50,8 @@ fn windows_plan(serve_said: Option<&str>, window_protocol: u32) -> Option<Host> 
     plan(&f).host
 }
 
-/// The review's cases: each one that cannot serve the window starts the bundled host, as a window without serve does
+/// A serve that cannot serve the window (an older one, one on another protocol, one that did not answer) leaves the
+/// window its bundled host, as a window without serve has
 #[test]
 fn an_older_serve_a_serve_on_another_protocol_and_one_that_did_not_answer_leave_the_window_its_bundled_host() {
     assert_eq!(windows_plan(Some(&line(r#","takes":["from","window"]"#, 1)), 1), Some(Host::Serve));
@@ -121,7 +122,7 @@ fn asks_the_launcher_for_its_connection_line_and_gives_up_on_one_that_hangs() {
     assert!(t0.elapsed() < Duration::from_secs(10), "it waited {:?}", t0.elapsed());
 }
 
-/// The review's third case end to end: `serve --window` ends before its ready line (here, a serve that refuses the
+/// End to end: `serve --window` ends before its ready line (here, a serve that refuses the
 /// option), and the window's next attempt is its bundled host, which comes up
 #[test]
 fn a_serve_window_that_ends_before_its_ready_line_leaves_a_working_bundled_host() {
@@ -256,7 +257,7 @@ fn a_window_that_fell_back_to_its_own_host_stops_nothing_through_serve() {
     assert!(!marker.exists(), "the bundled host the window runs is stopped by quitting");
 }
 
-/// #1964 review: a stop 0.7 s after `serve --window` began, before its host comes up at 1.7 s, waits for that host and
+/// #1964: a stop 0.7 s after `serve --window` began, before its host comes up at 1.7 s, waits for that host and
 /// stops it, rather than answer "not running" and leave it running after the window quits
 #[test]
 fn a_stop_while_the_serve_host_is_starting_waits_for_it_and_stops_it() {
