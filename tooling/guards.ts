@@ -1,13 +1,6 @@
 /**
- * The repository-wide guards (#2373): tests that fail on a file a branch did not touch. A branch passes CI alone and fails in the
- * queue on what landed before it, or lands and breaks another open pull request through what that one adds. `pnpm pre-pr`
- * (scripts/pre-pr.mjs) reads this list through scripts/pre-pr-guards.mjs: its repo-guards check runs each guard at the head of
- * every branch, and its guards check runs the ones a branch changes (the test, or a file it reads) against every other open pull
- * request. A guard is declared here with what it reads, each file named once, where its owner names it.
- *
- * Every test under tooling/ is named once, in GUARDS or in NOT_GUARDS under why it is not one (tooling/guards.test.ts): a test
- * is a guard when it holds the files of a folder, or of the repository, to a rule, so a file another pull request adds there
- * can fail it. A new test, or a declaration removed, fails until it is named again.
+ * The repository-wide guards (#2373), which `pnpm pre-pr` runs at each head and against every other open pull request
+ * (CONTRIBUTING.md "Before opening a pull request"). Each file is named once, where its owner names it.
  */
 import { losesTargets } from './doc-refs.js'
 import { OS_ALLOWLIST } from './os-layer.js'
@@ -17,17 +10,22 @@ import { RULES_FILE as TIER_RULES } from '../scripts/tier.mjs'
 export interface Guard {
   /** The test file, from the repository root */
   test: string
-  /** A vitest name pattern for the tests of the file that are the guard, when not all of them are */
-  tests?: string
+  /** A vitest name pattern for the tests of the file that are the guard (its describes', when all of them are) */
+  tests: string
   /** The files besides the test whose change changes what the guard holds every other file to */
   reads: readonly string[]
   /** Files it reads for part of what they hold: those `path` matches, when `changed` says that part changed */
   readsPart?: { path: RegExp; changed: (path: string, before: () => string | null, after: () => string | null) => boolean }
 }
 
+/**
+ * The tests that hold the files of a folder, or of the repository, to a rule: a file another pull request adds there can fail
+ * one. Every test under tooling/ is named once, here or in NOT_GUARDS (tooling/guards.test.ts).
+ */
 export const GUARDS: readonly Guard[] = [
   {
     test: 'tooling/doc-refs.test.ts',
+    tests: 'finds no reference to a section that is not there',
     reads: ['tooling/doc-refs.ts'],
     // Every reference, against the sections of every Markdown file: one that loses a section breaks what cites it
     readsPart: { path: /\.md$/, changed: losesTargets },
@@ -45,7 +43,11 @@ export const GUARDS: readonly Guard[] = [
     // Which files are a change to the screen, and the paths the tiers call the e2e harness
     reads: ['.github/scripts/ci-changes.mjs', TIER_RULES],
   },
-  { test: 'tooling/desktop-permissions.test.ts', reads: [] },
+  {
+    test: 'tooling/desktop-permissions.test.ts',
+    tests: 'app command permissions|window permission boundary|plugin permissions|app links',
+    reads: [],
+  },
   { test: 'tooling/e2e-browser-sandbox.test.ts', tests: 'every Playwright config under e2e', reads: [] },
   { test: 'tooling/guards.test.ts', tests: 'names every tooling test', reads: ['tooling/guards.ts'] },
   {
@@ -56,9 +58,13 @@ export const GUARDS: readonly Guard[] = [
   },
   { test: 'tooling/styles.test.ts', tests: 'borders are solid tokens|our own classes are actually used', reads: [] },
   { test: 'tooling/tier.test.ts', tests: 'matches every glob', reads: [TIER_RULES, 'scripts/tier.mjs'] },
-  { test: 'tooling/actions-pinned.test.ts', reads: [] },
-  { test: 'tooling/e2e-webkit-twins.test.ts', reads: [] },
-  { test: 'tooling/workflow-runners.test.ts', reads: [] },
+  { test: 'tooling/actions-pinned.test.ts', tests: 'workflow dependencies are immutable', reads: [] },
+  { test: 'tooling/e2e-webkit-twins.test.ts', tests: 'e2e WebKit twins repeat their base spec', reads: [] },
+  {
+    test: 'tooling/workflow-runners.test.ts',
+    tests: 'has no floating hosted runner labels|uses a macOS image GitHub has retired',
+    reads: [],
+  },
   // The format each list of the folder is held to
   { test: 'tooling/type-aware-lint.test.ts', tests: 'keeps every list sorted', reads: ['tooling/lint-allowlist.ts'] },
   // The platforms the folder's host-only packages are held to
@@ -66,13 +72,16 @@ export const GUARDS: readonly Guard[] = [
   // Each exception names a tracked file: another pull request that deletes or renames one fails it
   { test: 'tooling/guards-checks.test.ts', tests: 'has exceptions that only shrink', reads: ['tooling/guard-exceptions.js'] },
   // The modules the app's build reaches from its entries, held to what may load first and to the calls left out of what ships
-  { test: 'tooling/startup-bundle.test.ts', reads: ['tooling/window-build.test-helpers.ts'] },
+  { test: 'tooling/startup-bundle.test.ts', tests: 'startup bundle', reads: ['tooling/window-build.test-helpers.ts'] },
   { test: 'tooling/pure-calls.test.ts', tests: 'the window bundle', reads: ['tooling/pure-calls.mjs', 'tooling/window-build.test-helpers.ts'] },
   // Each map of the folder names only paths that are there: another pull request that deletes or moves one fails it
   { test: 'tooling/feature-maps.test.ts', tests: 'name no repository path', reads: ['tooling/feature-maps.ts'] },
   // The board app's folder holds no data file of the person's
   { test: 'tooling/project-board-contribute.test.ts', tests: 'the private word list in the data folder', reads: [] },
   { test: 'tooling/project-board-reader.test.ts', tests: 'on this computer only', reads: [] },
+  // Every registered adapter, held to what its mock declares and to the drift job reading it
+  { test: 'tooling/mock-capability-parity.test.ts', tests: 'the mock tools say what the real adapters say', reads: ['packages/platform/src/mock/tools.ts'] },
+  { test: 'tooling/drift-workflow.test.ts', tests: 'reads every registered adapter', reads: ['.github/workflows/drift.yml'] },
 ]
 
 /** The tests under tooling/ that are not guards, by why: no file another pull request adds is held to a rule of theirs */
@@ -93,7 +102,6 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/dependency-cruiser.test.ts',
     'tooling/desktop-csp.test.ts',
     'tooling/dev-live.test.ts',
-    'tooling/drift-workflow.test.ts',
     'tooling/e2e-affected.test.ts',
     'tooling/e2e-engine.test.ts',
     'tooling/e2e-flaky-report.test.ts',
@@ -127,7 +135,6 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/lint-ceiling.test.ts',
     'tooling/macos-minos.test.ts',
     'tooling/mail-mock-parity.test.ts',
-    'tooling/mock-capability-parity.test.ts',
     'tooling/node-pin.test.ts',
     'tooling/npm-protocol-version.test.ts',
     'tooling/platform-checks.test.ts',

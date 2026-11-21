@@ -303,7 +303,7 @@ describe('the repositories this file builds', () => {
 })
 
 /** The guards of the repositories below, as the fake reads them (fakeRunners) */
-const DECLARED = `${JSON.stringify([{ test: 'tooling/doc-refs.test.ts' }, { test: 'tooling/os-layer.test.ts', tests: 'the allowlist' }])}\n`
+const DECLARED = `${JSON.stringify([{ test: 'tooling/doc-refs.test.ts', tests: 'holds|finds no reference' }, { test: 'tooling/os-layer.test.ts', tests: 'the allowlist' }])}\n`
 
 describe('pre-pr on a stack of two pull requests', () => {
   let repo = ''
@@ -432,7 +432,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(guarded().ok).toBe(true)
     const main = git(repo, 'rev-parse', 'main')
     expect(calls).toEqual([
-      { files: ['tooling/doc-refs.test.ts'], o: expect.objectContaining({ testNamePattern: undefined, env: { CC_LINT_BASE: main } }) },
+      { files: ['tooling/doc-refs.test.ts'], o: expect.objectContaining({ testNamePattern: 'holds|finds no reference', env: { CC_LINT_BASE: main } }) },
       { files: ['tooling/os-layer.test.ts'], o: expect.objectContaining({ testNamePattern: 'the allowlist', env: { CC_LINT_BASE: main } }) },
     ])
     // Tests the pattern names that this system skips are there: nothing to say
@@ -840,11 +840,15 @@ describe('pre-pr on a stack of two pull requests', () => {
       const killed = leave(`killed-${process.pid}`, 999_999)
       const dead = leave(`dead-${process.pid}`, 999_998)
       const living = leave(`living-${process.pid}`, process.pid)
-      // A run's refs whose folder is gone: --cleanup of any run takes them too, and leaves those of a run with a folder
-      git(repo, 'update-ref', `${GUARD_REFS}/gone-${process.pid}/22`, 'top')
+      // Refs whose run folder is gone: --cleanup of any run takes those of a run, the board's too, whose process is gone. It keeps
+      // those of a living process (its folder may be under another TMPDIR), of an id with no pid, and of a run with a folder
+      const orphans = { dead: ['999997-1', 'board-999996-3'], kept: [`${process.pid}-1`, `gone-${process.pid}`] }
+      for (const id of [...orphans.dead, ...orphans.kept]) git(repo, 'update-ref', `${GUARD_REFS}/${id}/22`, 'top')
       execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
       expect(existsSync(killed)).toBe(false)
-      expect(guardRefs()).toBe([`${GUARD_REFS}/dead-${process.pid}/21`, `${GUARD_REFS}/living-${process.pid}/21`].join('\n'))
+      const keptRefs = orphans.kept.map((id) => `${GUARD_REFS}/${id}/22`)
+      expect(guardRefs().split('\n').sort()).toEqual([`${GUARD_REFS}/dead-${process.pid}/21`, `${GUARD_REFS}/living-${process.pid}/21`, ...keptRefs].sort())
+      for (const ref of keptRefs) git(repo, 'update-ref', '-d', ref)
       // The checkout's own, the dead run's and the living one's
       expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(3)
       expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
@@ -1163,7 +1167,7 @@ describe('pre-pr and the guards a branch adds', () => {
 
   const addGuard = () => {
     write('tooling/guard.test.ts', GUARD)
-    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/guard.test.ts' }])}\n`)
+    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/guard.test.ts', tests: 'banned' }])}\n`)
     write('src/notes.txt', notes('feat', 'line 10'))
     commit('feat: a guard')
   }
@@ -1234,7 +1238,7 @@ describe('pre-pr and the guards a branch adds', () => {
     expect(r.ok).toBe(true)
   })
 
-  it("holds a pull request only to each guard's own tests, as the head is held, and names them to vitest when every guard does", () => {
+  it("holds a pull request only to each guard's own tests, as the head is held, and names them all to vitest", () => {
     const declare = (guards: object[], message: string) => {
       write('tooling/guards.ts', `${JSON.stringify(guards)}\n`)
       commit(message)
@@ -1247,11 +1251,11 @@ describe('pre-pr and the guards a branch adds', () => {
     const only = ['#21 "pull request 21" (pr21) would fail tooling/guard.test.ts > no banned in src with this branch merged in: AssertionError: src/bad.txt holds "banned". Fix it in this change, or tell its author.']
     expect(guardsOf(run(runners([pr])))).toEqual(only)
     expect(vitestPatterns).toEqual(['banned'])
-    // With a guard of a whole file in the run, vitest runs every test of both: the other one's failure is not the guard's
-    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }, { test: 'tooling/plain.test.ts' }], 'feat: a guard of a whole file')
+    // Two guards' patterns in one run: a test one names in its own file only, so the other file's "other" is no guard of it
+    declare([{ test: 'tooling/guard.test.ts', tests: 'banned' }, { test: 'tooling/plain.test.ts', tests: 'worse|other' }], 'feat: a second guard')
     vitestPatterns.length = 0
     expect(guardsOf(run(runners([pr])))).toEqual(only)
-    expect(vitestPatterns).toEqual([undefined])
+    expect(vitestPatterns).toEqual(['banned|worse|other'])
   })
 
   it('runs the guard against a pull request that shares no file with the branch: the one it breaks need not', () => {
@@ -1273,7 +1277,7 @@ describe('pre-pr and the guards a branch adds', () => {
   it('runs a guard whose read file the branch changes, as if the branch changed the test', () => {
     write('tooling/os-layer.test.ts', GUARD)
     write('tooling/os-allowlist.txt', 'a\n')
-    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/os-layer.test.ts', reads: ['tooling/os-allowlist.txt'] }])}\n`)
+    write('tooling/guards.ts', `${JSON.stringify([{ test: 'tooling/os-layer.test.ts', tests: 'banned', reads: ['tooling/os-allowlist.txt'] }])}\n`)
     commit('feat: the os guard')
     git(repo, 'checkout', '-q', 'main')
     git(repo, 'merge', '-q', '--ff-only', 'feat')

@@ -51,7 +51,7 @@
 //                           [--only <check>]... [--remote <name>] [--no-fetch] [--json] [--run-id <id>] [--limit <seconds>]
 //                           [--guards-limit <seconds>]
 //   node scripts/pre-pr.mjs --cleanup <run-id>     removes what a run that was killed left behind, and the guard refs of
-//                                                  any run whose folder is gone
+//                                                  any run whose folder and process are gone
 //
 // --head defaults to HEAD, --main to <remote>/main, --base (what the pull request merges into: a lower
 // pull request's branch in a stack) to main. Unless --no-fetch, the remote is fetched first. The heads of
@@ -464,8 +464,8 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
         if (!present.length) continue
         log(`guards against #${pr.number}`)
         const timeoutMs = Math.max(1000, Math.min(perPrMs, deadline - now()))
-        // Only the tests that are the guards, when each says which: one pattern for the run, so each file's are kept below
-        const testNamePattern = present.every((g) => g.tests) ? present.map((g) => g.tests).join('|') : undefined
+        // Only the tests that are the guards: one pattern for the run, so each file's are kept below
+        const testNamePattern = present.map((g) => g.tests).join('|')
         const { report, timedOut } = runners.vitest(wt, present.map((g) => g.test), { timeoutMs, testNamePattern })
         if (!report) {
           skipped.push({ pr, why: noReport(timedOut, timeoutMs) })
@@ -488,7 +488,7 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
 }
 
 /** Whether the test named `name` (as {@link vitestTests} names it) is one of the guard `g`'s: its pattern read as vitest's `-t` reads it */
-const isGuardTest = (g, name) => !g.tests || new RegExp(g.tests).test(name.replaceAll(' > ', ' '))
+const isGuardTest = (g, name) => new RegExp(g.tests).test(name.replaceAll(' > ', ' '))
 
 /** A failure of {@link failuresOf} as a line names it: its file, and its test when it has one. */
 const failureLabel = (f) => `${f.file}${f.name ? ` > ${f.name}` : ''}`
@@ -568,7 +568,7 @@ function repoGuardsStep(c) {
       continue
     }
     if (c.outOfTime('repo-guards', g.test)) continue
-    c.log(`${g.test}${g.tests ? ` (${g.tests})` : ''}`)
+    c.log(`${g.test} (${g.tests})`)
     const limitMs = Math.max(1000, c.left())
     const { report, timedOut } = c.runners.vitest(c.top(), [g.test], { timeoutMs: limitMs, testNamePattern: g.tests, env: { CC_LINT_BASE: c.at.main } })
     if (!report) {
@@ -580,7 +580,7 @@ function repoGuardsStep(c) {
     // A pattern that matches no test any more would pass in silence. By name: a test vitest filtered out and one skipped on this
     // system both read as skipped
     if (!vitestTests(report, c.top()).some((t) => isGuardTest(g, t.name))) {
-      c.findings.push({ check: 'repo-guards', message: `${g.test}${g.tests ? ` has no test named like "${g.tests}"` : ' ran no test'}: ${GUARDS_FILE} declares a guard that is not there.` })
+      c.findings.push({ check: 'repo-guards', message: `${g.test} has no test named like "${g.tests}": ${GUARDS_FILE} declares a guard that is not there.` })
     }
   }
 }

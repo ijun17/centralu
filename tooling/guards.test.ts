@@ -18,6 +18,11 @@ describe('the repository-wide guards', () => {
     expect(missing, `tooling/guards.ts declares what the repository does not have: ${missing.join(', ')}`).toEqual([])
   })
 
+  it('names the tests of each guard, so one run against a pull request runs those only', () => {
+    const unnamed = GUARDS.filter((g) => !g.tests?.trim()).map((g) => g.test)
+    expect(unnamed, `tooling/guards.ts: give each guard the names of its tests (its describes', when all of them are): ${unnamed.join(', ')}`).toEqual([])
+  })
+
   it('names every tooling test once, as a guard or under why it is not one', () => {
     const tests = execFileSync('git', ['ls-files', '-z', '--', 'tooling'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.[cm]?tsx?$/.test(f))
     const named = [...GUARDS.map((g) => g.test), ...Object.values(NOT_GUARDS).flat()]
@@ -35,6 +40,9 @@ describe('the repository-wide guards', () => {
     expect(changedGuards([change('tooling/doc-refs.ts', 'a', 'b')])).toEqual(DOC_REFS)
     // An exception added for a file another pull request deletes or renames fails there
     expect(changedGuards([change('tooling/guard-exceptions.js', 'a', 'b')])).toEqual(['tooling/guards-checks.test.ts'])
+    // Every registered adapter is held to what these say: another pull request that adds an adapter fails a tighter one
+    expect(changedGuards([change('packages/platform/src/mock/tools.ts', 'a', 'b')])).toEqual(['tooling/mock-capability-parity.test.ts'])
+    expect(changedGuards([change('.github/workflows/drift.yml', 'a', 'b')])).toEqual(['tooling/drift-workflow.test.ts'])
     expect(changedGuards([change('tooling/os-layer.test.ts', 'a', 'b'), change('tooling/doc-refs.test.ts', 'a', null)])).toEqual([...DOC_REFS, 'tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/heavy-store.test.ts', 'a', 'b'), change('packages/ui/src/a.ts', null, 'b'), change('docs/notes.txt', '## 1. One\n', null)])).toEqual([])
   })

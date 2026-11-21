@@ -165,6 +165,15 @@ export function removeWorktree(wt, root) {
   return null
 }
 
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
 /** Where a run keeps the heads of the open pull requests it fetched (runGuards, pre-pr.mjs): `<GUARD_REFS>/<run id>/<number>` */
 export const GUARD_REFS = 'refs/centralu-pre-pr-guards'
 
@@ -190,15 +199,17 @@ function deleteRefs(root, refs) {
 /** Deletes the guard refs of the run `runId`: the run itself when its guards are done, or whoever removes what it left */
 export const removeGuardRefs = (root, runId) => deleteRefs(root, refsUnder(root, `${GUARD_REFS}/${runId}`))
 
+/** The pid in a run id of pre-pr (`<pid>-<ms>`) or of the board (`board-<pid>-<n>`, its pre-pr.mjs); null in any other */
+const pidOf = (id) => Number(/^(?:board-)?(\d+)-\d+$/.exec(id)?.[1]) || null
+
 /**
- * Deletes the guard refs of every run whose folder is gone: a run killed after it fetched, whose folder was removed by
- * hand. A run makes its folder before it fetches and removes its refs before its folder. The folder is looked for in this
- * process's temporary folder: a run started with another TMPDIR on the same checkout would be taken for gone. Answers
- * those runs' ids.
+ * Deletes the guard refs of every run whose folder is gone and whose process is: a run killed after it fetched, whose folder
+ * was removed by hand. A run makes its folder before it fetches and removes its refs before its folder. Its folder is looked
+ * for in this process's temporary folder, so a run started with another TMPDIR is kept by its pid. Answers those runs' ids.
  */
 export function sweepGuardRefs(root) {
   const byRun = Map.groupBy(refsUnder(root, GUARD_REFS), (ref) => ref.slice(GUARD_REFS.length + 1).split('/')[0])
-  const gone = [...byRun.keys()].filter((id) => !existsSync(runDir(id)))
+  const gone = [...byRun.keys()].filter((id) => pidOf(id) && !alive(pidOf(id)) && !existsSync(runDir(id)))
   for (const id of gone) deleteRefs(root, byRun.get(id))
   return gone
 }
@@ -224,15 +235,6 @@ export function removeRun(dir, root) {
     // the checkout may be gone; nothing of it to forget then
   }
   return left
-}
-
-const alive = (pid) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return e.code === 'EPERM'
-  }
 }
 
 /** Removes the folders of earlier runs on this checkout whose process is gone (killed, or the machine slept through a timeout). */
