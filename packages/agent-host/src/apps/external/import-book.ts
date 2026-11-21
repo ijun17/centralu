@@ -9,20 +9,14 @@ import { canonicalJson } from './runs.js'
 import { USER_APPS_PARTS } from './discovery.js'
 
 /**
- * The mark on an imported app and the person's confirmation of it (M4 E-3, decision 3) — lives on
- * the **host side**.
- *
- * A user-folder app is trusted because a person put it there (decision 3). Only an app imported from
- * outside gets asked about separately: an imported app arrives disabled, and is enabled only after
- * the person sees what it runs (`server`) and what it claims to use (`uses`). The record of being
- * enabled carries a key (`reviewKey`) for what was seen at that moment — if the manifest's `server`
- * or `uses` changes later, the key no longer matches and it is asked again.
- *
- * Why the mark lives outside the app folder (as a file in the data folder): a mark inside the app
- * folder could be deleted or edited by the app's own code, and an imported bundle could arrive
- * already carrying "already confirmed". The mark is tied to that folder's inode instead — so a
- * different folder that comes to exist under the same id (an app deleted and recreated) never
- * inherits the old mark. Renaming or moving the folder (on the same filesystem) preserves the inode.
+ * The mark on an imported app and the person's confirmation of it (M4 E-3, decision 3): it lives on the **host side**. A
+ * user-folder app is trusted because a person put it there (decision 3); only an app imported from outside is asked about
+ * separately: it arrives disabled and is enabled after the person sees what it runs (`server`) and claims to use (`uses`). The
+ * record of being enabled carries a key (`reviewKey`) for what was seen then, so a later change of `server` or `uses` asks
+ * again. The mark lives outside the app folder (a file in the data folder): inside it, the app's own code could delete or edit
+ * it, and an imported bundle could arrive already carrying "already confirmed". It is tied to that folder's inode, so a
+ * different folder that comes to exist under the same id (an app deleted and recreated) never inherits it; renaming or moving
+ * the folder on the same filesystem keeps the inode.
  */
 
 export const IMPORTS_FILE = 'app-imports.json'

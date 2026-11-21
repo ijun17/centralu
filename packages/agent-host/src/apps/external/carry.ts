@@ -7,23 +7,16 @@ import type { Os } from '../../os/port.js'
 import { VERSIONS_REL } from './versions.js'
 
 /**
- * What an app keeps on disk, carried from one app key to another (#1141): a user-folder app (`_user/<id>`) registered
- * as a project in place becomes `<project id>/<id>`, and its data folder, log and kept versions follow it.
- *
- *   data       <data folder>/app-data/<key>/
- *   log        <data folder>/app-logs/<key>.log, and the older generation `.log.1`
- *   versions   <data folder>/app-versions/<key>/
- *
- * **Copied, never moved**: a previous build serving during a host swap (docs/agent-host/store-migrations.md "Migration steps: expand, then contract") still reads and writes
- * the old key, and must not find its app's data gone. A later release removes the old copies.
- *
- * Only where the new key has nothing yet, so running it again after an interruption changes nothing, and never writes
- * over what the app has written under its new key since. A folder is copied beside its place and renamed into it, so
- * an interrupted copy never stands as a whole one that the next run would then skip.
- *
- * Off the event loop (#1707): an app writes its data folder, so it may hold a link into a share that does not answer, and
- * Windows waits about 21 s for the first stat of one. A step that does not answer within `CARRY_STEP_MS` fails the
- * carry (the app stays in the user folder, as for any failed carry), and the copy beside its place is removed.
+ * What an app keeps on disk, carried from one app key to another (#1141): a user-folder app (`_user/<id>`) registered as a
+ * project in place becomes `<project id>/<id>`, and its data folder, log (and the older `.log.1`) and kept versions follow it.
+ * **Copied, never moved**: a previous build serving during a host swap (docs/agent-host/store-migrations.md "Migration steps:
+ * expand, then contract") still reads and writes the old key, and must not find its app's data gone; a later release removes
+ * the old copies. Only where the new key has nothing yet, so running it again after an interruption changes nothing and never
+ * writes over what the app has written under its new key; a folder is copied beside its place and renamed into it, so an
+ * interrupted copy never stands as a whole one the next run would skip. Off the event loop (#1707): an app writes its data
+ * folder, so it may hold a link into a share that does not answer, and Windows waits about 21 s for the first stat of one; a
+ * step that does not answer within `CARRY_STEP_MS` fails the carry (the app stays in the user folder, as for any failed carry)
+ * and the copy beside its place is removed.
  */
 export async function carryAppFiles(dataRoot: string, fromKey: string, toKey: string, { os = realOs(), stepMs = CARRY_STEP_MS }: { os?: Os; stepMs?: number } = {}): Promise<void> {
   const copy = (from: string, to: string) => copyFolderOnce(os, stepMs, from, to)
@@ -118,10 +111,10 @@ async function copyFolderOnce(os: Os, stepMs: number, from: string, to: string):
   mkdirSync(dirname(to), { recursive: true })
   const tmp = `${to}.carry-${randomUUID()}`
   try {
-    // The `Os`'s copy: a link an app left in its data (one back to its own folder too) is copied as a link, and one
-    // into the folder leads into the new key's (`to`, where `tmp` is renamed), not the old one's (#1650 review). A
-    // junction, all an app on Windows can make without a right, always holds a whole path: kept as written, the two
-    // keys would share what is behind it, and removing the old key's copy would take the new key's data with it.
+    // The `Os`'s copy: a link an app left in its data (one back to its own folder too) is copied as a link, and one into the
+    // folder leads into the new key's (`to`, where `tmp` is renamed), not the old one's (#1650). A junction, all an app on
+    // Windows can make without a right, always holds a whole path: kept as written, the two keys would share what is behind it,
+    // and removing the old key's copy would take the new key's data with it.
     await os.files.promises.cp(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true, links: { from, to }, stepMs })
     realOs().files.renameSync(tmp, to)
   } catch (e) {

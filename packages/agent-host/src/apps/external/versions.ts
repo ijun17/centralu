@@ -18,26 +18,16 @@ import { folderFingerprint, walkCode } from './fingerprint.js'
 import { APP_FOLDER_DEPTH } from './folder-walk.js'
 
 /**
- * Versioning for apps outside git (M4 E-1) — user-folder apps (including imported ones) are not in
- * a repository, so there is no way to roll them back. So **every time the code changes and the app
- * starts**, this captures one copy of the app folder and keeps only the most recent few. A project
- * app's version is git (not handled here).
- *
- * What gets captured: the same walk (`walkCode`) that the folder fingerprint (`fingerprint.ts`)
- * measures — names starting with a dot and `node_modules` are not the app's code, so they are
- * neither captured nor restored. That means a snapshot's fingerprint matches its code's fingerprint
- * (the same source as the list's `codeStamp`), so "this is the current version" can be checked by
- * fingerprint. Restoring large files' timestamps follows the same reasoning (large files are
- * measured by size and timestamp).
- *
- * When it captures: **right before the app starts** (that code is now the code that runs), and
- * when an imported app comes in, and right before a restore. If a version with the same fingerprint
- * already exists, it does not capture again — an app that starts again with the same code (woke up
- * from idle, died and came back) does not grow the version list.
- *
- * Where it lives: `<data folder>/app-versions/_user/<app id>/<timestamp>-<first 16 chars of the
- * fingerprint>/`, with `files/` and `meta.json` beneath it. It lives outside the app folder, so the
- * app's own code cannot alter its versions, and it survives the app being deleted (into the trash).
+ * Versioning for apps outside git (M4 E-1; what is kept, when, and a restore: docs/apps/handing-over.md "Versions (E-1)"): a
+ * user-folder app has no repository to roll back in, so **every time the code changes and the app starts** this captures one
+ * copy of the app folder and keeps the newest few. A project app is versioned by git, not here. It copies what the folder
+ * fingerprint measures (`walkCode`: names starting with a dot and `node_modules` are not the app's code), so a snapshot's
+ * fingerprint equals its code's (the list's `codeStamp`) and "this is the current version" is a fingerprint comparison; large
+ * files' timestamps are restored too (they are measured by size and timestamp). It captures **right before the app starts**,
+ * when an imported app comes in, and right before a restore. A version with the same fingerprint already there is not captured
+ * again, so an app that starts again with the same code (woken from idle, restarted) does not grow the list. It lives at `<data
+ * folder>/app-versions/_user/<app id>/<timestamp>-<first 16 chars of the fingerprint>/` (`files/` and `meta.json` beneath),
+ * outside the app folder: the app's own code cannot alter its versions, and they survive its deletion.
  */
 
 export const VERSIONS_KEPT = 5

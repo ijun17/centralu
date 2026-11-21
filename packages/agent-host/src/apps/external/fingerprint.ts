@@ -4,22 +4,14 @@ import { join } from 'node:path'
 import { APP_FOLDER_DEPTH, STOP, walkAppFolder } from './folder-walk.js'
 
 /**
- * The fingerprint of an app folder (M4 C-4) — answers "has the folder changed since the app
- * started" with this one value.
- *
- * Why this does not rely on folder watching (fs events): watching only sees the folders that are
- * expanded (`DirWatchers` — it is not recursive), and events can be coalesced or dropped. At the
- * moment a change actually has to be reflected (the building session's turn ended), measuring the
- * folder right now gives the correct answer no matter how many events were missed. Watching only
- * tells us **when** to re-measure (while there is no building session).
- *
- * Small files are measured by **content**: a `touch`, or checking out the same content again, has
- * not changed the app, so there is no reason to restart it. Large files are measured by size and
- * timestamp — so measuring one folder never takes more than a few milliseconds.
- *
- * Skipped: what is never part of an app's code — names starting with a dot, `__MACOSX` and
- * `node_modules` (`outsideAppCode`, `folder-walk.ts`). There are caps on file count and depth (the
- * depth is the one every reader of an app folder shares, `APP_FOLDER_DEPTH`).
+ * The fingerprint of an app folder (M4 C-4): one value that answers "has the folder changed since the app started". It does not
+ * rely on folder watching (`DirWatchers` sees only expanded folders, not recursively, and events can be coalesced or dropped):
+ * when a change has to be reflected (the building session's turn ended) measuring the folder right now is correct however many
+ * events were missed; watching only tells us **when** to re-measure (while there is no building session). Small files are
+ * measured by **content** (a `touch`, or checking out the same content again, has not changed the app), large ones by size and
+ * timestamp, so measuring a folder never takes more than a few milliseconds. What is never part of an app's code is skipped
+ * (`outsideAppCode`, `folder-walk.ts`), with caps on file count and on depth (the one every reader of an app folder shares,
+ * `APP_FOLDER_DEPTH`).
  */
 
 const CONTENT_MAX_BYTES = 1024 * 1024

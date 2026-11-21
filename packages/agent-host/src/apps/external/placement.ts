@@ -7,16 +7,11 @@ import { PROJECT_APPS_PARTS, USER_APPS_PARTS } from './discovery.js'
 import { realOs } from '../../os/real.js'
 
 /**
- * Where an app folder goes (M4 A-7, C-1b, E-3) — the one place that knows it, for every way an app
- * folder comes to be: a new app from the template (`createApp`), an approved MCP server
- * (`installUserApp`), and an import moved in from its staging area (`AppHandover.commit`).
- *
- *   project app     `<project>/.centralu/apps/<id>/`
- *   user-folder app `<data folder>/apps/<id>/`
- *
- * Each of the three used to place its folder its own way, and one of them created the parent with
- * `mkdir -p`: an `apps/` in the data folder that is a link to somewhere else took the approved
- * server's folder outside the data folder, where discovery (which refuses that link) never saw it.
+ * Where an app folder goes (M4 A-7, C-1b, E-3): the one place that knows it, for every way an app folder comes to be: a new app
+ * from the template (`createApp`), an approved MCP server (`installUserApp`) and an import moved in from its staging area
+ * (`AppHandover.commit`). A project app is `<project>/.centralu/apps/<id>/`, a user-folder app `<data folder>/apps/<id>/`. The
+ * parent is never made with `mkdir -p`: an `apps/` in the data folder that is a link elsewhere would take the folder outside
+ * the data folder, where discovery (which refuses that link) never sees it.
  */
 
 /**

@@ -28,20 +28,13 @@ import { folderFingerprint } from './fingerprint.js'
 import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
 /**
- * The host side of handover (M4 E) — the staging area for an externally imported app, and the
- * person's confirmation of it.
- *
- * The runtime holds an app's lifecycle and the single path a call takes; this file holds "may this
- * app be brought in, may it run." These are kept separate because the runtime is already a file
- * where the broker (D), reflecting changes (C-4), and the lifecycle all live together — scattering
- * handover's rules through that too would make it hard to find which check lives where. The runtime
- * asks this file only two things: whether this app is waiting on confirmation (`gate`), and the mark
- * on an imported app (`imported`).
- *
- * The sequence: prepare (`prepare`: stage the files, validate, and build what the person will see) →
- * the person reviews it → bring it in (`commit`: move it into the user folder and record it as
- * disabled, or confirm it right there if requested) → later, if `server` or `uses` changes, ask again
- * (`review` → `enable`).
+ * The host side of handover (M4 E): the staging area for an externally imported app, and the person's confirmation of it. The
+ * runtime holds an app's lifecycle and the single path a call takes; this file holds "may this app be brought in, may it run",
+ * kept apart because the runtime already holds the broker (D), reflecting changes (C-4) and the lifecycle, and handover's rules
+ * scattered through it would be hard to find. The runtime asks this file two things: whether an app is waiting on confirmation
+ * (`gate`), and the mark on an imported app (`imported`). The sequence: prepare (`prepare`: stage the files, validate, build
+ * what the person will see) → the person reviews → bring it in (`commit`: move it into the user folder and record it disabled,
+ * or confirm it right there if requested) → later, if `server` or `uses` changes, ask again (`review` → `enable`).
  */
 
 export type HandoverHost = {

@@ -619,8 +619,8 @@ const HOST_SRC = 'packages/agent-host/src'
  * The folders of the host's source that guard/comments reads, and those it does not yet (#2355): a folder moves from the second
  * list to the first when its comments have been swept. The unit test requires every folder on disk to be in one of them.
  */
-export const COMMENTS_SWEPT_HOST_FOLDERS = ['keeper', 'lifecycle', 'links', 'mail', 'os', 'sessions', 'transport', 'views']
-export const COMMENTS_UNSWEPT_HOST_FOLDERS = ['adapters', 'apps', 'dev-services']
+export const COMMENTS_SWEPT_HOST_FOLDERS = ['apps', 'keeper', 'lifecycle', 'links', 'mail', 'os', 'sessions', 'transport', 'views']
+export const COMMENTS_UNSWEPT_HOST_FOLDERS = ['adapters', 'dev-services']
 /** Where guard/comments reads: a folder joins when its comments have been swept (#2355) */
 const COMMENTS_SWEPT = [
   'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',

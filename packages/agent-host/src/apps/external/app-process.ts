@@ -241,29 +241,16 @@ export class AppProcess {
   }
 
   /**
-   * The shutdown rule (S-5).
-   *
-   * **Stdin and fd 3 are closed together.** Closing only stdin was not enough to end the app — a
-   * Node app was held open by the fd 3 socket, and the official Python SDK's app was held open by its
-   * read thread (measured in S-5). Once both are closed, a well-built app ends on its own (Node
-   * 11ms, Python 2–7ms). If it does not end within the grace period, **its descendants** are ended
-   * too (kill-tree — the same method used for the terminal and the command runner).
-   *
-   * Even when it ends on its own, descendants can remain in its group (a helper the app started). The
-   * app's group is one we created ourselves (detached), so it is collected group-wide — the same two
-   * blows as other shutdown paths (SIGTERM, then SIGKILL for anything left after the grace period,
-   * via kill-tree's `stopGroup`). Previously there was only one blow, SIGTERM, and a helper that
-   * ignored it was left orphaned under launchd. While anyone remains in a group, its pgid is not
-   * reused, so this never reaches into someone else's group.
-   *
-   * Windows has no groups. Once the app has ended, what it left running is found by parent links
-   * and ended (`collectLeftovers`). That takes a process listing (~0.5 s), so by default it runs
-   * after this returns; `awaitTree` waits for it, for a caller about to move or delete the app's
-   * folder, which Windows refuses while a process has it as its working directory.
-   *
-   * `awaitTree` waits for the app's own exit too, up to `EXIT_WAIT_MS` (#1818): on a loaded machine the exit landed
-   * after the grace and the kill's wait, and the caller deleted a folder the app still held. What it left running is
-   * collected once it has exited, since only then is the window of its leftovers known.
+   * The shutdown rule (S-5, docs/apps/trust-lifecycle-calls.md Stop row; KL10: docs/runtime-lessons/stopping-process-trees.md).
+   * **Stdin and fd 3 are closed together:** stdin alone did not end the app (a Node app's fd 3 socket and the Python SDK's read
+   * thread held it open, measured); with both closed a well-built app ends on its own (Node 11 ms, Python 2-7 ms). If it does not
+   * within the grace period, **its descendants** are ended too. A group we created (detached) is collected group-wide even after
+   * a clean exit: SIGTERM, then SIGKILL (`stopGroup`; a helper that ignores SIGTERM is otherwise orphaned under launchd); a live
+   * group's pgid is not reused, so this never reaches another's group. Windows has no groups: what the app left is found by
+   * parent links and ended (`collectLeftovers`, a process listing of ~0.5 s) once the app has exited, as only then is the window
+   * of its leftovers known. `awaitTree` waits for that, for a caller about to move or delete the app's folder (Windows refuses
+   * while a process has it as its working directory), and for the app's own exit up to `EXIT_WAIT_MS` (#1818): on a loaded
+   * machine the exit can land after both waits.
    */
   stop(graceMs: number, opts: { awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
     // A stop already under way, started by someone who did not wait for the tree: this caller still does

@@ -62,7 +62,7 @@ describe('a secret is masked in a run record however JSON spells it', () => {
   })
 })
 
-// The app's log is masked a line at a time (#838 review): a PEM printed raw went out a line at a time, unmasked
+// The app's log is masked a line at a time: a PEM printed raw goes out a line at a time and would stay unmasked
 describe('a multi-line secret in the app log, masked line by line', () => {
   const pem = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcwggSjAgEAAoIBAQDf\n}\n-----END PRIVATE KEY-----'
   it('masks each line long enough to be the key, one line at a time', () => {
@@ -74,7 +74,7 @@ describe('a multi-line secret in the app log, masked line by line', () => {
     expect(logged[3]).toBe('}')
   })
 
-  // One long line and a short one (#945 review): counting only the long lines took it for a one-line value
+  // One long line and a short one: counting only the long lines would take it for a one-line value
   it('masks the one long line of a value whose other lines are short', () => {
     const value = 'abcdefghijklmnopqrstuvwxyz0123\nend'
     const redact = redactor({ K: value })

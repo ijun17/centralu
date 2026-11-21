@@ -2,32 +2,16 @@ import { readdirSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * The one walk over an app folder (M4 C-4, E-1, E-3) — what is an app's code, and how deep it goes.
- *
- * Every reader of an app folder walks it through here: the folder fingerprint (`fingerprint.ts`,
- * which decides whether a changed folder restarts the app), a version's capture and restore
- * (`versions.ts`), an import's copy and the re-review listing (`imports.ts`), and the template's
- * expansion (`scaffold.ts`). Discovery's watched subfolders (`discovery.ts`) read one level only,
- * with this file's skip rule (`outsideAppCode`), not a walk. They used to walk with their own code, and the depth had drifted: an import copied folders 16 deep while the
- * fingerprint and the versions stopped at 8 — so an edit deep in an imported app never restarted
- * it, and a version never captured nor restored those files. One depth now (`APP_FOLDER_DEPTH`).
- *
- * Two rules for what a walk skips, because the readers want two different things:
- *
- *   `hiddenName` — never moved into an app, never listed as its file: a name starting with a dot
- *   (`.git`, `.env`, and also `.claude/` and `.codex/`, settings a building session reads in the
- *   app folder — an imported bundle carrying a hook there could run it without the person's
- *   confirmation), and `__MACOSX`, what macOS's compressor adds beside an archive's content. An
- *   import's copy and its review walk with this one (`skip`).
- *
- *   `outsideAppCode` — the default: `hiddenName`, plus `node_modules`. What the fingerprint
- *   measures and a version keeps is the app's own code; installed dependencies are not, and walking
- *   them would take tens of thousands of entries every time the fingerprint is measured (inside the
- *   file cap they would also crowd out the app's own files: `node_modules` sorts before
- *   `server.mjs`). An import still copies a `node_modules` it brings, as it always did.
- *
- * A link is never followed: `Dirent` does not follow links, and each reader decides what a link
- * means to it (`link`). Entries are visited in name order, so the same folder always walks the same.
+ * The one walk over an app folder (M4 C-4, E-1, E-3): what is an app's code, and how deep it goes. Every reader of an app
+ * folder walks it through here; discovery's watched subfolders read one level only, with this file's skip rule. One depth
+ * (`APP_FOLDER_DEPTH`) for all: with separate walks an edit deeper than the fingerprint looked, in an imported app, would never
+ * restart it, nor would a version capture or restore those files. Two skip rules: `hiddenName` (never moved into an app or
+ * listed: dot names such as `.git`, `.env`, and `.claude/` and `.codex/`, where an imported bundle's hook could run without the
+ * person's confirmation, and `__MACOSX`, what macOS's compressor adds beside an archive's content) and `outsideAppCode`, the
+ * default (`hiddenName` plus `node_modules`: walking dependencies takes tens of thousands of entries per measurement and, as
+ * `node_modules` sorts before `server.mjs`, would crowd the app's files out of the file cap; an import still copies what it
+ * brings). A link is never followed (`Dirent` does not follow links): each reader decides what a link means to it (`link`).
+ * Entries come in name order, so the same folder always walks the same.
  */
 
 /** How deep folders nest inside an app folder — a folder deeper than this is not walked (`tooDeep`) */

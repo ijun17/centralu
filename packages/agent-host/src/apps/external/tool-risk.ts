@@ -1,31 +1,12 @@
 import type { PermissionPreset } from '@cc/protocol'
 
 /**
- * What an app says about the risk of a tool that changes something, and what the host does with it.
- *
- * `annotations.readOnlyHint: true` already lets a tool run with no card (decision 5). That left every other write,
- * from a note in the app's own data folder to a merge on GitHub, behind a card under `safe` and `normal`, and
- * the app call card asks every time and offers no "always", so a session that worked through an app was asked again
- * for each call. This adds two levels an app can declare in
- * the tool's `_meta`, and the host decides what each is worth. A declaration is a claim, like `readOnlyHint`:
- * it is read from the tool list of an app the person turned on (or trusted with its project), never from a
- * name, and an undeclared tool keeps asking.
- *
- *   `local`    the tool writes only this app's own data on this computer, and can be undone. No card under any
- *              preset, as for a read. Only honoured next to `destructiveHint: false` (the MCP default is true),
- *              so an app that says both "local" and "destructive" asks.
- *   `routine`  an ordinary write the app's own project would do anyway (a comment, a pull request, a merge
- *              that the app's own checks gate). No card under `normal`, **capped by project trust**: only for
- *              the app of the session's own project, which attaches only while the project is trusted. A user-folder
- *              app, an app another project shared and an app the session attached itself keep their cards,
- *              and so does `safe`, whose point is to ask.
- *
- * `centralu/askWhen` narrows a `routine` tool: when any argument it names holds the value named (`{ push: true }`), or is set
- * at all for the value "*" (`{ path: "*" }`), the call asks. `centralu/askUnless` is the other way round: the call asks
- * unless some argument it names holds that value (`{ skipPrePr: "*" }`), for a tool that is routine only in one form.
- * Both name arguments with a plain value (true, false, a string, a number) or "*". A declaration that cannot be read (not an
- * object, empty, a value that is itself an object or a list, which no argument could ever equal) asks too. Codex fixes a
- * tool's approval at thread start, before any arguments exist, so there a tool with either one always asks.
+ * What an app says about the risk of a tool that changes something, and what the host does with it (the levels, `askWhen` and
+ * `askUnless`: docs/apps/attaching.md "Approval (decision 5) and what an app may declare"). A declaration is a claim, like
+ * `readOnlyHint`: it is read from the tool list of an app the person turned on (or trusted with its project), never from a
+ * name, and an undeclared tool keeps asking. `routine` is **capped by project trust**: only the app of the session's own
+ * project, which attaches only while the project is trusted, has it honoured. A declaration that cannot be read (not an object,
+ * empty, a value that is itself an object or a list, which no argument could ever equal) asks too.
  */
 export const RISK_META_KEY = 'centralu/risk'
 export const ASK_WHEN_META_KEY = 'centralu/askWhen'
