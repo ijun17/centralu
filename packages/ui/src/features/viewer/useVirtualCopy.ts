@@ -39,10 +39,11 @@ export function useVirtualCopy({
   ready: boolean
 }): { onKeyDown: (e: KeyboardEvent<HTMLElement>) => void; onScroll: () => void } {
   const whole = useRef(false)
-  /** The last readable anchor of the current selection (see `selectedText`) */
-  const anchor = useRef<Caret | null>(null)
-  /** The DOM node `anchor` was read from: once recycling disconnects it, where the browser puts the anchor is no choice */
-  const anchorNode = useRef<Node | null>(null)
+  /**
+   * The last readable anchor of the current selection (see `selectedText`), and the DOM node it was read from: once
+   * recycling disconnects that node, where the browser puts the anchor is no choice
+   */
+  const anchor = useRef<{ caret: Caret; node: Node } | null>(null)
   const focusedFor = useRef<string | null>(null)
   const latest = useRef({ lines, wholeText })
   latest.current = { lines, wholeText }
@@ -50,7 +51,6 @@ export function useVirtualCopy({
   useEffect(() => {
     whole.current = false
     anchor.current = null
-    anchorNode.current = null
   }, [resetKey, contentKey])
 
   useEffect(() => {
@@ -79,15 +79,12 @@ export function useVirtualCopy({
       if (!sel || !root || !sel.anchorNode) return
       if (!root.contains(sel.anchorNode)) {
         // A collapsed caret outside the pane begins a new selection; a drag walked out is not collapsed and keeps its anchor
-        if (sel.isCollapsed) [anchor.current, anchorNode.current] = [null, null]
+        if (sel.isCollapsed) anchor.current = null
         return
       }
-      if (anchorMoved(sel, anchorNode.current)) return
+      if (anchorMoved(sel, anchor.current)) return
       const caret = caretAt(sel.anchorNode, sel.anchorOffset)
-      if (caret || sel.isCollapsed) {
-        anchor.current = caret
-        anchorNode.current = caret ? sel.anchorNode : null
-      }
+      if (caret || sel.isCollapsed) anchor.current = caret && { caret, node: sel.anchorNode }
     }
     document.addEventListener('selectionchange', onSelectionChange)
     return () => document.removeEventListener('selectionchange', onSelectionChange)
@@ -107,23 +104,17 @@ export function useVirtualCopy({
       const payload =
         whole.current && all !== null && claimStands(sel, rowsRef.current)
           ? all
-          : selectedText({
-              selection: sel,
-              root,
-              lines: current,
-              lastAnchor: anchor.current,
-              anchorMoved: anchorMoved(sel, anchorNode.current),
-            })
+          : selectedText({ selection: sel, root, lines: current, lastAnchor: anchor.current?.caret ?? null, anchorMoved: anchorMoved(sel, anchor.current) })
       if (payload === null) return
       e.preventDefault()
       e.clipboardData?.setData('text/plain', payload)
     }
     // Any click starts a new selection, so ⌘A's claim on the clipboard ends there. A press on the rows also forgets the
-    // old anchor's row (a double click can land its word before a collapsed caret is reported); one on the scrollbar or
-    // a button keeps the drag's selection, and Shift-click extends it
+    // old anchor (a double click can land its word before a collapsed caret is reported); one on the scrollbar or a
+    // button keeps the drag's selection, and Shift-click extends it
     const onMouseDown = (e: MouseEvent) => {
       whole.current = false
-      if (!e.shiftKey && e.target instanceof Node && rowsRef.current?.contains(e.target)) anchorNode.current = null
+      if (!e.shiftKey && e.target instanceof Node && rowsRef.current?.contains(e.target)) anchor.current = null
     }
     // So does extending a selection by keyboard (Shift with an arrow, Home, End or a page key)
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -167,8 +158,8 @@ export function useVirtualCopy({
 }
 
 /** A drag still going on whose anchor's row was recycled: wherever the browser put the anchor since, it did not start there */
-function anchorMoved(sel: Selection | null, remembered: Node | null): boolean {
-  return !!sel && !sel.isCollapsed && remembered !== null && !remembered.isConnected
+function anchorMoved(sel: Selection | null, remembered: { node: Node } | null): boolean {
+  return !!sel && !sel.isCollapsed && !!remembered && !remembered.node.isConnected
 }
 
 /**

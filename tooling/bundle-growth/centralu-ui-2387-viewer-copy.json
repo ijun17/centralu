@@ -1,0 +1,4 @@
+{
+  "bytes": 300,
+  "reason": "Copy from where a drag began after its row is recycled (#2387): Windows Chromium moves a recycled anchor onto the first mounted row, so the copy remembers the anchor's node with its caret and keeps that caret while the node is gone. Measured locally at 1,963,178 B against its merge base's 1,962,907 B, +271 B, after folding the node into the caret's ref; plain hook code with no dependency."
+}
