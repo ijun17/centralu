@@ -226,6 +226,12 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     await eventually(() => machine.store.mailbox.recipient(id, at(hub, 'h1'))?.releasedAt != null)
     expect(machine.store.mailbox.releasedUntold(at(machine, 'c1'))).toEqual([])
     expect(hub.store.mailbox.recipients(hub.store.mailbox.feedOf(at(hub, 'm1.c1'), { limit: 10 })[0]?.id ?? '').map((r) => r.deliveredAt !== null)).toEqual([true])
+    // It names the parent by the id the child's tools print for it, and read back as that session (gone)
+    const notice = machine.store.mailbox.feedOf(at(machine, 'c1'), { limit: 10 }).find((m) => m.sender === 'centralu')!
+    expect(notice.body).toContain(`${id} to hub-mac.h1: that session is gone.`)
+    expect((await tool(machine, 'c1', { action: 'send', to: 'hub-mac.h1', text: 'still there?' })).text).toBe(
+      'Refused (gone): hub-mac.h1 is gone from Hub mac: it is in the session archive there or deleted, so nothing was written.',
+    )
   })
 
   it('a session gone from its computer is refused by the id the sender used, and the computer it was on', async () => {

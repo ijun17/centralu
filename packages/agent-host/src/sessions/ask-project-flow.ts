@@ -16,12 +16,12 @@ import { unfinished } from '../mail/delegation.js'
 
 /**
  * The hubs that let this host's sessions ask their projects (#550, the reverse direction; `LinkedHubs` in
- * links/linked-hubs.ts): each hub's projects, their ids qualified by the hub's, and one ask into one of them
+ * links/linked-hubs.ts): each hub's projects, their ids under the hub's label, and one ask into one of them
  */
 export type HubsReader = {
   projects(): Promise<{
-    projects: { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string }[]
-    away: { hubId: string; hub: string; why: string }[]
+    projects: { id: string; projectId: string; name: string; hub: string; hubId: string; label: string; away?: string }[]
+    away: { hubId: string; hub: string; label: string; why: string }[]
   }>
   ask(hubId: string, params: HubAskParams, signal?: AbortSignal): Promise<HubAskResult>
 }
@@ -135,30 +135,33 @@ export class AskProjectFlow {
     const askableOf = (): AskableProject[] => [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
-      ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.hubId })),
+      ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.label })),
     ]
-    let found = matchProjects(wanted, askableOf())
+    // An older build printed a hub's projects under the hub's id (`<hub id>.<id>`, `<hub id>/<name>`): read under its label
+    const older = fromHubs.projects.find((p) => wanted.startsWith(`${p.hubId}.`) || wanted.startsWith(`${p.hubId}/`))
+    const sought = older ? `${older.label}${wanted.slice(older.hubId.length)}` : wanted
+    let found = matchProjects(sought, askableOf())
     // Nowhere (#1547): the mirror of a machine that is down may lack a project made since, so those are tried now, once, bounded
     if (!found.length && reader && !exactHere) {
       there = await reader.projects({ ref: wanted, anyDown: true, prior: there })
-      found = matchProjects(wanted, askableOf())
+      found = matchProjects(sought, askableOf())
     }
-    const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]
+    const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.label, machine: a.hub, why: a.why }))]
     const elsewhere = !!reader || fromHubs.projects.length > 0 || fromHubs.away.length > 0
     if (found.length > 1) {
       return fail(`More than one project is called "${wanted}": ${found.map(projectChoice).join('; ')}. Ask again with the id of the one you mean, or machine/name for a project on a linked machine.`)
     }
     if (!found[0]) {
-      const slash = wanted.indexOf('/')
-      const prefix = slash > 0 ? wanted.slice(0, slash).trim().toLowerCase() : null
-      const down = awayAll.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
+      const slash = sought.indexOf('/')
+      const prefix = slash > 0 ? sought.slice(0, slash).trim().toLowerCase() : null
+      const down = awayAll.find((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || sought.startsWith(`${a.machineId}.`))
       if (down) return fail(awayRefusal(down.machine, down.why, `"${wanted}" cannot be asked there`))
       const others = [
         ...projects.filter((p) => p.id !== caller.projectId).map((p) => (elsewhere ? `${p.name} (this computer)` : p.name)),
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
         ...fromHubs.projects.map((p) => `${p.name} (on ${p.hub}${p.away ? `, ${p.away}` : ''})`),
       ]
-      const missing = awayFor(wanted, awayAll, [...there.machines.map((m) => m.machineId), ...fromHubs.projects.map((p) => p.hubId)])
+      const missing = awayFor(sought, awayAll, [...there.machines.map((m) => m.machineId), ...fromHubs.projects.map((p) => p.label)])
       const unasked = missing.length ? ` Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
       return fail(others.length
         ? `No project named "${wanted}". The other projects are: ${others.join(', ')}.${unasked}`
@@ -357,17 +360,19 @@ export class AskProjectFlow {
   private async askHubProject(
     callerId: string,
     callerProject: string,
-    target: { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string },
+    target: { id: string; projectId: string; name: string; hub: string; hubId: string; label: string; away?: string },
     hubs: HubsReader,
     opts: { session?: string; task?: string },
     signal?: AbortSignal,
   ): Promise<AskProjectResult> {
     const label = `${target.name} on ${target.hub}`
-    const project = `${target.hubId}/${target.name}`
+    const project = `${target.label}/${target.name}`
     if (target.away) return { ok: false, error: awayRefusal(target.hub, target.away, `${label} cannot be asked`) }
-    const prefix = `${target.hubId}.`
-    const session = opts.session?.trim()
-    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(prefix) && (!session || a.sessionId === session || a.sessionId === `${prefix}${session}`))
+    const prefix = `${target.label}.`
+    // Its session by its id there, or as this host prints it (an older build printed the hub's id in front)
+    const given = opts.session?.trim()
+    const session = [prefix, `${target.hubId}.`].reduce((id, p) => (id?.startsWith(p) ? id.slice(p.length) : id), given)
+    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(prefix) && (!session || a.sessionId === `${prefix}${session}`))
     const [k] = kept
     if (k && kept.length === 1) {
       return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: sessionAddress(target.hubId, k.sessionId.slice(prefix.length)), sessionName: k.name, project }, null, signal)
@@ -377,7 +382,7 @@ export class AskProjectFlow {
       {
         caller: { sessionId: callerId, name: labelOf(this.host.store.messages, this.host.meta.get(callerId)!), project: callerProject },
         project: target.projectId,
-        ...(session ? { session: session.startsWith(prefix) ? session.slice(prefix.length) : session } : {}),
+        ...(session ? { session } : {}),
         ...(opts.task ? { task: opts.task } : {}),
         // The hub counts its session one level below this caller while it works on the task (#867, #838)
         depth: depthOf(this.host, callerId) + 1,

@@ -8,13 +8,14 @@ const HOST = 'hub-0000000a'
 const here = (id: string, name: string): HereSession => ({ id, name, project: null, state: 'idle' })
 const entry = (address: string, name: string): FoundEntry => ({ address, name, project: null, machine: 'Remote box', role: 'session', state: 'idle', busy: false, at: 1 })
 
-function refs(o: { sessions?: HereSession[]; machines?: string[]; hubs?: { id: string; label: string; name: string; you?: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
+function refs(o: { hostId?: string; sessions?: HereSession[]; machines?: string[]; label?: string; hubs?: { id: string; label: string; name: string; you?: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
   const computers: RefComputers = {
     machine: (id) => (o.machines ?? []).includes(id),
+    label: () => o.label ?? null,
     hubs: () => (o.hubs ?? []).map((h) => ({ you: null, ...h })),
     mirrored: (name) => (o.mirror ?? []).filter((e) => e.name === name),
   }
-  return new SessionRefs({ hostId: HOST, sessions: () => o.sessions ?? [here('a', 'alpha'), here('b', 'beta')], assistantId: () => o.assistant ?? null, computers: () => computers })
+  return new SessionRefs({ hostId: o.hostId ?? HOST, sessions: () => o.sessions ?? [here('a', 'alpha'), here('b', 'beta')], assistantId: () => o.assistant ?? null, computers: () => computers })
 }
 
 const refusal = (fn: () => unknown): string => {
@@ -139,5 +140,52 @@ describe('the id a tool prints for an address', () => {
     const other = refs({ hubs: [{ id: 'hub-0000000c', label: 'desk', name: 'Desk', you: 'm1' }] })
     expect(other.shown('session:hub-0000000b/m2.w1')).toBe('hub-0000000b.m2.w1')
     expect(other.ref('a', 'hub-0000000b.m2.w1')).toEqual({ address: 'session:hub-0000000c/hub-0000000b.m2.w1' })
+  })
+})
+
+describe('every id printed reads back as the session it names (`shown`, then `ref`)', () => {
+  // A hub (HOST, machines m1 and m2, labelled studio on them) and its machine m1 (host M)
+  const M = 'hub-0000000d'
+  const studio = { id: HOST, label: 'studio', name: 'Studio', you: 'm1' }
+  const hub = refs({ machines: ['m1', 'm2'], label: 'studio' })
+  const machine = refs({ hostId: M, hubs: [studio] })
+
+  it("written on a machine for a hub's session: in the hub's terms, which the hub reads back", () => {
+    const reader = `session:${HOST}/h1`
+    expect([`session:${M}/w1`, `session:${HOST}/b`, `session:${HOST}/m2.x`].map((a) => hub.ref('a', machine.shown(a, reader)))).toEqual([
+      { address: `session:${HOST}/m1.w1` },
+      { word: 'b', here: [here('b', 'beta')] },
+      { address: `session:${HOST}/m2.x` },
+    ])
+  })
+
+  it("written on a hub for a machine's session: in that machine's terms, read back whether one hub links it or several", () => {
+    const reader = `session:${HOST}/m1.c1`
+    const printed = [`session:${HOST}/h1`, `session:${HOST}/m1.b`, `session:${HOST}/m2.x`].map((a) => hub.shown(a, reader))
+    expect(printed).toEqual(['studio.h1', 'b', 'studio.m2.x'])
+    const twoHubs = refs({ hostId: M, hubs: [studio, { id: 'hub-0000000c', label: 'desk', name: 'Desk', you: 'm1' }] })
+    for (const r of [machine, twoHubs]) {
+      expect(printed.map((p) => r.ref('a', p))).toEqual([{ address: `session:${HOST}/h1` }, { word: 'b', here: [here('b', 'beta')] }, { address: `session:${HOST}/m2.x` }])
+    }
+  })
+
+  it('on a host that is a machine of one hub and a hub of its own machines: no id names the other side of either', () => {
+    // Its machine `studio` takes that label, so the hub goes by studio-2 here (`labelHere`); its machine m2 shares an id with the hub's other one
+    const both = refs({ hostId: M, machines: ['studio', 'm2'], label: 'desk', hubs: [{ ...studio, label: 'studio-2' }] })
+    const addresses = [`session:${HOST}/h1`, `session:${HOST}/m2.x`, `session:${M}/m2.y`, `session:${M}/b`]
+    expect(addresses.map((a) => both.shown(a))).toEqual(['studio-2.h1', 'studio-2.m2.x', 'm2.y', 'b'])
+    expect(addresses.slice(0, 3).map((a) => both.ref('a', both.shown(a)))).toEqual(addresses.slice(0, 3).map((address) => ({ address })))
+    // The hub's own text names its session under the label it offers: read here as this host's machine studio, where no such session is
+    expect(both.ref('a', 'studio.h1')).toEqual({ address: `session:${M}/studio.h1` })
+  })
+
+  it('reads the hub-id forms older builds printed as that hub', () => {
+    expect([`${HOST}.h1`, `${HOST}.m2.x`].map((t) => machine.ref('a', t))).toEqual([{ address: `session:${HOST}/h1` }, { address: `session:${HOST}/m2.x` }])
+  })
+
+  it("finds a linked machine's session whose name is shaped like an address by that name, as one here", () => {
+    const r = refs({ machines: ['m1'], mirror: [entry(`session:${HOST}/m1.w9`, 'session: x')] })
+    expect(r.ref('a', 'session: x')).toEqual({ word: 'session: x', here: [] })
+    expect(r.sessionId({ id: 'a', askedBy: null }, 'session: x')).toEqual({ ok: true, id: 'm1.w9' })
   })
 })
