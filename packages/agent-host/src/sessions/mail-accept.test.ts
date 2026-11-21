@@ -103,11 +103,14 @@ describe('handing a wake to a tool that tracks its inputs', () => {
     for (const state of ['idle', 'working']) {
       const w = world({ sendTracked: () => new Promise(() => {}) }, state)
       let settled = false
-      const delivery = w.sessionEvents.deliverMail('s1', input).then(() => (settled = true))
+      const taken = vi.fn()
+      const delivery = w.sessionEvents.deliverMail('s1', { ...input, taken }).then(() => (settled = true))
       await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS - 1_000)
       expect(settled).toBe(false)
+      expect(taken).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(2_000)
       await delivery
+      expect(taken).toHaveBeenCalledTimes(1)
       expect(w.events).toHaveLength(1)
       // Only a turn of the tool's own while it waited says none will run it (links/own-turn-report.test.ts)
       expect(w.stops).toEqual([])
