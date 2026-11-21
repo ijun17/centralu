@@ -159,6 +159,72 @@ test("the conversation's scrollbar is drawn over its content, and the native one
 })
 
 /**
+ * The conversation column (design-system §7, #2408): past `--container-conversation` the rows and the composer stop at
+ * that width, centred in the pane, while the scroller keeps the pane's width; a code block wider still scrolls inside
+ * its bubble. A pane narrower than the column keeps 16px a side.
+ */
+test('past its width the conversation column stops and is centred, the composer on it; narrower, 16px a side (#2408)', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 900 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'a wide one')
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: `Here:\n\n\`\`\`\n${'wide '.repeat(120)}\n\`\`\`` })
+  await expect(page.locator('[data-bubble] pre')).toBeVisible()
+  const measure = () =>
+    page.evaluate(() => {
+      const edges = (sel: string) => {
+        const r = document.querySelector(sel)!.getBoundingClientRect()
+        return { left: r.left, right: r.right }
+      }
+      const root = getComputedStyle(document.documentElement)
+      const pre = document.querySelector<HTMLElement>('[data-bubble] pre')!
+      return {
+        column: parseFloat(root.getPropertyValue('--container-conversation')) * parseFloat(root.fontSize),
+        pane: edges('[data-testid=session-view]'),
+        scroller: edges('[data-testid=chat-stream]'),
+        bubble: edges('[data-bubble]'),
+        card: edges('[data-composer-card]'),
+        pre: { ...edges('[data-bubble] pre'), scrolls: pre.scrollWidth > pre.clientWidth },
+      }
+    })
+
+  const wide = await measure()
+  expect(wide.column).toBeGreaterThan(0)
+  expect(wide.pane.right - wide.pane.left).toBeGreaterThan(wide.column + 200)
+  expect(wide.scroller).toEqual(wide.pane)
+  for (const part of [wide.bubble, wide.card]) {
+    expect(part.right - part.left).toBeCloseTo(wide.column, 0)
+    expect(part.left - wide.pane.left).toBeCloseTo(wide.pane.right - part.right, 0)
+  }
+  expect(wide.pre.right).toBeLessThanOrEqual(wide.bubble.right)
+  expect(wide.pre.scrolls).toBe(true)
+
+  // A note under the rows (here why the turn stopped) keeps its words on the column, its line the pane's width
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await emitEvent(page, 0, { type: 'error', error: { code: 'internal', message: 'boom', retryable: true } })
+  const note = page.getByTestId('stop-note')
+  await expect(note).toBeVisible()
+  const words = await note.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const s = getComputedStyle(el)
+    return { box: r.right - r.left, left: r.left + parseFloat(s.paddingLeft), right: r.right - parseFloat(s.paddingRight) }
+  })
+  expect(words.box).toBeCloseTo(wide.pane.right - wide.pane.left, 0)
+  expect(words.left).toBeCloseTo(wide.bubble.left, 0)
+  expect(words.right).toBeCloseTo(wide.bubble.right, 0)
+
+  await page.setViewportSize({ width: 700, height: 900 })
+  await expect.poll(async () => {
+    const { bubble, pane } = await measure()
+    return bubble.left - pane.left
+  }).toBeCloseTo(16, 0)
+  const narrow = await measure()
+  for (const part of [narrow.bubble, narrow.card]) {
+    expect(part.left - narrow.pane.left).toBeCloseTo(16, 0)
+    expect(narrow.pane.right - part.right).toBeCloseTo(16, 0)
+  }
+})
+
+/**
  * A heading that opens a piece of the answer bubble keeps its top margin inside the bubble (#1706). The piece has no
  * top padding of its own once it runs on from the one above (`mid`, `last`), so the heading's margin used to collapse
  * through the piece and out of it: the bubble's fill started at the heading's top edge and a hole of the page's
