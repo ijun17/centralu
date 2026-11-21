@@ -35,7 +35,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const read = useLoad(() => platform.apps.versions(app.appId, app.projectId, machine), [platform, app.appId, app.projectId, machine], [app.info.codeStamp])
   const versions: AppVersions | null = read.data ?? null
   const error = restoreError ?? read.error
-  // A list read again after a failed restore clears that failure, as it did before useLoad
+  // A list read again after a failed restore clears that failure
   useEffect(() => setRestoreError(null), [read.data])
 
   /*

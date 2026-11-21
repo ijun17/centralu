@@ -50,7 +50,7 @@ export type AutocompleteKeyAction = 'down' | 'up' | 'close' | 'pick'
 
 /**
  * The list's keys: the arrows move, Esc closes, Enter and Tab pick. **Shift+Tab is not a pick** (#842 item 12): it is
- * the key that moves focus back, and taking it inserted a suggestion the person was leaving, and kept them in the box.
+ * the key that moves focus back, and taking it would insert a suggestion the person is leaving, and keep them in the box.
  * Shift+Enter breaks the line, as it does with the list closed.
  */
 export function autocompleteKeyAction(e: Pick<KeyboardEvent, 'key' | 'shiftKey'>): AutocompleteKeyAction | null {

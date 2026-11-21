@@ -7,9 +7,9 @@ import { ROW_PAD } from '../layout.js'
  *
  * **No modal is shown.** A name only gets its meaning by being chosen among the other names — if
  * a dialog covers the screen, the person ends up naming it without being able to see what it might
- * be confused with. This was the problem where auto-generated names, since they truncate the first
- * prompt, produced four rows all reading `This session is being continued…` in a row, so the other
- * four rows have to stay visible while one is being edited.
+ * be confused with. Auto-generated names truncate the first prompt, so several rows in a row can
+ * all read `This session is being continued…`, and the other rows have to stay visible while one
+ * is being edited.
  *
  * An empty name is **treated as a cancel.** If a slip of deleting the text and clicking away
  * produced a nameless row, that row could no longer point at anything in the list.
@@ -45,8 +45,8 @@ export function SessionNameInput({
       onChange={(e) => setText(e.target.value)}
       /*
         An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append
-        instead). Only on the first focus: the focus the window gives back after ⌘Tab selected the half-typed name again,
-        and the next key replaced it.
+        instead). Only on the first focus: the focus the window gives back after ⌘Tab would select the half-typed name
+        again, and the next key would replace it.
       */
       onFocus={(e) => {
         if (selected.current) return
@@ -62,8 +62,8 @@ export function SessionNameInput({
       }}
       /*
         Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button. Not when the window
-        itself lost focus (⌘Tab to look something up, #842 item 14): the field blurs then too, and the half-typed name was
-        saved. The edit stays open until the window is back: the browser usually gives the field focus back with it, and
+        itself lost focus (⌘Tab to look something up, #842 item 14): the field blurs then too, and saving would keep a
+        half-typed name. The edit stays open until the window is back: the browser usually gives the field focus back with it, and
         if it does not, the name is saved then, so the edit is never left open with nothing to end it.
       */
       onBlur={(e) => {

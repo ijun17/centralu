@@ -7,7 +7,7 @@ import { dropsLeft, moveTo } from '../sidebar/reorder.js'
  * panel. `place` is the ref callback of the panel with that id.
  */
 function usePanelCards() {
-  /** Reference used to lift the **whole panel**, not just the header, while dragging */
+  /** Reference that lifts the **whole panel**, not just the header, while dragging */
   const cards = useRef(new Map<string, HTMLDivElement>())
   /** Conversation scroll positions, taken right before a reorder — see the layout effect below */
   const scrolls = useRef(new Map<string, number>())
@@ -65,9 +65,9 @@ function usePanelCards() {
     /** Call before any state change that can reorder the panels */
     snapshotScroll,
     /**
-     * Makes the drag carry the whole panel: the draggable element is the header, so the browser
-     * picked up only the header and carried it around — the panel stayed put and only a thin strip
-     * followed the pointer, so nobody could tell what was actually being moved (dogfooding).
+     * Makes the drag carry the whole panel: the draggable element is the header, so on its own the
+     * browser picks up only the header — the panel stays put and only a thin strip follows the
+     * pointer, so nobody can tell what is actually being moved.
      */
     liftPanel,
   }
@@ -80,15 +80,14 @@ function usePanelCards() {
 export function panelClass(dragged: boolean): string {
   /*
     The panel's border is brighter than any line inside the panel (user's
-    observation, 2026-09-11). Before, the panel was `line` and the folded input card
-    was `line-strong`, so **what was inside was brighter than the vessel holding it**,
-    and the eye went to the card's curve before the panel's boundary. The two are
-    swapped — the panel goes up to `line-strong` and the card goes down to `line`.
+    observation, 2026-09-11): the panel is `line-strong` and the folded input card `line`.
+    The other way round, **what is inside is brighter than the vessel holding it**, and
+    the eye goes to the card's curve before the panel's boundary.
 
     isolate: the panel contains its own stacking layer.
     The spinning border sits at z-30, because it has to be above the folded composer
     (z-20) inside the panel. But without the panel forming a stacking context, that
-    30 leaked outside the panel, and the border was drawn over the file/git overlay
+    30 leaks outside the panel, and the border is drawn over the file/git overlay
     (z-20) (user's observation). Raising the overlay's number to win would also work,
     but then whoever next picks a number starts the same race over again. For
     "highest within the panel" to actually be true, the panel has to be a fence —

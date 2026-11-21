@@ -4,20 +4,18 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * The button that opens frequently used commands (issue #44, expanded into a window in #60).
+ * The button that opens frequently used commands (issue #44; the window, #60).
  *
- * The reason the open state is held by the pane is unchanged: in the grid, this header is the
- * handle (`draggable`) used to move the pane, so dragging must be disabled while the window is
- * open.
+ * The open state is held by the pane: in the grid, this header is the handle (`draggable`)
+ * that moves the pane, so dragging must be disabled while the window is open.
  *
- * Listing, registering, running and logs have all moved to CommandRunnerOverlay — the small
- * popover in the header had no room to show logs (#60). All that is left here is the button
- * that opens it.
+ * Listing, registering, running and logs are CommandRunnerOverlay's — a small popover in the
+ * header has no room to show logs (#60). Here is only the button that opens it.
  *
- * However, **the icon lights up white while something is running** (requested by a user on
- * 2026-09-07). Closing the window used to make the fact that something was running disappear
- * from this header — this reads the same record the terminal tab and the collapsed strip's
- * dot read, so the door doubles as an indicator light.
+ * However, **the icon lights up white while something is running**, so closing the window does
+ * not make the fact that something is running disappear from this header — this reads the same
+ * record the terminal tab and the collapsed strip's dot read, so the door doubles as an
+ * indicator light.
  */
 export function RunMenu({
   projectId,

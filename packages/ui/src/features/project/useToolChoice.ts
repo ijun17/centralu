@@ -25,7 +25,7 @@ import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
  *
  * A detection that fails is not an answer (#850 item 8): `tools` stays null, so no tool is called missing and nothing is
  * blocked (the host still refuses a start with a tool it cannot run), and `detectError` says why, for the dialog to show
- * with a retry. It used to read as an empty list: every tool "not installed", and the dialog's create button disabled.
+ * with a retry. Read as an empty list, it would call every tool "not installed" and disable the dialog's create button.
  *
  * A tool that declared it cannot keep what this start asks (`demands`: an untrusted project, role text, a preset) is
  * not usable either, and `refusal` says why in the host's own words (`launchRefusal`, the rule the host refuses the

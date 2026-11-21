@@ -186,27 +186,23 @@ function SessionListRowView({
               Background work still running (#290) is the dot on the tool mark above, not a chip of its own (owner, 2026-11-05).
             */}
             {/*
-              An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
-
-              It was stating the same fact for a third time on this row: the tool mark's
-              border already states the state (an ink-muted ring when a turn ends), and the
-              name's brightness already states unread (the text-ink above). Since all
-              three lit up together when a turn ended while the person was away, the dot
-              added no information, only the question "what is that now" — and that
-              question was actually asked. The determination logic (lastReadSeq, markRead)
-              is unchanged.
+              **No unread dot** here: it would state the same fact for a third time on this
+              row. The tool mark's border already states the state (an ink-muted ring when
+              a turn ends), and the name's brightness already states unread (the text-ink
+              above). All three would light up together when a turn ends while the person
+              is away, so a dot adds no information, only the question "what is that now".
             */}
           </button>
           {/*
-            One menu instead of four icons (pencil, handoff, worktree, delete) — a
-            dogfooding request, the same grammar as the project row. With four icons it
-            turned into an unlabeled game of matching pictures, and two of them (handoff,
-            delete) were the kind that must not be pressed by mistake.
+            One menu instead of four icons (pencil, handoff, worktree, delete), the same
+            grammar as the project row. Four icons make an unlabeled game of matching
+            pictures, and two of them (handoff, delete) are the kind that must not be
+            pressed by mistake.
           */}
           {/*
             The right padding has to match the project header's px-3 — the two are
-            buttons standing in the same vertical column in the sidebar, and leaving them
-            at 4px and 12px stood out immediately to the eye (a dogfooding finding).
+            buttons standing in the same vertical column in the sidebar, and 4px against
+            12px stands out immediately to the eye.
             Fixing only one side would put them out of alignment again, so the value is
             kept matched.
           */}

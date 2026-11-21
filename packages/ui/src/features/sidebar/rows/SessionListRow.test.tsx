@@ -81,7 +81,7 @@ describe('SessionListRow', () => {
     expect(render(session(), false)).not.toMatch(/handed-off-| on Windows PC/)
   })
 
-  // Owner, 2026-11-05: auto is the default now, so the preset of a session a linked computer started is noise on the row (the header still says it)
+  // Owner, 2026-11-05: auto is the default, so the preset of a session a linked computer started is noise on the row (the header still says it)
   it('shows no preset tag on the row, whichever preset a linked computer started it under', () => {
     for (const permissionPreset of ['auto', 'normal'] as const) {
       expect(render(session({ permissionPreset, startedFromHub: true }), false)).not.toContain('session-preset-')

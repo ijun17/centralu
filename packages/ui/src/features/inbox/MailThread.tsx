@@ -206,7 +206,7 @@ function Reply({ blocked }: { blocked: boolean }) {
   const sendKey = useSendKey()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
-  // Which question the words answer, once the person has named one (#2191): else the newest, as it was before
+  // Which question the words answer, once the person has named one (#2191): else the newest
   const [chosen, setChosen] = useState<string | null>(null)
   if (!view) return null
   const { questions, target } = answeringTarget(view, chosen)

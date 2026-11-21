@@ -81,13 +81,13 @@ export function ProjectHeader({
     (s) =>
       !!rootApp && s.view === 'app' && !!s.focusedApp && appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === rootApp.key,
   )
-  // A chain its view started waits on the person (M4 D-4): the mark says so, as the app row's "asks you" did
+  // A chain its view started waits on the person (M4 D-4): the mark says so, as an app row's "asks you" does
   const appAsks = useStore((s) => !!rootApp && s.appQuestions.some((q) => q.origin.appId === rootApp.appId && (q.origin.projectId ?? null) === projectId))
   const openRootApp = rootApp ? () => openApp(projectId, rootApp.appId) : undefined
   /*
-   * The counts stand on the name line whether the project is folded or open (owner, 2026-11-05). They were drawn only
-   * folded, on the reasoning that an open project's rows state their own state; but the count is read from the name
-   * line, and it vanished the moment the project opened (or the pointer rested on it and it opened under it).
+   * The counts stand on the name line whether the project is folded or open (owner, 2026-11-05). An open project's rows
+   * state their own state, but the count is read from the name line, and drawn only folded it would vanish the moment
+   * the project opens (or the pointer rests on it and it opens under it).
    */
   const summary = foldSummary(sessions)
   // The summary stays mounted while its last chip fades out, so the line does not jump before the fade ends
@@ -98,8 +98,8 @@ export function ProjectHeader({
       Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions.
 
       When the project screen is open this line is marked the way an open session row is — the ink-muted bar and the
-      surface-hover/40 band — so the name row and a session row say "open" in one grammar. It replaced an underline
-      under the name, which was too faint to find once the group around it was tinted too.
+      surface-hover/40 band — so the name row and a session row say "open" in one grammar. An underline under the
+      name would be too faint to find once the group around it is tinted too.
 
       **The band must not move anything.** A session row is 31.5px tall (py-1.5 around a 13px line); this line
       is only its text. The padding that makes the band a row's height is cancelled by an equal negative margin,
@@ -108,7 +108,7 @@ export function ProjectHeader({
       level below is measured from (INDENT), with the chevron's 28px gutter just before it (#685).
 
       Every item on the line is centred on it, not aligned on the text baseline: an icon button has no baseline of its
-      own, so the `+`, the ⋯ and the arrow each sat a different distance from the name's centre (2 to 3px).
+      own, so the `+`, the ⋯ and the arrow would each sit a different distance from the name's centre (2 to 3px).
     */
     <header
       className={`group -my-1.5 flex items-center gap-2 border-l-2 py-1.5 pl-0.5 pr-3 transition-colors ${
@@ -122,8 +122,8 @@ export function ProjectHeader({
       onDragStart={(e) => {
         e.dataTransfer.setData(PROJECT_MIME, projectId)
         /*
-         * A project that is an app (#1141) is dragged onto the grid or its project screen the way an app row was: its
-         * line is the app's row now. The project list still reads it as a project being reordered
+         * A project that is an app (#1141) is dragged onto the grid or its project screen the way an app row is: its
+         * line is the app's row. The project list still reads it as a project being reordered
          */
         if (rootApp) {
           e.dataTransfer.setData(APP_MIME, rootApp.key)
@@ -185,14 +185,14 @@ export function ProjectHeader({
           </button>
         </Tooltip>
         {project.machine && (
-          // A pixel up from the shared baseline: the room left for descenders sat the box low against the name
+          // A pixel up from the shared baseline: the room left for descenders sits the box low against the name
           <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} className="-translate-y-px" />
         )}
       </span>
       {/*
         This project is an app (#1141): its manifest stands at the root. The mark says so where the name is, and opens
         the app's screen. Dimmed when the app cannot run (not trusted, invalid, failed), with the reason in its label,
-        as an app row's mark was; lit while its screen shows or its view waits on the person.
+        as an app row's mark is; lit while its screen shows or its view waits on the person.
       */}
       {rootApp && openRootApp && (
         <span
@@ -220,9 +220,9 @@ export function ProjectHeader({
       <ProjectMarks project={project} />
       {foldShown && <FoldSummary name={project.name} counts={summary} />}
       {/*
-        Every action on this row sits behind one button, the menu (owner, 2026-10-18). The `+` that started a session
-        on the open project (#529) is gone: it took the line's width, and on a folded project it slid in on hover and
-        pushed the fold's marks aside. The menu's first row starts a session at once, as `+` did.
+        Every action on this row sits behind one button, the menu (owner, 2026-10-18). No `+` for a new session (#529):
+        it would take the line's width, and on a folded project slide in on hover and push the fold's marks aside. The
+        menu's first row starts a session at once.
 
         The menu's button is hidden until hover or focus but keeps its width (opacity only), so nothing on the line
         moves when the pointer arrives. Keyboard focus and a worktree proposal (#69) surface it without hovering.
@@ -238,9 +238,9 @@ export function ProjectHeader({
         data-worktree-proposal={proposalHere || undefined}
       >
         {/*
-          A plain button, not an IconButton — to drop the tooltip (dogfooding, 2026-09-02).
-          Since pressing it opens a named menu right there, a hover tooltip was not an
-          explanation but noise left overlapping the open menu. The screen-reader name stays.
+          A plain button, not an IconButton, so it has no tooltip. Pressing it opens a named
+          menu right there, so a hover tooltip would be not an explanation but noise left
+          overlapping the open menu. The screen-reader name stays.
         */}
         <button
           type="button"

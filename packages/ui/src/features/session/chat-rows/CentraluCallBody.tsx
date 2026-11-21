@@ -8,7 +8,7 @@ const CLOSED_ROWS = 3
 type Row = Record<string, unknown>
 
 /**
- * What a call to Centralu's own tools answered, drawn for a person (owner, 2026-10-18: it was raw JSON).
+ * What a call to Centralu's own tools answered, drawn for a person, not as raw JSON (owner, 2026-10-18).
  *
  * The answer's shape decides the drawing, not the tool's name, so a tool that changes its words keeps working:
  *  - one JSON object per line with a `role` (read_session's transcript): a small conversation, who said what;

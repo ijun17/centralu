@@ -7,17 +7,15 @@ import { usePresence } from '../../../components/presence.js'
 
 /**
  * The session mark — tool and state, in one spot. Without the tool, there would be no way to tell
- * apart two sessions with similar titles (this was actually mixed up during dogfooding).
+ * apart two sessions with similar titles.
  *
  * **No official logo is used.** Both companies' marks are trademarks with their own brand
  * guidelines — bundling a logo file into the app and distributing it could run into those rules.
  * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
  * distinguishing things by shape in grayscale.
  *
- * The ring and the fill are the state, in four looks (`lookOf`, #736; the lines are in styles/index.css
- * under `.cc-mark`): a thin grey line at rest, a thick white line while it answers, the same line dashed
- * on grey when the turn broke off, and solid on grey when the person has to act. Nothing moves. The
- * chip's own 1px border is the same in all four, and the exact state is in the tooltip.
+ * The chip's own border and fill are the state, in four looks (`lookOf`, #736): docs/themes.md "The urgency order"
+ * lists them, and styles/index.css draws them under `.cc-mark`. Nothing moves, and the exact state is in the tooltip.
  *
  * Background work (#290) is a dot on the mark's bottom-right corner, not a chip of its own (owner, 2026-11-05): it
  * takes no width on the row. The dot is faint on purpose: brightness is this app's urgency signal and the ring states

@@ -12,7 +12,7 @@ import { Tooltip } from './primitives.jsx'
  * information).
  *
  * Why icon buttons are gathered into one component: building them one at a time leaves some with
- * a tooltip and some without. That actually happened.
+ * a tooltip and some without.
  */
 export function IconButton({
   label,

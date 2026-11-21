@@ -4,19 +4,17 @@ import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
  * Where a popover that hangs under a button goes, so that all of it is inside the window.
  *
  * Why this exists: a popover drawn as an `absolute` child of its button is clipped by the first ancestor with an
- * overflow, and a grid panel is `overflow-hidden` (it has to be — its rounded corners and its border). The
- * background-task list hung off the session header that way and lost its right side, Stop included, in any panel
- * narrower than the list (0.1.0-beta.9, the owner's screenshot). The popover is therefore rendered into
- * `document.body` and placed `fixed`, which leaves no box to clip it — the same reason the tooltip and the sidebar's
- * row menu are fixed.
+ * overflow, and a grid panel is `overflow-hidden` (it has to be — its rounded corners and its border). A list hung
+ * that way off the session header loses its right side, Stop included, in any panel narrower than the list. The
+ * popover is therefore rendered into `document.body` and placed `fixed`, which leaves no box to clip it — the same
+ * reason the tooltip and the sidebar's row menu are fixed.
  *
  * All numbers are layout pixels: the caller divides the anchor's screen rect and the window by the zoom
  * (`--text-zoom`) first. A rect is in screen pixels, already multiplied by the zoom, while the `top`/`left` set on a
- * fixed popover are lengths inside the zoomed root, so the zoom is multiplied in a second time when it is drawn. Mixed as
- * they were, the sidebar's menu sat 24px below and 103px left of its button at zoom 1.1 (54px/249px at 1.25, measured:
- * the dogfooding report "the menu position looks wrong"), and the e2e tests missed it because they only measured at
- * zoom 1.0. The window size has no notion of zoom and `offsetHeight` is already raw layout pixels: only the rect and the
- * window are divided, so everything lands in one coordinate system.
+ * fixed popover are lengths inside the zoomed root, so the zoom is multiplied in a second time when it is drawn. Mixed,
+ * the sidebar's menu sits 24px below and 103px left of its button at zoom 1.1 (54px/249px at 1.25, measured), and a
+ * test at zoom 1.0 cannot see it. The window size has no notion of zoom and `offsetHeight` is already raw layout pixels:
+ * only the rect and the window are divided, so everything lands in one coordinate system.
  */
 
 /** Between the button and the popover — flush, it is unclear where the button ends */

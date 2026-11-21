@@ -13,8 +13,8 @@ import { PastConversations } from './PastConversations.jsx'
  * What a new session's empty screen offers before its first message: which tool runs it, and the project's past
  * conversations of that tool to continue instead.
  *
- * The `+` starts a session at once with the tool the project remembers, so the choice of tool moved here, where the
- * person already is, instead of a dialog before it. Picking the other tool switches this same session to it: no
+ * The `+` starts a session at once with the tool the project remembers, so the choice of tool sits here, where the
+ * person already is, not in a dialog before it. Picking the other tool switches this same session to it: no
  * second session is made and none is removed.
  */
 export function SessionStart({

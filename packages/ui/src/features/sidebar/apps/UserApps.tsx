@@ -3,13 +3,12 @@ import { NAME_PAD } from '../layout.js'
 import { AppRows } from './AppRows.jsx'
 
 /**
- * User-folder apps still listed (#1141). An app is a project now: a folder with `centralu.app.json` at its root stands
- * in the project list with its project, and the host registers each old user-folder app as a project in place. So the
- * "Your apps" section with its New app and Import buttons is gone (that also settles #732's crowded bottom); New app
+ * User-folder apps still listed (#1141). An app is a project: a folder with `centralu.app.json` at its root stands
+ * in the project list with its project, and the host registers each user-folder app as a project in place. New app
  * stands beside New folder below the list, and Import is in the New app dialog and the command palette.
  *
  * What can still arrive with no project: a linked machine running a build from before #1141 sends its user-folder apps
- * as it always did, and an app this computer's host could not register stays in its user folder. Those stand here,
+ * as user-folder apps, and an app this computer's host could not register stays in its user folder. Those stand here,
  * under a plain title, only while there is one, so none becomes unreachable; with none, nothing is drawn.
  */
 export function UserApps() {

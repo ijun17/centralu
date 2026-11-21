@@ -6,10 +6,9 @@ import { useStore } from '../store/store.js'
 /**
  * How a popover, a menu or a modal goes away: one set of rules, written once (#428).
  *
- * Seven popovers each had their own copy, and the copies had drifted. The sidebar's row menu let its Escape travel on,
- * so the same press also closed the inbox behind it; only the span picker closed when the window lost focus (a click
- * into an app's view never reaches this document as a mousedown, but it takes focus out of it); only it gave focus
- * back to its button.
+ * Copies drift: an Escape that travels on also closes the inbox behind the menu, and a popover that ignores the window
+ * losing focus stays open over a click into an app's view (that click never reaches this document as a mousedown, but
+ * it takes focus out of it).
  *
  * - **Escape** closes the innermost open thing only: the press is claimed (`stopPropagation`), so the inbox, a modal or
  *   a layer under it does not close along with it. Capture phase on the window, so a row below that stops its own
@@ -22,7 +21,7 @@ import { useStore } from '../store/store.js'
  *   a modal or a popover with a backdrop (which covers the view) does not.
  * - **A window opening over the screen** (the palette, the inbox, settings, usage) closes it, unless `closeOverWindow` is
  *   off. Those windows hear Escape on the window after this capture listener has claimed it, so a popover left open
- *   under them took the key and the window on top stayed (⌘K, then Esc, closed the hidden popover). A popover has
+ *   under them would take the key and the window on top would stay (⌘K, then Esc, closing the hidden popover). A popover has
  *   nothing the person can still reach under a window anyway.
  * - **`returnFocusTo`**: Escape gives focus back to the trigger, since the person is on the keyboard. A press outside
  *   or a blur does not: they moved focus on purpose. Only when focus is the popover's or nobody's: a composer the person

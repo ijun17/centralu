@@ -80,7 +80,7 @@ export function useChatScroll({
    * The last scroll position this component is aware of — while following, the highest one
    * seen at the bottom (see `stickAfterScroll`).
    *
-   * The reference used to judge "did the person scroll up" by **a change in position** rather
+   * The reference for judging "did the person scroll up" by **a change in position** rather
    * than a flag: scrollTop stays put even as content grows, but drops when the person scrolls up.
    */
   const lastTop = useRef(0)
@@ -134,11 +134,11 @@ export function useChatScroll({
    * The row currently touching the top of the screen (#61) — updated **on every move, not on
    * leaving**.
    *
-   * Computing it at the moment of leaving was tried and failed: the focus view keeps the
+   * Computing it at the moment of leaving fails: the focus view keeps the
    * component and only swaps `sessionId`, but React runs the cleanup function **after**
    * rendering with the new session. By that point, the conversation and measurements at hand
    * already belong to the next session, leaving nothing to ask about the leaving session's
-   * position (e2e caught this as a 3,959px jump).
+   * position (a 3,959px jump in e2e).
    *
    * So the fact is kept ready ahead of time. Being a ref, it costs no re-render, and since the
    * scroll handler already runs a pass through syncSticky anyway, this only adds one more
@@ -151,8 +151,8 @@ export function useChatScroll({
    *
    * There are two reasons this is kept separate from `stickToBottom`. One is the same as
    * `anchor` above — the element at the moment the cleanup function runs already belongs to the
-   * next session, so it must not be measured there. The other is the reason the original
-   * comment gave for "look at position, not the follow flag": the follow effect's release,
+   * next session, so it must not be measured there. The other is why it looks at position,
+   * not the follow flag: the follow effect's release,
    * below, also drops the flag on a drop it sees before the scroll event (while the person's
    * input is fresh), but that is a judgment about a single frame, not an answer to where the
    * person was actually looking. So this is used **only here**, and is only ever written from a
@@ -235,9 +235,9 @@ export function useChatScroll({
    *
    * Neither landing nor restoring finishes in one frame — the target keeps moving as rows are
    * measured, so it has to be re-aimed at on every frame. Rendering those intermediate
-   * positions as-is was the symptom of "even when stuck to the bottom, it starts a bit higher
-   * and slides down". What needed fixing was not how many times it re-aims, but **showing the
-   * in-between steps at all**.
+   * positions as-is reads as "even when stuck to the bottom, it starts a bit higher and slides
+   * down". What matters is not how many times it re-aims, but **not showing the in-between
+   * steps at all**.
    *
    * This has to be `visibility: hidden` (not display:none). The virtual scroller measures rows
    * while it renders, and if the layout box disappears, there is nothing left to measure, so it
@@ -266,11 +266,10 @@ export function useChatScroll({
       /*
        * **The row being viewed** is left behind on the way out (#61).
        *
-       * Before anything was left behind here, a non-bottom position was forgotten entirely —
-       * coming back, the landing loop did nothing (since it was not at the bottom), and the
-       * browser started the fresh element at scrollTop 0, so the result was a jump to the top.
-       * The decision not to reuse a raw position was about pixels, but it had drifted into
-       * meaning "do not reuse a row" either.
+       * Without it a non-bottom position is forgotten entirely — coming back, the landing loop
+       * does nothing (it is not at the bottom), and the browser starts the fresh element at
+       * scrollTop 0, so the result is a jump to the top. A raw pixel position is not reused;
+       * a row is.
        *
        * Nothing is left behind while still landing — the same reason as `setStickToBottom`
        * below. It is not yet a position the person could actually have held.
@@ -293,18 +292,18 @@ export function useChatScroll({
        *
        * Arriving is itself a scroll: the position is corrected over several frames while
        * rows measure, and each correction fires an event from somewhere that is not yet
-       * the bottom. Letting those speak meant a panel could record "was not at the bottom"
+       * the bottom. Letting those speak would let a panel record "was not at the bottom"
        * about a landing still in progress and then honour that on the way back, which
-       * reads as the app losing the reader's place at random (it did, under load).
+       * reads as the app losing the reader's place at random (it does, under load).
        *
        * Leaving mid-landing says nothing at all, for the same reason: we never got as far
        * as a position the reader could have held. Whatever the session already believed
        * stands.
        *
-       * The element is not read here (it was, until #61): by the time this runs on a
-       * session switch the same element already holds the *next* conversation, so it
-       * answers about the wrong session — it reported "at the bottom" for a session left
-       * halfway up, and the anchor saved beside it was then never consulted. `wasAtBottom`
+       * The element is not read here (#61): by the time this runs on a session switch the
+       * same element already holds the *next* conversation, so it answers about the wrong
+       * session — "at the bottom" for a session left halfway up, and the anchor saved beside
+       * it would never be consulted. `wasAtBottom`
        * is the same fact taken at the only moment it is true: when the reader scrolled.
        * (Still not the follow flag, for the reason its own comment gives.)
        */
@@ -321,8 +320,8 @@ export function useChatScroll({
    *
    * One `scrollTop = scrollHeight` cannot reach the bottom of a list nobody has measured:
    * rows are 64px guesses until they render, so the number we aim at moves while we aim.
-   * The panel came to rest a few hundred pixels short of the end (measured: 339px on an
-   * 80-turn conversation) — "the scroll has moved up", which is how #31 was reported.
+   * A single aim comes to rest a few hundred pixels short of the end (measured: 339px on an
+   * 80-turn conversation; #31).
    *
    * The follow effect below cannot do this job. It has to tell "the content grew" from
    * "the reader scrolled up", and it does that by watching `scrollTop` fall — which is
@@ -331,18 +330,18 @@ export function useChatScroll({
    * short, permanently. Here we know nobody has touched anything yet.
    *
    * Nor can it be a matter of waiting for the height to hold still: measuring is deferred
-   * to a frame of its own and can arrive several frames late, so "two quiet frames" meant
-   * finishing before the list had grown at all — 339px short again, and only sometimes,
+   * to a frame of its own and can arrive several frames late, so "two quiet frames" can
+   * finish before the list has grown at all — 339px short again, and only sometimes,
    * which is worse than always.
    *
    * Waiting for `chat.length` matters — history arrives after the mount, and there is
    * nothing to land on before it does.
    *
-   * If the session was **not** at the bottom we do nothing at all. #31 deliberately does
-   * not promise the offset back: restoring one into an unmeasured virtualiser is what put
+   * If the session was **not** at the bottom this landing does nothing. #31 deliberately
+   * does not promise the pixel offset back: restoring one into an unmeasured virtualiser puts
    * the reader *near* their place rather than at it. Not moving is the honest version of
    * that — the reader keeps looking at the old messages instead of being dragged to the
-   * newest.
+   * newest (the row left behind is returned to instead, #61, below).
    *
    * It ends early two ways: the reader touches the conversation (`endLanding` on the
    * scroller in ChatStream.tsx), or something drags the view up and away from the end. Both are needed.
@@ -392,8 +391,7 @@ export function useChatScroll({
     /*
      * If it was not at the bottom, **it returns to the row that was left behind** (#61).
      *
-     * This used to just be a `return` here, and that was the entirety of the "back at the top
-     * on return" bug. It solves the same problem as landing, but the target is different: the
+     * A bare `return` here would leave the view at the top on return. It solves the same problem as landing, but the target is different: the
      * bottom is reachable without measuring anything, but a row's position is only settled once
      * every row above it has been measured. So it re-aims at the target on every frame the same
      * way — the target keeps moving every time a row above it is measured.
@@ -448,7 +446,7 @@ export function useChatScroll({
        *
        * Only up counts. When rows above the viewport measure taller than the guess, Chrome
        * moves `scrollTop` down the document by the same amount to hold the view still
-       * (scroll anchoring, +32px a frame here); reading any change as a person meant giving
+       * (scroll anchoring, +32px a frame here); reading any change as a person would give
        * up on the third frame, hundreds of pixels short of the end.
        */
       if (mine >= 0 && el.scrollTop < mine - MOVED_UP_SLACK) {
@@ -469,17 +467,16 @@ export function useChatScroll({
     }
     landing.current = requestAnimationFrame(step)
     // No cleanup here on purpose: this effect re-runs whenever the conversation grows, and
-    // cancelling from there threw the landing away whenever a message arrived first (it
-    // did, under load — the panel simply stayed at the top). The frame is cancelled where
+    // cancelling from there would throw the landing away whenever a message arrives first
+    // (it does, under load — the panel simply stays at the top). The frame is cancelled where
     // it actually stops being wanted: when the session changes or the panel goes.
   }, [sessionId, chat, searchTarget, scrollRef, stickToBottom])
 
   /*
    * Keeps following while stuck to the bottom.
    *
-   * The reference used to be `chat.length`, but a streaming response **does not add an item —
-   * it grows the last one.** So the view stayed frozen in place while the answer got longer
-   * (dogfooding: "at the bottom, but it does not follow when new content appears").
+   * The reference is not `chat.length`: a streaming response **does not add an item — it
+   * grows the last one**, so the view would stay frozen in place while the answer gets longer.
    *
    * Watching the virtual scroller's total height folds both cases into one reference — the
    * total height changes whether an item is added or an existing one grows.
@@ -497,8 +494,8 @@ export function useChatScroll({
      *
      * Two writers is worse than one here. This one aims once per size change and then asks
      * `decideFollow` whether to let go, and on a list that is still measuring the answer
-     * comes back "the reader scrolled up" — which is how the panel ended up a few hundred
-     * pixels short of the end and stayed there. Until the landing is done, there is no
+     * comes back "the reader scrolled up" — which leaves the panel a few hundred pixels short
+     * of the end for good. Until the landing is done, there is no
      * reader to have scrolled.
      */
     if (stillLanding.current) return

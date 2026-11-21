@@ -5,15 +5,15 @@ import type { Notice } from '../../store/state/notifications.js'
 import { MailIcon } from '../../components/icons.jsx'
 import { mailAsksYou, mailAttention } from '../../store/mail.js'
 
-/** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-18: 4 s;
- * 2026-10-20: 5 s, as 4 s sometimes folded before it was read); a finished turn on screen is judged seen at the same
+/** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-20: 5 s,
+ * as 4 s sometimes folds before it is read); a finished turn on screen is judged seen at the same
  * moment, Notices.tsx */
 export const PEEK_MS = 5000
 
 /**
  * The inbox's door in the top bar: an envelope and the count of sessions waiting on the person, on one capsule
- * (owner, 2026-10-18). It replaced the "Waiting for input NN" readout and the cards that stacked in the top right
- * over the conversation: both said the same things, and the cards covered what the person was reading.
+ * (owner, 2026-10-18). There is no separate readout or stack of cards in the top right beside it: both would say
+ * the same things, and cards over the conversation cover what the person is reading.
  *
  * Something new that happened off screen (`notices`: a turn finished, an approval or an agent start asked for, an
  * error) is written out in the capsule itself for a few seconds ("api finished"), then it folds back into the
@@ -128,7 +128,7 @@ export function peekText(n: Notice): string {
  * screen opens is not news.
  *
  * **Shown only while the window is in front.** One that arrives while the person is in another window waits, and is
- * written out the moment they come back: a line that opened and folded behind another window was never seen. More
+ * written out the moment they come back: a line that opens and folds behind another window is never seen. More
  * than one waiting comes back as the newest, with how many more ("api finished · 2 more").
  */
 function useNoticePeek(): Peek | null {

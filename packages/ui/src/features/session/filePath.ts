@@ -1,7 +1,7 @@
 /**
  * Deciding which of an agent's words is a file the person can open (issue #39).
  *
- * Opening the file was never the hard part — `openFile(path)` already exists. The hard
+ * Opening the file is not the hard part — `openFile(path)` already exists. The hard
  * part is that this runs over **every inline-code span of every message**, and the text
  * came out of a model. Match too eagerly and ordinary prose (`and/or`, `node:fs/promises`,
  * `v1.2.0`) turns into a wall of links that mostly lead nowhere; match too shyly and

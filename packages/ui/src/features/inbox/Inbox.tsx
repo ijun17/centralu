@@ -38,11 +38,11 @@ import { MailThread } from './MailThread.jsx'
  * newest first, with the mail that was not delivered pinned on top and what is read or finished folded under
  * "Earlier" (owner, 2026-11-12, #2213).
  *
- * **It is a dropdown hanging below the top-bar number** (user request, 2026-09-09). While it was
- * a modal in the middle of the screen, the place clicked and the place it opened were far apart,
- * so the one action of checking the number and opening the list moved the eye twice. The
- * location moved, but **keyboard ownership stays the same** — clearing the list with ↑↓, ↵ and
- * esc is the heart of this screen, and that has nothing to do with where it sits.
+ * **It is a dropdown hanging below the top-bar number** (user request, 2026-09-09). A modal in the
+ * middle of the screen puts the place clicked and the place it opens far apart, so the one action
+ * of checking the number and opening the list moves the eye twice. **Keyboard ownership is still
+ * a modal's** — clearing the list with ↑↓, ↵ and esc is the heart of this screen, and that has
+ * nothing to do with where it sits.
  */
 export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
@@ -206,7 +206,7 @@ export function Inbox() {
       {/*
         Pressing outside closes it. Covers the screen without dimming it — a dropdown does not take the screen away.
         On the press, not the click, and marked data-no-drag: this sits inside the top bar's window drag region, and on
-        Windows a window drag swallows the mouseup, so a click never came and the inbox stayed open (#365, DragRegion.tsx).
+        Windows a window drag swallows the mouseup, so a click never comes and the inbox would stay open (#365, DragRegion.tsx).
       */}
       {!leaving && (
         <div

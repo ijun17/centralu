@@ -5,9 +5,8 @@ import { ActionRow } from './ActionRow.jsx'
 
 /**
  * Where Add project adds the folder, once a machine is linked (#734): this computer (the folder picker), or a linked
- * machine (its path typed in AddRemoteProjectDialog, or a new folder made there). It took the place of each machine
- * header's +. A machine that is not connected is listed but cannot be picked, since that machine's host is the one that
- * checks the path; its state says why, in the words the header used.
+ * machine (its path typed in AddRemoteProjectDialog, or a new folder made there). A machine that is not connected
+ * is listed but cannot be picked, since that machine's host is the one that checks the path; its state mark says why.
  */
 export function AddProjectMachines({
   machines,

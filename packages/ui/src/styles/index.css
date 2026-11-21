@@ -49,8 +49,8 @@
 
 /*
  * ── Design tokens ────────────────────────────────────────────────
- * Named by role, not by how they look (#312). The old names (void, chalk, beacon…) described
- * brightness, which reads backwards the moment a light theme exists; a role name says what the
+ * Named by role, not by how they look (#312). A name that describes brightness (void, chalk,
+ * beacon…) reads backwards the moment a light theme exists; a role name says what the
  * colour is for, so a theme can give it any value. Every colour the UI paints is one of these —
  * use a token, not a hex value or an arbitrary `shadow-[…]`, so a theme reaches it.
  *
@@ -79,7 +79,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #1d1d1d; /* the app floor */
-  --color-surface-side: #28282a; /* the sidebar and the top bar, ΔL* 5.4 over the floor with the edge line (`line-chrome`) between (it was the floor's own value from 2026-10-27 until #2335) */
+  --color-surface-side: #28282a; /* the sidebar and the top bar, ΔL* 5.4 over the floor with the edge line (`line-chrome`) between (#2335) */
   --color-surface-raised: #2c2c2e; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #3a3a3c; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #48484a; /* hover and pressed; also my own message bubble */
@@ -90,9 +90,8 @@
    * dark and the surface is bright, but in the grid the inside of a panel is the session screen
    * itself, so the inside has to be the floor for text to read. So the outside is brightened
    * instead, to make the panels look carved out —
-   * with inside and outside both the same floor, the boundary was a single border line, and that
-   * made it hard to see by eye where one panel ended (dogfooding: "the panel background and the
-   * outside look the same, it's confusing"). What is actually visible is only the gaps between
+   * with inside and outside both the same floor, the boundary is a single border line, and it is
+   * hard to see by eye where one panel ends. What is actually visible is only the gaps between
    * panels and the edges, so it does not brighten a large area.
    */
   --color-surface-deck: #232325; /* the grid's and the project screen's floor */
@@ -114,8 +113,8 @@
    * The edges of the conversation's frames that are not the hairline, each a colour the theme sets: a resting panel's, the answering
    * ring's and your own bubble's. The agent's bubble and a tool call card draw the plain `line`. A theme file that leaves one out
    * follows the token THEME_TOKENS names (`follows`): the panel's and your bubble's `line-strong`, the ring's `ink-muted`. Dark's
-   * values are what these were drawn with before (the ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`,
-   * as a solid colour). The high-contrast presets hold all three to 3:1 (e2e/fixtures/theme.ts).
+   * values are the panel's `line-strong`, the ring's `ink-muted` and your bubble's `ink-faint` at 40% over `surface-hover`, as a
+   * solid colour. The high-contrast presets hold all three to 3:1 (e2e/fixtures/theme.ts).
    */
   --color-line-panel: #545456;
   --color-line-answering: #b0b0b5;
@@ -144,9 +143,9 @@
   --color-diff-del-bg: #3a1d1b;
   /*
    * Danger — what is about to destroy something (deleting a project with its folder, purging
-   * the trash) and an action that failed (a quit or a switch that did not go through). It
-   * borrowed the diff's deletion red (dogfooding: dangerous spots are red; red already means
-   * "this is disappearing" here), so the values are the same today. It is its own token because
+   * the trash) and an action that failed (a quit or a switch that did not go through). It takes
+   * the diff's deletion red (red already means "this is disappearing" here), so the values are
+   * the same. It is its own token because
    * the two answer different questions: a theme may want the diff's red softer for reading while
    * keeping a warning loud.
    */
@@ -218,8 +217,7 @@
   /*
    * Shadows. Used as `shadow-(--shadow-modal)`, not `shadow-modal`: Tailwind copies a theme
    * shadow's value into the utility, so only the var() form follows a theme that changes it.
-   * Each value is one that was written out at its call sites before; where two looked alike but
-   * differed, they stay two tokens rather than changing what is on screen.
+   * Where two look alike but differ, they are two tokens, so neither changes what is on screen.
    */
   --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.9); /* menus, popovers, the toast */
   --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.9); /* the same, opening upward */
@@ -227,7 +225,7 @@
   --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.9);
   --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.9);
   --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.8); /* my pinned question over the conversation */
-  /* The folded composer: `--shadow-dock` is not drawn any more (it rests out of sight, 2026-11-07; the key stays for themes), `-raised` is its shadow while raised — tuned by measuring, see SessionView */
+  /* The folded composer: `--shadow-dock` is not drawn (it rests out of sight; the key stays for themes), `-raised` is its shadow while raised — tuned by measuring, see SessionView */
   --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.6);
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.58);
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(0 0 0 / 0.7);
@@ -249,9 +247,8 @@
    *
    * Five text sizes. The app reads in a dense band: 13px is what a person reads (a message, a
    * title), 12px the controls around it, 11px what a machine wrote (paths, logs, the code viewer),
-   * 10px labels and counts, and 19px the one heading of the first-run screen. 9px was folded into
-   * 10px: at the default zoom it was below what reads comfortably, and it sat one pixel from its
-   * neighbour. The whole UI scales by the root zoom (Settings → Appearance), not by these.
+   * 10px labels and counts, and 19px the one heading of the first-run screen. There is no 9px: at
+   * the default zoom it is below what reads comfortably, and it sits one pixel from its neighbour. The whole UI scales by the root zoom (Settings → Appearance), not by these.
    *
    * No `--text-*--line-height` is defined on purpose. Without it a size utility sets only the
    * font size, as `text-[11px]` did, so every element keeps the line height it inherits; with it,
@@ -326,25 +323,16 @@
  * view is told the floor's steps (app-frame/hostStyles.ts), so an app panel and the session panel
  * beside it on the grid stand on the same ground without a rule of their own.
  *
- * History, in one sentence: from 2026-08 to 2026-10 the conversation was lifted a step off the
- * floor (Dark #1d1d1d, its cards #2a2a2a) because the reader saw it and the sidebar as "the same
- * colour" at three steps apart (#090909 and #0c0c0c then, ΔL* 0.9, with the sidebar's hairline
- * between them), until the owner preferred the board's darker floor and the lift was found to
- * leave app panels on a different ground from the sessions beside them.
- *
- * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
- * what the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #28282a, conversation #1d1d1d: ΔL* 5.4, with the edge line (#4a4a4c, `line-chrome`) between them
- *          (Graphite's values since #2335; the sidebar was the floor's own value from 2026-10-27, with the line alone).
- *   Light  sidebar #efefef, conversation #ffffff (the owner's "Light New" since 2026-11-12; it was #e0e0e0 and #f0f0f0): ΔL* 5.0, the sidebar a recess below the floor
- *          as it was before.
+ * The sidebar keeps its distance from the conversation. Measured as CIELAB lightness (ΔL*), which
+ * follows what the eye sees at the dark end better than hex steps do (the values and how they were
+ * chosen: docs/themes.md "Choosing"):
+ *   Dark   sidebar #28282a, conversation #1d1d1d: ΔL* 5.4, with the edge line (#4a4a4c, `line-chrome`) between them (#2335).
+ *   Light  sidebar #efefef, conversation #ffffff: ΔL* 5.0, the sidebar a recess below the floor.
  * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 7.3 above the floor in Dark (#2c2c2e on #1d1d1d) and 4.2 in Light
- * (#f4f4f4 on #e8e8e8). That is above what the lifted conversation gave its cards (6.3), which
- * was the point of the wider steps (#725): the composer and the cards read apart from
- * the conversation without leaning on their border. The card's `line` border (ΔL* 13.7 and 7.1
+ * signal. Raised sits ΔL* 7.3 above the floor in Dark (#2c2c2e on #1d1d1d), the wide steps of
+ * #725: the composer and the cards read apart from the conversation without leaning on their border. The card's `line` border (ΔL* 13.7 and 7.1
  * off the floor) and its signal edge still carry the rest, as the board's borders do. The signal
  * ink keeps the highest contrast on every surface (app/theme.ts `urgencyBreaks`, checked for
  * every preset).
@@ -371,13 +359,8 @@
  * checks for every preset. Raised surfaces are lighter than the floor, so in light "lifting" a
  * card means moving it toward white.
  *
- * Light sits a step down from white (#362): the owner found the near-white version (floor
- * #f2f2f2, conversation #f8f8f8, cards #ffffff) too bright. The floor is #e8e8e8 and raised
- * #f4f4f4, never pure white, and every other surface, line and ink moved by the same lightness
- * it had from the floor before (line ΔL* 7, line-strong 16.5, hover 8.5). All of Light's values were replaced by the owner's "Light New" on
- * 2026-11-12 (themes.md); where they miss the rule in themes.md "The lines" is recorded there, so the steps read as
- * they did. The two quieter inks are a little darker to keep their contrast on the dimmer floor:
- * muted 6.1:1 (was 6.0), faint 3.3:1 (was 3.1).
+ * Light is the owner's "Light New" (owner, 2026-11-12; docs/themes.md "Choosing"); where its lines
+ * miss the rule is recorded in docs/themes.md "The lines".
  *
  * The high-contrast presets push every step further apart: black or white floors, borders that
  * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
@@ -609,16 +592,15 @@
     color-scheme: dark;
     /*
      * Overall text size (Settings → Appearance) is applied as a root zoom — but vh/vw are not
-     * affected by zoom, so zooming in made the 100vh shell grow bigger than the window and cut
-     * off the bottom (the session composer) (caught in dogfooding). So (1) the shell is held with
+     * affected by zoom, so zooming in would make a 100vh shell grow bigger than the window and cut
+     * off the bottom (the session composer). So (1) the shell is held with
      * a chain of % instead of vh (html → body → #root → App), and (2) any remaining vh/vw is
      * divided by this variable to bring it back to the real window size.
      * The effect in App.tsx always keeps zoom and this variable at the same value.
      */
     --text-zoom: 1;
     /* The desktop app's window itself does not scroll.
-       Without this, pulling at the edge bounces back like a rubber band, as on the web (caught
-       in dogfooding). */
+       Without this, pulling at the edge bounces back like a rubber band, as on the web. */
     overscroll-behavior: none;
     height: 100%;
     overflow: hidden;
@@ -643,7 +625,7 @@
    * WebKit rounds up every box's scrollWidth by 1px under a zoom factor
    * (measured: at 1.25x, every element has sw = cw + 1 — confirmed with Playwright WebKit).
    * That 1px puts a phantom horizontal scrollbar on every element with overflow auto —
-   * it actually showed up in the composer (textarea's default overflow is auto) (dogfooding).
+   * it shows up in the composer (textarea's default overflow is auto).
    * Every textarea in this app is a wrapping composer, so horizontal scroll is never the right
    * answer there, and the same is true of vertical scroll containers (.overflow-y-auto) — when
    * content overflows, clipping or an ellipsis is the answer, not horizontal scroll. Places that
@@ -676,15 +658,15 @@
     outline-offset: 1px;
   }
   /*
-   * We draw the checkbox ourselves (dogfooding: the background color changed when the window
-   * lost key focus).
+   * We draw the checkbox ourselves: a native one changes its background colour when the window
+   * loses key focus.
    *
    * The OS draws native controls, so their color changes with the window's active/inactive state
    * — accent-color cannot override that rule (the inactive gray is a semantic color with no room
    * to override). Taking over drawing with appearance: none makes both states the same pixels.
    *
-   * Color splits across two variables. The existing accent-ink-muted class can no longer do
-   * anything through accent-color, but it stays as a marker meaning "this check is the bright
+   * Color splits across two variables. The accent-ink-muted class does nothing through
+   * accent-color here, but it stays as a marker meaning "this check is the bright
    * kind" — the mapping below reads that marker and leaves the six call sites untouched. Removing
    * it would let the mapping fall back to the default (line-strong: the box is drawn as an
    * outline, and checking it fills the outline with its own colour so the box stays one shape).
@@ -736,8 +718,8 @@
   /*
    * The selection highlight is translucent near-white.
    *
-   * It used to be solid #353535, but my own message bubble's background is the same colour,
-   * so selecting text on it produced no visible change (caught in dogfooding). Using alpha
+   * Not a solid colour: on a background of the same colour (a solid #353535 on my own message
+   * bubble, for one) selecting text shows no visible change. Using alpha
    * brightens whatever is underneath by the same amount no matter what it is, so the same problem
    * cannot recur even if more backgrounds get added later. Pure white itself belongs to "what is
    * waiting for me", so opacity keeps it dimmed.
@@ -795,9 +777,8 @@
    * The session marker chip.
    *
    * Bright text on a dark background, but the sidebar background (surface-side) and the chip
-   * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
-   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, the same value from 2026-10-27,
-   * and is #28282a on #1d1d1d since #2335), so a single border did not separate them well.
+   * background (surface-floor) are close (#28282a on #1d1d1d in Dark, #2335), so a single border
+   * does not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any
@@ -890,7 +871,7 @@
 }
 /*
  * The conversation's cover (ChatStream) waits longer (owner, 2026-10-18): a conversation usually arrives in
- * 150-300ms, and a skeleton that half rose and was then swapped for the rows read as a flicker. Below 600ms the rows
+ * 150-300ms, and a skeleton that half rises and is then swapped for the rows reads as a flicker. Below 600ms the rows
  * simply fade in; only a slow read (a linked machine, a very long history) shows the skeleton.
  */
 .cc-skeleton.cc-skeleton-late {
@@ -1284,9 +1265,9 @@
 /*
  * Tells the person, right where they pressed, that the button is working.
  *
- * A restart kills the process and brings it back up, which takes a few seconds during which
- * nothing appeared to happen on screen — so the person pressed again, killing the process that
- * had just come back up. The spinning icon is not decoration, it is the response "received, and
+ * A restart kills the process and brings it back up, which takes a few seconds; with nothing
+ * happening on screen meanwhile, the person presses again, killing the process that has just
+ * come back up. The spinning icon is not decoration, it is the response "received, and
  * working on it".
  * (Same clock: everything that spins uses 1.4s.)
  */
@@ -1407,8 +1388,8 @@
     font-size: 0.95em;
   }
   /*
-   * A table's lines are `line-strong`, not the hairline (owner, 2026-10-18): the answer now sits in a bubble on
-   * `surface-raised` with a `line` border, so hairline cells and a raised header faded into the bubble itself. The
+   * A table's lines are `line-strong`, not the hairline (owner, 2026-10-18): the answer sits in a bubble on
+   * `surface-raised` with a `line` border, so hairline cells and a raised header would fade into the bubble itself. The
    * header takes half a hover step over whatever it stands on, so it reads as a header on the bubble and off it.
    */
   .cc-md th,
@@ -1440,15 +1421,13 @@
  *   stopped    a white dashed border on a grey chip: the turn broke off (error, interruption, limit)
  *   waiting    a white border on a grey chip: the person has to act (approval, a question)
  *
- * The mark is one 17px chip whose own border is the look (below, 2026-10-18).
+ * The mark is one 17px chip whose own border is the look (below).
  */
 .cc-mark {
   /*
-   * One edge, not three (owner, 2026-10-18: the mark read blurry). It used to be a 1.5px ring painted as a background
-   * behind a 14px chip that had its own 1px border and the keycap's inset light and drop shadow: three edges a pixel
-   * apart, the shadow making the bottom heavier than the top, and the ring's corner not following the chip's.
-   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 2px when it says
-   * something. No shadow: the border alone separates it from the sidebar.
+   * One edge, not three (owner, 2026-10-18: a ring behind a bordered, shadowed chip reads blurry, its edges a pixel
+   * apart and its bottom heavier than its top). The chip is the whole 17px mark and its own border is the look: thin
+   * grey when idle, 2px when it says something. No shadow: the border alone separates it from the sidebar.
    */
   display: inline-flex;
   align-items: center;
@@ -1547,17 +1526,15 @@
 /*
  * The band is far wider than the screen, and does not end by exiting.
  *
- * It used to be narrow — the thinking was that covering the screen would bury the text, but what
- * buried it was not the width, it was the brightness (0.42 at the time). So the brightness stays
- * held down while only the width grows.
+ * Covering the screen does not bury the text; brightness does (0.42 does). So the brightness stays
+ * held down while the width is wide.
  *
- * Widening alone was not enough. Measuring it showed the easing was a strong ease-out, so the band
- * passes through almost entirely near the start — it covers the whole screen for one instant at
- * the 15% mark, and by the halfway point only 35% of it remained, already vanishing off the right
- * edge. Wider, and still not visible across the whole screen.
+ * Width alone is not enough. Measured, with a strong ease-out the band passes through almost
+ * entirely near the start — it covers the whole screen for one instant at the 15% mark, and by the
+ * halfway point only 35% of it remains, already vanishing off the right edge.
  *
- * So the way it ends was changed. Instead of ending by exiting, it now fades while still covering
- * the screen: the end point (25%) is where the left edge has just reached the left of the screen.
+ * So it does not end by exiting: it fades while still covering the screen. The end point (25%) is
+ * where the left edge has just reached the left of the screen.
  * It covers the screen fully throughout the brightest stretch (25-60%), and disappearing is done
  * by opacity rather than motion. The motion is still there, so it is still a gust, not a panel
  * switching on and off.

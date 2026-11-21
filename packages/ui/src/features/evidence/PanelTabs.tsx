@@ -96,7 +96,7 @@ function TabGroup({
 
   /*
    * How many tabs fit. What is measured is **the space the tabs are allowed to use** (fitRef), not
-   * the whole strip — the control buttons on the right never collapse, so that space was never the
+   * the whole strip — the control buttons on the right never collapse, so that space is never the
    * tabs' to claim, and this space's own width does not change whether the `…` button appears or
    * disappears, so the calculation does not get shaken by its own result.
    *
@@ -154,10 +154,9 @@ function TabGroup({
         }}
       >
         {/*
-          The boundary resize handle (moved here after a second dogfooding finding). It originally
-          sat on the top edge of the bottom body, but that was **below the tab strip**, not the "the
-          boundary between the two panels" — the space between the top body and the bottom tab strip
-          — that a person actually grabs for. The boundary is this strip's top edge.
+          The boundary resize handle. Not on the top edge of the bottom body: that is **below the tab
+          strip**, not "the boundary between the two panels" — the space between the top body and the
+          bottom tab strip — that a person actually grabs for. The boundary is this strip's top edge.
 
           Why the calculation runs entirely on ratios: `rect` is a screen pixel multiplied by zoom
           (--text-zoom), while offsetHeight is a layout pixel, and mixing them throws things off
@@ -221,14 +220,13 @@ function TabGroup({
       <div
         /*
           overflow-hidden is the wall that protects the neighboring group. Without it, content from
-          the group above overflowing its body **got drawn on top of the tab strip of the group
-          below** (this actually happened with the git tab's fixed-height History strip — a
-          dogfooding finding). The rule that a tab, whatever it draws, cannot escape its own body is
+          the group above overflowing its body **gets drawn on top of the tab strip of the group
+          below** (a fixed-height block in a short half does exactly that). The rule that a tab, whatever it draws, cannot escape its own body is
           enforced by the container, not by the content.
         */
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         /*
-          Each split body's share (dogfooding: a fixed 50/50 split could not express "the terminal
+          Each split body's share (a fixed 50/50 split cannot express "the terminal
           can stay narrow but a diff needs to be wide"). The tab strip has a fixed height, so flexGrow
           only divides space between the bodies — basis stays at flex-1's 0, so the grow ratio is
           exactly the height ratio.
@@ -362,9 +360,9 @@ function TabButton({
   // the same call as the sidebar rows, for the same reason.
   const [edge, setEdge] = useState<'left' | 'right' | null>(null)
   /*
-   * The terminal tab's running badge (a carryover from #60) — even with a dev server left running
-   * while looking at another tab, the fact that "it is running" has to stay visible on the tab. This
-   * gap (nothing shown once the terminal window was closed) was the reason for the carryover.
+   * The terminal tab's running badge (#60) — even with a dev server left running while looking at
+   * another tab, the fact that "it is running" has to stay visible on the tab, also once the
+   * terminal window is closed.
    */
   const running = useStore((s) =>
     id === 'terminal' ? Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running) : false,

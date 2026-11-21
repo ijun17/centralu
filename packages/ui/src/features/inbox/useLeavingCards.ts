@@ -16,7 +16,7 @@ const isCard = (r: WaitingRow) => r.kind === 'mail' && r.thread.ask !== null
  */
 export function useLeavingCards(rows: readonly WaitingRow[]): ShownRow[] {
   // The list is derived on every render (`arrangeInbox`, over a clock that moves each time), so its rows are never the same array twice: a change is a change of the
-  // rows' keys, not of the array. Comparing by identity here set state on every pass of a render and never settled
+  // rows' keys, not of the array. Comparing by identity here would set state on every pass of a render and never settle
   const keys = JSON.stringify(rows.map(rowKeyOf))
   const [before, setBefore] = useState({ keys, rows })
   const [ghosts, setGhosts] = useState<Ghost[]>([])

@@ -32,8 +32,8 @@ import { droppedGridList, droppedGridPanel, gridTakes } from './drop.js'
 /**
  * Grid — several sessions, and apps, on one screen.
  *
- * The spec (§5.4) originally left the grid out of v1. The first of three reasons given —
- * "at 600×400 per panel, neither the conversation nor the composer reads well" — still holds.
+ * The first of the grid's live objections in docs/product-spec.md §5.4 — "at 600×400 per panel,
+ * neither the conversation nor the composer reads well" — holds.
  * That is why the column count is **computed from the width**, so a panel never shrinks below
  * the minimum width (core's columnsFor). As the window narrows, columns drop, eventually down
  * to one.
@@ -134,9 +134,9 @@ export function GridView() {
   const room = windowSpanRoom(width, height)
 
   /*
-    While a panel is dragged the grid rearranges live (#53). The old inset edge line said
-    "before/after this neighbour", but the grid reflows on drop — so the line pointed at a
-    layout that stopped existing the moment you let go. The only display that cannot lie
+    While a panel is dragged the grid rearranges live (#53). An inset edge line saying
+    "before/after this neighbour" would point at a layout that stops existing the moment you
+    let go, since the grid reflows on drop. The only display that cannot lie
     about the destination is the destination itself, so we show it: the drop then changes
     nothing visually.
 
@@ -274,11 +274,8 @@ export function GridView() {
                 not reading, so it has to be caught out of the corner of the eye.
               */
                 /*
-                The selected panel is not highlighted with a border (the conclusion of two
-                rounds of dogfooding). The first time, it failed to update, so a single panel
-                stayed lit for days; once that was fixed to follow the hand, the judgment came
-                back that the indicator was not needed at all — the cursor and the composer's
-                focus outline already say where the person is typing. Only the look of the
+                The selected panel is not highlighted with a border: the cursor and the
+                composer's focus outline already say where the person is typing. Only the look of the
                 session's state remains.
               */
                 className={panelClass(dragging === id)}
@@ -295,9 +292,9 @@ export function GridView() {
                 data-focused={(panel.kind === 'session' && focusedSessionId === id) || undefined}
                 data-testid={`grid-panel-${id}`}
                 /*
-                The panel the hand touches is the selected panel (dogfooding: on launch it
-                stayed frozen on whichever session had been restored, and never moved). It is no
-                longer used for drawing anything, but the value still does real work: markRead
+                The panel the hand touches is the selected panel (otherwise it stays on whichever
+                session was restored at launch). It draws nothing, but the value still does real
+                work: markRead
                 clears this panel's unread mark, and "the last session looked at" (the one
                 warmed up on the next launch) becomes the session the hand actually went to.
                 Because of preferGrid the view stays put, and since WKWebView does not give focus
@@ -312,9 +309,9 @@ export function GridView() {
                     focusSession(id, { preferGrid: true, reveal: false })
                 }}
                 /*
-                Where the dragged thing lands relative to this panel. The edge line that used
-                to draw this is gone — the reflow shows it — but tests and assistive tech
-                still need the relation as a value, not as a pixel position to reverse-engineer.
+                Where the dragged thing lands relative to this panel. No edge line draws this —
+                the reflow shows it — but tests and assistive tech still need the relation as a
+                value, not as a pixel position to reverse-engineer.
               */
                 data-drop={dropMark(id)}
                 onDragOver={(e) => {
@@ -380,29 +377,28 @@ export function GridView() {
                 Removing only takes it off the screen — the session stays in the sidebar and
                 keeps running. That is why it is called "remove", not "delete".
 
-                Passed as a header slot. It used to sit absolutely positioned on top of the
-                panel, which left its size and height out of sync with the header's restart
-                button (12px vs 14px, different flow). Placed on the same line, there is nothing
-                left to line up.
+                Passed as a header slot, not positioned absolutely on top of the panel, which
+                leaves its size and height out of sync with the header's restart button (12px vs
+                14px, different flow). Placed on the same line, there is nothing left to line up.
               */
                   <SessionPane
                     sessionId={id}
                     /*
                   Folding the composer exists **only in the grid** and on project screens (user request, 2026-09-10),
-                  and since 2026-10-20 only when the panel is short (SessionPane's FOLD_SHARE, under about 570px since 2026-11-07,
+                  and only when the panel is short (SessionPane's FOLD_SHARE, under about 570px,
                   twice the first line): the focus view has
                   plenty of room, and folding there would only leave the person having to unfold it every time.
                 */
                     foldWhenShort
                     /*
                   The **only** handle for moving a panel is the header.
-                  The whole panel used to be draggable, but with a draggable ancestor the
-                  browser will not let text inside it be selected — selecting text in the
-                  conversation dragged the panel instead.
+                  Not the whole panel: with a draggable ancestor the browser will not let text
+                  inside it be selected — selecting text in the conversation would drag the
+                  panel instead.
 
                   At the same time, this header is not a handle for moving the window. In the
-                  focus view the header doubles as the title bar, but not here — left as is,
-                  trying to move a panel dragged the whole app window instead (dogfooding).
+                  focus view the header doubles as the title bar, but not here — otherwise
+                  trying to move a panel would drag the whole app window instead.
                 */
                     headerDrag={(e) => startDrag(id, e)}
                     headerExtra={

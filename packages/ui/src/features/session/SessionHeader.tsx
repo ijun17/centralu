@@ -43,12 +43,11 @@ export function SessionHeader({
   const restarting = useStore((s) => !!s.resuming[session.id])
 
   /*
-   * The header's height is written as **an explicit height**, not padding (2026-09-13).
+   * The header's height is written as **an explicit height** (40px), not padding (2026-09-13).
    *
-   * The value is back to 40px — 32px and 36px were both tried and reverted. What changed is how
-   * it is written: writing it as py-2 lets the height be dictated by the tallest thing inside it
-   * (the tool button row at 23px), and the evidence panel header standing next to it had 24px
-   * inside it, coming out to 41px — **a 1px mismatch.** Two rows standing side by side show a
+   * Written as py-2, the height is dictated by the tallest thing inside it (the tool button row
+   * at 23px), and the evidence panel header standing next to it has 24px inside it, coming out
+   * to 41px — **a 1px mismatch.** Two rows standing side by side show a
    * doubled edge from even a 1px difference. With both at h-10, that gap never has a chance to
    * appear.
    */

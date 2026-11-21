@@ -2,8 +2,8 @@ import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
- * FR-17 shortcut table — has to be viewable and checkable. It lived in Settings → Shortcuts until the owner moved it to
- * the command palette (2026-10-20): it is something looked up in passing, and the palette is where a key is wanted.
+ * FR-17 shortcut table — has to be viewable and checkable. It is in the command palette, not Settings (owner,
+ * 2026-10-20): it is something looked up in passing, and the palette is where a key is wanted.
  *
  * A combination is written **by meaning**: `'mod'` and `'alt'` get named by this machine's own
  * keyboard (`⌘`/`Ctrl`, `⌥`/`Alt`), and the remaining pieces are the key's own name as is
@@ -23,8 +23,6 @@ const SHORTCUTS: [string[], string][] = [
   /*
    * The digits name tab *identities*, not positions (EvidencePanel's handler) — after a
    * drag-reorder this list stays true, which is the whole reason identity was chosen.
-   * The names listed here were once "chat · files · git · viewer": tabs that predate the
-   * three-lane layout. Nobody noticed because the shortcut itself didn't exist until #20.
    */
   [['mod', '⇧1~4'], 'Panel tab (changes · history · files · terminal)'],
   [['y / n / a'], 'Approve · deny · always allow'],

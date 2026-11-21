@@ -1,12 +1,12 @@
 /**
  * How tall the composer's text is, for fitting the box to it (#744).
  *
- * The box used to be fitted by reading its own `scrollHeight` at `height: auto`. At that height
- * the box is one row tall, so a text of several rows makes it show a scrollbar, and where a
- * scrollbar takes room (WebKit with classic scrollbars) the text wraps narrower and the box laid
- * the text out one row longer than it ends up: it came out one blank row too tall at some
- * lengths, and the row count read off its height disagreed with the rows on screen (the up arrow
- * went to history a wrapped line early). WebKit even keeps that narrower layout after the
+ * The box's own `scrollHeight` at `height: auto` cannot be trusted. At that height the box is
+ * one row tall, so a text of several rows makes it show a scrollbar, and where a scrollbar takes
+ * room (WebKit with classic scrollbars) the text wraps narrower and the box lays the text out one
+ * row longer than it ends up: it comes out one blank row too tall at some lengths, and the row
+ * count read off its height disagrees with the rows on screen (the up arrow goes to history a
+ * wrapped line early). WebKit even keeps that narrower layout after the
  * scrollbar is gone (`overflow: hidden` on the box does not undo it), so the box itself cannot be
  * asked.
  *

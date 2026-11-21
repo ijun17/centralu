@@ -4,16 +4,16 @@ import { composingKey } from '../app/keys.js'
 /**
  * The keyboard inside a dialog (#842 item 7): where focus starts, and Tab staying inside.
  *
- * A dialog that covers the window (a modal, Settings, the palette) used to leave focus wherever it was: on the button
- * that opened it, behind the scrim, so the first Tab walked into the screen the dialog was hiding and a screen reader
- * never heard that a dialog had opened. Now:
+ * A dialog that covers the window (a modal, Settings, the palette) takes focus: left on the button that opened it,
+ * behind the scrim, the first Tab walks into the screen the dialog hides and a screen reader never hears that a dialog
+ * opened. So:
  *
  * - **Focus starts inside.** A dialog that put focus somewhere of its own (an `autoFocus` field, a child's effect) keeps
  *   that; otherwise the dialog's panel takes it. The panel, not its first control: the first control of a confirmation
  *   is often the one that deletes, and Enter on a focused button presses it.
  * - **Tab cycles inside**, through every control, and from the last back to the first. It is moved here rather than left
  *   to the browser: WebKit's Tab passes over buttons unless the system's keyboard setting says otherwise, so the control
- *   it would stop on last was not the last one, and the browser walked out of the dialog. A control outside the panel's
+ *   it stops on last is not the last one, and the browser walks out of the dialog. A control outside the panel's
  *   DOM (a menu drawn in a portal) is left to the browser.
  *   Focus that fell to the page (the focused control went away, a re-render dropped it) is brought back the same way: Tab
  *   from `<body>` goes to the top dialog's first control, Shift+Tab to its last. A Tab an input method is composing with

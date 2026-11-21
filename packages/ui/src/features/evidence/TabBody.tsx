@@ -44,10 +44,10 @@ export function TabBody({
   if (tab === 'history') return <CommitHistory projectId={projectId} />
 
   /*
-    Git tab: what changed right now, alone. The history strip that used to sit below it
-    left with the split feature (#20): it was a fixed-height block, so in a short split
-    half it overflowed the group body straight over the next group's tab strip — and the
-    History tab (#21) already answers "how did we get here" with a full column to do it in.
+    Git tab: what changed right now, alone. No history strip below it (#20): a block of fixed
+    height, in a short split half, overflows the group body straight over the next group's tab
+    strip — and the History tab (#21) already answers "how did we get here" with a full column
+    to do it in.
   */
   return (
     <div className="flex min-h-0 flex-1 flex-col">

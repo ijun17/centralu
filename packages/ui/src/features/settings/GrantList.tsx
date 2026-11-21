@@ -11,8 +11,7 @@ import { SettingsEmpty } from './SettingsLayout.jsx'
  * A list of answers the person gave once and can take back (#850 item 12): the always-allow rules and the projects
  * allowed to reach other projects, under Settings → Permissions.
  *
- * The two lists were written twice, and the rules' copy had no error handling: a delete the host refused was an
- * unhandled rejection, and the row stayed with nothing said. Here a refused take-back says why and the row stays; one
+ * One component for both lists, so both handle a refusal: a refused take-back says why and the row stays; one
  * taken back leaves at once and the list is read again, which then decides what is shown. A row's button takes no second press while its take-back runs.
  */
 export function GrantList<T>({

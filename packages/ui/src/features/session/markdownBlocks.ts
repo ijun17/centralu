@@ -5,8 +5,8 @@ import { unified } from 'unified'
 /**
  * A streaming reply split into the blocks that can no longer change and the one that still can (#364).
  *
- * Every `message_delta` used to hand the whole reply to react-markdown, which parsed it from the first character
- * again: a reply of forty paragraphs was parsed forty times over while its last one arrived. Chromium showed none of
+ * Handing the whole reply to react-markdown on every `message_delta` parses it from the first character again: a
+ * reply of forty paragraphs is parsed forty times over while its last one arrives. Chromium showed none of
  * that survives a collection; WebKit kept its high-water mark (docs/spikes/2026-10-memory-heavy-store.md §3).
  *
  * CommonMark reads a reply line by line, and a top-level block that a whole line of another top-level block has
@@ -109,8 +109,8 @@ function topLevel(text: string, from: number): { starts: number[]; children: Blo
  * the lines after them like this, so the text is only cut after a block that ends cleanly (a paragraph, a heading, a
  * rule, a table or a fenced code block) and is followed by a blank line; the blocks in between stay with the next
  * cut. Then what is about to be kept and what will be the tail are each parsed alone, and the cut is made only if they
- * parse to what they parsed to in place. That is two parses when a block is kept, not per delta. All three cases were
- * found by the randomized test in markdownBlocks.test.tsx.
+ * parse to what they parsed to in place. That is two parses when a block is kept, not per delta. The randomized test in
+ * markdownBlocks.test.tsx turns up all three cases.
  */
 function closedUpTo(text: string, from: number, starts: number[], children: Block[]): number {
   let keep = starts.length - 1

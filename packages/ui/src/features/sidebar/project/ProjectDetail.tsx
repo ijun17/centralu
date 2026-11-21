@@ -8,7 +8,7 @@ import { BranchIcon, ChangesIcon } from '../../../components/icons.jsx'
 /**
  * Tooltip content: claims no space by default, but answers everything when asked.
  *
- * Since the name line lost its changes count (owner, 2026-10-20) this is where the count lives, so it is drawn to be
+ * The name line has no changes count (owner, 2026-10-20), so this is where the count lives, and it is drawn to be
  * read at a glance: the branch and the uncommitted files each on a row with their icon, the count in the body ink.
  */
 export function ProjectDetail({ project }: { project: ProjectInfo }) {

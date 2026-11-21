@@ -5,10 +5,10 @@ import { createPortal } from 'react-dom'
  * Where the current tab's control buttons live — **the right end of the tab strip** (user request,
  * 2026-09-07).
  *
- * Each tab used to draw one more header bar of its own. In a vertically narrow panel that put two
- * header bars (the tab strip, then the tab's own bar) back to back, with the actual content only
- * starting in whatever room was left below them. On top of that, the bar's label ("Terminal",
- * "Changes") was already saying exactly what the tab right above it said.
+ * A header bar of each tab's own would, in a vertically narrow panel, put two header bars (the
+ * tab strip, then the tab's own bar) back to back, with the actual content only starting in
+ * whatever room was left below them. And the bar's label ("Terminal", "Changes") would say
+ * exactly what the tab right above it says.
  *
  * Lifting the buttons up onto the strip by hoisting each screen's state upward instead (the
  * terminal's add function, whether ignored files are shown, and so on) would mean the strip has to

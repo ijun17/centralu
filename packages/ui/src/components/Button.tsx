@@ -1,12 +1,8 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 /**
- * A framed text button: the one look every screen used to spell out in place (owner, 2026-10-18).
- *
- * Before this, 97 buttons assembled `rounded-md border border-line px-… py-… text-…` at their call sites, and
- * paddings, sizes, hover colours and the disabled fade drifted between them (`px-2`/`px-2.5`, `py-0.5`/`py-1`,
- * `disabled:opacity-40`/`50`/`60`, a hover that brightened the border here and the fill there). Reading them all, six
- * kinds were in use, and those are the variants:
+ * A framed text button: one definition of the look, so paddings, sizes, hover colours and the disabled fade cannot drift
+ * between screens (owner, 2026-10-18; docs/design-system.md §11). The variants are the kinds the screens need:
  *
  * - `primary`: the action a dialog or a card is for (Create, Save, Import). Filled, white ink.
  * - `secondary`: an action that stands beside the main one without being it (Retry, Copy, Edit). Framed, white ink.
@@ -22,7 +18,7 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
  * the small chip in a line of text (a conversation row's "show", a picker's span).
  *
  * `onRaised`: the fill of `primary` is the raised surface, so on a card that is itself raised it would vanish into
- * it; there it takes the floor instead, which is what those cards did by hand.
+ * it; there it takes the floor instead.
  *
  * `busy`: the action is running. The button is disabled (a second press would start the same thing twice, see
  * InlineConfirm) and, when `busyText` is given, says so ("Creating…").
@@ -31,7 +27,7 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
  * competes with the variant's own, and which one wins in Tailwind is the order of the generated CSS, not of the
  * attribute (IconButton's `lit` says the same): add a variant here instead.
  *
- * Hover reacts only while enabled: a disabled button that still brightened on hover looked pressable. Disabled fades
+ * Hover reacts only while enabled: a disabled button that brightens on hover looks pressable. Disabled fades
  * to 50%, the one fade every shared control uses (owner, 2026-10-18).
  */
 export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'subtle' | 'danger' | 'ghost' | 'choice'

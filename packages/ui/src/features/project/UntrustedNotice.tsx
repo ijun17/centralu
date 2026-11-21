@@ -21,9 +21,9 @@ function putAwayNow(id: string): void {
 }
 
 /**
- * What is off in a project the person has not trusted, said where they work in it (#1512). Until now nothing said that
- * its `CLAUDE.md` and `AGENTS.md` are ignored: the card said what trusting turns on, the project row said only that
- * its apps do not run, and an agent's refusal ("the person can trust it from the project menu") reached the person as
+ * What is off in a project the person has not trusted, said where they work in it (#1512). Nothing else says that
+ * its `CLAUDE.md` and `AGENTS.md` are ignored: the card says what trusting turns on, the project row says only that
+ * its apps do not run, and an agent's refusal ("the person can trust it from the project menu") reaches the person as
  * a line of the agent's answer.
  *
  * One line, whatever the panel's width (a narrow grid panel has no room for three); the rest of what is off stands in the

@@ -11,7 +11,7 @@ export const HOST_REQUEST_ARM_MS = 500
  * runs without asking. The host holds the call; this card is the only way it runs.
  *
  * It stands over the lanes rather than in their flow: it comes and goes on a program's schedule, and taking room would
- * move what the person is reading (the reason the global approval banner went, product-spec.md). It has no keys, unlike
+ * move what the person is reading (the reason there is no global approval banner, product-spec.md). It has no keys, unlike
  * a session's card: a y meant for the composer must never delete something for good. One card at a time, oldest first,
  * with how many more wait. A card's buttons take a click only once it has stood `HOST_REQUEST_ARM_MS`, and one click:
  * the next card appears where this one was, and a program that hears the answer can ask again at once.

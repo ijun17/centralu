@@ -4,10 +4,10 @@ import type { InputHTMLAttributes } from 'react'
  * An on/off switch: a small track with a knob, for a setting that is simply on or off (Settings' rows).
  *
  * It stays a checkbox underneath. The real `<input type="checkbox">` lies over the drawn track, transparent, so a
- * click, the keyboard (Space), a screen reader and a test (`check()`, `checked`) all reach the same element they
- * reached when it was a bare box; only the look changed. The knob and the track follow the input through `peer-*`.
+ * click, the keyboard (Space), a screen reader and a test (`check()`, `checked`) all reach the checkbox; only the
+ * look is drawn. The knob and the track follow the input through `peer-*`.
  *
- * On, the track takes the muted ink and the knob the floor, the way a checked box filled itself (index.css). Never the
+ * On, the track takes the muted ink and the knob the floor, the way a checked box fills itself (index.css). Never the
  * signal white: a switch is not something waiting on the person.
  *
  * Every prop goes to the input (`checked`, `onChange`, `disabled`, `data-testid`, `aria-label`, `id`); `className`

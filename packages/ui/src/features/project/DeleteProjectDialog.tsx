@@ -13,7 +13,7 @@ import { awayNote, folderNote, type DeleteOutlook } from './deleteNote.js'
 const OUTLOOK_WAIT_MS = 3000
 
 /**
- * Deleting a project (a dogfooding request).
+ * Deleting a project.
  *
  * **There are two irreversible actions here, and they are different in scale.** One is this app's
  * own memory disappearing (sessions, conversations, the search index); the other is a folder on
@@ -27,7 +27,7 @@ const OUTLOOK_WAIT_MS = 3000
  * what they are about to delete — that is the entire point of this device.
  *
  * **Its sessions go to Centralu's trash (#204), not with it** — only Settings deletes a conversation for good, and
- * a project took every one of its conversations at once. Both sentences below say so, and where to find them.
+ * a project must not take every one of its conversations at once. Both sentences below say so, and where to find them.
  *
  * The files go **to the trash.** Exactly the app's own file rule (the fs port: "Not a delete — that
  * is the whole decision"). Leaving the OS one path back is better than calling `rm` ourselves and
@@ -99,7 +99,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           that choosing is not something that should happen here.
         */}
         {/*
-          The dangerous state is **red** (a dogfooding request). The color is the danger token,
+          The dangerous state is **red**. The color is the danger token,
           which has the diff's delete values (--color-danger) — red already means "this is disappearing" in this app, so
           this extends the existing language rather than inventing a new one. The most painful
           sentence (it reaches even uncommitted work) is the most saturated.

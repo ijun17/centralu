@@ -1,9 +1,9 @@
 /**
  * Recalling sent messages with the arrow keys (#38).
  *
- * Only the judgment is pulled out here — knows neither the DOM nor the store. That way "when
+ * Only the judgment lives here — it knows neither the DOM nor the store. That way "when
  * does the caret move, and when does history come up" can be tested as plain values (the same
- * reason scroll.ts was pulled out).
+ * reason scroll.ts stands apart).
  */
 
 import type { ChatItem } from '../../store/store.js'
@@ -27,7 +27,7 @@ export function sentMessages(chat: ChatItem[]): string[] {
     /*
      * Only what the person sent here (#745). A brief another session sent through Centralu's tools (start_agent,
      * agent_session, ask_project: `from`) or a message an app view wrote (`fromApp`) sits in the same list as a user
-     * message, but the person never typed it, and recalling it buried their own last message under it.
+     * message, but the person never typed it, and recalling it would bury their own last message under it.
      */
     if (item.from || item.fromApp || item.fromScript) continue
     if (out[out.length - 1] === item.text) continue
@@ -42,11 +42,8 @@ export function sentMessages(chat: ChatItem[]): string[] {
  * This does not count visually wrapped lines. Counting those needs the caret's on-screen
  * coordinates, which is not a judgment that can be tested as plain values without a DOM.
  * Wrapped lines are measured by caret.ts with a mirror element, and Composer.tsx combines the
- * two — filtering first with the cheap judgment keeps the expensive measurement rare.
- *
- * (For a while this counted newlines only, full stop. When a long line wrapped, pressing the
- * up arrow on the wrapped second line brought up history instead of moving the caret, and it
- * looked as though what the person was typing had vanished — reported by a user on 2026-09-07.)
+ * two — filtering first with the cheap judgment keeps the expensive measurement rare. Newlines
+ * alone would bring up history from the wrapped second line of a long line (caret.ts).
  */
 export const onFirstLine = (text: string, caret: number): boolean => !text.slice(0, caret).includes('\n')
 

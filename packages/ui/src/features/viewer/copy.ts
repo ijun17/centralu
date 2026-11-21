@@ -10,7 +10,7 @@
  *     suppresses the *visual* highlight, but it is CSS, and CSS does not decide what lands
  *     in the clipboard — Chromium copies that text in plenty of layouts.
  *
- * The data was never the problem: the whole file is in memory. So the payload is rebuilt
+ * The data is not the problem: the whole file is in memory. So the payload is rebuilt
  * here from the lines, and the DOM is asked one question only — *where* does the selection
  * start and end. The answer comes back as line/column, which unmounted rows cannot break.
  */
@@ -56,7 +56,7 @@ export function buildCopyText(lines: CopyLine[], a: Caret, b: Caret): string {
     const start = i === first ? clamp(from.column, text.length) : 0
     const end = i === last ? clamp(to.column, text.length) : text.length
     // The marker only belongs to the clipboard when the line is taken from its start —
-    // a selection that begins mid-line did not cover the marker on screen either.
+    // a selection that begins mid-line does not cover the marker on screen either.
     out.push((start === 0 ? prefix : '') + text.slice(start, end))
   }
   return out.join('\n')

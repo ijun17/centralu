@@ -10,8 +10,8 @@ import { SettingsCard, SettingsEmpty } from './SettingsLayout.jsx'
  * to the session archive while the session stays, and a trashed set of steps as a row of the session archive.
  *
  * The steps of the native subagents a session launched (#222) are kept under their launch cards and read only when a
- * card is opened, so nothing showed what they took: the measured store held 46 MB of them, all one session still in use,
- * and the only way to let them go was to delete the conversation. The session archive is where this screen says what the store
+ * card is opened, so nothing else shows what they take (one measured store held 46 MB of them, all one session still in
+ * use), and without this screen the only way to let them go is to delete the conversation. The session archive is where this screen says what the store
  * holds, so they are said here.
  *
  * The list of what sessions hold is drawn in the shared Settings card (owner, 2026-10-31), its action the shared `Button`; a trashed set of steps

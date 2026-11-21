@@ -7,8 +7,8 @@ import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppSecrets } from './AppSecrets.jsx'
 
 /*
- * An app's Secrets section when the saved secrets could not be read (#944): before, every value just showed missing,
- * which read as values never entered.
+ * An app's Secrets section when the saved secrets could not be read (#944): every value shown missing
+ * reads as values never entered.
  */
 const platform = {} as unknown as Platform
 function app(info: Partial<ExternalAppInfo>): ExternalCatalogApp {

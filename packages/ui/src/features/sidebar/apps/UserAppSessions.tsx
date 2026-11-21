@@ -10,8 +10,8 @@ import { ToolMark } from '../marks/ToolMark.jsx'
  * `run_agent` stood up (both have no project and carry the app's id).
  *
  * This is their one place in the sidebar. Project apps use the same nested rows in their project's
- * app list; user-folder apps have no project, and the "No app" list that used to catch every
- * session with no project is gone (2026-10-05). An agent an app started can still wait on the
+ * app list; user-folder apps have no project, and no list catches every session with no
+ * project. An agent an app started can still wait on the
  * person (a question, a card Centralu raises, a preset the person lowered), and such a session must have a row to be found by.
  *
  * A session with no project that no listed app claims (a coordinator the removed control app stood

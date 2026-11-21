@@ -6,9 +6,9 @@ import type { WaitingRow } from './inboxList.js'
 import { useLeavingCards } from './useLeavingCards.js'
 
 /*
- * The rows of the list are derived on every render (`arrangeInbox` over a clock that moves), so they are a new array each time with the same content. The hook once compared them
- * by identity during render: every pass set state, the render started again, and it never settled. A render of a component that makes its rows afresh on every pass shows it:
- * with the fix it takes one pass, and without it React gives up at its limit on render passes.
+ * The rows of the list are derived on every render (`arrangeInbox` over a clock that moves), so they are a new array each time with the same content. A hook that compares them
+ * by identity during render sets state on every pass, the render starts again, and it never settles. A render of a component that makes its rows afresh on every pass shows it:
+ * comparing by keys it takes one pass, and by identity React gives up at its limit on render passes.
  */
 
 const party = { address: 'person', kind: 'person', sessionId: null, name: null, state: null }

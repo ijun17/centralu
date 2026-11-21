@@ -18,10 +18,10 @@ function quoted(text: string): ReactNode[] {
  * names (one setting per line) and the hint. The tool's own words stay one click away, so a cause the explanation did not
  * anticipate is never lost.
  *
- * The owner's case (packaged 0.1.0-beta.9): a `config.toml` warning and a deprecation addressed to Centralu read like the same
+ * A `config.toml` warning and a deprecation addressed to Centralu would read like the same
  * kind of problem. So a notice for the person starts open and one for Centralu starts closed (owner, 2026-11-17, #2338), and
  * `for Centralu` is fainter than `for you`: a notice the person cannot act on does not look like one they must. A notice whose
- * audience the host did not place starts open, as every notice used to be.
+ * audience the host did not place starts open.
  * The host places the audience, not this rule from the notice's level: Centralu's lines about a compaction are placed for Centralu, so they start
  * closed with a head that says what happened (owner, 2026-11-18), while an `info` notice the host did not place keeps its words open. A notice from
  * Centralu that is for Centralu does not say `for Centralu` (`audienceShown`): the speaker is the one it is for, so the words add nothing and the head

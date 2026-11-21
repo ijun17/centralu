@@ -9,10 +9,10 @@ import { SessionSettings } from './SessionSettings.jsx'
  *
  * **Why this subscribes separately** from the composer: the values here keep changing during
  * the conversation (context on every turn, live on every restart), and the composer has nothing
- * to do with any of that. Back when this was one component, the textarea itself was re-rendered
- * whole on every delta while a response streamed.
+ * to do with any of that. As one component, the textarea itself would re-render whole on every
+ * delta while a response streams.
  *
- * The placement is unchanged — model and permissions are decided **right before sending**, so
+ * Model and permissions are decided **right before sending**, so
  * they belong here, where the hand and eye already are, rather than in the header at the
  * opposite end of the screen.
  */

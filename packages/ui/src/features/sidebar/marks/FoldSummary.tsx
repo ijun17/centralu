@@ -52,7 +52,7 @@ const FOLD_LOOK: Record<FoldSummaryState, SessionLook> = {
  * A chip like ToolMark — a count instead of a letter. A count of 0 is no chip; the one that just dropped to 0 stays for its exit with its last count (usePresence, as the mark's dot does).
  *
  * **A chip that leaves gives back its width as it fades** (`cc-chip-out`, #2202) and **one that arrives grows its width in as it fades in** (`cc-chip-in`, #2209): the chips that stay
- * slide over, where they jumped by its width (and its gap) in one frame (design-system §9). Its wrapper has no box at rest (`contents`), so the line's layout is the chips' own.
+ * slide over instead of jumping by its width (and its gap) in one frame (design-system §9). Its wrapper has no box at rest (`contents`), so the line's layout is the chips' own.
  */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
   const presence = usePresence(count > 0)

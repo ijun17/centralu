@@ -24,16 +24,16 @@ import { useStore, type ChatItem, type CommandRun } from '../../store/store.js'
 import { formatElapsed, nextElapsedTick } from './elapsed.js'
 
 /*
- * Saved commands, redrawn from what a person does with them (owner, 2026-10-19: "tear it down, make it a better UX").
+ * Saved commands, drawn from what a person does with them (owner, 2026-10-19).
  *
  * - The common act is "start the dev server" or "run the tests", so each row carries its own Run (Stop while it runs)
- *   at its start: one click, no picking first. The old pick-then-Run took two clicks and a look at a second place.
+ *   at its start: one click, no picking first. Pick-then-Run would take two clicks and a look at a second place.
  * - Each row says how it stands, so the list answers "what is running and how did the last run end" at a glance: a
  *   breathing dot and the time it has been running, or how it ended and how long ago. Running is the plain ink, not
  *   white (nothing waits on the person); a failed run is the dashed grey ring, "failed, nothing waits".
  * - The log opens in place under its row (a click on the row, or Space), one at a time, so the window stays a short
- *   list until a log is asked for. A running command's log also stands in the evidence panel's terminal tab, as
- *   before; this window keeps the last log after it ends.
+ *   list until a log is asked for. A running command's log also stands in the evidence panel's terminal tab;
+ *   this window keeps the last log after it ends.
  * - Restart stands beside a running row; rename and remove come up on hover or focus, remove at the far end, away from
  *   Run, since a removal cannot be undone.
  * - Adding is command first; the name field shows up once there is a command to name. Commands the agent ran in this
@@ -41,7 +41,7 @@ import { formatElapsed, nextElapsedTick } from './elapsed.js'
  * - Keys from the header button: the list takes the keyboard, ↑↓ move, ↵ runs (on a running row it opens the log
  *   instead: Enter never stops or restarts a server), Space opens or closes the log, Esc closes.
  *
- * Kept from before: a saved command is its command string, and wherever a name is shown its command is shown with it
+ * A saved command is its command string, and wherever a name is shown its command is shown with it
  * (2026-09-06); run state lives in the store's record (commandRuns), shared with the terminal tab and the header
  * button, so a run goes on with the window closed; only the last run's log per command is kept on the host and is
  * replaced when that command runs again (2026-08-26). It opens as a dropdown under the header's button and comes and
@@ -470,7 +470,7 @@ function CommandRow({
               data-testid={`run-rename-input-${i}`}
               className="w-full"
               onKeyDown={(e) => {
-                // An Enter that ends a composition does not save (#181) — the last syllable of a Korean name was dropped
+                // An Enter that ends a composition does not save (#181) — it would drop the last syllable of a Korean name
                 if (isPlainEnter(e.nativeEvent)) finishRename((e.target as HTMLInputElement).value)
                 // Esc is cleared from `renaming` by the window's listener; the field going away must not save what was typed
                 else if (isPlainEscape(e.nativeEvent)) renamed.current = true

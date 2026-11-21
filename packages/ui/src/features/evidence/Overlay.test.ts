@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { overlayTakesEscape } from './Overlay.jsx'
 
 /*
- * #181: the overlay receives Esc in the window's capture phase — before every other element. While
- * the target was not checked, Esc meant for the terminal (vim, less) in the evidence panel next to
- * it never reached it, and the hidden overlay closed first instead of a settings dialog or a modal
+ * #181: the overlay receives Esc in the window's capture phase — before every other element. Without
+ * a check of the target, Esc meant for the terminal (vim, less) in the evidence panel next to it
+ * never reaches it, and the hidden overlay closes first instead of a settings dialog or a modal
  * open above it.
  */
 describe('overlayTakesEscape — the overlay only claims Esc when it is on top and the key came from its own side (#181)', () => {

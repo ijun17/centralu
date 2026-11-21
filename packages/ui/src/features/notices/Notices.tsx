@@ -8,7 +8,7 @@ import { PEEK_MS } from '../inbox/InboxPill.jsx'
  * Things that happened in a session are kept as notices (`notices` in the store) until they are done with (below).
  *
  * They are shown by the inbox's capsule in the top bar (InboxPill): a new one is written out there for a few seconds.
- * The cards that used to stack in the top right were removed (owner, 2026-10-18) because they covered the page.
+ * No cards stack in the top right (owner, 2026-10-18): they would cover the page.
  * A notice never disappears on its own: it is cleared here, in one place, by the rule for its kind.
  */
 export function Notices() {
@@ -80,9 +80,9 @@ export function Notices() {
   }, [notices, sessions, tick, appFocused, view, focusedSessionId, assistantId, gridSessions, builderPaneSessionId, projectScreen, dismiss])
 
   /*
-   * The cards that stood here in the top right are gone (owner, 2026-10-18): they covered the conversation, and the
-   * inbox's capsule in the top bar says the same thing now (features/inbox/InboxPill.tsx writes a new notice out for a
-   * few seconds). What stays is this component's other job, clearing a notice once its session is on screen.
+   * Nothing drawn (owner, 2026-10-18): cards in the top right would cover the conversation, and the inbox's capsule in
+   * the top bar says the same thing (features/inbox/InboxPill.tsx writes a new notice out for a few seconds). This
+   * component's job is clearing a notice once its session is on screen.
    */
   return null
 }

@@ -79,7 +79,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
     if (!savedFolded) expander.reset()
   }, [expander, savedFolded])
   useEffect(() => () => expander.reset(), [expander])
-  /** A click on the project: a hover-expanded one stays (the saved fold opens), a click-folded one folds as the arrow always did */
+  /** A click on the project: a hover-expanded one stays (the saved fold opens), a click-folded one folds as the arrow does */
   const toggleFoldFromClick = () => {
     if (hoverActive) expander.reset()
     toggleFold(projectId)

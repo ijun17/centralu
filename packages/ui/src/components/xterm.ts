@@ -33,7 +33,7 @@ export type XtermAttach = (term: Xterm, fit: () => void) => XtermAttachment
  * **The same size is never reported twice.** A pty resize makes the shell redraw its prompt, but
  * `fit()` touches the element's layout, which wakes the ResizeObserver again — without this guard a
  * feedback loop would keep running even when the size never changed, and on screen the prompt line
- * would grow endlessly (a finding from dogfooding).
+ * would grow endlessly.
  *
  * @param attach runs once the terminal is open and fitted; it may call `fit` itself (a shell does,
  * before writing its history, so the history lands in a terminal of the right size)

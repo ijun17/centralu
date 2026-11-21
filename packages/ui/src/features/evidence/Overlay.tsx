@@ -17,11 +17,11 @@ const GitPanel = lazyComponent(() => import('../git/GitPanel.jsx').then((m) => m
  * Why not inside the right-hand panel: what the viewer is really for here is checking a
  * diff an agent just wrote, and a diff is unreadable at 340px.
  *
- * Why it no longer covers that panel as well: the sentence above got read as "so take the
- * panel's width too", which does not follow from it. The overlay competes with the
- * *conversation* for room, not with the panel. Covering the panel took away the file tree
+ * Why it does not cover that panel as well: the sentence above does not mean "so take the
+ * panel's width too". The overlay competes with the
+ * *conversation* for room, not with the panel. Covering the panel takes away the file tree
  * and the change list — the thing you use to open the next file — so the shape of the work
- * became: click a file, watch the tree disappear, press escape, click the next one. Giving
+ * becomes: click a file, watch the tree disappear, press escape, click the next one. Giving
  * up ~340px of diff to stop that is cheap, because the diff is unified: the loss is line
  * width, not a whole column (issue #15). It applies to both kinds, and the `git` kind is
  * the worse of the two to cover, since the list it was opened from is the list you are
@@ -53,10 +53,10 @@ export function Overlay() {
    *
    * **But only when this layer is on top and the key actually came from this layer** (#181).
    * Intercepting it in the window's capture phase means it arrives before every other element, so
-   * Esc meant for the terminal (vim, less) in the evidence panel visible right next to it never
-   * reached the terminal, and the overlay closed instead. It was also intercepting Esc meant for a
-   * settings dialog or a modal open above it, closing the hidden overlay underneath and leaving the
-   * settings dialog needing a second press to close.
+   * without that check Esc meant for the terminal (vim, less) in the evidence panel visible right
+   * next to it never reaches the terminal, and the overlay closes instead. It would also take Esc
+   * meant for a settings dialog or a modal open above it, closing the hidden overlay underneath and
+   * leaving the settings dialog needing a second press to close.
    */
   useEffect(() => {
     if (!overlay) return

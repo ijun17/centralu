@@ -14,7 +14,7 @@ export type ProjectAppSessions = {
  * project list instead of disappearing with the app row.
  *
  * This happens before `orderAsTree`, so a regular session and the agents or worktrees it started
- * retain the tree layout they had before app rows were introduced.
+ * keep their tree layout whatever app rows the project has.
  */
 export function groupProjectAppSessions(
   sessions: SessionSummary[],
@@ -51,7 +51,7 @@ export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
  * indentation is only a sign of a relationship, and drawing it indented while the parent is
  * invisible would make it look like it is hanging under nothing. A child of a child hangs one step further in (#862):
  * start_agent is depth one, but an `auto` session may cross that boundary, and drawing its children at the top level
- * made them read as their grandparent's siblings. A loop in the links (which the host never makes) is cut where it
+ * would make them read as their grandparent's siblings. A loop in the links (which the host never makes) is cut where it
  * closes, so every session is drawn exactly once.
  */
 export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; nested: boolean; depth: number }[] {

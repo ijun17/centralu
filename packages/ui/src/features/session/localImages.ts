@@ -5,7 +5,7 @@ import type { MessageImage } from '@cc/protocol/client'
  *
  * The window cannot load `![shot](/Users/me/out/shot.png)` itself (its origin is the app, and the desktop CSP takes
  * images from `data:` and `blob:` only), so such an image is asked of the session's host (`messages.image`) and drawn
- * from the bytes it sends back. A web address stays an ordinary `<img>`, as it always was.
+ * from the bytes it sends back. A web address stays an ordinary `<img>`.
  */
 
 /**

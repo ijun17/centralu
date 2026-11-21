@@ -6,8 +6,8 @@ import type { Loaded } from '../../app/useLoad.js'
  *
  * Both lists are read with `useLoad`, which says "loading", "answered" or "failed". The three ways a list can be
  * empty must not look alike: it is still being read, the host said there is nothing, or the read did not work. A
- * failure that looked like "none" was the bug (#1143 U14), and a failure that looked like "still loading" was the
- * other one (U13): the menu said "Loading skills…" until the person retyped the `/`.
+ * failure must not look like "none" (#1143 U14), nor like "still loading" (U13), where the menu would say
+ * "Loading skills…" until the person retyped the `/`.
  */
 
 /** The `/` list as the host answered it, with the session it answers (the pane is reused for another session) */

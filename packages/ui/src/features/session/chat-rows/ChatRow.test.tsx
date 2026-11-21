@@ -7,8 +7,8 @@ import { PlatformProvider } from '../../../app/PlatformProvider.jsx'
 import type { AppState, ChatItem } from '../../../store/store.js'
 
 /*
- * Each row kind drawn from a fixture, pinning what the conversation shows today (#428): the move out of
- * SessionView.tsx changed no DOM, and a later change to a card shows up here before it shows up on screen.
+ * Each row kind drawn from a fixture, pinning what the conversation shows (#428): a change to a card shows up
+ * here before it shows up on screen.
  *
  * The rows are drawn with renderToStaticMarkup, which reads a zustand store's *initial* state (the server
  * snapshot of useSyncExternalStore), so `useStore` is replaced by one that reads `state`: a test seeds the
@@ -321,7 +321,7 @@ describe('ChatRow: tool cards', () => {
     expect(testIds(failed.html)).not.toContain('subagent-steps-empty')
   })
 
-  // #418: a card whose steps the person archived read as one that never kept any
+  // #418: a card whose steps the person archived must not read as one that never kept any
   it('says the steps were archived, all of them or the earlier ones, and where they come back from', () => {
     state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [], trashed: 12 } } } }
     const all = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))

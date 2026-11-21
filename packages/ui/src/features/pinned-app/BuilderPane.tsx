@@ -6,7 +6,7 @@ import { useStore } from '../../store/store.js'
 /**
  * Opens the builder session's conversation **beside** the app view (M4 C-5).
  *
- * There was also the option of a link that jumps to that session. That would switch the center lane
+ * Not a link that jumps to that session: that would switch the center lane
  * over to the session and hide the app view — breaking the promise that "the person never leaves the
  * app" (plan C-5) the moment it is pressed. Opening it beside the view instead lets the same pair of
  * eyes catch the view changing while the builder agent fixes it, and lets the person answer a

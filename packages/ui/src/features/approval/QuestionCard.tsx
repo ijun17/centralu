@@ -9,14 +9,14 @@ import { WaitCard, WaitFooter } from './WaitCard.jsx'
  * Kept apart from the approval card because what travels back differs — an approval is
  * whether something runs, this is *content*: the picked answer goes to the model.
  *
- * In dogfooding this tool call used to flow as raw JSON and get cut off mid-stream; from
- * the second option on there was **no way to answer at all.** So nothing here truncates —
- * not the question, not the options, not the descriptions. If it had to be cut, there was
- * no point asking.
+ * Cut off mid-stream, this tool call leaves **no way to answer at all** from the second
+ * option on. So nothing here truncates —
+ * not the question, not the options, not the descriptions. A question that has to be cut is
+ * not worth asking.
  *
  * **Several questions become tabs, not a stack** (issue #8). Stacked, three questions
- * with descriptions ran past a panel height and the Answer button sat below everything,
- * so the card read as a wall exactly where the agent is waiting on a person. One question
+ * with descriptions run past a panel height and the Answer button sits below everything,
+ * so the card reads as a wall exactly where the agent is waiting on a person. One question
  * at a time is also how people actually answer; the tab row keeps the others in reach and
  * shows which still need one. A single question keeps the flat layout — a tab row of one
  * would be decoration.
@@ -25,7 +25,7 @@ import { WaitCard, WaitFooter } from './WaitCard.jsx'
  * Whether a click on an option is the whole answer (issue #543, item 5).
  *
  * That holds for exactly one question with one choice: the pick *is* the decision, and a
- * separate Answer button was a second decision (`M P B B`, 2.6 s) with nothing left to
+ * separate Answer button is a second decision (`M P B B`, 2.6 s) with nothing left to
  * decide. Several questions need every one answered before anything is sent, and a
  * multiple-choice question has no way to say the last option was picked — those keep Answer.
  */

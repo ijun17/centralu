@@ -236,10 +236,9 @@ function Donut({ window: w }: { window: UsageWindow }) {
         </svg>
         <span className={`readout text-md leading-none ${tone}`}>{w.percent}%</span>
         {/*
-          The model name **is written out** (user's observation, 2026-09-09). Before, when a
-          scope existed, only a dangling "·" was shown and the name was left to the tooltip, so
-          two 74% weekly donuts standing side by side gave no way to read on screen which was
-          whose limit — that is what "per model seems to be missing" meant.
+          The model name **is written out** (user's observation, 2026-09-09). Left to the
+          tooltip, two 74% weekly donuts standing side by side give no way to read on screen
+          which is whose limit.
         */}
         <span className="max-w-[92px] truncate text-2xs text-ink-faint" title={w.scope ?? undefined}>
           {w.label}

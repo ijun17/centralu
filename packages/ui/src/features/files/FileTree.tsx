@@ -20,21 +20,19 @@ import { TabActions } from '../evidence/tabActions.jsx'
  * A lazy load — only a directory that has actually been opened is read. The first render has to
  * stay light even in a repository with 10k+ files.
  *
- * **Ignored files are shown by default** (issue #17). They used to be hidden until you
- * found this checkbox, and a hidden row does not look filtered — it looks like the file is
- * not there. That is the wrong first impression for a tree whose job is "show me this
+ * **Ignored files are shown by default** (issue #17). A hidden row does not look filtered —
+ * it looks like the file is not there. That is the wrong first impression for a tree whose job is "show me this
  * repo", and the file you came for is often exactly the untracked one.
  *
  * The toggle stays, because of what `.gitignore` covers: not a curiosity or two but
  * `node_modules`, `dist`, `.next` — thousands of rows that sort in among `src`. Anyone
- * drowning in those turns it off once and it stays off, which is only true since the switch
- * stopped being component state: leaving for the Git tab or collapsing the panel used to
- * put it back, so "can't see ignored files" really meant "you can, but it forgets". It
- * lives on the store now and comes back with the rest of the panel's layout. Whether it is
+ * drowning in those turns it off once and it stays off: the switch lives on the store, not in
+ * component state, so leaving for the Git tab or collapsing the panel does not put it back,
+ * and it comes back with the rest of the panel's layout. Whether it is
  * on is a way of looking, so unlike expanded folders (#16, which belong to a project) it is
  * one setting for the whole app.
  *
- * **The tree can now change files, not only show them** (#18, #19). Four operations and no
+ * **The tree changes files, not only shows them** (#18, #19). Four operations and no
  * more: reveal, drag one in, drag one around, move one to the trash. Create, rename,
  * copy/paste, multi-select and filtering are deliberately absent — this app is a place to
  * watch an agent work, not an editor, and each of those brings a mode or a dialog with it.
@@ -65,7 +63,7 @@ export function FileTree({ projectId }: { projectId: string }) {
   }, [])
 
   /*
-   * And now **a change made outside** is also reported (#34).
+   * **A change made outside** is reported too (#34).
    *
    * The watched set is exactly the expanded directories — not the whole repository. A folder the
    * lazy tree has not read is not on screen, so there is no reason to watch it either, and that
@@ -116,9 +114,8 @@ export function FileTree({ projectId }: { projectId: string }) {
   /*
    * There is **only one** folder currently being targeted.
    *
-   * Each row used to hold its own state at first, but when an inner folder intercepted the drop (the
-   * closest one wins), the outer folder had no way to know the cursor had left it, and both stayed
-   * lit. Two lit spots means the screen gives two answers to "where will it go" — a fact that has
+   * With a state in each row, an inner folder that intercepts the drop (the closest one wins)
+   * leaves the outer folder no way to know the cursor has left it, and both stay lit. Two lit spots means the screen gives two answers to "where will it go" — a fact that has
    * only one answer needs to be tracked as only one piece of state.
    */
   const [hover, setHover] = useState<string | null>(null)
@@ -282,8 +279,8 @@ type FileOps = ReturnType<typeof useFileOps>
  *
  * A dataURL has the shape `data:<mime>;base64,<body>`, so stripping the prefix leaves it directly
  * usable, and the browser does the conversion. Handling the bytes directly makes string
- * concatenation freeze the screen for tens of seconds on a large file, and the symptom reported as
- * "the file will not attach" for attachments was actually exactly this.
+ * concatenation freeze the screen for tens of seconds on a large file, which a person reads as
+ * "the file will not attach".
  */
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -360,12 +357,11 @@ function Dir({
   const stamp = version[path] ?? 0
 
   /*
-   * `entries` was used as a guard to avoid re-reading once it had been read, but that also blocked
-   * it **even when the input changed.** Picking a session in a different project changed projectId,
-   * but it still bailed out early because entries was already populated, so the file tree kept
-   * showing the old project (a dogfooding finding).
+   * `entries` is not a guard against re-reading: such a guard also blocks a read **when the input
+   * changes.** Picking a session in a different project changes projectId, and the file tree would
+   * keep showing the old project.
    *
-   * Removing the guard still does not cause repeated reads — this effect only runs when open,
+   * Without the guard reads still do not repeat — this effect only runs when open,
    * projectId or path **actually change.** The condition "do not re-read" is expressed through
    * dependencies, not simulated with state. `stamp` is included for the same reason: the fact that
    * the list needs re-reading after a file is moved or deleted is also expressed through a
@@ -390,7 +386,7 @@ function Dir({
         ),
       )}
       {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-sm text-ink-faint">Empty</li>}
-      {/* A failed read used to be drawn as "Empty" at the top, and as nothing inside a folder (#850 item 8) */}
+      {/* A failed read says so, not "Empty" at the top or nothing inside a folder (#850 item 8) */}
       {read.error !== null && (
         <li>
           <LoadFailed
@@ -409,10 +405,9 @@ function Dir({
 /**
  * Whether a folder is open is **the project's** fact, not this row's (issue #16).
  *
- * It used to be `useState` here, so it died with the component: moving between two sessions
- * of the same repo collapsed the whole tree and you dug down the same path again. Drafts
- * had the same shape of bug and moved onto the session — this one moves onto the *project*,
- * because an expanded folder is a fact about the code rather than about a conversation.
+ * As `useState` here it would die with the component: moving between two sessions of the
+ * same repo would collapse the whole tree and you dig down the same path again. Drafts live
+ * on the session for the same reason; this one lives on the *project*, because an expanded folder is a fact about the code rather than about a conversation.
  * Two sessions on one repo want the same tree open; two projects almost never do.
  *
  * The whole `<li>` takes the drop, not just the row: everything inside a folder renders
@@ -513,8 +508,8 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
  * **The reason delete is here** is the reason this menu exists at all. Putting a delete button on
  * the row means a hand aiming to open something could land on delete instead, and opening and
  * deleting have very different costs to undo. A right click is an entirely different action from a
- * left click, so it cannot be pressed by mistake, and there was nothing already using right-click on
- * a tree row to take over from.
+ * left click, so it cannot be pressed by mistake, and right-click on a tree row has no other use to
+ * take over from.
  *
  * There is no confirmation dialog — that is #18's decision. The trash can be undone **even after**
  * pressing it, while a dialog can only be undone before pressing it. A dialog that asks ends up

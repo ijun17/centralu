@@ -7,14 +7,14 @@ import { Kbd, Tooltip } from '../../components/primitives.jsx'
 import { detailText } from './ApprovalCard.jsx'
 
 /**
- * An approval answered from the waiting list's row (#543, audit items 1 and 2; the sidebar's row no longer has one, #1740).
+ * An approval answered from the waiting list's row (#543, audit items 1 and 2; the sidebar's row has none, #1740).
  * Answering without opening the session is a shortcut past the card, so the row
  * keeps the card's promises:
  *
  * - **It says what is being approved, and nothing of it is hidden.** The verb and the command or path stand on the
  *   row; the tooltip is the card's own text, whole (`detailText`, the same function the card draws, with what the
  *   request says beyond its line). A path shows its file's name first, then its folder inside the session's own
- *   folder (#683 review: cut at the end, an absolute path lost the name). A command is answered from the row only
+ *   folder (#683: cut at the end, an absolute path loses the name). A command is answered from the row only
  *   when it fits on it whole (measured, `useFitsWhole`): a cut command can hide its dangerous end (`cd ~/x && …`).
  * - **Only a plain yes or no.** Allow and Deny for a card whose question one line states whole (`answersInPlace`,
  *   which also sends empty and flagged requests to the card), for an edit inside the session's folder; anything else

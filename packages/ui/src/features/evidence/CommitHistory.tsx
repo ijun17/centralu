@@ -13,14 +13,11 @@ import { useGitRefreshKey } from './GitChanges.jsx'
 /**
  * The History tab — the place a person comes to **read** the log (#21).
  *
- * It is also the successor to the History strip that used to live below the git tab. That strip had
- * a fixed height, so with splitting (#20) it covered the neighboring group's tab strip, and since
- * this tab already answers the same question ("how did we get here") with a full vertical column,
- * the strip was removed.
+ * There is no History strip below the git tab: a strip of fixed height covers the neighboring
+ * group's tab strip once groups split (#20), and this tab already answers the same question ("how
+ * did we get here") with a full vertical column.
  *
- * **The lines (the lane graph) are now drawn here.** Back at #21, the reason this tab chose dates
- * and dropped the lines was "the graph lives over there (the strip)" — now that "over there" is
- * gone, that premise is gone too. A full-width tab has room for both: the lines state branching and
+ * **The lines (the lane graph) are drawn here.** A full-width tab has room for both: the lines state branching and
  * merging, the date states "how long ago." Row height is therefore fixed — the lines only look
  * continuous when they line up exactly at each row's boundary.
  *
@@ -44,7 +41,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
   }, [commits])
 
   /*
-   * A failed read used to be drawn as "No commits yet" (#850 item 8). It stands in place of the history when there is
+   * A failed read is not drawn as "No commits yet" (#850 item 8). It stands in place of the history when there is
    * none, and above the last one when a refresh failed
    */
   const failed = log.error !== null && (

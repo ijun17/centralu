@@ -43,15 +43,14 @@ export function useDropLine(mime: string, onDrop: (draggedId: string, before: bo
  *
  * **Must not be drawn with a border.** A border grows an element by 1px, so every time the
  * indicator moves to a different row the whole list shifts by that amount — while dragging, it
- * reads as a constant little jump (a dogfooding finding). Worse, the spot the hand is aiming for
- * keeps moving, which makes dropping harder too.
+ * reads as a constant little jump. Worse, the spot the hand is aiming for keeps moving, which
+ * makes dropping harder too.
  *
- * **The line sits on the boundary between rows, not inside a row** (dogfooding, 2026-09-10:
- * "it is the same spot, but the line nudges up and down slightly"). One boundary is shared by two
+ * **The line sits on the boundary between rows, not inside a row.** One boundary is shared by two
  * rows — it is the "bottom" for the row above and the "top" for the row below. An inset shadow
- * draws that on **each row's own inside edge**, so the two indicators pointing at the same
- * boundary ended up 2-3px apart. That is why the line appeared to jump by that amount every time
- * the hand crossed the boundary.
+ * would draw that on **each row's own inside edge**, so the two indicators pointing at the same
+ * boundary land 2-3px apart, and the line jumps by that amount every time the hand crosses the
+ * boundary.
  *
  * Placing an absolutely positioned pseudo-element (`after`) right on the boundary (-1px) instead
  * makes the two rows' indicators land on **the same pixel**. It keeps the property of not

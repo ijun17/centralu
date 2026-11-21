@@ -29,10 +29,9 @@ export function useOpenLayer(): void {
  *
  * This must be rendered through a portal. `absolute inset-0` positions itself relative to the
  * nearest positioned ancestor, and where the component using the modal happens to sit is none of
- * the modal's business. This actually happened: adding `relative` to the sidebar for its resize
- * handle trapped the session-creation modal opened inside it within the sidebar's width (caught
- * in dogfooding). Covering the whole window regardless of an ancestor's circumstances requires
- * attaching to body.
+ * the modal's business: the sidebar is `relative` for its resize handle, so a modal opened inside
+ * it would be trapped within the sidebar's width. Covering the whole window regardless of an
+ * ancestor's circumstances requires attaching to body.
  *
  * Closing on Esc and on an outside click is also handled once, here — if every caller reimplements
  * it, some modals end up with Esc working and others without.

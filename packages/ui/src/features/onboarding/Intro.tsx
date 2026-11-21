@@ -29,8 +29,8 @@ export function Intro() {
   const platform = usePlatform()
   const completeIntro = useStore((s) => s.completeIntro)
   /*
-   * A detection that fails is not "no tool is ready" (#850 item 8): it used to read as an empty list, which drew no card
-   * and told the person to run a command "above" that was not there. It says what failed, with the same way to ask again.
+   * A detection that fails is not "no tool is ready" (#850 item 8): read as an empty list, it would draw no card and tell
+   * the person to run a command "above" that is not there. It says what failed, with the same way to ask again.
    */
   const detected = useLoad<ToolStatus[]>(() => platform.agents.detect(), [platform])
   const tools = useLiveTools(detected.data ?? null)
@@ -50,7 +50,7 @@ export function Intro() {
         {/*
           **One line is all there is.** Nobody reads a three-paragraph explanation before
           starting — the longer it is, the less it gets read, and unread, this screen teaches
-          nothing and just collects a click (a dogfooding observation). The one sentence worth
+          nothing and just collects a click. The one sentence worth
           keeping is the single reason this screen exists: **there is someone to talk to.**
           Everything else is left to the suggested-question cards on the next screen.
         */}
@@ -65,7 +65,7 @@ export function Intro() {
         <div className="mt-2 grid grid-cols-2 gap-3">
           {cards.map((t) => {
             const ok = ready(t)
-            // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run, as before.
+            // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run.
             // One the Assistant cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
             const managed = (t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu') && refusal(t.name) === null
             // A card whose line holds buttons of its own (Install, Sign in) is not a <button>, which may not hold one: it acts as one once it can be picked

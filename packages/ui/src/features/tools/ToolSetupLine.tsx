@@ -23,7 +23,7 @@ export type TerminalHints = {
  * the new-app dialog show where a tool cannot be used yet. It says why in one line and gives the action the state allows:
  * Install (with progress and Stop, then Retry on a failure), Sign in (with "Waiting for the browser…" and Stop, then
  * Retry after a timeout), only a sentence on a linked machine, and the terminal command for a tool Centralu does not set
- * up (as before).
+ * up.
  *
  * `shown` is whether the tool is blocked. When it turns false (a sign-in succeeded) the line fades out and folds away
  * (`Fold`), still saying what it said, and the caller's Start enables at once: nothing here delays input.
@@ -58,7 +58,7 @@ export function ToolSetupLine({
   const linked = !!machine
   const machineName = useMachineName(machine)
   const live = useStore((s) => s.toolSetups[status?.name ?? ''])
-  // A tool the list does not know (a linked machine's host that predates it) is not found there: said as before, never an empty line
+  // A tool the list does not know (a linked machine's host that predates it) is not found there: it gets the terminal install line, never an empty line
   const view: SetupView = refusal ? { kind: 'ready' } : status ? setupView(setupOf(status, live, linked), linked) : shown ? { kind: 'terminal_install' } : { kind: 'ready' }
   const actions = useToolSetupActions(status?.name ?? '', machine, view.kind === 'installing', redetect)
 

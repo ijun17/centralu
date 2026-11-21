@@ -40,7 +40,7 @@ export type AutoApplyInput = {
  * - Never while someone is typing.
  * - Never from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing
  *   reports whether the host is busy there, and waiting for a report that never comes would only say "something is
- *   running" for good. The person presses the button. With a keeper the report is there, so it waits for idle as before.
+ *   running" for good. The person presses the button. With a keeper the report is there, so it waits for idle.
  */
 export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingFor?: string } {
   const u = i.update
@@ -120,8 +120,8 @@ export function useRelaunchCheck(): RelaunchCheck | null | undefined {
 
 /**
  * The check Updates asks for as Settings opens (#43): **each time it opens, not each time it mounts** (#2155). Settings
- * reopened during its closing fade is still mounted, so a check tied to the mount asked nothing and showed what it had
- * as it closed. Only with automatic checking on, and not over a check or an install under way.
+ * reopened during its closing fade is still mounted, so a check tied to the mount would ask nothing and show what it
+ * had as it closed. Only with automatic checking on, and not over a check or an install under way.
  */
 export function useUpdateCheckWhileOpen(): void {
   const open = useStore((s) => s.settingsOpen)
@@ -211,8 +211,7 @@ export function useAutoApplyUpdate(): string | null {
  *
  * **The order itself is the judgment.** Whatever is in progress comes first, the outcome comes
  * after. In particular, `error` must never come after `latest` — the moment a brief network
- * drop gets read back as "you are up to date," the check erases its own finding (this is
- * exactly how #42 stayed hidden for an entire release).
+ * drop gets read back as "you are up to date," the check erases its own finding (#42).
  */
 export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null): string {
   if (!u) return 'Not checked yet'

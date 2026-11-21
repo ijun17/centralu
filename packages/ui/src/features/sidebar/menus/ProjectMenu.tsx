@@ -55,7 +55,7 @@ export function ProjectMenu({
       {/* A project on a machine that is not connected: bringing it back comes first (#1533); nothing here for one that is connected or on this computer */}
       {project.machine && <ReconnectRow machine={project.machine} projectName={project.name} anchorEl={anchorEl} onClose={onClose} />}
       {/*
-        The only way to start a session from the sidebar since its `+` went (owner, 2026-10-18). It starts one at once:
+        The only way to start a session from the sidebar (owner, 2026-10-18). It starts one at once:
         the empty screen switches the tool and offers past conversations, so no window of options is needed here.
       */}
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
@@ -70,7 +70,7 @@ export function ProjectMenu({
       {onNewApp && <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />}
       {/*
         The whole project in VS Code, on its own machine (#82). It lives here and not in the file tree's tab strip:
-        there it took the width the strip counts tabs by, and pushed the terminal tab into "more" in a narrow panel.
+        there it would take the width the strip counts tabs by, and push the terminal tab into "more" in a narrow panel.
       */}
       {onOpenInVsCode && (
         <ActionRow
