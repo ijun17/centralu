@@ -269,14 +269,12 @@ describe('finding a tool under WSL (#2366)', () => {
   const there = (path: string) => path === '/mnt/c/Users/me/AppData/Roaming/npm/claude'
   const machine = (files: Record<string, string>) => (path: string) => files[path] ?? null
 
-  it("reads the kernel's release and wsl.conf, and passes over the Windows install there", () => {
+  it("reads the kernel's release and wsl.conf, and passes over the Windows install there only under WSL", () => {
     const wsl = machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n' })
     expect(whichTool('claude', { PATH }, 'linux', there, wsl)).toBeNull()
     const elsewhere = machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n', '/etc/wsl.conf': '[automount]\nroot = /windir/\n' })
     expect(whichTool('claude', { PATH }, 'linux', there, elsewhere)).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
-  })
-
-  it('finds it as before on a Linux that is not WSL, and on macOS', () => {
+    // A Linux that is not WSL, and macOS, search every folder
     expect(whichTool('claude', { PATH }, 'linux', there, machine({ '/proc/sys/kernel/osrelease': '6.8.0-45-generic\n' }))).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
     expect(whichTool('claude', { PATH }, 'darwin', there, machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n' }))).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
   })
