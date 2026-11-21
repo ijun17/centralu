@@ -23,11 +23,14 @@ const SPACE = 'refs/centralu-pre-pr'
  * The commit status open_pr and pre_pr post on the head pre-pr passed on, or was skipped for with a reason (#1886); the merge
  * queue asks for it. Attribution, not proof: AGENTS.md "pre-pr's status".
  */
-export const PRE_PR_STATUS = 'pre-pr'
+const PRE_PR_STATUS = 'pre-pr'
 /** The status's description: the tier first, since GitHub keeps 140 characters of it */
 export const prePrDescription = (tier, how) => `tier:${tier}; ${how}`
-/** Whether `sha` carries a successful pre-pr status */
-export const prePrPassed = async (repo, sha) => (await readStatus(repo, sha, PRE_PR_STATUS))?.state === 'success'
+/** The successful pre-pr status on `sha` (`{ state, description }`), or null: none, or one that is not success */
+export async function readPrePr(repo, sha) {
+  const s = await readStatus(repo, sha, PRE_PR_STATUS)
+  return s?.state === 'success' ? s : null
+}
 /** Posts the pre-pr status on `sha`, with a description prePrDescription made */
 export const postPrePr = (repo, sha, description) => postStatus(repo, sha, { state: 'success', context: PRE_PR_STATUS, description })
 // A tier's name as it goes into a label; which names exist is the repository's (scripts/tier.mjs), not the board's

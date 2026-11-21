@@ -1922,6 +1922,39 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
   })
 
+  it('asks again of a head that moves twice: the status of the first new head accepts that head only', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)], [SHA2]: [ghCheck('verify', null, 11)] }, noPrePr: [A] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    // The first new head has the status (pre_pr ran on it): taken without asking
+    patchGh((s) => (s.prs['77'].headRefOid = SHA2))
+    await until(() => itemsOnDisk()[0]?.prePrHead === SHA2, 'the first new head to be taken')
+    patchGh((s) => {
+      s.prs['77'].headRefOid = A
+      s.checks[A] = green()
+      s.runs[A] = [ghRun('success', 1, A)]
+    })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention for the second new head')
+    expect(q.queue[0].reason.text).toContain(`since ${SHA2.slice(0, 7)} to ${A.slice(0, 7)}`)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+  })
+
+  it('refuses to queue again a queued pull request whose head moved without the status, and keeps asking for it', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, noPrePr: [SHA2] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    patchGh((s) => {
+      s.prs['77'].headRefOid = SHA2
+      s.checks[SHA2] = green()
+      s.runs[SHA2] = [ghRun('success', 1, SHA2)]
+    })
+    const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain("#77's head beef000 has no pre-pr status")
+    const q = await until((x) => stateOf(x) === 'attention', 'attention for the moved head')
+    expect(q.queue[0].reason.kind).toBe('pre-pr')
+    expect(itemsOnDisk()[0].prePrHead).toBe(SHA)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+  })
+
   // Mixed versions while the board is rolled out: an item an older board queued checked no status
   it('takes an item an older board queued at the head it had, and asks for the pre-pr status only of a head pushed after that', async () => {
     const at = new Date().toISOString()

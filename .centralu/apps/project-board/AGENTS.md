@@ -323,13 +323,14 @@ lands.
   moved while pre-pr ran gets the status on the commit it checked, and the answer says so. It does not edit the description.
 - **`queue_merge`** refuses a top whose head has no successful `pre-pr` status, naming the head and `pre_pr`. A stack needs it
   on its top only: the top's run checked the lowers with it. The item keeps `prePrHead`, the head the status was found on.
-- **A head that moved** after queueing (`pollItem`): before CI is read, a head other than `prePrHead` needs the status, read
-  on every poll; without it, attention `pre-pr` (once per head), which says the queue cannot tell new commits from a rebase onto
-  main, so a rebase needs `pre_pr` too. Polled again like any attention: once the status is there it carries on, with nothing
-  queued again. **Exempt**: a record of `integrate` (`auto`: the queue judges its tier on every head itself, and no pre-pr ran
-  for it), and a head the queue pushed itself onto a head it had accepted (a merge of main or a restack, `conflict.sha`): the
-  same change, merged mechanically or replayed with the same patch id, and CI runs on it before it lands. The queue never runs
-  pre-pr itself.
+- **A head that moved** after queueing (`pollItem`): a head other than `prePrHead` needs the status, read on every poll
+  before a conflict is handled (so the queue's own push onto it, below, is exempt) and before CI is read; without it,
+  attention `pre-pr` (once per head), which says the queue cannot tell new commits from a rebase onto main, so a rebase
+  needs `pre_pr` too. Polled again like any attention: once the status is there it carries on, with nothing queued again.
+  **Exempt**: a record of `integrate` (`auto`: the queue judges its tier on every head itself, and no pre-pr ran for it),
+  and a head the queue pushed itself onto a head it had accepted (a merge of main or a restack, `conflict.sha`): the same
+  change, merged mechanically, replayed with the same patch id (a stack's top) or rebased cleanly without a landed
+  squash's commits, and CI runs on it before it lands. The queue never runs pre-pr itself.
 - **`rebase_stack`** (a session's restack) carries the status over to the head it pushes (`carry`, stack.mjs), its
   description as it was: it pushes only a replay whose patch id is the tested change's, so what pre-pr said
   holds, and a stack's top restacked after its lower landed can be queued without running pre-pr again. A head that had no
@@ -344,9 +345,9 @@ lands.
   head nobody checked by mistake; it is a speed check, not a trust boundary. CI on the head, the batch's run and the review its
   tier asks for remain what lands a change.
 - Tests: `tooling/project-board-contribute.test.ts` (`open_pr` posting it, `pre_pr`, `rebase_stack` carrying it),
-  `tooling/project-board-queue.test.ts` (`queue_merge`, a moved head, an older board's item), `-conflicts` (the queue's own
-  pushes land without it), `-integrate` (a record is not asked for it). The queue's fake `gh` gives every head the status
-  unless a test lists it in `noPrePr` (or `'*'`).
+  `tooling/project-board-queue.test.ts` (`queue_merge`, a moved head, an older board's item), `-conflicts` (the queue's
+  own pushes land without it), `-batches` (its restack of a stack's top), `-integrate` (a record is not asked for it). The
+  queue's fake `gh` gives every head the status unless a test lists it in `noPrePr` (or `'*'`).
 
 ### Reruns (2026-10-19)
 

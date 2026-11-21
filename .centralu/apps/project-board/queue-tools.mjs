@@ -14,7 +14,7 @@ import { GitHubError, markDraft, prsWithHead, readPr, readRepo } from './github.
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, prePrAsk, queueOrder, SUBJECT_MAX } from './queue.mjs'
-import { prePrPassed } from './pre-pr.mjs'
+import { readPrePr } from './pre-pr.mjs'
 import { multiClosingWarnings } from './rules.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
 import { codeAge, staleWarning } from './code-age.mjs'
@@ -232,7 +232,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   if (p.state !== 'OPEN') problems.push(`${top.ref} is ${String(p.state).toLowerCase()}, not open.`)
   if (p.isDraft) problems.push(`${top.ref} is a draft; mark it ready for review first.`)
   // open_pr posts it on the head pre-pr passed on; a head pushed since has none (#1886). A stack's top's run covered its lowers
-  if (p.state === 'OPEN' && !(await prePrPassed(top.repo, p.headRefOid))) problems.push(`${top.ref}'s head ${short(p.headRefOid)} has no pre-pr status: pnpm pre-pr has not passed on it through open_pr or pre_pr. ${prePrAsk(top.ref, p.headRefOid)}`)
+  if (p.state === 'OPEN' && !(await readPrePr(top.repo, p.headRefOid))) problems.push(`${top.ref}'s head ${short(p.headRefOid)} has no pre-pr status: pnpm pre-pr has not passed on it through open_pr or pre_pr. ${prePrAsk(top.ref, p.headRefOid)}`)
   const lowerPrs = []
   for (const l of under) {
     const lp = await readPr(l.repo, l.number)

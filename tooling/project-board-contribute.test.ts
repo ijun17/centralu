@@ -258,6 +258,7 @@ if (args[0] === 'api' && args[1] === '-X') {
   }
   const status = /^repos\/[^/]+\/[^/]+\/statuses\/(\w+)$/.exec(path)
   if (method === 'POST' && status) {
+    if (st.statusRefused) fail('gh: Resource not accessible by integration (HTTP 403)\n', 1, '{"message":"Resource not accessible by integration"}')
     st.statuses = { ...st.statuses, [status[1]]: [{ state: body.state, context: body.context, description: body.description }, ...((st.statuses ?? {})[status[1]] ?? [])] }
     save()
     json({ id: 1, state: body.state })
@@ -291,7 +292,7 @@ let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string; labels?: { name: string }[] }
 type Status = { state: string; context: string; description: string }
-type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean; statuses?: Record<string, Status[]> }
+type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean; statusRefused?: boolean; statuses?: Record<string, Status[]> }
 
 const pr = (number: number, extra: Partial<Pr>): Pr => ({
   number,
@@ -760,6 +761,20 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(leftovers(s.work)).toEqual({ worktrees: 1, refs: '' })
   })
 
+  it('pushes the restacked branch when GitHub refuses the carried status, and says to run pre_pr on it', async () => {
+    const s = stack()
+    patchState((st) => {
+      st.statuses = { [s.u2]: [{ state: 'success', context: 'pre-pr', description: 'tier:light; passed' }] }
+      st.statusRefused = true
+    })
+    runtime()
+    const r = await call('rebase_stack', { pr: '#2', path: s.work, push: true })
+    expect(r.isError, r.text).toBe(false)
+    const head = g(s.origin, 'rev-parse', 'refs/heads/up')
+    expect(r.data.steps[3]).toMatch(new RegExp(`^The pre-pr status of ${s.u2.slice(0, 7)} was not carried over to ${head.slice(0, 7)}: .*Resource not accessible by integration.* Run pre_pr on it before queue_merge\\.$`))
+    expect(r.data.steps.at(-1)).toBe("Moved #2's base from low to main.")
+  })
+
   // #1066: a stack's lowers are drafts; restacked onto main with nothing based on it, a draft is its stack's top now
   it('says when the pull request it restacked is a draft nothing is based on any more, so CI runs once it is marked ready', async () => {
     const s = stack()
@@ -1107,6 +1122,18 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(r.text).toContain('Add the label yourself: gh pr edit 900 --add-label tier:light.')
   })
 
+  it('opens the pull request when GitHub refuses the pre-pr status, and says to run pre_pr for it', async () => {
+    const c = prePrCheckout()
+    patchState((s) => (s.statusRefused = true))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: { name: 'light', line: 'Tier: light.', because: [] } })
+    runtime()
+    const r = await call('open_pr', { ...PR_PLAIN, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toMatch(/^Opened #900 /)
+    expect(r.text).toMatch(/The pre-pr status was not posted: .*Resource not accessible by integration.* queue_merge asks for it; run pre_pr on #900, which posts it\./)
+    expect(gh.state<State>().statuses).toBeUndefined()
+  })
+
   it('opens without it only with a stated reason, which goes into Verified', async () => {
     const c = prePrCheckout()
     prePrAnswers({ ok: false, findings: [{ check: 'tsc', message: 'x' }], notes: [], heads: [], head: c.tools })
@@ -1217,6 +1244,18 @@ describe('pre_pr runs pnpm pre-pr on a pull request as it is now and posts the p
     const r = await call('pre_pr', { pr: 7, path: c.work })
     expect(r.text).toBe(`pnpm pre-pr passed on #7 at ${c.tools.slice(0, 7)}; posted the pre-pr status (tier:light; passed). Its label stays tier:deep: a label only raises, so take it off by hand if the paths now ask for less.`)
     expect(writes().map((w) => w.args[3])).toEqual([`repos/ijun17/centralu/statuses/${c.tools}`])
+  })
+
+  it("names the tier label the pull request has when it stays: a person's tier:person, or an unknown one that counts as deep", async () => {
+    const c = prePrCheckout()
+    for (const label of ['tier:person', 'tier:x']) {
+      patchState((s) => (s.prs['7'] = pr(7, { headRefName: 'feat/tools', headRefOid: c.tools, labels: [{ name: label }] })))
+      prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: tier('light') })
+      runtime()
+      const r = await call('pre_pr', { pr: 7, path: c.work })
+      expect(r.text).toBe(`pnpm pre-pr passed on #7 at ${c.tools.slice(0, 7)}; posted the pre-pr status (tier:light; passed). Its label stays ${label}: a label only raises, so take it off by hand if the paths now ask for less.`)
+      expect(writes().filter((w) => w.args[3] === 'repos/ijun17/centralu/issues/7/labels')).toEqual([])
+    }
   })
 
   it('says the branch moved while it ran, and puts the status on the head it checked', async () => {

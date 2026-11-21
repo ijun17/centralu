@@ -11,7 +11,7 @@ import { g, githubStandIn } from './git-fixture.test-helpers.js'
 import { emptyQueue, pushEvent, quickLanded, normalize, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
-import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, ghCalls, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
+import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, ghCheck, green, ghRun, ghPr, type Gh, ghState, root, rt, fake, IDLE_SERVER, TIERS, NO_BATCH, FAST_LAND, REAL_QUICK, runtime, call, gh, patchGh, writes, ghCalls, queueFile, queueOnDisk, notices, until, polls, stateOf, morePolls, suiteCheck, ownRun, ownChecks, BATCH_HEAD, batchRun, batchChecks, batchState, batchesOnDisk, batchEvents, short2, watch, seedQueue, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('the merge queue batches pull requests waiting for CI into one run (#962)', { timeout: 240_000 * SLOW }, () => {
   it('builds queue/batch-1 from main, runs CI on it once, cancels their own waiting runs, and lands each in order on the tested tree', async () => {
@@ -1520,6 +1520,22 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       expect(events().filter((e) => e.kind === 'attention')).toEqual([])
       // The person's checkout is as it was
       expect(g(s.work, 'branch', '--show-current')).toBe('mine')
+    })
+
+    it('lands the head it restacked onto a head with the pre-pr status without asking for the status again (#1886)', async () => {
+      const s = restackable()
+      seedQueue([item()])
+      stackRuntime(s)
+      await until(() => events().some((e) => e.kind === 'conflict'), 'the restack')
+      const pushed = g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')
+      patchGh((st) => {
+        st.noPrePr = [pushed]
+        Object.assign(st.prs['77'], { headRefOid: pushed, baseRefName: 'main', mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+        st.checks[pushed] = green('2026-10-17T09:00:00Z')
+        st.runs[pushed] = [ghRun('success', 1, pushed)]
+      })
+      await until((x) => stateOf(x) === 'merged', 'the restacked head to land')
+      expect(events().filter((e) => e.kind === 'attention')).toEqual([])
     })
 
     it('hands it to its author as before when the pull request under it has not merged', async () => {

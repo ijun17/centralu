@@ -343,6 +343,24 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
   })
 
+  it('lands its push onto a head pushed since it was queued that has the pre-pr status, without asking for it again', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    const at = new Date().toISOString()
+    // Queued at A; the author pushed the conflicting head since and ran pre_pr on it (the fake's default status)
+    seedQueue([{ repo: R, pr: 77, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', head: A, prePrHead: A, title: 'feat(apps): change 77', queuedAt: at, updatedAt: at, reruns: {} }])
+    conflictRuntime(repo, [77])
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
+    const tip = tipOf(repo, 77)
+    patchGh((s) => {
+      s.noPrePr = [tip]
+      Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[tip] = green('2026-10-17T09:00:00Z')
+      s.runs[tip] = [ghRun('success', 1, tip)]
+    })
+    await until((x) => stateOf(x) === 'merged', 'the pushed head to land')
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
   it('hands a conflict in code to the author session, once, with the exact instruction, and pushes nothing', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml', 'src/app.ts'] })
     const before = untouched(repo.work)

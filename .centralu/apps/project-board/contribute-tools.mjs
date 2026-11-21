@@ -4,12 +4,12 @@ import { commentIdOf } from './answers.mjs'
 import { checkoutDir, itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { config } from './config.mjs'
 import { GitError } from './git.mjs'
-import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, QUEUE_PR_FIELDS, readComment, readPr, readRepo, readRepoFile, readStatus, sameRepo, setPrBase, viewerLogin } from './github.mjs'
+import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, QUEUE_PR_FIELDS, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
 import { progress } from './ci-tools.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
-import { postPrePr, PRE_PR_STATUS, prePrDescription, runPrePr } from './pre-pr.mjs'
+import { postPrePr, prePrDescription, readPrePr, runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
@@ -18,7 +18,7 @@ import { privateWords } from './words-tools.mjs'
 import { ACTIVE, longSubject, longSubjectText } from './queue.mjs'
 import { readQueue } from './queue-driver.mjs'
 import { freshCache } from './cache.mjs'
-import { labelTier } from './queue-integrate.mjs'
+import { labelTier, tierLabels } from './queue-integrate.mjs'
 import { short } from './util.mjs'
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
@@ -225,8 +225,8 @@ async function lowerBranches(repo, base, defaultBranch) {
 /**
  * pnpm pre-pr on the pushed `head` and the branches of the open pull requests under `base` (#1181), or its skip with a reason:
  * what open_pr and pre_pr write from it. Runs outside the one-write-at-a-time line, so other writes do not wait minutes behind
- * it. Answers `{ refused }`, an answer of what pre-pr found that starts with `refusal`, or `{ note, tier, warnings, sha, description }`: the Verified
- * note, the tier, and the pre-pr status (`sha` null when skipped: the caller's head is the one).
+ * it. Answers `{ refused }`, an answer of what pre-pr found that starts with `refusal`, or `{ note, tier, warnings, skipped, sha, description }`:
+ * the Verified note, the tier, and the pre-pr status (no `sha` when skipped: the caller's head is the one).
  */
 async function checkHead({ repo, head, fork, base, path, skipPrePr, prePrExempt, refusal }, ctx) {
   const signal = ctx?.mcpReq?.signal
@@ -242,7 +242,7 @@ async function checkHead({ repo, head, fork, base, path, skipPrePr, prePrExempt,
     const problems = publicTextProblems(why, await privateWords(), 'skipPrePr')
     if (problems.length) throw new GitHubError('input', problems.join(' '))
     // Not run, the paths were not judged: deep, so skipping pre-pr never lowers the review (#1259)
-    return { note: `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`, tier: 'deep', warnings: [], sha: null, description: prePrDescription('deep', `skipped: ${why}`) }
+    return { note: `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`, tier: 'deep', warnings: [], skipped: true, description: prePrDescription('deep', `skipped: ${why}`) }
   }
   if (fork) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
   const dir = await checkoutDir(path)
@@ -287,7 +287,7 @@ async function checkHead({ repo, head, fork, base, path, skipPrePr, prePrExempt,
   ].join('\n')
   warnings.push(...res.warnings.map((w) => `[${w.check}] ${w.message}`))
   const how = res.exempted.length ? `passed without ${res.exempted.map((x) => x.check).join(', ')}` : 'passed'
-  return { note, tier: res.tier.name, warnings, sha: res.head, description: prePrDescription(res.tier.name, how) }
+  return { note, tier: res.tier.name, warnings, skipped: false, sha: res.head, description: prePrDescription(res.tier.name, how) }
 }
 
 /**
@@ -326,16 +326,18 @@ async function postPrePrOn({ want, p, c }) {
   if (sha !== p.headRefOid) warnings.push(`${want.ref} was at ${short(p.headRefOid)} when read, and pre-pr ran on ${short(sha)}: the branch moved meanwhile. The status is on ${short(sha)}; run pre_pr again if that is not its head now.`)
   const had = labelTier(p.labels)
   const tier = labelTier([...(p.labels ?? []), `tier:${c.tier}`])
+  // As named on the pull request: an unknown tier:<name> counts as deep, but is not called that
+  const shown = tierLabels(p.labels).join(', ')
   let labelled = ''
   if (tier !== had) {
     try {
       await addLabels(want.repo, want.number, [`tier:${tier}`])
-      labelled = ` Labelled tier:${tier}${had ? `, above its tier:${had}` : ''}.`
+      labelled = ` Labelled tier:${tier}${had ? `, above its ${shown}` : ''}.`
     } catch (e) {
       warnings.push(`${e?.message ?? e} Add the label yourself: gh pr edit ${want.number} --add-label tier:${tier}.`)
     }
-  } else if (c.tier !== had) labelled = ` Its label stays tier:${had}: a label only raises, so take it off by hand if the paths now ask for less.`
-  const done = c.sha ? `pnpm pre-pr passed on ${want.ref} at ${short(sha)}` : `pnpm pre-pr skipped for ${want.ref} at ${short(sha)}`
+  } else if (c.tier !== had) labelled = ` Its label stays ${shown}: a label only raises, so take it off by hand if the paths now ask for less.`
+  const done = c.skipped ? `pnpm pre-pr skipped for ${want.ref} at ${short(sha)}` : `pnpm pre-pr passed on ${want.ref} at ${short(sha)}`
   return linesAnswer(`${done}; posted the pre-pr status (${c.description}).${labelled}`, [['warnings', 'Warnings:', warnings]], { ok: true, head: sha, tier: c.tier, note: c.note })
 }
 
@@ -357,8 +359,8 @@ async function fileIssue({ title, body, labels, repo, dryRun }) {
  */
 async function carryPrePr(repo, from, to) {
   try {
-    const s = await readStatus(repo, from, PRE_PR_STATUS)
-    if (s?.state !== 'success') return `${short(from)} had no pre-pr status to carry over to ${short(to)}: run pre_pr on it before queue_merge.`
+    const s = await readPrePr(repo, from)
+    if (!s) return `${short(from)} had no pre-pr status to carry over to ${short(to)}: run pre_pr on it before queue_merge.`
     await postPrePr(repo, to, s.description)
     return `Carried the pre-pr status of ${short(from)} over to ${short(to)}: the same change.`
   } catch (e) {
