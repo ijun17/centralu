@@ -88,6 +88,8 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'emptying the trash (#1875)', paths: ['packages/agent-host/src/sessions/session-trash.ts'], tier: 'deep', rule: 'deletion' },
   { name: 'restoring an app version', paths: ['packages/agent-host/src/apps/external/versions.ts'], tier: 'deep', rule: 'deletion' },
   { name: 'the delete most removals go through', paths: ['packages/agent-host/src/dev-services/data-folder.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'an app project a failed start leaves', paths: ['packages/agent-host/src/sessions/app-sessions.ts'], tier: 'deep', rule: 'deletion' },
+  { name: 'the leftovers of a carried app folder', paths: ['packages/agent-host/src/apps/external/carry.ts'], tier: 'deep', rule: 'deletion' },
   { name: 'app secrets', paths: ['packages/agent-host/src/apps/external/secrets.ts'], tier: 'deep', rule: 'trust' },
   { name: 'the desktop shell\'s install', paths: ['apps/desktop/src-tauri/src/shell/install.rs'], tier: 'deep', rule: 'processes' },
   { name: 'a release script', paths: ['scripts/release-npm.mts'], tier: 'deep', rule: 'release' },
