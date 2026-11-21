@@ -11,7 +11,8 @@ const FOLD_IN_MS = 200
  * `instant` is for a fold being set up, not changed (before the saved folds are read): no slide and no `closing` state,
  * so the window does not open with every folded project closing. A closing list is `inert`: a menu or drag begun on a
  * row would be taken away with it. The content is clipped only while it moves, so a focus ring at the edge shows at
- * rest. `data-fold` (`opening`, `open`, `closing`) is for tests that wait on the end state.
+ * rest. A clip, not `overflow: hidden` (kept for engines without clip, Safari 15): a hidden box scrolls to bring a row into
+ * view (focus, a pointer's tool), then slides it from under the pointer as it grows. `data-fold` (`opening`, `open`, `closing`) is for tests that wait on the end state.
  */
 export function Fold({ open, children, className, testId, instant }: { open: boolean; children: ReactNode; className?: string; testId?: string; instant?: boolean }) {
   const { shown } = usePresence(open, instant ? 0 : LEAVE_MS)
@@ -42,7 +43,7 @@ export function Fold({ open, children, className, testId, instant }: { open: boo
   return (
     <div ref={ref} className={instant ? 'cc-fold cc-fold-instant' : 'cc-fold'} inert={!open} data-drawn={drawn || undefined} data-fold={!open ? 'closing' : settled ? 'open' : 'opening'} data-testid={testId}>
       {/* The padding is on the inner box: a clipped box keeps its own padding when the track is empty, and the list would stop 6px short of closed */}
-      <div className={`min-h-0 min-w-0 ${open && settled ? '' : 'overflow-hidden'}`}>
+      <div className={`min-h-0 min-w-0 ${open && settled ? '' : 'overflow-hidden supports-[overflow:clip]:overflow-clip'}`}>
         <div className={className}>{children}</div>
       </div>
     </div>
