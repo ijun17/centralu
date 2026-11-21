@@ -43,7 +43,7 @@ const realFs: Fs = {
 const VERSION = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d{2})-(\d{2})-(\d{2}))?-[a-f0-9]+$/
 
 /** Newest first, as the launcher orders them: by date, then (a choice of ours) by the build time the newer form adds */
-export function newestVersion(names: readonly string[]): string | null {
+function newestVersion(names: readonly string[]): string | null {
   const key = (n: string) => {
     const m = VERSION.exec(n)
     if (!m) return null

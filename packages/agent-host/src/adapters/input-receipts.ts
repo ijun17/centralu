@@ -38,7 +38,7 @@ export const UPDATE_CONTINUE_TEXT =
  * What a session whose turn the provider ended for want of capacity is sent when the host retries it (#1693): through Centralu's
  * channel, never as the person's message. Like the update's note it asks the agent to check what already happened.
  */
-export const RETRY_NOTE_HEAD = "[Centralu] The model provider's servers were at capacity"
+const RETRY_NOTE_HEAD = "[Centralu] The model provider's servers were at capacity"
 export const RETRY_NOTE =
   `${RETRY_NOTE_HEAD}, which ended your last turn. Nothing you did caused it. ` + CONTINUE_WORDS
 
@@ -46,9 +46,9 @@ export const RETRY_NOTE =
  * What a session whose turn the network or a usage limit stopped is sent when the host continues it once the cause cleared (#1415,
  * #2238): through Centralu's channel, never as the person's message, asking the agent to check what already happened like the others
  */
-export const NETWORK_NOTE_HEAD = '[Centralu] The network dropped'
+const NETWORK_NOTE_HEAD = '[Centralu] The network dropped'
 export const NETWORK_NOTE = `${NETWORK_NOTE_HEAD} during your last turn and ended it before it finished. It is back now. ${CONTINUE_WORDS}`
-export const LIMIT_NOTE_HEAD = "[Centralu] The account's usage limit"
+const LIMIT_NOTE_HEAD = "[Centralu] The account's usage limit"
 export const LIMIT_NOTE = `${LIMIT_NOTE_HEAD} ended your last turn before it finished. The limit has reset. ${CONTINUE_WORDS}`
 
 /**

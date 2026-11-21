@@ -11,7 +11,7 @@ import type { AgyArchive } from './release.js'
  * - `BROWSER`: the process's own helper (`browserFolder`), always set, so the person's own `BROWSER` never reaches the agent
  *   and the agent never starts a browser itself (an empty value where no helper could be written)
  */
-export function agyEnv(home: AgyHome, browser: string): Record<string, string> {
+function agyEnv(home: AgyHome, browser: string): Record<string, string> {
   return { GEMINI_HOME: home.geminiHome, BROWSER: browser }
 }
 

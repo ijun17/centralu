@@ -13,13 +13,13 @@ import { realOs } from '../../os/real.js'
  */
 
 /** Smaller than any real Claude Code binary (about 250 MB) and larger than any placeholder (500 bytes in 2.1.x) */
-export const PLACEHOLDER_MAX_BYTES = 1_000_000
+const PLACEHOLDER_MAX_BYTES = 1_000_000
 
 /** How long the package's own setup step may run: a link is instant, a copy of the 250 MB program is not */
-export const INSTALLER_TIMEOUT_MS = 30_000
+const INSTALLER_TIMEOUT_MS = 30_000
 
 /** How long `claude.exe --version` may take when the repaired program cannot be proven by its size */
-export const VERSION_TIMEOUT_MS = 10_000
+const VERSION_TIMEOUT_MS = 10_000
 
 /** What `start` throws when Claude Code's program is the npm placeholder: the message says what to do */
 export class ClaudePlaceholderError extends Error {
@@ -104,7 +104,7 @@ export const realExeFs: ExeFs = {
 }
 
 /** Claude Code's own setup step beside `bin/claude.exe` in npm's layout, or null when there is none */
-export function installerFor(exe: string, fs: ExeFs = realExeFs): string | null {
+function installerFor(exe: string, fs: ExeFs = realExeFs): string | null {
   if (basename(dirname(exe)).toLowerCase() !== 'bin') return null
   const installer = join(dirname(dirname(exe)), 'install.cjs')
   try {
@@ -122,7 +122,7 @@ export function installerFor(exe: string, fs: ExeFs = realExeFs): string | null 
  * would start, as it does any non-PE file named `.exe`, as a 16-bit program and refuse. A file that
  * is large or starts with `MZ` passes: this only names the one failure we know, never guesses.
  */
-export function placeholderProblem(exe: string, size: number, fs: ExeFs = realExeFs, tried: string | null = null): string | null {
+function placeholderProblem(exe: string, size: number, fs: ExeFs = realExeFs, tried: string | null = null): string | null {
   if (size >= PLACEHOLDER_MAX_BYTES) return null
   let head: Buffer
   try {
@@ -161,7 +161,7 @@ function unprovenProblem(exe: string, size: number, why: string, tried: string, 
  * npm stamps every file it unpacks with the same time, so time is only used where npm is not
  * involved (a native install keeps the time it was downloaded).
  */
-export function claudeKey(exe: string, stat: { size: number; mtimeMs: number }, fs: ExeFs = realExeFs): string {
+function claudeKey(exe: string, stat: { size: number; mtimeMs: number }, fs: ExeFs = realExeFs): string {
   let version: string | null = null
   try {
     const pkg = JSON.parse(fs.read(join(dirname(dirname(exe)), 'package.json'))) as { name?: unknown; version?: unknown }

@@ -18,7 +18,7 @@ async function gather(): Promise<SurfaceInputs> {
   return { version: AGY_RELEASE.version, initialize }
 }
 
-export function readAgySurface(inputs: SurfaceInputs): ToolSurface {
+function readAgySurface(inputs: SurfaceInputs): ToolSurface {
   return {
     version: `antigravity-acp ${inputs.version ?? 'unknown'}`,
     offered: { capability: acpCapabilities(inputs.initialize) },

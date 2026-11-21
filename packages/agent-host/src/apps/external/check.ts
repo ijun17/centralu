@@ -21,7 +21,7 @@ import { isViewMimeType, viewHtmlOf, VIEW_MIME_TYPE } from '../../views/view-doc
 /** The bridge placeholder in a template screen — `centralu.uiResource` replaces it. If it is still there, the screen has no bridge. */
 const BRIDGE_TAG = 'centralu:mcp-app.js'
 
-export type CheckLevel = 'problem' | 'warning'
+type CheckLevel = 'problem' | 'warning'
 export type CheckFinding = { level: CheckLevel; where: string; message: string }
 
 /** The summary of one tool — one line of the report */

@@ -32,7 +32,7 @@ async function gather(): Promise<SurfaceInputs> {
   return { version: install.version, help, initialize, bundle: JSON.stringify([...names].sort()) }
 }
 
-export function readCursorSurface(inputs: SurfaceInputs): ToolSurface {
+function readCursorSurface(inputs: SurfaceInputs): ToolSurface {
   const commands = [...(inputs.help ?? '').matchAll(/^ {2}([a-z][\w-]*)(?: |$)/gm)].flatMap((m) => (m[1] ? [m[1]] : []))
   const bundle = z.array(z.string()).parse(JSON.parse(inputs.bundle ?? '[]'))
   return {

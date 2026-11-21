@@ -63,7 +63,7 @@ export function killHandle(child: ChildProcess): KillablePty {
  * KILL after the grace. Windows: its leftovers are collected, which takes a process listing (~0.5 s); the promise
  * answers the pids ended, and never rejects.
  */
-export function sweepExited(root: EndedRoot, platform?: NodeJS.Platform, os?: LeftoverOs): Promise<number[]> {
+function sweepExited(root: EndedRoot, platform?: NodeJS.Platform, os?: LeftoverOs): Promise<number[]> {
   if (hasProcessGroups(platform)) {
     stopGroup(root.pid, KILL_GRACE_MS)
     return Promise.resolve([])

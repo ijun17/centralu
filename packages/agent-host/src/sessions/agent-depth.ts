@@ -83,7 +83,7 @@ export const AGENT_DEPTH_SETTING = '"How deep agents may start agents" in Settin
  * The refusal for a caller at or past the depth (#867): what it is, the setting and where it is, and what to do instead.
  * `what` is the act refused ("start agents", "ask a project").
  */
-export function agentDepthError(depth: number, limit: number, what: string): string {
+function agentDepthError(depth: number, limit: number, what: string): string {
   const below = `${depth} level${depth === 1 ? '' : 's'} below`
   return (
     `This session is ${below} a session the person started, and ${AGENT_DEPTH_SETTING} is ${limit}, so it cannot ` +

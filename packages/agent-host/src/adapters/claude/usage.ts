@@ -65,14 +65,14 @@ export type UsageQuery = {
 export const UNSUPPORTED =
   'The installed Claude Code SDK does not support usage queries (update the SDK)'
 
-export async function readUsage(q: UsageQuery | null): Promise<UsageSnapshot> {
+async function readUsage(q: UsageQuery | null): Promise<UsageSnapshot> {
   const fn = q?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET
   if (typeof fn !== 'function') throw new Error(UNSUPPORTED)
   return toSnapshot(await fn.call(q))
 }
 
 /** How long one live session gets to answer before the next is asked (#481); the manager allows 15 s in all */
-export const USAGE_ASK_MS = 4_000
+const USAGE_ASK_MS = 4_000
 
 /**
  * Usage from the first of `queries` that answers, newest first (#481).

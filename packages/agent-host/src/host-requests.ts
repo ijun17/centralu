@@ -62,7 +62,7 @@ type Waiting = { request: HostRequest; settle: (answer: 'allow' | 'deny' | null,
 type Ended = { decision: 'allow' | 'deny' | null; outcome: HostRequestOutcome | 'too_many_requests' | 'no_window' }
 
 /** Why a host request ended without running, for a program to read (`data.refused`) */
-export type RequestRefusal = 'no_window' | 'too_many_requests' | 'denied' | 'withdrawn' | 'expired' | 'not_done'
+type RequestRefusal = 'no_window' | 'too_many_requests' | 'denied' | 'withdrawn' | 'expired' | 'not_done'
 
 export class HostRequests {
   private readonly open = new Map<string, Waiting>()

@@ -60,7 +60,7 @@ function notARepository(e: unknown): boolean {
 }
 
 /** The most changed files a summary counts; past it the count says "at least" (`more`) and git is stopped */
-export const SUMMARY_CAP = 10_000
+const SUMMARY_CAP = 10_000
 
 /** A summary's bounds, for tests: how many files to count before stopping, and how long git may take */
 export type SummaryLimits = { cap?: number; timeoutMs?: number }

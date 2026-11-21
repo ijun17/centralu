@@ -23,7 +23,7 @@ export type SurfaceBaseline = ToolSurface & {
 }
 
 /** What the adapter does about something the tool offers, or did not offer when it was measured */
-export type SurfaceTreatment =
+type SurfaceTreatment =
   /** Answered or refused here; never reaches the tool */
   | 'blocked'
   /** Received and not shown or stored (only `host.log` says so, `UnmappedTypes`) */

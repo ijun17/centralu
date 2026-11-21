@@ -463,7 +463,7 @@ export function pidAlive(pid: number): boolean {
  * What `leftoverOs`'s taskkill rejects with for a process that is no longer there (or whose number another process has now),
  * whatever taskkill said of it: nothing to end, and nothing to report
  */
-export class ProcessGone extends Error {
+class ProcessGone extends Error {
   constructor(pid: number) {
     super(`process ${pid} is already gone`)
   }

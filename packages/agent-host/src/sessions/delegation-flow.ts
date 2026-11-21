@@ -16,11 +16,6 @@ import { RemoteAgents } from './remote-agents.js'
 // Moved with start_agent (#850); still importable from here
 export type { DelegationHost } from './delegation-host.js'
 export { ASK_THE_PERSON, agentStartPersonText } from './start-agent-flow.js'
-// Moved with stopping a child's background work (#428); still importable from here
-export { taskList } from './background-stops.js'
-
-// Moved to a module of its own, which the linked reports read without this one's imports (#1082); still importable from here
-export { HUB_SENDER } from './hub-sender.js'
 
 /**
  * The work one session gives another (#428): ask_project's delegations (#371 part B; linked machines, #700), start_agent

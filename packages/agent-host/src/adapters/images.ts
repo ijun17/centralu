@@ -75,7 +75,7 @@ const SIGNATURES = [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], [0xff, 0xd
  * The one check of picture bytes for every image the window is sent, from disk or inline: what it is, or why it is not
  * drawn. Nothing, or the first bytes of a signature, is a file still being written, so it gets the cut-short reason too.
  */
-export function judgeImage(buf: Buffer): { mime: string } | { note: string } | null {
+function judgeImage(buf: Buffer): { mime: string } | { note: string } | null {
   const seen = sniffImage(buf)
   if (seen?.complete) return { mime: seen.mime }
   if (seen || buf.length < 8 && SIGNATURES.some((sig) => buf.every((b, i) => i >= sig.length || b === sig[i]))) {

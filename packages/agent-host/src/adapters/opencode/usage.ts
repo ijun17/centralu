@@ -94,7 +94,7 @@ const SOFT_MS = 3_000
  * has this ceiling, the asker never waits for it (the soft wait answers provisionally; `settle` waits at most 20 s), the last
  * totals stand while a refresh runs, and a stale answer is returned at once.
  */
-export const STATS_RUN_MS = 5 * 60_000
+const STATS_RUN_MS = 5 * 60_000
 
 /**
  * The reader of OpenCode's totals; `run` starts `opencode stats` for at most the given time and answers its stdout. The

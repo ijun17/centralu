@@ -22,7 +22,7 @@ export const VIEW_HANDOVER_KEY = 'views.handover'
  */
 export const VIEW_HANDOVER_MAX_AGE_MS = 10 * 60_000
 
-export type HandedView = OpenView & { inline?: { sessionId: string; callId: string; tool: string } }
+type HandedView = OpenView & { inline?: { sessionId: string; callId: string; tool: string } }
 
 type HandoverRecord = { at: number; views: HandedView[] }
 

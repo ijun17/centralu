@@ -63,7 +63,7 @@ export type LastResponse = {
  * in its tool for a turn after, and with no task it handed on in that work still open (that work is not done; the turn that
  * work's answer starts ends it)
  */
-export function tasksAtRest(records: MailboxRecords, recipient: string, last: Pick<LastResponse, 'released' | 'answers' | 'queued'>): { row: RecipientRow; sender: string }[] {
+function tasksAtRest(records: MailboxRecords, recipient: string, last: Pick<LastResponse, 'released' | 'answers' | 'queued'>): { row: RecipientRow; sender: string }[] {
   return records.watchedTo(recipient).flatMap((row) => {
     if (row.deliveredAt === null || (row.held !== null && row.held !== 'released') || (!last.released && row.releasedAt !== null) || last.queued?.has(row.messageId)) return []
     const task = records.message(row.messageId)

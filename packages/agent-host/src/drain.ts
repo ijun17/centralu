@@ -24,7 +24,7 @@ export const REFUSED_MESSAGE =
  * Said to a call still running when the bound passes: the work may still finish (a request an app already received cannot be
  * taken back), so the model is told to check before repeating anything unsafe to repeat
  */
-export function cutMessage(boundMs: number): string {
+function cutMessage(boundMs: number): string {
   const s = Math.round(boundMs / 100) / 10
   return (
     `Centralu restarted the agent host and stopped waiting for this call after ${s}s. ` +

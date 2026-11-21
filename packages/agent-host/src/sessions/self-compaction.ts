@@ -51,7 +51,7 @@ const FOCUS_MAX_CHARS = 300
 /** More compact then-step cycles than this in an hour, of one session, and the person gets one warning (#2024); nothing is held, refused or delayed for it */
 export const WARN_COMPACT_CYCLES_PER_HOUR = 6
 /** The longest `then` a request takes: it is a prompt, so it is refused rather than cut */
-export const THEN_MAX_CHARS = 4_000
+const THEN_MAX_CHARS = 4_000
 /**
  * What waits behind the compact turn is looked at directly (`SelfCompactionHost.queued`: the inputs the tool holds, and mail waiting for the session); with
  * nothing waiting `then` goes at once, and with something it goes at the end of that turn. **The one guess left** is for a tool that cannot say what it holds
@@ -64,7 +64,7 @@ export const THEN_QUEUE_MAX_MS = 60_000
 const THEN_LOOK_MS = 250
 const THEN_LOOKS = 12
 /** A `then` asked again with the context within this many tokens of where the last refusal found it is answered in the tool result, with no turn (#2036) */
-export const REFUSED_AGAIN_TOKENS = 2_000
+const REFUSED_AGAIN_TOKENS = 2_000
 /**
  * A kept `then` older than this is not sent by the host that finds it. A compact is stale after `COMPACT_STALE_MS`, and a swap or a restart
  * with a wake takes minutes: an hour covers a long outage, and cuts what a rollback to an older build left for a newer one to find days later

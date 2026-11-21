@@ -210,7 +210,7 @@ function cut(s: string, n: number): string {
 }
 
 /** The head of one tool result, with a marker that says how much was cut (#1481). A result within the head is whole */
-export function resultHead(result: string): string {
+function resultHead(result: string): string {
   if (result.length <= RESULT_HEAD) return result
   const end = cut(result, RESULT_HEAD).length
   return `${result.slice(0, end).trimEnd()}\n… (${num(result.length - end)} more characters cut — re-run it to see the rest)`

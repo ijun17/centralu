@@ -14,7 +14,7 @@ import { isServerOverloaded, SERVER_OVERLOADED } from '../overloaded.js'
  */
 
 /** The marker `ProtocolError.data` carries (`data` is free-form, so an older screen shows the error as any other) */
-export const MODEL_REJECTED = 'model_rejected'
+const MODEL_REJECTED = 'model_rejected'
 
 /** The model a provider's answer refuses, with the provider's own sentence; null when the failure is some other one */
 export function modelRejection(message: string, errorInfo?: unknown): { model: string; reason: string } | null {

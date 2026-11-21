@@ -26,7 +26,7 @@ import { agyStderrLine } from './shape.js'
  */
 
 /** Past the agent's own 300 s, so its "timed out" answer is the one heard */
-export const SIGN_IN_TIMEOUT_MS = 330_000
+const SIGN_IN_TIMEOUT_MS = 330_000
 
 export type SignInResult = { plan: { name: string; upgradeUri?: string } | null }
 

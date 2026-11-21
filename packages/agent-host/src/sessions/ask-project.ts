@@ -24,7 +24,7 @@ export const ASK_WAIT_MS = 240_000
 export const ANSWER_READ_MAX_CHARS = 100_000
 
 /** The longest answer handed back whole. Past it, the head and the tail are kept: a report puts its findings first and the paths last */
-export const ANSWER_MAX_CHARS = 6000
+const ANSWER_MAX_CHARS = 6000
 const ANSWER_HEAD_CHARS = 4500
 const ANSWER_TAIL_CHARS = 1200
 

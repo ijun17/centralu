@@ -12,7 +12,7 @@ import type { ToolLaunch } from './tool-process.js'
  * (Codex, Claude) names its own turns, so it has a seam of its own (`MidTurnWire`, `mid-turn-ledger.ts`).
  */
 
-export type ProtocolErrorOf = Extract<NormalizedEvent, { type: 'error' }>['error']
+type ProtocolErrorOf = Extract<NormalizedEvent, { type: 'error' }>['error']
 
 /** What the core hands a wire to write: one input */
 export type TurnInput = {

@@ -23,7 +23,7 @@ import type { AppErrorBundle } from '@cc/protocol'
  */
 export type HeldErrorBundle = Omit<AppErrorBundle, 'sentAt'>
 
-export type AppErrorKind = AppErrorBundle['kind']
+type AppErrorKind = AppErrorBundle['kind']
 
 /** An error bundle returned on request — carries the time it was sent, if it was sent to the building session (C-6) */
 export type SentErrorBundle = AppErrorBundle

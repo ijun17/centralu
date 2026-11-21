@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
@@ -59,7 +59,6 @@ export const leftovers = (home: AgyHome, prefix: string) => (existsSync(home.roo
 export const inFolder = (path: string) => (existsSync(path) ? readdirSync(path) : [])
 
 export const exists = (path: string) => existsSync(path)
-export const readText = (path: string) => readFileSync(path, 'utf8')
 export const inVersion = (home: AgyHome, name: string) => join(home.versionDir, name)
 export const inRoot = (home: AgyHome, name: string) => join(home.root, name)
 

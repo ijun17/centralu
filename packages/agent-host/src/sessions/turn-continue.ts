@@ -70,7 +70,7 @@ const CONTINUE_NOTES: Record<Exclude<ContinueCause, 'update'>, Omit<ContinueNote
 }
 
 /** What a continue hands the agent, and the line the conversation shows where it went in (empty: no line) */
-export type ContinueNote = { cause: ContinueCause; text: string; line: string; label: string }
+type ContinueNote = { cause: ContinueCause; text: string; line: string; label: string }
 
 /**
  * Sessions an update's stop left that wake at once (#1913): each wake's first request re-reads the whole conversation, uncached after the
@@ -104,7 +104,7 @@ const wakeEnded = (e: NormalizedEvent): boolean => ANSWERED.has(e.type) || (e.ty
 /** After a usage limit's reset, before the continue: the provider's clock and ours differ by seconds */
 export const RESET_MARGIN_MS = 60_000
 /** A usage limit whose tool said no reset time is tried again this long after it stopped */
-export const NO_RESET_RETRY_MS = 30 * 60_000
+const NO_RESET_RETRY_MS = 30 * 60_000
 /** Between two probes of a tool's API while the network is down; the last repeats */
 export const PROBE_STEPS_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const
 /** Between two sessions of one tool continued at once, so they do not hit the provider in one burst (#1913) */
@@ -151,7 +151,7 @@ export type TurnContinueHost = {
 }
 
 /** What a send is given: whether the wait still stands, and the word that the tool is being handed the note (from then on the turn is the tool's) */
-export type RetrySend = { live(): boolean; handed(): void }
+type RetrySend = { live(): boolean; handed(): void }
 
 /** Where a held retry is: waiting for its time, being sent (a restart or a wake waited out first), or handed to the tool, which runs the turn */
 export type RetryPhase = 'waiting' | 'sending' | 'handed'

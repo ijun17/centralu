@@ -44,7 +44,7 @@ const GIVE_BACK_RETRY_MS = 3000
 export const ADOPTION_MARK = ['.centralu', 'adopted'] as const
 
 /** The mark in this folder, or null when it has none (or it cannot be read) */
-export function adoptionMark(dir: string): string | null {
+function adoptionMark(dir: string): string | null {
   try {
     return readFileSync(join(dir, ...ADOPTION_MARK), 'utf8').trim() || null
   } catch {

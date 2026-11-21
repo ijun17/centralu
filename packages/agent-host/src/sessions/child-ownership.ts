@@ -93,13 +93,13 @@ function starterFor(ran: readonly Entry[]): Decided {
  * `latest` and `previous`, which a build before it reads; a list that does not end at `latest` (that build wrote the span
  * since) is not read
  */
-export const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
+const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
 const TURN_STARTS_KEPT = 8
 /**
  * The last row stored when a question card of the session was last answered (#1948), in `question_answered:<session>`: the answer goes
  * to the tool and is stored nowhere else, so a stop notice that quotes the turn knows the turn took the person's answer in
  */
-export const questionAnsweredKey = (sessionId: string) => `question_answered:${sessionId}`
+const questionAnsweredKey = (sessionId: string) => `question_answered:${sessionId}`
 type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number }; starts?: readonly number[] }
 function readTurnSpan(raw: string | null): TurnSpan {
   if (raw === null) return {}

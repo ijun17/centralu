@@ -312,7 +312,7 @@ function rawOutputOk(raw: unknown): boolean {
 }
 
 /** The command an `execute` call runs, as its input names it */
-export function commandOf(u: ToolCallFields): string {
+function commandOf(u: ToolCallFields): string {
   const command = asObj(u.rawInput).command
   return typeof command === 'string' ? command : ''
 }

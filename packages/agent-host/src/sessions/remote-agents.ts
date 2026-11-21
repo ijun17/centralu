@@ -55,7 +55,7 @@ const LEGACY = ['owed', 'whose', 'given', 'queued', 'sent', 'turn'] as const
  * How long a start waits for the machine to say its instructions for agents now (#1161), once the child is made
  * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
  */
-export const INSTRUCTIONS_WAIT_MS = 5_000
+const INSTRUCTIONS_WAIT_MS = 5_000
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'

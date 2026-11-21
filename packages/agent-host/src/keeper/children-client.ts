@@ -77,7 +77,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  * `lines` on one connection to `sock`, and one answer per line: each the next JSON line that comes back that is not a
  * pushed event (a control connection's `exit`). Bounded by `ASK_TIMEOUT_MS`.
  */
-export function askLines(sock: string, lines: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+function askLines(sock: string, lines: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
     const answers: Record<string, unknown>[] = []
     const c = createConnection(sock)

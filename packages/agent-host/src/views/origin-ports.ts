@@ -46,7 +46,7 @@ export type OriginPortsOptions = {
   log?: (line: string) => void
 }
 
-export const ORIGIN_PORT_RANGE = [20000, 32767] as const
+const ORIGIN_PORT_RANGE = [20000, 32767] as const
 
 const validPort = (p: unknown): p is number => Number.isInteger(p) && (p as number) > 0 && (p as number) < 65536
 

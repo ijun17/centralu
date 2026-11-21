@@ -36,7 +36,7 @@ type ProjectWatch = { dirs: Map<string, FSWatcher | null>; tree: { root: string;
 export type WatchHolder = string | number
 
 /** The holder of a set the host asks for itself */
-export const LOCAL_HOLDER = 'local'
+const LOCAL_HOLDER = 'local'
 
 export class DirWatchers {
   private byProject = new Map<string, ProjectWatch>()

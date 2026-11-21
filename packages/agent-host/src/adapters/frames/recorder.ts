@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { errorMessage } from '@cc/protocol'
 /** Which way a line went: to the tool, or from it */
-export type FrameDirection = 'in' | 'out'
+type FrameDirection = 'in' | 'out'
 
 export type FrameRecorder = {
   frame: (direction: FrameDirection, line: string) => void

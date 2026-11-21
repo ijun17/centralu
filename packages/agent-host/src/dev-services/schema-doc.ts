@@ -13,7 +13,7 @@ import { Store } from './store.js'
  * (`pnpm docs:schema`).
  */
 
-export type SchemaColumn = {
+type SchemaColumn = {
   name: string
   type: string
   notNull: boolean
@@ -24,11 +24,11 @@ export type SchemaColumn = {
   addedIn: string
 }
 
-export type SchemaForeignKey = { from: string; table: string; to: string; onDelete: string }
+type SchemaForeignKey = { from: string; table: string; to: string; onDelete: string }
 
-export type SchemaIndex = { name: string; unique: boolean; columns: string[] }
+type SchemaIndex = { name: string; unique: boolean; columns: string[] }
 
-export type SchemaTable = {
+type SchemaTable = {
   name: string
   /** True for an FTS5 or other virtual table */
   virtual: boolean

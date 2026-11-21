@@ -38,7 +38,7 @@ export function plantAttachApp(kit: PlantKit, projectPath: string, id: string, l
   return { open: () => writeFileSync(gate, '') }
 }
 
-export type Rec = { t: string; pid: number; runId?: string | null; method?: string }
+type Rec = { t: string; pid: number; runId?: string | null; method?: string }
 
 export type AttachWorld = {
   root: string
@@ -115,7 +115,7 @@ export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}, 
 }
 
 /** A session handle that does nothing: these tests read the options the adapter received, not the session */
-export class Handle implements SessionHandle {
+class Handle implements SessionHandle {
   externalId = 'ext-1'
   constructor(readonly sessionId: string) {}
   send(_text: string) {}

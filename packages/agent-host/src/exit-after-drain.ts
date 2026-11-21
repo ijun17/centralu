@@ -5,7 +5,7 @@
  */
 
 /** How long an exit waits for the last of the output before it is reported anyway */
-export const EXIT_AFTER_OUTPUT_MS = 1000
+const EXIT_AFTER_OUTPUT_MS = 1000
 
 export class ExitAfterDrain {
   private exitKnown = false

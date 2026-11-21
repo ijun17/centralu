@@ -121,7 +121,7 @@ function addRow(o: UsageHistoryRow, r: UsageHistoryRow): void {
 }
 
 /** The readings as one series per tool, account and window */
-export function readingSeries(readings: readonly StoredReading[]): UsageHistoryReadings[] {
+function readingSeries(readings: readonly StoredReading[]): UsageHistoryReadings[] {
   const series = new Map<string, UsageHistoryReadings>()
   for (const r of readings) {
     const id = `${r.tool}\n${r.account}\n${r.id}\n${r.scope ?? ''}`
