@@ -143,9 +143,11 @@ export class ClaudeRaceRetry {
     return read
   }
 
-  /** A resend still waiting out its delay is called off, and what went again is let go; returns how many messages it would have sent */
+  /**
+   * A resend still waiting out its delay is called off; returns how many messages it would have sent. The ids resent inputs went under
+   * stay: a Stop's receipt names the inputs it cancelled by them, after this
+   */
   cancel(): number {
-    this.sentAs.clear()
     if (!this.retry) return 0
     clearTimeout(this.retry.timer)
     const n = this.retry.texts.length

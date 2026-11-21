@@ -139,8 +139,8 @@ export function normalizeMessage(
  *                                  (`latestCommands`) and `listCommands` asks the query each time
  *       `command_lifecycle`       queued, started, completed or cancelled for each message sent with a uuid: delivery
  *                                  is read from the turn's own messages (`user_message_uuids`) and the interrupt's
- *                                  receipt (`cancelled`), and the SDK's types do not declare it at all. Read only as a
- *                                  sign the CLI read an input (`TurnStartWait`)
+ *                                  receipt (`cancelled`), and the SDK's types do not declare it at all. Read only as the
+ *                                  CLI's receipt for an input given at rest (`TurnStartWait`)
  *       `system/permission_denied` a call the CLI denied without asking: the tool's result follows at once with an
  *                                  error carrying the same words (`message`), so the card already ends failed with them. Measured only for
  *                                  `decision_reason_type: "mode"` (don't-ask mode); a classifier's or a subagent's denial

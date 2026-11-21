@@ -88,7 +88,7 @@ export class ClaudeSession implements SessionHandle {
     this.sendInput(text, receipt.id, receipt, opts?.origin)
     return receipt.done
   }
-  /** The wait for the CLI to start a turn for input given it at rest (`TurnStartWait`) */
+  /** The wait for the CLI to say it read input given it at rest (`TurnStartWait`) */
   private readonly turnStart = new TurnStartWait(() => this.notStarted())
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
@@ -283,13 +283,15 @@ export class ClaudeSession implements SessionHandle {
       const next = this.queue.shift()
       if (next !== undefined) {
         if (!next.quiet) this.raceRetry.read(next)
+        const sentAs = next.sentAs ?? next.uuid
+        this.turnStart.wrote(sentAs)
         // A quiet input starts no turn and has no result to settle it, so nothing waits for it
         if (!next.parentNote && !next.quiet) this.personInputs.add(next.uuid)
         yield {
           type: 'user' as const,
           parent_tool_use_id: null,
           session_id: this.externalId ?? '',
-          uuid: next.sentAs ?? next.uuid,
+          uuid: sentAs,
           message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
           // The person's own typing says so; everything else is left unattributed, as before (see `InputOrigin`)
           ...(next.origin ? { origin: next.origin } : {}),

@@ -4,13 +4,15 @@ import type { NormalizedEvent } from '@cc/protocol'
 /**
  * Input the CLI starts no turn for (#2377). The fake CLI does what CLI 2.1.296 was measured to do (SDK 0.3.263, 2026-11-21): it sends a
  * turn's `init` only when it reads an input, never at start, and an input whose id it has already read starts nothing and is never
- * answered. What it does with each new input is the test's (`cli.answer`): by default a turn for it alone
+ * answered. What it does with each new input is the test's (`cli.answer`): by default its receipt and a turn for it alone. A Stop
+ * cancels what `cli.cancelled` names
  */
 type Input = { uuid: string; message: { content: { text: string }[] } }
 const cli = vi.hoisted(() => ({
   version: '2.1.296',
   read: [] as Input[],
   answer: null as null | ((input: Input, say: (m: unknown) => void) => void),
+  cancelled: [] as string[],
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -29,6 +31,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
         cli.read.push(input)
         if (cli.answer) cli.answer(input, say)
         else {
+          say({ type: 'command_lifecycle', command_uuid: input.uuid, state: 'queued' })
           say(init)
           say({ type: 'assistant', parent_tool_use_id: null, user_message_uuid: input.uuid, message: { id: `m-${input.uuid}`, role: 'assistant', content: [{ type: 'text', text: 'done' }] } })
           say({ type: 'result', subtype: 'success', is_error: false, result: 'done', user_message_uuid: input.uuid, user_message_uuids: [input.uuid], modelUsage: {} })
@@ -42,7 +45,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
           await new Promise<void>((r) => (wake = r))
         }
       },
-      interrupt: async () => ({ cancelled: [], still_queued: [] }),
+      interrupt: async () => ({ cancelled: cli.cancelled.splice(0), still_queued: [] }),
       close: () => {},
       supportedCommands: async () => [],
       getContextUsage: async () => undefined,
@@ -61,6 +64,14 @@ async function session(id: string) {
   const events: NormalizedEvent[] = []
   const handle = await new ClaudeAdapter({ retryDelay: () => 10 }).createSession({ sessionId: id, cwd: '/tmp', permissionPreset: 'auto' }, (e) => events.push(e))
   return { handle, events }
+}
+
+/** A session whose CLI has run a turn to its end, so its init said what it sends */
+async function ran(id: string) {
+  const s = await session(id)
+  await s.handle.sendTracked!('hello')
+  await vi.waitFor(() => expect(s.events.at(-1)).toMatchObject({ type: 'turn_complete' }))
+  return s
 }
 
 afterEach(() => {
@@ -87,12 +98,30 @@ describe('a turn that lost the sign-in refresh race goes again under an id the C
     expect(handle.queuedInputs!()).toBe(0)
     await handle.dispose()
   })
+
+  it('a Stop while the resent message waits in the CLI says it was not delivered', async () => {
+    const { handle, events } = await ran('race-stop')
+    cli.answer = (input, say) => {
+      // The resend: the CLI holds it, and the Stop cancels it by the id it was sent under
+      cli.answer = (resent) => cli.cancelled.push(resent.uuid)
+      say({ type: 'command_lifecycle', command_uuid: input.uuid, state: 'queued' })
+      say({ type: 'system', subtype: 'init', claude_code_version: cli.version, capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] })
+      say({ type: 'assistant', parent_tool_use_id: null, error: 'server_error', message: { id: 'race', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: RACE }] } })
+      say({ type: 'result', subtype: 'success', is_error: true, result: RACE, user_message_uuids: [input.uuid], modelUsage: {} })
+    }
+    handle.send('hello again', { origin: { kind: 'human' } })
+    await vi.waitFor(() => expect(cli.cancelled).toHaveLength(1))
+    handle.interrupt()
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'error' && /^1 message\(s\) were still queued/.test(e.error.message))).toBe(true))
+    expect(handle.queuedInputs!()).toBe(0)
+    await handle.dispose()
+  })
 })
 
 describe('input the CLI starts no turn for (#2377)', () => {
   it('a tracked input is failed after the wait, and the session does not stay working', async () => {
     vi.useFakeTimers()
-    const { handle, events } = await session('silent-tracked')
+    const { handle, events } = await ran('silent-tracked')
     cli.answer = () => {}
     const sent = handle.sendTracked!('the task')
     const failed = expect(sent).rejects.toThrow(/started no turn/)
@@ -107,7 +136,7 @@ describe('input the CLI starts no turn for (#2377)', () => {
 
   it('the person’s input is said not delivered', async () => {
     vi.useFakeTimers()
-    const { handle, events } = await session('silent-person')
+    const { handle, events } = await ran('silent-person')
     cli.answer = () => {}
     handle.send('hello', { origin: { kind: 'human' } })
     await vi.advanceTimersByTimeAsync(TURN_START_MS)
@@ -118,7 +147,7 @@ describe('input the CLI starts no turn for (#2377)', () => {
 
   it('a long turn is left alone once the CLI said it read the input, its init still to come (an MCP server connecting)', async () => {
     vi.useFakeTimers()
-    const { handle, events } = await session('in-time')
+    const { handle, events } = await ran('in-time')
     // The delivery receipt the CLI says before anything else, then nothing for longer than the wait
     cli.answer = (input, say) => say({ type: 'command_lifecycle', command_uuid: input.uuid, state: 'queued' })
     const sent = handle.sendTracked!('the task')
@@ -127,6 +156,30 @@ describe('input the CLI starts no turn for (#2377)', () => {
     expect(handle.queuedInputs!()).toBe(1)
     await handle.dispose()
     await sent.catch(() => {})
+  })
+
+  it('a late receipt for the input before it does not end the wait', async () => {
+    vi.useFakeTimers()
+    const { handle, events } = await ran('stale')
+    const before = cli.read[0]!.uuid
+    cli.answer = (_input, say) => say({ type: 'command_lifecycle', command_uuid: before, state: 'completed' })
+    const sent = handle.sendTracked!('the task')
+    const failed = expect(sent).rejects.toThrow(/started no turn/)
+    await vi.advanceTimersByTimeAsync(TURN_START_MS)
+    await failed
+    expect(events.at(-1)).toMatchObject({ type: 'error' })
+    await handle.dispose()
+  })
+
+  it('a CLI not known to send the receipt is not waited for: an input it read is never given back to run twice', async () => {
+    vi.useFakeTimers()
+    cli.version = '2.1.280'
+    const { handle, events } = await ran('older')
+    cli.answer = () => {}
+    handle.send('hello again', { origin: { kind: 'human' } })
+    await vi.advanceTimersByTimeAsync(TURN_START_MS * 2)
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+    await handle.dispose()
   })
 })
 

@@ -194,7 +194,7 @@ export function startupBanner(info: { build: string; db: string; pid: number }):
   return [
     '',
     '='.repeat(72),
-    `[agent-host] started ${new Date().toISOString()}`,
+    '[agent-host] started',
     `  build ${info.build}`,
     `  node  ${process.version}`,
     `  pid   ${info.pid}`,
