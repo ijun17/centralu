@@ -9,6 +9,7 @@ import { openTaskParties } from './delegation.js'
 import { quoted } from './frame.js'
 import { UlidMaker, watchIdOf } from './ids.js'
 import type { MessageService } from './messages.js'
+import { nameWithId } from './reach.js'
 import { HOUR_MS, MINUTE_MS, REFUSAL_TEXT, WARNING_TEXT, WATCH, hourlyKey, refuse } from './rules.js'
 
 /*
@@ -304,10 +305,7 @@ export class Watches {
 
   /** What a watch waits for, in Centralu's words: `<name> (<id>)`, `a timer for 16:30`, `a timer every 30 minutes` */
   what(w: Watch): string {
-    if (w.spec.source === 'session') {
-      const [name, id] = [this.host.service.labelOf(w.spec.target), this.host.service.shownId(w.spec.target)]
-      return name === id ? id : `${name} (${id})`
-    }
+    if (w.spec.source === 'session') return nameWithId(this.host.service.labelOf(w.spec.target), this.host.service.shownId(w.spec.target))
     if (w.spec.source === 'pr') return `the checks on #${w.spec.number}`
     return w.spec.kind === 'every' ? `a timer every ${w.spec.periodMin} minutes` : `a timer for ${this.clock(w.spec.slotMs)}`
   }

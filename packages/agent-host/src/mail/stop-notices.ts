@@ -7,7 +7,7 @@ import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRec
 import { parseAddress, senderKind, sessionAddress } from './address.js'
 import { quoted } from './frame.js'
 import { PREVIEW_CHARS, clipped } from './last-response.js'
-import type { MailReach } from './reach.js'
+import { nameWithId, type MailReach } from './reach.js'
 import { hash16 } from './rules.js'
 
 /** What the stop notice reads of the host (`MessageService`'s options) */
@@ -416,7 +416,7 @@ function unansweredText(all: readonly { id: string; recipient: string; why: Rele
 ${lastWordsText(s.name, said)}`
   })
   if (rows.length === 0) return stopLines.join('\n')
-  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${r.name}${r.name === r.shown ? '' : ` (${r.shown})`}`}: ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
+  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${nameWithId(r.name, r.shown)}`}: ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
   // The person is not told what an agent is: no advice to go on without answers, and no reminders to speak of
   if (person) return [`${rows.length} of your messages went unanswered:`, ...lines, ...stopLines].join('\n')

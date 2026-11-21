@@ -633,7 +633,7 @@ export class MailAcross extends AcrossReceipts {
       // A reply to a message this side never kept: one that arrived there while the link failed during its send
       const lost = why === 'unknown_message' && p.replyTo !== undefined && !this.d.records.message(p.replyTo)
       const text = why === 'gone'
-        ? // The service names the session by this host's address, which the sender never used; the person reads it by its name
+        ? // The service names the session by this host's id, which the sender never used; the person reads it by its name
           isPerson(from)
           ? `${this.label(to)} on ${this.selfName()} is in the session archive there or was deleted, so your answer was not sent.`
           : `${seen ? oneLineText(seen, 200) : 'That session'} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`

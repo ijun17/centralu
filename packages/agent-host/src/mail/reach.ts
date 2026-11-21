@@ -136,6 +136,11 @@ export function mailReach(host: ReachHost): MailReach {
   }
 }
 
+/** A session as a sentence names it with the id to write to: its name, and its id when the name is not that */
+export function nameWithId(name: string, id: string): string {
+  return name === id ? id : `${name} (${id})`
+}
+
 /** S13: the person dismissed what a sender had waiting for a project to be trusted */
 export function droppedText(ids: readonly string[], project: string): string {
   const shown = ids.slice(0, 10).join(', ') + (ids.length > 10 ? `, and ${ids.length - 10} more` : '')

@@ -27,16 +27,6 @@ const refusal = (fn: () => unknown): string => {
 }
 
 describe('what a tool reads a session argument as', () => {
-  it("a role word, an app's address as it is, and a session here by its id or its name", () => {
-    const r = refs()
-    expect(['Assistant', 'parent', 'person'].map((t) => r.ref('a', t))).toEqual([{ role: 'assistant' }, { role: 'parent' }, { role: 'person' }])
-    expect(r.ref('a', `app:${HOST}/p1/x`)).toEqual({ address: `app:${HOST}/p1/x` })
-    expect(r.ref('a', 'b')).toEqual({ word: 'b', here: [here('b', 'beta')] })
-    expect(r.ref('a', ' Beta ')).toEqual({ word: 'Beta', here: [here('b', 'beta')] })
-    // Its own name is not the caller's to write to: an heir has the name of the session it replaced
-    expect(r.ref('a', 'alpha')).toEqual({ word: 'alpha', here: [] })
-  })
-
   it('refuses a text shaped as an address that is not one, saying the id to write when it names a session here, and never reads it as a name', () => {
     const r = refs()
     expect(refusal(() => r.ref('a', 'session:b'))).toBe('"session:b" is not a session\'s address. For that session, write "b". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".')
@@ -46,8 +36,14 @@ describe('what a tool reads a session argument as', () => {
     expect(refusal(() => r.ref('a', 'session: b'))).toMatch(/^"session: b" is not a session's address\. For that session, write "b"\./)
   })
 
-  it('finds a session here named like a refused shape by that name first', () => {
-    const r = refs({ sessions: [here('a', 'alpha'), here('s', 'Session: cleanup'), here('f', 'app:fix'), here('v', `session:${HOST}/v1`)] })
+  it("a role word, an app's address as it is, and a session here by its id or its name first, even a name shaped like a refused text", () => {
+    const r = refs({ sessions: [here('a', 'alpha'), here('b', 'beta'), here('s', 'Session: cleanup'), here('f', 'app:fix'), here('v', `session:${HOST}/v1`)] })
+    expect(['Assistant', 'parent', 'person'].map((t) => r.ref('a', t))).toEqual([{ role: 'assistant' }, { role: 'parent' }, { role: 'person' }])
+    expect(r.ref('a', `app:${HOST}/p1/x`)).toEqual({ address: `app:${HOST}/p1/x` })
+    expect(r.ref('a', 'b')).toEqual({ word: 'b', here: [here('b', 'beta')] })
+    expect(r.ref('a', ' Beta ')).toEqual({ word: 'Beta', here: [here('b', 'beta')] })
+    // Its own name is not the caller's to write to: an heir has the name of the session it replaced
+    expect(r.ref('a', 'alpha')).toEqual({ word: 'alpha', here: [] })
     expect(['session: cleanup', 'app:fix', `session:${HOST}/v1`].map((t) => r.ref('a', t))).toEqual([
       { word: 'session: cleanup', here: [here('s', 'Session: cleanup')] },
       { word: 'app:fix', here: [here('f', 'app:fix')] },
@@ -130,6 +126,10 @@ describe('the id a tool prints for an address', () => {
     expect(['session:hub-0000000b/h1', 'session:hub-0000000b/m2.w1', 'session:hub-0000000b/m1.b'].map((a) => onMachine.shown(a))).toEqual(['studio.h1', 'm2.w1', 'b'])
     expect(onHub.ref('a', onHub.shown(`session:${HOST}/m1.w1`))).toEqual({ address: `session:${HOST}/m1.w1` })
     expect(['session:hub-0000000b/h1', 'session:hub-0000000b/m2.w1'].map((a) => onMachine.ref('a', onMachine.shown(a)))).toEqual([{ address: 'session:hub-0000000b/h1' }, { address: 'session:hub-0000000b/m2.w1' }])
+    // Several hubs: another machine's session goes under its hub's label, which says which hub
+    const twoHubs = refs({ hubs: [{ id: 'hub-0000000b', label: 'studio', name: 'Studio', you: 'm1' }, { id: 'hub-0000000c', label: 'desk', name: 'Desk', you: 'm1' }] })
+    expect(twoHubs.shown('session:hub-0000000c/m2.w1')).toBe('desk.m2.w1')
+    expect(twoHubs.ref('a', 'desk.m2.w1')).toEqual({ address: 'session:hub-0000000c/m2.w1' })
   })
 
   it("is the person's word for the person under either name and an app's address as it is; a hub no longer linked goes by its id", () => {

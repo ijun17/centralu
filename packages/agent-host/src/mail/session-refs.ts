@@ -103,17 +103,20 @@ export class SessionRefs {
 
   /**
    * How a tool prints `address`, in the form `ref` reads back: a session here by its id, one on another computer as `<computer>.<id>`
-   * (a hub by its label), the person as `person`. A hub this computer no longer links has no label left: its id stands in. An app's
-   * address stays as it is
+   * (a hub by its label; another machine of a hub under that hub's label too while several hubs link this one), the person as
+   * `person`. An app's address stays as it is. A hub this computer no longer links has no label left: its id stands in, and reads
+   * back as no session
    */
   shown(address: string): string {
     if (isPerson(address)) return PERSON
     const p = parseAddress(address)
     if (p?.kind !== 'session') return address
     if (p.host === this.d.hostId) return p.sessionId
-    const hub = this.d.computers().hubs().find((h) => h.id === p.host)
+    const hubs = this.d.computers().hubs()
+    const hub = hubs.find((h) => h.id === p.host)
     const dot = p.sessionId.indexOf('.')
-    if (dot > 0) return hub?.you === p.sessionId.slice(0, dot) ? p.sessionId.slice(dot + 1) : p.sessionId
+    if (dot > 0 && hub?.you === p.sessionId.slice(0, dot)) return p.sessionId.slice(dot + 1)
+    if (dot > 0 && !(hub && hubs.length > 1)) return p.sessionId
     return `${hub?.label ?? p.host}.${p.sessionId}`
   }
 

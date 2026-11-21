@@ -2421,8 +2421,9 @@ measured length rounded up to the next 20 in M3b. The reader seat's ceilings fal
 **Name resolution** is `SessionRefs` (`mail/session-refs.ts`), one reading for every tool that takes a session, as
 remote-hub.md §3.3 says: the words `assistant`, `parent` and `person`; a session here by its id, else by its name (the
 caller is never a candidate, and several are refused `ambiguous` with each one's id, project and state); then
-`<computer>.<id>`. A text shaped as an address is refused `bad_address` with the id to write, never looked up as a name.
-Tools print a session by that id (`SessionRefs.shown`), never by its address.
+`<computer>.<id>`. A session's address, whole or cut short, is refused `bad_address` with the id to write, never looked
+up as a name. Tools print a session by that id (`SessionRefs.shown`), never by its address. `mail(action="sessions")` is
+not built.
 
 What is gone: `handled` (`done` is the one acknowledgement), `reply` (`send` with `id`), `update` and `close` (task
 state), `thread`, `kind`, `subject`, `state`, `outcome`, `next`, `blocker`, `unblock` and `follows`.

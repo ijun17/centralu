@@ -7,7 +7,7 @@ import { parseMailId } from './ids.js'
 import { OUTCOME_WORDS } from './last-response.js'
 import { CITE_MS, SUBJECT_CHARS, waitsForReply, type InboxView, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailAcross } from './across.js'
-import type { MailReach } from './reach.js'
+import { nameWithId, type MailReach } from './reach.js'
 import type { SessionRef, SessionRefs } from './session-refs.js'
 import { refusalReason, refuse } from './rules.js'
 import { isTimeWatch, prNumberOf, type Watches } from './watches.js'
@@ -322,7 +322,7 @@ export class MailTool {
 
   /**
    * A party the call names, as `SessionRefs` reads it: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an
-   * address, or a session of this host by its id or exact name (any case). Several sessions of one name are refused with their addresses: a guess
+   * address, or a session of this host by its id or exact name (any case). Several sessions of one name are refused with their ids: a guess
    * could send the words to the wrong one
    */
   private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
@@ -366,9 +366,8 @@ export class MailTool {
     const [first] = this.records.recipients(m.id)
     const to = first?.recipient ?? ''
     const name = this.reach.labelOf(to)
-    const id = this.reach.shownId(to)
     const answered = r.answered === null ? undefined : this.records.message(r.answered)
-    const lines = [`Sent ${m.id} to ${name}${name === id ? '' : ` (${id})`}.`]
+    const lines = [`Sent ${m.id} to ${nameWithId(name, this.reach.shownId(to))}.`]
     if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the Assistant reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
     if (r.cited) lines.push(`Centralu checked the citation: the Assistant reads the person's message ${r.cited.seq} of this session with your request.`)
     // A reply to a task answers it only marked as its answer (`replyAnswers`); otherwise the task stays open and the last response answers it
