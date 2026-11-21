@@ -41,9 +41,10 @@ afterEach(async () => {
 
 describe('mail to a child on a linked machine (#2067)', () => {
   // #1948: mail to a child of the caller's is more work, here or on a linked machine, as agent_session's send was; to any other session there it is mail
-  it('by its id is more work through the link, and with no link to it is refused at once, written nowhere', async () => {
+  it('by its id is more work through the link, and with no link to it is refused at once, written nowhere; by its address it is refused as one', async () => {
     const sent = await m.hooks.tool!('h1', { action: 'send', to: CHILD.sessionId, text: 'one more thing' })
     expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('m1.c1 is on Box, and no machine is linked to this computer now.') })
+    expect(await m.hooks.tool!('h1', { action: 'send', to: addr(CHILD.sessionId), text: 'one more thing' })).toMatchObject({ isError: true, text: expect.stringContaining('For that session, write "m1.c1".') })
     expect(store.mailbox.postsSince(addr('h1'), 0)).toBe(0)
   })
 
