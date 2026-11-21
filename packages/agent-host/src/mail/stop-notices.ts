@@ -58,10 +58,10 @@ export class StopNotices {
     this.releaseAndTell((now, senders) => {
       for (const { row, message } of this.owedBy(address, 'gone', null)) if (this.d.records.markReleased(row.messageId, address, now, 'gone')) senders.add(message.sender)
       for (const row of this.d.records.watchedTo(address)) if (!isRoleVia(row.via)) this.d.records.settle(row.messageId, address, 'gone', now)
-      // Held for its link, it never went: deleted, as its row not held is withdrawn and never delivered
+      // One held for its link ends as one not held does, withdrawn, and no longer held: nothing waits on it
       for (const row of this.d.records.watchedFrom(address)) {
-        if (row.held === LINK_HOLD) this.d.records.deleteRows([{ messageId: row.messageId, recipient: row.recipient }])
-        else this.d.records.settle(row.messageId, row.recipient, 'withdrawn', now)
+        this.d.records.settle(row.messageId, row.recipient, 'withdrawn', now)
+        if (row.held === LINK_HOLD) this.d.records.hold(row.recipient, [row.messageId], null)
       }
     })
   }

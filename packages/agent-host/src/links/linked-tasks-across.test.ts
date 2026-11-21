@@ -575,14 +575,14 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     expect(w.records.heldForLink(addr('orc'))).toEqual([])
   })
 
-  it("a sender gone to the trash: its held question is deleted, as its mail not held is withdrawn; its held message goes whatever its age, as its mail not held is delivered", async () => {
+  it("a sender gone to the trash: its held question ends withdrawn and no longer held, as its mail not held does; its held message goes whatever its age, as its mail not held is delivered", async () => {
     const { w, across, answers, sent, machine, child } = hubWorld({ tasks: true, clock: true })
     machine.reachable = false
     const question = await across.send('orc', { to: child, text: 'which branch?', needsReply: true })
     const note = await across.send('orc', { to: child, text: 'fyi', needsReply: false })
     w.sessions.set('orc', { ...w.sessions.get('orc')!, here: false })
     w.mail.stops.partyGone(addr('orc'))
-    expect(w.records.recipients(question.ok ? question.messageId : '')).toEqual([])
+    expect(w.records.recipients(question.ok ? question.messageId : '')).toMatchObject([{ settled: 'withdrawn', held: null }])
     w.clock.t += LINK_HOLD_MS + 1000
     machine.reachable = true
     across.changed()

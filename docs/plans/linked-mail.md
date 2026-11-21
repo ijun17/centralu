@@ -523,8 +523,9 @@ outbox it already has for Centralu's own notices and reports (§6).
   the sender was told what became of the row), so no row is named twice. Ten minutes covers a link that drops and comes
   back by itself, which is most of them; a computer off for the night is the case where asking first is right.
 - **A sender gone to the trash** follows the rule for its mail not held (`partyGone`): a watched one, a question or a
-  task, is deleted, as one not held is withdrawn and never delivered; any other goes when the link is back whatever its
-  age, as one not held is delivered, since no one is left to decide. Nothing stays held for it.
+  task, is settled `withdrawn` and no longer held, the record one not held keeps, and is never sent; any other goes when
+  the link is back whatever its age, as one not held is delivered, since no one is left to decide. Nothing stays held
+  for it.
 - **A restart.** Held rows are in the store, so they outlive this host and the other one. After a restart they go at the
   first connect, under the same age rule, measured from when each was written; a send is never made twice by this host
   at once (`sending`), and the other side takes a repeated id as the message it has.
