@@ -194,6 +194,12 @@ export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...` */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
+/**
+ * The hold of a sender's copy of mail to a session on a linked computer whose link was down when it was sent (#2354, docs/plans/linked-mail.md
+ * §12): nothing went yet. Its sender acts on it, never the person, and it goes when the link is back (`MailAcross.retryOwed`)
+ */
+export const LINK_HOLD = 'link' as const
+
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
 export const HIDDEN_HOLDS = ['policy', 'loop'] as const
 const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
@@ -611,9 +617,15 @@ export class MailboxRecords {
     return this.rows(`r.attempt_at IS NOT NULL AND r.delivered_at IS NULL AND ${WAITING}`)
   }
 
-  /** The rows held for the person to act on, the earliest due first */
+  /** The rows held for the person to act on, the earliest due first: not one held for its link, which is its sender's */
   heldRows(): RecipientRow[] {
-    return this.rows(`${HELD} AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
+    return this.rows(`${HELD} AND r.held <> '${LINK_HOLD}' AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
+  }
+
+  /** The rows held for their link (`LINK_HOLD`), of `sender`'s mail or everyone's, with their messages, oldest first */
+  heldForLink(sender?: string): PendingRow[] {
+    const where = `r.held = '${LINK_HOLD}' AND r.settled IS NULL${sender === undefined ? '' : ' AND m.sender = ?'} ORDER BY m.created_at, m.id`
+    return this.withMessages(sender === undefined ? this.rows(where) : this.rows(where, sender))
   }
 
   /** Every row held `policy`, with its message's `sender_project`: what the person's trust or Dismiss acts on (§7.4) */
@@ -763,13 +775,13 @@ export class MailboxRecords {
 
   /**
    * The open tasks given after `since` to addresses that start with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`), oldest first,
-   * at most `limit` (#2289)
+   * at most `limit` (#2289). Not one held for its link: it never went, so the machine cannot have it
    */
   openTasksToward(prefix: string, since: number, limit: number): string[] {
     return this.db
       .prepare<[string, number, number], { id: string }>(
         `SELECT m.id FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND m.created_at > ?
+          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND r.held IS NULL AND m.created_at > ?
           ORDER BY m.created_at, m.id LIMIT ?`,
       )
       .all(likePrefix(prefix), since, limit)

@@ -161,16 +161,20 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect([machine.store.mailbox.postsSince(at(machine, 'w1'), 0), hub.store.mailbox.postsSince(at(hub, 'm1.w1'), 0)]).toEqual([0, 0])
   })
 
-  it("is refused at once while the link is down, written nowhere, and the same words go once it is back", async () => {
+  it('is held here while the link is down, listed as held in the sender’s inbox, and goes by itself once it is back, saying when it was written (#2354)', async () => {
     const { machine, hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable)
-    expect(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })).toEqual({ text: expect.stringMatching(/^Refused \(link_down\): Remote box is not reachable right now, so nothing was sent\./), isError: true })
-    expect(hub.store.mailbox.postsSince(at(hub, 'h1'), 0)).toBe(0)
+    const r = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })
+    expect(r.text).toMatch(/^Held (\S+) for "w1 on Remote box" \(session:hub-[0-9a-f]+\/m1\.w1\): Remote box is not reachable right now, so it is held here and goes when the link is back/)
+    const id = /^Held (\S+) /.exec(r.text)?.[1] ?? ''
+    expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ held: 'link', deliveredAt: null })
+    expect((await tool(hub, 'h1', { action: 'inbox' })).text).toContain(`held      ${id} to `)
     await hub.router.handle('machines.reconnect', { machineId: 'm1' })
-    await eventually(() => hub.machine().status === 'connected')
-    await eventually(async () => !(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })).isError)
-    expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 }).map((m) => m.body)).toEqual(['ping'])
+    await eventually(() => machine.store.mailbox.message(id) !== undefined)
+    expect(machine.store.mailbox.message(id)?.body).toMatch(/^\[Written at \d{4}-\d\d-\d\d \d\d:\d\d UTC on Hub mac, while the link between the computers was down\.\]\n\nping$/)
+    await eventually(() => hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.held === null)
+    expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.deliveredAt).not.toBeNull()
   })
 
   it('a parent that goes without answering is told to the child on its machine, as the notice it would read at home', async () => {

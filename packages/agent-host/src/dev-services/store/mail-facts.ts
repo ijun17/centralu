@@ -68,9 +68,9 @@ export const MailFacts = z.looseObject({
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
   /** On the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection (`scriptLabel`), so no reader takes it for the person's words */
   fromScript: z.object({ credential: z.string() }).optional(),
-  /** On a task a hub's own Assistant gave with send_to_session (#1948 step 6, #2258): the hub's word that it is for the person; set only from that hub's `host.mail` */
+  /** On a task a hub's own Assistant gave with send_to_session (#1948 step 6, #2258): the hub's word that it is for the person; on a machine set only from that hub's `host.mail`, on the hub on its own copy, which keeps the task as it goes (`sentAcross`) */
   hubAssistant: z.literal(true).optional(),
-  /** On a task from another computer's session (#838, #1948 step 6): the agent depth the session here counts while it works on it */
+  /** On a task from another computer's session (#838, #1948 step 6): the agent depth the session here counts while it works on it; on the giver's copy, the depth it went with */
   agentDepth: z.number().int().min(1).max(64).optional(),
   /**
    * On a session's message that needs a reply: its sender marked it as a question (the mail tool's `kind: "question"`, or `choices`). A question to a

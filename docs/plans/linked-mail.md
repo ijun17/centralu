@@ -3,8 +3,8 @@
 Every session reaches every other session by mail, across linked machines too (owner decision, 2026-11-08). Today
 mail stops at a link: a child a hub session started on a linked machine (`fromHub`) cannot mail its parent, and a hub
 session's mail to that child is refused `elsewhere` (slice 1, on main). This plan replaces the store-and-forward
-outline of [mailbox.md §14](mailbox.md#14-linked-machines) where the owner's decisions differ from it: nothing is held
-while a link is down, so there is no outbox and no per-link numbering.
+outline of [mailbox.md §14](mailbox.md#14-linked-machines) where the owner's decisions differ from it: there is no
+per-link numbering, and the one outbox is the rows this host owes the other side (§6, §12).
 
 ## 1. Decisions in force
 
@@ -12,7 +12,8 @@ while a link is down, so there is no outbox and no per-link numbering.
   (2) `session:<other host>/<id>` addresses reach a session on a linked host, and the receipts (delivered, read,
   answered) come back. (3) Names of sessions on linked hosts resolve as #2066 resolves this host's, with the same
   refusal for an ambiguous name.
-- **Link down:** the send is refused at once, with the reason. Nothing is held.
+- **Link down:** a send to a computer that is linked and down now is held here and goes when the link is back (#2354,
+  §12). One to a computer no longer linked, from an older build, or still connecting is refused at once, with the reason.
 - **Retry:** a send the link refuses is not written anywhere, so the `repeat` guard never counts it and the sender can
   send the same text again.
 - **Guards** (#2014, #2035) warn the person and never block agent mail. They run where the message is written.
@@ -220,7 +221,7 @@ Each is said at once, and nothing is written on either side:
 
 | Case | Refusal |
 |---|---|
-| The link to the host the address is on is down, or that hub never offered since this host started | `link_down`, naming the computer |
+| That host is no longer linked, or that hub never offered since this host started | `link_down`, naming the computer. A host still linked whose link is down holds the mail instead (§12) |
 | That host runs a release without this (`Unknown method`, or a hub with no `you`) | `older`, naming the computer and saying to update it |
 | The other host answered an error of its own | `refused`, with its words and that it may or may not have taken the message (an error raised after it wrote cannot be told apart) |
 | The call failed with no answer | `link_down`, saying it is not known whether the message arrived |
@@ -254,7 +255,7 @@ may not open (decided 2026-11-14 on #1987):
   `link_down` (`MailAcross.personTarget`). The hubs that offer mail are kept in the app setting `mail_hubs` (`LinkedHubs`,
   with when its link was last up: an offer, the end of its connection, or a daily write while it is connected, so a host
   that crashes finds it up within a day), so a host that starts again while its hub is
-  away knows that hub before it offers, and the send is refused `link_down` naming it, not kept here unseen. A kept hub
+  away knows that hub before it offers, and the send is held for it (§12), not kept in this computer's Inbox unseen. A kept hub
   stands only for mail until it offers: it says nothing of apps, so a session it started keeps its own record for
   those (remote-hub.md §13.5). A hub whose link has been down 30 days is forgotten for mail at its first use, after a restart or not:
   this host cannot learn that a hub was removed while away, and 30 days outlasts a computer left off over a trip.
@@ -281,7 +282,7 @@ may not open (decided 2026-11-14 on #1987):
   (`passOn`, named `person` on the wire).
 - **The Inbox** names a machine's session `<name> on <machine>`, with its state as the hub's mirror of that machine last
   had it (`personSessions`).
-- **Refusals**, each at once with nothing written: the link down (`link_down`, naming the hub); a hub from before this,
+- **Refusals**, each at once with nothing written (a link that is down holds the mail instead, §12): a hub from before this,
   which reads `person` as no address (`older`: `<hub> runs an older Centralu, which takes no mail to the person from
   here. Update it there.`); a machine from before this, which refuses `host.mail` from `person` (`older`: `<machine>
   runs an older Centralu, which takes no answer from the person here. Update it there.`, shown in the Inbox); an answer
@@ -483,3 +484,40 @@ machines' open work beside its own, and a row from a machine opens there.
 - **An older machine is left out, unnamed.** A machine that answers `mail.tasks` "Unknown method" (a build from before
   Tasks) has none to list and is not named. Machines follow the hub's update, so such a machine is a passing state of an
   update, not one the person acts on; naming it as not reached would say it is down when it is not.
+
+## 12. Mail held while a link is down (#2354)
+
+The owner reversed §1's "nothing is held" (#2354): a session that mails a computer whose link is down for a moment had
+to notice the refusal, remember the message and send it again, and most did not. Now the sending host keeps it and sends
+it itself when the link is back, through the outbox it already has for Centralu's own notices and reports (§6).
+
+- **What is held.** A message or a task (`MailAcross.send`, `sendFrom`, `sendTask`) to a session on a computer that is
+  linked and not reachable now, the person's mail across included (the person's address is a session of the hub, §7a).
+  Its copy is written at once (`sentAcross` with `held`), under the id `idFor` gives, with its one row undelivered and
+  `held = 'link'` (`LINK_HOLD`; the column is free text, so no store step). The copy keeps what goes later: a task's
+  depth and whether the Assistant gave it for the person (`agentDepth`, `hubAssistant`), a question's subject and
+  choices. The answer is ok and says the mail is held and goes when the link is back (`heldLine`, one wording for the
+  mail tool and a delegation's notice). Still refused: a computer no longer linked, an older build, a machine still
+  connecting, and `parent` from a hub's child, whose address only the hub names, so there is no recipient to hold a copy
+  for (§3).
+- **Who acts on it.** The sender, never the person: the person's held list (`heldRows`) leaves `link` out, and a task
+  held so is not in a machine's offer (`openTasksToward`), which would read it as lost there (§10). The sender's `inbox`
+  lists it as held; `handled` on it deletes it here (nothing went, so nothing is told across); to replace it, the sender
+  drops it and sends again.
+- **When it goes.** At a connect or any change (`retryOwed`, the one loop that passes what is owed to the other side), a
+  held row whose side can take it now (reachable, and a machine past this connection's offer, before which it takes no
+  mail) goes by itself if it was written less than `LINK_HOLD_MS` (10 minutes) ago, under its own id. Its words go led by
+  `[Written at <UTC time> on <computer>, while the link between the computers was down.]`, so a reader knows it is late;
+  this is in the text, so a build from before this shows it too. The other side writes it as any send (a second send of
+  an id it has is taken as the one it has), and the row here is then delivered and no longer held. A refusal there
+  deletes the copy and tells the sender why; an answer lost keeps it held, and it goes again under its id.
+- **Older than `LINK_HOLD_MS`.** It does not go by itself: what was news ten minutes ago may be out of date, and only the
+  sender knows. The sender gets one Centralu notice for all it holds then (id, to whom, first line), with what to do per
+  message: `mail send` with `thread` = its id sends it now, `handled` drops it. The rows are marked told (`told_at`),
+  so no row is named twice. Ten minutes covers a link that drops and comes back by itself, which is most of them; a
+  computer off for the night is the case where asking first is right.
+- **A restart.** Held rows are in the store, so they outlive this host and the other one. After a restart they go at the
+  first connect, under the same age rule, measured from when each was written; a send is never made twice by this host
+  (`sending`), and the other side takes a repeated id as the message it has.
+- **App calls** across a link that is down are still refused (`awayRefusal`) and never replayed: a call may have effects
+  its caller has to watch.

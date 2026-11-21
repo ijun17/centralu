@@ -4,6 +4,7 @@ import { errorMessage, oneLineText, type MailChoices } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import {
   HIDDEN_HOLDS,
+  LINK_HOLD,
   MailTargetMissing,
   type HandOverScope,
   type MailFacts,
@@ -142,8 +143,8 @@ export type InboxView = {
   needReply: ReadItem[]
   unread: ReadItem[]
   waiting: { row: RecipientRow; message: MailRow }[]
-  /** `loop`: a row an earlier build held for its turns, which waits for the person's Resume */
-  held: { row: RecipientRow; message: MailRow; why: HoldReason | 'loop' }[]
+  /** `loop`: a row an earlier build held for its turns, which waits for the person's Resume; `link`: mail across held while its link is down (`LINK_HOLD`) */
+  held: { row: RecipientRow; message: MailRow; why: HoldReason | 'loop' | typeof LINK_HOLD }[]
 }
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
 
@@ -367,17 +368,24 @@ export class MessageService {
    * host answered with the message's id, under the same id, so a reply there and here names one message. Its one row is
    * the foreign recipient's, delivered at hand-over, so this host's delivery never tries it; the recipient's host pushes
    * what becomes of it (`MailboxRecords.mergeAcross`). No guard runs here: they ran where the message was written. An
-   * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer)
+   * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer).
+   *
+   * `held`: written before it goes, as the link to that host is down (#2354): its row is undelivered and held for the link (`LINK_HOLD`) until it goes
+   * (`MailAcross.retryOwed`), so the copy keeps all that goes then: a task's depth and whether it is for the person, a question's subject and choices
    */
-  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true; task?: { origin: DelegationOrigin; note?: true } }): MailRow {
+  sentAcross(
+    sender: string,
+    input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true; subject?: string; choices?: MailChoices; task?: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }; held?: true },
+  ): MailRow {
     return this.run(() => {
       const now = this.now()
       const target = input.replyTo === undefined ? undefined : this.records.message(input.replyTo)
       // Work given across a link (#1948 step 6) is a task here as there: the report the machine sends back answers this copy, and settles it
       const work = input.task ? { kind: input.task.note ? ('message' as const) : ('task' as const), origin: input.task.origin, causeId: this.causeOf(sender) } : { kind: 'message' as const, origin: 'mail' as const }
+      const facts: MailFacts = { ...(input.question && input.needsReply ? { question: true } : {}), ...(input.task?.forPerson ? { hubAssistant: true } : {}), ...(input.task?.depth ? { agentDepth: input.task.depth } : {}) }
       const stored = this.put(
-        { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work, ...(input.question && input.needsReply ? { facts: { question: true } } : {}) },
-        [this.row(input.to, { dueAt: now, deliveredAt: now })],
+        { id: input.id, sender, body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, createdAt: now, ...work, facts, subject: input.subject ?? null, choices: input.choices ?? null },
+        [this.row(input.to, input.held ? { dueAt: now, held: LINK_HOLD } : { dueAt: now, deliveredAt: now })],
       )
       if (target && replyAnswers(target, input) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
       return stored
@@ -508,11 +516,14 @@ export class MessageService {
   }
 
   /** `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient */
-  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' } {
+  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'dropped' | 'none' | 'unwatched' } {
     return this.run(() => {
       const m = this.records.message(id)
       if (!m) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
       const mine = m.sender === by
+      // Mail across held for its link never went (#2354): withdrawn, it is deleted here, and nothing is told across
+      const held = mine ? this.records.recipients(id).filter((r) => r.held === LINK_HOLD && r.settled === null) : []
+      if (held.length > 0) return { settled: this.records.deleteRows(held.map((r) => ({ messageId: id, recipient: r.recipient }))), how: 'dropped' }
       const row = mine ? undefined : this.records.recipient(id, by)
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))
       // A request is marked done in the turn it is in, where its words are shown (§7.6)
@@ -603,12 +614,15 @@ export class MessageService {
       .map((p) => this.item(p.message, reader, turn))
     const waiting = this.records.watchedFrom(reader).flatMap((row) => {
       const message = messageOf(row)
-      return message?.kind === 'message' && message.needsReply ? [{ row, message }] : []
+      return message?.kind === 'message' && message.needsReply && row.held !== LINK_HOLD ? [{ row, message }] : []
     })
-    const held = this.records.heldRows().flatMap((row) => {
-      const message = messageOf(row)
-      return message?.sender === reader && isHidden(row) ? [{ row, message, why: row.held === 'loop' ? ('loop' as const) : ('policy' as const) }] : []
-    })
+    const held = [
+      ...this.records.heldRows().flatMap((row) => {
+        const message = messageOf(row)
+        return message?.sender === reader && isHidden(row) ? [{ row, message, why: row.held === 'loop' ? ('loop' as const) : ('policy' as const) }] : []
+      }),
+      ...this.records.heldForLink(reader).map((p) => ({ ...p, why: LINK_HOLD })),
+    ]
     return { needReply, unread, waiting, held }
   }
 

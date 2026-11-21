@@ -1,10 +1,12 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
-import { ROLE_VIA, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
+import { LINK_HOLD, ROLE_VIA, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
+import { durationText } from '../timing.js'
+import { LINK_HOLD_MS, heldLine } from './across-core.js'
 import { CENTRALU, PERSON, isPerson, parseAddress } from './address.js'
 import { NOT_AN_INSTRUCTION, UNTRUSTED_LINES, escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { OUTCOME_WORDS } from './last-response.js'
-import { CITE_MS, SUBJECT_CHARS, waitsForReply, type MessageService, type ReadItem, type SendResult } from './messages.js'
+import { CITE_MS, SUBJECT_CHARS, waitsForReply, type InboxView, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
@@ -18,6 +20,14 @@ const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => strin
   cancelled: (id) => `Cancelled watch ${id}.`,
   withdrawn: (id) => `Watch ${id} had fired, and its notice had not reached you yet: it will not come.`,
   ended: (id) => `Watch ${id} had ended already.`,
+}
+
+/** Why the caller's own mail is held, as `inbox` lists it */
+const HELD_WHY: Record<InboxView['held'][number]['why'], (m: MailRow, calls: MessageCalls) => string> = {
+  loop: () => 'waits until the person lets it go',
+  policy: (m) => `waits until the person trusts ${m.senderProject ?? 'your project'}`,
+  [LINK_HOLD]: (m, calls) =>
+    `its computer is not reachable. It goes by itself when the link is back within ${durationText(LINK_HOLD_MS)} of writing; ${calls.send(m.id)} sends it once the link is back, ${calls.done(m.id)} drops it`,
 }
 
 /**
@@ -69,7 +79,7 @@ export type MailToolHost = {
    * Mail across linked machines (#2067 items 2 and 3, `MailAcross`): a send to a session on another computer, which that
    * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
    */
-  across?: Pick<MailAcross, 'send' | 'foreign' | 'find' | 'named' | 'personTarget' | 'parentHost'>
+  across?: Pick<MailAcross, 'send' | 'sendHeld' | 'foreign' | 'find' | 'named' | 'personTarget' | 'parentHost'>
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */
@@ -127,6 +137,11 @@ export class MailTool {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
+      // The caller's mail held for its link, sent now whatever its age (#2354): `send` with its id and no recipient
+      if (args.action === 'send' && across && args.thread?.trim() && !args.to?.trim()) {
+        const r = await across.sendHeld(me.address, args.thread.trim())
+        return r.ok ? { text: `Sent ${r.messageId} to ${JSON.stringify(r.to)} on ${r.computer}.` } : { text: `Refused (${r.why}): ${r.text}`, isError: true }
+      }
       // Work first: a start request's handle or a linked child's id is no name to look for on other computers, one of which may be away
       const work = await this.work(sessionId, me, args, signal)
       if (work) return work
@@ -154,7 +169,8 @@ export class MailTool {
       const r = await across.send(sessionId, { to: far.address, text: this.need(args.text, 'text'), needsReply, ...(args.urgent ? { urgent: true } : {}), ...(far.replyTo ? { replyTo: far.replyTo } : {}), ...shown, ...(asks(args) ? { question: true } : {}) })
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
       const who = far.address === 'parent' ? `your parent ${JSON.stringify(r.to)}` : far.person ? 'the person' : `${JSON.stringify(r.to)}${r.address ? ` (${r.address})` : ''}`
-      const lines = [`Sent ${r.messageId} to ${who} on ${r.computer}.`, ...(far.replyTo ? [`It answers ${far.replyTo}.`] : []), ...waitLine({ needsReply, answers: far.replyTo !== undefined, clarifies })]
+      const head = r.held ? `Held ${r.messageId} for ${who}: ${heldLine(r.computer)} Drop it with ${mailCalls(this.host.form(sessionId)).done(r.messageId)}.` : `Sent ${r.messageId} to ${who} on ${r.computer}.`
+      const lines = [head, ...(far.replyTo ? [`It answers ${far.replyTo}.`] : []), ...waitLine({ needsReply, answers: far.replyTo !== undefined, clarifies })]
       return { text: lines.join(' ') }
     } catch (e) {
       return failed(e)
@@ -383,6 +399,7 @@ export class MailTool {
     const r = this.service.done(me, id)
     if (r.how === 'done') return '1 message marked handled.'
     if (r.how === 'withdrawn') return `Withdrawn: ${id} no longer waits for an answer from ${r.settled} recipient${r.settled === 1 ? '' : 's'}.`
+    if (r.how === 'dropped') return `Dropped: ${id} was held for its link and is not sent.`
     return 'Nothing was waiting to be marked handled.'
   }
 
@@ -404,7 +421,7 @@ export class MailTool {
       ...v.needReply.map((i) => `reply     ${i.message.id} from ${this.from(i)}, ${this.age(i.message.createdAt)} ago${i.row?.readAt === null ? ', unread' : ''}`),
       ...v.unread.map((i) => `unread    ${i.message.id} ${i.message.kind}${this.aboutWords(i.message) || ` from ${this.from(i)}`}, ${this.age(i.message.createdAt)} ago${i.withheld ? ' (a request: its words are shown in the turn it starts)' : ''}`),
       ...v.waiting.map((w) => `you asked ${w.message.id} ${this.name(w.row.recipient)}, ${this.age(w.message.createdAt)} ago: ${w.row.answerId ? 'answered, the answer held for the person' : 'not answered'}`),
-      ...v.held.map((h) => `held      ${h.message.id} to ${this.name(h.row.recipient)}: ${h.why === 'loop' ? 'waits until the person lets it go' : `waits until the person trusts ${h.message.senderProject ?? 'your project'}`}`),
+      ...v.held.map((h) => `held      ${h.message.id} to ${this.name(h.row.recipient)}: ${HELD_WHY[h.why](h.message, calls)}`),
       ...watching,
     ]
     return lines.join('\n')

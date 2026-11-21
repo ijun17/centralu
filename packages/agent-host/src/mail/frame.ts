@@ -145,6 +145,8 @@ export type MessageCalls = {
   done(id: string): string
   inbox(): string
   close(id: string): string
+  /** Sends the caller's mail held for its link now (#2354) */
+  send(id: string): string
 }
 
 /**
@@ -164,6 +166,7 @@ export function mailCalls(form: 'plain' | 'command'): MessageCalls {
     done: (id) => call('handled', { thread: id }),
     inbox: () => call('inbox'),
     close: (id) => call('close', { thread: id }),
+    send: (id) => call('send', { thread: id }),
   }
 }
 
