@@ -1189,7 +1189,7 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
 | Identical repeats within 10 minutes (`REPEAT_WINDOW_MS`) | **keep, re-keyed** | per (sender, recipient, body): refused `repeat` | |
 | Per-pair new threads, 5 an hour (owner, #1455) | **removed (D32)** | Was: 5 non-reply messages an hour per ordered pair, refused `pair_rate` | A refusal is a block |
 | One open request to the orchestrator per group (`checkAsk`, `service.ts:1819`) | **drop** | — | #1683: a report is not a second request, and the gate stranded it |
-| 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many cards a project can raise for the person |
+| 5 request words an hour per group to the orchestrator (`checkAskRate`) | **keep** | 5 requests (§7.6; clarifications are not requests) an hour per group, counted by `MailboxRecords.requestsSince(senders, orchestrator, since)` (which leaves out clarifications) over the group's session addresses (`reach.askGroupMembers`) | It bounds how many turns a project's sessions can have the Assistant take on their word |
 | Request turns: the person's card naming the asker (`request-hook.ts`, `asked-acts.ts`) | **dropped** (#2411) | the orchestrator judges each request by the instruction in its header; its steps run as in the person's own turn ([cited-requests.md](cited-requests.md)) | The owner prefers judgement by intent |
 | The read-scope gate on what the orchestrator writes out (`asked-reach.ts`, `AskedGate`) | **dropped** (#1739) | the orchestrator judges a request, with the person's message it cites as evidence ([cited-requests.md](cited-requests.md)) | Replaced, not re-keyed |
 | Mail never answers a card, never passes for the person, grants nothing (old §9.2) | **keep** | unchanged: the frame, quoted bodies, the held `card` state | Not about threads |
@@ -1514,7 +1514,7 @@ never gets the result. The rule:
 - **A clarification** is a `message` from session C to session or person O whose turn's cause (D9) is a task T from O
   to C. `MessageService.send` sets `facts.clarifies = T` when it stores it. A turn caused by T is a turn T started or
   was made the work of (§8.2 step 3), so T was open when the turn began; its state at send time does not matter.
-- A clarification is **not a request** (§7.6): no request card, no `ask_rate`, no one-asker grouping. Its depth is reckoned as any message's (D9).
+- A clarification is **not a request** (§7.6): no request header or judge instruction, no `ask_rate`, no one-asker grouping. Its depth is reckoned as any message's (D9).
 - **It needs a reply only as a question** (#2357, the owner's decision of 2026-11-19): `needsReply` is set only when C marks it with
   `kind: "question"` or `choices` (`waitsForReply`, D3's one rule for a session's message), so a result or progress sent to O waits for
   nothing: it is not reminded (§10.2), not listed as waiting in either inbox, and its send says it needs no reply. Why: on one machine's store

@@ -1000,7 +1000,7 @@ export const READER_BUDGET_CHARS = 1960
  * ceilings. How each moved, with the measures: docs/tool-cost.md §17.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  assistant: 10_180 + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
+  assistant: 9_970 + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
   scoped: 2_600 + APP_BUDGET_CHARS,
   builder: 1_500 + APP_BUDGET_CHARS,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
