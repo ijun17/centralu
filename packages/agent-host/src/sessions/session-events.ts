@@ -764,9 +764,9 @@ export class SessionEvents {
       const taking = { ownTurn: false }
       this.taking.set(sessionId, taking)
       const took = await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, { ...(late ? { late } : {}), ...(input.id ? { id: input.id } : {}), ...(input.taken ? { taken: input.taken } : {}) }).finally(() => this.taking.delete(sessionId))
-      // Counted after the tool ran a turn of its own instead (#2318): no turn runs the wake, so the work stops as a lost input's does. Not on state alone:
-      // behind a running turn, or in a Codex that says `working` only once its turn started, a turn may still run it and answer after a stop (`LastResponse.released`)
-      if (took === 'counted' && taking.ownTurn) this.inputLost(sessionId)
+      // Counted after the tool ran a turn of its own instead (#2318), and none runs now: no turn runs the wake, so the work stops as a lost input's does.
+      // Not on state alone: in a Codex that says `working` only once its turn started, a turn may still run it and answer after a stop (`LastResponse.released`)
+      if (took === 'counted' && taking.ownTurn && !inTurn(this.host.meta.get(sessionId)?.state ?? 'working')) this.inputLost(sessionId)
     }
     /*
      * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists

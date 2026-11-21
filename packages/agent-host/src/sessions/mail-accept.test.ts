@@ -117,6 +117,21 @@ describe('handing a wake to a tool that tracks its inputs', () => {
     }
   })
 
+  it('a wake counted after a turn of the tool\'s own is stopped at rest, but not while a second turn of its own still runs', async () => {
+    vi.useFakeTimers()
+    for (const [state, stopped] of [['idle', [['s1', 'error']]], ['working', []]] as const) {
+      const w = world({ sendTracked: () => new Promise(() => {}) }, state)
+      const delivery = w.sessionEvents.deliverMail('s1', input)
+      await vi.advanceTimersByTimeAsync(0)
+      // The tool ended a turn of its own while the wake waited (links/own-turn-report.test.ts drives it from the tool's events)
+      const taking = (w.sessionEvents as unknown as { taking: Map<string, { ownTurn: boolean }> }).taking.get('s1')
+      if (taking) taking.ownTurn = true
+      await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS + 1_000)
+      await delivery
+      expect(w.stops).toEqual(stopped)
+    }
+  })
+
   it('a tool that fails it after the wait ran out is told to the mailbox, which puts the mail back; one that took it is not', async () => {
     vi.useFakeTimers()
     let observer!: InputObserver
