@@ -7,7 +7,7 @@ import { letterOf } from '../../app/keys.js'
  * returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
  * - The copy is rebuilt from `lines` (`selectedText`): the DOM holds only the rows near the viewport. A selection that
  *   leaves the pane copies the pane's part (`edgeCaret`); one that does not touch it is left to the browser.
- * - The anchor end is remembered while its row exists: the browser walks it out of the rows once the list scrolls far.
+ * - The anchor end is remembered while its row exists: far scrolling walks it out of the rows or onto another one.
  *   A new `resetKey` or `contentKey` forgets it.
  * - ⌘A claims `wholeText` and paints the mounted rows: with no live selection the browser fires no `copy`. The claim
  *   ends on a mouse press, a selection leaving the rows, or Shift with a key that extends a selection (#842 item 9:
@@ -41,6 +41,8 @@ export function useVirtualCopy({
   const whole = useRef(false)
   /** The last readable anchor of the current selection (see `selectedText`) */
   const anchor = useRef<Caret | null>(null)
+  /** The DOM node `anchor` was read from: once recycling disconnects it, where the browser puts the anchor is no choice */
+  const anchorNode = useRef<Node | null>(null)
   const focusedFor = useRef<string | null>(null)
   const latest = useRef({ lines, wholeText })
   latest.current = { lines, wholeText }
@@ -48,6 +50,7 @@ export function useVirtualCopy({
   useEffect(() => {
     whole.current = false
     anchor.current = null
+    anchorNode.current = null
   }, [resetKey, contentKey])
 
   useEffect(() => {
@@ -58,9 +61,10 @@ export function useVirtualCopy({
   }, [ready, resetKey, scrollRef])
 
   /*
-   * Remember the anchor while its row exists: once the row is recycled the browser moves the anchor up into the app
-   * chrome, and ⌘C would copy "Files / esc back to chat / Open in IDE". A collapsed selection is a new one, so it
-   * overwrites the memory even with null; an anchor a continuing drag walked out of the pane is ignored.
+   * Remember the anchor while its row exists: once the row is recycled the browser moves the anchor, up into the app
+   * chrome ("Files / esc back to chat / Open in IDE" on the clipboard) or, on Windows, onto the first mounted row
+   * (#2387). A collapsed selection is a new one, so it overwrites the memory even with null; a continuing drag's anchor
+   * that moved off its recycled row, out of the pane or onto another row, is ignored.
    */
   useEffect(() => {
     if (!ready) return
@@ -75,11 +79,15 @@ export function useVirtualCopy({
       if (!sel || !root || !sel.anchorNode) return
       if (!root.contains(sel.anchorNode)) {
         // A collapsed caret outside the pane begins a new selection; a drag walked out is not collapsed and keeps its anchor
-        if (sel.isCollapsed) anchor.current = null
+        if (sel.isCollapsed) [anchor.current, anchorNode.current] = [null, null]
         return
       }
+      if (anchorMoved(sel, anchorNode.current)) return
       const caret = caretAt(sel.anchorNode, sel.anchorOffset)
-      if (caret || sel.isCollapsed) anchor.current = caret
+      if (caret || sel.isCollapsed) {
+        anchor.current = caret
+        anchorNode.current = caret ? sel.anchorNode : null
+      }
     }
     document.addEventListener('selectionchange', onSelectionChange)
     return () => document.removeEventListener('selectionchange', onSelectionChange)
@@ -95,17 +103,20 @@ export function useVirtualCopy({
       const root = scrollRef.current
       if (!root) return
       const { lines: current, wholeText: all } = latest.current
+      const sel = document.getSelection()
       const payload =
-        whole.current && all !== null && claimStands(document.getSelection(), rowsRef.current)
+        whole.current && all !== null && claimStands(sel, rowsRef.current)
           ? all
-          : selectedText({ selection: document.getSelection(), root, lines: current, lastAnchor: anchor.current })
+          : selectedText({ selection: sel, root, lines: current, lastAnchor: anchor.current, anchorMoved: anchorMoved(sel, anchorNode.current) })
       if (payload === null) return
       e.preventDefault()
       e.clipboardData?.setData('text/plain', payload)
     }
-    // Any click starts a new selection, so ⌘A's claim on the clipboard ends there
-    const onMouseDown = () => {
+    // Any click starts a new selection, so ⌘A's claim on the clipboard ends there, and so does the old anchor's row
+    // (a double click can land its word before a collapsed caret is ever reported); Shift-click extends the selection
+    const onMouseDown = (e: MouseEvent) => {
       whole.current = false
+      if (!e.shiftKey) anchorNode.current = null
     }
     // So does extending a selection by keyboard (Shift with an arrow, Home, End or a page key)
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -146,6 +157,11 @@ export function useVirtualCopy({
       if (whole.current) paintMountedRows()
     },
   }
+}
+
+/** A drag still going on whose anchor's row was recycled: wherever the browser put the anchor since, it did not start there */
+function anchorMoved(sel: Selection | null, remembered: Node | null): boolean {
+  return !!sel && !sel.isCollapsed && remembered !== null && !remembered.isConnected
 }
 
 /**

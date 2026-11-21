@@ -220,6 +220,17 @@ describe('selectedText', () => {
     expect(copy(select(rowsBox, 0, below, 0, range(0, 11)), { line: 3, column: 0 })).toBe(range(3, 9).map((i) => `line ${i}`).join('\n'))
   })
 
+  it('uses the remembered anchor when its row was recycled and the browser put the anchor on another row (#2387)', () => {
+    // Windows Chromium moves the anchor onto the first mounted row, which reads as a line of its own
+    const walkedOntoRow = select(rows[4]!.text, 0, rows[6]!.text, 4, range(4, 6))
+    const remembered = { line: 1, column: 0 }
+    expect(selectedText({ selection: walkedOntoRow, root, lines, lastAnchor: remembered, anchorMoved: true })).toBe(
+      'line 1\nline 2\nline 3\nline 4\nline 5\nline',
+    )
+    // Not moved: the live anchor is where the selection began, whatever an earlier one left remembered
+    expect(copy(walkedOntoRow, remembered)).toBe('line 4\nline 5\nline')
+  })
+
   it('does not borrow the remembered anchor when the selection began outside the pane and ends outside it too', () => {
     expect(copy(select(above, 0, below, 0, range(0, 11)), { line: 3, column: 0 })).toBe(lines.map((l) => l.text).join('\n'))
   })

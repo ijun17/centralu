@@ -65,13 +65,15 @@ export function caretAt(node: Node | null, offset: number): Caret | null {
 /**
  * The clipboard text for what is selected inside `root`, or null to leave the copy to the browser. `lastAnchor`: after
  * enough scrolling Chromium re-parents the anchor end onto the scroll container, which has no line (the focus end is
- * under the pointer, always mounted).
+ * under the pointer, always mounted). `anchorMoved`: the anchor's row was recycled and the browser put the anchor on
+ * another row (Windows, #2387), whose line is not where the selection began: `lastAnchor` is, whatever the DOM says.
  */
 export function selectedText(p: {
   selection: Selection | null
   root: HTMLElement
   lines: CopyLine[]
   lastAnchor: Caret | null
+  anchorMoved?: boolean
 }): string | null {
   const sel = p.selection
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
@@ -80,7 +82,7 @@ export function selectedText(p: {
 
   // The remembered anchor stands in for one scrolling walked onto no row of the pane, or when the focus is on a row; not
   // for an anchor on a container elsewhere (a page select-all starts at `body`), which belongs to no drag of this pane.
-  let anchor = caretAt(sel.anchorNode, sel.anchorOffset)
+  let anchor = p.anchorMoved && p.lastAnchor ? p.lastAnchor : caretAt(sel.anchorNode, sel.anchorOffset)
   let focus = caretAt(sel.focusNode, sel.focusOffset)
   const walked = !!sel.anchorNode && p.root.contains(sel.anchorNode)
   if (!anchor && p.lastAnchor && (walked || focus)) anchor = p.lastAnchor
