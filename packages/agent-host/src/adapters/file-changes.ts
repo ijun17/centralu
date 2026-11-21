@@ -11,7 +11,7 @@ const CHANGE_TOOL = { add: 'Create', update: 'Edit', delete: 'Delete', move: 'Mo
 
 /**
  * The card's name for a call's changes (#2060): a create, delete or move says so, in the approval row's words, when
- * every file had that one kind of change. Anything else is an Edit.
+ * every file had that one kind of change. Anything else is an Edit. The words are also RowApproval.tsx's: change both.
  */
 export function fileChangeTool(changes: readonly FileChange[]): string {
   const kinds = new Set(changes.map((c) => c.change ?? 'update'))

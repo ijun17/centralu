@@ -197,6 +197,7 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
     const p = pathParts(d.path, root)
     const inside = p.inside
     return {
+      // The same words name a Codex file change's card (the host's `fileChangeTool`): change both together
       verb:
         d.change === 'add'
           ? 'Create'

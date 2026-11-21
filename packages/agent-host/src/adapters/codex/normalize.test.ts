@@ -333,6 +333,10 @@ describe('the whole record of a tool call (#221)', () => {
       item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes: [{ path: 'src/a.ts', diff: '', kind: { type: 'update', move_path: 'src/b.ts' } }] },
     })
     expect(moved[0]).toMatchObject({ summary: { tool: 'Move' } })
+    // Nothing said of the files, or a kind this build does not know: an Edit
+    const [none] = n('item/started', { item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes: [] } })
+    const [unknown] = n('item/started', { item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes: [{ path: 'a', diff: '', kind: { type: 'rename' } }] } })
+    expect([none, unknown]).toMatchObject([{ summary: { tool: 'Edit', title: 'Edit files' } }, { summary: { tool: 'Edit' } }])
   })
 
   it('a command keeps what was asked and none of how it went; an MCP call keeps its arguments', () => {
