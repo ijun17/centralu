@@ -26,11 +26,7 @@ export function usePresence(open: boolean, ms = LEAVE_MS): { shown: boolean; lea
   return { shown: open || leaving, leaving: !open && leaving }
 }
 
-/**
- * What a layer last said, for the frames it fades out in once it has nothing to say (`usePresence` keeps it on screen, this keeps its
- * content): `value` while it is there, else the last one that was. Decided while rendering, as usePresence, so the frame that loses the
- * value still draws it.
- */
+/** The last non-null `value`, set while rendering so the frame that loses it still draws it as it fades out */
 export function useHeld<T>(value: T | null | undefined): T | null {
   const [held, setHeld] = useState<T | null>(value ?? null)
   if (value != null && value !== held) setHeld(value)

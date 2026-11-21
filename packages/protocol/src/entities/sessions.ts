@@ -53,10 +53,7 @@ export const Interruption = z.object({
    * `tries`: continues made in this run of stops. Absent: nothing continues it by itself, or an older host
    */
   autoContinue: z.object({ at: z.number().optional(), tries: z.number().int().min(0) }).optional(),
-  /**
-   * A `limit` stop's reset (ms), when the host knows it: the tool's limit data, else the time its words name (#1415). Kept when the wait
-   * goes (Don't continue, the setting off), so the screen still says when the limit clears. Absent: not known, or an older host
-   */
+  /** A `limit` stop's reset (ms), kept when the wait goes (#1415). Absent: not known, or an older host */
   resetAt: z.number().optional(),
 })
 export type Interruption = z.infer<typeof Interruption>
