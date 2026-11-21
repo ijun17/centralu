@@ -80,7 +80,7 @@ export type MailAcrossDeps = {
   hostId: string
   service: MessageService
   records: MailboxRecords
-  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant' | 'gone'>
+  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant' | 'gone' | 'shownId'>
   /** This host's own sessions as the directory lists them */
   ownEntries(): FoundEntry[]
   now?: () => number
@@ -188,7 +188,7 @@ export class AcrossCore {
     const heard = this.names.get(address) ?? (r.kind === 'machine' ? this.peers?.machineSession?.(r.machineId, r.sessionId) : undefined)
     if (heard) return { name: heard }
     const computer = this.computerOf(r)
-    return { name: computer ? `a session on ${computer}` : address }
+    return { name: computer ? `a session on ${computer}` : this.d.reach.shownId(address) }
   }
 
   /** A linked machine's session's state as this hub's mirror last had it, for the person's Inbox; undefined for any other address */

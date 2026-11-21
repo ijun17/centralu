@@ -70,6 +70,7 @@ describe('who may write to whom (§7.1)', () => {
       appCalledBy: (_app, session) => session === 'a',
       project: () => ({ trusted: true }),
       askGroupMembers: () => [],
+      shown: (a) => a,
     })
     expect(reach.mayWrite(app, A)).toBeNull()
     expect(reach.mayWrite(app, B)).toBe('not_allowed')
@@ -144,7 +145,7 @@ describe('what the service reads of a session', () => {
     expect(reach.parentOf(W)).toBe(A)
     expect(reach.parentOf(A)).toBeNull()
     expect(reach.labelOf(W)).toBe('worker')
-    expect(reach.labelOf(addr('ghost'))).toBe(addr('ghost'))
+    expect(reach.labelOf(addr('ghost'))).toBe('ghost')
     expect(reach.projectLabel('px')).toBe('Pex')
     expect(reach.projectLabel('p2')).toBe('p2')
     expect(reach.askGroupMembers(A).sort()).toEqual([A, B, W].sort())
@@ -164,7 +165,7 @@ describe('what the service reads of a session', () => {
     const { reach } = world()
     const other = sessionAddress('hub-bbbbbbbb', 'a')
     expect(reach.projectOf(other)).toBeNull()
-    expect(reach.labelOf(other)).toBe(other)
+    expect(reach.labelOf(other)).toBe('hub-bbbbbbbb.a')
     expect(reach.isAssistant(sessionAddress('hub-bbbbbbbb', 'orc'))).toBe(false)
     expect(reach.mayWrite(A, other)).toBe('elsewhere')
     expect(reach.mayWrite(PERSON, other)).toBe('elsewhere')

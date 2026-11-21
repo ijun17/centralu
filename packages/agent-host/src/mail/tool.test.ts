@@ -27,7 +27,7 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
     const asked: unknown[][] = []
     const w = hostWorld({ work: async (callerId, target, text, ifBusy) => (asked.push([callerId, target, text, ifBusy]), target === 'w' ? { text: 'the work answer' } : null) })
     expect(await w.tool.call('a', { action: 'send', to: 'worker', text: 'and the docs', ifBusy: 'fork' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
-    expect(await w.tool.call('a', { action: 'send', to: `session:${HOST}/w`, text: 'and the tests' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
+    expect(await w.tool.call('a', { action: 'send', to: 'w', text: 'and the tests' })).toEqual({ text: 'Sent as work for a session you started. the work answer' })
     // #1948: the subject the card shows leads the words the child reads, on one line; a kind, which work has none of, is said to be mail's
     expect((await w.tool.call('a', { action: 'send', to: 'w', kind: 'note', subject: 'Docs\nnow', text: 'and the docs' })).text).toBe('Sent as work for a session you started (kind: "note" is for other mail). the work answer')
     expect(asked).toEqual([['a', 'w', 'and the docs', 'fork'], ['a', 'w', 'and the tests', undefined], ['a', 'w', 'Docs now\n\nand the docs', undefined]])
@@ -69,7 +69,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     expect(r.isError).toBeUndefined()
     const [sent] = w.store.mailbox.feedOf(A, { limit: 1 })
     expect(sent).toMatchObject({ kind: 'message', needsReply: true, body: 'Is #12 still open?' })
-    expect(r.text).toBe(`Sent ${sent!.id} to beta (${B}). It needs a reply, which reaches you as mail and wakes you if you are at rest.`)
+    expect(r.text).toBe(`Sent ${sent!.id} to beta (b). It needs a reply, which reaches you as mail and wakes you if you are at rest.`)
     w.run('a', { action: 'send', to: 'assistant', text: 'help please', kind: 'question' })
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'assistant' })
   })
@@ -125,14 +125,19 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
 
 describe('"to" as a name (#2039)', () => {
   const sentTo = (w: ReturnType<typeof world>, from: string) => w.store.mailbox.recipients(w.store.mailbox.feedOf(at(from), { limit: 1 })[0]!.id)[0]!.recipient
-  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").'
+  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name or its id (<computer>.<id> on another computer), or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").'
 
-  it("a session's name, in any case, reaches it as its id does; so does the address with the name in it", () => {
+  it("a session's name, in any case, reaches it as its id does; its address, which no tool prints, is refused with the id to write", () => {
     const w = world()
-    for (const to of ['beta', 'Beta', ' BETA ', 'b', B, `session:${HOST}/Beta`]) {
+    for (const to of ['beta', 'Beta', ' BETA ', 'b']) {
       expect(w.run('a', { action: 'send', to, text: `hi ${to}` }).isError).toBeUndefined()
       expect(sentTo(w, 'a')).toBe(B)
     }
+    const sent = w.store.mailbox.feedOf(A, { limit: 10 }).length
+    for (const [to, id] of [[B, 'b'], [`session:${HOST}/Beta`, 'Beta'], ['session:hub-bbbbbbbb/z', 'hub-bbbbbbbb.z']] as const) {
+      expect(w.run('a', { action: 'send', to, text: 'x' })).toEqual({ text: `Refused (bad_address): "${to}" is a mail address, which tools do not take. For that session, write "${id}". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".`, isError: true })
+    }
+    expect(w.store.mailbox.feedOf(A, { limit: 10 })).toHaveLength(sent)
   })
 
   it('a name no session has is refused as unknown, saying what an address looks like, never as gone', () => {
@@ -146,20 +151,16 @@ describe('"to" as a name (#2039)', () => {
       text: `Refused (unknown): no session on this computer has the id or name "orchestrator" (${TEXT}`,
       isError: true,
     })
-    // The expanded form of a name, and a name with a space or a colon in it (which no address holds)
-    expect(w.run('a', { action: 'send', to: `session:${HOST}/nobody`, text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "nobody"')
+    // A name with a space or a colon in it (which no address holds)
     expect(w.run('a', { action: 'send', to: 'fix: the mail', text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "fix: the mail"')
-    // An address on another computer is not looked up here: the service refuses it in its own words
-    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe("Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and only a session's mail tool sends mail there: nothing was written.")
   })
 
-  it('a name two sessions share is refused with both addresses, and an address or an id still reaches exactly one', () => {
+  it('a name two sessions share is refused with both ids, and an id still reaches exactly one', () => {
     const w = hostWorld({ extra: { d: { name: 'Beta', projectId: 'p2' } } })
     stops.push(() => w.stop())
     const r = w.tool.run('a', { action: 'send', to: 'beta', text: 'x' })
-    expect(r).toEqual({ text: `Refused (ambiguous): 2 sessions are named "beta": ${B} (project p1, idle), ${at('d')} (project p2, idle). Send to one of them by its address.`, isError: true })
-    expect(w.tool.run('a', { action: 'send', to: `session:${HOST}/Beta`, text: 'x' }).text).toContain('Refused (ambiguous)')
-    expect(w.tool.run('a', { action: 'send', to: at('d'), text: 'x' }).isError).toBeUndefined()
+    expect(r).toEqual({ text: `Refused (ambiguous): 2 sessions are named "beta": b (project p1, idle), d (project p2, idle). Send to one of them by its id.`, isError: true })
+    expect(w.tool.run('a', { action: 'send', to: 'd', text: 'x' }).isError).toBeUndefined()
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]!.recipient).toBe(at('d'))
   })
 
@@ -173,10 +174,10 @@ describe('"to" as a name (#2039)', () => {
   })
 
   // The child's host has no row of its parent, which lives on the hub: no name or address it can write names it, and the refusal says why instead of "gone"
-  it('a child started from a linked computer that writes the name of its parent, or that name expanded against its own host, is told how to find it', () => {
+  it('a child started from a linked computer that writes the name of its parent is told how to find it; that name made an address is refused as one', () => {
     const child = hostWorld({ fromHub: ['b'] })
     stops.push(() => child.stop())
-    for (const to of ['Hub Parent', 'hubparent', `session:${HOST}/hubparent`]) {
+    for (const to of ['Hub Parent', 'hubparent']) {
       const r = child.tool.run('b', { action: 'send', to, text: 'checkpoint' })
       expect(r.isError).toBe(true)
       expect(r.text).toMatch(/^Refused \(unknown\): no session on this computer has the id or name/)
@@ -184,6 +185,7 @@ describe('"to" as a name (#2039)', () => {
       expect(r.text).toContain('Find one on any computer with mail(action="find", to="<words>").')
       expect(r.text).not.toMatch(/gone|Not a mail address|bad_address/)
     }
+    expect(child.tool.run('b', { action: 'send', to: `session:${HOST}/hubparent`, text: 'checkpoint' }).text).toMatch(/^Refused \(bad_address\): "session:\S+" is a mail address/)
   })
 })
 
@@ -266,10 +268,10 @@ describe('a reply to a session gone by a handoff (#2349 review)', () => {
     delete w.table.old
     const heirs = vi.spyOn(w.store.handoffs, 'handoffHeirs').mockImplementation((id) => (id === 'old' ? [{ sessionId: 'b', trashed: false }] : []))
     const r = w.tool.run('a', { action: 'reply', thread: q.message.id, text: 'main' })
-    expect(r).toEqual({ text: `Refused (gone): ${at('old')} is gone: it is in the session archive or deleted. "beta" (${B}) took over from it by a handoff: write to that session.`, isError: true })
+    expect(r).toEqual({ text: `Refused (gone): old is gone: it is in the session archive or deleted. "beta" (b) took over from it by a handoff: write to that session.`, isError: true })
     // None took over: the refusal says only that it is gone
     heirs.mockReturnValue([])
-    expect(w.tool.run('a', { action: 'reply', thread: q.message.id, text: 'main' }).text).toBe(`Refused (gone): ${at('old')} is gone: it is in the session archive or deleted.`)
+    expect(w.tool.run('a', { action: 'reply', thread: q.message.id, text: 'main' }).text).toBe(`Refused (gone): old is gone: it is in the session archive or deleted.`)
   })
 })
 
@@ -288,7 +290,7 @@ describe('handled, read and inbox', () => {
     const w = world()
     const q = w.mail.send(A, { to: [B], text: 'line one\nline two' })
     const text = w.run('b', { action: 'read' }).text
-    expect(text).toContain(`[${q.message.id}] message from a session of your project alpha (${A})`)
+    expect(text).toContain(`[${q.message.id}] message from a session of your project alpha (a)`)
     expect(text).toContain('It needs a reply: not answered yet.')
     expect(text).toContain('> line one\n> line two')
     expect(w.row(q.message.id, B)!.readAt).not.toBeNull()
@@ -335,7 +337,7 @@ describe('watch, and close with its id (docs/plans/mailbox.md §18.2)', () => {
       `A watch needs to: a session by name or id, "in 30m", "at 16:30" (this computer's time), "every 30m" (at least 10 minutes) or "#123" (a pull request's checks); text is your note, at most 300 characters.`,
     )
     const id = /id (\S+)\./.exec(w.run('a', { action: 'watch', to: 'beta', text: 'its review' }).text)?.[1] ?? ''
-    expect(w.run('a', { action: 'inbox' }).text.split('\n')).toEqual(['Your mailbox is empty.', `Watching: ${id} beta (${B}) until ${w.watches.clock(w.clock.t + 24 * 3_600_000)}: its review`])
+    expect(w.run('a', { action: 'inbox' }).text.split('\n')).toEqual(['Your mailbox is empty.', `Watching: ${id} beta (b) until ${w.watches.clock(w.clock.t + 24 * 3_600_000)}: its review`])
     expect(w.run('a', { action: 'close', thread: id })).toEqual({ text: `Cancelled watch ${id}.` })
     expect(w.run('a', { action: 'inbox' }).text).toBe('Your mailbox is empty.')
   })

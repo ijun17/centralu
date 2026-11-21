@@ -95,30 +95,30 @@ export function named(entries: readonly FoundEntry[], name: string): FoundEntry[
 }
 
 /**
- * One entry on one line: the address to mail, the name, and what tells it apart. Each part is cut short, so a line stays
- * the same size whatever a session or project is called: the address, which is what a sender mails, is never cut
+ * One entry on one line: the id to mail (`shown`), the name, and what tells it apart. Each part is cut short, so a line stays
+ * the same size whatever a session or project is called: the id, which is what a sender mails, is never cut
  */
-export function entryLine(e: DirectoryEntry): string {
-  return [`${oneLineText(e.address, 120)} ${JSON.stringify(oneLineText(e.name, 40))}`, e.project === null ? 'no project' : oneLineText(e.project, 30), ...(e.machine ? [`on ${oneLineText(e.machine, 30)}`] : []), oneLineText(e.role, 12), oneLineText(e.state, 20)].join(' · ')
+function entryLine(e: DirectoryEntry, shown: (address: string) => string): string {
+  return [`${oneLineText(shown(e.address), 120)} ${JSON.stringify(oneLineText(e.name, 40))}`, e.project === null ? 'no project' : oneLineText(e.project, 30), ...(e.machine ? [`on ${oneLineText(e.machine, 30)}`] : []), oneLineText(e.role, 12), oneLineText(e.state, 20)].join(' · ')
 }
 
 /**
  * The answer to `mail find`: at most `FIND_LIMIT` lines, how many matched of how many, a hint to narrow when there are
- * more, and the computers that could not be searched with why, at most `AWAY_LIMIT` and a count of the rest
+ * more, and the computers that could not be searched with why, at most `AWAY_LIMIT` and a count of the rest. `shown`: an entry's id
  */
-export function findAnswer(o: { query: string; found: readonly DirectoryEntry[]; matched: number; total: number; away: readonly { name: string; why: string }[] }): string {
+export function findAnswer(o: { query: string; found: readonly DirectoryEntry[]; matched: number; total: number; away: readonly { name: string; why: string }[]; shown: (address: string) => string }): string {
   const q = oneLineText(o.query, 80)
   const shown = o.found.slice(0, FIND_LIMIT)
   const head =
     o.matched === 0
       ? `No session matches ${JSON.stringify(q)} among ${o.total}.${o.total > 0 ? ' Try fewer words, or a project, a machine or a role.' : ''}`
       : q === ''
-        ? `The ${shown.length} most recently active of ${o.total} sessions. Mail one by its address.`
-        : `${o.matched} of ${o.total} sessions match ${JSON.stringify(q)}. Mail one by its address.`
+        ? `The ${shown.length} most recently active of ${o.total} sessions. Mail one by its id.`
+        : `${o.matched} of ${o.total} sessions match ${JSON.stringify(q)}. Mail one by its id.`
   const more = o.matched - shown.length
   return [
     head,
-    ...shown.map(entryLine),
+    ...shown.map((e) => entryLine(e, o.shown)),
     ...(more > 0 ? [`${more} more: add a word (a project, a machine or a role) to narrow it.`] : []),
     ...o.away.slice(0, AWAY_LIMIT).map((a) => `Not searched: ${oneLineText(a.name, 30)} (${oneLineText(a.why, 60)}).`),
     ...(o.away.length > AWAY_LIMIT ? [`Not searched either: ${o.away.length - AWAY_LIMIT} more computers.`] : []),

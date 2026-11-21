@@ -832,7 +832,7 @@ describe("the Assistant across a link (#2274)", () => {
     // The hub knows the machine's session by its address (`foreign`): an id is unique on its own host only
     const reach = mailReach({
       hostId: HOST, session: (id) => (id === 'orc' ? { projectId: null, askedBy: null, here: true, canReadMail: true, host: 'here' } : undefined), assistantId: () => 'orc',
-      appCalledBy: () => false, project: () => undefined, askGroupMembers: () => [], foreign: () => ({ name: 'worker on Remote box' }),
+      appCalledBy: () => false, project: () => undefined, askGroupMembers: () => [], foreign: () => ({ name: 'worker on Remote box' }), shown: (a) => a,
     })
     expect(reach.isAssistant(addr('orc'))).toBe(true)
     expect(reach.isAssistant(sessionAddress('hub-0000000b', 'orc'))).toBe(false)

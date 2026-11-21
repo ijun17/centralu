@@ -243,7 +243,7 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     const answer = how.ok ? clipped(how.text, ANSWER_KEPT_CHARS) : undefined
     const written = mail.report(row.messageId, {
       outcome,
-      body: reportWords(childId, { outcome, answer: answerKept(answer, ANSWER_KEPT_CHARS), ...(how.ok ? {} : { kind: how.error }) }),
+      body: reportWords(mail.shownId(child), { outcome, answer: answerKept(answer, ANSWER_KEPT_CHARS), ...(how.ok ? {} : { kind: how.error }) }),
       ...(how.ok ? { answer } : { error: how.error }),
     })
     if ('message' in written) {

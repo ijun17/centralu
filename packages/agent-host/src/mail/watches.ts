@@ -9,7 +9,8 @@ import { openTaskParties } from './delegation.js'
 import { quoted } from './frame.js'
 import { UlidMaker, watchIdOf } from './ids.js'
 import type { MessageService } from './messages.js'
-import { HOUR_MS, MINUTE_MS, WARNING_TEXT, WATCH, hourlyKey, refuse } from './rules.js'
+import { nameWithId } from './reach.js'
+import { HOUR_MS, MINUTE_MS, REFUSAL_TEXT, WARNING_TEXT, WATCH, hourlyKey, refuse } from './rules.js'
 
 /*
  * A watch (docs/plans/mailbox.md §18): a condition a session asks Centralu to keep for it. When it changes, the session that set it gets one
@@ -302,9 +303,9 @@ export class Watches {
     }))
   }
 
-  /** What a watch waits for, in Centralu's words: `<name> (<address>)`, `a timer for 16:30`, `a timer every 30 minutes` */
+  /** What a watch waits for, in Centralu's words: `<name> (<id>)`, `a timer for 16:30`, `a timer every 30 minutes` */
   what(w: Watch): string {
-    if (w.spec.source === 'session') return `${this.host.service.labelOf(w.spec.target)} (${w.spec.target})`
+    if (w.spec.source === 'session') return nameWithId(this.host.service.labelOf(w.spec.target), this.host.service.shownId(w.spec.target))
     if (w.spec.source === 'pr') return `the checks on #${w.spec.number}`
     return w.spec.kind === 'every' ? `a timer every ${w.spec.periodMin} minutes` : `a timer for ${this.clock(w.spec.slotMs)}`
   }
@@ -546,9 +547,10 @@ export class Watches {
     const me = parseAddress(owner)
     if (party?.kind !== 'session' || me?.kind !== 'session') throw refuse('bad_value', USAGE)
     if (target === owner) throw refuse('bad_value', 'a session does not watch itself.')
-    if (this.host.elsewhere(target)) throw refuse('elsewhere', `${target} is on another computer, and a watch waits only for a session on this one.`)
-    if (!this.host.session(target)) throw refuse('gone', `${target} is gone: it is in the session archive or deleted.`)
-    if (!this.host.mayRead(owner, target)) throw refuse('not_allowed', `${target} is not a session you can read with read_session, so you cannot watch it.`)
+    const id = this.host.service.shownId(target)
+    if (this.host.elsewhere(target)) throw refuse('elsewhere', `${id} is on another computer, and a watch waits only for a session on this one.`)
+    if (!this.host.session(target)) throw refuse('gone', REFUSAL_TEXT.gone(id))
+    if (!this.host.mayRead(owner, target)) throw refuse('not_allowed', `${id} is not a session you can read with read_session, so you cannot watch it.`)
     if (openTaskParties(this.host.records, target, 'to').includes(me.sessionId)) {
       throw refuse('not_allowed', `you gave ${this.host.service.labelOf(target)} work that is open: its last response or reply reaches you as mail, and so does its stop, without a watch.`)
     }

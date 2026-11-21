@@ -236,9 +236,14 @@ export class MessageService {
     return sessionAddress(this.opts.hostId, sessionId)
   }
 
-  /** A session's name, or its address while the host gives none (`MailReach.labelOf`) */
+  /** A session's name, or its shown id while the host gives none (`MailReach.labelOf`) */
   labelOf(address: string): string {
     return this.reach.labelOf(address)
+  }
+
+  /** The id a tool prints for an address (`MailReach.shownId`) */
+  shownId(address: string): string {
+    return this.reach.shownId(address)
   }
 
   /** Hears every change once it has committed: a message written, and who it is for. A listener that throws is said on stderr */
@@ -976,14 +981,14 @@ export class MessageService {
   /** A gone session's refusal, naming the session that took over from it by a handoff when there is one (a reply to its question, say): write to that one */
   private goneText(to: string): string {
     const heir = this.opts.heirOf?.(to) ?? null
-    return `${REFUSAL_TEXT.gone(to)}${heir ? ` ${JSON.stringify(this.reach.labelOf(heir))} (${heir}) took over from it by a handoff: write to that session.` : ''}`
+    return `${REFUSAL_TEXT.gone(this.reach.shownId(to))}${heir ? ` ${JSON.stringify(this.reach.labelOf(heir))} (${this.reach.shownId(heir)}) took over from it by a handoff: write to that session.` : ''}`
   }
 
   private refusalText(why: ReturnType<MailReach['mayWrite']> & string, to: string): string {
     const text: Record<string, string | undefined> = {
       gone: this.goneText(to),
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
-      elsewhere: REFUSAL_TEXT.elsewhere(to),
+      elsewhere: REFUSAL_TEXT.elsewhere(this.reach.shownId(to)),
       not_allowed: REFUSAL_TEXT.not_allowed(),
     }
     return text[why] ?? why
@@ -1157,12 +1162,12 @@ export class MessageService {
     return {
       messageId: m.id,
       kind: m.kind,
-      from: isPerson(m.sender) ? PERSON : m.sender,
+      from: this.reach.shownId(m.sender),
       relation,
       ...(m.kind === 'message' ? { needsReply: m.needsReply } : {}),
       ...(answered?.sender === recipient ? { answers: answered.id } : {}),
       ...(typeof m.facts.clarifies === 'string' ? { clarifies: m.facts.clarifies } : {}),
-      ...(typeof about === 'string' && parseAddress(about) ? { about } : {}),
+      ...(typeof about === 'string' && parseAddress(about) ? { about: this.reach.shownId(about) } : {}),
       // The stored word `finished` is the host's knowledge that a turn ended, not that the work is done (#1902): the model reads it as that
       ...(m.facts.outcome ? { outcome: m.facts.outcome === 'finished' ? 'turn_ended' : m.facts.outcome } : {}),
       ...(m.facts.error ? { error: m.facts.error } : {}),

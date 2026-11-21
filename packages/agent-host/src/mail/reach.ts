@@ -29,6 +29,8 @@ export type ReachHost = {
   foreign?(address: string): { name: string } | undefined
   /** Whether `hostId` is a hub that links this host, reachable now or not (`MailAcross.isHub`): only its person writes as the person from there (#1987) */
   hubPerson?(hostId: string): boolean
+  /** How a tool prints an address (`SessionRefs.shown`) */
+  shown(address: string): string
 }
 
 /** Where a delegation goes, as far as the hold goes: a session, a project (to create one in, or `ask_project`), the Assistant or a linked machine */
@@ -53,8 +55,10 @@ export type MailReach = {
   elsewhere(address: string): boolean
   /** Whether the address is a session of this host that is no longer here: in the trash or deleted */
   gone(address: string): boolean
-  /** A session's name, or its address while the host gives none: the word a sentence to an agent uses for it */
+  /** A session's name, or its shown id while the host gives none: the word a sentence to an agent uses for it */
   labelOf(address: string): string
+  /** The id a tool prints for an address, never the address itself (remote-hub.md §3.3) */
+  shownId(address: string): string
   /** A project's name, or its id while the host gives none */
   projectLabel(projectId: string): string
 }
@@ -67,6 +71,7 @@ export function mailReach(host: ReachHost): MailReach {
     const far = host.foreign?.(address)
     return far ? { id: party.sessionId, info: { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere' as const, name: far.name } } : undefined
   }
+  const shownId = (address: string) => host.shown(address)
   const untrusted = (projectId: string | null): boolean => (projectId === null ? false : !(host.project(projectId)?.trusted ?? false))
   /** The one test of leaving: an untrusted project's mail or work to a place that is not that project */
   const leaves = (senderProject: string | null, recipientProject: string | null): boolean => HOLD_UNTRUSTED_OUT && untrusted(senderProject) && recipientProject !== senderProject
@@ -85,7 +90,8 @@ export function mailReach(host: ReachHost): MailReach {
       const party = parseAddress(address)
       return parent && party?.kind === 'session' ? sessionAddress(party.host, parent) : null
     },
-    labelOf: (address) => sessionOf(address)?.info?.name ?? address,
+    labelOf: (address) => sessionOf(address)?.info?.name ?? shownId(address),
+    shownId,
     elsewhere: (address) => sessionOf(address)?.info?.host === 'elsewhere',
     gone: (address) => {
       const s = sessionOf(address)
@@ -128,6 +134,11 @@ export function mailReach(host: ReachHost): MailReach {
       return leaves(project, targetProject) ? project : null
     },
   }
+}
+
+/** A session as a sentence names it with the id to write to: its name, and its id when the name is not that */
+export function nameWithId(name: string, id: string): string {
+  return name === id ? id : `${name} (${id})`
 }
 
 /** S13: the person dismissed what a sender had waiting for a project to be trusted */

@@ -253,7 +253,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
 - **D14. `ask_project` keeps its project-pair consent** (`project_consents`) for what only it does: work in another
   project's session with its report, the agent depth, and read grants. Plain mail across projects needs no consent
   (§7.8; Q4 accepted as option A).
-- **D15. `to: "orchestrator"` is a role, and unsettled mail follows the role.** When the role moves to another
+- **D15. `to: "assistant"` is a role, and unsettled mail follows the role.** When the role moves to another
   session, every unsettled row addressed by the role moves with it and is delivered to the new orchestrator afresh
   (§7.7, #1683). A reply to a message from the former orchestrator still goes to that session while it is here.
 - **D16. `to: "parent"` means the session that started the sender** (`askedBy`). Today the word is taken as a session
@@ -730,7 +730,7 @@ These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, 
 | Cover | A row R to S is covered while S has a watched row, open, not held or released, that it sent after R was delivered, caused by the starter of R's delivery turn or by nothing (D23, §10.3) |
 | Released | A needsReply row Centralu stopped watching for its recipient, and whose sender is told (D25); `released_at` |
 | At rest (for a reminder) | §10.1 |
-| Address | As today (`mail/address.ts`): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, `centralu`. The tool also takes the words `orchestrator`, `parent` and `person`, a session id, or a session name that names exactly one session |
+| Address | As today (`mail/address.ts`): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, `centralu`. Internal: a tool takes and prints a session's id instead (§11.1) |
 
 ## 5. The model
 
@@ -2414,22 +2414,16 @@ measured length rounded up to the next 20 in M3b. The reader seat's ceilings fal
 |---|---|---|
 | `inbox` | — | needsReply messages waiting for your answer, then unread mail, then your own needsReply messages still waiting, then your held mail. One line each (S6) |
 | `read` | `id?`, `before?`→`id` | With no id, the unread mail, which is then marked read. With an id, that message and its chain back (§8.4) |
-| `send` | `to?`, `text`, `id?`, `needsReply?`, `urgent?` | A new message, or with `id` an answer to that message. With `id` and no `to`, it goes to that message's sender; when that message is the caller's own, it is refused `own_message` (name `to`). `to` is an address, a session id, a session name that names exactly one session, `orchestrator`, `parent`, `person`, or a list of up to 10 of those. `id` must be a stored message the caller may read, or it is refused `unknown_message` |
+| `send` | `to?`, `text`, `id?`, `needsReply?`, `urgent?` | A new message, or with `id` an answer to that message. With `id` and no `to`, it goes to that message's sender; when that message is the caller's own, it is refused `own_message` (name `to`). `to` is a session's id, a session name that names exactly one session, `assistant`, `parent`, `person`, or a list of up to 10 of those. `id` must be a stored message the caller may read, or it is refused `unknown_message` |
 | `done` | `id` | As a recipient, no answer is needed (settles the row). As the sender, the message is withdrawn for every unsettled recipient |
 | `sessions` | `project?` | The sessions you can write to on this computer: name, project, tool, state, and the address to use. At most 50, and `project` narrows the list |
 
-**Name resolution** (`resolveTo`, M3b): a word is tried in this order. `orchestrator`, `parent`, `person`; an address
-(`parseAddress`); a session id of a session here; then a name: sessions here, not in the trash, whose `SessionInfo.name`
-equals the word ignoring case and surrounding spaces. One match resolves; several are refused `ambiguous`; none
-`unknown`. A session on another computer is refused `elsewhere`.
-
-Built in the version-1 tool for #2039 (`MailTool.party`): the word is tried as an address first, so a name with a colon or
-a space in it is still a name. The address of this host with something that is not a session's id after it
-(`session:<this host>/<name>`, which is what an agent gets back when it writes a name) is that word as a name, so there is one
-way to be ambiguous and one list of candidates (each with its project and state, because a handoff leaves the heir and the session it replaced under one name). The caller is never a candidate. `gone` is no longer what a send to an unknown id gets: that is `unknown`. An address of another host is not looked up: `elsewhere`. Mail does not
-cross links yet, so a session on a linked computer has no row on the computer of the sender: a child there that writes its
-parent's name is refused `unknown`, and the text says mail reaches this computer's sessions only. `mail(action="sessions")`
-is not built.
+**Name resolution** is `SessionRefs` (`mail/session-refs.ts`), one reading for every tool that takes a session, as
+remote-hub.md §3.3 says: the words `assistant`, `parent` and `person`; a session here by its id, else by its name (the
+caller is never a candidate, and several are refused `ambiguous` with each one's id, project and state); then
+`<computer>.<id>`. A session's address, whole or cut short, is refused `bad_address` with the id to write, never looked
+up as a name. Tools print a session by that id (`SessionRefs.shown`), never by its address. `mail(action="sessions")` is
+not built.
 
 What is gone: `handled` (`done` is the one acknowledgement), `reply` (`send` with `id`), `update` and `close` (task
 state), `thread`, `kind`, `subject`, `state`, `outcome`, `next`, `blocker`, `unblock` and `follows`.
@@ -3298,8 +3292,8 @@ a session by its name, §11.1) came to the one tool. What follows is the slice a
 - `SessionHandle.mailArgs: 1 | 2`, set where the manager spawns (2, and written to `sessions.mail_args`) and adopts (the
   stored value, null reading as 1). `MailToolHost.mailArgs` reads it. `mapV1` writes `mailbox.v1_last_seen`; the
   diagnostic `agents.mailArgs` lists live sessions with their `mail_args` (M7b's gate).
-- `mail/tool.ts`: the five actions, `resolveTo` (§11.1), the S4 to S11 texts, `parent` and `orchestrator` as
-  words, `sessions` (S7, from `MailToolHost.sessions`), and the version-1 mapping kept for `mailArgs` 1.
+- `mail/tool.ts`: the five actions, the S4 to S11 texts, `parent` and `assistant` as
+  words (read by `SessionRefs`, §11.1), `sessions` (S7, from `MailToolHost.sessions`), and the version-1 mapping kept for `mailArgs` 1.
 - `mail/frame.ts`: the calls each process is told of come from `mailCalls(mailArgs, form)`.
 - `docs/tool-cost.md` §13.
 
