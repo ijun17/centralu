@@ -11,24 +11,17 @@ export class StepsV55 extends MigrationRange {
         to: 55,
         breaksOlderReaders: false,
         /**
-         * Old cross-project ownership goes (#614, #844). `asked_by_session_id` once named the session in another project
-         * that asked for this one (ask_project, #371); it now names only the session that started this one in its own
-         * project (start_agent). A row still holding the old meaning is cleared, so the session stands as an ordinary
-         * one of its project; who asked stays in the conversation's `from`.
-         *
-         * The old meaning is told apart as the host start that did this until now told it (`SessionManager`), case by
-         * case, for the listed sessions:
+         * Old cross-project ownership goes (#614, #844): `asked_by_session_id` names only the session that started this one in its
+         * own project (start_agent), so a row naming an asker in another project (ask_project, #371) is cleared, leaving an ordinary
+         * session of its project (who asked stays in the conversation's `from`). Such a row is told apart case by case:
          *   - an asker listed with a project: cleared when that project is not the row's;
          *   - an asker in the trash: the same, with the project its trash record keeps (a trashed row's `project_id` is
          *     null), a record with none counting as no project;
          *   - otherwise (purged, or listed with no project, as the Assistant is): cleared when the row's first message
          *     is the task that asker sent, framed as ask_project framed it.
          *
-         * This ran at every host start until now (`SessionManager`), outside the step list. Builds up to beta.20 still
-         * write the old meaning; a row one of them writes after this step has run keeps its "asked by" mark, which is
-         * how that build showed it anyway.
-         *
-         * **Expand only (#292's rule).** A nullable column set to null, which every build reads as "nobody asked".
+         * Expand only (#292): null reads as "nobody asked" in every build. A row a build up to beta.20 writes with the
+         * cross-project meaning after this step keeps its "asked by" mark, as that build shows it anyway.
          */
         run: () => {
           const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all().map((c) => c.name))
@@ -59,12 +52,9 @@ export class StepsV55 extends MigrationRange {
         // Drops `usage_facts`: an older schema.sql recreates it empty, and builds up to beta.10 still ran DELETE FROM it
         breaksOlderReaders: true,
         /**
-         * The unused usage aggregate goes (#423). It was planned for the first milestone and never built: no build ever
-         * wrote a row. Deleting a project was the last statement that named it, and #420 removed that; the table has
-         * been left alone by every release since, which is the "one release later" that §5.1 rule 2 asks for.
-         *
-         * `schema.sql` no longer creates it either, so a new store and a migrated one end with the same tables. Nothing
-         * is lost: there is no row to keep. `IF EXISTS` because a fresh store never had the table.
+         * The unused usage aggregate goes (#423): no build ever wrote a row, and no release since #420 names it, which is
+         * the "one release later" that §5.1 rule 2 asks for. `schema.sql` does not create it either, so a new store and a
+         * migrated one end with the same tables. `IF EXISTS` because a fresh store never had the table.
          */
         run: () => {
           this.db.exec(`DROP TABLE IF EXISTS usage_facts`)

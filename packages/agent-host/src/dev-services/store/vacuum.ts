@@ -10,14 +10,13 @@ import { readStoreKey, writeStoreKey } from './store-keys.js'
  */
 export const VACUUM_FREE_BYTES = 16 * 1024 * 1024
 
-/** What an owed `VACUUM` did: the file's size before and after, and how long it took */
+/** What an owed `VACUUM` did: the file's bytes before and after, and its duration */
 export type VacuumDone = { before: number; after: number; ms: number }
 
 /**
  * The `app_settings` key present while a `VACUUM` a migration step queued has not run yet (#396). Written in the step's
- * own transaction and deleted once the vacuum is over, so a host stopped during the vacuum (which SQLite rolls back
- * whole) leaves it for the next open. The step's version has already committed by then: without the row, nothing would
- * vacuum again and the file would keep its free pages for good.
+ * own transaction and deleted once the vacuum is over: a host stopped during the vacuum (which SQLite rolls back whole)
+ * leaves it, so the next open vacuums the free pages of a step whose version has already committed.
  */
 export const VACUUM_OWED_KEY = 'vacuum_owed'
 
@@ -25,14 +24,12 @@ export const VACUUM_OWED_KEY = 'vacuum_owed'
 export class OwedVacuum {
   constructor(private readonly db: Database.Database) {}
 
-  /** A `VACUUM` a step queued has not run yet: the host was stopped during it (#396) */
   get vacuumOwed(): boolean {
     return readStoreKey(this.db, VACUUM_OWED_KEY) !== null
   }
 
   /**
    * Runs the owed `VACUUM` and deletes the record of it. `why`, when given, is said in host.log on success.
-   *
    * A vacuum that fails (no room for its temporary copy, say) is reported and passed over, its record deleted too: the
    * free pages stay in the file and later writes reuse them, and a store that cannot shrink must neither keep the host
    * from starting nor make every start try again. Only a host stopped during the vacuum leaves the record behind.

@@ -19,14 +19,11 @@ import { rpcError } from '../rpc-error.js'
  * Two principles:
  *   1. **Read only one level at a time** — the first render has to be fast even on a repository
  *      with 10k+ files.
- *   2. **Never leave the project** — blocks a path escape (`../../etc/passwd`).
+ *   2. **Never leave the project** — blocks a path escape (`../../etc/passwd`); *moving* or *trashing* the wrong
+ *      entry destroys something the person never pointed at.
  *
- * Issues #18/#19 added writing to that list, and writing is where rule 2 stops being a
- * tidiness rule: reading the wrong file leaks it, but *moving* or *trashing* the wrong one
- * destroys something the person never pointed at. Operations reject traversal, canonicalize
- * symlinks that stay under the project root, and reject symlink escapes before use; reads
- * also check the opened object's identity. These pathname guards are not an atomic sandbox
- * against concurrent same-user filesystem mutations.
+ * Operations reject traversal and symlink escapes before use; reads also check the opened object's identity. These
+ * pathname guards are not an atomic sandbox against concurrent same-user filesystem mutations.
  */
 
 // What `listDir` and `readTextFile` answer are the protocol's shapes (`fs.listDir`, `fs.readFile`), not copies of them
@@ -67,20 +64,13 @@ function fail(message: string): never {
 /**
  * The last segment of a path, and nothing else.
  *
- * Both writing operations take a *name* from somewhere we do not control — the source
- * entry for a move, the OS for a drop — and paste it onto a destination directory. Taking
- * only the last segment is what stops `../../.ssh/authorized_keys` from being a name that
- * climbs out of the destination. `safeJoin` would catch it too; this catches it earlier and
- * says so.
+ * Both writing operations take a *name* we do not control (the source entry of a move, the OS for a drop) and paste
+ * it onto a destination directory, so `../../.ssh/authorized_keys` must not climb out (`safeJoin` would catch it
+ * later, without saying so).
  *
- * Which characters *are* separators is therefore a security question, not a tidiness one, and
- * it has two different answers here (#47). The incoming string is a wire path, so `/` is the
- * only separator in it — that part is settled by the protocol. `\` is settled by the machine:
- * an ordinary character in a file name on macOS and Linux, a separator on Windows. So the
- * platform is asked, and a name it would read as a path is **refused** rather than reduced to
- * its last piece. Reducing it would rename the thing being moved, which is the one outcome
- * nobody can undo — and refusing costs nothing, because a name with a separator in it was never
- * a name.
+ * Which characters are separators is a security question (#47): `/` is the wire's, while `\` is an ordinary character
+ * on macOS and Linux but a separator on Windows. So the platform is asked, and a name it would read as a path is
+ * **refused** rather than reduced to its last piece, which would rename the thing being moved beyond undo.
  */
 export function baseName(path: string): string {
   const name = wireBaseName(path)
@@ -102,15 +92,12 @@ export function moveTarget(from: string, toDir: string): string {
 /**
  * Move a file or folder inside the project (#19).
  *
- * **Never overwrites.** A collision is reported, not resolved: the app cannot know whether
- * the file already sitting there is the one an agent is mid-edit on, and quietly replacing
- * it is the one outcome nobody can undo. `moved: false` means the drop landed where the
- * entry already was — a miss, not a failure, so the caller stays quiet about it.
+ * **Never overwrites:** the file already there may be one an agent is mid-edit on. `moved: false` means the drop
+ * landed where the entry already was — a miss, not a failure, so the caller stays quiet about it.
  *
- * The destination guard ahead of `rename` is not atomic (POSIX `rename` replaces the
- * destination and Node exposes no `RENAME_NOREPLACE`). The window is between two calls in
- * one process driven by one person's drag, so the realistic collision is the one this does
- * catch: a file that was already there.
+ * The destination guard ahead of `rename` is not atomic (POSIX `rename` replaces the destination and Node exposes no
+ * `RENAME_NOREPLACE`); the window is between two calls driven by one person's drag, so the realistic collision is a
+ * file that was already there, which this catches.
  */
 export async function moveEntry(root: string, from: string, toDir: string): Promise<{ path: string; moved: boolean }> {
   const src = safeJoin(root, from)
@@ -132,13 +119,8 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
 /**
  * Write a file the OS handed us into the project (#19, dragging in from Finder).
  *
- * This takes bytes rather than a source path on purpose: the webview does not tell the page
- * where a dropped file came from (which is why pasted and dropped attachments already
- * travel as bytes). So the original stays where it was — the one direction that cannot
- * destroy something outside the project.
- *
- * `wx` makes the no-overwrite rule atomic here, unlike the move above: the create fails if
- * anything is at that path already.
+ * Bytes rather than a source path: the webview does not tell the page where a dropped file came from. The original
+ * stays where it was. `wx` makes the no-overwrite rule atomic here, unlike the move above.
  *
  * On Windows the name must also be one Windows takes as a file's name (#849), checked as a new folder's is. Node
  * writes through `\\?\` paths, so `nul`, `aux.c` or `notes.` would land as a file of that very name, one Explorer,
@@ -172,10 +154,8 @@ export async function importFile(
 /**
  * The absolute path of something that is really there.
  *
- * Trashing and revealing happen in the desktop shell (Rust), which knows nothing about
- * projects — so it has to be handed a full path, and this is the only place allowed to make
- * one. The existence check is part of the contract: "reveal a file that is no longer there"
- * has to fail out loud, because the shell's answer to a missing path is to do nothing.
+ * The desktop shell (Rust) trashes and reveals, knowing nothing of projects, so it is handed a full path made only
+ * here. A missing path fails out loud: the shell's answer to one is to do nothing.
  */
 export async function resolveExisting(root: string, rel: string): Promise<string> {
   const abs = safeJoin(root, rel)
@@ -183,17 +163,9 @@ export async function resolveExisting(root: string, rel: string): Promise<string
   const expected = await assertExistingPath(root, rel)
   const canonical = await realpath(abs)
   /*
-   * **No test exercises this line** — removing it and running the whole suite still passes all
-   * 1,284 tests (measured). Not because it is dead code, but because the window it covers cannot
-   * be opened by a test: the assertExistingPath just above already confirmed containment by
-   * walking it piece by piece, so this only trips when **the filesystem changed** between that
-   * check and this realpath.
-   *
-   * The dev/ino comparison below catches the same race more precisely, but that asks "is this
-   * the same file," while this asks "is this inside." They are different questions, so both stay.
-   *
-   * Do not remove this for lacking a test (#86). A test that could never fail was removed
-   * (#121), but a safeguard that cannot be observed is a different matter.
+   * **No test exercises this line, and none can:** it only trips when the filesystem changed between the
+   * assertExistingPath above and this realpath. Do not remove it for lacking a test (#86). The dev/ino comparison
+   * below asks "is this the same file"; this asks "is this inside". Both stay.
    */
   safeJoin(rootReal, relative(rootReal, canonical))
   const current = await lstat(canonical, { bigint: true })
@@ -208,8 +180,8 @@ export async function resolveExisting(root: string, rel: string): Promise<string
  *
  * The folder the entry sits in is resolved (links in the middle of the path are followed, inside the project only, as
  * everywhere), and the last segment is taken as it is after an `lstat`, a link included: trashing a link moves the
- * link, never what it points at. `resolveExisting` followed the last segment, so an untrusted repository's
- * `old-build -> .` sent the project folder itself to the trash. The project folder is refused, and so is a path that
+ * link, never what it points at (following it, as `resolveExisting` does, an untrusted repository's `old-build -> .`
+ * would trash the project folder). The project folder is refused, and so is a path that
  * folds to it (`''`, `.`, `a/..`). The shell's trash check allows a link only as the last segment.
  */
 export async function resolveEntry(root: string, rel: string): Promise<string> {
@@ -262,33 +234,17 @@ export async function resolveProjectFolder(root: string): Promise<string> {
  */
 async function ignoredIn(root: string, names: string[], dir: string, trust: GitTrust): Promise<Set<string>> {
   if (names.length === 0) return new Set()
-  /*
-   * git speaks POSIX (#47). Its index stores `/` on every platform, and `check-ignore` reads and
-   * prints paths that way — so the native separator `relative` just produced has to go before
-   * the pathspec does, and what comes back needs no conversion at all. On macOS and Linux `sep`
-   * is already `/` and this replacement does nothing, which is the whole reason it was missing.
-   */
+  // git reads and prints `/` on every platform (#47), so the native separator goes before the pathspec does
   const rel = relative(root, dir).replaceAll(sep, '/')
-  /*
-   * Both input and output are NUL-separated (`-z`, #176). Line-based output, depending on
-   * `core.quotePath`, wrapped a Korean name as `"\355\225\234…"`, which no longer matched the
-   * original name below — an ignored Korean file was never shown dimmed. Under `-z`, git returns
-   * exactly the string it was given, with no quoting.
-   */
+  // NUL-separated both ways (`-z`, #176): line output, per `core.quotePath`, quotes a Korean name as `"\355\225\234…"`
   const input = names.map((n) => wireJoin(rel, n)).join('\0')
   /*
-   * A project does not have to be a git repository — the first-run screen says so in as many
-   * words. When it isn't one, git prints `fatal: not a git repository` and exits *before reading
-   * anything*, and the list we are writing lands on a closed pipe. The answer we want is already
-   * the right one: nothing is ignored. The danger is the EPIPE itself: a stream 'error' with no
-   * listener is an uncaught exception inside the host, the process every session lives in.
-   * `runGit` swallows that pipe error (on a small directory the list fits in the pipe buffer and
-   * lands before git is gone; past 65,536 bytes, about four thousand names, the EPIPE is
-   * certain, and CI hit it on both Linux runners on timing alone).
+   * Outside a repository git exits *before reading anything*, and the list lands on a closed pipe: nothing is ignored,
+   * which is right, but an unheard EPIPE would end the host. `runGit` swallows it (past 65,536 bytes, about four
+   * thousand names, it is certain; CI hit it below that on timing alone).
    *
-   * check-ignore exits 1 when nothing matched, which is not an error: what it printed is kept.
-   * Before trust, the call runs none of the repository's programs (`core.fsmonitor` ran here,
-   * #407).
+   * check-ignore exits 1 when nothing matched, which is not an error: what it printed is kept. Before trust, the call
+   * runs none of the repository's programs (`core.fsmonitor`, #407).
    */
   let stdout: string
   try {
@@ -359,12 +315,8 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
     const bytes = buf.subarray(0, total)
 
     if (mime) {
-      /*
-       * SVG is both an image and its own source. Dropping text like a raster image would lose
-       * the existing code-reading path, and keeping only text would leave no way to check the
-       * picture. Both are returned so the viewer can offer Text/Preview. It is drawn only as an
-       * `<img>`, so an SVG is never injected into or executed in the app's own DOM.
-       */
+      // SVG is both an image and its own source: both are returned so the viewer can offer Text/Preview. It is drawn
+      // only as an `<img>`, so an SVG is never injected into or executed in the app's own DOM.
       if (mime === 'image/svg+xml') {
         const truncated = total > MAX_TEXT
         return {
@@ -396,22 +348,15 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
 /**
  * Copies a file or directory whole — **cloned rather than copied, when possible** (#76).
  *
- * APFS's clonefile creates a reference that shares data blocks: not a single byte is written at
- * creation time, and afterward, whichever side is edited only forks off the part that changed
- * (copy-on-write). This means worktree isolation is never broken — the decisive difference from
- * a symlink, and why node_modules is cloned rather than linked (one install must never change
- * the other's).
+ * APFS's clonefile shares data blocks copy-on-write, so worktree isolation holds — unlike a symlink, which is why
+ * node_modules is cloned rather than linked (one install must never change the other's).
  *
  * Measured (this repository, APFS):
  *   Rust target, 8.5GB — clone 3.98s, 10MB on disk, vs. an ordinary copy at 14.7s, 8.5GB on disk
  *   node_modules, 637MB (pnpm's forest of symlinks) — 4.18s vs. 4.44s (no real difference, and no penalty either)
- * The gain comes from **content with actual bytes.** For a pile of small files the cost is all
- * metadata, so it is the same either way.
  *
- * There are several places cloning cannot happen — a different filesystem, a different volume,
- * not APFS, not macOS. All of them are handled the same way: **it silently falls back to an
- * ordinary copy.** Throwing here would block session creation over one failed copy, which is
- * exactly the situation this feature exists to prevent.
+ * Wherever cloning cannot happen (another filesystem or volume, not APFS, not macOS) it **silently falls back to an
+ * ordinary copy**: throwing would block session creation over one failed copy.
  */
 export async function copyTree(
   src: string,
@@ -424,21 +369,18 @@ export async function copyTree(
   )
   if (await clone(src, dst)) return
   /*
-   * `cp` already creates part of the result before it fails (#167). Running an ordinary copy on
-   * top of that died with `ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY` trying to overwrite a directory
-   * symlink that had already come across — the fallback path failed to actually fall back. So
-   * the half-finished result is deleted and the copy starts fresh. A destination that already
-   * existed before the copy started is left untouched, since it was never ours to begin with.
+   * `cp` creates part of the result before it fails (#167), and an ordinary copy on top dies with
+   * `ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY` on a directory symlink already there, so the half-finished result is deleted.
+   * A destination that existed before the copy started was never ours and is left untouched.
    */
   if (!existed) await realOs().files.promises.rm(dst, { recursive: true, force: true })
   if (!traitsFor().cpKeepsLinks) return copyTreeWindows(src, dst, links)
-  // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
-  // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
-  // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
-  // 2026-10-04). macOS took the clone path above, which keeps links as they are (`dropEscapingLinks` leads them into
-  // the worktree afterwards, #1708). `links`: a whole link into the
-  // project leads to the same place in the worktree, as copyTreeWindows makes it, not into the project.
-  // Sync, as Node's was: a 20 000-entry pnpm tree takes 1.7 s this way and 7.4 s step by step through promises (Linux)
+  // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ends the host in
+  // Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one into the
+  // source, and dropEscapingLinks would remove every pnpm link in a Linux worktree. macOS takes the clone path above
+  // (`dropEscapingLinks` retargets its links, #1708). `links`: a whole link into the project leads to the same place
+  // in the worktree, as copyTreeWindows makes it.
+  // Sync: a 20 000-entry pnpm tree takes 1.7 s this way and 7.4 s step by step through promises (Linux)
   realOs().files.cpSync(src, dst, { recursive: true, verbatimSymlinks: true, links })
 }
 
@@ -456,22 +398,16 @@ export type CopyTreeOptions = {
 /**
  * The ordinary copy on Windows (#849): a walk that never follows a link.
  *
- * `cpSync` cannot be used there. pnpm (without Developer Mode) and npm/yarn workspaces link folders with junctions,
- * and `cpSync` copied each junction as a real folder holding a copy of its target: dependency resolution broke,
- * workspace packages froze as copies of the main checkout, a junction pointing outside the project arrived as plain
- * files that `dropEscapingLinks` could no longer see, and two junctions pointing at each other ended the host with
- * 0xC0000409 (measured on Windows 11, Node 22.23).
+ * Not `cpSync`: pnpm (without Developer Mode) and npm/yarn workspaces link folders with junctions, which `cpSync`
+ * copies as real folders (breaking resolution, hiding outside targets from `dropEscapingLinks`), and two junctions
+ * pointing at each other end the host with 0xC0000409 (measured on Windows 11, Node 22.23).
  *
- * A junction's target is an absolute path into the project, so it is made again pointing at the same place in the
- * worktree. A relative symlink is kept as written, as `verbatimSymlinks` does elsewhere. A link whose target is not
- * inside `links.from`, once resolved, is not made at all: it would be a window out of the worktree.
+ * A junction is made again pointing at the same place in the worktree; a relative symlink is kept as written. A link
+ * whose resolved target is not inside `links.from` is not made at all: it would be a window out of the worktree.
  *
- * What is a link is taken from the folder's listing, never from `lstat`. libuv lists every reparse point as a link,
- * but `lstat` calls one a link only when it can read the target: a junction to a volume path (`\??\Volume{…}\…`,
- * `\??\GLOBALROOT\…`), which anyone can make, came back as a plain folder, and the walk copied what it led to (a
- * folder outside the project as real files, or the project's own node_modules into itself until the path was too
- * long). A link whose target cannot be read is left out. A folder already walked, too deep a tree and too many
- * entries stop the copy as a last guard.
+ * What is a link comes from the folder's listing, never `lstat`, which calls a reparse point a link only when it can
+ * read the target: a junction to a volume path (`\??\Volume{…}\…`, `\??\GLOBALROOT\…`), which anyone can make, would
+ * be walked as a folder. A walked folder, too deep a tree and too many entries stop the copy as a last guard.
  */
 async function copyTreeWindows(src: string, dst: string, links: { from: string; to: string }): Promise<void> {
   const from = canonicalPath(links.from)
@@ -557,13 +493,8 @@ async function cloneTree(src: string, dst: string): Promise<boolean> {
 
 /**
  * Creates the spot a copy will land in and returns its absolute path — **asking the guard one
- * level at a time.**
- *
- * `mkdirSync(dirname(dst), { recursive: true })` silently follows a symlink along the way.
- * If a worktree's checked-out tracked files include `logs -> /somewhere`, a request to copy
- * `logs/.env` would write the user's secret into someone else's directory. Asking the guard for
- * every level, instead of creating the whole path at once, stops exactly at the level where a
- * symlink is found — leaving not even an empty directory outside.
+ * level at a time:** a recursive `mkdir` follows a tracked `logs -> /somewhere`, and copying `logs/.env` would write a
+ * secret outside. Level by level stops where the symlink is, leaving not even an empty directory outside.
  */
 export async function prepareCopyTarget(root: string, rel: string): Promise<string> {
   const parts = relative(resolve(root), resolve(root, rel || '.')).split(sep).filter((part) => part.length > 0)
@@ -579,21 +510,11 @@ export async function prepareCopyTarget(root: string, rel: string): Promise<stri
  * Picks out and removes **only the symlinks that point outside the worktree** from a
  * freshly copied tree. Returns what was removed.
  *
- * Why links are kept at all: pnpm's node_modules is a forest of symlinks (1,368 of them in this
- * repository). Following every one and flattening it into a real file would blow up the size,
- * run into circular links, and above all, stop being the shape pnpm expects. Rejecting links
- * outright would make this feature's most common use (bringing over node_modules) simply
- * unusable. Those links point, by relative path, into their own tree, so when placed at the same
- * spot in the worktree they point into the worktree — leaving them as-is is the correct answer.
- *
- * Why only the ones pointing outside are removed: that is the window through which something
- * looks to an agent like an ordinary file inside its own tree (#95). Rejecting the whole tree
- * because one entry looks off would hand the user a workbench with no node_modules at all, which
- * is worse than one missing link. So only the window is closed, and the rest is kept.
- *
- * The read itself is cheap — 177ms (measured) to walk the whole forest above, next to the 4
- * seconds it takes to copy the same tree. This does not follow a link inward: it never gets
- * caught in a cycle, and never walks the same tree twice.
+ * Links are kept: pnpm's node_modules is a forest of relative symlinks (1,368 in this repository) that point into
+ * their own tree, so in the worktree they point into the worktree; flattening them would blow up size, loop, and
+ * break pnpm's shape. One pointing outside is a window that looks to an agent like a file in its own tree (#95), so
+ * only it goes, rather than the whole tree. The walk takes 177ms (measured) next to a 4 s copy, and never follows a
+ * link, so it cannot cycle.
  *
  * Given `from`, the folder `root` is a copy of (the project, for its worktree), a link that leads into `from` is made
  * again leading to the same place inside `root` (`retarget`), as `copyTree`'s `links` rule makes it on Linux and

@@ -4,20 +4,17 @@ import { join } from 'node:path'
 import { fixtureGit, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
- * A repository that came from somewhere (#407): a folder copied the way a zip extract lands, with
- * every program a git read could be talked into running planted in its own `.git`. Each program
- * leaves a marker file named after itself, so a test reads which ones ran.
+ * A repository that came from somewhere (#407): a folder copied the way a zip extract lands, with every program a git
+ * read could be talked into running planted in its own `.git`. Each leaves a marker file named after itself.
  *
- * Planted: the `post-index-change`, `post-checkout` and `reference-transaction` hooks; a filter
- * driver with clean and smudge commands; a diff driver with textconv and an external command;
- * `core.fsmonitor`; and `gpg.program` with `log.showSignature`, against a commit that carries a
- * signature header. With `processFilter`, also a long-running filter process on `b.dat`: it does
- * not speak git's protocol, which makes the trusted read that reaches it fail, so it is opt-in.
- * The copy has a tracked file changed since the commit, tracked files whose stat data no longer
- * matches the index (so status has to hash them), an untracked file and an ignored one.
+ * Planted: the `post-index-change`, `post-checkout` and `reference-transaction` hooks; a filter driver with clean and
+ * smudge commands; a diff driver with textconv and an external command; `core.fsmonitor`; and `gpg.program` with
+ * `log.showSignature`, against a commit that carries a signature header. With `processFilter`, also a long-running filter
+ * process on `b.dat`: opt-in, as it does not speak git's protocol and fails the trusted read that reaches it. The copy has
+ * a tracked file changed since the commit, tracked files whose stat data no longer matches the index (so status has to
+ * hash them), an untracked file and an ignored one.
  *
- * The scripts are `sh`, which Git for Windows runs too, and every path in them is written with
- * forward slashes so its shell reads it as a path rather than as escapes.
+ * The scripts are `sh`, which Git for Windows runs too, with forward slashes so its shell reads a path, not escapes.
  */
 export type PlantedRepo = {
   /** The copied repository, the folder a person would add as a project */

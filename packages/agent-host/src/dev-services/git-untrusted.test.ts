@@ -58,7 +58,7 @@ const READS: Read[] = [
     name: 'gitSummary (projects.list, projects.gitStatus)',
     read: (r, t) => gitSummary(r.dir, t),
     answers: (s) => expect(s).toMatchObject({ isRepo: true, branch: 'main', changedFiles: 2 }),
-    // Never takes the optional index lock, trusted or not (`streamGit`, #850 review): the refreshed index is not
+    // Never takes the optional index lock, trusted or not (`streamGit`): the refreshed index is not
     // written, so the hook that follows a write has nothing to follow
     trustedRuns: ['clean', 'fsmonitor'],
   },

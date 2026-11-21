@@ -13,23 +13,13 @@ export class HandoffMarkers {
   constructor(private readonly db: Database.Database) {}
 
   /**
-   * Handoff notes that still **have an owner** — predecessor ids that a live session has
-   * recorded inheriting (#106).
-   *
-   * The note's file name is the predecessor's id (#104). So "the predecessor is gone, so its
-   * note can go too" is **wrong**: the last step of a handoff is deleting the predecessor
-   * itself, and at that moment the successor has not even opened the note yet. Only the
-   * successor's marker knows which file it inherited, so that is where cleanup has to get its
-   * evidence.
-   *
-   * What the JOIN buys: a marker whose session is gone disappears along with it — a dead
-   * session cannot hold on to a note.
+   * Handoff notes that still have an owner: predecessor ids a session has recorded inheriting (#106).
+   * The note is named by the predecessor's id (#104), but a gone predecessor does not free it: a handoff ends by
+   * deleting the predecessor before the successor has opened the note, so only the successor's marker is evidence.
+   * The JOIN drops markers whose session is gone, so a dead session holds no note.
    */
   handoffPredecessors(): Set<string> {
-    /*
-     * A successor in the trash still claims its note (#204): restoring it must find the note it was handed, so
-     * only deleting it for good lets the note go.
-     */
+    // A successor in the trash still claims its note (#204): restoring it must find the note it was handed, so only deleting it for good lets the note go
     const rows = this.db
       .prepare<unknown[], { payload: string }>(
         `/* includes the archive: an archived successor keeps its note */
@@ -47,11 +37,11 @@ export class HandoffMarkers {
 
   /**
    * The sessions that inherited a handoff from this one (#738), newest first, trashed ones included with their mark:
-   * where a removed session's remaining children go. The same evidence as above, the successor's handoff marker.
+   * where a removed session's remaining children go.
    */
   handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
     /*
-     * Filtered in SQL (#740 review): a handoff marker carries its whole note, megabytes, and this runs on every delete.
+     * Filtered in SQL: a handoff marker carries its whole note, megabytes, and this runs on every delete.
      * The CASE keeps a row that is not valid JSON from failing the query; it names no heir.
      */
     const rows = this.db
@@ -85,9 +75,8 @@ export class HandoffMarkers {
 
   /**
    * The handoff lineage of a session (#1487), nearest first: its predecessor, that one's predecessor, and so on, archived
-   * ones included. The chain ends at a session that is gone for good (its messages, and so its own marker, went with
-   * it), at one that names itself again, and after `max` generations. This is the whole of what a successor may read
-   * of the archive; nothing else in it follows from here.
+   * ones included; it ends at a session gone for good (its marker went with its messages). This is the whole of what a
+   * successor may read of the archive.
    */
   lineage(sessionId: string, max = 12): string[] {
     const out: string[] = []
@@ -139,8 +128,7 @@ export class HandoffMarkers {
 
   /**
    * Whether this session inherited a handoff (#142) — asked so that waking it can reopen access to the notes
-   * folder it can read from. The same test as above: a handoff marker carrying `fromSessionId`. A session only
-   * ever has a handful of markers, so only those are read.
+   * folder it can read from. A session has a handful of markers, so only those are read.
    */
   inheritsHandoff(sessionId: string): boolean {
     const rows = this.db

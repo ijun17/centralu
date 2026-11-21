@@ -111,12 +111,10 @@ export class StoreCopies {
    * while a backup or a scanner holds the file), with a notice that says there is no copy beside a whole one, and
    * the copy's time again at every start of a host that stops in a long step.
    *
-   * By the files' own times, the WAL's included, since a commit reaches the WAL first. A WAL written after the copy
-   * counts only for the commits in it: an open makes an empty one new, and a step stopped before its commit leaves the
-   * part that outgrew SQLite's memory, which SQLite drops. A store written since is copied again: its step failed and
-   * the person went on with the build they had, and the earlier copy lacks that work. A time that wrongly reads as
-   * written since costs one more copy; one that wrongly reads as not (a clock set back, a store put back from a backup
-   * with its old time) keeps a copy without the work since.
+   * By the files' own times, the WAL's included (a commit reaches it first); a newer WAL counts only for its commits: an
+   * open makes an empty one new, and a step stopped before its commit leaves pages SQLite drops. A store written since is
+   * copied again (the person went on with the build they had). A time wrongly read as written since costs one more copy;
+   * one wrongly read as not (a clock set back, a store restored from a backup) keeps a copy without the work since.
    */
   private holdsTheStoreAsItIs(name: string): boolean {
     const stat = (path: string) => this.os.files.statSync(path, { throwIfNoEntry: false })

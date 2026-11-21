@@ -3,10 +3,8 @@ import type { GitCommit } from '@cc/protocol'
 /**
  * Commit attribution (#50) — through observation, without a hook.
  *
- * Decision (2026-08-23): nothing is written to the repository. Trailers, hooks and templates
- * pollute someone else's repository and force a workflow on it — exactly what this app has
- * repeatedly refused to do. Instead, this uses the fact that the commit happens **in front of
- * us**: an agent runs git commit as a tool call, and its output is already in our event stream.
+ * Nothing is written to the repository (decision, 2026-08-23): trailers, hooks and templates force a workflow on
+ * someone else's repository. The agent's `git commit` is a tool call whose output is already in our event stream.
  */
 
 /**
@@ -23,11 +21,7 @@ export function looksLikeGitCommit(command: string): boolean {
   return /\bgit\b[^\n]*?\bcommit\b/.test(command)
 }
 
-/**
- * Attaches a session name to the commit list. A recorded hash can be short (7 digits picked up
- * from truncated output), so it is matched by prefix — the same rule git itself uses to resolve
- * a short hash.
- */
+/** A recorded hash can be short (7 digits from truncated output), so it is matched by prefix, as git resolves one */
 export function attachCommitSessions(
   commits: GitCommit[],
   records: { sha: string; sessionId: string }[],

@@ -143,35 +143,18 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
 }
 
 /**
- * The segments to walk. **`..` is folded first — that is the whole point of this function.**
- *
- * This used to fold only for an absolute path, and split a relative path exactly as given. So
- * `..` was left as a segment, and the walk climbed to the parent **after** following a symlink
- * along the way. Meanwhile, the path the real syscall uses is built by `safeJoin` folding it
- * **first** with `resolve()`. When a link's target sits deeper than the link itself, the two paths
- * diverge: the guard looks inside and lets it through, while the syscall went outside.
+ * The segments to walk. **`..` is folded first, by the same `resolve()` as `safeJoin`: the string that is checked has to
+ * be the string that is used.** Split as given, `..` is climbed **after** following a symlink, while the syscall's path
+ * folds it first; when a link's target sits deeper than the link, `link/../evil` checks one path and opens another:
  *
  *   root/link -> root/sub/deep      the link's target sits deeper than the link itself
  *   root/sub/evil/                  the bait the guard ends up walking
  *   root/evil -> /wherever          where it actually opens
  *
- * Given `link/../evil`, the guard checked `root/sub/evil` and allowed it, while `safeJoin`
- * returned `root/evil`. Measured, this made it possible to list a directory outside the project,
- * create a file at an arbitrary location, exfiltrate a project file, and watch an outside
- * directory.
- *
- * So the rule is pinned down in one line: **the string that is checked has to be the string that
- * is used.** That is why the same `resolve()` as `safeJoin` is used here.
- *
- * Even after folding, `..` can remain — a path leaving the root (`../outside`) is one such case,
- * and the walking side's `checkedParent` rejects it at that point.
- *
- * **Windows (#14):** `relative()` returns an *absolute* path when the target is on another drive
- * or a UNC share (`D:\secret`, `\\evil\share\x`), and that split into segments (`D:`, `secret`)
- * that were then walked *inside* the root. A drive path still failed, since `root\D:` never
- * exists, but a UNC path passed if matching folders existed in the project. Every caller hands in
- * a checked or constant path today, so this is hardening: such a path is refused here, by name.
- * `p` is the path module, a parameter only so the Windows rules can be tested on any OS.
+ * (measured: listing, creating, exfiltrating and watching outside the project). A `..` left after folding (`../outside`)
+ * is refused by the walking side's `checkedParent`. **Windows (#14):** `relative()` answers an absolute path for another
+ * drive or a UNC share (`D:\secret`, `\\evil\share\x`), whose segments would be walked inside the root: refused here by
+ * name (hardening; callers hand in checked paths). `p` is a parameter only so the Windows rules can be tested on any OS.
  */
 export function pathParts(root: string, rel: string, p: PlatformPath = nativePath): readonly string[] {
   const rootResolved = p.resolve(root)

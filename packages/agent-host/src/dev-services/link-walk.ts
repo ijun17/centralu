@@ -16,16 +16,6 @@ import { win32 } from 'node:path'
  *
  * Used by a reply's image (`message-image.ts`) and by the project path guard (`path-guard.ts`) before either follows a
  * link. Windows only: elsewhere a path names nothing on another machine unless a mount the person made puts it there.
- *
- * A short name (`RUNNER~1`, how Windows hands out a temp folder, and how a link's target may be written) is not in its
- * folder's listing: it is matched to the entry it names by file identity (`shortNameEntry`), asked of `lstat`, which
- * never follows a link it can read. It used to be refused, which refused every link under a temp folder reached by its
- * short name (CI's Windows runner, review of #1072).
- *
- * This fails closed: a link whose target cannot be read, a folder that cannot be listed, a name its folder's listing
- * does not hold and that names no entry of it (a trailing dot or space, a stream) and more than MAX_LINK_HOPS links
- * are all refused. A name that is simply not there is not: whatever follows the walk then stops at it, reaching
- * nothing.
  */
 export type LinkWalk = { ok: true } | { ok: false; reason: 'elsewhere' | 'unchecked'; why: string }
 
@@ -89,6 +79,9 @@ const MAX_SHORT_NAME_SCAN = 10_000
  * The entry of `listed` (the listing of `folder`) that the short name `part` names, by file identity: `lstat` of the
  * short name against `lstat` of each entry. Entries whose name starts with the short name's first letter are asked
  * first (Windows makes a short name from the long one's first letters). Null when none is, or `part` names nothing.
+ * A short name (`RUNNER~1`, how Windows hands out a temp folder, and how a link's target may be written) is not in its
+ * folder's listing, and `lstat` never follows a link it can read. Not refused: that would refuse every link under a temp
+ * folder reached by its short name (CI's Windows runner, #1072).
  */
 function* shortNameEntry(folder: string, part: string, listed: Dirent[]): Generator<Ask, Dirent | null, Answer> {
   const self = yield { identity: win32.join(folder, part) }
@@ -104,6 +97,11 @@ function* shortNameEntry(folder: string, part: string, listed: Dirent[]): Genera
   return null
 }
 
+/**
+ * Fails closed: a link whose target cannot be read, a folder that cannot be listed, a name its folder's listing does not
+ * hold and that names no entry of it (a trailing dot or space, a stream) and more than MAX_LINK_HOPS links are all
+ * refused. A name that is simply not there is not: whatever follows the walk then stops at it, reaching nothing.
+ */
 function* walkSteps(abs: string, home: string | undefined): Generator<Ask, LinkWalk, Answer> {
   let path = abs
   for (let hops = 0; hops <= MAX_LINK_HOPS; hops++) {

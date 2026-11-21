@@ -11,20 +11,14 @@ export class StepsV62 extends MigrationRange {
          * Usage over time (docs/agent-host/usage.md "Usage over time"): the limit windows' readings and the tokens per hour.
          *
          * `usage_readings`: one row per change of a window's percent or reset time, per tool, account and window
-         * (`window_id`, with the `scope` of a per-model window and its `label` as the tool names them)
-         * (`at`, `resets_at` in ms; `resets_at` null when unknown). `account` is the login's fingerprint
-         * (`agents.account`), empty when the tool did not say.
+         * (`window_id`, with a per-model window's `scope` and its `label` as the tool names them); `at` and `resets_at`
+         * in ms, `resets_at` null when unknown. `account` is the login's fingerprint (`agents.account`), '' when not said.
          *
-         * `usage_buckets`: the requests the cache ledger counts, summed per hour (`hour`, the start of the hour
-         * in ms) and per session, project, tool, model and machine. `project_id`, `model` and `machine` are ''
-         * when there is none (the Assistant has no project; the host's own requests have no machine). The
-         * `cache_write_5m` and `cache_write_1h` columns are the part of `cache_write` the API said how long it
-         * stays cached. `causes` is the JSON of the rebuilds by cause. A flush adds to a row (one upsert per
-         * bucket), so a restart or a swap midway through an hour only adds.
-         *
-         * **Expand only (#292's rule).** Two new tables; an older host neither reads nor writes them, and
-         * purging a session deletes its `usage_buckets` rows in the new build only (an older host leaves them,
-         * which is harmless: they hold counts, no content).
+         * `usage_buckets`: the cache ledger's requests summed per hour (`hour`, its start in ms) and per session, project,
+         * tool, model and machine, '' for none (the Assistant has no project; the host's own requests no machine).
+         * `cache_write_5m`/`_1h` are the part of `cache_write` whose lifetime the API stated; `causes` is the JSON of
+         * rebuilds by cause. A flush upserts, so a restart or swap mid-hour only adds. Expand only (#292): an older
+         * host's purge leaves a session's `usage_buckets` rows, which is harmless (counts, no content).
          */
         run: () => {
           this.db.exec(`

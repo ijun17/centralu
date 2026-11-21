@@ -156,8 +156,8 @@ describe('gh stopped by an abort (#368)', () => {
     if (process.platform === 'win32') await eventually(() => !alive(child), 5_000)
   })
 
-  // #982 review: in the host's process group the tree kill spared what gh started (git, reading the remotes); gh now
-  // leads a group of its own, and a child that stays in it ends with it on every system
+  // In the host's process group the tree kill would spare what gh started (git, reading the remotes); gh leads a
+  // group of its own, and a child that stays in it ends with it on every system (#982)
   it('ends a child gh started in its own group when gh does not answer in time', { timeout: 30_000 * SLOW }, async () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-timeout-')))
     const bin = join(root, 'bin')
@@ -199,7 +199,7 @@ describe('a gh that is a batch file', () => {
 
   /*
    * And never the bare name instead: given one, Windows looks in the working directory, the project, before PATH, so a
-   * gh.exe committed to the repository would run (a review of #964). Here that gh.exe is Node, which runs the script
+   * gh.exe committed to the repository would run (#964). Here that gh.exe is Node, which runs the script
    * `pr` it finds there and leaves a mark.
    */
   it('is no gh to run: the answer is that gh is unavailable, never a throw, and never a gh.exe in the project', async () => {

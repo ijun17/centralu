@@ -9,11 +9,9 @@ export class SessionRecords {
   constructor(private readonly db: Database.Database) {}
 
   /**
-   * The UPDATE clause has to list **everything that can change.**
-   * It used to be missing tool, so switching agents (claude to codex) was never saved — on
-   * restart the tool reverted, but by then the thread to resume from (external_id) had already
-   * broken, turning the session into one that could not even be recovered. (project_id and
-   * created_at do not change, by definition.)
+   * The UPDATE clause has to list **everything that can change.** A column left out is not saved: a lost `tool` (a
+   * switch from claude to codex) reverts on restart after the thread to resume (external_id) has moved on, and the
+   * session cannot be recovered. (project_id and created_at do not change, by definition.)
    */
   upsertSession(s: SessionInfo): void {
     this.db
@@ -66,10 +64,8 @@ export class SessionRecords {
         askedBy: s.askedBy ?? null,
         forkedFrom: s.forkedFrom ?? null,
         /*
-         * Context rides the ordinary upsert (issue #48), which the manager already runs after
-         * every event — so a reading is on disk the instant it arrives, with no second write
-         * path to remember. Saving at session close instead would lose exactly the sessions
-         * that matter: the ones a crash or a force-quit ends.
+         * Context rides the ordinary upsert (issue #48), run after every event, so a reading is on disk when it arrives.
+         * Saving at session close would lose the sessions a crash or a force-quit ends.
          */
         contextUsed: s.context?.used ?? null,
         contextWindow: s.context?.window ?? null,
@@ -85,16 +81,9 @@ export class SessionRecords {
   }
 
   /**
-   * The id of the **central** assistant (null if there is none).
-   *
-   * There used to be only one Assistant per app, so this query was the whole answer. Once
-   * project assistants existed (#13), the marker (is_assistant=1) could be set on more
-   * than one row, and the central one is whichever of those has no project. The marker itself
-   * rides SessionInfo.kind through the ordinary upsert — at one point this was the only place
-   * that answered, on the reasoning that "keeping it in two places lets one drift out of sync,"
-   * but the project assistant broke the premise that reasoning relied on (that projectId
-   * being null was the same fact as the marker), so kind is now the single source of truth and
-   * this query just reads it.
+   * The id of the **central** assistant (null if there is none). Project assistants (#13) carry the same marker
+   * (is_assistant=1), so the central one is the marked row with no project. The marker rides SessionInfo.kind through
+   * the ordinary upsert: kind is its single source, since a null projectId is not the same fact as the marker.
    */
   assistantId(): string | null {
     /*
@@ -188,22 +177,14 @@ export class SessionRecords {
           : null,
         ...sessionLiveDefaults(),
         /*
-         * **Context is the one that comes back** (issue #48), so it overrules the defaults above.
+         * **Context is the one that comes back** (issue #48), so it overrules the defaults above: the rest of that group
+         * are facts about *our* process (a request id, an expired rate-limit window); how full the context is belongs to
+         * the conversation, which is the tool's and outlives us.
          *
-         * The rest of that group are facts about *our* process — a request id nobody can answer
-         * any more, a rate-limit window that expired while we were gone — and are rightly gone
-         * with it. How full the context is, is not: it is a fact about the conversation, and the
-         * conversation is the tool's and outlives us.
-         *
-         * It is shown plainly, with no staleness mark, and that is a decision rather than an
-         * omission. The gauge has never claimed to be live — the reading arrives at the end of a
-         * turn and is already a turn behind while the next one runs; restarting only lengthens a
-         * gap that is always there. The event that really makes it wrong is the conversation
-         * moving without us (someone continuing it in the terminal), which can happen with or
-         * without a restart and which we cannot detect either way. A mark keyed on "we
-         * restarted" would therefore flag the common case, where nothing moved and the number is
-         * exact, and stay silent in the case that actually earns it. The first turn corrects it
-         * regardless — at the very instant the old behaviour would have shown anything at all.
+         * It is shown with no staleness mark, by decision: the gauge is always a turn behind, and what makes it wrong is
+         * the conversation moving without us (continued in the terminal), which we cannot detect, restart or not. A mark
+         * keyed on "we restarted" would flag the common case, where the number is exact, and miss the real one. The first
+         * turn corrects it regardless.
          */
         context:
           contextUsed !== null && contextWindow !== null
@@ -223,11 +204,9 @@ export class SessionRecords {
   /**
    * The directory this session was created in — the one its tool-side history is filed under.
    *
-   * Deliberately **not** part of `SessionInfo`: it is not something the screen shows, and
-   * `upsertSession` must never carry it. The whole point (issue #28) is that this value is
-   * written once and then left alone; routing it through the same upsert that saves names and
-   * states would let any later save quietly replace it with whatever the caller happened to
-   * hold. `touched_paths` lives on the same terms.
+   * Deliberately **not** part of `SessionInfo`, and `upsertSession` must never carry it (issue #28): it is written once
+   * and left alone, and the upsert that saves names and states would let any later save replace it with whatever the
+   * caller held. `touched_paths` lives on the same terms.
    *
    * null means "we do not know yet" — an Assistant row that predates v14. The manager
    * resolves it the first time it needs the path and writes it back.
@@ -252,7 +231,6 @@ export class SessionRecords {
     return readJsonList(row?.p, z.string())
   }
 
-  /** Records the skill list (per tool and directory) */
   /** Records commit attribution (#50) — kept here only, not in the repository */
   recordCommit(projectId: string, sha: string, sessionId: string): void {
     this.db

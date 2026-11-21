@@ -103,7 +103,7 @@ export class ProjectFiles {
   gitBranches(projectId: string) {
     return gitBranches(this.host.rootOf(projectId))
   }
-  /** Things a fresh worktree will not have (#76) — used to point out candidates to copy */
+  /** Things a fresh worktree will not have (#76): the candidates to copy, pointed out */
   gitIgnoredEntries(projectId: string) {
     return gitIgnoredEntries(this.host.rootOf(projectId), undefined, this.host.trust(projectId))
   }

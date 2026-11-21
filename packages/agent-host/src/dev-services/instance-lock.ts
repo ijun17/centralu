@@ -10,33 +10,18 @@ import { writeFileWhole } from '../os/write-file-whole.js'
 import type { SayStoreWork } from './store/store-work.js'
 
 /**
- * Only one host per data folder.
+ * Only one host per data folder. Two hosts on one store.db each keep their own session list in memory, so **the "already
+ * loaded" check disagrees and a conversation ends up twice on the list** (a real duplicate-session incident).
  *
- * If two hosts held the same store.db, each would carry its own session list in memory while
- * writing to the same file. Neither knows about a session the other created, so **the "already
- * loaded" check disagrees and the same conversation ends up twice on the list** — a real
- * duplicate-session incident traces back to exactly this shape. SQLite's own lock contention
- * comes on top of that.
+ * **Ownership is an exclusive SQLite lock held for the host's whole lifetime (#82, after #91)**: `BEGIN EXCLUSIVE` on
+ * `host-ownership.sqlite` until exit. Taking it is atomic, a second taker gets SQLITE_BUSY at once, and the OS releases it
+ * however the process dies, so nothing stale is left. Not a lock file alone: check-then-write let 8 hosts started at once
+ * make 2 owners and a second acquire in one process succeed (measured), a missing `host.lock` let a second owner in while one was
+ * alive, and a file left by a SIGKILL or a power loss refused starts once its pid was reused, unless the start time recorded next
+ * to it told the two apart (#184).
  *
- * So the start is refused, and the reason for the refusal is stated plainly.
- *
- * **Ownership itself is an exclusive SQLite lock held for the host's whole lifetime (#82).** The
- * lock file alone was check-then-write: two hosts could both read "no live owner" and both write.
- * Measured on main: 8 hosts started at once on one folder produced 2 owners; a second acquire in
- * the same process succeeded; and while an owner was alive, a missing `host.lock` let a second
- * owner in. A file left behind by a SIGKILL or a power loss also refused every later start once
- * an unrelated process reused its pid, unless the start time recorded next to it told the two
- * apart (#184). Now the owner opens `host-ownership.sqlite` and holds `BEGIN EXCLUSIVE` on it until it
- * exits. Taking that lock is atomic, a second taker gets SQLITE_BUSY at once, and the operating
- * system releases it when the process dies however it dies (SIGKILL, a crash, a power cut leaves
- * no process to hold it), so there is nothing stale to clean up. Based on the approach in #91.
- *
- * `host.lock` stays as a description only: it names the owner (pid and start time) in the conflict
- * message. Until 0.1.0-beta.16 a live, matching `host.lock` also refused the start, for hosts from
- * before #82 that knew only the file; that check went with #461, so a host that old is no longer
- * kept out by this one (nor this one by it). This is local, single-machine ownership: not a
- * distributed lease, and not meant for a data folder on a network filesystem, where advisory locks
- * are not reliable.
+ * `host.lock` only names the owner in the conflict message; a host from before #82 (which knew only that file) and this one do not
+ * keep each other out (#461). Local ownership: not for a data folder on a network filesystem, where advisory locks are unreliable.
  */
 
 /**

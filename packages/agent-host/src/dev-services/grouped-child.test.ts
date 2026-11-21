@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sweepLeftovers, tracked } from './grouped-child.js'
 
 /**
- * The sweep after a grouped child exits (#1650 review): what it left is what was created between its spawn and its
+ * The sweep after a grouped child exits (#1650): what it left is what was created between its spawn and its
  * exit as the host saw it, never up to the time of the sweep. By then Windows may have given its pid to another
  * program, whose children would otherwise be ended with it.
  */

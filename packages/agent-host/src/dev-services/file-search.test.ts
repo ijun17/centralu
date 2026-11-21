@@ -79,9 +79,8 @@ describe('searchFiles — Korean file names', () => {
     expect((await searchFiles(d, '회의록'.normalize('NFC'))).map((h) => h.path)).toEqual(['회의록.md'.normalize('NFC')])
   })
 
-  // Relative paths on the wire are POSIX on every OS (docs/protocol.md). The walk used to take the
-  // path from `relative()`, which on Windows answers `src\deep\Widget.tsx` (#14). Only the Windows
-  // test job can see that difference; on macOS and Linux both spellings are the same.
+  // Relative paths on the wire are POSIX on every OS (docs/protocol.md); `relative()` answers `src\deep\Widget.tsx`
+  // on Windows (#14). Only the Windows test job can see that difference; on macOS and Linux both spellings are the same.
   it('a nested file in a folder that is not a repository comes back with / and its own name', async () => {
     const d = tmp()
     mkdirSync(join(d, 'src', 'deep'), { recursive: true })

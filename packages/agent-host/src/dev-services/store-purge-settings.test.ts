@@ -1,8 +1,8 @@
 /**
  * The settings a session keeps (`<name>:<sessionId>` in app_settings) go when it is deleted for good (#850 round 4).
  *
- * The purge used to delete two of them by name, and every key added since (a process's tool prefix and launch
- * settings, the fresh-start mark, the last import, a paused report) stayed in the store for good.
+ * A purge by a list of names leaves behind every key added later (a process's tool prefix and launch settings, the
+ * fresh-start mark, the last import, a paused report), so these tests cover every key the host writes.
  */
 import { describe, expect, it } from 'vitest'
 import { sessionLiveDefaults } from '@cc/protocol'

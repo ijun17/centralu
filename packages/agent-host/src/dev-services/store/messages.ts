@@ -55,22 +55,12 @@ export class MessageRecords {
   /**
    * Writes messages — **writing the same spot twice overwrites it, index included.**
    *
-   * messages used to be the only INSERT OR REPLACE; the index was a plain INSERT. So rewriting
-   * the same (session, seq) added **another row to the index** every time. In the real database
-   * that came to 28,892 messages against 249,809 index rows — 8.6x — and some had piled up as
-   * many as 13 duplicates.
+   * The index row is pinned to its message row (the messages rowid is its rowid), so INSERT OR REPLACE overwrites it. A
+   * plain index INSERT adds a row per rewrite: a real database reached 28,892 messages against 249,809 index rows (8.6x,
+   * up to 13 duplicates), recall returned the same line 5 times in a limit of 8, and the index grew to tens of times the
+   * text. Deleting by session_id and seq is no alternative: they are UNINDEXED, so it scans all ~250,000 rows per write.
    *
-   * The cost showed up in two places: recall results were papered over with the same line
-   * repeated (dogfooding: "limit was 8 and the same thing came back 5 times"), and the index had
-   * bloated to tens of times the size of the actual text.
-   *
-   * The fix is to **pin the index row to its message row.** Using the messages rowid as the
-   * index's own rowid lets INSERT OR REPLACE overwrite it automatically. (session_id and seq
-   * are UNINDEXED, so deleting by a WHERE clause on them would scan all 250,000 rows — that
-   * cannot happen on every write.)
-   *
-   * messages also has to be UPDATE, not REPLACE. REPLACE deletes and reinserts, which **changes
-   * the rowid**, and once that happens the spot the index was pointing at is gone.
+   * messages is UPDATE, not REPLACE: REPLACE deletes and reinserts, which **changes the rowid** the index points at.
    */
   appendMessages(msgs: StoredMessage[]): void {
     const stmt = this.db.prepare(
@@ -85,8 +75,7 @@ export class MessageRecords {
     /*
      * Deletes by rowid. FTS5's `'delete'` command only works on contentless or external-content
      * tables, and messages_fts is an ordinary table that holds its own text, so that command
-     * always failed with `SQL logic error` and rolled back other messages in the same batch
-     * along with it (#179).
+     * fails with `SQL logic error` and rolls back other messages in the same batch (#179).
      */
     const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const tx = this.db.transaction((rows: StoredMessage[]) => {
@@ -108,19 +97,9 @@ export class MessageRecords {
   }
 
   /**
-   * Full-text search over conversations (E-1). Archived sessions are included too — what is
-   * being looked for may be sitting in one of them.
-   */
-  /**
-   * Full-text search over conversations. **Returns the whole body** — trimming it is left to
-   * the caller.
-   *
-   * This used to trim with `snippet(..., 12)` here, but that 12 counted not characters but
-   * **tokens**, and with the trigram tokenizer that cut off after roughly 15 real characters.
-   * The Assistant would receive something like `"the policy list already said the…"` and
-   * **could not tell whether this was even the passage it was looking for.** How much
-   * surrounding context is needed is something only the caller knows, so that judgment is
-   * left to it.
+   * Full-text search over conversations (E-1). **Returns the whole body**: how much context is needed only the caller
+   * knows. Not `snippet(..., 12)`: its 12 counts trigram tokens, about 15 real characters, too little to tell whether
+   * a passage is the one looked for.
    */
   searchMessages(query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
     const q = query.trim()
@@ -170,16 +149,11 @@ export class MessageRecords {
   }
 
   /**
-   * Reads a conversation — **one row is one message** (#77).
+   * Reads a conversation — **one row is one message** (#77), and `limit` counts rows.
    *
-   * In the delta era (before #66), one token was one row, so this used to join consecutive
-   * assistant rows back into a single message when reading. Those rows were merged once by v21,
-   * and writes now write one row per message. Since then, neighboring assistant rows are
-   * **genuinely different messages** — a new reply with no human turn in between (a background
-   * task finished, a question card was answered), and rows written per reply by transcript
-   * import. Joining them the old way would run two replies together into one paragraph with no
-   * space, like "…still running.All six reviews are in." So rows are handed back as-is — limit
-   * also counts rows (= messages).
+   * Neighboring assistant rows are different messages (a reply after a background task finished or a question card was
+   * answered, rows a transcript import writes per reply), so they are not joined: joining runs two replies into one
+   * paragraph with no space, like "…still running.All six reviews are in."
    */
   loadMessages(sessionId: string, limit = 200, beforeSeq?: number, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db
@@ -222,7 +196,7 @@ export class MessageRecords {
 
   /**
    * The conversation **after** afterSeq — loadMessages's forward-going counterpart (#66).
-   * Used to read "what was said next" from a spot recall handed back. Same rule: one row is one message (#77).
+   * Reads "what was said next" from a spot recall handed back. Same rule: one row is one message (#77).
    */
   loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20, opts: ReadOpts = {}): StoredMessage[] {
     const raw = this.db

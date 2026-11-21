@@ -10,45 +10,15 @@ import { environmentValues } from '../os/process-env.js'
 import { ancestors, descendants } from './proc-table.js'
 
 /**
- * A leftover process still running from our folder (user request, 2026-09-07).
+ * A leftover process still running from our folder (user request, 2026-09-07). **Why (measured 2026-09-07):** a dev
+ * server an agent launched with the bash tool outlives the app: `ppid=1` (its shell ended, init adopted it) and its own
+ * process group, out of reach of the PTY's tree kill (kill-tree.ts). codex cleans up its own group when a command ends;
+ * this is left behind only on the claude path.
  *
- * **Why this is needed (measured 2026-09-07):** a dev server an agent launched with the bash tool
- * does not die when the app quits. Investigating found that process had `ppid=1` (its shell had
- * already ended and it was adopted by init) and **its own process group** — cut off from us in
- * both parent chain and group, a spot the tree kill we use on the PTY (kill-tree.ts) cannot reach.
- * codex cleans up its own group when a command ends, so it does not have this problem; it is only
- * left behind on the claude path.
- *
- * So this **shows it to the person first, instead of killing it.** Only the person knows what
- * should be killed — if the app silently killed a server the person launched by hand in the same
- * folder, cleaning up an orphan would cut off someone else's work.
- *
- * Four rules pick a candidate (all four have to hold for it to make the list):
- *
- *  1. **cwd is inside our own folder** — either the project directory or a worktree directory.
- *  2. **It has no controlling terminal** (tty is `??`). This is the line that separates it from
- *     something the person launched in their own terminal (measured: launched from a terminal it
- *     is `ttys005`, launched by an agent over a pipe it is `??`). If a person's shell and whatever
- *     runs in it got mixed into the list, this feature would be unusable.
- *  3. **It is not our own descendant, nor what started us** — the shutdown procedure already cleans up the host's
- *     descendants as a whole tree. What this carries is only what that cleanup cannot reach.
- *  4. **We started it** (#1898, the owner's decision of 2026-11-12): the nearest owner mark up its parent chain, its own
- *     first, is this host's (`OWNER_MARK`, in the environment). The host puts the mark in its own environment, so every
- *     agent, terminal and command it starts inherits it, and so does whatever those start, however it is re-parented
- *     later. The parent chain's shape no longer decides: it could not tell a dev server an agent left behind from an
- *     editor the person detached on purpose (`code .` from a terminal in the project: cwd in the project, no terminal,
- *     adopted by `systemd --user` or init), nor see that VS Code's Claude extension, alive and launched over a pipe
- *     in our folder, had an owner (it was SIGTERMed when an early version ran, 4a69b96f).
- *
- *     A process whose environment cannot be read, or that has no mark, is never offered: one from before the mark,
- *     one started outside Centralu, one whose starter cleared its environment, an app server (an app gets no `CENTRALU_`
- *     variable but its own, `app-start-env.ts`), and on macOS a platform binary of the
- *     system volume, whose environment `ps` does not show (`environmentValues`) unless a process it descends from
- *     carries the mark.
- *
- *     If everything in between on the chain is also a candidate (same folder, no terminal), those
- *     are children an orphan spawned, and they are kept together — a node launched by an orphaned
- *     `npm run dev` has to be selectable on the same screen too.
+ * It is **shown to the person first, not killed**: only the person knows what should go, and silently killing a server
+ * they launched by hand in the same folder would cut off someone else's work. A candidate passes all four rules: 1 to 3
+ * in `candidatesOf`, 4 in `pickStrays`. Children an orphan spawned (same folder, no terminal) are candidates too, so a
+ * node launched by an orphaned `npm run dev` is selectable on the same screen.
  */
 
 /**
@@ -128,11 +98,16 @@ export function insideAny(cwd: string, roots: readonly string[]): string | null 
   return null
 }
 
-/** What passes rules 1 to 3, with its folder: the processes whose mark rule 4 asks about */
+/**
+ * What passes rules 1 to 3, with its folder: the processes whose mark rule 4 asks about.
+ *  1. **cwd is inside our own folder**: the project directory or a worktree directory.
+ *  2. **No controlling terminal** (tty `??`), which separates it from what the person launched in their own terminal
+ *     (measured: `ttys005` from a terminal, `??` from an agent over a pipe); a person's shell on the list would make it unusable.
+ *  3. **Not our own descendant, nor what started us** (the keeper, a launcher): shutdown cleans up the host's descendants
+ *     as one tree, and this carries only what that cannot reach.
+ */
 function candidatesOf(rows: readonly PsRow[], cwdOf: ReadonlyMap<number, string>, roots: readonly string[], selfPid: number): Map<number, string> {
-  // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
   const ours = descendants(rows, [selfPid])
-  // Who started us (the keeper, a launcher) is not a leftover: it is no leftover of anyone's
   const launchers = ancestors(rows, [selfPid])
   const candidates = new Map<number, string>()
   for (const r of rows) {
@@ -155,6 +130,12 @@ export function markAsked(rows: readonly PsRow[], cwdOf: ReadonlyMap<number, str
 /**
  * Builds the list by applying the four rules (pure — this is as far as a test needs to look). `marks` holds the owner
  * mark of each pid whose environment was read and carries one, whoever's it is; `mark` is this host's.
+ *
+ * Rule 4, **we started it** (#1898, the owner's decision of 2026-11-12): the nearest owner mark up its parent chain, its
+ * own first, is ours (`OWNER_MARK`), which whatever the host starts inherits however it is re-parented. Not the chain's
+ * shape: that cannot tell a dev server an agent left from an editor the person detached on purpose (`code .`: cwd in the
+ * project, no terminal, adopted by `systemd --user` or init), nor that VS Code's Claude extension, launched over a pipe
+ * in our folder, has an owner (an early version SIGTERMed it, 4a69b96f).
  */
 export function pickStrays(
   rows: readonly PsRow[],
@@ -166,9 +147,12 @@ export function pickStrays(
 ): StrayProcess[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]))
   /*
-   * Rule 4: the nearest mark up its parent chain, its own first, is ours. A host started inside another host's agent
-   * starts with that host's mark and gives its children its own: what runs under it is that host's, not ours (#2221
-   * review). A parent missing from our own account's table ends the walk
+   * A host started inside another host's agent starts with that host's mark and gives its children its own: what runs
+   * under it is that host's, not ours (#2221). A parent missing from our own account's table ends the walk. No readable
+   * environment or no mark is never ours: one from before the mark, one started outside Centralu, one whose starter
+   * cleared its environment, an app server (an app gets no `CENTRALU_` variable but its own, `app-start-env.ts`), and on
+   * macOS a system-volume platform binary, whose environment `ps` does not show (`environmentValues`) unless a process it
+   * descends from carries the mark.
    */
   const ourStart = (pid: number): boolean => {
     const seen = new Set<number>()
@@ -301,11 +285,11 @@ const REAL_STRAY_STOP: StrayStopDeps = { find: findStrays, kill: (pid, signal) =
  * terminal running right now in our own folder" receives the signal.
  *
  * SIGTERM first, and SIGKILL after the grace to whatever of those is still a leftover, measured once more and still
- * running the same command: the same two shots as every other stop (`stopGroup`). A dev server that traps TERM used to
- * be left running after Stop.
+ * running the same command: the same two shots as every other stop (`stopGroup`), so a dev server that traps TERM does
+ * not survive Stop.
  *
- * No host's children are held anywhere else any more (#1895 step 4). What a holding keeper left behind when it died was
- * started before the owner mark, so it is not offered (#1898).
+ * No host's children are held anywhere else (#1895 step 4). What a holding keeper left behind when it died was started
+ * before the owner mark, so it is not offered (#1898).
  */
 export async function stopStrays(
   pids: readonly number[],

@@ -7,26 +7,17 @@ import { dataBytes, removeData, removeDataSync } from './data-folder.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * Where a handoff note lives (#142) — **under the data folder**,
- * `<data>/handoff/<project id>/<session id>.md`.
+ * Where a handoff note lives (#142): **under the data folder**, `<data>/handoff/<project id>/<session id>.md`.
  *
- * The old location was `<project>/.centralu/handoff/`, which is to say inside the user's own
- * repository. Two things were wrong there. The note was not ignored by git — the rule excluding
- * that folder lived only in **this repository's own** .gitignore, and we do not touch the user's
- * .gitignore or `.git/info/exclude`. And cleanup trusted that folder blindly: committing
- * `.centralu/handoff -> ..` into a repository meant that when a cloned copy's host started up, it
- * followed the link and deleted the README.md at the repository root (measured). A folder we
- * write to and delete from has to be ours.
+ * Not `<project>/.centralu/handoff/`, inside the user's repository: we do not touch its .gitignore or `.git/info/exclude`,
+ * so the note would not be ignored, and a committed `.centralu/handoff -> ..` made a clone's host follow the link in
+ * cleanup and delete the README.md at its root (measured). A folder we write to and delete from has to be ours.
+ * **That folder is never read, written or cleaned up**: a note there is the user's repository file, left where it is
+ * (an older successor's first message may point at it).
  *
- * **The old location is never read, written to, or cleaned up.** A note already sitting there is
- * the user's own repository file, so it is neither moved nor deleted — an old successor session's
- * first message still points at that path, and the file stays where it is.
- *
- * **Why the folder is split per project**: a successor Claude session only gets to read the
- * folder holding its note without asking if it is granted as an additional working directory
- * (`CreateSessionOpts.readableDirs` — the measurement is written there). Splitting by project
- * means that grant stops at the same project's own notes. Pooling them into one folder would open
- * every project's notes together.
+ * **Split per project**: a successor Claude session reads its note's folder without asking only if it is granted as a
+ * working directory (`CreateSessionOpts.readableDirs`, where the measurement is); one pooled folder would open every
+ * project's notes.
  */
 // **This is a function.** Deciding this at module load time would bake in the value from before
 // the host has settled on a data folder (the same reasoning as attachments.ts)
@@ -84,10 +75,8 @@ export function writeHandoffNoteSync(projectId: string, sessionId: string, text:
  * Deletes a note with no owner (#106). Which one has an owner is something the caller knows
  * (`owned`).
  *
- * **Only directories and regular files are looked at.** Both the folder and the files in it are
- * created only by the host, but cleanup that followed a link and deleted through it is what
- * started this issue — an entry from `withFileTypes` never follows a link and answers as the link
- * itself, so a link never shows up as either a folder or a file.
+ * **Only directories and regular files are looked at**, though only the host creates them: cleanup must never delete
+ * through a link, and an entry from `withFileTypes` answers as the link itself, never as a folder or a file.
  *
  * **An empty folder is left as-is** (#104) — cleanup that took the whole folder away would also
  * carry off the text of a handoff that started in the meantime.

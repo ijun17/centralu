@@ -20,19 +20,13 @@ const root = () => join(dataRoot(), 'attachments')
 /**
  * A session's folder — here, the id has to be **exactly one segment** (#94).
  *
- * This is the only file that uses a session id as a directory name, and that directory is
- * deleted whole. Given `"../../Documents"`, `realOs().files.promises.rm(..., { recursive: true })` actually deleted that
- * folder under the user's home. The protocol already filters the same thing at its boundary
- * (`SessionId`), but the side building the path checks it again itself — these functions are
- * called without going through the RPC layer too (`saveAttachment(m.id, 'agent-image', …)` is one
- * example, and future callers will be too).
+ * That directory is deleted whole, so `"../../Documents"` would delete a folder under the user's home. The protocol
+ * filters ids at its boundary (`SessionId`), but these functions are also called without the RPC layer
+ * (`saveAttachment(m.id, 'agent-image', …)`), so the side building the path checks again.
  *
- * Why `path-guard` is not used here: it answers "does a multi-segment relative path stay inside
- * the root," following symlinks along the way, and that requires the root to already exist on
- * disk — the attachments root is created for the first time inside this very call, and the
- * cleanup side runs even before the root exists. What has to be asked here is not containment but
- * **"is this even an id in the first place."** With exactly one segment, there is no path that
- * could express leaving, which is a stronger guarantee than a containment check.
+ * Not `path-guard`: it follows symlinks and needs the root to exist on disk, but the root is created inside this call
+ * and cleanup runs before it exists. With exactly one segment no path can express leaving, a stronger guarantee than
+ * a containment check.
  */
 function sessionDir(sessionId: string): string {
   if (!isSessionId(sessionId)) {

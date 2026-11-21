@@ -38,19 +38,13 @@ export type BranchPr = {
 /**
  * This branch's pull request status — **asked of gh** (#76 stage 3).
  *
- * What PR status knows precisely is exactly what gitBranchMerged cannot see (squash and rebase
- * merges — the dominant outcome for a GitHub PR): MERGED is not an inference, it is a fact the
- * server recorded.
+ * It sees what gitBranchMerged cannot (squash and rebase merges): MERGED is a fact the server recorded.
  *
- * This function fails quietly. Two branches of failure are returned as distinct:
- *   - `'unavailable'` — gh itself is missing (ENOENT). The answer will not change on asking
- *     again, so the caller is right to stop asking for the rest of this process.
- *   - `null` — unknown for now (no PR, offline, not a GitHub repository, not authenticated).
- *     Asking again later may get an answer.
- * Neither branch throws — this signal is the basis for one badge, not a precondition for the
- * session list. But a gh that fails for any reason other than "no pull request" (its sign-in
- * expired, the network, GitHub refusing) is said once in the host's log with gh's own line
- * (#841): read as "no PR" alone, a badge that never came had no trace of why.
+ * Never throws, since it backs one badge, not the session list:
+ *   - `'unavailable'` — gh itself is missing (ENOENT); the caller stops asking for the rest of this process.
+ *   - `null` — unknown for now (no PR, offline, not a GitHub repository, not authenticated); asking later may answer.
+ * A failure other than "no pull request" is said once in the host's log with gh's own line (#841), so a badge that
+ * never came leaves a trace of why.
  */
 export async function gitBranchPr(
   projectCwd: string,
@@ -114,13 +108,12 @@ async function ghPrView(
    * **An abort, or running past `timeoutMs`, ends gh with the processes it started, and returns once gh is gone** (the
    * host stopping, #368; a gh that does not answer, #982). `os.processes.run` starts gh as the root of a tree this host
    * can end, as git is: off Windows in a process group of its own, so the tree kill reaches what gh started (it runs git
-   * to read the remotes); in the host's group it spared them (#982 review). It ends the tree at once (no grace: gh holds
+   * to read the remotes), which the host's group would spare. It ends the tree at once (no grace: gh holds
    * no lock files), and returns when gh has exited and its output has closed, or a second after the exit.
    *
-   * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY). On
-   * macOS and Linux the tree kill does not reach a child that left gh's process group, and that child can hold the
-   * output open for as long as it runs, which must not hold the host's shutdown (nor does it hold the folder there:
-   * those systems remove a folder a process works in).
+   * They work in the project's folder, which Windows refuses to remove while they run (EBUSY). On macOS and Linux a
+   * child that left gh's group can hold the output open as long as it runs, which must not hold the host's shutdown
+   * (those systems remove a folder a process works in).
    */
   try {
     const run = await realOs().processes.run(programPath('gh'), ['pr', 'view', ref, '--json', fields.join(',')], {

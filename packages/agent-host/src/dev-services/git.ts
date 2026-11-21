@@ -8,14 +8,9 @@ import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * Reads and operates on git (B-1). This file holds the reads; the writes the person asks for are in git-write.ts,
- * worktrees and their branches in git-worktree.ts, a branch's pull request in git-pr.ts.
- *
- * Document correction (G): an earlier comment called this "throwaway code, to be replaced by
- * Rust git2 at Tauri stage 4," but that plan was **put on hold** once the Node sidecar became
- * the production path at M1.5. The git2 migration will not happen until measurement confirms
- * it is a bottleneck (m2-plan decision 3). The port interface stays the same, so moving it
- * later leaves the UI untouched.
+ * Reads git (B-1). The writes the person asks for are in git-write.ts, worktrees and their branches in git-worktree.ts,
+ * a branch's pull request in git-pr.ts. A move to Rust git2 waits until measurement shows this is a bottleneck (m2-plan
+ * decision 3); the port interface keeps such a move invisible to the UI.
  */
 
 /**
@@ -34,7 +29,7 @@ export type GitSummary = {
   /** git did not answer (a timeout, a crash): neither the count nor "clean" is known */
   unknown?: true
 }
-// The git panel's shapes are the protocol's (FR-4); a hand copy here had already lost `sessionName` (#428)
+// The git panel's shapes are the protocol's (FR-4), declared once: a hand copy here drifts (#428)
 export type { GitBranch, GitCommit, GitFileStatus, GitTrust }
 
 /** A read: the repository's programs run only for a trusted project */
@@ -73,7 +68,7 @@ export type SummaryLimits = { cap?: number; timeoutMs?: number }
 export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: SummaryLimits = {}): Promise<GitSummary> {
   const cap = limits.cap ?? SUMMARY_CAP
   let branch = '(detached)'
-  /** Distinct paths (#850 review): a file staged for removal and still on disk is `1 D.` and `? path`, one file */
+  /** Distinct paths: a file staged for removal and still on disk is `1 D.` and `? path`, one file */
   const paths = new Set<string>()
   let more = false
   /** A rename's entry is followed by its original path, which is not an entry of its own */
@@ -95,10 +90,9 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
   try {
     /*
      * Untracked files one by one, as the panel lists them (`gitStatusFiles`): by default git names a new folder once,
-     * and the sidebar said 1 where the panel listed its files (#850 item 10).
-     *
-     * Read as it arrives and stopped at the cap (#850 review): an un-ignored folder of 150,000 files made this answer
-     * megabytes long, and a buffered read past its 32 MB said "not a repository".
+     * and the sidebar's count would disagree with the panel's list.
+     * Read as it arrives and stopped at the cap: an un-ignored folder of 150,000 files makes this answer megabytes long,
+     * and a buffered read past its 32 MB would say "not a repository".
      */
     await streamGit(
       cwd,
@@ -120,7 +114,7 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
     if (notARepository(e)) return { isRepo: false, branch: '', changedFiles: 0 }
     /*
      * Anything else (git ran past its time on a slow disk, crashed, refused for another reason) says nothing about
-     * whether this is a repository (#850 review). This summary is also the "is this a repository" check for new
+     * whether this is a repository. This summary is also the "is this a repository" check for new
      * worktrees and the "is this worktree clean" check before removing one: an unknown count must read as neither
      * "no repository" nor "clean".
      */
@@ -144,11 +138,9 @@ export async function gitStatusFiles(cwd: string, trust: GitTrust = {}): Promise
       const parts = entry.split(' ')
       const xy = parts[1] ?? '..'
       /*
-       * A rename (2) has one extra field before the path (<X><score>, e.g. R100). Reading it at
-       * the same position as a 1-line (8) turned the path into "R100 new-name" — a file that
-       * does not exist — and staging failed silently. Under -z, the original name follows as
-       * **the next NUL-separated token**, so that token is skipped rather than mistaken for a
-       * new entry.
+       * A rename (2) has one extra field before the path (<X><score>, e.g. R100); read at a 1-line's position (8) the
+       * path would be "R100 new-name", a file that does not exist, and staging would fail silently. Under -z the original
+       * name follows as the next NUL-separated token, so that token is skipped rather than taken for a new entry.
        */
       const rename = entry.startsWith('2 ')
       const path = parts.slice(rename ? 9 : 8).join(' ')
@@ -182,11 +174,8 @@ function assertLexicalGitPath(cwd: string, path: string): string {
   const root = resolve(cwd)
   const target = isAbsolute(path) ? resolve(path) : resolve(root, path)
   const rel = relative(root, target)
-  /*
-   * The root itself is not outside (#134) — this still rejects it (what arrives here is
-   * supposed to be a single file's path), but says why directly. This used to say the root was
-   * "outside the project" too, and readers went looking for the cause in the wrong place.
-   */
+  // The root is rejected (a single file's path is expected) but not as "outside the project", which sends readers to the
+  // wrong cause (#134)
   if (rel === '') throw rpcError('Path is the project root, not a file in it')
   if (isInside(root, target)) return rel
   throw rpcError('Path is outside the project')
@@ -208,15 +197,11 @@ export function literalPathspec(path: string): string {
 }
 
 /**
- * The diff cap — in **characters**, not bytes (#134). Measured and sliced with `String.length`,
- * so this counts UTF-16 code units; mixing in Korean text or emoji makes the actual byte count
- * several times this value. The old name (`maxBytes`) made a promise the code did not keep.
- * Counting bytes would have shrunk the diff length a person actually saw, so the behavior was
- * left alone and the name was made to say what it does instead (the owner's decision).
+ * The diff cap, in **characters**, not bytes (#134): measured and sliced with `String.length`, so UTF-16 code units;
+ * Korean text or emoji make the byte count several times this value. Not bytes, because counting bytes would shrink the
+ * diff a person sees (the owner's decision).
  *
- * `gitDiff` and `gitCommitDetail` share this one value — hardcoding the number in two places
- * would let one of them drift. When e2e builds a fixture sized to this cap, it also imports this
- * constant rather than writing the number again.
+ * `gitDiff`, `gitCommitDetail` and e2e fixtures sized to this cap import this one value, so none of them drifts.
  */
 export const GIT_DIFF_MAX_CHARS = 400_000
 
@@ -272,13 +257,9 @@ export async function gitLogPath(cwd: string, rel = '', limit = 20): Promise<{ r
   let stdout: string
   try {
     /*
-     * The order is pinned so that **a child always comes before its parent.**
-     *
-     * The default sort is commit time, and a commit whose time got reversed by a rebase or
-     * cherry-pick can have its parent appear before its child. The graph layout (core
-     * git/graph.ts) cannot draw a line going upward for input shaped like that, so it drops the
-     * edge — guaranteeing the order here means there is never an edge to drop in the first
-     * place (this was the cause of the phantom lanes).
+     * Topological order, so a child always comes before its parent. By commit time a rebase or cherry-pick can put a
+     * parent before its child, and the graph layout (core git/graph.ts) drops an edge it cannot draw upward (phantom
+     * lanes).
      */
     stdout = await git(cwd, ['log', '--topo-order', `-n${limit}`, `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%an${SEP}%at${SEP}%P`, ...path])
   } catch (e) {
@@ -305,9 +286,8 @@ export async function gitLog(cwd: string, limit = 50): Promise<GitCommit[]> {
  * A single commit's files and diff. The `--end-of-options` before `sha` keeps a value starting with `-` from being
  * read as an option (#175).
  *
- * A merge commit shows its difference against the first parent (`--diff-merges=first-parent`, #160). The default,
- * a combined diff, is empty for a merge that had no conflicts, so every such merge showed up as `0 files` with an
- * empty diff. The difference against the first parent is exactly "what this merge brought into this branch."
+ * A merge commit shows its difference against the first parent (`--diff-merges=first-parent`, #160): "what this merge
+ * brought into this branch". The default, a combined diff, is empty for a merge without conflicts (`0 files`).
  */
 export async function gitCommitDetail(
   cwd: string,
@@ -322,7 +302,6 @@ export async function gitCommitDetail(
   return { files, diff: raw.slice(0, max), truncated: raw.length > max }
 }
 
-/** The current HEAD — a fallback for commit attribution (#50) when the tool's output was truncated and the hash could not be picked up */
 /**
  * The `origin` remote's address as the repository's config has it (#1038), or null: not a repository, or no `origin`.
  * Only the config is read, so nothing of the repository runs, trusted or not.
@@ -335,6 +314,7 @@ export async function gitOriginUrl(cwd: string, trust: GitTrust = {}): Promise<s
   }
 }
 
+/** The current HEAD — a fallback for commit attribution (#50) when the tool's output was truncated and the hash could not be picked up */
 export async function gitHeadSha(cwd: string): Promise<string | null> {
   if (!(await isRepo(cwd))) return null
   try {
@@ -347,9 +327,7 @@ export async function gitHeadSha(cwd: string): Promise<string | null> {
 /**
  * The sha this ref points at — null if there is none (#76).
  *
- * Checks existence and reads the sha in one call. This is meant to keep the spot that asks
- * whether the trunk branch was deleted and the spot that records that branch's sha from asking
- * the same question twice.
+ * Checks existence and reads the sha in one call, so "was the trunk branch deleted" and "record its sha" ask once.
  */
 export async function gitRevParse(cwd: string, ref: string): Promise<string | null> {
   try {
@@ -362,18 +340,14 @@ export async function gitRevParse(cwd: string, ref: string): Promise<string | nu
 /**
  * What git ignores — the list of files that will be **missing** from a new worktree (#76).
  *
- * These are exactly what a new worktree lacks (tracked files come along with git), so this list
- * is the entire set of candidates for "what should be copied." So the app does not choose for
- * itself; it only **points them out** — defaulting to "copy everything" here would drag along
- * node_modules's 637MB and the Rust target's 8.5GB, just from this one repository.
+ * Tracked files come along with git, so this list is every candidate for "what should be copied". The app only
+ * **points them out**: defaulting to "copy everything" would drag along node_modules's 637MB and the Rust target's
+ * 8.5GB, in this one repository.
  *
- * `--directory` is the key part: a directory that is ignored wholesale is folded into one line
- * instead of expanded, so a directory like node_modules/ does not turn the list into noise the
- * size of its file count.
+ * `--directory` folds a wholly ignored directory (node_modules/) into one line instead of its file count.
  *
- * Only .DS_Store is filtered out. Every macOS repository has dozens of them, there is never a
- * reason to copy one, and they always occupy the top of the list, pushing out the .env a person
- * actually needs to see.
+ * Only .DS_Store is filtered out: every macOS repository has dozens, none is worth copying, and they would push the
+ * .env a person needs to see off the top of the list.
  */
 export async function gitIgnoredEntries(
   cwd: string,
@@ -393,11 +367,8 @@ export async function gitIgnoredEntries(
     .filter((p) => !p.endsWith('.DS_Store'))
   if (paths.length === 0) return []
 
-  /*
-   * The size is included, because the judgment a person actually makes from this list is
-   * "this one is too big." If measuring takes too long the list is returned without sizes (the
-   * size is only a nicety, and it would be backwards for that to freeze the window).
-   */
+  // Sizes, because "this one is too big" is the judgment made from this list; a measure that takes too long returns the
+  // list without sizes rather than freezing the window
   const listed = paths.slice(0, limit)
   const sizes = traitsFor().measuresWithDu ? await duSizes(cwd, listed) : await walkedSizes(cwd, listed)
 
@@ -411,14 +382,11 @@ export async function gitIgnoredEntries(
  * The branch list. Whether a branch is remote is decided by the prefix of its **full ref name**
  * (#175).
  *
- * This used to take `%(refname:short)` and call it remote whenever the name had a `/`. But a
- * short name does not add `remotes/` to `origin/main`, and shortens `refs/remotes/origin/HEAD`
- * to plain `origin` — so remote branches got mixed into the local column, `origin` passed itself
- * off as a local branch, and a local branch like `feature/login` was sorted as remote. A full
- * name (`refs/heads/…`, `refs/remotes/…`) is never shortened, so its prefix is the answer.
- * A remote's `HEAD` is excluded because it is not a branch but an alias pointing at the default
- * branch. A line that is not a ref at all, like the detached HEAD line, is excluded too — taking
- * it for a branch would make a push try to create an upstream named "(HEAD detached at …)".
+ * Not `%(refname:short)` with "has a `/`": a short name leaves `remotes/` off `origin/main`, shortens
+ * `refs/remotes/origin/HEAD` to `origin` (read as local), and the local `feature/login` would read as remote. A full name
+ * (`refs/heads/…`, `refs/remotes/…`) is never shortened, so its prefix is the answer.
+ * A remote's `HEAD` is excluded: it is an alias for the default branch. A line that is not a ref (the detached HEAD
+ * line) is excluded too, or a push would try to create an upstream named "(HEAD detached at …)".
  */
 export async function gitBranches(cwd: string): Promise<GitBranch[]> {
   if (!(await isRepo(cwd))) return []

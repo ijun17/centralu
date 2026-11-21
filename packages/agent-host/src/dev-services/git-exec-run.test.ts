@@ -200,8 +200,8 @@ ${shPath(process.execPath)} ${shPath(program)}
 })
 
 /*
- * #982 review: SIGKILL alone left `.git/index.lock` behind (git removes it on SIGTERM), so the next commit or stage
- * was refused. A commit with `-a` holds the lock while its pre-commit hook runs. Windows has no SIGTERM: `taskkill /F`
+ * SIGKILL alone leaves `.git/index.lock` behind (git removes it on SIGTERM), so the next commit or stage would be
+ * refused. A commit with `-a` holds the lock while its pre-commit hook runs. Windows has no SIGTERM: `taskkill /F`
  * leaves the lock as SIGKILL does, so the lock is checked off Windows only.
  */
 describe('a git that is stopped takes its lock away (#982)', () => {
