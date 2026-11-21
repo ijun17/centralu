@@ -127,20 +127,17 @@ describe('"to" as a name (#2039)', () => {
   const sentTo = (w: ReturnType<typeof world>, from: string) => w.store.mailbox.recipients(w.store.mailbox.feedOf(at(from), { limit: 1 })[0]!.id)[0]!.recipient
   const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name or its id (<computer>.<id> on another computer), or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").'
 
-  it("a session's name, in any case, reaches it as its id does", () => {
+  it("a session's name, in any case, reaches it as its id does; its address, which no tool prints, is refused with the id to write", () => {
     const w = world()
     for (const to of ['beta', 'Beta', ' BETA ', 'b']) {
       expect(w.run('a', { action: 'send', to, text: `hi ${to}` }).isError).toBeUndefined()
       expect(sentTo(w, 'a')).toBe(B)
     }
-  })
-
-  it('a session\'s address, which no tool prints, is refused with the id to write, and nothing is written', () => {
-    const w = world()
+    const sent = w.store.mailbox.feedOf(A, { limit: 10 }).length
     for (const [to, id] of [[B, 'b'], [`session:${HOST}/Beta`, 'Beta'], ['session:hub-bbbbbbbb/z', 'hub-bbbbbbbb.z']] as const) {
       expect(w.run('a', { action: 'send', to, text: 'x' })).toEqual({ text: `Refused (bad_address): "${to}" is a mail address, which tools do not take. For that session, write "${id}". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".`, isError: true })
     }
-    expect(w.store.mailbox.feedOf(A, { limit: 1 })).toEqual([])
+    expect(w.store.mailbox.feedOf(A, { limit: 10 })).toHaveLength(sent)
   })
 
   it('a name no session has is refused as unknown, saying what an address looks like, never as gone', () => {
@@ -177,7 +174,7 @@ describe('"to" as a name (#2039)', () => {
   })
 
   // The child's host has no row of its parent, which lives on the hub: no name or address it can write names it, and the refusal says why instead of "gone"
-  it('a child started from a linked computer that writes the name of its parent is told how to find it', () => {
+  it('a child started from a linked computer that writes the name of its parent is told how to find it; that name made an address is refused as one', () => {
     const child = hostWorld({ fromHub: ['b'] })
     stops.push(() => child.stop())
     for (const to of ['Hub Parent', 'hubparent']) {
@@ -188,6 +185,7 @@ describe('"to" as a name (#2039)', () => {
       expect(r.text).toContain('Find one on any computer with mail(action="find", to="<words>").')
       expect(r.text).not.toMatch(/gone|Not a mail address|bad_address/)
     }
+    expect(child.tool.run('b', { action: 'send', to: `session:${HOST}/hubparent`, text: 'checkpoint' }).text).toMatch(/^Refused \(bad_address\): "session:\S+" is a mail address/)
   })
 })
 
