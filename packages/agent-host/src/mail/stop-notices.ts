@@ -127,9 +127,9 @@ export class StopNotices {
       this.d.records.markTold(rows, this.d.now())
       const told = new Set(senders)
       if (end.first && tellsStarter && starter) told.add(starter)
-      const name = this.d.reach.labelOf(address)
       for (const to of told) {
         if (parseAddress(to)?.kind !== 'session') continue
+        const name = this.d.reach.labelOf(address, to)
         this.d.notice(to, {
           kind: 'notice',
           // One wording per way it went on (ux-writing.md §3): Centralu's note, or a turn of its own (the person's Continue, mail it was given)
@@ -275,7 +275,7 @@ export class StopNotices {
     const words = new Map(stopped.flatMap((r) => { const w = this.quoteFor(r, sender, cutTurn(r)); return w ? [[r, w] as const] : [] }))
     const written = this.d.notice(sender, {
       kind: 'notice',
-      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient), shown: this.d.reach.shownId(u.recipient) })), kind === 'person', words),
+      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient, sender), shown: this.d.reach.shownId(u.recipient, sender) })), kind === 'person', words),
       facts: { unanswered, ...(kind === 'session' && !this.wakes(sender, true) ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
@@ -316,7 +316,7 @@ export class StopNotices {
   private tellStarter(starter: string, stopped: string, why: StopWhy, turnSeq: number | null): void {
     if (parseAddress(starter)?.kind !== 'session') return
     const said = this.quoteFor(stopped, starter, turnSeq)
-    const name = this.d.reach.labelOf(stopped)
+    const name = this.d.reach.labelOf(stopped, starter)
     const written = this.d.notice(starter, {
       kind: 'notice',
       body: `${name}, which you started, stopped: ${STARTER_WORDS[why]}. It owed you no answer. read_session shows where it stopped; send it a message if it should go on.${said ? `

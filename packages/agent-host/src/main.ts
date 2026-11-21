@@ -681,6 +681,7 @@ const hubs: LinkedHubs = new LinkedHubs({
   // A session a hub created here before it offered: recorded under it once it does (#2067)
   record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
   settings: store.settings,
+  machines: () => store.machines.listLinkedMachines().map((m) => m.id),
 })
 const links = new Links(linkDepsFor(store, {
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },

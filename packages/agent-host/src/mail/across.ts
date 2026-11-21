@@ -541,7 +541,7 @@ export class MailAcross extends AcrossReceipts {
     if (from !== CENTRALU) this.names.set(from, p.name ? oneLineText(p.name, 200) : `a session on ${hub.name}`)
     const to = this.d.service.sessionAddress(p.to)
     if (p.task) return this.taskFrom(hub, from, to, { ...p, task: p.task })
-    return this.write(from, to, p, sessionIdOf(this.asHubNames(hub.id, to)) ?? undefined)
+    return this.write(from, to, p)
   }
 
   /**
@@ -557,9 +557,8 @@ export class MailAcross extends AcrossReceipts {
     if (p.id === undefined || !FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: 'a task from another computer comes with the id it gave it.' }
     if (this.lacked.get(hub.id)?.has(p.id)) return { ok: false, why: 'not_allowed', text: `${this.selfName()} told ${hub.name} when the link came back that this task never arrived, so it was not written now. Give it again.` }
     const had = this.d.records.message(p.id)
-    if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
-    // A session gone from here has no name left here: the sender knows which it gave the work to
-    if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === this.d.reach.shownId(to) ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
+    if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to, from), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
+    if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to, from)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
       const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
       return { ok: true, messageId: m.id, to: this.label(to), address: to }
@@ -598,20 +597,18 @@ export class MailAcross extends AcrossReceipts {
    * Centralu, which `fromHub` alone passes (a hub writes its own notices on the machines it links), is written as a notice
    * of Centralu's. A notice from the other side's session or machine is that side's message, never Centralu's, and is
    * taken only for a session here that mailed that side: the "no longer watched" notice it passes on is about such mail.
-   * `seen`: the id the sender's side shows for `to`, which a refusal names; without it, "that session"
    */
   private write(
     from: string,
     to: string,
     p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined; subject?: string | undefined; choices?: string[] | undefined },
-    seen?: string,
   ): HubMailResult & { address?: string } {
     if (p.id !== undefined) {
       if (!FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is not an id another computer may give a message.` }
       // Sent again after its answer was lost: the message written then is this one
       const had = this.d.records.message(p.id)
       if (had) {
-        if (had.sender === from && this.d.records.recipient(p.id, to)) return { ok: true, messageId: p.id, to: this.label(to), address: to }
+        if (had.sender === from && this.d.records.recipient(p.id, to)) return { ok: true, messageId: p.id, to: this.label(to, from), address: to }
         return { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
       }
     }
@@ -624,7 +621,7 @@ export class MailAcross extends AcrossReceipts {
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
-        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to)} did not, so nothing was written.` }
+        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
       }
       const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
       return { ok: true, messageId: sent.message.id, to: this.label(to), address: to }
@@ -636,7 +633,7 @@ export class MailAcross extends AcrossReceipts {
         ? // The service names the session by this host's id, which the sender never used; the person reads it by its name
           isPerson(from)
           ? `${this.label(to)} on ${this.selfName()} is in the session archive there or was deleted, so your answer was not sent.`
-          : `${seen ? oneLineText(seen, 200) : 'That session'} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
+          : `${this.d.reach.shownId(to, from)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
         : lost
         ? `${this.selfName()} has no record of ${oneLineText(p.replyTo ?? '', 200)}: it most likely reached you while the link failed during its sending, so ${this.selfName()} never kept its copy, and nothing was written. Send your answer again as a new message (without replying to that one), saying what it answers.`
         : why

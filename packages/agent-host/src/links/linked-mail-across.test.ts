@@ -226,6 +226,12 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     await eventually(() => machine.store.mailbox.recipient(id, at(hub, 'h1'))?.releasedAt != null)
     expect(machine.store.mailbox.releasedUntold(at(machine, 'c1'))).toEqual([])
     expect(hub.store.mailbox.recipients(hub.store.mailbox.feedOf(at(hub, 'm1.c1'), { limit: 10 })[0]?.id ?? '').map((r) => r.deliveredAt !== null)).toEqual([true])
+    // It names the parent by the id the child's tools print for it, and read back as that session (gone)
+    const notice = machine.store.mailbox.feedOf(at(machine, 'c1'), { limit: 10 }).find((m) => m.sender === 'centralu')!
+    expect(notice.body).toContain(`${id} to hub-mac.h1: that session is gone.`)
+    expect((await tool(machine, 'c1', { action: 'send', to: 'hub-mac.h1', text: 'still there?' })).text).toBe(
+      'Refused (gone): hub-mac.h1 is gone from Hub mac: it is in the session archive there or deleted, so nothing was written.',
+    )
   })
 
   it('a session gone from its computer is refused by the id the sender used, and the computer it was on', async () => {
@@ -235,6 +241,17 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
       text: `Refused (gone): m1.w1 is gone from Remote box: it is in the session archive there or deleted, so nothing was written.`,
       isError: true,
     })
+  })
+
+  it('a session gone from its computer is named to the hub by the id the hub reads back, when its mail or task is sent again or a notice is refused', async () => {
+    const { machine, hub } = await rig()
+    const from = { id: hub.id, name: hub.name }
+    const sent = { from: at(hub, 'h1'), to: 'w1', text: 'still there?', id: `${hub.id}.m_01JX000000000000000000000S` }
+    const task = { ...sent, id: `${hub.id}.m_01JX000000000000000000000T`, task: { origin: 'agent_session' as const } }
+    for (const p of [sent, task]) expect(machine.mail!.across.fromHub(from, p)).toMatchObject({ ok: true, to: 'w1' })
+    await machine.mgr.trash.trashSession('w1')
+    for (const p of [sent, task]) expect(machine.mail!.across.fromHub(from, p)).toMatchObject({ ok: true, messageId: p.id, to: 'm1.w1' })
+    expect(machine.mail!.across.fromHub(from, { from: sent.from, to: 'w1', text: 'noted', notice: true })).toMatchObject({ ok: false, why: 'not_allowed', text: expect.stringContaining(', and m1.w1 did not,') })
   })
 
   it("a session of an untrusted project is refused across at once: nothing waits for the person over a link", async () => {

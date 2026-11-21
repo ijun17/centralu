@@ -77,6 +77,22 @@ export function hubLabel(name: string, machines: Iterable<string>): string {
   return unique(slugOf(name) ?? 'hub', new Set([...machines, ...ROLE_WORDS])) ?? 'hub'
 }
 
+/** This hub's own label (`hubLabel`) over every machine it links: what its offer gives them and its mail writes for them. null on a host that is no hub */
+export function ownHubLabel(d: { hubSelf?: () => { name: string }; registry: { list(): readonly { id: string }[] } }): string | null {
+  const self = d.hubSelf?.()
+  return self ? hubLabel(self.name, d.registry.list().map((r) => r.id)) : null
+}
+
+/**
+ * The label this host shows a hub that links it under: the one it offered (made from its name when an older hub offered none), suffixed as
+ * `hubLabel` does when it is one of `taken` (this host's own machines' ids, which `<label>.<id>` would name first). Worked out at each read from
+ * what is kept (the offer, this host's machines), so it holds across restarts while neither changes
+ */
+export function labelHere(offered: string | null, name: string, taken: Iterable<string>): string {
+  const t = new Set([...taken, ...ROLE_WORDS])
+  return (offered === null ? null : unique(offered, t)) ?? hubLabel(name, t)
+}
+
 function slugOf(name: string): string | null {
   const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 24)
   return slug && MACHINE_ID_RE.test(slug) ? slug : null

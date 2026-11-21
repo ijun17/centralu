@@ -135,7 +135,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(task).toMatchObject({ origin: 'ask_project', facts: { agentDepth: 1 } })
     expect(hub.store.mailbox.recipient(task.id, at.hub('h1'))?.deliveredAt).toBeNull()
     free()
-    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: `${hub.id}.h1`, answer: expect.stringContaining('review the branch') })
+    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: 'hub-mac.h1', answer: expect.stringContaining('review the branch') })
     // The answer carried the report: none crosses after it, and the machine keeps no copy
     expect(machine.store.mailbox.message(task.id)).toBeUndefined()
     const [report] = hub.store.mailbox.reportsOn(task.id)
@@ -147,7 +147,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     pairApproved()
     const free = await busy(hub.mgr, 'h1')
     const r = await machine.ask({ project: 'hub-project', task: 'review the branch' })
-    expect(r).toMatchObject({ ok: true, state: 'working', sessionId: `${hub.id}.h1` })
+    expect(r).toMatchObject({ ok: true, state: 'working', sessionId: 'hub-mac.h1' })
     const task = taskTo(hub, at.hub('h1'), at.hub('m1.w1'))!
     expect(machine.store.mailbox.message(task.id)).toMatchObject({ kind: 'task', origin: 'ask_project', sender: at.machine('w1') })
     expect(machine.store.mailbox.recipients(task.id)).toEqual([expect.objectContaining({ recipient: at.hub('h1') })])
@@ -175,6 +175,35 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).not.toBeNull()
   })
 
+  it('refuses a project two hubs that share a label both have, naming both, and names a hub that is away by its id as older builds printed it', async () => {
+    const machine = await machineHost({ mail: 'delivered' })
+    const web = (hubId: string, hub: string) => ({ id: `studio.p-${hubId}`, projectId: `p-${hubId}`, name: 'web', hub, hubId, label: 'studio' })
+    const ask = vi.fn(async (): Promise<HubAskResult> => ({ ok: false, error: 'asked' }))
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [web('hub-0000000b', 'Studio'), web('hub-0000000c', 'Studio 2')], away: [{ hubId: 'hub-0000000d', hub: 'Desk', label: 'desk', why: 'not reachable right now' }] }), ask })
+    for (const project of ['web', 'studio/web']) {
+      expect(await machine.ask({ project, task: 'review it' }), project).toMatchObject({ ok: false, error: expect.stringMatching(/^More than one project is called "(studio\/)?web": web \[studio\.p-hub-0000000b\] on Studio; web \[studio\.p-hub-0000000c\] on Studio 2\./) })
+    }
+    expect(await machine.ask({ project: 'hub-0000000d/web', task: 'review it' })).toMatchObject({ ok: false, error: expect.stringContaining('Desk is not reachable right now') })
+    expect(ask).not.toHaveBeenCalled()
+  })
+
+  it('waits on a kept ask only for the hub and the session it went to, when two hubs share a label', async () => {
+    const machine = await machineHost({ mail: 'delivered' })
+    const [a, b] = ['hub-0000000b', 'hub-0000000c']
+    const of = (hubId: string, name: string) => ({ id: `studio.p-${name}`, projectId: `p-${name}`, name, hub: hubId, hubId, label: 'studio' })
+    const ask = vi.fn(async (hubId: string, p: { task?: string }): Promise<HubAskResult> =>
+      p.task ? { ok: true, state: 'working', project: 'web', sessionId: 'h1', sessionName: 'Helper', taskId: `${a}.m_01J0000000000000000000000001` } : { ok: false, error: `asked ${hubId}` })
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [of(a, 'web'), of(b, 'api')], away: [] }), ask })
+    expect(await machine.ask({ project: 'web', task: 'review it' })).toMatchObject({ ok: true, state: 'working' })
+    // Hub B's project, or another session of hub A's, is asked there: the ask kept on hub A's h1 is not its answer
+    expect(await machine.ask({ project: 'api' })).toEqual({ ok: false, error: `asked ${b}` })
+    expect(await machine.ask({ project: 'web', session: 'studio.h2' })).toEqual({ ok: false, error: `asked ${a}` })
+    expect(ask).toHaveBeenCalledTimes(3)
+    // Its own session is waited on here, not asked again (a call already cancelled, so the wait ends at once)
+    expect(await machine.ask({ project: 'web', session: 'studio.h1' }, AbortSignal.abort())).toEqual({ ok: false, error: expect.stringMatching(/^The call was cancelled; studio\/web's session ".+" was left running\.$/) })
+    expect(ask).toHaveBeenCalledTimes(3)
+  })
+
   it('of a hub that says no task id (an older build), keeps nothing, and asks that hub again for the answer', async () => {
     const machine = await machineHost({ mail: 'delivered' })
     const answers: HubAskResult[] = [
@@ -182,7 +211,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
       { ok: true, state: 'done', project: 'web', sessionId: 'h1', sessionName: 'Helper', answer: 'reviewed' },
     ]
     const ask = vi.fn(async () => answers.shift()!)
-    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [{ id: 'hub-0000000b.p-web', projectId: 'p-web', name: 'web', hub: 'Old hub', hubId: 'hub-0000000b' }], away: [] }), ask })
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [{ id: 'old-hub.p-web', projectId: 'p-web', name: 'web', hub: 'Old hub', hubId: 'hub-0000000b', label: 'old-hub' }], away: [] }), ask })
     expect(await machine.ask({ project: 'web', task: 'review it' })).toMatchObject({ ok: true, state: 'working' })
     expect(machine.store.mailbox.feedOf(sessionAddress('hub-0000000b', 'h1'), { limit: 5 })).toEqual([])
     expect(await machine.ask({ project: 'web' })).toMatchObject({ ok: true, state: 'done', answer: 'reviewed' })

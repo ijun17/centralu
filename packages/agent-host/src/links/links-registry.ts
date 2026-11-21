@@ -9,7 +9,7 @@ import type {
 } from '@cc/protocol'
 import { probeTarget } from './probe.js'
 import { listSshHosts, resolveAlias, type ResolvedHost } from './ssh-config.js'
-import { hubLabel, qualifiedMachine, newMachineId } from './machine-ids.js'
+import { ownHubLabel, qualifiedMachine, newMachineId } from './machine-ids.js'
 import { dataDirError, wslDistroError, type RemoteSpec } from './tunnel.js'
 import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
@@ -48,6 +48,11 @@ export class Links {
     return at && (at.machine.lastKnown('projects') ?? []).some((p) => isObj(p) && p.id === at.id) ? at.machine.id : null
   }
 
+  /** The prefix this hub's own sessions go under on its machines (`ownHubLabel`); null on a host that is no hub */
+  label(): string | null {
+    return ownHubLabel(this.deps)
+  }
+
   /** Whether a machine id is one the person linked */
   linked(machine: string): boolean {
     return this.machines.has(machine)
@@ -73,10 +78,10 @@ export class Links {
     if (!trimmed.sshTarget || trimmed.sshTarget.startsWith('-') || /\s/.test(trimmed.sshTarget)) {
       throw rpcError('Not an ssh target: use a host alias from ~/.ssh/config, or user@host')
     }
-    // Never the prefix this hub's own sessions go under on its machines (`hubLabel`), which the new id would then name too
-    const self = this.deps.hubSelf?.()
+    // Never the prefix this hub's own sessions go under on its machines, which the new id would then name too
+    const own = this.label()
     const taken = new Set(this.machines.keys())
-    if (self) taken.add(hubLabel(self.name, taken))
+    if (own) taken.add(own)
     const record = this.deps.registry.add({ id: newMachineId(trimmed.name, taken), ...trimmed, remote, addedAt: Date.now(), acceptedVersions: null })
     return this.startOne(record).info()
   }
