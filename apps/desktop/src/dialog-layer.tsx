@@ -7,7 +7,7 @@ import { useOpenLayer } from '@cc/ui'
  * it takes the keyboard when it opens and gives it back when it closes (useOpenLayer), Esc cancels,
  * and Tab stays inside it. The quit dialog keeps its own Enter/Esc handling and counts its layer itself.
  */
-export function useDialogLayer(box: RefObject<HTMLElement | null>, onCancel?: () => void): void {
+function useDialogLayer(box: RefObject<HTMLElement | null>, onCancel?: () => void): void {
   useOpenLayer()
   useEffect(() => {
     if (!onCancel) return

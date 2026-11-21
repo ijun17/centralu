@@ -115,7 +115,7 @@ export function RestartKeeperDialog({ loses, onCancel, onConfirm }: { loses: str
 }
 
 /** "build abc1234 (0.1.0-beta.6) from /Applications/Centralu.app" — what a person can check against what they installed */
-export function describeBuild(b: ShellHostBuild['host']): string {
+function describeBuild(b: ShellHostBuild['host']): string {
   if (!b) return 'an unknown build'
   const version = b.version ? ` (${b.version})` : ''
   const from = b.bundlePath ? ` from ${b.bundlePath}` : ''

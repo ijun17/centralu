@@ -131,7 +131,7 @@ async function fetchPackage(app: PublicApp): Promise<string> {
  * (the default, opaque origin, is what is being tested), no `uses`, no `csp`. The command is the
  * package's published bin with its documented `--stdio` flag.
  */
-export function wrapperManifest(app: PublicApp, pkgDir: string): Record<string, unknown> {
+function wrapperManifest(app: PublicApp, pkgDir: string): Record<string, unknown> {
   return {
     manifestVersion: 1,
     id: app.id,

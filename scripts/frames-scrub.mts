@@ -67,7 +67,7 @@ const RECORDER_FOLDER = /\bframes-(?:data|raw|record-[a-z-]+?)-[A-Za-z0-9]{6}\b/
 /** The kinds of update whose text an agent streams in pieces */
 const CHUNKED = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
 
-export type ScrubPlaces = {
+type ScrubPlaces = {
   cwd: string
   home?: string
   tmp?: string
@@ -114,7 +114,7 @@ function spans(s: string, places: Places): { start: number; end: number; with: s
 }
 
 /** `pieces` scrubbed as the one text they make, each kept where it was: a replacement goes in the piece it starts in */
-export function scrubPieces(pieces: readonly string[], places: ScrubPlaces, json = false): string[] {
+function scrubPieces(pieces: readonly string[], places: ScrubPlaces, json = false): string[] {
   const all = withDefaults(places)
   const joined = pieces.join('')
   const found = spans(joined, all)
