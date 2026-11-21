@@ -3081,8 +3081,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await there.tenure.disposeAll()
     await remoteHost(remote.port, remoteStore, { mail: true })
     await eventually(() => status(hub) === 'connected' && hub.links.get('m1')?.takesTasks === true)
+    /*
+     * Two writers, in no set order: the task released there on the deletion crosses back by the receipts and frees the place; the record goes once
+     * the link's resync has read the machine's sessions (`RemoteAgents.caughtUp`). A child at rest keeps its record and holds no place, so each is
+     * waited for
+     */
     await eventually(() => ceiling() === null)
-    expect(records()).toEqual([])
+    await eventually(() => records().length === 0)
     // A child of a machine then removed from Centralu holds no place either
     await begin('please approve this one too')
     expect(ceiling()).toContain('already working')
