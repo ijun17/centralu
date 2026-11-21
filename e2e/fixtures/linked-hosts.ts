@@ -13,7 +13,7 @@ import { freePort, homeEnv, spawnHost, type SpawnedHost } from './real-host.js'
  */
 
 export const LINKED_TOKEN = 'e2e-linked-token'
-export const LINKED_UI_ORIGIN = 'http://127.0.0.1:5179'
+const LINKED_UI_ORIGIN = 'http://127.0.0.1:5179'
 export const LINKED_RELAY_PORT = 5180
 export const MACHINE = 'm1'
 

@@ -25,7 +25,7 @@ import { environmentValues } from '../../packages/agent-host/src/os/process-env.
 const root = fileURLToPath(new URL('../../', import.meta.url))
 
 export const RECOVERY_TOKEN = 'e2e-recovery-token'
-export const RECOVERY_UI_ORIGIN = 'http://127.0.0.1:5177'
+const RECOVERY_UI_ORIGIN = 'http://127.0.0.1:5177'
 export const RECOVERY_RELAY_PORT = 5178
 
 export type Workspace = { dir: string; db: string; home: string; project: string; cleanup(): void }
@@ -195,7 +195,7 @@ const HOST_MARK = 'CENTRALU_E2E_HOST_RUN'
  * A mark for one host process: `env` goes into the host's environment, and `gone()` waits until no process
  * carrying it is left. Call `gone()` after the host has exited, and remove the host's folders only after it.
  */
-export function hostRun(): { env: Record<string, string>; gone(): Promise<void> } {
+function hostRun(): { env: Record<string, string>; gone(): Promise<void> } {
   const run = randomUUID()
   return { env: { [HOST_MARK]: run }, gone: () => gone(run) }
 }

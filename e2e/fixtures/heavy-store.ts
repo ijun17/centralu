@@ -78,7 +78,7 @@ export const PROFILES: Record<StoreProfile, ProfileSpec> = {
   },
 }
 
-export type SeededSession = {
+type SeededSession = {
   id: string
   name: string
   projectId: string

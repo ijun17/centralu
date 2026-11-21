@@ -189,7 +189,7 @@ export async function watchDrags(page: Page) {
   })
 }
 
-export const seenDrags = (page: Page) =>
+const seenDrags = (page: Page) =>
   page.evaluate(() => (window as any).__drags as { effect: string | null; drops: number })
 
 /** What the project screen remembers for a project (the store's `projectPanels`) */
