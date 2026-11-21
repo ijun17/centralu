@@ -130,11 +130,7 @@ export const AdapterCapabilities = z.object({
   backgroundTasks: z.boolean().default(false),
   /** Whether send accepts input during a running turn without interrupting it (#592). Absent is unsupported. */
   midTurnInput: z.boolean().optional(),
-  /**
-   * Every step of the CLI's own that is not a read can go to the host's card in a turn the host names, whatever the
-   * preset (#1447). Claude: a `PreToolUse` hook sees every call in every mode (measured: a narrower mode alone leaves out
-   * the tools that need no permission). Absent: false, and another session cannot ask for a session of this tool
-   */
+  /** Sent by older hosts and read by nobody; it stays because removing a field is a version increment (docs/protocol.md §4) */
   gatesSteps: z.boolean().optional(),
   /** Can defer single Centralu tool definitions until the model asks; the host counts a kept process's prefix by it */
   toolDeferral: z.boolean().optional(),

@@ -19,7 +19,6 @@ import { ClaudeServers } from './session-servers.js'
 import { editAskRuleExists, isCentraluToolName, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
-import { requestTurnHooks } from './request-hook.js'
 import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { TURN_START_MS, TurnStartWait } from './turn-start.js'
@@ -259,7 +258,6 @@ export class ClaudeSession implements SessionHandle {
         codeIntelligence,
         spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = startToolProcess(o, { sessionId: this.sessionId }))),
         canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
-        hooks: requestTurnHooks(this.opts, () => this.servers.centraluToolsServer !== null),
       }),
     }))
     // A usage probe (#726) is not a session anyone else may borrow: a model list asked meanwhile would use a query about to close

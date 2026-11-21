@@ -51,10 +51,9 @@ then who may call it:
   and the same presets as Claude and Codex, through the same bridge credential as Centralu's other tools (it names the
   session, and the host counts that session's apps). An ACP agent's own permission requests
   (`session/request_permission`) cover its own tools only, and its adapter reads no bypass of the person's
-  (`bypassesApprovals` absent), so under `normal` and `edits` every app tool that does not only read asks. The request
-  gate (`whenAsked`, #1447) applies to an app call as to any step when the session is the Assistant in a turn another
-  session's request started, whatever its CLI (`bridge-apps.test.ts` "under normal, its write raises the host card and
-  runs only on Allow; a Deny runs nothing"). Its Stop cancels the session's app calls and withdraws a card standing for
+  (`bypassesApprovals` absent), so under `normal` and `edits` every app tool that does not only read asks
+  (`bridge-apps.test.ts` "under normal, its write raises the host card and runs only on Allow; a Deny runs nothing").
+  Its Stop cancels the session's app calls and withdraws a card standing for
   one, with or without a turn running, and closing the session closes its apps, as on Claude and Codex
   (`acp/session.test.ts` "the Stop cancels the session's app calls…").
 - A project's session reaches another project's app only by attaching it (#371 part A, apps/other-projects-apps.md),

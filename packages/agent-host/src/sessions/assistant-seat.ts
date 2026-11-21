@@ -4,7 +4,6 @@ import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import type { Asker } from '../mail/asked-by.js'
 import { heldLine } from '../mail/across-core.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
 import type { ChildOwnership } from './child-ownership.js'
@@ -27,15 +26,13 @@ import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcrip
 /**
  * The preset of a session create_session makes (owner decision 2026-11-05): the one named, or the default a new session
  * gets in that project (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one). Never more than
- * the seat's own permissions (#838), and never above `normal` in an untrusted project, named or not. In a turn a
- * session's request started (`asker`), the default is also held to that session's preset, so the work handed on is no
- * looser than the asking session and takes no card (#1739). A default above a cap is held to it; a preset named above
- * one is refused (null). It used to be `normal` at most whatever was asked.
+ * the seat's own permissions (#838), and never above `normal` in an untrusted project, named or not. A default above
+ * the cap is held to it; a preset named above it is refused (null).
  */
-export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset, asker?: PermissionPreset): PermissionPreset | null {
+export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset): PermissionPreset | null {
   const cap = project.trusted ? seat : lowestPreset('normal', seat)
   if (named !== undefined) return presetWithin(named, cap) ? named : null
-  return lowestPreset(defaultPresetFor(project), cap, ...(asker ? [asker] : []))
+  return lowestPreset(defaultPresetFor(project), cap)
 }
 
 /**
@@ -66,8 +63,6 @@ export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   ): Promise<SessionInfo & { applied: SettingsApplied }>
   createSession(params: { projectId: string; cwd: string; tool: ToolName | null; permissionPreset: PermissionPreset }): Promise<SessionInfo>
   firstTool(preferred?: ToolName | null): ToolName | null
-  /** The session whose request the Assistant's turn is answering, if one (#1739, `AskedGateHost.askedBy`); absent where it is not wired */
-  askedBy?(assistantId: string): Asker | null
   rename(sessionId: string, name: string): void
   send(sessionId: string, text: string, attachments?: Attachment[], from?: { sessionId: string; name: string }): Promise<void>
   routedCards(sessionId: string, callerId: string): RoutedCard[]
@@ -360,10 +355,7 @@ export function centraluToolsFor(
       const target = remote[0] ?? local[0]
       // A linked machine's project as that machine says; one here as this host reads it now
       const trusted = remote[0] ? remote[0].trusted === true : host.projectTrusted(target?.id ?? null)
-      const asker = host.askedBy?.(assistantId)
-      // Held to the lowest asking session's preset: a turn with two askers (which fails closed) holds to the lower of them
-      const askerPreset = asker ? lowestPreset(...[asker, ...(asker.also ?? [])].map((a) => host.meta.get(a.sessionId)?.permissionPreset ?? 'safe')) : undefined
-      const preset = createdPreset(own, { trusted }, opts.preset, askerPreset)
+      const preset = createdPreset(own, { trusted }, opts.preset)
       if (preset === null) {
         return {
           ok: false,

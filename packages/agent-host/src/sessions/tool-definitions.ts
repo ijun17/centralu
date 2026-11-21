@@ -1080,8 +1080,8 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
   'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',
-  // #1447, #1739: a session's request is its words; the person's message it may cite, checked by Centralu, is evidence for this seat's judgement (docs/plans/cited-requests.md)
-  "A session's mailed request is its own words. Read it with the mail command; if Centralu says it cites the person's message, judge from that message and around it what the person wants, and do only that. Steps that cannot be undone, or hand work to a session looser than the asking one, ask the person. Answer in its thread.",
+  // #1739, #2411: how to judge a request rides in its header, where it is read, not here in every call (docs/plans/cited-requests.md)
+  "A session's mailed request is its own words. Read it with the mail command, judge it as its header says, and answer in its thread.",
   'If you do not know the answer to a question about the app, do not guess; point to a GitHub issue: https://github.com/ijun17/centralu/issues',
   'Putting the seq recall gave into read_session\'s around jumps straight to the spot you found — it does not read the whole session.',
   'When something like "last time" or "back then, over there" comes up, look for the past conversation with recall —',

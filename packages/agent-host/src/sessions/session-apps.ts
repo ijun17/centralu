@@ -202,17 +202,6 @@ export class SessionAppsHub {
       /** A project's name, for the name of a later app with an id another app of the session already has */
       projectName?: (projectId: string) => string | undefined
       /**
-       * Asks the person before an app tool runs when the session's turn is a session's request (§9.7, #1447): the one door every call of an agent
-       * passes through, whatever the CLI and its preset. It runs `run` at once in any other turn
-       */
-      whenAsked?: (
-        sessionId: string,
-        call: { name: string; args: Record<string, unknown>; readOnly?: boolean },
-        signal: AbortSignal | undefined,
-        run: () => Promise<AppToolResult>,
-        refused: (text: string) => AppToolResult,
-      ) => Promise<AppToolResult>
-      /**
        * The person's say on an app tool that does not run unasked (#2231, decision 5): the host decides at the call, with
        * its arguments, on every CLI. Absent only in tests that run no card, where every call runs
        */
@@ -557,8 +546,8 @@ class Attachment implements SessionAppAttachment {
 
   /**
    * One call of the `app` tool (#2231), in order: the app must be this session's now; the tool must exist and the arguments
-   * fit its schema, or the answer is the schema and nothing runs; a session's request turn asks the Assistant's person
-   * (`whenAsked`, #1447); the person's card where the preset asks (`approve`); then the runtime's one call path.
+   * fit its schema, or the answer is the schema and nothing runs; the person's card where the preset asks (`approve`); then
+   * the runtime's one call path.
    */
   async call(server: string, tool: string, args: Record<string, unknown>, opts: AppCallOpts = {}): Promise<AppToolResult> {
     let hit = this.closed ? null : this.find(server)
@@ -593,16 +582,9 @@ class Attachment implements SessionAppAttachment {
     this.inflight.add(abort)
     const deadline = opts.waitMs ? Date.now() + opts.waitMs : null
     const left = () => (deadline === null ? undefined : Math.max(1_000, deadline - Date.now()))
-    const run = async (): Promise<AppToolResult> => {
-      const refused = await this.approve(server, tool, args, abort.signal, left())
-      return refused ? failure(refused) : this.callNow(server, tool, args, { signal: abort.signal, waitMs: left(), callId: opts.callId })
-    }
     try {
-      const gate = this.hub.opts.whenAsked
-      if (!gate) return await run()
-      // Named with a dot so no app tool can pass for one of the Assistant's own reading tools or undoable commands
-      const call = { name: `${server}.${tool}`, args, ...(this.readOnly(server, tool) ? { readOnly: true as const } : {}) }
-      return await gate(this.session.id, call, abort.signal, run, failure)
+      const refused = await this.approve(server, tool, args, abort.signal, left())
+      return refused ? failure(refused) : await this.callNow(server, tool, args, { signal: abort.signal, waitMs: left(), callId: opts.callId })
     } finally {
       this.inflight.delete(abort)
       opts.signal?.removeEventListener('abort', onUp)

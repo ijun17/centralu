@@ -82,8 +82,7 @@ read), `notListed` still refuses it, so it never runs without the person's say.
 
 **Approval is the host's, at the call, with the real arguments**, the same on every CLI (`Attachment.approve`). In order:
 
-1. The Assistant in a turn a session's request started (#1447): the request gate (`whenAsked`), as before; it knows
-   whether the tool only reads. `list` never asks: it only reads.
+1. `list` never asks: it only reads. A turn a session's request started is the Assistant's own turn here (#2411).
 2. A tool that runs unasked (`readOnlyHint`, `centralu/risk` `local`, or `routine` in the session's own project's app
    under `normal`, `tool-risk.ts`): no card. `askWhen`/`askUnless` are read with the call's arguments on Codex too.
 3. Otherwise the session's preset, read at the call (`presetAsks`):

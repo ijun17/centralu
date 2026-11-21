@@ -61,7 +61,6 @@ describe('deleting a session while it holds work in the mailbox', () => {
   it('a request to the Assistant’s role outlives the Assistant put in the trash: the next Assistant made gets it, delivered afresh (D15)', async () => {
     const asker = await create()
     const orc = await world.mgr.assistant()
-    world.adapter.capabilities.gatesSteps = true
     expect(m.tool.run(asker.id, { action: 'send', to: 'assistant', text: 'Can you look at CI?' }).text).toContain('Sent')
     const request = read.between(addressOf(asker.id), addressOf(orc.id))[0]!
     await world.rpc('agents.deleteSession', { sessionId: orc.id })

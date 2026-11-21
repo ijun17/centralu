@@ -585,8 +585,8 @@ The permission presets:
 | `edits` (#1525) | `auto` for `kind: edit` calls inside the session's folder, a card for the rest (a `delete` or a `move` is not an edit, as for Codex) |
 | `safe` | needs the tool to ask before every write and command. OpenCode: through `OPENCODE_CONFIG_CONTENT` (measured; §0.7). Cursor: no per-process switch found yet; until one is, Cursor does not offer `safe` (open question 3) |
 
-`capabilities.gatesSteps` is false: ACP has no hook before every tool call, so an ACP session cannot be the
-orchestrator answering a session's request (#1447). That is the existing rule for a tool that cannot gate steps.
+An ACP session can be the Assistant answering a session's request: since #2411 no tool needs a hook before every
+tool call for that.
 
 ### 5.4 Input during a turn
 
@@ -679,7 +679,6 @@ Values for the ACP adapter, decided per profile and, where marked, from the `ini
 | `exclusiveWriter` | false | ACP promises no lock |
 | `backgroundTasks`, `builtInSubagents` | false | until PR 2 |
 | `midTurnInput` | false | §5.4 |
-| `gatesSteps` | false | §5.3 |
 | `processModel` | `per-session` | §3.1 |
 | `instructionChannel` | `server` | §6 |
 | `sleep` | false | until resume is measured to lose nothing on Cursor |

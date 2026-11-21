@@ -1540,7 +1540,7 @@ project on a linked machine is one; the budgets have no room anyway (`APP_ACCESS
 ### 13.3 The path of a call
 
 One path for every app, wherever it runs. On the calling session's host, `Attachment.call` (session-apps.ts l.562) runs
-as today: find, `notListed`, the schema check, the `whenAsked` gate, `approve`. Only its last step changes: instead of
+as today: find, `notListed`, the schema check, `approve`. Only its last step changes: instead of
 `hub.rt.call` it calls `rtFor(ref).call(...)`, where `rtFor` picks the local `ExternalApps` or `LinkedApps` (new,
 links/linked-apps.ts) by the ref's machine. `LinkedApps` offers the five things `Attachment` and `AppAccess` read from
 the runtime (`list`, `tools`, `knownTools`, `call`, `runs`; 9 uses in session-apps.ts, 4 in app-access.ts), so no

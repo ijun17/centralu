@@ -391,7 +391,7 @@ The card carries the hook's `stepIdx`, which is the stream's `step_index` (measu
 
 | Preset | The gate |
 |---|---|
-| `auto` | allows everything at once (the hook still runs, so `gatesSteps` holds) |
+| `auto` | allows everything at once (the hook still runs) |
 | `edits` (#1525) | allows reads, and edits inside the session's folder; a card for the rest |
 | `normal` | allows reads inside the workspace (agy's own default does the same, per the changelog); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
 | `safe` | a card for everything but reads inside the session's folder |
@@ -406,8 +406,8 @@ bridge, as now.
 
 ### 5.3 Who else answers
 
-`gatesSteps` is true: every tool step, the sub-agents' included, passes the gate whatever the preset, so an `agy`
-session can be the one whose requests go to the orchestrator (#1447).
+Every tool step, the sub-agents' included, passes the gate whatever the preset. An `agy` session can be the Assistant
+answering a session's request, as a session of any tool can (#2411).
 
 ### 5.4 Failure
 
@@ -484,7 +484,6 @@ text has a path (open question 4).
 | Capability | Value | From |
 |---|---|---|
 | `approvals` | true | the gate (§5) |
-| `gatesSteps` | true | the hook sees every tool step, sub-agents' too |
 | `contextUsage` | `none` | no window (§6) |
 | `resume` | true | `--conversation`, survives SIGKILL |
 | `exclusiveWriter` | false | two processes wrote one conversation |

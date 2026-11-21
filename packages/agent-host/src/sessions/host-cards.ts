@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityQuestion } from '../apps/external/runtime.js'
 import type {
@@ -61,12 +60,7 @@ export type HostCardsHost = {
 export class HostCards {
   constructor(private readonly host: HostCardsHost) {}
 
-  /**
-   * A card the host raises in a session's approval slot — requestId -> question: an app's capability question (M4
-   * D-4), or one project reaching another (#371). It uses the same slot as the adapter's card (the session's
-   * `pendingApproval`), so if the adapter's card is already up, this one is raised only after that one closes
-   * (`raiseHostAsks`). The answer (`respondApproval`) never reaches the adapter — it is resolved right here.
-   */
+  /** requestId -> question; raised once the adapter's card in the same slot closes (`raiseHostAsks`) */
   readonly hostAsks = new Map<string, HostAsk>()
 
   /**
@@ -81,32 +75,6 @@ export class HostCards {
   readonly answeredApprovals = new Map<string, string>()
 
   /**
-   * The Allow the person just gave for one call (#1447, `AskedGate`): the Assistant, in a turn a session's request started, runs a step the person
-   * allowed on that session's behalf, and the cards that step raises itself are not raised a second time. It belongs to the call, not to the session:
-   * it travels with the call's own async work (a card of another call, or of the same session raised from elsewhere, is not covered), and it ends
-   * when the call returns or its signal fires, so a step that outlives its turn does not answer the person's later cards
-   */
-  private readonly allowed = new AsyncLocalStorage<{ sessionId: string; live: boolean }>()
-
-  /** Runs `run` with the cards `sessionId` raises inside it covered by the person's Allow for this call (see `allowed`) */
-  async cover<T>(sessionId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const cover = { sessionId, live: true }
-    const end = () => void (cover.live = false)
-    signal?.addEventListener('abort', end, { once: true })
-    try {
-      return await this.allowed.run(cover, run)
-    } finally {
-      end()
-      signal?.removeEventListener('abort', end)
-    }
-  }
-
-  private isCovered(sessionId: string): boolean {
-    const cover = this.allowed.getStore()
-    return cover !== undefined && cover.live && cover.sessionId === sessionId
-  }
-
-  /**
    * Capability question for a chain started from the screen (M4 D-4) — drawn by that app's pinned
    * view and the sidebar's app row (`apps.questions`). id -> question.
    */
@@ -116,16 +84,15 @@ export class HostCards {
    * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the
    * caller tracks the card itself (a start_agent request, #673); `shown` raises one the conversation already records
    * (a request carried over from the previous host) without recording it again; `log` is what auto's log line names;
-   * `alwaysAsk` raises the card for auto too. `uncovered` raises it even while an Allow covers the session's cards (`cover`): the card that asks for that Allow.
+   * `alwaysAsk` raises the card for auto too.
    */
   askHost(
     sessionId: string,
     detail: HostAsk['detail'],
     signal?: AbortSignal,
-    card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; uncovered?: boolean; onHeld?: (held: boolean) => void } = {},
+    card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; onHeld?: (held: boolean) => void } = {},
   ): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
-    if (!card.uncovered && this.isCovered(sessionId)) return Promise.resolve('allow')
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
     // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694)
     // `alwaysAsk`: a card auto does not answer either (#1038: start_agent on another computer)

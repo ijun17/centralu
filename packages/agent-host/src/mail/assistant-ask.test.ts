@@ -42,7 +42,7 @@ describe('a request’s words are read in the turn it starts (§7.6)', () => {
     const inside = w.tool.run('orc', { action: 'read', thread: q.message.id }).text
     expect(inside).toContain('> please rebase #12')
     expect(inside).toContain('The person did not write it')
-    expect(w.hooks.askedBy!('orc')).toMatchObject({ messageId: q.message.id, sessionId: 'a', name: 'alpha', project: 'p1', trusted: true })
+    expect(inside).toContain('Asked by session "alpha", project "p1", trusted.')
   })
 
   it('a worker answering the Assistant’s question is no request: no asker, its words are read anywhere', () => {

@@ -559,7 +559,7 @@ export class MailAcross extends AcrossReceipts {
     const had = this.d.records.message(p.id)
     if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
     // A session gone from here has no name left here: the sender knows which it gave the work to
-    if (this.d.reach.mayWrite(from, to, false) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === to ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
+    if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === to ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
       const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
       return { ok: true, messageId: m.id, to: this.label(to), address: to }

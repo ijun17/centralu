@@ -17,8 +17,6 @@ export type ReachHost = {
   session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere'; name?: string } | undefined
   /** The Assistant's session id, or null before it exists */
   assistantId(): string | null
-  /** Whether the Assistant's tool can put each step of a request's turn to the person (§7.6): sessions may write requests to it only then */
-  assistantAsks(): boolean
   appCalledBy(app: string, session: string): boolean
   /** A project of this host: whether it is trusted. Undefined: this host does not know it (a deleted project) */
   project(projectId: string): { trusted: boolean; name?: string } | undefined
@@ -37,11 +35,8 @@ export type ReachHost = {
 export type DelegationTarget = { sessionId?: string; projectId?: string | null; assistant?: boolean; linked?: boolean }
 
 export type MailReach = {
-  /**
-   * Why `from` may not write to `to` (§7.1), or null. `asRequest` is false for a session's word to the Assistant that is no request (an answer to its own
-   * `needsReply` message, a clarification): it needs no Assistant that can ask the person for each step
-   */
-  mayWrite(from: string, to: string, asRequest?: boolean): RefusalReason | null
+  /** Why `from` may not write to `to` (§7.1), or null */
+  mayWrite(from: string, to: string): RefusalReason | null
   /** Whether the project is untrusted (§7.2): none is not, a project of this host is by its flag, one this host does not know is (fail closed) */
   untrusted(projectId: string | null): boolean
   /** `policy` (§7.4): the one hold; null when nothing holds. Mail is never held for how much of it there is (#2014) */
@@ -98,7 +93,7 @@ export function mailReach(host: ReachHost): MailReach {
     },
     projectLabel: (projectId) => host.project(projectId)?.name ?? projectId,
 
-    mayWrite(from, to, asRequest = true) {
+    mayWrite(from, to) {
       const f = parseAddress(from)
       const t = parseAddress(to)
       if (!f || !t) return 'bad_address'
@@ -117,10 +112,7 @@ export function mailReach(host: ReachHost): MailReach {
       // An app writes to a session that called it, and to nobody else yet
       if (f.kind === 'app') return receiver && host.appCalledBy(from, receiver.id) ? null : 'not_allowed'
       // From here on the sender is a session, which must still be here
-      if (!sessionOf(from)?.info?.here) return 'gone'
-      if (!receiver) return null
-      const assistant = host.assistantId()
-      return asRequest && receiver.id === assistant && f.sessionId !== assistant && !host.assistantAsks() ? 'assistant_asks' : null
+      return sessionOf(from)?.info?.here ? null : 'gone'
     },
 
     holdFor(m, recipient) {

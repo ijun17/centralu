@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, launchRefusal, sessionLiveDefaults, isAssistantKind } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, CentraluTools, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, CentraluTools, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
@@ -95,8 +95,6 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     listCommands: ToolQueries['listCommands']
     /** Whether another project handed this path back to the session (#371 part B) */
     mayRead: (sessionId: string, path: string, cwd: string) => boolean
-    /** The Assistant's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
-    requestTurn: (sessionId: string) => RequestTurn
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
     /** The Assistant's memory handoff for a new process */
@@ -615,7 +613,6 @@ export class SessionStarts {
       ...this.host.handoffNotes.handoffReadDirs(m.projectId, o.inheritsHandoff),
       // Paths another project handed back to this session (#371), asked on every read
       mayRead: (path: string) => this.host.mayRead(m.id, path, o.cwd),
-      ...(isAssistantKind(m.kind) ? { requestTurn: this.host.requestTurn(m.id) } : {}),
       // An Assistant gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
       // the rest), an ordinary session its own project, read-only (#320, #561)
       /*

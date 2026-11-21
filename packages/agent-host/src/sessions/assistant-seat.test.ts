@@ -563,17 +563,6 @@ describe('a session the Assistant creates', () => {
     expect(await centraluToolsFor(host, 'orch').createSession({ project: 'far', preset: 'auto' })).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted') })
     expect(createSession).toHaveBeenCalledTimes(1)
   })
-
-  it("in a turn a session's request started, the default is held to that session's preset too", async () => {
-    seatUnder('auto')
-    meta.set('asker', { ...session('asker'), permissionPreset: 'normal' })
-    host.askedBy = vi.fn(() => ({ messageId: 'm', sessionId: 'asker', turn: 1, name: 'Asker', project: null, trusted: true }) as never)
-    expect(await centraluToolsFor(host, 'orch').createSession({ project: 'kept' })).toMatchObject({ ok: true })
-    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'normal' }))
-    // A preset named is the Assistant's choice: #1739's card is what weighs it then
-    expect(await centraluToolsFor(host, 'orch').createSession({ project: 'kept', preset: 'auto' })).toMatchObject({ ok: true })
-    expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: 'auto' }))
-  })
 })
 
 /*
