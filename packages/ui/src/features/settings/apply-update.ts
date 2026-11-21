@@ -9,8 +9,7 @@ import { trackTyping, typedWithin, TYPING_QUIET_MS } from './typing.js'
 // Applying an installed update (#352): what the update line offers once installed, and when the automatic apply
 // relaunches by itself. The decisions are pure, tested without a window; the hooks only feed them.
 
-export { applyOffer, installedUpdate, agentApplyVerdict, type ApplyOffer, type AgentApplyVerdict } from './apply-offer.js'
-export { typedWithin, TYPING_QUIET_MS } from './typing.js'
+export { applyOffer, installedUpdate, agentApplyVerdict, type ApplyOffer } from './apply-offer.js'
 
 export type AutoApplyInput = {
   update: UpdateStatus | null

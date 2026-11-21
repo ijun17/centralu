@@ -48,7 +48,7 @@ export function CentraluCallBody({ result, open, onOpen }: { result: string; ope
 
 type Shape = { kind: 'text'; text: string } | { kind: 'fields'; row: Row } | { kind: 'transcript' | 'list'; rows: Row[] }
 
-export function readShape(result: string): Shape {
+function readShape(result: string): Shape {
   const text = result.trim()
   try {
     const whole: unknown = JSON.parse(text)

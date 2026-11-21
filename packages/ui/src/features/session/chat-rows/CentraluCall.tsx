@@ -70,7 +70,7 @@ function askStatus(item: ToolItem, session: { state: string } | undefined): stri
  * Why a failed call failed, in the host's own words: the first sentence of its answer, cut short. The rest of the answer
  * is in the card once opened (#1544: the row said only that the call failed).
  */
-export function failureReason(result: string | undefined): string | null {
+function failureReason(result: string | undefined): string | null {
   const first = result?.trim().split('\n')[0]?.trim()
   if (!first) return null
   const sentence = first.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? first

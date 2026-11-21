@@ -228,7 +228,7 @@ function unmarkedAskProject(item: Extract<ChatItem, { kind: 'tool' }>): NonNulla
  * One title row until opened (docs/design-system.md §7). No scrolling inside it: a scroll area in the
  * conversation takes the wheel from it. A failure shows on the title row while closed.
  */
-export function ToolCard({
+function ToolCard({
   item,
   sessionId,
   projectRoot,
@@ -507,7 +507,7 @@ export function SubagentSteps({
 }
 
 /** `more`: a running subagent wrote steps under the card since, so the archived ones are "N earlier steps" (#418) */
-export function trashedLine(trashed: number, more: boolean): string {
+function trashedLine(trashed: number, more: boolean): string {
   const one = trashed === 1
   const what = more ? `${formatCount(trashed)} earlier ${one ? 'step was' : 'steps were'}` : one ? 'The step was' : 'The steps were'
   return `${what} archived. Settings → Archive restores ${one ? 'it' : 'them'}.`

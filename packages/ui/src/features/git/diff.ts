@@ -1,7 +1,7 @@
 // A diff's text split the way the screen draws it, apart from the component so "the line on screen" is testable: a
 // diff's row is a file's line only after `@@ -a,b +c,d @@` and the lines surviving in the new file below it are counted.
 
-export type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
+type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
 export type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
 
 /** Where the top of the screen currently is in the diff — the name for the band and the line number to hand to the IDE */

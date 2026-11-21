@@ -54,7 +54,7 @@ export function watchLine(w: WatchView, now: number): string {
   }
 }
 
-export const watchesLabel = (n: number): string => `${n} watch${n === 1 ? '' : 'es'} set to wake this session`
+const watchesLabel = (n: number): string => `${n} watch${n === 1 ? '' : 'es'} set to wake this session`
 
 export function WatchesBadge({ sessionId }: { sessionId: string }) {
   const rows = useStore((s) => s.watches[sessionId])

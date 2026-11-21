@@ -118,7 +118,7 @@ export function usageTools(s: AppState): ToolName[] {
 }
 
 /** Raises `toastAt` with every write that says a toast (#842): over a hundred places write `toast` directly */
-export function stampToasts(set: StoreSet): StoreSet {
+function stampToasts(set: StoreSet): StoreSet {
   return ((partial: Parameters<StoreSet>[0], replace?: boolean) =>
     (set as (p: unknown, r?: boolean) => void)((st: AppState) => {
       const next = typeof partial === 'function' ? partial(st) : partial

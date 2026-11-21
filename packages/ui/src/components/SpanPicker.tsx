@@ -11,7 +11,7 @@ import { useDismiss } from './useDismiss.js'
  * panel is overflow-hidden and the app's view is laid over it, so a hung popover would be clipped and covered.
  */
 
-export const spanLabel = (s: GridSpan): string => `${s.cols}×${s.rows}`
+const spanLabel = (s: GridSpan): string => `${s.cols}×${s.rows}`
 const spanWords = (s: GridSpan): string => `${s.cols} × ${s.rows}`
 
 export function SpanButton({

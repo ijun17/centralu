@@ -3,7 +3,7 @@ import { useStore } from '../../store/store.js'
 import { WaitCard, WaitFooter } from '../approval/WaitCard.jsx'
 
 /** How long a card stands before its buttons take a click: the next card must not take a click meant for the last */
-export const HOST_REQUEST_ARM_MS = 500
+const HOST_REQUEST_ARM_MS = 500
 
 /**
  * A program's call waiting for the person (#1405): something on this computer other than this window, with only the

@@ -18,7 +18,7 @@ const PAD_R = 7
 
 const x = (lane: number) => PAD_L + lane * LANE_W
 
-export function graphWidth(lanes: number): number {
+function graphWidth(lanes: number): number {
   return PAD_L + PAD_R + Math.max(0, lanes - 1) * LANE_W
 }
 

@@ -94,7 +94,7 @@ export function choicesLabel(answered: boolean, picked: boolean, open: boolean):
  * The thread's questions waiting on the person (#2191) that this view holds, oldest first, as the host names them
  * (`thread.ask.open`, its one rule for what can still be answered and what the person may read)
  */
-export function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>): MailMessage[] {
+function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>): MailMessage[] {
   const open = view.thread.ask?.open ?? []
   return view.messages.filter((m) => open.includes(m.id))
 }
