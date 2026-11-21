@@ -54,10 +54,10 @@ export type SessionsSlice = {
   /**
    * The session currently being woken up.
    *
-   * Picking a session **wakes it immediately.** Waking on send would pile the whole
-   * process-startup time onto the time between turning the app on and the first response. Worse, a
-   * sleeping session has no process to ask, so it cannot even hand back its slash-skill list. The
-   * act of picking already means "I am about to use this session," so preparation starts right then.
+   * A session wakes when it is used (#568): its composer takes the keyboard, or a message is sent to
+   * it. Selecting it alone does not wake it. Waking only on send would pile the whole process-startup
+   * time onto the wait for the first response, and a sleeping session has no process to ask, so it
+   * cannot even hand back its slash-skill list.
    */
   resuming: Record<string, boolean>
   /**

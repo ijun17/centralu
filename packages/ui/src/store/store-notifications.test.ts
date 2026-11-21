@@ -361,7 +361,7 @@ describe('MCP server suggestions', () => {
     expect(mock.badge).toBe(1)
   })
 
-  // 'assistant_proposals_changed': the same broadcast from a host of a later release, under the role's current name (#2133)
+  // 'assistant_proposals_changed': the same broadcast from a host of a later release, named after the role (#2133)
   it.each(['orchestrator_proposals_changed', 'assistant_proposals_changed'] as const)('one broadcast (%s) re-reads both lists, whichever tool or command made the change', async (type) => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

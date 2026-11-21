@@ -43,8 +43,8 @@ function liveFactsOf(
     unreachable: s.unreachable === true,
     // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
     interruption: s.interruption ?? null,
-    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not). Taken with
-    // every row, as `machine` is
+    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not: owner,
+    // 2026-11-05). Taken with every row, as `machine` is
     startedFromHub: s.startedFromHub === true,
   }
 }
@@ -248,10 +248,9 @@ const pendingEvents = new Map<string, { since: number; events: { e: NormalizedEv
  * reconnect read the list. Without these limits an event for a session that never registers would
  * stay in the pen for the life of the window: a late event for a session already deleted (its
  * `session_deleted` cleared the pen before it arrived), or one for a session the list does not
- * carry. Ten minutes is far past any
- * registration; a pen older than that is for a session that is not coming. Past the count, the
- * oldest half goes: the host has already written that output to its store, and opening the
- * session reads it from there.
+ * carry. Ten minutes is far past any registration; a pen older than that is for a session that is
+ * not coming. Past the count, the oldest half goes: the host has already written that output to its
+ * store, and opening the session reads it from there.
  */
 export const PENDING_EVENTS_MAX = 2000
 export const PENDING_EVENTS_MAX_AGE_MS = 10 * 60_000

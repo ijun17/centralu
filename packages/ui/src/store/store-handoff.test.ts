@@ -281,9 +281,9 @@ describe('handing off and starting fresh', () => {
   })
 
   /*
-   * #102: the predecessor is told "it is a file, so length is not a constraint". Delivered as a single
-   * chat message, the more thorough the note, the more likely the successor dies the moment it arrives
-   * (measured: handing a long session off to codex produced an error). The first message points at the
+   * #102: the predecessor is told "it is a file, so length is not a constraint". The more thorough the
+   * note, the more likely the successor dies when it is delivered as one chat message (measured: handing
+   * a long session off to codex produced an error). The first message points at the
    * note's **location** instead, so no matter how long the note grows, the first message never grows
    * with it.
    */

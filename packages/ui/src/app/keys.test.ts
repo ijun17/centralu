@@ -5,8 +5,8 @@ import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntr
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
 
 /**
- * Letter shortcuts are not read only from the character the keyboard produced (read that way,
- * the settings screen's `⌥a` does nothing on a Mac).
+ * Letter shortcuts are read from the key's position as well as the character it produced (read
+ * from the character alone, the settings screen's `⌥a` does nothing on a Mac).
  *
  * The values below are not invented — they were asked directly of the installed keyboard layout
  * (Carbon UCKeyTranslate, 2026-08-24):

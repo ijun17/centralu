@@ -136,8 +136,8 @@ describe('project trust (M4)', () => {
 /**
  * A project's default model belongs to **the tool** (#107).
  *
- * A project with `default_tool=codex` that also holds `default_model=opus[1m]` would give a codex
- * session that dies every turn with a `400 invalid_request_error`. A handoff deliberately clears the
+ * A project with `default_tool=codex` that also holds `default_model=opus[1m]`: a codex session
+ * started from it would die every turn with a `400 invalid_request_error`. A handoff deliberately clears the
  * model when the tool changes (`sameTool ? … : undefined`), and a default kept per project would
  * fill it right back in beneath that guard.
  */

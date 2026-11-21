@@ -53,8 +53,8 @@ export function isPlainEscape(e: ImeKey): boolean {
  *
  * So `⌥a` ("always allow — project scope"), read from `e.key` alone, does nothing at all on a Mac,
  * because `'å' === 'a'` is false. On Linux and Windows, Alt does not change the character, so it
- * would fail only on the platform this app runs on every day. For the same reason, while typing
- * Korean, y/n/a/j/k/d all arrive as different characters entirely.
+ * would fail only on the Mac. For the same reason, while typing Korean, y/n/a/j/k/d all arrive as
+ * different characters entirely.
  *
  * The rule: only ask for the key's physical position when the character is not a Latin letter.
  *

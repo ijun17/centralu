@@ -106,7 +106,7 @@ describe('handling resync_required (U3)', () => {
 /** Lets every pending promise and zero-delay timer run */
 const settle = () => new Promise((r) => setTimeout(r, 0))
 
-// #841 items 9 and 10: what the window cannot read is not dropped with no word
+// #841 items 9 and 10: what the window cannot read is said, not dropped
 describe('what the window could not read is said', () => {
   it('a reconnect that cannot read the session list after its retries says so', async () => {
     const mock = new MockPlatform()

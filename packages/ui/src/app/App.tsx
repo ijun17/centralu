@@ -155,10 +155,10 @@ export function App({
    * window. If something happens, our handler did it.
    *
    * This is in the capture phase and has no conditions. Adding even one condition — the kind of
-   * drag, the element underneath, whether there is a handler that accepts it — hands the other
-   * side of that condition back to the webview: a composer that blocks only its own spot leaves
-   * the rest of the window to it. It is capture for the same reason — even if something below calls stopPropagation, the floor
-   * has to be laid down first.
+   * drag, the element underneath, whether there is a handler that accepts it — hands the other side
+   * of that condition back to the webview: a composer that blocks only its own spot leaves the rest
+   * of the window to it. It is capture for the same reason — even if something below calls
+   * stopPropagation, the floor has to be laid down first.
    *
    * All three are blocked. `drop` alone is not enough: `dragover` is the answer to "can something
    * be dropped here", and without blocking it the browser takes that decision for itself.
@@ -207,9 +207,9 @@ export function App({
 
   useEffect(() => {
     /*
-       All three handlers use the same judgment. If only visibilitychange looked at visibility,
-       another occlusion event after switching to another app would find the window still
-       'visible' and mark it 'in front' again, and notifications would be silently suppressed.
+       All three handlers use the same judgment. A handler that looked only at visibility would,
+       on another occlusion event after switching to another app, find the window still 'visible'
+       and mark it 'in front' again, and notifications would be silently suppressed.
        Notifying the person while they are away is exactly what this app is supposed to do.
      */
     // document.hasFocus() can still be stale at the moment of blur, so pass the value we already
@@ -244,20 +244,20 @@ export function App({
           {/*
             The shell's banner sits in the flow, below the top bar (#326). Laid over the window
             (fixed, top 0), it would put its text under the macOS traffic lights and its button on
-            top of the header's own controls. Above the top bar
-            would not do either: the traffic lights are pinned at a fixed spot in the window
-            (trafficLightPosition, traffic_lights.rs), so they would land on the banner instead,
-            and the top bar would stop being the strip they are centred on. Here the top bar stays
-            the drag handle it is, and the lanes give up the banner's height — flex-1 and
-            min-h-0 on Body take that out of the lanes rather than pushing the composer off the
-            bottom.
+            top of the header's own controls. Above the top bar would not do either: the traffic
+            lights are pinned at a fixed spot in the window (trafficLightPosition,
+            traffic_lights.rs), so they would land on the banner instead, and the top bar would stop
+            being the strip they are centred on. Here the top bar stays the drag handle it is, and
+            the lanes give up the banner's height — flex-1 and min-h-0 on Body take that out of the
+            lanes rather than pushing the composer off the bottom.
 
-            Taking room does shift the lanes when it comes and goes, the cost that rules out a global approval banner
-            (product-spec.md, "Approval requests from unfocused sessions"). That banner would come and go with every
-            request, in the middle of reading; this one shows once per build mismatch and stays until the person
-            dismisses it or the switch they asked for finishes, and it holds one height through all its states
-            (ShellBanner). Laid over the lanes instead, it would hide the top of the sidebar and the pane header for
-            as long as it stands.
+            Taking room does shift the lanes when it comes and goes, the cost that rules out a
+            global approval banner (product-spec.md, "Approval requests from unfocused sessions").
+            That banner would come and go with every request, in the middle of reading; this one
+            shows once per build mismatch and stays until the person dismisses it or the switch they
+            asked for finishes, and it holds one height through all its states (ShellBanner). Laid
+            over the lanes instead, it would hide the top of the sidebar and the pane header for as
+            long as it stands.
           */}
           {banner}
           <Body />
@@ -432,8 +432,8 @@ function Body() {
 /**
  * Top bar = the dashboard.
  *
- * There is one number (user request, 2026-09-09), though FR-12 keeps approvals and
- * waiting-for-input apart: the decision to tell the two apart never happens at the top bar.
+ * There is one number (user request, 2026-09-09), where FR-12 specifies split counters for
+ * approvals and waiting-for-input: the decision to tell the two apart never happens at the top bar.
  * Either way, the answer is "open the list and work through it one by one", and the kind is
  * already written on each row of the list. Two numbers on the dashboard would make the reader do
  * the addition in their head every time.
@@ -482,11 +482,12 @@ function TopBar() {
     <DragRegion
       className="flex h-9 shrink-0 items-center gap-4 border-b border-line-chrome bg-surface-side pr-4 relative"
       /*
-       * Inset is 0 wherever there are no traffic lights (web and mock report it that way — correct, since there is no
-       * button to make room for). But using it as-is would remove the left margin entirely and the first control
-       * would sit flush against the window corner. With pr-4 on the right and nothing on the left, the bar would look
-       * lopsided. So there is a floor: make room for whatever there is to make room for, and otherwise use the same
-       * margin as the other corners.
+       * Inset is 0 wherever there are no traffic lights (web and mock report it that way — correct,
+       * since there is no button to make room for). But using it as-is would remove the left margin
+       * entirely and the first control would sit flush against the window corner. With pr-4 on the
+       * right and nothing on the left, the bar would look lopsided. So there is a floor: make room
+       * for whatever there is to make room for, and otherwise use the same margin as the other
+       * corners.
        */
       style={{ paddingLeft: Math.max(controlsInset, EDGE_PADDING) }}
       testId="app-header"

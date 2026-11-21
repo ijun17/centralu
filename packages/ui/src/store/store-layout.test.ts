@@ -709,8 +709,8 @@ describe('view restoration', () => {
 /*
  * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
  * through saves, so a save in the middle of it would write the defaults of every field restored later back over
- * the snapshot. The last setting restored (whether .gitignore's files show) shows it: turned off, it would be on
- * again after a restart (seen 2026-09-30).
+ * the snapshot. The last setting restored (whether .gitignore's files show) is the one that shows it: turned off, it
+ * is on again after a restart (seen 2026-09-30).
  */
 describe('restoring the workspace saves nothing until it is done', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
