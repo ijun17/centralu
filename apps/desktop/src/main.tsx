@@ -48,7 +48,7 @@ boot()
 
 function boot() {
   // **Draw something first.** If nothing is rendered while waiting on the host, an empty black
-  // window shows up, and that reads as broken (flagged during dogfooding).
+  // window shows up, and that reads as broken.
   root.render(<Starting />)
   createTauriPlatform({ onStoreWork: (work) => root.render(<Starting work={work} />) })
     .then(async (platform) => {
@@ -60,10 +60,9 @@ function boot() {
 }
 
 /**
- * Retry on the failure screen (#184). This used to be `location.reload()`, which only
- * reloaded the webview, and a supervisor that had already given up did not restart, so the
- * same message reappeared 30 seconds later. This restarts the supervisor and waits again as
- * if from the start.
+ * Retry on the failure screen (#184). Restarts the supervisor and waits again as if from the
+ * start: reloading the webview alone does not restart a supervisor that has already given up,
+ * so the same message would reappear 30 seconds later.
  */
 function retry() {
   root.render(<Starting />)
@@ -73,8 +72,8 @@ function retry() {
 }
 
 /**
- * Prevents ⌘Q and ⌘W from quitting immediately (dogfooding, 2026-09-04) — lives here because
- * it is a desktop-only concern.
+ * Prevents ⌘Q and ⌘W from quitting immediately — lives here because it is a desktop-only
+ * concern.
  *
  * Rust intercepts every path toward quitting (the menu's Quit, ⌘Q, closing the window) and
  * fires `quit-requested`, and this modal does the asking. Only "Quit" calls quit_app to open
@@ -86,8 +85,7 @@ function retry() {
 function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   const [askQuit, setAskQuit] = useState(false)
   /**
-   * Leftover processes still running from our project folders (requested by the person,
-   * 2026-09-07).
+   * Leftover processes still running from our project folders.
    *
    * A dev server an agent launched via bash is not caught by our shutdown procedure — measured
    * directly, that process has ppid=1 and is its own process group, so both the parent chain
@@ -106,7 +104,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   /*
    * Background mode (#280), read each time the dialog opens: with it on, plain Quit leaves the
    * agents running, so the dialog says so and offers the one way to stop them anyway. Null while
-   * unknown or where the platform has no keeper — then the dialog reads as it always did.
+   * unknown or where the platform has no keeper — then the dialog reads as with the mode off.
    */
   const [background, setBackground] = useState<boolean | null>(null)
   // The window runs on the computer's `centralu serve` host, which stays running when it closes (#1466)
@@ -188,8 +186,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
 
   /*
    * The case where the host gives up after exceeding its restart limit once the app is already
-   * up (#184). This signal used to be received by nobody, so the top bar just stayed on
-   * Connecting/Disconnected, and the reason the host gave was nowhere on screen. This puts the
+   * up (#184). Without this the top bar would stay on Connecting/Disconnected, with the reason
+   * the host gave nowhere on screen. This puts the
    * same message and Retry as the launch-failure screen on top of the app, and clears it once
    * the host comes back up (ready) — switching to the new address is already handled by the
    * platform's onEndpointChange.
@@ -260,9 +258,9 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   useEffect(() => {
     if (!askQuit) return
     /*
-     * Moves focus to the dialog when it opens (#181). The dialog was not taking focus, so
-     * focus stayed on the app underneath, and Tab passed through the elements below it first.
-     * This traps focus inside the dialog and returns it to where it was once the dialog closes.
+     * Moves focus to the dialog when it opens (#181), so focus does not stay on the app
+     * underneath and Tab does not pass through the elements below it first. This traps focus
+     * inside the dialog and returns it to where it was once the dialog closes.
      */
     const before = document.activeElement as HTMLElement | null
     dialogRef.current?.focus()
@@ -283,8 +281,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       }
       /*
        * Enter = quit, Esc = keep going — except for an in-progress IME composition and an
-       * Enter pressed on a button (#181, `confirmKeyAction`). While Enter was read as quit
-       * regardless of focus, pressing Enter after tabbing to Cancel also quit the app.
+       * Enter pressed on a button (#181, `confirmKeyAction`): Enter after tabbing to Cancel
+       * must not quit the app.
        */
       const onButton = pressesItself(e.target)
       const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, keyCode: e.keyCode, onButton })
@@ -300,7 +298,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   }, [askQuit, quit])
   /*
    * Handed to App, which draws it between its top bar and the lanes (#326). Laid over the window
-   * here (fixed, top 0) it covered the macOS traffic lights and the header's controls.
+   * here (fixed, top 0) it would cover the macOS traffic lights and the header's controls.
    */
   const buildBarNode =
     build && bar.kind !== 'none' ? (

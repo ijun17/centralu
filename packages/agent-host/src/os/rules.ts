@@ -457,13 +457,15 @@ export function commandInterpreter(env: Env): string {
 }
 
 /**
- * What is started on Windows for a program that is not on PATH: a path under `%SystemRoot%\System32` that only an
- * administrator can make, so the start reports the program missing (ENOENT, which every caller reads as "not
- * installed") and Windows looks for it nowhere else. Given the bare name, Windows looks in the child's working folder
- * before PATH: a `git.exe` committed in a project ran whenever git itself was not installed (#838).
+ * What is started for a program the host's lookup did not find: a path only an administrator can make, so the start
+ * reports the program missing (ENOENT, which every caller reads as "not installed") and nothing is looked for anywhere
+ * else. Windows: under `%SystemRoot%\System32`; given the bare name, Windows looks in the child's working folder before
+ * PATH, so a `git.exe` committed in a project would run whenever git itself is not installed (#838). Elsewhere: a folder at
+ * the root; given the bare name, the start's own PATH search finds what `findOnPath` passes over (a Windows install
+ * under WSL, #2366).
  */
-export function notOnPath(name: string, env: Env): string {
-  return systemTool(['centralu-not-on-path', `${name}.exe`], env)
+export function notOnPath(name: string, env: Env, family: OsFamily): string {
+  return family === 'windows' ? systemTool(['centralu-not-on-path', `${name}.exe`], env) : posix.join('/centralu-not-on-path', name)
 }
 
 /**
@@ -491,7 +493,7 @@ export function programFor(
         : find(name, '.COM;.EXE')
     if (!found) return { path: win32.join(win32.dirname(batch), `${name}.exe`), found: false }
   }
-  return found ? { path: found, found: true } : { path: notOnPath(name, env), found: false }
+  return found ? { path: found, found: true } : { path: notOnPath(name, env, family), found: false }
 }
 
 /** What Windows assumes when PATHEXT is not set */
@@ -516,12 +518,19 @@ export function programCandidates(path: string, family: OsFamily): string[] {
  * something Windows can start (#14). Extensions are lowercased: NTFS ignores case, and `claude.cmd` is the name npm
  * wrote. Only absolute entries are searched (a relative one is read from the working folder, which may be a cloned
  * repository), and an entry is read without its quotes (`"C:\Program Files\Git\cmd"`), as Windows reads it.
+ *
+ * **Under WSL** (`windowsDrives`, the folder Windows' drives are mounted in: `wslDrives`) a folder on a Windows drive
+ * (`<that folder><letter>/…`) is not searched for a name without `.exe`: WSL appends Windows' PATH to Linux's, and what npm wrote there for a Windows
+ * install (`/mnt/c/…/npm/opencode`, an sh script ending in `exec …/opencode.exe`) would run the Windows tool, with the
+ * Windows install's config, home and sign-in, from a Linux host (#2366). A tool installed only on Windows is then not
+ * installed for that host. A `.exe` asked for by name is a Windows program the host means to run, and is found there.
  */
 export function findOnPath(
   name: string,
   env: Env,
   family: OsFamily,
   exists: (path: string) => boolean,
+  { windowsDrives = null }: { windowsDrives?: string | null } = {},
 ): string | null {
   if (family === 'windows') {
     const exts = /\.[^\\/.]+$/.test(name)
@@ -540,12 +549,30 @@ export function findOnPath(
     }
     return null
   }
+  const skipped = name.toLowerCase().endsWith('.exe') ? null : windowsDrives
+  // A drive is one letter under the mount folder: `/mnt/wsl`, a disk mounted at `/mnt/data` and, with `root = /`, `/usr` are Linux's
+  const onDrive = (dir: string) => skipped !== null && dir.startsWith(skipped) && /^[a-z]\//i.test(dir.slice(skipped.length))
   for (const dir of (env.PATH ?? '').split(posix.delimiter)) {
-    if (!dir) continue
+    if (!dir || onDrive(posix.join(dir, '/'))) continue
     const candidate = posix.join(dir, name)
     if (exists(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * The folder WSL mounts Windows' drives in (with a trailing `/`), from the kernel's release (`/proc/sys/kernel/osrelease`,
+ * which names Microsoft under WSL) and `/etc/wsl.conf`: its `[automount]` `root`, `/mnt/` when it names none or cannot be
+ * read. null when this is not WSL.
+ */
+export function wslDrives(osRelease: string | null, wslConf: string | null): string | null {
+  if (!osRelease || !/microsoft/i.test(osRelease)) return null
+  // Every `[automount]` section is read, and the last `root` in them counts, as INI readers merge a section given twice
+  const sections = (wslConf ?? '').matchAll(/^\s*\[automount\]\s*(?:#.*)?$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/gim)
+  const roots = [...sections].flatMap(([, body]) => [...(body ?? '').matchAll(/^\s*root\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\s]+))/gim)])
+  const last = roots.at(-1)
+  const root = last && (last[1] ?? last[2] ?? last[3])
+  return posix.join(root && posix.isAbsolute(root) ? root : '/mnt/', '/')
 }
 
 /** How to start a found tool: a program and the arguments that go before the tool's own */

@@ -4,14 +4,14 @@ use super::*;
 use centralu_keeper_core::serve_window::Pick;
 
 /// The direct path's launch: the bundled host through the system Node, `CC_HOST_CMD`, or the
-/// source through tsx — exactly what the app ran before the keeper existed. The plan's `host` says
+/// source through tsx. The plan's `host` says
 /// which. On Windows with `centralu serve` installed in the data folder, the folder's serve host
 /// through its launcher (`Host::Serve`, #1223).
 pub(super) fn direct_launcher(start: &Start) -> Launcher {
     let (host, dev, bundled, serve, fallback) = (start.plan.host, start.plan.dev, start.bundled.clone(), start.serve.clone(), start.fallback.clone());
     /*
-     * A Linux window is the host's parent (#1895 step 4 PR 7). Until then `CC_USE_KEEPER=1` ran a keeper there, and one
-     * an earlier build started may still hold the data folder with its host: stopped once, before the first host
+     * A Linux window is the host's parent (#1895 step 4 PR 7). A keeper an earlier build started there under
+     * `CC_USE_KEEPER=1` may still hold the data folder with its host: stopped once, before the first host
      * (`os::stop_earlier_keeper`). One still answering is left, and the host's lock refusal then names it.
      */
     let linux = start.facts.os == start_plan::Os::Linux;
@@ -28,7 +28,7 @@ pub(super) fn direct_launcher(start: &Start) -> Launcher {
             });
         }
         if let (Some(Host::Serve), Some(launcher)) = (host, &serve) {
-            // A `serve --window` that ended before its ready line hands every later attempt to the bundled host (#1223 review)
+            // A `serve --window` that ended before its ready line hands every later attempt to the bundled host (#1223)
             match (fallback.next(), &bundled) {
                 (Pick::Bundle, Some(dir)) => {
                     let mut launch = host_proc::bundled_launch(&dir.join("main.mjs"), &[])?;
@@ -85,7 +85,7 @@ mod tests {
         assert!(l.env.is_empty());
     }
 
-    /// #1223's review: a `serve --window` attempt that ends before its ready line makes the next one the bundled host
+    /// #1223: a `serve --window` attempt that ends before its ready line makes the next one the bundled host
     #[test]
     fn the_launcher_runs_the_bundled_host_after_a_serve_attempt_that_never_got_ready() {
         use centralu_keeper_core::start_plan::{Build, Env, Facts, Os, Shell};

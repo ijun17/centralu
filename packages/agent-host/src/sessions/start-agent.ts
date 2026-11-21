@@ -1,5 +1,5 @@
 import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
-import { ANSWER_GROUNDS } from './ask-project.js'
+import { ANSWER_GROUNDS, askBeforeFinish } from './ask-project.js'
 import { worktreeSetupFrame } from './worktree-sessions.js'
 
 /**
@@ -43,7 +43,7 @@ export function aboveCallerError(name: string, child: PermissionPreset, caller: 
  * sees names. Said before it sends (#2133): a child that read "assistant" as the session that gave it the job mailed progress there, and its answer
  * reaches the parent by itself
  */
-const PARENT_MAIL = 'No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` and `kind: "question"` ("assistant" is someone else). '
+const PARENT_MAIL = `No progress reports needed. ${askBeforeFinish('parent')} ("assistant" is someone else). `
 
 /**
  * Whether `child` can mail the session `senderId` as its `parent` (#1984): it was started by that session (`askedBy`) and has the mail tool, which a

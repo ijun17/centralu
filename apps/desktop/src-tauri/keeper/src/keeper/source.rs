@@ -1,11 +1,10 @@
 //! Where a host came from, and the per-build copy it runs from.
 //!
-//! The owner's requirement on #280: on 2026-10-03 the running app turned out to be the
-//! build-output bundle that `pnpm app:open` opens in place, and the next `tauri build` rewrote
-//! that bundle on disk while it ran. The host had its code in memory but still read the Codex
-//! bridge, `schema.sql` and `app-template/` from the bundle on demand, so it could have mixed two
-//! builds. A host started by the keeper therefore never runs from a bundle: the keeper copies
-//! the bundle's `resources/host` folder to `<data>/hosts/<key>/` first and runs it from there.
+//! A host started by the keeper never runs from a bundle (#280): the running app may be the
+//! build-output bundle that `pnpm app:open` opens in place, which the next `tauri build` rewrites
+//! on disk, and a host holds its code in memory but reads the Codex bridge, `schema.sql` and
+//! `app-template/` from its folder on demand, so it could mix two builds. The keeper copies the
+//! bundle's `resources/host` folder to `<data>/hosts/<key>/` first and runs it from there.
 //! Rebuilding, replacing or deleting the bundle afterwards cannot touch the running host.
 //!
 //! A keeper the macOS shell started runs its hosts from the verified content copy instead,
@@ -143,10 +142,9 @@ pub fn hosts_dir(data: &Path) -> PathBuf {
 /// real name.
 ///
 /// A complete copy is reused even when the folder it came from is gone. On Linux that folder is
-/// inside the AppImage, which exists only while it is mounted: a keeper that took over from a
-/// window of a newer AppImage keeps running after that window quits and its mount goes, and every
-/// later host restart used to fail on the missing source and give up (measured in WSL2,
-/// docs/spikes/2026-10-linux-keeper.md).
+/// inside the AppImage, which exists only while it is mounted: a keeper can outlive the window whose
+/// mount held it, and a host restart that read the missing source would fail and give up
+/// (measured in WSL2, docs/spikes/2026-10-linux-keeper.md).
 pub fn copy_into(data: &Path, src: &BuildSource) -> Result<PathBuf, String> {
     let from = src.host_dir.as_deref().ok_or("this build has no host folder to copy")?;
     let from = Path::new(from);
@@ -219,8 +217,8 @@ fn clean_copies(data: &Path, keep: &HashSet<String>) -> Vec<String> {
     let mut removed = Vec::new();
     for name in stale_copies(&names, keep) {
         let path = hosts.join(&name);
-        // A temporary copy still being written belongs to a launch in progress (#280 step 4 measured a
-        // cleanup deleting one under its copy). One a dead keeper left behind goes once it is old.
+        // A temporary copy still being written belongs to a launch in progress (#280 step 4: a cleanup
+        // can delete one under its copy). One a dead keeper left behind goes once it is old.
         if name.starts_with(".tmp-") && in_progress(&path) {
             continue;
         }
@@ -249,8 +247,8 @@ fn in_progress(path: &Path) -> bool {
  * The per-build copies in `<data>/hosts/`, and which of them are spoken for (#368).
  *
  * A copy is in use from the moment a launch starts making it until a host runs from it, and the
- * cleanup a ready host sets off must not take it in between (seen in CI, 2026-10-05/06: a cleanup
- * deleted a copy before the host started from it, "Cannot find module .../main.mjs").
+ * cleanup a ready host sets off must not take it in between (a copy deleted before the host
+ * starts from it fails the start with "Cannot find module .../main.mjs").
  *
  * So every copy and every cleanup in a keeper goes through one lock:
  *   - `claim` makes or reuses a build's copy and holds it until the claim is dropped. A launch
@@ -260,7 +258,7 @@ fn in_progress(path: &Path) -> bool {
  *
  * **Verified content** (thin-shell plan §5, §10 step 5). A host whose folder is a verified copy's
  * `<data>/content/<version>/host/` runs from there as it is: the copy is read-only and was made from
- * signed content, which is everything a copy in `hosts/` was for. Claiming such a build holds its
+ * signed content, which is everything a copy in `hosts/` is for. Claiming such a build holds its
  * `content/<version>/` folder instead of copying it. The cleanup removes every version folder
  * that no claim holds, that is not the keeper's own (`own`, the folder its executable runs from) and
  * that no host in use runs from, and every `.partial-*` folder a copy that died left behind; never
@@ -463,9 +461,9 @@ static NEXT_TMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
  * file or the new one, whole.
  *
  * The temporary name is this process's and this call's (#840 item 11). With one name per process,
- * two threads writing `keeper.json` at once (the status sink and a request) truncated and wrote the
- * same temporary file, and the rename could publish the two interleaved, or fail because the other
- * thread had renamed it away. The data is synced before the rename, so a crash leaves the old file,
+ * two threads writing `keeper.json` at once (the status sink and a request) would truncate and write
+ * the same temporary file, and the rename could publish the two interleaved, or fail because the
+ * other thread renamed it away. The data is synced before the rename, so a crash leaves the old file,
  * not an empty new one. A temporary file an earlier process with this pid left behind (killed
  * between create and rename) is removed and the create tried once more.
  */
@@ -502,8 +500,8 @@ mod tests {
     use crate::keeper::test_support::temp_path as temp;
 
     /// #840 item 11: threads writing the same file at once each publish their own content whole.
-    /// With one temporary name per process they truncated and wrote the same temporary file, and
-    /// a rename failed or published a mix.
+    /// With one temporary name per process they would truncate and write the same temporary file,
+    /// and a rename would fail or publish a mix.
     #[test]
     fn a_stale_temporary_file_of_a_dead_process_with_this_pid_does_not_stop_the_write() {
         let dir = temp("stale-tmp");
@@ -728,9 +726,9 @@ mod tests {
         (data, a_src, c_src, a, c)
     }
 
-    /// The CI failure of #368, in order: build C's copy is claimed, then a cleanup a ready host set off runs with build A as
-    /// the running host's copy. C's copy must still be there when its host starts ("Cannot find module
-    /// .../hosts/handoff-C/main.mjs" when it was not).
+    /// #368, in order: build C's copy is claimed, then a cleanup a ready host set off runs with build A as
+    /// the running host's copy. C's copy must still be there when its host starts (else "Cannot find module
+    /// .../hosts/handoff-C/main.mjs").
     #[test]
     fn a_claimed_copy_survives_the_cleanup_a_ready_host_sets_off() {
         let (data, a_src, c_src, a, c) = two_builds("held");

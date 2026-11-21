@@ -175,7 +175,7 @@ unsafe extern "system" fn subclass_proc(
             tell.flush(CONFIRMED_END_WAIT);
         }
     }
-    // The answer is the program's own, as it was: the window never refuses the end
+    // The answer is the next procedure's: the window never refuses the end
     // SAFETY: the next procedure of the chain, with the message as it came
     unsafe { windows_sys::Win32::UI::Shell::DefSubclassProc(hwnd, msg, wparam, lparam) }
 }

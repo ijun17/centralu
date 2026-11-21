@@ -1,7 +1,6 @@
 //! The public keys the keeper verifies content with (docs/plans/thin-shell.md §4): `packaging/shell/keys.json`,
 //! compiled in through `content_verify::embedded_keys`, the same keys the shell trusts, and nothing else. Used for the
-//! window's account of why the shell refused its content (`content::diagnose`). The test key a keeper build could also
-//! trust went with the handoff to verified content it was for (#1895 step 4, PR 4).
+//! window's account of why the shell refused its content (`content::diagnose`).
 
 use content_verify::{embedded_keys, TrustedKey};
 

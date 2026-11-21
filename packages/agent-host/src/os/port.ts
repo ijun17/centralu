@@ -393,7 +393,11 @@ export interface OsProcesses {
    * (`stop` with a 2 s grace).
    */
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>
-  /** The same, holding the host until it ends (the layer's own `taskkill` and `ps`, a lock's owner): keep these few */
+  /**
+   * The same, holding the host until it ends, for a program that starts nothing (`STARTS_NOTHING`, the list
+   * `guard/timed-start` holds): a limit ends the pid alone, because ending a tree without blocking the host for a process-table read
+   * cannot be done synchronously
+   */
   runSync(
     command: string,
     args: readonly string[],

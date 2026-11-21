@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execTool } from './tool-run.js'
 import { realOs } from './os/real.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
+import { fakeTool } from './fake-exe.test-helpers.js'
 import { alive, cleanUp, plantTreeScript, settle, treePids } from './dev-services/process-tree.test-helpers.js'
 import { SLOW } from '../../../tooling/test-timing.js'
 
@@ -19,25 +20,19 @@ describe('execTool', () => {
     dir = ''
   })
 
-  /**
-   * A tool on PATH, as npm puts one there: a `.cmd` shim, which Windows finds by PATHEXT, and a shell script by the bare
-   * name, which POSIX finds; each OS passes over the other's
-   */
-  function fakeTool(name: string, js: string): void {
-    dir = tempRoot('cc-tool-run-')
-    files.writeFileSync(join(dir, `${name}.cjs`), js)
-    files.writeFileSync(join(dir, `${name}.cmd`), `@"${env.execPath}" "%~dp0\\${name}.cjs" %*\r\n`)
-    files.writeFileSync(join(dir, name), `#!/bin/sh\nexec "${env.execPath}" "${join(dir, `${name}.cjs`)}" "$@"\n`, { mode: 0o755 })
-    vi.stubEnv('PATH', `${dir}${delimiter}${env.get('PATH') ?? ''}`)
+  /** A tool `fakeTool` writes into this test's folder, first on PATH */
+  function toolOnPath(name: string, js: string): void {
+    dir ||= tempRoot('cc-tool-run-')
+    vi.stubEnv('PATH', `${fakeTool(dir, name, js)}${delimiter}${env.get('PATH') ?? ''}`)
   }
 
   it('asks the tool found on PATH, with the arguments after its own', async () => {
-    fakeTool('faketool', "process.stdout.write(JSON.stringify(process.argv.slice(2)))")
+    toolOnPath('faketool', "process.stdout.write(JSON.stringify(process.argv.slice(2)))")
     expect(JSON.parse((await execTool('faketool', ['--version'], { timeoutMs: 30_000 * SLOW })).stdout)).toEqual(['--version'])
   })
 
   it('names the tool in a failure, not the Node its shim runs', async () => {
-    fakeTool('faketool', "process.stderr.write('not signed in'); process.exit(3)")
+    toolOnPath('faketool', "process.stderr.write('not signed in'); process.exit(3)")
     await expect(execTool('faketool', ['auth', 'status'], { timeoutMs: 30_000 * SLOW })).rejects.toThrow(/^faketool exited 3: not signed in$/)
   })
 
@@ -50,11 +45,11 @@ describe('execTool', () => {
    * (`plantTreeScript`); the caller exits as soon as the limit's rejection reaches it, as a script does.
    */
   it('leaves nothing running when the caller exits on a timeout', async () => {
-    fakeTool('faketool', '')
+    dir = tempRoot('cc-tool-run-')
     const pidFile = join(dir, 'pids')
     const tree = plantTreeScript(dir)
-    files.writeFileSync(
-      join(dir, 'faketool.cjs'),
+    toolOnPath(
+      'faketool',
       [
         "const { spawn } = require('node:child_process')",
         "const { appendFileSync } = require('node:fs')",

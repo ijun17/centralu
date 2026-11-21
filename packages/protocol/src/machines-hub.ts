@@ -56,10 +56,12 @@ export const HubAskResult = z.union([
 export type HubAskResult = z.infer<typeof HubAskResult>
 /** The most tasks a report across names as covered (`TaskReport.covers`): the newest, when a giver left more open */
 export const TASK_REPORT_COVERS_MAX = 100
+/** The most of a report's answer that crosses (`TaskReport.answer`): the sender cuts a longer one to it, ending in "…" */
+export const TASK_REPORT_ANSWER_MAX = 2_000
 /** How a crossed task's turn ended: the mailbox's `TurnReport` without its words */
 export const TaskReport = z.object({
   outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']),
-  answer: z.string().max(2_000).optional(),
+  answer: z.string().max(TASK_REPORT_ANSWER_MAX).optional(),
   error: z.string().max(200).optional(),
   reason: z.string().max(200).optional(),
   paused: z.number().int().min(0).max(10_000).optional(),

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import Module from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -9,7 +9,7 @@ import { removeTree } from '../temp-dir.test-helpers.js'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { isDevVersion } from './dev-build.js'
-import { fakeRegistry, fakeServe, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, fakeServe, linuxRemote, type FakePackage, type FakeRegistry, type NodeArchive } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { findMachine, remoteDev, resolveCommit } from './remote-dev.js'
 import { storeRegistry } from './stored.js'
@@ -242,7 +242,7 @@ describe('the command’s lookups (#1036)', () => {
  */
 function wholeCommand(o: {
   shell: RemoteSpec['shell']
-  prepare: (root: string, home: string) => Promise<{ ssh: string; env: (over?: Record<string, string>) => Record<string, string>; runtime: RemoteRuntime; archive: { version: string; file: string; bytes: Buffer }; packages: (version: string) => FakePackage[] }>
+  prepare: (root: string, home: string) => Promise<{ ssh: string; env: (over?: Record<string, string>) => Record<string, string>; runtime: RemoteRuntime; archive: NodeArchive; packages: (version: string) => FakePackage[] }>
 }) {
   let root: string
   let home: string
@@ -256,7 +256,7 @@ function wholeCommand(o: {
     mkdirSync(home, { recursive: true })
     ctx = await o.prepare(root, home)
     reg = await fakeRegistry(ctx.packages(BASE))
-    reg.addNodeArchive(ctx.archive.version, ctx.archive.file, ctx.archive.bytes)
+    reg.addNodeArchive(ctx.archive)
     mkdirSync(join(root, 'hub'), { recursive: true })
     const store = new Store(join(root, 'hub', 'store.db'))
     storeRegistry(store).add({ id: 'box', name: 'Box', sshTarget: 'box', remote: spec, addedAt: 1, acceptedVersions: null })
@@ -436,34 +436,18 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('pnpm rem
   })
 })
 
-// A Linux remote played by this machine's sh (see update.test.ts)
+// A Linux remote played by this machine's sh (`linuxRemote`)
 describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux machine over a fake ssh into a real sh (#1036)', () => {
   const NODE_V = '24.21.0'
-  const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
   wholeCommand({
     shell: 'posix',
-    prepare: async (root, home) => {
-      const bin = join(root, 'bin')
-      mkdirSync(bin, { recursive: true })
-      const tool = (name: string, body: string) => {
-        writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
-        chmodSync(join(bin, name), 0o755)
-      }
-      tool('uname', 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) /usr/bin/uname "$@" ;; esac')
-      tool('getconf', 'echo "glibc 2.39"')
-      writeFileSync(
-        join(root, 'ssh'),
-        `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`,
-      )
-      chmodSync(join(root, 'ssh'), 0o755)
-      const archive = tarGz(`node-v${NODE_V}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT' })
+    prepare: async (root) => {
+      const machine = linuxRemote(root, NODE_V)
       // git is found where this machine has it; the fake tools come first
       const gitDir = dirname(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim())
       return {
-        ssh: join(root, 'ssh'),
-        env: (over = {}) => ({ HOME: home, PATH: `${bin}:${gitDir}:/usr/bin:/bin:/usr/sbin:/sbin`, ...over }),
-        runtime: { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: sha256(archive) } } } },
-        archive: { version: NODE_V, file: NODE_FILE, bytes: archive },
+        ...machine,
+        env: (over = {}) => machine.env(over, [gitDir]),
         packages: (v): FakePackage[] => [
           { name: 'centralu', version: v, files: { 'package.json': JSON.stringify({ name: 'centralu', version: v }), 'bin/centralu.mjs': fakeServe(v, { installInfo: INSTALL_INFO, realServe: REAL }), 'bin/serve.mjs': SERVE_SHIM, 'bin/serve-switch.mjs': SWITCH_MARK } },
           { name: '@centralu/host-linux-x64', version: v, files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } },

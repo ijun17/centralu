@@ -77,7 +77,7 @@ beforeEach(async () => {
   events = []
   claude = new Adapter()
   const other = Object.assign(new Adapter(), { tool: 'claude-two' as ToolName })
-  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, tmpdir())
+  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, { worktreeRoot: tmpdir() })
   projectId = (await mgr.projectCreation.addProject(tmpdir())).id
 })
 afterEach(async () => {

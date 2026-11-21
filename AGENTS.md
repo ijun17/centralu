@@ -32,6 +32,7 @@ What reaches a running app without a restart: [CONTRIBUTING.md](CONTRIBUTING.md#
 
 ## Before you change …
 
+Where one feature's screen, host, protocol, store and tests are: [docs/feature-maps/](docs/feature-maps/README.md).
 Read the row's document first. The guard is what fails when the rule is broken; UNGUARDED means
 nothing does, so your own check and the review must catch it.
 
@@ -48,7 +49,7 @@ nothing does, so your own check and the review must catch it.
 | A string on screen | [ux-writing.md](docs/ux-writing.md) §1, §3 | English only, American spelling. Copy the nearest string that follows the rules; no internal words; one wording per state | `guard/archive-wording` ("trash" only) |
 | How a task is done on screen | [usability.md](docs/usability.md) "Process"; [ux-metrics.md](docs/ux-metrics.md) "Budgets" | A frequent task has a ux task; a raised budget says why in the PR | CI `ux tasks` |
 | What the product does | [product-spec.md](docs/product-spec.md) | The spec wins on what is built; the design document wins on how | UNGUARDED |
-| Host code that touches the OS or processes | [architecture.md](docs/architecture.md) §2; [runtime-lessons/](docs/runtime-lessons/README.md) (by rule id); [plans/os-layer.md](docs/plans/os-layer.md) | The OS only behind the OS layer; signal only pids you started; stdout carries the handshake only (HO1) | `local/os-imports`, `local/platform-checks`, `guard/git-start`, `log-file.test.ts` |
+| Host code that touches the OS or processes | [architecture.md](docs/architecture.md) §2; [runtime-lessons/](docs/runtime-lessons/README.md) (by rule id); [plans/os-layer.md](docs/plans/os-layer.md); its tests: [agent-host/os-layer-in-tests.md](docs/agent-host/os-layer-in-tests.md) | The OS only behind the OS layer; signal only pids you started; stdout carries the handshake only (HO1) | `local/os-imports`, `local/platform-checks`, `guard/git-start`, `log-file.test.ts` |
 | Data from outside the process | [architecture.md](docs/architecture.md) §2 "Data from outside the process…" | Check it with zod or a narrowing guard, never `as T`; a caught value's text via `errorMessage(e)` | type-aware lint, `guard/type-assertions`, `tooling/type-aware-lint.test.ts` |
 | An adapter | [agent-host/adapters/adding-a-tool.md](docs/agent-host/adapters/adding-a-tool.md) step 3, [agent-host/adapters/vendor-drift-checks.md](docs/agent-host/adapters/vendor-drift-checks.md); [architecture.md](docs/architecture.md) §2 | Tests replay recordings of real runs. A new vendor name joins the drift contract. CLI names stay in `adapters/` | `agent/agent-adapter-checks`, `.github/workflows/drift.yml` |
 | A protocol message | [protocol.md](docs/protocol.md) §4 | Additions only; a shape is declared once; an added host field has a default the client applies | `protocol.test.ts` (golden fixtures), `e2e/older-host.spec.ts`, `pnpm tier` (deep) |

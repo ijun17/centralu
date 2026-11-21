@@ -64,7 +64,7 @@ describe('codex app-server exit judgment', () => {
     )
 
     // A short timeout: the rejection comes from spawn's 'error', but this keeps a leftover timer from holding the test runner open
-    await expect(client.request('initialize', {}, 1000)).rejects.toThrow(/failed to start/)
+    await expect(client.request('initialize', {}, 1000)).rejects.toThrow(/^codex app-server failed to start: codex CLI not found$/)
     // onExit fires only once even if both 'error' and 'exit' arrive (the finished flag)
     await new Promise((r) => setTimeout(r, 100))
     expect(exits).toBe(1)

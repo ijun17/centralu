@@ -53,7 +53,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.message(id)).toMatchObject({ needsReply: true, sender: at(hub, 'm1.c1') })
     // The parent answers with an ordinary reply, refused `elsewhere` before
     const a = await tool(hub, 'h1', { action: 'reply', thread: id, text: 'base it on main' })
-    expect(a.text).toMatch(/^Sent \S+ to "c1" \(session:hub-[0-9a-f]+\/m1\.c1\) on Remote box\. It answers that message\./)
+    expect(a.text).toMatch(/^Sent \S+ to "c1" \(session:hub-[0-9a-f]+\/m1\.c1\) on Remote box\. It answers \S+\.$/)
     const answer = idOf(a)
     // Written on the machine, to the child, as an answer to its own question (the same id on both sides)
     expect(machine.store.mailbox.message(answer)).toMatchObject({ sender: at(hub, 'h1'), replyTo: id, body: 'base it on main' })
@@ -73,14 +73,14 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const { machine, hub } = await rig()
     expect(hub.machine().asks).toEqual({ on: false, note: null })
     const sent = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'are you free for a review?' })
-    expect(sent.text).toMatch(/^Sent \S+ to "w1" \(session:hub-[0-9a-f]+\/m1\.w1\) on Remote box\. It waits for a reply/)
+    expect(sent.text).toMatch(/^Sent \S+ to "w1" \(session:hub-[0-9a-f]+\/m1\.w1\) on Remote box\. It needs a reply/)
     const id = idOf(sent)
     expect(machine.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'h1'), needsReply: true })
     // The hub keeps its copy, which this host never tries to deliver
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
     expect(hub.store.mailbox.dueRecipients()).not.toContain(at(hub, 'm1.w1'))
     const back = await tool(machine, 'w1', { action: 'reply', thread: id, text: 'yes, send it' })
-    expect(back.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on Hub mac\. It answers that message\./)
+    expect(back.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on Hub mac\. It answers \S+\.$/)
     expect(hub.store.mailbox.message(idOf(back))).toMatchObject({ sender: at(hub, 'm1.w1'), replyTo: id, body: 'yes, send it' })
     await eventually(() => hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.settled === 'answered')
     // A question its sender withdraws is withdrawn on the recipient's computer too: the sender's side is the authority on that

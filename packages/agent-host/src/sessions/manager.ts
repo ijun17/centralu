@@ -238,6 +238,7 @@ export class SessionManager {
    * restart asks again (the caller's agent then raises its own card for a read outside its folder).
    */
   private readGrants = new Map<string, Set<string>>()
+  private readonly worktreeRoot: string
 
   constructor(
     private store: Store,
@@ -250,9 +251,9 @@ export class SessionManager {
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
     private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
-    /** Root under which worktrees are created: the data folder's (`worktreesFolder`) unless a test names one */
-    private worktreeRoot = worktreesFolder(),
     private keeperOpts: {
+      /** Root under which worktrees are created: the data folder's (`worktreesFolder`) unless a test names one */
+      worktreeRoot?: string
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
@@ -268,6 +269,7 @@ export class SessionManager {
       handoffTimings?: HandoffTimings
     } = {},
   ) {
+    this.worktreeRoot = keeperOpts.worktreeRoot ?? worktreesFolder()
     this.tenure = new HostTenure(this.parts())
     this.files = new ProjectFiles({
       rootOf: (projectId) => this.projectRegistry.cwdOf(projectId),

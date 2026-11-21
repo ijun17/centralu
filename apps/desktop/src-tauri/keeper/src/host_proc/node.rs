@@ -10,9 +10,8 @@ use crate::os;
 use crate::start_plan::Os;
 
 /// Told to someone who has no Node at all, so it has to name a command they can actually
-/// run. `brew` was hardcoded, which on Linux points at a package manager that is not
-/// there — the one message whose whole job is to unblock a stuck user would have sent
-/// them somewhere else.
+/// run on this OS: `brew` on Linux points at a package manager that is not there, and this
+/// message's whole job is to unblock a stuck user.
 pub(super) fn install_node_hint(os: Os) -> &'static str {
     match os {
         Os::MacOs => "`brew install node`",
@@ -74,10 +73,9 @@ fn nvm_windows_versions(home: &str) -> Vec<String> {
 
 /// The guidance shown to the person verbatim when Node cannot be found.
 ///
-/// **A silent failure is the worst outcome.** It used to just run `"node"` bare when it
-/// could not find it, which left only `No such file or directory`, and that raw text is
-/// what showed up on screen. There was no way to tell apart Node truly being missing, Node
-/// being present but not found, and the version being too low.
+/// **A silent failure is the worst outcome.** Running `"node"` bare when it cannot be found
+/// leaves only `No such file or directory` on screen, which does not tell apart Node truly
+/// being missing, Node being present but not found, and the version being too low.
 pub(super) fn node_missing_message(looked: &[String]) -> String {
     format!(
         "Could not find Node.js. Centralu requires {}.\n\
@@ -178,12 +176,10 @@ static NODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 ///
 /// **Why a fixed path does not work (measured):** a `.app` launched from the GUI does not
 /// inherit the login shell's PATH, and only gets
-/// `/usr/bin:/bin:/usr/sbin:/sbin`. This used to only check the two Homebrew locations and
-/// `/usr/bin`, but Node installed via nvm, mise or volta lives under the home directory, so
-/// **the app would not start even on a Mac where Node was perfectly well installed.** The
-/// claude and codex CLI lookups had already hit the same problem and were fixed to ask the
-/// login shell (`packages/agent-host/src/env-path.ts`); only node was left using the old
-/// approach.
+/// `/usr/bin:/bin:/usr/sbin:/sbin`. Node installed via nvm, mise or volta lives under the home
+/// directory, so a fixed list of the two Homebrew locations and `/usr/bin` means **the app does
+/// not start even on a Mac where Node is perfectly well installed.** So this asks the login
+/// shell, as the claude and codex CLI lookups do (`packages/agent-host/src/env-path.ts`).
 ///
 /// **Windows** has no login shell to ask, and does not need one: a program started from Explorer
 /// inherits the user's PATH from the registry, which is where the Node installer, nvm-windows,
