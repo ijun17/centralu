@@ -321,6 +321,7 @@ export function commentsOnly(path, before, after, ts) {
 
 // --- Reading a checkout -------------------------------------------------------------------------
 
+// git started here, not through scripts/interrupts.mjs: the board runs main's copy of this file alone (queue-integrate.mjs)
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
 }

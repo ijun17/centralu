@@ -390,8 +390,10 @@ not run; it prints each step's time as it goes. In that order:
   so it must build on its own;
 - dependency-cruiser's orphans as errors (`orphans`; `pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
   cycle, a layer rule);
-- `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references and the OS allowlist), at
-  your head: they fail on a file your branch did not touch. A guard is declared there with the files it reads;
+- `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references, the OS allowlist, the old name,
+  the tiers' globs and more), at your head: they fail on a file your branch did not touch. A guard is declared there with the files
+  it reads. A tooling test that reads the repository (`git ls-files`, a recursive readdir, or the mark `pre-pr: guard` when it
+  reads it through a module) is declared there, or listed in its `NOT_GUARDS` with why; `tooling/guards.test.ts` fails otherwise;
 - `store-step`: a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
   that main already has or another open pull request adds (#1203): two parallel changes picking the
   same number each pass CI alone and clash when the second lands. It reads the open pull requests
@@ -401,9 +403,9 @@ not run; it prints each step's time as it goes. In that order:
 - `revert`: each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported. The run stops at the first such test (one more
   may finish with it). A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported.
-  A file under `e2e/` that a changed test outside `e2e/` imports is reverted too: there it is the code under test. A changed test
-  file whose base version does not load with the rest reverted (it needs a test helper your branch changed) is left out, with a
-  warning: which of its tests are new cannot be told;
+  A file under `e2e/` that a changed test outside `e2e/` reaches through imports, at any depth, is reverted too: there it is the
+  code under test. A changed test file whose base version does not load with the rest reverted (it needs a test helper your branch
+  changed) is left out, with a warning: which of its tests are new cannot be told, and **Verified** says how many were not judged;
 - `guards`: a guard of `tooling/guards.ts` your branch changes (its test, or a file it reads: the OS allowlist, a document
   that loses a section, heading or anchor) is run against each other open, non-draft pull request, its head merged with your branch: a
   guard breaks another pull request through what that one adds, in files yours need not touch. A branch that changes

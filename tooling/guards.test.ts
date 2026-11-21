@@ -1,9 +1,10 @@
 /** The repository-wide guards `pnpm pre-pr` runs (tooling/guards.ts, #2373): what each declares, and which guards a change touches */
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { changedGuards, GUARDS, type Change } from './guards.js'
+import { changedGuards, GUARDS, NOT_GUARDS, type Change } from './guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const DOC_REFS = ['tooling/doc-refs.test.ts']
@@ -17,12 +18,19 @@ describe('the repository-wide guards', () => {
     expect(missing, `tooling/guards.ts declares what the repository does not have: ${missing.join(', ')}`).toEqual([])
   })
 
+  it('names every tooling test that reads the repository, as a guard or with why it is not one', () => {
+    const tests = execFileSync('git', ['ls-files', '-z', '--', 'tooling'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.[cm]?tsx?$/.test(f))
+    const reads = tests.filter((f) => /'ls-files'|readdirSync\(.*recursive: true|pre-pr: guard/.test(readFileSync(join(ROOT, f), 'utf8'))).sort()
+    const named = [...GUARDS.map((g) => g.test), ...Object.keys(NOT_GUARDS)].sort()
+    expect(named, 'tooling/guards.ts: each test that reads the repository (git ls-files, a recursive readdir, the mark pre-pr: guard) in GUARDS or NOT_GUARDS, and no other').toEqual(reads)
+  })
+
   it('counts a change to a guard test or to a file it reads, and to nothing else', () => {
     expect(changedGuards([change('tooling/os-allowlist.txt', 'a\n', 'a\nb\n')])).toEqual(['tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/os-tests.ts', 'a', 'b')])).toEqual(['tooling/os-layer.test.ts'])
     expect(changedGuards([change('tooling/doc-refs.ts', 'a', 'b')])).toEqual(DOC_REFS)
     expect(changedGuards([change('tooling/os-layer.test.ts', 'a', 'b'), change('tooling/doc-refs.test.ts', 'a', null)])).toEqual([...DOC_REFS, 'tooling/os-layer.test.ts'])
-    expect(changedGuards([change('tooling/styles.test.ts', 'a', 'b'), change('packages/ui/src/a.ts', null, 'b'), change('docs/notes.txt', '## 1. One\n', null)])).toEqual([])
+    expect(changedGuards([change('tooling/heavy-store.test.ts', 'a', 'b'), change('packages/ui/src/a.ts', null, 'b'), change('docs/notes.txt', '## 1. One\n', null)])).toEqual([])
   })
 
   it('counts a document only when it loses something a reference may cite', () => {

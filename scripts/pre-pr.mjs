@@ -196,6 +196,8 @@ function pnpm(args, dir) {
 
 /** The real tools. Each takes a worktree (`gh`: the checkout, to run in); tests replace them. */
 export const realRunners = {
+  /** The change's tier: tierOfChange of scripts/tier.mjs, which starts git itself (tierOf reads how it ended) */
+  tier: tierOfChange,
   /** Runs `gh` in the checkout; answers its stdout. */
   gh(args, dir) {
     try {
@@ -618,12 +620,21 @@ function importedPaths(from, text) {
 
 /**
  * The changes (`{ status, path }`) the revert check puts back to the base: all but the tests' own files (isTestFile). A file under
- * e2e/ that a changed vitest file imports goes back too, whatever it is: vitest runs nothing under e2e/, so there it is what a test
- * checks, not a test of its own. `read(path)` answers a changed file's text at the head.
+ * e2e/ that a changed vitest file reaches through e2e/ imports, at any depth, goes back too, whatever it is: vitest runs nothing
+ * under e2e/, so there it is what a test checks, not a test of its own. `read(path)` answers a file's text at the head, or null
+ * where there is none.
  */
 export function revertedChanges(changed, read) {
-  const imported = new Set(changed.filter((x) => x.status !== 'D' && isVitestFile(x.path)).flatMap((x) => importedPaths(x.path, read(x.path))))
-  return changed.filter((x) => !isTestFile(x.path) || (x.path.startsWith('e2e/') && imported.has(x.path)))
+  const reached = new Set()
+  const follow = (from) => {
+    for (const path of importedPaths(from, read(from) ?? '')) {
+      if (!path.startsWith('e2e/') || reached.has(path)) continue
+      reached.add(path)
+      follow(path)
+    }
+  }
+  for (const x of changed) if (x.status !== 'D' && isVitestFile(x.path)) follow(x.path)
+  return changed.filter((x) => !isTestFile(x.path) || (x.path.startsWith('e2e/') && reached.has(x.path)))
 }
 
 /**
@@ -641,7 +652,14 @@ function revertStep(c) {
   const top = c.top()
   // The guards check reads the head's declaration, which this step puts back to the base
   if (c.want('guards')) c.declared()
-  const sources = revertedChanges(c.changed, (path) => readFileSync(join(top, path), 'utf8'))
+  const sources = revertedChanges(c.changed, (path) => {
+    try {
+      return readFileSync(join(top, path), 'utf8')
+    } catch {
+      // An import's path as guessed (importedPaths) that is no file, or is a folder
+      return null
+    }
+  })
   c.log(`Running ${tests.length} test file(s) with ${sources.length} other change(s) reverted to ${c.base}`)
   for (const s of sources) {
     if (s.status === 'A') rmSync(join(top, s.path), { force: true })
@@ -767,14 +785,20 @@ function runSteps(c) {
   }
 }
 
-/** What each check held when a run found nothing, as a pull request's Verified names it; `heads` is how many heads tsc built. */
+/**
+ * What each check held when a run found nothing, as a pull request's Verified names it; `heads` is how many heads tsc built, and
+ * `warnings` the run's: the revert check's are the test files it left out, which its line must not claim.
+ */
 const PASSED = {
   lint: () => 'lint on the changed files',
   tsc: (heads) => `tsc at ${heads} head(s)`,
   orphans: () => 'no orphans',
   deps: () => 'no dependency errors',
   'repo-guards': () => 'the repository-wide guards',
-  revert: () => 'no new test passes without the change',
+  revert: (_heads, warnings) => {
+    const leftOut = warnings.filter((w) => w.check === 'revert').length
+    return `no new test passes without the change${leftOut ? ` (${leftOut} test file(s) not judged: see the warnings)` : ''}`
+  },
 }
 
 /** The checks a pull request can be exempted from, each with a reason, and `--only` runs. `main` is only ever a warning. */
@@ -784,9 +808,9 @@ const CHECKS = STEPS.flatMap((s) => s.checks)
  * The pull request's tier: never a refusal. The review it needs, from the paths it changes over its base, by main's rules;
  * when they cannot be read it is deep, with a warning, so a broken rules file never lets a change through unreviewed.
  */
-function tierOf(root, at, warnings) {
+function tierOf(root, at, warnings, runners) {
   try {
-    const t = tierOfChange({ root, base: at.base, head: at.head, rulesRef: at.main })
+    const t = runners.tier({ root, base: at.base, head: at.head, rulesRef: at.main })
     return { name: t.tier, line: t.line, because: t.because.map((f) => f.path) }
   } catch (e) {
     // tier.mjs starts git on its own (the board runs it as one file): its tool's end is read here
@@ -876,13 +900,13 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
     warnings,
     exempted,
     notes,
-    passed: checked && !findings.length ? CHECKS.filter((k) => want(k) && Object.hasOwn(PASSED, k)).map((k) => PASSED[k](heads.length)) : [],
+    passed: checked && !findings.length ? CHECKS.filter((k) => want(k) && Object.hasOwn(PASSED, k)).map((k) => PASSED[k](heads.length, warnings)) : [],
     heads: heads.map((h) => ({ sha: h.sha, names: h.names })),
     head: at.head,
     tier,
   })
 
-  tier = tierOf(root, at, warnings)
+  tier = tierOf(root, at, warnings, runners)
   const behind = mainWarning(root, at, head, main)
   if (behind) warnings.push(behind)
 

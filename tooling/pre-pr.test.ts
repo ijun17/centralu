@@ -65,6 +65,7 @@ function fakeRunners(opts: { orphans?: string[]; cycle?: boolean; lintFails?: bo
   return {
     calls,
     runners: {
+      tier: realRunners.tier,
       prepare: (dir: string) => {
         const sha = git(dir, 'rev-parse', 'HEAD')
         calls.prepare.push(sha)
@@ -578,11 +579,12 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(second.findings.map((f: { check: string; message: string }) => [f.check, /not run: vitest gave no report .*so no test was judged/.test(f.message)])).toEqual([['revert', true]])
   })
 
-  it('reverts an e2e/ file a changed vitest test imports, as the code it checks, and keeps the e2e fixtures it does not', () => {
+  it('reverts the e2e/ files a changed vitest test reaches through imports, as the code it checks, and keeps the e2e fixtures it does not', () => {
     git(repo, 'checkout', '-q', '-b', 'e2e', 'main')
-    write('e2e/fixtures/gap.ts', 'export const gap = 2\n')
+    write('e2e/fixtures/gap.ts', "import { deep } from './deep.js'\nexport const gap = 2\n")
+    write('e2e/fixtures/deep.ts', 'export const deep = 3\n')
     write('e2e/fixtures/other.ts', 'export const other = 2\n')
-    write('src/gap.test.ts', "import { gap } from '../e2e/fixtures/gap.js'\nknows the gap :: e2e/fixtures/gap.ts :: gap = 2\nknows the other :: e2e/fixtures/other.ts :: other = 2\n")
+    write('src/gap.test.ts', "import { gap } from '../e2e/fixtures/gap.js'\nknows the gap :: e2e/fixtures/gap.ts :: gap = 2\nknows the deep :: e2e/fixtures/deep.ts :: deep = 3\nknows the other :: e2e/fixtures/other.ts :: other = 2\n")
     commit('e2e')
     expect(run({ head: 'e2e' }).findings.map((f: { message: string }) => f.message.split(' passes')[0])).toEqual(['src/gap.test.ts: "knows the other"'])
   })
@@ -602,6 +604,8 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.warnings.filter((w: { check: string }) => w.check === 'revert').map((w: { message: string }) => w.message)).toEqual([
       "src/a.test.mjs: its version at base does not load with this pull request's other changes reverted (Error: Cannot find module ./helper.js), so which of its tests are new is not known: they were not judged.",
     ])
+    // Verified names the check as passed only for the files it judged
+    expect(r.passed).toContain('no new test passes without the change (1 test file(s) not judged: see the warnings)')
   })
 
   it('reports the first new test that passes with the other changes reverted, and none that fails or was there', () => {
@@ -769,6 +773,13 @@ describe('pre-pr on a stack of two pull requests', () => {
       return { ok: false, out: 'src/b.mjs: an error' }
     }
     expect(prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, lint: failed } }).findings.map((f: { check: string }) => f.check)).toEqual(['lint'])
+  }, 60_000 * SLOW)
+
+  it('knows an interrupt of the git the tier starts itself, not through runTool, by how it ended', () => {
+    const fake = fakeRunners()
+    const tier = () => execFileSync(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: 1000, killSignal: 'SIGINT', stdio: 'ignore' })
+    expect(() => prePr({ cwd: repo, head: 'top', main: 'main', fetch: false, runners: { ...fake.runners, tier } })).toThrow('interrupted')
+    expect(fake.calls.lint).toEqual([])
   }, 60_000 * SLOW)
 
   it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {

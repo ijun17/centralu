@@ -1,4 +1,5 @@
 /** `guard/doc-refs`: a `<doc> §n`, `<doc>.md "Heading"`, `<doc>.md HO1` or Markdown link reference points at a section that exists (tooling/doc-refs.ts; #2179) */
+// pre-pr: guard (it reads every tracked file through scanRepository, tooling/doc-refs.ts)
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'

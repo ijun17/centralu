@@ -1,4 +1,4 @@
-// How pre-pr (scripts/pre-pr.mjs) and tier (scripts/tier.mjs) start git, pnpm, gh and Node: through runTool, which counts each
+// How pre-pr (scripts/pre-pr.mjs) starts git, pnpm, gh and Node: through runTool, which counts each
 // tool an interrupt ended. Ctrl-C and Ctrl-Break reach every process of the terminal, the tool too, and the tool fails. The run
 // is synchronous while a tool runs, so its own signal handler runs only once the run is over: how the tool ended is what tells
 // the run it was interrupted, and not that the tool failed.
