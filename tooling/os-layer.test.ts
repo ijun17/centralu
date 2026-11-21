@@ -15,7 +15,7 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { g, gitAsT } from './git-fixture.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, droppedPieces, droppedPiecesSince, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, treeAt, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, droppedPieces, droppedPiecesSince, everyOsTestsIn, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, treeAt, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -550,6 +550,10 @@ describe('the tests that run on every OS', () => {
     },
     120_000 * SLOW,
   )
+
+  it("reads this tree's EVERY_OS_TESTS as a later change reads it at its base", () => {
+    expect(everyOsTestsIn()).toEqual(layer.EVERY_OS_TESTS)
+  })
 
   it('refuses to guess past an import it cannot follow', () => {
     expect(() => pick({ 'packages/ui/src/x/a.test.ts': "import { b } from './gone.js'\nexport const a = b\n" }, 'packages/ui/src/x/a.test.ts')).toThrow(/names no file/)

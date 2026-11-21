@@ -532,8 +532,11 @@ export function droppedPiecesSince(base: string, tests: readonly string[], picke
 
 const OS_LAYER_MODULE = 'tooling/os-layer.js'
 
-/** `EVERY_OS_TESTS` of `tree`'s tooling/os-layer.js, none without one. The list is code (entries built with `map`), so a Node of its own runs it */
-function everyOsTestsIn(tree: Tree, root: string): EveryOsTest[] {
+/**
+ * `EVERY_OS_TESTS` of `tree`'s tooling/os-layer.js, none without one. The list is code (entries built with `map`), so a Node
+ * of its own runs it from its text, where a relative import resolves against nothing: the module may import Node's alone.
+ */
+export function everyOsTestsIn(tree: Tree = WORKING_TREE, root = ROOT): EveryOsTest[] {
   if (!tree.isFile(OS_LAYER_MODULE)) return []
   const script = `${tree.read(OS_LAYER_MODULE)}\nprocess.stdout.write(JSON.stringify(EVERY_OS_TESTS))\n`
   const list: unknown = JSON.parse(execFileSync(process.execPath, ['--input-type=module'], { cwd: root, input: script, encoding: 'utf8' }))
