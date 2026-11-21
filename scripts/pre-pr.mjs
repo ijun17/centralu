@@ -22,8 +22,8 @@
 //             since it lands on its own.
 //   orphans   dependency-cruiser's `no-orphans` rule as an error, as `pnpm verify` has it.
 //   deps      every other dependency-cruiser rule at error severity, as `pnpm depcruise` fails on them (a cycle, a layer rule).
-//   repo-guards  the repository-wide guards fast enough for every branch (REPO_GUARDS: doc references, the OS allowlist),
-//             which fail on a file the branch did not touch.
+//   repo-guards  the repository-wide guards tooling/guards.ts declares (doc references, the OS allowlist), at the head: they fail
+//             on a file the branch did not touch. The declaration is read by scripts/pre-pr-guards.mjs with the head's own tsx.
 //   store-step  a store step number this branch adds (a new `to: N,` under the migrations folder) that main
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
@@ -34,9 +34,8 @@
 //             request count; one that was already there passing is no news. Which tests the base's
 //             version of a file had is read first by a vitest pass that selects none, so it names them all, the skipped and
 //             todo ones too (a test the pull request un-skips was there); the run then ends at the first new test that passes.
-//   guards    never a refusal: when the branch adds or changes a repository-wide guard test (a tooling/*.test.ts, or
-//             a test that scans the whole repository), or a file one reads (GUARD_INPUTS), each changed guard is run against
-//             every other open, non-draft pull request, its head merged with this branch, and the
+//   guards    never a refusal: when the branch changes a guard of tooling/guards.ts (its test, or a file it declares it reads),
+//             each changed guard is run against every other open, non-draft pull request, its head merged with this branch, and the
 //             ones it would fail are listed with the first line of the failure, as warnings (they go into Verified): a
 //             guard that lands breaks a queued pull request otherwise. The author fixes those in the same change, or tells
 //             their authors. Bounded: a time limit (--guards-limit), only the guards the branch changed, and a
@@ -57,12 +56,13 @@
 // pull request's branch in a stack) to main. Unless --no-fetch, the remote is fetched first. The heads of
 // the stack are the local and remote branches between main and the head, and each --stack ref (the
 // board's open_pr fetches the stack under refs of its own and names them so).
-// Exit 0 when nothing was found, 1 with findings, 2 when it could not check, 130 when interrupted.
-import { execFileSync } from 'node:child_process'
+// Exit 0 when nothing was found, 1 with findings, 2 when it could not check, 130 when interrupted: a tool it started was ended by an
+// interrupt (scripts/interrupts.mjs), or one reached it.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { join, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
+import { endedByInterrupt, interruptsSoFar, runTool } from './interrupts.mjs'
 import { isMain } from './is-main.mjs'
 import { relFile, testKey } from './pre-pr-stop-reporter.mjs'
 import { ENV, canonical, git, mirrorModules, removeRun, removeWorktree, runDir, sweepStale, unlinkLinks } from './pre-pr-worktrees.mjs'
@@ -71,8 +71,9 @@ import { tierOfChange, unjudged } from './tier.mjs'
 // --- What a path is ------------------------------------------------------------------------------
 
 /**
- * A file the tests own: a test, a test helper, a fixture, a UI scenario or ux task. Never reverted. The rest of e2e/ (its
- * config, reporters, engine choice) is code vitest tests, so the revert check reverts it.
+ * A file the tests own: a test, a test helper, a fixture, a UI scenario or ux task. The revert check keeps it, but for an e2e/
+ * file a changed vitest test imports ({@link revertedChanges}). The rest of e2e/ (its config, reporters, engine choice) is code
+ * vitest tests, so the revert check reverts it.
  */
 export function isTestFile(path) {
   return /(?:^|\/)(?:fixtures|__tests__)\//.test(path) || /\.(?:test|spec)(?:-helpers)?\.[cm]?[jt]sx?$/.test(path) || /^e2e\/(?:.*\/)?[^/]+\.task\.ts$/.test(path)
@@ -165,12 +166,15 @@ export function nodeBin(worktree, bin, args, env = {}, timeout = 0) {
   const entry = [join(dir, 'node_modules', bin), ...args]
   const [file, argv] = timeout ? [process.execPath, [fileURLToPath(new URL('./run-limited.mjs', import.meta.url)), String(timeout), process.execPath, ...entry]] : [process.execPath, entry]
   try {
-    const out = execFileSync(file, argv, { cwd: dir, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+    const out = runTool(file, argv, { cwd: dir, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
     return { ok: true, out, timedOut: false }
   } catch (e) {
     return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}` || String(e.message), timedOut: timeout > 0 && e.status === 124 }
   }
 }
+
+/** The lockfile a checkout's last `pnpm install` installed: pnpm's copy of it */
+const INSTALLED_LOCK = 'node_modules/.pnpm/lock.yaml'
 
 const sameText = (a, b) => existsSync(a) && existsSync(b) && readFileSync(a, 'utf8').replace(/\r\n/g, '\n') === readFileSync(b, 'utf8').replace(/\r\n/g, '\n')
 
@@ -182,9 +186,9 @@ function pnpm(args, dir) {
   const self = process.env.npm_execpath
   const opts = { cwd: dir, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 }
   try {
-    if (self && /pnpm/i.test(self)) return /\.[cm]?js$/.test(self) ? execFileSync(process.execPath, [self, ...args], opts) : execFileSync(self, args, opts)
+    if (self && /pnpm/i.test(self)) return /\.[cm]?js$/.test(self) ? runTool(process.execPath, [self, ...args], opts) : runTool(self, args, opts)
     // pnpm is a .cmd on Windows, which only a shell starts; the arguments are fixed words
-    return execFileSync('pnpm', args, { ...opts, shell: process.platform === 'win32' })
+    return runTool('pnpm', args, { ...opts, shell: process.platform === 'win32' })
   } catch (e) {
     throw new Error(`pnpm ${args.join(' ')} failed in ${dir}:\n${tail(`${e.stdout ?? ''}${e.stderr ?? ''}`)}`)
   }
@@ -195,7 +199,7 @@ export const realRunners = {
   /** Runs `gh` in the checkout; answers its stdout. */
   gh(args, dir) {
     try {
-      return execFileSync('gh', args, { cwd: dir, encoding: 'utf8', env: ENV, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
+      return runTool('gh', args, { cwd: dir, encoding: 'utf8', env: ENV, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
     } catch (e) {
       throw new Error(`gh ${args.slice(0, 3).join(' ')} failed: ${tail(`${e.stderr ?? ''}${e.message}`, 3)}`)
     }
@@ -208,7 +212,7 @@ export const realRunners = {
    * differs is not installed (minutes, for each of many pull requests): answers false.
    */
   prepare(dir, root, { linkOnly = false } = {}) {
-    if (!sameText(join(root, 'node_modules', '.pnpm', 'lock.yaml'), join(dir, 'pnpm-lock.yaml'))) {
+    if (!sameText(join(root, INSTALLED_LOCK), join(dir, 'pnpm-lock.yaml'))) {
       if (linkOnly) return false
       pnpm(['install', '--frozen-lockfile', '--prefer-offline', '--ignore-scripts'], dir)
       return
@@ -225,6 +229,16 @@ export const realRunners = {
     // It exits non-zero when a rule at error severity fails, with the JSON still on stdout
     const start = r.out.indexOf('{')
     return JSON.parse(r.out.slice(start))
+  },
+  /**
+   * The repository-wide guards a worktree declares (tooling/guards.ts), read by scripts/pre-pr-guards.mjs with the worktree's
+   * tsx: `{ guards: [{ test, tests }] | null, changed: [test] }`, `changed` the ones the commits `from`..`to` change. Throws
+   * when it cannot be read.
+   */
+  guards(dir, from, to) {
+    const r = nodeBin(dir, 'tsx/dist/cli.mjs', [fileURLToPath(new URL('./pre-pr-guards.mjs', import.meta.url)), from, to])
+    if (!r.ok) throw new Error(`${GUARDS_FILE} could not be read: ${tail(r.out, 5)}`)
+    return JSON.parse(r.out.trim().split('\n').at(-1))
   },
   /** `pnpm lint <files>` (tooling/lint.ts); with no files, the whole repository. */
   lint(dir, files, { timeoutMs = 0 } = {}) {
@@ -354,18 +368,6 @@ function otherPrsAddingSteps({ gh, root, listed, commits, names }) {
 
 // --- Guards against the open pull requests (the day-1 cost: a guard landed, a queued pull request broke) --------
 
-/** A test that scans the whole repository: a derived path up from the test's folder, and a walk or a `git ls-files`. */
-const REPO_SCAN = /ls-files|readdirSync\([^)]*recursive:\s*true|globSync|\bwalk\w*\(/
-const REPO_ROOT = /REPO_ROOT|repoRoot|\bROOT\b|'\.\.\/\.\.|"\.\.\/\.\./
-/** A file can say it is one: `pre-pr: guard` anywhere in it. */
-const GUARD_MARK = /pre-pr: guard/
-
-/** A repository-wide guard: a test under tooling/, a test that scans the repository from its root, or one that says so. */
-export function isGuardTest(path, text = '') {
-  if (!isVitestFile(path)) return false
-  return /^tooling\/[^/]+\.test\.[cm]?[jt]sx?$/.test(path) || GUARD_MARK.test(text) || (REPO_SCAN.test(text) && REPO_ROOT.test(text))
-}
-
 /** The files that differ from `from` to `to` (commits), each `{ status, path }` with git's one-letter status; renames as a deletion and an addition. */
 export function nameStatus(root, from, to) {
   const parts = git(root, ['diff', '--name-status', '--no-renames', '-z', from, to]).split('\0').filter(Boolean)
@@ -374,32 +376,17 @@ export function nameStatus(root, from, to) {
   return out
 }
 
-/** The guard files among `changes` (see {@link nameStatus}) that a branch adds or changes, read at `to`. */
-export function guardFiles(root, changes, to) {
-  const guards = []
-  for (const { status, path } of changes) {
-    if (status === 'D' || !isVitestFile(path)) continue
-    let text = ''
-    try {
-      text = git(root, ['show', `${to}:${path}`])
-    } catch {
-      continue
-    }
-    if (isGuardTest(path, text)) guards.push(path)
-  }
-  return guards
-}
-
 // vitest colours its messages: the escape character is what is stripped
 // eslint-disable-next-line no-control-regex
 const stripAnsi = (t) => String(t ?? '').replace(/\u001b\[[0-9;]*m/g, '')
 
-/** How many lines of a failure's message a finding keeps: an assertion's diff names what failed, the stack does not. */
+/** How many lines of a failure's message a finding keeps: a guard's message names what it found, the stack does not. */
 const DETAIL_LINES = 20
 
 /**
  * The failures of a vitest JSON report as `{ file, name, line, detail }`: `line` the first line of the message, `detail` its
- * lines up to the stack (an assertion's expected and received among them), at most DETAIL_LINES.
+ * lines up to the stack, at most DETAIL_LINES. The JSON report carries no diff of what was expected and received: a failure says
+ * what its assertion's message says (a guard names there what it found) and vitest's one line of what it expected.
  */
 export function failuresOf(report, root) {
   const of = (m) => {
@@ -467,7 +454,7 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
         const commit = git(root, ['commit-tree', tree, '-p', theirs, '-p', head, '-m', `pre-pr guards: #${pr.number} with this branch`], ident).trim()
         wt = makeWorktree(commit)
         if (!wt) {
-          skipped.push({ pr, why: 'needs other dependencies than this checkout has (a different lockfile)' })
+          skipped.push({ pr, why: `its lockfile with this branch merged in is not the one this checkout last installed (${INSTALLED_LOCK}), and a guard run installs nothing; a pnpm install here may change that` })
           continue
         }
         const present = guards.filter((g) => existsSync(join(wt, g)))
@@ -517,16 +504,8 @@ export function guardWarnings({ failing, skipped, unchecked }, guards) {
 
 // --- The checks ----------------------------------------------------------------------------------
 
-/**
- * Repository-wide guards fast enough to run on every branch, not only one that changes them: each a test file and, when only
- * some of its tests are the guard, a vitest name pattern for them. A guard that scans the repository fails in CI on a file the
- * branch did not touch, a queue run after pre-pr passed (a doc reference to a section that does not exist, a line the OS
- * allowlist no longer needs).
- */
-const REPO_GUARDS = [
-  { file: 'tooling/doc-refs.test.ts' },
-  { file: 'tooling/os-layer.test.ts', tests: 'the allowlist' },
-]
+/** Where the repository-wide guards are declared, with the files each reads; read through scripts/pre-pr-guards.mjs */
+const GUARDS_FILE = 'tooling/guards.ts'
 
 /** `pnpm lint` on the files the branch changed. */
 function lintStep(c) {
@@ -566,21 +545,31 @@ function depsStep(c) {
   if (c.want('deps')) for (const message of depErrorsOf(cruise)) c.findings.push({ check: 'deps', message })
 }
 
-/** {@link REPO_GUARDS} at the head, against main as CI compares them. */
+/** The guards {@link GUARDS_FILE} declares, at the head, against main as CI compares them. */
 function repoGuardsStep(c) {
-  for (const g of REPO_GUARDS) {
+  const declared = c.declared()
+  if (declared.error) {
+    c.notRun('repo-guards', GUARDS_FILE, declared.error)
+    return
+  }
+  if (!declared.guards) {
+    // A branch older than the declaration has none to run; one that removed it would pass in silence
+    if (existsAt(c.root, c.forkMain, GUARDS_FILE)) c.findings.push({ check: 'repo-guards', message: `${GUARDS_FILE} is not at this head, though it was where the branch left main: keep it, with the guards it declares.` })
+    else c.notes.push(`No ${GUARDS_FILE} at this head: no repository-wide guard was run.`)
+    return
+  }
+  for (const g of declared.guards) {
     c.check()
-    if (!existsSync(join(c.top(), g.file))) {
-      // A branch older than the guard has none to run; one that removed or moved it would pass in silence
-      if (existsAt(c.root, c.forkMain, g.file)) c.findings.push({ check: 'repo-guards', message: `${g.file} is not at this head, though it was where the branch left main: REPO_GUARDS in scripts/pre-pr.mjs names it. Keep it, or change REPO_GUARDS with it.` })
+    if (!existsSync(join(c.top(), g.test))) {
+      c.findings.push({ check: 'repo-guards', message: `${g.test} is not at this head, though ${GUARDS_FILE} declares it: keep it, or change the declaration with it.` })
       continue
     }
-    if (c.outOfTime('repo-guards', g.file)) continue
-    c.log(`${g.file}${g.tests ? ` (${g.tests})` : ''}`)
+    if (c.outOfTime('repo-guards', g.test)) continue
+    c.log(`${g.test}${g.tests ? ` (${g.tests})` : ''}`)
     const limitMs = Math.max(1000, c.left())
-    const { report, timedOut } = c.runners.vitest(c.top(), [g.file], { timeoutMs: limitMs, testNamePattern: g.tests, env: { CC_LINT_BASE: c.at.main } })
+    const { report, timedOut } = c.runners.vitest(c.top(), [g.test], { timeoutMs: limitMs, testNamePattern: g.tests, env: { CC_LINT_BASE: c.at.main } })
     if (!report) {
-      c.notRun('repo-guards', g.file, noReport(timedOut, limitMs))
+      c.notRun('repo-guards', g.test, noReport(timedOut, limitMs))
       continue
     }
     const fails = failuresOf(report, c.top())
@@ -589,7 +578,7 @@ function repoGuardsStep(c) {
     // system both read as skipped
     const named = (t) => !g.tests || new RegExp(g.tests).test(t.name)
     if (!vitestTests(report, c.top()).some(named)) {
-      c.findings.push({ check: 'repo-guards', message: `${g.file}${g.tests ? ` has no test named like "${g.tests}"` : ' ran no test'}: REPO_GUARDS in scripts/pre-pr.mjs names a guard that is not there.` })
+      c.findings.push({ check: 'repo-guards', message: `${g.test}${g.tests ? ` has no test named like "${g.tests}"` : ' ran no test'}: ${GUARDS_FILE} declares a guard that is not there.` })
     }
   }
 }
@@ -618,6 +607,25 @@ function storeStepStep(c) {
   c.findings.push(...stepFindings({ added, onMain: stepsAt(c.root, c.at.main), others }))
 }
 
+/** The paths from the repository root a module's relative imports may name: `./x.js` is x.js, or x.ts, … */
+function importedPaths(from, text) {
+  return [...String(text).matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.{1,2}\/[^'"]+)['"]/g)].flatMap((m) => {
+    const path = posix.join(posix.dirname(from), m[1])
+    const stem = path.replace(/\.[cm]?[jt]sx?$/, '')
+    return [path, ...['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '/index.ts', '/index.js'].map((x) => stem + x)]
+  })
+}
+
+/**
+ * The changes (`{ status, path }`) the revert check puts back to the base: all but the tests' own files (isTestFile). A file under
+ * e2e/ that a changed vitest file imports goes back too, whatever it is: vitest runs nothing under e2e/, so there it is what a test
+ * checks, not a test of its own. `read(path)` answers a changed file's text at the head.
+ */
+export function revertedChanges(changed, read) {
+  const imported = new Set(changed.filter((x) => x.status !== 'D' && isVitestFile(x.path)).flatMap((x) => importedPaths(x.path, read(x.path))))
+  return changed.filter((x) => !isTestFile(x.path) || (x.path.startsWith('e2e/') && imported.has(x.path)))
+}
+
 /**
  * The changed tests, at the head, with everything else the pull request changed put back to where it left its base. The base's
  * version of each changed file is asked first which tests it had, by a pass that runs none (it names the skipped and todo ones
@@ -631,7 +639,9 @@ function revertStep(c) {
   }
   if (c.outOfTime('revert', 'The changed tests')) return
   const top = c.top()
-  const sources = c.changed.filter((x) => !isTestFile(x.path))
+  // The guards check reads the head's declaration, which this step puts back to the base
+  if (c.want('guards')) c.declared()
+  const sources = revertedChanges(c.changed, (path) => readFileSync(join(top, path), 'utf8'))
   c.log(`Running ${tests.length} test file(s) with ${sources.length} other change(s) reverted to ${c.base}`)
   for (const s of sources) {
     if (s.status === 'A') rmSync(join(top, s.path), { force: true })
@@ -653,6 +663,7 @@ function revertStep(c) {
   // A file that is new (added) has no base version to ask
   const existed = tests.filter((t) => t.status !== 'A').map((t) => t.path)
   let before = []
+  let judged = tests.map((t) => t.path)
   if (existed.length) {
     for (const p of existed) git(top, ['checkout', c.fork, '--', p])
     const named = run(existed, { namesOnly: true })
@@ -662,49 +673,47 @@ function revertStep(c) {
       return
     }
     before = named.tests
-    if (c.outOfTime('revert', 'The changed tests')) return
+    // A base file that does not load names none of its tests, so every test of it would count as new: it is left out
+    for (const f of failuresOf(named.report, top).filter((x) => !x.name)) {
+      judged = judged.filter((p) => p !== f.file)
+      c.warnings.push({ check: 'revert', message: `${f.file}: its version at ${c.base} does not load with this pull request's other changes reverted (${f.line}), so which of its tests are new is not known: they were not judged.` })
+    }
+    if (!judged.length || c.outOfTime('revert', 'The changed tests')) return
   }
-  const pass = run(tests.map((t) => t.path), { known: before })
+  const pass = run(judged, { known: before })
   c.revertReport = pass.report
   if (!pass.tests) {
-    c.notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, noReport(pass.timedOut, pass.limitMs))
+    c.notRun('revert', `The changed tests (${judged.join(', ')})`, noReport(pass.timedOut, pass.limitMs))
     return
   }
   const loose = passingNewTests({ reverted: pass.tests, base: before })
   // The stop reporter ends the run only at a new passing test: tests left pending with none such means it and this file named
   // the tests differently, and the ones not run were not judged
   if (!loose.length && pass.tests.some((t) => t.status === 'pending')) {
-    c.notRun('revert', `The changed tests (${tests.map((t) => t.path).join(', ')})`, 'the run was ended early, yet no new test passed in it, so the tests it did not run were not judged')
+    c.notRun('revert', `The changed tests (${judged.join(', ')})`, 'the run was ended early, yet no new test passed in it, so the tests it did not run were not judged')
     return
   }
   for (const t of loose) {
     c.findings.push({ check: 'revert', message: `${t.file}: "${t.name}" passes with this pull request's other changes reverted to ${c.base}, so it protects nothing. Make it fail without the change, or exempt the revert check with the reason it cannot.` })
   }
   // Failures, not "not passed": a skipped or todo test is neither, and a file that did not load fails with no test of its own
-  if (!loose.length) c.notes.push(`${failuresOf(pass.report, top).length} test(s) of ${tests.length} changed file(s) fail without the change; no new test passes without it.`)
+  if (!loose.length) c.notes.push(`${failuresOf(pass.report, top).length} test(s) of ${judged.length} changed file(s) fail without the change; no new test passes without it.`)
 }
 
 /**
- * Files a guard test reads that are not tests: a change to one is a change to that guard. Lint rules and lint allowlists are
- * not here: what they break in another pull request is its lint, which this step does not run.
- */
-export const GUARD_INPUTS = { 'tooling/os-allowlist.txt': 'tooling/os-layer.test.ts' }
-
-/** The guard tests a branch changes: the ones it adds or changes (guardFiles), and the ones that read a file it changes (GUARD_INPUTS). */
-function changedGuards(root, changes, at) {
-  const read = changes.filter((x) => x.status !== 'D' && Object.hasOwn(GUARD_INPUTS, x.path)).map((x) => GUARD_INPUTS[x.path])
-  return [...new Set([...guardFiles(root, changes, at), ...read.filter((g) => existsAt(root, at, g))])]
-}
-
-/**
- * Only a warning: the guards this branch adds or changes, against every open pull request, merged in. A guard breaks another
- * pull request through what that one adds, in files the guard's branch need not touch, so none is passed over; a branch that
- * changes no guard skips the step.
+ * Only a warning: the guards of {@link GUARDS_FILE} this branch (the whole stack) changes, against every open pull request,
+ * merged in. A guard breaks another pull request through what that one adds, in files the guard's branch need not touch, so none
+ * is passed over; a branch that changes no guard skips the step.
  */
 function guardsStep(c) {
-  const guards = changedGuards(c.root, c.mainChanges, c.at.head)
+  const declared = c.declared()
+  if (declared.error) {
+    c.warnings.push({ check: 'guards', message: `No guard was run against the open pull requests: ${declared.error}` })
+    return
+  }
+  const guards = declared.changed.filter((g) => existsAt(c.root, c.at.head, g))
   if (!guards.length) {
-    c.notes.push('No repository-wide guard test (or a file one reads) is added or changed: not run against the open pull requests.')
+    c.notes.push(`No guard of ${GUARDS_FILE} (its test, or a file it reads) is changed: not run against the open pull requests.`)
     return
   }
   if (c.outOfTime('guards', guards.join(', '))) return
@@ -727,7 +736,8 @@ function guardsStep(c) {
 /**
  * The steps of a run, in this order: the cheap ones first, so the common failure is known in seconds, and a run stops after the
  * first step that finds something. `checks` are the names an exemption and `--only` take; one dependency-cruiser run answers two.
- * The revert step puts the head's worktree back to the base: every step that reads the head comes before it.
+ * The revert step puts the head's worktree back to the base: every step that reads the head comes before it, and it reads the
+ * guards' declaration first for the guards step (c.declared).
  */
 const STEPS = [
   { name: 'lint', checks: ['lint'], run: lintStep },
@@ -779,6 +789,8 @@ function tierOf(root, at, warnings) {
     const t = tierOfChange({ root, base: at.base, head: at.head, rulesRef: at.main })
     return { name: t.tier, line: t.line, because: t.because.map((f) => f.path) }
   } catch (e) {
+    // tier.mjs starts git on its own (the board runs it as one file): its tool's end is read here
+    if (endedByInterrupt(e)) throw new Error('interrupted')
     const t = unjudged(`the tier could not be read: ${String(e.message).trim()}`)
     warnings.push({ check: 'tier', message: `The tier could not be read, so it is deep: ${e.message}` })
     return { name: t.tier, line: t.line, because: [] }
@@ -811,9 +823,11 @@ function mainWarning(root, at, head, main) {
 /**
  * Runs the checks; answers { ok, findings, warnings, exempted, notes, heads, head, tier }. A finding fails the run; a warning does
  * not. `exempt` maps a check of {@link CHECKS} to the reason it is not run; `only`, when not empty, names the checks to run.
- * `runners` replaces the tools (tests); `log` hears progress, and each step's time; `stopped()` says the run was interrupted.
+ * `runners` replaces the tools (tests); `log` hears progress, and each step's time. A tool an interrupt ended (scripts/interrupts.mjs)
+ * stops the run at the next check, with the error `interrupted`.
  */
-export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, only = [], runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, stopped = () => false, guardsLimitMs = GUARDS_LIMIT_MS, limitMs = TOTAL_LIMIT_MS, now = Date.now } = {}) {
+export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = [], remote = 'origin', fetch = true, exempt = {}, only = [], runId = `${process.pid}-${Date.now()}`, runners = realRunners, log = () => {}, guardsLimitMs = GUARDS_LIMIT_MS, limitMs = TOTAL_LIMIT_MS, now = Date.now } = {}) {
+  const interruptsAtStart = interruptsSoFar()
   const root = resolve(git(cwd, ['rev-parse', '--show-toplevel']).trim())
   for (const check of [...only, ...Object.keys(exempt)]) if (!CHECKS.includes(check)) throw new Error(`No check is called ${check}; the checks are ${CHECKS.join(', ')}.`)
   for (const [check, why] of Object.entries(exempt)) {
@@ -900,6 +914,9 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
     return wt
   }
   let topWt = null
+  // The head's worktree, made by the first step that reads it
+  const top = () => (topWt ??= worktree(at.head))
+  let declared = null
   // Against where the head left the base, not the base's tip: what the base gained since is not this pull request's
   const fork = git(root, ['merge-base', at.base, at.head]).trim()
   const forkMain = git(root, ['merge-base', at.main, at.head]).trim()
@@ -907,17 +924,27 @@ export function prePr({ cwd = process.cwd(), head = 'HEAD', base, main, stack = 
   const c = {
     root, remote, base, at, runId, runners, log, now, guardsLimitMs, findings, warnings, notes, want, left, notRun, outOfTime, commits, worktree, fork,
     heads,
-    // The head's worktree, made by the first step that reads it
-    top: () => (topWt ??= worktree(at.head)),
+    top,
     forkMain,
-    // What the pull request changes over its base, and what the branch (the whole stack) changes over main
+    // The guards the head declares, and the ones the branch (the whole stack) changes; `{ error }` when they could not be read
+    declared: () => {
+      if (!declared) {
+        const wt = top()
+        try {
+          declared = runners.guards(wt, forkMain, at.head)
+        } catch (e) {
+          declared = { error: String(e.message) }
+        }
+      }
+      return declared
+    },
+    // What the pull request changes over its base
     changed: nameStatus(root, fork, at.head),
-    mainChanges: nameStatus(root, forkMain, at.head),
     // The open pull requests, read once for the checks that look at them
     openPrs: () => (listed ??= JSON.parse(runners.gh(['pr', 'list', '--state', 'open', '--limit', '500', '--json', PR_FIELDS], root))),
     names: new Set(heads.flatMap((h) => h.names).flatMap((n) => [n, n.replace(`${remote}/`, ''), n.replace(/^refs\/centralu-pre-pr\/[^/]+\//, '')])),
     check: () => {
-      if (stopped()) throw new Error('interrupted')
+      if (interruptsSoFar() > interruptsAtStart) throw new Error('interrupted')
     },
     revertReport: null,
   }
@@ -955,9 +982,10 @@ export function parseArgs(argv) {
 
 function main() {
   let o
-  // Ctrl-C reaches the tool running now, which fails; then the run's folder is removed and it exits
-  let interrupted = false
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(signal, () => (interrupted = true))
+  // Ctrl-C reaches the tool running now, which ends: the run knows the interrupt by that (prePr), removes its folder and exits.
+  // Handled, the signal does not end this process first; the handler runs only once the synchronous run is over, which an
+  // interrupt between two tools reaches as well
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(signal, () => (process.exitCode = 130))
   try {
     o = parseArgs(process.argv.slice(2))
     if (o.cleanup !== undefined) {
@@ -967,7 +995,7 @@ function main() {
       process.exitCode = left.length ? 2 : 0
       return
     }
-    const r = prePr({ ...o, log: (m) => process.stderr.write(`pre-pr: ${m}\n`), stopped: () => interrupted })
+    const r = prePr({ ...o, log: (m) => process.stderr.write(`pre-pr: ${m}\n`) })
     if (o.json) process.stdout.write(`${JSON.stringify(r)}\n`)
     else {
       if (r.tier) console.log(r.tier.line)
@@ -979,6 +1007,7 @@ function main() {
     }
     process.exitCode = r.ok ? 0 : 1
   } catch (e) {
+    const interrupted = e.message === 'interrupted' || interruptsSoFar() > 0
     const message = interrupted ? 'interrupted' : e.message
     if (o?.json) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`)
     else console.error(`pre-pr could not check: ${message}`)

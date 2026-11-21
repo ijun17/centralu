@@ -390,8 +390,8 @@ not run; it prints each step's time as it goes. In that order:
   so it must build on its own;
 - dependency-cruiser's orphans as errors (`orphans`; `pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
   cycle, a layer rule);
-- `repo-guards`: the repository-wide guards fast enough to run on every branch (`REPO_GUARDS` in
-  `scripts/pre-pr.mjs`: the document references and the OS allowlist), which fail on a file your branch did not touch;
+- `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references and the OS allowlist), at
+  your head: they fail on a file your branch did not touch. A guard is declared there with the files it reads;
 - `store-step`: a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
   that main already has or another open pull request adds (#1203): two parallel changes picking the
   same number each pass CI alone and clash when the second lands. It reads the open pull requests
@@ -400,16 +400,19 @@ not run; it prints each step's time as it goes. In that order:
   none and that finds it needs a step stops and asks (this check is only the backstop);
 - `revert`: each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported. The run stops at the first such test (one more
-  may finish with it). A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported;
-- `guards`: a repository-wide guard test your branch adds or changes (any `tooling/*.test.ts`, a test that scans the
-  whole repository from its root, or a file saying `pre-pr: guard`), or a file one reads (`GUARD_INPUTS` in
-  scripts/pre-pr.mjs), is run against each other open, non-draft pull request, its head merged with your branch: a
+  may finish with it). A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported.
+  A file under `e2e/` that a changed test outside `e2e/` imports is reverted too: there it is the code under test. A changed test
+  file whose base version does not load with the rest reverted (it needs a test helper your branch changed) is left out, with a
+  warning: which of its tests are new cannot be told;
+- `guards`: a guard of `tooling/guards.ts` your branch changes (its test, or a file it reads: the OS allowlist, a document
+  that loses a section, heading or anchor) is run against each other open, non-draft pull request, its head merged with your branch: a
   guard breaks another pull request through what that one adds, in files yours need not touch. A branch that changes
   no guard skips this check, with a line saying so. The ones it would fail are listed with the first line of the
   failure. This never refuses: the list is printed and goes into **Verified**
   (as warnings), so you fix those pull requests in the same change or tell their authors. It is bounded:
   `--guards-limit <seconds>` (default 600), only the guards you changed, and a pull request that does not
-  merge cleanly with your branch, or needs other dependencies, is skipped and named as not checked. One
+  merge cleanly with your branch, or whose lockfile (merged with yours) is not the one your checkout last installed
+  (`node_modules/.pnpm/lock.yaml`; a guard run installs nothing), is skipped and named as not checked. One
   that merges is started only with as much time left as your guards took in the revert check's run (a run
   cut off half way says nothing); the ones left are named with that time and what was left.
 
@@ -428,8 +431,8 @@ checks a branch other than the one checked out. When one check's finding stands 
 test that cannot fail without the change, and why), leave that check out with the reason:
 `--exempt revert="<why>"` (or any other check above). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
-`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted, it removes its
-worktrees itself; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
+`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted (Ctrl-C, Ctrl-Break), it knows it by
+how the tool it was running ended, removes its worktrees itself and exits 130; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`). Do not
 delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees hold links to your checkout's
 `node_modules` (each workspace package's link points at the worktree's own copy, so `tsc` sees one
 declaration of each class), and a recursive delete may follow them.
