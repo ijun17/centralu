@@ -3,13 +3,15 @@
  * folder (#1606). Each is tried on virtual files: what it reports, what only looks like it, which files it reads, and
  * the exception lines (tooling/guard-exceptions.js) that let a file through.
  */
+import { ESLint } from 'eslint'
+import tseslint from 'typescript-eslint'
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { ARCHIVE_ALLOWED, COMMENT_SHARE_HELD, EXCEPTIONS } from './guard-exceptions.js'
+import { ARCHIVE_ALLOWED, COMMENT_SHARE_HELD, COMMENTS_LEFT, EXCEPTIONS } from './guard-exceptions.js'
 import { commentShareOf, guardConfigs, guards } from './eslint-guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -883,6 +885,29 @@ describe('guard/comments (#2355)', () => {
   })
   it('reads only the folders whose comments are swept', async () => {
     expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
-    expect(await lines('packages/agent-host/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
+    expect(await lines('packages/agent-host/src/sessions/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([])
+    // A file in COMMENTS_LEFT is not read yet
+    expect(COMMENTS_LEFT.length).toBeGreaterThan(0)
+    expect(await lines(COMMENTS_LEFT[0]!, 'f()\n// It used to wait.', 'comments')).toEqual([])
+  })
+  it('lists in COMMENTS_LEFT only tracked files', () => {
+    const tracked = execFileSync('git', ['ls-files', '--', ...COMMENTS_LEFT], { cwd: ROOT, encoding: 'utf8' }).split(NL).filter(Boolean)
+    expect([...COMMENTS_LEFT].sort()).toEqual(tracked.sort())
+  })
+  it('lists in COMMENTS_LEFT only files that still have a finding, so a file that is cleared leaves the list', async () => {
+    const bare = new ESLint({
+      cwd: ROOT,
+      overrideConfigFile: true,
+      overrideConfig: [
+        { files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } },
+        { linterOptions: { noInlineConfig: true } },
+        // The block that switches the rule on, as the guard pass has it, without the files it leaves
+        ...guardConfigs.filter((c) => 'guard/comments' in c.rules).map(({ ignores: _left, ...c }) => c),
+      ],
+    })
+    const results = await bare.lintFiles(COMMENTS_LEFT.map((f) => join(ROOT, f)))
+    const clean = results.filter((r) => !r.messages.some((m) => m.ruleId === 'guard/comments')).map((r) => relative(ROOT, r.filePath).split(sep).join('/'))
+    expect(clean).toEqual([])
   })
 })

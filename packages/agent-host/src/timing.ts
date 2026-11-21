@@ -1,19 +1,13 @@
 /**
- * Bounded waits, in one place (#428).
- *
- * A wait written by hand as `Promise.race([p, new Promise((r) => setTimeout(r, ms))])` drifted three
- * ways: its timer was not cleared once `p` won, so every finished wait kept a timer (and what its
- * closure held) for the full bound, and a referenced one kept a leaving process alive that long; `unref`
- * was applied in some copies and not others; and the timeout's words differed. Each helper here clears
- * its timer however the race ends, and unrefs it: a bound is never what keeps the host running.
+ * Bounded waits in one place (#428): a hand-written `Promise.race` with a timer drifted (timer not cleared once `p` won,
+ * `unref` in some copies only, differing words), so each helper clears and unrefs its timer however the race ends, and a bound
+ * never keeps the host running
  */
 
 /**
- * A duration as a sentence says it, to a person or a model, in full words (ux-writing.md §1): `20 milliseconds`, `20 seconds`,
- * `2 minutes`, `4 hours`. Seconds under a minute and up to three minutes (a bound of 150 s says `150 seconds`), unless
- * the time is a whole number of minutes (`2 minutes`, not `120 seconds`); then minutes up to three hours, rounded; then hours.
- * Every wait's words, a bound and a measured time alike, are written here. Compact units (`20 s`) are for a label or a log
- * line the person does not read as a sentence; no host message here is one.
+ * A duration as a sentence says it, in full words (ux-writing.md §1): `20 milliseconds`, `2 minutes`, `4 hours`; seconds up to
+ * three minutes unless it is whole minutes, then minutes up to three hours, then hours. Compact units (`20 s`) are for labels
+ * and logs, not host messages
  */
 export function durationText(ms: number): string {
   const unit = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
@@ -31,9 +25,9 @@ export function sleepSync(ms: number): void {
 }
 
 /**
- * Waits `ms`, or until `signal` aborts (and then rejects with its reason, as an Error). A signal already aborted rejects
- * at once. The timer holds the process open unless `unref`: a settle before a shutdown step must not let the process
- * leave first, while a poll that only matters to a live host need not keep it running.
+ * Waits `ms`, or until `signal` aborts (rejecting with its reason as an Error; an already aborted signal rejects at once). The
+ * timer holds the process open unless `unref`: a settle before a shutdown step must not let it leave first, while a poll that
+ * only matters to a live host need not
  */
 export function sleep(ms: number, signal?: AbortSignal, opts: { unref?: boolean } = {}): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -60,12 +54,9 @@ function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
 }
 
 /**
- * Do not let a call that never answers hold the screen hostage.
- *
- * The `label` is the diagnosis (or a function of the bound that words the whole message). An unnamed timeout only ever surfaced as the outer RPC's 30-second
- * "RPC timed out: agents.resumeSession", and that message does not say **where** it stopped — when
- * an actual session died that way, there was no way to find out after the fact. If each stage
- * fails carrying its own name, the next occurrence of the same incident is its own diagnosis.
+ * Bounds a call that never answers. The `label` is the diagnosis (or a function of the bound that words the whole message): an
+ * unnamed timeout surfaced only as the outer RPC's 30-second "RPC timed out: agents.resumeSession", which does not say where it
+ * stopped when a session died that way
  */
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string | ((ms: number) => string) = 'A call'): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -89,11 +80,10 @@ export function raceTimeout<T, F>(p: Promise<T>, ms: number, fallback: F): Promi
 }
 
 /**
- * Waits on `outcome` for at most `ms`, and no longer than `signal` lets it (#428): the outcome's value, `'bound'`,
- * `'aborted'` (also for a signal aborted before the call), or what one of `wakes` resolved with first. It never
- * rejects on its own, unlike `withTimeout`: a bound here is an answer ("still working"), not a failure. Its timer and
- * listener are gone once it settles. The waits on a delegation, a child, a start request and a handoff each wrote this
- * race themselves, and one lacked the check for a signal already aborted, so a cancelled wait sat out its whole bound.
+ * Waits on `outcome` for at most `ms` and no longer than `signal` lets it (#428): the value, `'bound'`, `'aborted'` (also for a
+ * signal aborted before the call) or what one of `wakes` resolved with first. It never rejects on its own, as a bound here is
+ * an answer ("still working"). The waits on a delegation, a child, a start request and a handoff each wrote this race, and one
+ * lacked the already-aborted check, so a cancelled wait sat out its bound
  */
 export async function raceBound<T, W extends unknown[] = []>(
   outcome: Promise<T>,
@@ -143,9 +133,8 @@ export function waitForEvent<E extends string>(emitter: Emitter<E>, events: E | 
 export type Exiting = Emitter<'exit'> & { readonly exitCode: number | null; readonly signalCode?: NodeJS.Signals | null }
 
 /**
- * Whether the process has ended, or ends within `ms`. Ended is ended, by code or by signal: a process
- * killed by a signal has no exit code, only a signal code, and checking the exit code alone made a
- * signalled process wait out the whole bound as if it were still running.
+ * Whether the process has ended, or ends within `ms`, by code or by signal: a signalled process has no exit code, and checking
+ * the code alone made it wait out the bound
  */
 export function waitForExit(proc: Exiting, ms: number): Promise<boolean> {
   if (proc.exitCode !== null || proc.signalCode != null) return Promise.resolve(true)

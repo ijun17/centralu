@@ -5,24 +5,15 @@ import { powershell } from '../os.js'
 
 /**
  * The Windows process table, read in milliseconds even on a starved machine (#2178): the one source of `pid ppid createdMs`
- * rows a Windows stop and sweep read (`kill-tree.ts`, `leftoverOs`).
- *
- * Almost all of a read used to be PowerShell starting: `Get-CimInstance Win32_Process` in a PowerShell of its own took
- * 0.3–0.7 s with up to 8 busy loops on 12 cores, and 8.7–12 s once every core was busy (measured 2026-11-10, Windows 11,
- * 20 reads each, p50–p99), past the 3 s an ordered stop waits (`STOP_LIST_MS`), which then fell back to `taskkill /T`.
- * One PowerShell kept for the host's life, asked over stdin, answered in 1–4 ms at every load measured (0 to 16 busy
- * loops), 2–4 ms where the one-off read took 9–12 s. It costs one resident process of about 80 MB (65 MB private, which
- * neither `-NoLogo`, a collection nor a trimmed working set lowers), so only the long-lived host keeps one (`warmProcessTable`).
- *
- * It reads with one `NtQuerySystemInformation(SystemProcessInformation)` call, which returns every process with its
- * parent and creation time and opens none of them (Toolhelp32 has no creation time, and skips what it cannot open); a
- * process manager in Python reads it so too. The call is declared at run time (Reflection.Emit), so nothing is compiled
- * or written to disk, and there is no native module to build. `PreserveSig` keeps the "buffer too small" status a
- * status. The offsets (creation time 0x20, pid 0x50, parent 0x58) are the 64-bit layout, x64 and ARM64 alike: the
- * PowerShell under System32 is the 64-bit one. On one machine the rows matched CIM's for every pid both showed.
- *
- * Asked `t`, it writes the rows and then `END`, or `ERR <why>` and then `END`. A process without a creation time (the idle
- * process) is left out, as CIM's listing left it out.
+ * rows for a Windows stop and sweep (`kill-tree.ts`, `leftoverOs`). A one-off `Get-CimInstance Win32_Process` in a PowerShell
+ * of its own took 0.3–0.7 s with up to 8 busy loops on 12 cores and 8.7–12 s with every core busy (measured 2026-11-10, Windows
+ * 11, p50–p99), past the 3 s an ordered stop waits (`STOP_LIST_MS`); one PowerShell kept for the host's life and asked over
+ * stdin answers in 1–4 ms at every load, at the cost of one resident process of about 80 MB, so only the long-lived host keeps
+ * one (`warmProcessTable`). One `NtQuerySystemInformation(SystemProcessInformation)` call returns every process with parent and
+ * creation time and opens none (Toolhelp32 has no creation time), declared at run time (Reflection.Emit) so nothing is compiled
+ * or written to disk; `PreserveSig` keeps "buffer too small" a status. The offsets (creation time 0x20, pid 0x50, parent 0x58)
+ * are the 64-bit layout, x64 and ARM64 alike, as System32's PowerShell is the 64-bit one; the rows matched CIM's, and a process
+ * without a creation time (the idle process) is left out as CIM left it
  */
 const READ_TABLE = [
   "$tb = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName 'CcProc'), 'Run').DefineDynamicModule('CcProc').DefineType('CcNt', 'Public,Class')",
@@ -95,9 +86,9 @@ export type ReaderProcess = {
 const startServer = (): ReaderProcess => spawn(powershell(), [...POWERSHELL_ARGS, SERVE], { windowsHide: true })
 
 /**
- * The warm reader. One read at a time; the reader is started on `warm` or the first read, and again after it ended. Neither
- * it nor its pipes hold the host open, and it ends with the host: its stdin closes and it leaves its loop. A read that
- * times out ends it (its late answer would be taken for the next read's), and the next read starts another.
+ * The warm reader: one read at a time, started on `warm` or the first read and again after it ended. Neither it nor its pipes
+ * hold the host open, and it ends with the host (stdin closes). A read that times out ends it, as its late answer would be
+ * taken for the next read's
  */
 export function tableReader(start: () => ReaderProcess = startServer): TableReader {
   let child: ReaderProcess | null = null
@@ -147,8 +138,8 @@ export function tableReader(start: () => ReaderProcess = startServer): TableRead
         waiting = null
         c.kill()
         /*
-         * Its successor starts now, not at the next read: the start is the slow part (2.2 s measured on a loaded machine),
-         * and a reader started by a read spends it out of that read's time limit
+         * Its successor starts now, not at the next read: the start is the slow part (2.2 s measured on a loaded machine) and would
+         * come out of that read's time limit
          */
         if (child === c) {
           child = null

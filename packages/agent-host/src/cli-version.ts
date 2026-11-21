@@ -7,22 +7,13 @@ import { execText } from './os/exec.js'
 
 
 /**
- * Which version of an agent CLI is installed on this machine (#297), found the way sessions find
- * the CLI they start: `whichTool`, then the program a shim starts (`launchFor`).
- *
- * In order:
- *
- *   1. **npm's `package.json`**, beside the file the command runs. npm and pnpm install both CLIs
- *      this way (`@anthropic-ai/claude-code`, `@openai/codex`), and reading a file costs no process.
- *      On Windows it is also the only safe way: since #353 Claude runs from a hard link under
- *      `<data>\tools\claude\…`, and running npm's `claude.exe` to ask would hold the very file an
- *      npm update has to replace.
- *   2. **The file's own name**, when it is a version: Claude Code's native installer keeps one file
- *      per version (`~/.local/share/claude/versions/2.1.289`) and links `claude` to the current one.
- *   3. **`<cli> --version`**, off Windows only: a Homebrew cask, a manual install. Measured
- *      2026-10-05: `2.1.289 (Claude Code)` and `codex-cli 0.160.0`, each well under a second.
- *
- * Null when the CLI is not installed or none of these says.
+ * Which version of an agent CLI is installed (#297), found as sessions find the CLI they start (`whichTool`, then the program a
+ * shim starts, `launchFor`). In order: npm's `package.json` beside the file the command runs (npm and pnpm install both CLIs
+ * so, and it costs no process; on Windows it is the only safe way, as since #353 Claude runs from a hard link under
+ * `<data>\tools\claude\…` and running npm's `claude.exe` would hold the file an npm update must replace); the file's own name
+ * when it is a version (Claude Code's native installer keeps one file per version, `~/.local/share/claude/versions/2.1.289`,
+ * and links `claude` to the current); `<cli> --version`, off Windows only (a Homebrew cask, a manual install; measured
+ * 2026-10-05: `2.1.289 (Claude Code)`, `codex-cli 0.160.0`, each well under a second). Null when none says
  */
 export type CliVersionDeps = {
   platform: NodeJS.Platform
@@ -47,8 +38,8 @@ const realDeps = (): CliVersionDeps => ({
 const PACKAGE_DEPTH = 3
 
 /**
- * The version in the `package.json` of the npm package named `packageName` that `file` belongs to,
- * or null. The name must match: a folder above a hand-installed binary can hold any package.
+ * The version in the `package.json` of the npm package `packageName` that `file` belongs to, or null; the name must match, as a
+ * folder above a hand-installed binary can hold any package
  */
 export function npmPackageVersion(file: string, packageName: string, deps: Pick<CliVersionDeps, 'platform' | 'realpath' | 'read'>): string | null {
   const path = pathsOf(deps.platform)

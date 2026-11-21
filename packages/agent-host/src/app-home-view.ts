@@ -4,28 +4,12 @@ import type { ViewHost } from './views/view-host.js'
 import { rpcError } from './rpc-error.js'
 
 /**
- * Opens the one fixed view (M4 B-2) — the body of the RPC `apps.openView`.
- *
- * Clicking an app in the sidebar makes the host call the `home` tool from the manifest, and opens
- * the view that tool declares. The host calling a tool is also within the spec. The view is still
- * born from a single tool call (the plan's "two places a view is born"). So the calling path is
- * the same **single path** as every other call (`ExternalApps.call`), and the caller is **the
- * view**. Scope (`app`) and the run record both happen there, once. The record shows "the view
- * called home." A person clicked it, but that is the same reason a view's own call is not
- * recorded as "the person."
- *
- * Order: check whether the view exists first (`homeView`), call it, and open the instance only
- * once the app has answered. A call that never reached the app (rejected, failed to start) has no
- * result to render, so it fails with a reason and no instance is left behind. A call the app
- * answered with a failure (`isError`) is opened — rendering that failure is also the view's job
- * (the spec's tool-result).
- *
- * There is no path here to impersonate another app's view. The instance belongs to the app that
- * was called, and ViewHost reads the document only from the instance's own app. Whatever the
- * result claims, the read happens against this app's process.
- *
- * main.ts (rpc.ts) and the tests share the same function (the same arrangement as
- * `app-view-source.ts`).
+ * Opens the one fixed view, the body of `apps.openView`: the host calls the manifest's `home` tool through the one call path
+ * (`ExternalApps.call`) with the view as caller, so scope and the run record ("the view called home") happen there once. It checks the
+ * view exists (`homeView`), calls it, and opens the instance only once the app answered: a call that never reached the app (rejected,
+ * failed to start) leaves no instance, while an `isError` answer is opened, since rendering that failure is the view's job. The instance
+ * belongs to the app that was called and ViewHost reads the document only from that app's process, so a result cannot impersonate another
+ * app's view. main.ts (rpc.ts) and the tests share it
  */
 export type { HomeView } from './views/home-view.js'
 
@@ -34,7 +18,7 @@ export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: App
   const prior = openKey ? views.homeOpen(ref, openKey, holder) : null
   if (prior) return prior
   const home = await apps.homeView(ref)
-  // Two calls may have checked the metadata concurrently.
+  // Two calls may have checked the metadata concurrently
   const concurrent = openKey ? views.homeOpen(ref, openKey, holder) : null
   if (concurrent) return concurrent
   const toolInput: Record<string, unknown> = {}
@@ -47,7 +31,6 @@ export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: App
     const { instanceId } = views.open(ref, home.resourceUri, holder)
     return views.rememberHome(instanceId, openKey, async () => ({ instanceId, ...await invoke() }))
   }
-  // Older callers retain their existing contract.
   const outcome = await invoke()
   return { ...views.open(ref, home.resourceUri, holder), ...outcome }
 }

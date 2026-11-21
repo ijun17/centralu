@@ -1,11 +1,7 @@
 /**
- * A child's exit, reported once its output has all arrived (#428): an agent CLI started here
- * (`adapters/local-process.ts`) and an app process (`apps/external/app-process.ts`).
- *
- * 'exit' can arrive before the last of the output, and that last line is the one a reader needs: a
- * turn's result, a crash's reason. So the report waits for the output's end. A grandchild that
- * inherited the pipe can hold it open for as long as it runs, so the wait is capped: past `capMs`
- * after the exit, it is reported anyway.
+ * A child's exit reported once its output has all arrived (#428), for agent CLIs (`adapters/local-process.ts`) and app
+ * processes: 'exit' can come before the last output, the line a reader needs, and a grandchild that inherited the pipe can hold
+ * it open, so the wait is capped at `capMs`
  */
 
 /** How long an exit waits for the last of the output before it is reported anyway */

@@ -4,38 +4,20 @@ import type { AppCaller, AppRef } from './apps/external/runtime.js'
 type AppChanged = Extract<NormalizedEvent, { type: 'external_app_state_changed' }>
 
 /**
- * The window that collects one app's "changed" notifications. Notifications that arrive within
- * the window go out as one, at the end of the window — so one app's broadcast can never exceed 4
- * per second. To a person this looks like an update lagging by a beat, while the view that made
- * the change itself sees the result immediately, as the call's answer.
+ * The window that collects one app's "changed" notifications into one at its end, so one app's broadcast cannot exceed 4 per
+ * second; the view that made the change sees the result at once, as the call's answer
  */
 export const APP_CHANGE_WINDOW_MS = 250
 
 /**
- * The external app "changed" broadcast (M4 B-5) — collects the runtime's `emitChanged` per app
- * and emits `external_app_state_changed`.
- *
- * **This is the last line of defense.** An open view that receives a notification calls the app's
- * tool again, and if that call fires another notification, it becomes a loop. Measured (65acb43):
- * a single template view called `show` about 700 times per second (2035 run-record lines in 3
- * seconds). The loop is meant to be broken earlier, by two prior layers — a read-only tool does
- * not notify (the runtime), and a view does not hear the change it caused itself (AppFrame). But
- * for an app that left the annotation off a read tool, two views of the same app (the fixed view
- * and a view not in a conversation) can hear each other's re-reads and volley back and forth. When
- * collected here, that volley also cannot exceed 4 per second for one app.
- *
- * Why this lives in the host rather than the UI store: this is where the flood originates. Stopping
- * it here protects every window, every view, and the run panel (RunsPanel re-reads the record on
- * every signal) all at once. And the broadcast accumulates in the host's event log (a 2000-slot
- * ring buffer) — at 700 per second, the session's events would all be pushed out within 3 seconds,
- * so a reconnecting UI could not pick up where it left off and would have to reload everything.
- *
- * While collecting, the cause (`cause`) is kept only when every notification in the window shares
- * the same cause. If they are mixed, it is dropped — if someone mistook a notification mixed with
- * someone else's change for their own and skipped it, that view would show a stale value.
- *
- * main.ts and the tests share this same function (the same arrangement as `app-list-events.ts`).
- * The seam the tests run through is the same seam the host uses.
+ * The external app "changed" broadcast: collects the runtime's `emitChanged` per app and emits `external_app_state_changed`.
+ * The last line of defense against a loop: an open view that hears a notification calls the tool again, and if that fires
+ * another it loops (measured, 65acb43: a template view called `show` about 700 times a second, 2035 run-record lines in 3 s). A
+ * read-only tool does not notify (runtime) and a view does not hear its own change (AppFrame), but an app that left the
+ * annotation off a read tool lets two views volley. It lives in the host because the flood starts here, and at 700 a second the
+ * 2000-slot event log would push out a session's events in 3 s, so a reconnecting UI would reload everything. The `cause` is
+ * kept only when every notification in the window shares it; mixed, a view could mistake someone else's change for its own and
+ * show a stale value. main.ts and the tests share it
  */
 export function broadcastAppChanges(send: (e: AppChanged) => void, windowMs = APP_CHANGE_WINDOW_MS) {
   const pending = new Map<string, { ref: AppRef; cause: AppCaller | null; timer: NodeJS.Timeout }>()
@@ -65,11 +47,9 @@ export function broadcastAppChanges(send: (e: AppChanged) => void, windowMs = AP
 type AppRunsChanged = Extract<NormalizedEvent, { type: 'external_app_runs_changed' }>
 
 /**
- * The broadcast that an external app's run record changed (M4 D-6) — collects the runtime's
- * `emitRunsChanged` per app through the same window and emits `external_app_runs_changed`. A
- * signal that does not wake any view: only the run panel listens. The reason for collecting it is
- * the same as above — even with a view calling dozens of times per second, one app's broadcast
- * stays at 4 per second, and it does not push the host's event log (ring buffer) out.
+ * The broadcast that an app's run record changed: collects `emitRunsChanged` per app through the same window and emits
+ * `external_app_runs_changed`; no view wakes, only the run panel listens, and the same 4 per second bound keeps the event log
+ * from being pushed out
  */
 export function broadcastAppRuns(send: (e: AppRunsChanged) => void, windowMs = APP_CHANGE_WINDOW_MS) {
   const pending = new Map<string, NodeJS.Timeout>()
