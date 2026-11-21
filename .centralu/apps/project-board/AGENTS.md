@@ -165,13 +165,15 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   what the paths said when it opened, so commits pushed later leave it stale. A `skipPrePr` (a fork's pull
   request) or a pre-pr that answers no tier labels `tier:deep`. The hook for the queue: the tier of what it
   is about to land is the higher of `tierOfChange` (`scripts/tier.mjs`) at that head over main and
-  `tierOfLabels` of its labels; no label, rules missing or unreadable, or any failure, is deep.
+  `tierOfLabels` of its labels; no label, rules missing or unreadable, or any failure, is deep. `pre_pr` on a later
+  head raises the label when its paths call for more (below, "pre-pr's status").
 
 - **`queue_merge`** (`pr`, `lowers?`, `owner?`, `author?`, `deleteBranch?`; model only): one pull request, or a
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, without maintain or admin, for a draft or a closed pull
-  request, for a top based on a branch none of its lowers has, and for a top whose squash subject (`Title (#N)`,
+  request, for a top based on a branch none of its lowers has, for a top whose head has no `pre-pr` status (below,
+  "pre-pr's status"), and for a top whose squash subject (`Title (#N)`,
   the stack lands through its top) is over 72 characters (`kind: 'subject'`, "Shorten the title", nothing
   queued: #1593, as `integrate` does, #1222). A pull request is in one item only.
   `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
@@ -194,8 +196,8 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   back into a draft is not undone), a stack lower, or one `open_pr` did not open still needs attention (`draft`), and so does a record handed over with `integrate` when found
   ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
-  (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
-  lower's branch → attention. The subject is judged **before a batch can take the item** (#1593: #1586's quick tier passed,
+  (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, a base that is not the default branch or a
+  lower's branch, or a head pushed since it was queued without the `pre-pr` status (below) → attention. The subject is judged **before a batch can take the item** (#1593: #1586's quick tier passed,
   batch-225 ran the full tier for 30 minutes, and landing refused it): `decideCi` answers attention `subject` first of all (after
   a failure alone in a batch on this head), whatever CI says yet: a quick run still going, not reported, failed or green, a record handed
   over with integrate, or a full run. A batch takes an item whose quick run is still going too, so the item must not be in `ci`:
@@ -302,6 +304,50 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   (`clock.mjs` `systemNow`): the other driver is another process, whose clock a step does not move.
   Tests: `tooling/project-board-queue.test.ts` (and `-guard.test.ts`) (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
+
+### pre-pr's status (#1886)
+
+`open_pr` runs `pnpm pre-pr` on the head it opens; a head pushed later (new commits, or the author's own rebase onto main)
+needs it again. pre-pr's pass is written on the head it ran on, as a commit status, and the queue asks for it on the head it
+lands.
+
+- **The status**: context `pre-pr` (`PRE_PR_STATUS`, pre-pr.mjs), state success, on the exact commit pre-pr ran on (its
+  answer's `head`, not the branch as read before or after), description `tier:<name>; passed` (`passed without <checks>` with
+  exemptions); with `skipPrePr`, `tier:deep; skipped: <reason>` (the reason checked as public text, as the description is)
+  on the head the pull request opened at. `open_pr` posts it
+  after the pull request opens (a status GitHub refuses is a warning: the pull request is open either way).
+- **`pre_pr`** (`pr`, `skipPrePr?`, `prePrExempt?`, `path?`): pre-pr on an open pull request's head as it is now, with the
+  branches of the pull requests under it, exactly as `open_pr` runs it (`checkHead`, contribute-tools.mjs, the one procedure
+  for both), then the status. Its tier label is raised when the paths now call for more, never lowered (`labelTier`: a label
+  only raises, and a person may have raised it); the answer says when a lower tier left the label as it was. A branch that
+  moved while pre-pr ran gets the status on the commit it checked, and the answer says so. It does not edit the description.
+- **`queue_merge`** refuses a top whose head has no successful `pre-pr` status, naming the head and `pre_pr`. A stack needs it
+  on its top only: the top's run checked the lowers with it. The item keeps `prePrHead`, the head the status was found on.
+- **A head that moved** after queueing (`pollItem`): a head other than `prePrHead` needs the status, read on every poll
+  before a conflict is handled (so the queue's own push onto it, below, is exempt) and before CI is read; without it,
+  attention `pre-pr` (once per head), which says the queue cannot tell new commits from a rebase onto main, so a rebase
+  needs `pre_pr` too. Polled again like any attention: once the status is there it carries on, with nothing queued again.
+  **Exempt**: a record of `integrate` (`auto`: the queue judges its tier on every head itself, and no pre-pr ran for it),
+  and a head the queue pushed itself onto a head it had accepted (a merge of main or a restack, `conflict.sha`): the same
+  change, merged mechanically, replayed with the same patch id (a stack's top) or rebased cleanly without a landed
+  squash's commits, and CI runs on it before it lands. The queue never runs pre-pr itself.
+- **`rebase_stack`** (a session's restack) carries the status over to the head it pushes (`carry`, stack.mjs), its
+  description as it was: it pushes only a replay whose patch id is the tested change's, so what pre-pr said
+  holds, and a stack's top restacked after its lower landed can be queued without running pre-pr again. A head that had no
+  status carries none, and the answer says to run `pre_pr`. The queue's own restack of a top carries nothing: the exemption
+  above covers it in the queue, and queued again after `unqueue` such a head needs `pre_pr`.
+- **Mixed versions while this rolls out**: an item queued before this (no `prePrHead`) is taken at the head it had, and only a
+  head pushed after that is asked for the status. A pull request an older board opened has no status, and `queue_merge` says to
+  run `pre_pr`. An older board's `queue_merge` queues without asking, and an older driver (a watch command started days ago)
+  polls without asking: it lands a moved head on CI alone until it is restarted on this code.
+- **Attribution, not proof.** Anyone who can push to the repository can post a `pre-pr` status by hand, and pre-pr ran on
+  the session's computer, on code it pushed. The status says which run of pre-pr vouched for a head, so the queue does not land a
+  head nobody checked by mistake; it is a speed check, not a trust boundary. CI on the head, the batch's run and the review its
+  tier asks for remain what lands a change.
+- Tests: `tooling/project-board-contribute.test.ts` (`open_pr` posting it, `pre_pr`, `rebase_stack` carrying it),
+  `tooling/project-board-queue.test.ts` (`queue_merge`, a moved head, an older board's item), `-conflicts` (the queue's
+  own pushes land without it), `-batches` (its restack of a stack's top), `-integrate` (a record is not asked for it). The
+  queue's fake `gh` gives every head the status unless a test lists it in `noPrePr` (or `'*'`).
 
 ### Reruns (2026-10-19)
 
@@ -1050,7 +1096,8 @@ and refuses with every reason at once, sending nothing.
   fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
   past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
   process group; so is a tool the script limits itself, tsc, lint or vitest, with what it started: `scripts/run-limited.mjs`), its `--cleanup` removes the worktrees and their links, and nothing is opened; a
-  call cancelled while waiting for its turn opens nothing either.
+  call cancelled while waiting for its turn opens nothing either. It posts the `pre-pr` status on the head pre-pr passed on
+  (or was skipped for), and `pre_pr` runs the same on a head pushed later (above, "pre-pr's status").
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure. One this
@@ -1180,7 +1227,7 @@ push run of CI is fully green, the full tier included (or `commit`).
   screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (save_answer, list_owner_answers,
   mark_answer_recorded), `contribute-tools.mjs` (comment, edit_comment, file_issue,
-  open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status,
+  open_pr, pre_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status,
   mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
   edit_private_words).
@@ -1213,7 +1260,7 @@ push run of CI is fully green, the full tier included (or `commit`).
 - `clock.mjs` — the app's one clock: `now` for every time the app reads or writes (a stepped test moves it), `systemNow`
   for the lease between processes. Lint refuses `Date.now()` and `new Date()` anywhere else in the app, also `Date` kept under another name and `globalThis.Date` (eslint.config.js).
 - `opened.mjs` — which session opened each pull request (`open_pr`'s note, `opened-prs.json`), read by the queue (#1509 item 4).
-- `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` (main's copy, as fetched for the call) on the pushed branches.
+- `pre-pr.mjs` — open_pr's and pre_pr's run of the repository's `scripts/pre-pr.mjs` (main's copy, as fetched for the call) on the pushed branches, and the `pre-pr` status's one definition.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers
   (`sleep`, `mapLimit`, `short`, `plural`) the modules share (pure).
@@ -1244,8 +1291,8 @@ push run of CI is fully green, the full tier included (or `commit`).
    `'centralu/askWhen': { push: true, path: '*' }` to ask for a call where any named argument holds that value
    (`'*'`: is set at all), and `'centralu/askUnless'` to ask unless one does. This app declares `ack`, `unqueue`
    and `mark_answer_recorded` local, and `comment`, `file_issue`, `set_item_fields`, `add_item`, `mark_ready`,
-   `open_pr` and `rebase_stack` routine. `rebase_stack` asks when `path` names a checkout of the caller's choosing
-   (its git would run there) or when `push` is true. `open_pr` asks unless `skipPrePr` is given (or `dryRun`):
+   `open_pr`, `pre_pr` and `rebase_stack` routine. `rebase_stack` asks when `path` names a checkout of the caller's choosing
+   (its git would run there) or when `push` is true. `open_pr` and `pre_pr` ask unless `skipPrePr` is given (or `dryRun`):
    `pnpm pre-pr` runs the tests and the vitest config of the head the session pushed, outside any sandbox, and also
    when `path` is set. `queue_merge`, `integrate`, `edit_comment`, `release` and
    `edit_private_words` declare nothing and always ask. The merges, so a card stays the check on "never merge your

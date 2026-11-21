@@ -328,6 +328,18 @@ export function handoffReason({ item, pr, files = [], why, ref, instruction = nu
   }
 }
 
+/** What to do about a head without the pre-pr status (#1886): pre_pr runs pnpm pre-pr on it and posts it. */
+export const prePrAsk = (n, head) => `Run pre_pr with pr ${n}: it runs pnpm pre-pr on ${short(head)} and posts the pre-pr status.`
+
+/**
+ * A head pushed since the item was queued at `accepted`, without the pre-pr status (#1886). The queue cannot tell new commits
+ * from a rebase onto the base, so either needs pre-pr again. Polled again like any attention: it carries on once the status is there.
+ */
+export function prePrMissing({ n, head, accepted, base }) {
+  const since = accepted ? ` since ${short(accepted)}` : ''
+  return attention('pre-pr', `${n}'s head moved${since} to ${short(head)}, which has no pre-pr status: new commits, or a rebase onto ${base} (the queue cannot tell them apart, so a rebase needs it too). ${prePrAsk(n, head)} The queue carries on by itself once it is there.`)
+}
+
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */
 export function resetFor(item, head) {
   if (item.head === head) return {}

@@ -1,15 +1,15 @@
-// The contribution procedure: comment, edit_comment, file_issue, open_pr, commit_check, rebase_stack.
+// The contribution procedure: comment, edit_comment, file_issue, open_pr, pre_pr, commit_check, rebase_stack.
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
 import { commentIdOf } from './answers.mjs'
 import { checkoutDir, itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { config } from './config.mjs'
 import { GitError } from './git.mjs'
-import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
+import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, QUEUE_PR_FIELDS, readComment, readPr, readRepo, readRepoFile, sameRepo, setPrBase, viewerLogin } from './github.mjs'
 import { progress } from './ci-tools.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
-import { runPrePr } from './pre-pr.mjs'
+import { postPrePr, prePrDescription, readPrePr, runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
@@ -18,6 +18,8 @@ import { privateWords } from './words-tools.mjs'
 import { ACTIVE, longSubject, longSubjectText } from './queue.mjs'
 import { readQueue } from './queue-driver.mjs'
 import { freshCache } from './cache.mjs'
+import { labelTier, tierLabels } from './queue-integrate.mjs'
+import { short } from './util.mjs'
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
 // The rules come from the repository (the pull request template, the commit conventions) and the
@@ -121,7 +123,7 @@ const SKIPPED_TIER_LINE = 'Tier: deep (pnpm pre-pr was not run, so the paths wer
 
 const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', situationsChecked: 'Situations checked', usability: 'Usability', notExercised: 'Not exercised', closes: CLOSES_HEADING }
 
-export async function openPr({ title, head, base, draft, repo, sections, dryRun, verifiedNote, labels = [], alsoWarn = [], signal, ...named }) {
+export async function openPr({ title, head, base, draft, repo, sections, dryRun, verifiedNote, labels = [], status = null, alsoWarn = [], signal, ...named }) {
   const r = repoOf(repo)
   const info = await readRepo(r)
   const target = base ?? info.defaultBranch
@@ -175,6 +177,16 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
       warnings.push(`${e?.message ?? e} Add the label yourself: gh pr edit ${pr.number} --add-label ${labels.join(',')}.`)
     }
   }
+  // The pre-pr status (#1886): on the head pre-pr ran on, or on the head opened when it was skipped
+  if (status) {
+    const sha = status.sha ?? pr.head
+    try {
+      if (!sha) throw new GitHubError('github', 'GitHub gave no head commit for it.')
+      await postPrePr(r, sha, status.description)
+    } catch (e) {
+      warnings.push(`The pre-pr status was not posted: ${e?.message ?? e} queue_merge asks for it; run pre_pr on ${refOf(r, pr.number)}, which posts it.`)
+    }
+  }
   let stacked = queued ? ` ${lowerLine(false)}` : ''
   if (lower && !lower.isDraft && !queued) {
     try {
@@ -211,78 +223,122 @@ async function lowerBranches(repo, base, defaultBranch) {
 }
 
 /**
- * open_pr: the template and title rules first (cheap, and a wrong title is not learned after minutes),
- * then the repository's pnpm pre-pr on the pushed commits (#1181), then the pull request. pre-pr's
- * findings refuse it; `skipPrePr` with a reason opens it anyway and says so in Verified. pre-pr runs
- * outside the one-write-at-a-time line, so other writes do not wait minutes behind it.
+ * pnpm pre-pr on the pushed `head` and the branches of the open pull requests under `base` (#1181), or its skip with a reason:
+ * what open_pr and pre_pr write from it. Runs outside the one-write-at-a-time line, so other writes do not wait minutes behind
+ * it. Answers `{ refused }`, an answer of what pre-pr found that starts with `refusal`, or `{ note, tier, warnings, skipped, sha, description }`:
+ * the Verified note, the tier, and the pre-pr status (no `sha` when skipped: the caller's head is the one).
+ */
+async function checkHead({ repo, head, fork, base, path, skipPrePr, prePrExempt, refusal }, ctx) {
+  const signal = ctx?.mcpReq?.signal
+  const cancelled = () => {
+    if (signal?.aborted) throw new GitHubError('input', 'the call was cancelled; nothing was sent to GitHub.')
+  }
+  const exempt = Object.fromEntries(Object.entries(prePrExempt ?? {}).map(([check, why]) => [check, String(why ?? '').trim()]))
+  for (const [check, why] of Object.entries(exempt)) if (!why) throw new GitHubError('input', `prePrExempt.${check} needs the reason that check is left out; it goes into the description.`)
+  if (skipPrePr !== undefined) {
+    const why = String(skipPrePr).trim()
+    if (!why) throw new GitHubError('input', 'skipPrePr needs the reason the checks are skipped; it goes into the description.')
+    // It goes onto GitHub in the pre-pr status too, which no description check reads
+    const problems = publicTextProblems(why, await privateWords(), 'skipPrePr')
+    if (problems.length) throw new GitHubError('input', problems.join(' '))
+    // Not run, the paths were not judged: deep, so skipping pre-pr never lowers the review (#1259)
+    return { note: `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`, tier: 'deep', warnings: [], skipped: true, description: prePrDescription('deep', `skipped: ${why}`) }
+  }
+  if (fork) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
+  const dir = await checkoutDir(path)
+  const info = await readRepo(repo)
+  const target = base ?? info.defaultBranch
+  const lowers = await lowerBranches(repo, target, info.defaultBranch)
+  cancelled()
+  progress(ctx, 0, `pnpm pre-pr on ${head}${lowers.length ? ` and the ${lowers.length} pull request(s) under it` : ''}`)
+  const res = await runPrePr({
+    dir,
+    repo,
+    head,
+    base: target,
+    main: info.defaultBranch,
+    lowers,
+    exempt,
+    script: config.rules?.prePr ?? 'scripts/pre-pr.mjs',
+    beat: (seconds) => progress(ctx, seconds, `pnpm pre-pr on ${head}: ${seconds} s so far`),
+    signal,
+  })
+  const warnings = res.refsLeft.map((l) => `A ref of pre-pr's was left behind: ${l}.`)
+  cancelled()
+  if (!res.ran) throw new GitHubError('input', `pnpm pre-pr did not run: ${res.why.replace(/\.?$/, '.')} Give path (a checkout of ${repo}), or skipPrePr with the reason it cannot run.${warnings.length ? ` ${warnings.join(' ')}` : ''}`)
+  if (!res.ok) {
+    const found = res.findings.map((f) => `[${f.check}] ${f.message}`)
+    return {
+      refused: asError(
+        linesAnswer(
+          `${refusal} pnpm pre-pr found ${found.length} problem(s) on ${head}; nothing was sent to GitHub. Fix them and push, or give prePrExempt (one check) or skipPrePr (all) with the reason they stand.`,
+          [['findings', '', found], ['warnings', 'Warnings:', [...res.warnings.map((w) => `[${w.check}] ${w.message}`), ...warnings]], ['notes', 'Notes:', res.notes]],
+          { ok: false, prePr: { findings: res.findings, warnings: res.warnings, notes: res.notes } },
+        ),
+      ),
+    }
+  }
+  const note = [
+    `\`pnpm pre-pr\` passed at ${String(res.head ?? '').slice(0, 10)}${res.passed.length ? `: ${res.passed.join(', ')}` : ''}.`,
+    ...res.exempted.map((x) => `Not run, the ${x.check} check: ${x.reason}`),
+    ...res.warnings.map((w) => `Warning (${w.check}): ${w.message}`),
+    // The risk tier by the paths changed (#1259): a line in Verified, and the label the merge queue reads
+    res.tier.line,
+  ].join('\n')
+  warnings.push(...res.warnings.map((w) => `[${w.check}] ${w.message}`))
+  const how = res.exempted.length ? `passed without ${res.exempted.map((x) => x.check).join(', ')}` : 'passed'
+  return { note, tier: res.tier.name, warnings, skipped: false, sha: res.head, description: prePrDescription(res.tier.name, how) }
+}
+
+/**
+ * open_pr: the template and title rules first (cheap, and a wrong title is not learned after minutes), then pnpm pre-pr
+ * (checkHead), then the pull request, with pre-pr's tier as a label and its status on the head. pre-pr's findings refuse it.
  */
 async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
   if (args.dryRun) {
     const dry = await openPr(args)
     return dry.isError || skipPrePr !== undefined ? dry : { ...dry, content: [{ type: 'text', text: `${dry.content[0].text}\npnpm pre-pr runs when it opens (or give skipPrePr, or prePrExempt for one check, with the reason).` }] }
   }
-  const signal = ctx?.mcpReq?.signal
-  const cancelled = () => {
-    if (signal?.aborted) throw new GitHubError('input', 'the call was cancelled; nothing was sent to GitHub.')
-  }
   const dry = await openPr({ ...args, dryRun: true })
   if (dry.isError) return dry
-  const exempt = Object.fromEntries(Object.entries(prePrExempt ?? {}).map(([check, why]) => [check, String(why ?? '').trim()]))
-  for (const [check, why] of Object.entries(exempt)) if (!why) throw new GitHubError('input', `prePrExempt.${check} needs the reason that check is left out; it goes into the description.`)
-  let note
-  const alsoWarn = []
-  const labels = []
-  if (skipPrePr !== undefined) {
-    const why = String(skipPrePr).trim()
-    if (!why) throw new GitHubError('input', 'skipPrePr needs the reason the checks are skipped; it goes into the description.')
-    // Not run, the paths were not judged: deep, so skipping pre-pr never lowers the review (#1259)
-    note = `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`
-    labels.push('tier:deep')
-  } else {
-    if (String(args.head).includes(':')) throw new GitHubError('input', `pnpm pre-pr cannot fetch a fork's branch (${args.head}) here. Run it in that checkout, and give skipPrePr with what it said.`)
-    const dir = await checkoutDir(path)
-    const r = repoOf(args.repo)
-    const info = await readRepo(r)
-    const target = args.base ?? info.defaultBranch
-    const lowers = await lowerBranches(r, target, info.defaultBranch)
-    cancelled()
-    progress(ctx, 0, `pnpm pre-pr on ${args.head}${lowers.length ? ` and the ${lowers.length} pull request(s) under it` : ''}`)
-    const res = await runPrePr({
-      dir,
-      repo: r,
-      head: args.head,
-      base: target,
-      main: info.defaultBranch,
-      lowers,
-      exempt,
-      script: config.rules?.prePr ?? 'scripts/pre-pr.mjs',
-      beat: (seconds) => progress(ctx, seconds, `pnpm pre-pr on ${args.head}: ${seconds} s so far`),
-      signal,
-    })
-    alsoWarn.push(...res.refsLeft.map((l) => `A ref of pre-pr's was left behind: ${l}.`))
-    cancelled()
-    if (!res.ran) throw new GitHubError('input', `pnpm pre-pr did not run: ${res.why.replace(/\.?$/, '.')} Give path (a checkout of ${r}), or skipPrePr with the reason it cannot run.${alsoWarn.length ? ` ${alsoWarn.join(' ')}` : ''}`)
-    if (!res.ok) {
-      const found = res.findings.map((f) => `[${f.check}] ${f.message}`)
-      return asError(
-        linesAnswer(
-          `Not opened: pnpm pre-pr found ${found.length} problem(s) on ${args.head}; nothing was sent to GitHub. Fix them and push, or give prePrExempt (one check) or skipPrePr (all) with the reason they stand.`,
-          [['findings', '', found], ['warnings', 'Warnings:', [...res.warnings.map((w) => `[${w.check}] ${w.message}`), ...alsoWarn]], ['notes', 'Notes:', res.notes]],
-          { ok: false, prePr: { findings: res.findings, warnings: res.warnings, notes: res.notes } },
-        ),
-      )
+  const c = await checkHead({ repo: repoOf(args.repo), head: args.head, fork: String(args.head).includes(':'), base: args.base, path, skipPrePr, prePrExempt, refusal: 'Not opened:' }, ctx)
+  if (c.refused) return c.refused
+  return serially(openPr)({ ...args, verifiedNote: c.note, labels: [`tier:${c.tier}`], status: { sha: c.sha, description: c.description }, alsoWarn: c.warnings, signal: ctx?.mcpReq?.signal }, ctx)
+}
+
+/**
+ * pre_pr (#1886): pnpm pre-pr on an open pull request's head as it is now (checkHead), for a head pushed after open_pr, then
+ * the pre-pr status on it, and its tier label raised when the paths now call for more (a label only raises: labelTier).
+ */
+async function prePrOn({ pr, path, skipPrePr, prePrExempt }, ctx) {
+  const want = itemOf(pr)
+  const p = await readPr(want.repo, want.number, QUEUE_PR_FIELDS)
+  if (p.state !== 'OPEN') throw new GitHubError('input', `${want.ref} is ${String(p.state).toLowerCase()}; pre_pr checks an open pull request.`)
+  const c = await checkHead({ repo: want.repo, head: p.headRefName, fork: p.isCrossRepository, base: p.baseRefName, path, skipPrePr, prePrExempt, refusal: `No pre-pr status on ${want.ref}:` }, ctx)
+  if (c.refused) return c.refused
+  return serially(postPrePrOn)({ want, p, c }, ctx)
+}
+
+async function postPrePrOn({ want, p, c }) {
+  const sha = c.sha ?? p.headRefOid
+  const warnings = [...c.warnings]
+  await postPrePr(want.repo, sha, c.description)
+  if (sha !== p.headRefOid) warnings.push(`${want.ref} was at ${short(p.headRefOid)} when read, and pre-pr ran on ${short(sha)}: the branch moved meanwhile. The status is on ${short(sha)}; run pre_pr again if that is not its head now.`)
+  const had = labelTier(p.labels)
+  const tier = labelTier([...(p.labels ?? []), `tier:${c.tier}`])
+  // As named on the pull request: an unknown tier:<name> counts as deep, but is not called that
+  const shown = tierLabels(p.labels).join(', ')
+  let labelled = ''
+  if (tier !== had) {
+    try {
+      await addLabels(want.repo, want.number, [`tier:${tier}`])
+      labelled = ` Labelled tier:${tier}${had ? `, above its ${shown}` : ''}.`
+    } catch (e) {
+      warnings.push(`${e?.message ?? e} Add the label yourself: gh pr edit ${want.number} --add-label tier:${tier}.`)
     }
-    note = [
-      `\`pnpm pre-pr\` passed at ${String(res.head ?? '').slice(0, 10)}${res.passed.length ? `: ${res.passed.join(', ')}` : ''}.`,
-      ...res.exempted.map((x) => `Not run, the ${x.check} check: ${x.reason}`),
-      ...res.warnings.map((w) => `Warning (${w.check}): ${w.message}`),
-      // The risk tier by the paths changed (#1259): a line in Verified, and the label the merge queue reads
-      res.tier.line,
-    ].join('\n')
-    alsoWarn.push(...res.warnings.map((w) => `[${w.check}] ${w.message}`))
-    labels.push(`tier:${res.tier.name}`)
-  }
-  return serially(openPr)({ ...args, verifiedNote: note, labels, alsoWarn, signal }, ctx)
+  } else if (c.tier !== had) labelled = ` Its label stays ${shown}: a label only raises, so take it off by hand if the paths now ask for less.`
+  const done = c.skipped ? `pnpm pre-pr skipped for ${want.ref} at ${short(sha)}` : `pnpm pre-pr passed on ${want.ref} at ${short(sha)}`
+  return linesAnswer(`${done}; posted the pre-pr status (${c.description}).${labelled}`, [['warnings', 'Warnings:', warnings]], { ok: true, head: sha, tier: c.tier, note: c.note })
 }
 
 async function fileIssue({ title, body, labels, repo, dryRun }) {
@@ -297,6 +353,21 @@ async function fileIssue({ title, body, labels, repo, dryRun }) {
 }
 
 
+/**
+ * The pre-pr status of `from` posted on `to`, its restack (#1886): rebase_stack pushes only a replay with the same patch id,
+ * so what pre-pr said of the change holds. Answers the line that says what was done; the push stands either way.
+ */
+async function carryPrePr(repo, from, to) {
+  try {
+    const s = await readPrePr(repo, from)
+    if (!s) return `${short(from)} had no pre-pr status to carry over to ${short(to)}: run pre_pr on it before queue_merge.`
+    await postPrePr(repo, to, s.description)
+    return `Carried the pre-pr status of ${short(from)} over to ${short(to)}: the same change.`
+  } catch (e) {
+    return `The pre-pr status of ${short(from)} was not carried over to ${short(to)}: ${e?.message ?? e} Run pre_pr on it before queue_merge.`
+  }
+}
+
 async function restack({ pr, lower, path, push }) {
   const want = itemOf(pr)
   const below = lower === undefined ? undefined : itemOf(lower, want.repo)
@@ -304,7 +375,7 @@ async function restack({ pr, lower, path, push }) {
   try {
     const r = await rebaseStack(
       { repo: want.repo, pr: want.number, lower: below?.number, dir: await checkoutDir(path), push: push === true },
-      { readPr, prsWithHead, setPrBase, openPrsOnBase },
+      { readPr, prsWithHead, setPrBase, openPrsOnBase, carry: (from, to) => carryPrePr(want.repo, from, to) },
       (n) => refOf(want.repo, n),
     )
     return linesAnswer(r.summary, [['steps', '', r.lines]], { ok: !r.partial, pushed: r.pushed, head: r.rebased, sameTree: r.sameTree })
@@ -312,6 +383,12 @@ async function restack({ pr, lower, path, push }) {
     if (e instanceof StackRefusal || e instanceof GitError) return asError(answer(`Not restacked: ${e.message}`, { ok: false, pushed: false }))
     throw e
   }
+}
+
+/** What open_pr and pre_pr take to leave pre-pr's checks out */
+const PRE_PR_INPUT = {
+  skipPrePr: z.string().max(2000).optional().describe('Without running pnpm pre-pr at all: the reason, which goes into Verified and the pre-pr status'),
+  prePrExempt: z.object({ tsc: z.string().max(2000), orphans: z.string().max(2000), deps: z.string().max(2000), lint: z.string().max(2000), 'repo-guards': z.string().max(2000), 'store-step': z.string().max(2000), guards: z.string().max(2000), revert: z.string().max(2000) }).partial().strict().optional().describe('Leave one of pnpm pre-pr\'s checks out, by name, with the reason (it goes into Verified): e.g. { "revert": "the new test guards a Windows path this branch only documents" }'),
 }
 
 export const tools = {
@@ -373,8 +450,7 @@ export const tools = {
         notExercised: z.string().optional().describe('Surfaces this change touches that were not run; required'),
         closes: z.string().optional().describe('e.g. "Closes #386", or why there is no issue'),
         sections: z.record(z.string(), z.string()).optional().describe('Any heading of the template by its name, e.g. { "Screenshots": "…" }'),
-        skipPrePr: z.string().max(2000).optional().describe('Open without running pnpm pre-pr at all: the reason, which goes into Verified'),
-        prePrExempt: z.object({ tsc: z.string().max(2000), orphans: z.string().max(2000), deps: z.string().max(2000), lint: z.string().max(2000), 'repo-guards': z.string().max(2000), 'store-step': z.string().max(2000), guards: z.string().max(2000), revert: z.string().max(2000) }).partial().strict().optional().describe('Leave one of pnpm pre-pr\'s checks out, by name, with the reason (it goes into Verified): e.g. { "revert": "the new test guards a Windows path this branch only documents" }'),
+        ...PRE_PR_INPUT,
         path: pathInput,
         draft: z.boolean().optional(),
         repo: repoInput,
@@ -384,6 +460,18 @@ export const tools = {
       _meta: { 'centralu/risk': 'routine', 'centralu/askWhen': { path: '*' }, 'centralu/askUnless': { skipPrePr: '*', dryRun: true }, ui: { visibility: ['model'] } },
     },
     handler: answering(openPrChecked, 'Not opened: '),
+  },
+
+  pre_pr: {
+    config: {
+      title: "Run pnpm pre-pr on a pull request's head",
+      description:
+        "For a head pushed after open_pr (new commits, or a rebase onto main): run the repository's pnpm pre-pr on the open pull request's head as it is now, as open_pr does, and post the pre-pr commit status on it, which queue_merge asks for and the merge queue waits for on a head that moved. The tier label is raised when the paths now call for more (never lowered). Refused, with nothing posted, on what pre-pr finds; prePrExempt and skipPrePr as for open_pr.",
+      inputSchema: z.object({ pr: itemRef.describe(`The pull request: ${REF_HELP}`), ...PRE_PR_INPUT, path: pathInput }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      _meta: { 'centralu/risk': 'routine', 'centralu/askWhen': { path: '*' }, 'centralu/askUnless': { skipPrePr: '*' }, ui: { visibility: ['model'] } },
+    },
+    handler: answering(prePrOn, 'No pre-pr status: '),
   },
 
   commit_check: {

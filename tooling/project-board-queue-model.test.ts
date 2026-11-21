@@ -69,6 +69,8 @@ vi.mock('../.centralu/apps/project-board/github.mjs', async (importOriginal) => 
     deleteBranch: async (_repo: string, name: string) => w().deleteBranch(name),
     mergePr: async (_repo: string, n: number, sha: string) => w().mergePr(n, sha),
     postStatus: async () => undefined,
+    // Every head carries open_pr's pre-pr status (#1886): the model's pushes are the authors'
+    readStatus: async () => ({ state: 'success', description: 'tier:light; passed' }),
     readRepoFile: async (_repo: string, path: string) => w().readFile(path),
     readCompareFiles: async (_repo: string, _base: string, head: string) => w().compareFiles(head),
     openPrsOnBase: async () => [],

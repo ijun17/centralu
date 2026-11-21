@@ -20,7 +20,8 @@ export class StackRefusal extends Error {}
 const listFiles = (files) => listSome(files, 8)
 
 /**
- * `gh`: { readPr, prsWithHead, setPrBase, openPrsOnBase } (github.mjs). `ref(n)` writes a pull request's number the
+ * `gh`: { readPr, prsWithHead, setPrBase, openPrsOnBase } (github.mjs), and `carry(tested, rebased)` when the caller carries
+ * something over to the pushed head, answering the line that says so. `ref(n)` writes a pull request's number the
  * way the board does. Answers { summary, lines, pushed, rebased, sameTree }.
  */
 export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = false }, gh, ref = (n) => `#${n}`) {
@@ -118,6 +119,7 @@ export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = fa
         refuse(`Pushing ${branch} failed, so nothing changed: ${e.message}${/stale info|rejected/.test(`${e.message}\n${e.stderr}`) ? ' It moved on the remote after it was read; call again.' : ''}`)
       }
       lines.push(`Pushed ${short(rebased)} to ${branch} on ${remote}, where it was ${short(tested)}.`)
+      if (gh.carry) lines.push(await gh.carry(tested, rebased))
     }
     if (upper.baseRefName !== base) {
       try {

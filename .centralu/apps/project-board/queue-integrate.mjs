@@ -141,12 +141,15 @@ export function becauseLines(j, max = 12) {
 
 const LABEL_TIERS = ['auto', 'light', 'deep', 'person']
 
+/** A pull request's tier:<name> labels as they are named, known or not (`labels`: names, or GitHub's `{ name }`) */
+export const tierLabels = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((l) => typeof l === 'string' && l.startsWith('tier:'))
+
 /**
  * The highest tier a person or open_pr gave a pull request by its labels (tier:<name>), or null when it has none. Never
  * taken as lower than the judge's: a label only raises (#1259 review). An unknown tier:<name> is deep.
  */
 export function labelTier(labels) {
-  const names = (labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter((l) => typeof l === 'string' && l.startsWith('tier:'))
+  const names = tierLabels(labels)
   if (!names.length) return null
   return names.map((l) => (LABEL_TIERS.includes(l.slice(5)) ? l.slice(5) : 'deep')).reduce((a, b) => (LABEL_TIERS.indexOf(b) > LABEL_TIERS.indexOf(a) ? b : a))
 }

@@ -696,6 +696,13 @@ export async function postStatus(repo, sha, { state, context, description, targe
   await restWrite('POST', `repos/${repo}/statuses/${sha}`, { state, context, description: String(description).slice(0, 140), ...(targetUrl ? { target_url: targetUrl } : {}) }, `the ${context} status`)
 }
 
+/** The newest commit status of `context` on `sha` (`{ state, description }`; the combined status keeps one per context), or null when there is none. */
+export async function readStatus(repo, sha, context) {
+  checkRepo(repo)
+  const s = (await restJson(`repos/${repo}/commits/${sha}/status?per_page=100`))?.statuses?.find((x) => x?.context === context)
+  return s ? { state: s.state, description: s.description ?? '' } : null
+}
+
 // --- Reading an item and answering it (the reader in the view) --------------------------------------
 // One GraphQL query for the item and a page of its comments, newest page first: a thread longer than
 // the limit keeps its latest comments, which are the ones a decision turns on.
@@ -800,11 +807,11 @@ async function restWrite(method, path, payload, what) {
   return json
 }
 
-/** Opens a pull request; answers its number and address. */
+/** Opens a pull request; answers its number, address and head commit. */
 export async function createPr(repo, { title, head, base, body, draft }) {
   checkRepo(repo)
   const pr = await restWrite('POST', `repos/${repo}/pulls`, { title, head, base, body, draft: draft === true }, 'the pull request')
-  return { number: pr.number, url: pr.html_url ?? null }
+  return { number: pr.number, url: pr.html_url ?? null, head: pr.head?.sha ?? null }
 }
 
 /** Adds labels to an issue or pull request; GitHub makes a label that does not exist yet. */

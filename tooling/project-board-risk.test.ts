@@ -27,7 +27,7 @@ const own = { own: true, preset: 'normal', args: {} } as const
 
 describe("the project board's writes and the cards they raise", () => {
   const local = ['ack', 'unqueue', 'mark_answer_recorded']
-  const routine = ['comment', 'file_issue', 'open_pr', 'set_item_fields', 'add_item', 'mark_ready', 'rebase_stack']
+  const routine = ['comment', 'file_issue', 'open_pr', 'pre_pr', 'set_item_fields', 'add_item', 'mark_ready', 'rebase_stack']
   // The owner's call (2026-10-24): "never merge your own pull request" stays a card, and every comment of the gh login
   // is one login, so the owner's own comments cannot be told from the session's
   const merges = ['queue_merge', 'integrate']
@@ -46,7 +46,7 @@ describe("the project board's writes and the cards they raise", () => {
       const t = ALL[name]!.config
       expect(declaredRisk(t), name).toBe('routine')
       // open_pr asks unless it skips pre-pr (below): the arguments that make any of them card-free are given here
-      const args = name === 'open_pr' ? { skipPrePr: 'a fork' } : {}
+      const args = name === 'open_pr' || name === 'pre_pr' ? { skipPrePr: 'a fork' } : {}
       expect(runsUnasked(t, { ...own, args }), name).toBe(true)
       expect(runsUnasked(t, { own: false, preset: 'normal', args }), name).toBe(false)
       expect(runsUnasked(t, { own: true, preset: 'safe', args }), name).toBe(false)
@@ -85,6 +85,14 @@ describe("the project board's writes and the cards they raise", () => {
     expect(runsUnasked(t, { ...own, args: { head: 'feature', dryRun: true } })).toBe(true)
     // path names a checkout of the caller's choosing, whatever else is given
     expect(runsUnasked(t, { ...own, args: { head: 'feature', skipPrePr: 'a fork', path: 'C:/work/other' } })).toBe(false)
+  })
+
+  it('asks for pre_pr as for open_pr: it runs pre-pr on the head unless skipPrePr is given (#1886)', () => {
+    const t = ALL.pre_pr!.config
+    expect(askUnless(t)).toEqual({ skipPrePr: '*' })
+    expect(runsUnasked(t, { ...own, args: { pr: 7 } })).toBe(false)
+    expect(runsUnasked(t, { ...own, args: { pr: 7, skipPrePr: 'a fork' } })).toBe(true)
+    expect(runsUnasked(t, { ...own, args: { pr: 7, skipPrePr: 'a fork', path: 'C:/work/other' } })).toBe(false)
   })
 
   it('declares nothing on a read, and nothing else is declared', () => {

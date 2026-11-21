@@ -453,7 +453,9 @@ checks a branch other than the one checked out. When one check's finding stands 
 test that cannot fail without the change, and why), leave that check out with the reason:
 `--exempt revert="<why>"` (or any other check above). The board's `open_pr` runs it on the pushed branch
 and refuses with what it finds; its `prePrExempt: { "revert": "<why>" }` leaves one check out, and
-`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. Interrupted (Ctrl-C, Ctrl-Break), it knows it by
+`skipPrePr: "<why>"` all of them. Either reason goes into **Verified**. A head you push after `open_pr` (a review fix, a
+rebase onto main) needs the board's `pre_pr` before `queue_merge` takes it: that posts the `pre-pr` status the queue asks for,
+and a `pnpm pre-pr` run by hand posts nothing. Interrupted (Ctrl-C, Ctrl-Break), it knows it by
 how the tool it was running ended, removes its worktrees itself and exits 130; killed outright, the next run does (or `pnpm pre-pr --cleanup <run-id>`, which also deletes the pull request heads
 that any run whose folder and process are gone fetched for the guards). Do not
 delete a `cc-pre-pr-*` folder by hand with a recursive delete: its worktrees hold links to your checkout's
