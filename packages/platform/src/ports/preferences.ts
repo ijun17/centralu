@@ -5,70 +5,50 @@ import type {
   ThemeFileEntry,
 } from '@cc/protocol/client'
 
-/** Workspace snapshot (C-3) — returns to the place being viewed even after the window is closed and reopened */
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
   /**
-   * Which of the three views was showing — focus, grid, or assistant. Restoring the
-   * focused session without this landed a person who quit from the grid back in the focus
-   * view: the *session* came back but the *way of looking* did not, which reads as the app
-   * forgetting. Loosely typed like panelLayout: a snapshot is a file, the UI validates.
+   * focus, grid or assistant: restoring the session in another view reads as the app forgetting. Loosely typed like
+   * panelLayout: a snapshot is a file, the UI validates.
    */
   view?: string
-  /**
-   * The app being viewed as a pinned screen (M4 B-2) — what was being viewed when `view` was
-   * 'app'. An app is identified by (project, id). If that app is not in the list when
-   * restoring (its folder is gone), this is silently skipped.
-   */
+  /** When `view` was 'app' (M4 B-2); skipped on restore when the app is gone */
   focusedApp?: { projectId: string | null; appId: string; machine?: string | null } | null
-  /** Whether the evidence panel (git/files) was open */
   panelOpen?: boolean
   /**
-   * The panel's tab arrangement (#20): vertically stacked groups, each an ordered tab
-   * list plus its active tab. One arrangement for the whole app — the panel is a way
-   * of looking, not project state. Loosely typed here on purpose: a snapshot is a file
-   * on disk, and the UI sanitizes whatever comes back (store/panelLayout.ts).
+   * Stacked groups, each tabs plus its active one (#20); one for the whole app, as a way of looking, not project state.
+   * Loosely typed: the UI sanitizes it (store/panelLayout.ts).
    */
   panelLayout?: { tabs: string[]; active: string }[]
-  /** The share the top group takes up (0.15–0.85). Only meaningful when there are two groups — the split ratio is also part of the way of looking */
+  /** The top group's share (0.15–0.85), with two groups */
   panelSplit?: number
-  /** Evidence panel width (px) */
   panelWidth?: number
-  /** Session list width (px) */
   sidebarWidth?: number
 }
 
 /**
- * Custom themes as files (#312): `<data>/themes/<id>.json`, read, written and watched by the host.
- *
- * The list arrives whole (a handful of small files); a change to the folder — from Settings, an
- * editor or an agent — arrives as `themes_changed` on the event stream, and the screen refetches.
+ * `<data>/themes/<id>.json`, read, written and watched by the host (#312). A change from anywhere comes as
+ * `themes_changed`, and the screen reads the whole list again.
  */
 export interface ThemesPort {
   list(): Promise<ThemeFileEntry[]>
-  /** Writes a theme file atomically; `id` null creates one named after the theme */
+  /** Atomic; `id` null creates one named after the theme */
   save(id: string | null, content: ThemeFileContent): Promise<ThemeFileEntry>
-  /** Copies a theme file from a path on disk into the folder (Import) */
   importFile(path: string): Promise<ThemeFileEntry>
-  /** Moves a theme file to the OS trash. Only the desktop app has a trash. */
+  /** To the OS trash; only the desktop app has one */
   remove(id: string): Promise<{ supported: boolean; reason?: string }>
-  /** Shows a theme file in the file manager (Export: the file is already a file) */
+  /** In the file manager; this is Export */
   reveal(id: string): Promise<{ supported: boolean; reason?: string }>
 }
 
 /**
- * Screen preferences (UiPreferences).
- *
- * **Deliberately kept separate from the workspace snapshot.** The snapshot is "what was
- * placed where" and is fine to overwrite wholesale on the way out; preferences are "what this
- * person chose" and must never be overwritten that way. Mixing them into one blob would make
- * every place that saves layout also save preferences, and if even one of those places is
- * holding a stale value, the chosen setting silently reverts.
+ * Separate from the workspace snapshot on purpose: the snapshot is overwritten whole on the way out, and a stale
+ * preference saved along with it would silently revert the person's choice.
  */
 export interface PreferencesPort {
-  /** Once at startup. On failure the caller fills in defaults — this never blocks the app */
+  /** On failure the caller uses defaults; never blocks the app */
   load(): Promise<UiPreferences>
-  /** Writes only what changed. What comes back is the whole thing after it was recorded */
+  /** Writes only what changed; answers the whole record */
   save(patch: UiPreferencesPatch): Promise<UiPreferences>
 }
 

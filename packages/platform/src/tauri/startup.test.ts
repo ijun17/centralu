@@ -28,9 +28,8 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 const { createTauriPlatform, listenForQuit, quitApp } = await import('./index.js')
 
 /**
- * The desktop at the moment the host fails to come up (#184). Checks only the seam with the
- * shell, without a webview — whether ⌘Q actually works, and whether Retry actually brings the
- * host back up, is confirmed by hand in the packaged app.
+ * The desktop when the host fails to come up: the seam with the shell only. That ⌘Q works and Retry brings the host
+ * back is checked by hand in the packaged app.
  */
 beforeEach(() => {
   invoke.mockReset()

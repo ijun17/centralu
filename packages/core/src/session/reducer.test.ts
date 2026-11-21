@@ -179,12 +179,7 @@ describe('a resolve arriving after the turn ended does not restart the session',
   })
 })
 
-/*
- * A card lives only while it can be answered — error is not the only way a requestId dies.
- * A resume (back to idle) and working resuming finish that request off too, so the cards are cleared with it.
- * If the state (visibility) and the payload (whether it can be acted on) drift apart, cards that cannot be
- * answered are left behind.
- */
+// A card lives only while it can be answered: a resume and working resuming end its request too, not only an error
 describe('cards are cleared on recovery (back to idle or working)', () => {
   it('waiting_approval → idle (resume) clears the approval card', () => {
     const s = applyEvent(replay(TURN.slice(0, 3)), ev({ type: 'state_change', state: 'idle', reason: 'resumed' }), NOW)
@@ -217,10 +212,7 @@ describe('session name (FR-18)', () => {
     expect(s.name).toBe('the name I chose')
   })
 
-  /*
-   * A name the person changed has to reach the other screens **however many times it is changed** (issue #5).
-   * Decided from this side's own autoNamed alone, it is quietly dropped from the second change on.
-   */
+  // A given name reaches the other screens however many times it changes (#5)
   it('a name the person chose (auto:false) updates a session that is already manual too', () => {
     const once = applyEvent(s0(), ev({ type: 'session_title', title: 'Guard MCP', auto: false }), NOW)
     expect(once).toMatchObject({ name: 'Guard MCP', autoNamed: false })

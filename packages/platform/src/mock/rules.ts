@@ -3,7 +3,6 @@ import type { Emit } from './event-bus.js'
 
 /** What the host remembers and lists: message search, permission rules and cross-project consents */
 export class RulesMock {
-  /** For tests: search and rule state */
   searchResults: { sessionId: string; seq: number; snippet: string }[] = []
   rulesList: {
     id: number
@@ -15,9 +14,8 @@ export class RulesMock {
     sessionId?: string | null
   }[] = []
 
-  /** For tests: when set, a message search answers only once this settles (an answer that arrives late) */
+  /** A search answers only once this settles */
   searchHold: Promise<void> | null = null
-  /** For tests: when set, the message search fails with this reason */
   searchMessagesError: string | null = null
   readonly search = {
     messages: async (query: string) => {
@@ -27,7 +25,7 @@ export class RulesMock {
     },
   }
 
-  /** Remembered cross-project consents (#371) — a test seeds this, and revoking emits the host's event */
+  /** Cross-project consents (#371) */
   consentsList: ProjectConsent[] = []
   readonly consents = {
     list: async () => structuredClone(this.consentsList),

@@ -18,31 +18,29 @@ type Thread = {
   read: number
   /** Whether the person has something here to answer (the host's `canReply`) */
   canReply: boolean
-  /** Mail between sessions the person is not in: opened from Tasks to look in, never listed with their own (`MailThreadView.lookIn`) */
+  /** Sessions' mail the person is not in: opened from Tasks, never listed (`MailThreadView.lookIn`) */
   lookIn?: boolean
 }
 
 /**
- * The person's mailbox (#1347), in memory: a thread a test or the demo seeds, and the person's acts on it. It keeps the host's
- * rules that a screen shows (a thread that is done takes no reply; an unread count that falls when the thread is read) and none
- * of the delivery.
+ * The person's mailbox (#1347), in memory. It keeps the host's rules a screen shows (a done thread takes no reply,
+ * reading lowers the unread count) and none of the delivery.
  */
 export class MailMock {
   private readonly threads = new Map<string, Thread>()
   private heldRows: MailHeldRow[] = []
   /** Sleeping sessions waiting for the person's word (`mail.wake`); a test sets it */
   waiting = 0
-  /** What the person pressed, for a test to read */
   readonly calls: string[] = []
-  /** The watches each session keeps (#1324), by session id */
+  /** By session id (#1324) */
   private readonly watchRows = new Map<string, WatchView[]>()
   /** False stands in for an older host: both watch methods are unknown to it */
   knowsWatches = true
-  /** The host's open work, as `mail.tasks` lists it (#1577); a test or the demo seeds it */
+  /** As `mail.tasks` lists it (#1577) */
   private taskRows: MailTaskRow[] = []
-  /** A host with more open work than it lists says how many it listed (#1577); a test sets it */
+  /** How many a host with more open work listed (#1577) */
   tasksCapped: number | null = null
-  /** A hub names the linked machines whose tasks it could not read (#2268); a test sets them */
+  /** The linked machines whose tasks a hub could not read (#2268) */
   tasksUnreached: UnreachedMachine[] = []
   /** False stands in for a host older than Tasks: `mail.tasks` is unknown to it */
   knowsTasks = true
@@ -111,8 +109,8 @@ export class MailMock {
   }
 
   /**
-   * Puts a piece of work on the host's task list, with the chain it opens: the person's own when they gave it or are asked, else one between
-   * sessions they look into. `state` and `outcome` are the host's words (`MailTaskRow`)
+   * Puts work on the host's task list with the chain it opens: the person's own when they gave it or are asked,
+   * else one between sessions they look into. `state` and `outcome` are the host's words (`MailTaskRow`)
    */
   seedTask(spec: { subject: string; owner: MailParty; assignee: MailParty; body?: string; kind?: 'assign' | 'question'; state?: string; outcome?: string; held?: string }): string {
     const kind = spec.kind ?? 'assign'
@@ -167,7 +165,7 @@ export class MailMock {
     }
   }
 
-  /** What the thread waits on the person to answer, as the host works it out (`MailPerson.asking`): a session's questions that none of the person's messages names, until the thread is done */
+  /** As `MailPerson.asking`: a session's questions no message of the person's names, until the thread is done */
   private asking(t: Thread): MailThreadRow['ask'] {
     const open = t.row.state === 'done' ? [] : t.messages.filter((m) => m.kind === 'question' && m.sender.kind === 'session' && !t.messages.some((a) => a.sender.kind === 'person' && a.replyTo === m.id))
     const newest = open.at(-1)
@@ -216,7 +214,7 @@ export class MailMock {
     reply: async (threadId, text, kind, answers) => {
       const t = this.must(threadId)
       if (t.row.state === 'done') throw mockError('this thread is done; open a follow-up', 'refused')
-      // As the host does (`pickTarget`): an answer names its question, a pick being one of its choices and other words the person's own, and a question is answered once
+      // As `pickTarget`: an answer names its question (a pick is one of its choices), answered once
       const open = t.messages.findLast((m) => m.sender.kind !== 'person' && m.kind === 'question' && !t.messages.some((a) => a.replyTo === m.id))
       const question = answers === undefined ? open : t.messages.find((m) => m.id === answers)
       if (answers !== undefined && !question) throw mockError(`There is no message ${answers} to answer.`, 'refused')
@@ -224,7 +222,7 @@ export class MailMock {
       const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? (question ? 'answer' : 'note'), urgent: false, body: text, facts: answers !== undefined && question?.choices?.includes(text) ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
-      // As the host does (`MailPerson.reply`): the answer reads what it answers and what came before it, not what came after
+      // As `MailPerson.reply`: the answer reads what it answers and what came before, not after
       const answered = (question ?? t.messages.findLast((m) => m.sender.kind !== 'person'))?.seq ?? 0
       t.row.unread = Math.min(t.row.unread, t.messages.filter((m) => m.sender.kind !== 'person' && m.seq > answered).length)
       t.row.last = { sender: PERSON, kind: message.kind, preview: text.slice(0, 140), at: message.createdAt }
@@ -234,13 +232,13 @@ export class MailMock {
     close: async (threadId, outcome) => {
       const t = this.must(threadId)
       if (t.lookIn) throw mockError('You are not in this mail: you can read it, not close it.', 'refused')
-      // As the host does (C12): the session whose turn is on the thread is told in Centralu's words without a wake, and its turn goes on
+      // As the host (C12): the session working the thread is told without a wake, and its turn goes on
       const helper = t.row.working ? t.row.assignee?.sessionId : null
       if (helper) this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: 'Centralu told it the person closed its work' })
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
       t.row.working = false
-      // As the host does (`closeFor`): what was said to the person in it is theirs to have read, so the row leaves the list of what waits
+      // As `closeFor`: what was said to the person counts as read, so the row stops waiting
       t.row.unread = 0
       t.read = t.messages.at(-1)?.seq ?? t.read
       this.touch(t)

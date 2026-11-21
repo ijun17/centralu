@@ -56,7 +56,7 @@ describe('the mock mailbox', () => {
     expect(await p.mail.held('release', worker.address, [held[0]!.messageId])).toEqual({ changed: 1 })
     expect((await p.mail.list()).held).toEqual([])
     expect((await p.mail.list()).threads[0]).toMatchObject({ id, blocked: 0 })
-    // Both went with threads (Q-M3a-34): the mock, like the port, has neither
+    // Threads have neither (Q-M3a-34), in the port or the mock
     expect(['reassign', 'unblock'].filter((m) => m in p.mail)).toEqual([])
     expect('block' in p.mockMail).toBe(false)
   })

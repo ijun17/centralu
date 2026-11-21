@@ -1,43 +1,21 @@
 import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
 
-/**
- * The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1): what the Inbox lists and shows, the person's words in a
- * thread, and the acts that are theirs. A thread that changes is announced on the event stream as `mail_changed`
- * (`AgentPort.subscribe`), naming the thread; the Inbox reads `list` or `thread` again.
- *
- * Whatever the person writes is theirs by who is asking, not by a field of the call. A rule that says no arrives as an error with
- * the code `refused` and `data.reason` (docs/protocol.md §5).
- */
+/** The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1, docs/protocol.md §3, §5) */
 export interface MailPort {
-  /** The threads the person is in (unread first), the mail held for them, and how many sleeping sessions wait for their word */
   list(): Promise<{ threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number }>
-  /**
-   * The open and recently settled work on the host (#1577), one row per recipient, for the Inbox's Tasks; `capped` is how many open rows are listed when
-   * more are open (rows, as the list counts them); on a hub, `unreached` names the linked machines whose rows are not in it (#2268). An older host has
-   * no such method and the call rejects
-   */
   tasks(): Promise<{ tasks: MailTaskRow[]; capped: number | null; unreached: UnreachedMachine[] }>
   /**
-   * One thread from where the person last read (or `after`, or from the start with `all`), read for them. With `tail`, its last that many
-   * messages (at most 100), read to the end; with `before` as well, the earlier page of them, whose `older` says whether there is more. With `lookIn`,
-   * read as a look in: nothing in it is read for anyone (a mail line folded open in a conversation, #2333)
+   * Read for the person from where they last read (or `after`, or `all`). `tail`: the last that many (at most 100),
+   * read to the end; with `before`, the page before (`older`: more). `lookIn`: read for nobody (#2333)
    */
   thread(threadId: string, opts?: { after?: number; all?: boolean; tail?: number; before?: number; lookIn?: boolean }): Promise<MailThreadView>
-  /** The person's words in a thread; answers the new message */
-  /** `answers`: the question whose choice `text` is (a pick); the answer goes to that question, and a question answered already refuses it */
   reply(threadId: string, text: string, kind?: 'note' | 'answer' | 'question', answers?: string): Promise<MailThreadView>
   close(threadId: string, outcome?: 'finished' | 'failed' | 'stopped' | 'dropped'): Promise<MailThreadRow>
-  /** Sends held mail now (`release`: Release, Resend, Retry) or lets it go undelivered (`dismiss`) */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): Promise<{ changed: number }>
-  /** Lifts a pause: a thread whose mail stopped for its turns (§7.9) */
   resume(target: { threadId: string }): Promise<void>
-  /** Answers "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn (§7.9) */
   wake(wake: boolean): Promise<void>
-  /**
-   * The watches a session keeps (#1324, docs/plans/mailbox.md §18.8), for its header. A change is announced as `watches_changed`
-   * naming the session. An older host has no such method and the call rejects
-   */
+  /** For the session's header (#1324, docs/plans/mailbox.md §18.8); changes: `watches_changed`. Older hosts reject */
   watches(sessionId: string): Promise<WatchView[]>
-  /** The person cancels a watch; false when it had ended already */
+  /** false when it had ended already */
   cancelWatch(id: string): Promise<boolean>
 }

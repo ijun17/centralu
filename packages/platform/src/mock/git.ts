@@ -2,9 +2,7 @@ import type { GitBranch, GitCommit, GitDiff, GitFileStatus } from '@cc/protocol/
 
 /** The mock's git, behind the `git` port: the state tests manipulate and the calls they check */
 export class GitMock {
-  /** For tests: which diff was asked for — an eye on whether the group is right for a partially staged file (#160) */
   readonly gitDiffCalls: { path: string; staged: boolean }[] = []
-  /** The fake git state tests manipulate */
   gitState: {
     files: GitFileStatus[]
     diffs: Record<string, string>
@@ -12,16 +10,11 @@ export class GitMock {
     branches: GitBranch[]
     dirty: string[]
     /**
-     * The keys (path or sha) of the diffs to report as truncated.
-     *
-     * The real host gives only the first part and sets truncated once it crosses the cap
-     * (400,000 characters). While the mock always returned false, a test for "the truncation
-     * notice does not appear" **could not possibly fail** (#121). Taking a key rather than
-     * faking it by length: a test should be able to draw that state without having to build a
-     * 400KB string.
+     * Keys (path or sha) of diffs reported truncated, which the host does past 400,000 characters (#121).
+     * A key, so a test need not build a 400KB string.
      */
     truncated: string[]
-    /** Things git ignores (#76) — the list the setup window offers as copy candidates */
+    /** What git ignores: the setup window's copy candidates (#76) */
     ignored: { path: string; bytes: number | null }[]
     lastCommitMessage?: string
     pushed: boolean
@@ -29,7 +22,6 @@ export class GitMock {
     holdWrites?: boolean
   } = { files: [], diffs: {}, commits: [], branches: [], dirty: [], truncated: [], ignored: [], pushed: false }
 
-  /** The held writes, each ended by `cancel` */
   private held = new Set<() => void>()
   private hold(): Promise<{ ok: boolean; message?: string; cancelled?: true } | null> {
     if (!this.gitState.holdWrites) return Promise.resolve(null)
@@ -68,10 +60,7 @@ export class GitMock {
       )
     },
     commit: async (_projectId: string, message: string) => {
-      /*
-       * Nothing staged: `git commit` fails and the host passes git's own words on (gitCommit, #999). With changes left
-       * unstaged git says how to add them; with none, that the tree is clean.
-       */
+      // Nothing staged: `git commit` fails and the host passes git's own words on (gitCommit, #999)
       if (!this.gitState.files.some((f) => f.staged)) {
         return {
           ok: false,

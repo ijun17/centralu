@@ -120,7 +120,7 @@ describe('matching "always allow" rules', () => {
     expect(matchesRule('git * origin', 'git * origin')).toBe(true)
   })
 
-  // The rule the card suggests for a command must match that command (#428): suggestMatcher trims, and the match did not
+  // suggestMatcher trims, so the match must too (#428)
   it('a command matches the rule suggested for it, surrounding whitespace and all', () => {
     const command = '  npm test\n'
     expect(matchesRule(command, suggestMatcher(command))).toBe(true)

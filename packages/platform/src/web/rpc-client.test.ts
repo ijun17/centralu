@@ -3,10 +3,7 @@ import { RpcClient, type RpcClientOptions } from './rpc-client.js'
 import { SessionInfo, liveBackgroundTasks } from '@cc/protocol'
 import { currentSession, missingDefaults, withoutDefaultedFields } from '../../../protocol/src/test-helpers.js'
 
-/**
- * Lets one test make reading a result throw. Every other read goes to the real `parseRpcResult`, so
- * the rest of this file runs against the real schemas.
- */
+/** Lets one test make reading a result throw; every other read goes to the real `parseRpcResult` */
 const resultFault = vi.hoisted(() => ({ next: null as Error | null }))
 vi.mock('@cc/protocol/client', async (importOriginal) => {
   const real = await importOriginal<typeof import('@cc/protocol')>()
@@ -21,11 +18,7 @@ vi.mock('@cc/protocol/client', async (importOriginal) => {
   }
 })
 
-/**
- * A fake WebSocket for reproducing connect, disconnect and responses by hand, with no real
- * socket. Used together with a fake timer, since reconnection (the backoff setTimeout) also
- * has to be verified.
- */
+/** Connect, disconnect and answers by hand, with fake timers for the backoff */
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
   static get last(): FakeWebSocket {
@@ -51,7 +44,7 @@ class FakeWebSocket {
     this.readyState = 1
     this.onopen?.()
   }
-  /** Opens and completes the handshake — the host said hello_ok, so calls may now go out (#82) */
+  /** Opens and answers the handshake, so calls may go out */
   ready(hello: Record<string, unknown> = {}): void {
     this.open()
     this.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0, streamEpoch: 'epoch-a', ...hello })
@@ -91,13 +84,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/**
- * An unreadable response is also a response.
- *
- * A frame with an error code not in the protocol fails validation; dropped silently, it leaves
- * the caller waiting for an answer all the way to the 30-second timeout — the screen at
- * 'loading' the whole time.
- */
+/** An unreadable failure frame still ends the call it answers, rather than leave it to the 30 s timeout */
 describe('RpcClient unreadable response (dogfooding)', () => {
   it('even a failure response that fails validation ends the call — carrying its explanation as-is', async () => {
     const rpc = makeClient()
@@ -135,11 +122,7 @@ describe('RpcClient unreadable response (dogfooding)', () => {
   })
 })
 
-/**
- * A window attached to an older host (#280). An older host's session list can lack
- * `backgroundTasks` (#305); handed to the screen as sent, the field's `.default([])` never
- * applies, and the screen crashes on `undefined.filter`.
- */
+/** protocol.md §4: unparsed, a list without `backgroundTasks` crashes the screen on `undefined.filter` */
 describe('RpcClient — an older host\'s answers get the defaults the protocol added since (#280)', () => {
   it('a session list with every defaulted field left out arrives with all of them filled in', async () => {
     const rpc = makeClient()
@@ -159,10 +142,7 @@ describe('RpcClient — an older host\'s answers get the defaults the protocol a
 })
 
 describe('RpcClient rejects in-flight calls on disconnect (U1)', () => {
-  /*
-   * Its outcome is unknown (#82): the host may have run it. It is therefore not marked retryable —
-   * a blind retry of a rename or a send could do it twice.
-   */
+  // The host may have run it, so it is not retryable (protocol.md §1)
   it('an RPC sent with no answer yet is rejected as unknown, not retryable, when the connection drops', async () => {
     const rpc = makeClient()
     rpc.connect()
@@ -263,9 +243,8 @@ describe('RpcClient rejects in-flight calls on disconnect (U1)', () => {
 })
 
 /*
- * An RPC that ends in a revival gets a long budget (#164). A revival alone can use up to 150
- * seconds just to start the process (the manager's stage limit); cut off at 30 seconds, the
- * host applies the settings and restarts while the screen shows a failure.
+ * A revival alone can take up to 150 s to start the process (the manager's stage limit); cut at 30 s, the host
+ * applies the settings and restarts while the screen shows a failure.
  */
 describe('RpcClient — budget for a call ending in a revival (#164)', () => {
   const RESUMING = [
@@ -294,8 +273,8 @@ describe('RpcClient — budget for a call ending in a revival (#164)', () => {
 })
 
 /*
- * #982 review: a commit or push runs the repository's hooks and may wait on a sign-in; the host gives it 10 minutes.
- * Cut at 30 s, the screen unlocked its buttons while git still held the index lock.
+ * A commit or push runs the repository's hooks and may wait on a sign-in; the host gives it 10 minutes. Cut at 30 s,
+ * the screen unlocks its buttons while git still holds the index lock.
  */
 describe('RpcClient — budget for a git write', () => {
   it.each(['git.stage', 'git.commit', 'git.checkout', 'git.push'])('%s waits past the host\'s 10 minutes, and is cut at 11', async (method) => {
@@ -315,10 +294,8 @@ describe('RpcClient — budget for a git write', () => {
 })
 
 /*
- * #173: the starting point for replay. A first-met host replays its whole buffer, and that is
- * all stuff that finished before the screen was attached (a "done" card stood for every
- * finished turn). Attaching to a host that came back up on the same address while still
- * holding the old number would replay nothing.
+ * protocol.md §1: a first-met host's replay finished before the screen attached (a "done" card per finished turn),
+ * and a host back at the same address read with the old number would replay nothing.
  */
 describe('RpcClient — the starting point for replay (#173)', () => {
   const ev = (seq: number) => ({
@@ -403,9 +380,6 @@ describe('RpcClient — the starting point for replay (#173)', () => {
   })
 })
 
-/*
- * #82: recovery hardening for the local app.
- */
 describe('RpcClient — what the window says it shows (#1405)', () => {
   it("says in its hello that it shows host requests, so a host raises a limited caller's card for it", () => {
     const rpc = makeClient()
@@ -530,11 +504,8 @@ describe('RpcClient — host lifetime and duplicates (#82)', () => {
     rpc.close()
   })
 
-  /*
-   * The case #173's `currentSeq < lastSeq` check cannot see: the new lifetime has already numbered
-   * past the old cursor. Even a host that fails to say resyncRequired must not get its numbers
-   * read as the old lifetime's.
-   */
+  // The new lifetime has numbered past the old cursor, which a `currentSeq < lastSeq` check cannot see
+  // (protocol.md §1); even without `resyncRequired` its numbers are not the old lifetime's
   it('a hello_ok from another lifetime is a resync, even when its numbers are ahead of the cursor', async () => {
     const { rpc, got, conn } = client()
     FakeWebSocket.last.ready({ streamEpoch: 'epoch-a' })
@@ -664,11 +635,7 @@ describe('RpcClient — deterministic close (#82)', () => {
   })
 })
 
-/**
- * One subscriber that throws must not cost anyone else anything. The client has already moved past
- * what it was handing on (the event's seq is the cursor, the connection change has happened), so a
- * throw that stopped the loop, or escaped the socket callback, lost that for good.
- */
+/** One subscriber that throws costs no one else anything (deliver.ts) */
 describe('RpcClient — a subscriber that throws', () => {
   const ev = (seq: number) => ({ kind: 'event', seq, event: { type: 'message_delta', sessionId: 's1', role: 'assistant', text: `e${seq}` } })
 

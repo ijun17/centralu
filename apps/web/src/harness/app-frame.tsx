@@ -6,20 +6,8 @@ import type { AppViewFrame } from '@cc/platform/ports'
 import '../../../../packages/ui/src/styles/index.css'
 
 /**
- * A test rig for AppFrame (M4 B-3c, exclusively for e2e/app-frame.spec.ts).
- *
- * Attaching an app screen underneath a conversation card (B-1) does not exist yet. So this
- * stands the component up alone on top of a mock platform. Only the screen address is produced
- * by real host code: the test launches a HostServer and a ViewHost on the Node side, and plugs
- * that `frame()` in through `window.__viewFrame`. That means the proxy, the CSP and the secret
- * path are all the real thing.
- *
- * The store attaches to the mock's event flow the same way (`attach`) the app does. So the
- * wiring that carries the host's broadcast (the mock's `emit`) through the store to AppFrame is
- * also the real thing.
- *
- * This only comes up on the dev server. `vite build`'s only input is index.html, so it never
- * ends up in a release build.
+ * AppFrame alone on a mock platform, for e2e/app-frame.spec.ts. The test plugs a real HostServer's ViewHost `frame()`
+ * in through `window.__viewFrame`, so the proxy, CSP, secret path and the store's wiring are real. Dev server only.
  */
 
 type Mounted = { key: string; props: AppFrameProps; ref: RefObject<AppFrameHandle | null> }
@@ -30,10 +18,9 @@ declare global {
     __appFrame?: {
       mount(key: string, props: AppFrameProps): void
       update(key: string, patch: Partial<AppFrameProps>): void
-      /** The order the parent has to follow: call teardown first, then take it down once the
-       * answer comes back. */
+      /** Teardown first, then taken down once it answers: the order the parent has to follow */
       close(key: string): Promise<string>
-      /** Takes it down immediately, without teardown. */
+      /** Without teardown */
       drop(key: string): void
       events: { kind: string; key: string; value: unknown }[]
     }
@@ -43,7 +30,7 @@ declare global {
 const mock = createMockPlatform()
 window.__mock = mock
 window.__store = useStore
-// The fonts and line height the way App.tsx puts them on the root (#312 step 5), for the app-theme e2e
+// As App.tsx puts them on the root (#312), for the app-theme e2e
 ;(window as never as { __typography: unknown }).__typography = (prefs: Parameters<typeof typographyOf>[0]) => applyTypography(typographyOf(prefs))
 mock.viewFrameProvider = (appId, instanceId, opts) => {
   if (!window.__viewFrame) throw new Error('No view host is attached to this harness')

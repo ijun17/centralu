@@ -1,12 +1,6 @@
 /**
- * The host's copy of a session's state agrees with the window's (#428).
- *
- * The window holds the live state (core `applyEvent`); the host keeps its own copy for a window that reconnects and
- * for the next host after a swap (`applySessionState`, protocol session-state.ts, which the host's `applyStateHint`
- * and the mock's list run). The same event sequences go to both, and the fields a reconnect hands back must come out
- * the same after every event. A hand-copied table drifts in exactly these places: a question that does not block
- * the session, a `turn_complete` in idle that ends a turn that never began, a limit that comes down on every hint,
- * and an answered card next to another one that releases the session.
+ * The host's copy of a session's state (`applySessionState`, kept for reconnects and swaps) agrees with the window's
+ * (`applyEvent`) after every event of the same sequences (#428).
  */
 import { describe, expect, it } from 'vitest'
 import { applySessionState, type NormalizedEvent, type SessionInfo, type SessionState } from '@cc/protocol'

@@ -4,24 +4,17 @@ import { mockError } from './mock-error.js'
 
 /** What the Assistant proposes (MCP servers, skills) and the skills approved from it (#71, #703) */
 export class ProposalsMock {
-  /** Proposed MCP servers waiting for approval (filled in by tests) */
   readonly mcpProposalList: { name: string; command: string; args: string[]; why?: string }[] = []
-  /** Approved proposal names — the observation point for whether an approval click was actually delivered */
   readonly mcpApproved: string[] = []
-  /** Proposed skills waiting for approval (#71 — filled in by tests) */
   readonly skillProposalList: { name: string; content: string; why?: string }[] = []
-  /**
-   * For tests: what the host does when the Assistant proposes — saves the proposal, **then** broadcasts that the list
-   * changed (#703). Pushing to the lists directly saves without the broadcast, which is the host's order the other way round.
-   */
+  /** As the host (#703): saves, then broadcasts; pushing to the lists directly skips the broadcast */
   saveProposal(spec: { mcp: { name: string; command: string; args: string[]; why?: string } } | { skill: { name: string; content: string; why?: string } }): void {
     if ('mcp' in spec) this.mcpProposalList.push(spec.mcp)
     else this.skillProposalList.push(spec.skill)
     this.emit({ type: 'orchestrator_proposals_changed' })
   }
-  /** How many times the screen read a proposal list (either) — for tests that say when it reads (#703) */
+  /** Reads of either list (#703) */
   proposalReads = 0
-  /** Approved skills — the observation point for whether approving/deleting was actually delivered */
   readonly skillList: { name: string; content: string }[] = []
   readonly agents: Pick<AgentPort, 'mcpProposals' | 'resolveMcpProposal' | 'skillProposals' | 'resolveSkillProposal' | 'assistantSkills' | 'deleteAssistantSkill'> = {
     mcpProposals: async () => {

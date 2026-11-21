@@ -3,12 +3,11 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { MockPlatform } from './index.js'
 
 /**
- * The mock fans out the way the web client does (#972 item 4): a subscriber that throws is reported, and every
- * other subscriber still gets the value. If one throwing subscriber kept an event from the rest in the mock only, a test
- * would see a screen break that the app does not.
+ * The mock fans out as the web client does (#972 item 4): a subscriber that throws is reported and the rest still get
+ * the value, so a test sees no screen break the app would not have.
  */
 describe('the mock fan-out', () => {
-  // Put back after each test (#845 item 15): made once for the file, the spy outlived it
+  // Put back after each test (#845 item 15): a spy made once for the file outlives the test
   let quiet: MockInstance<typeof console.error>
   beforeEach(() => {
     quiet = vi.spyOn(console, 'error').mockImplementation(() => {})

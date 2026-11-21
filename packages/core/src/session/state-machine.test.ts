@@ -1,8 +1,4 @@
-/**
- * Gate G2: the FR-12 table is copied out as test cases, so a machine checks that the spec and the
- * implementation agree.
- * (One of the items where plan v2 replaced human review with automatic verification)
- */
+/** Gate G2: the FR-12 table as test cases, so the spec and the implementation agree */
 import { describe, expect, it } from 'vitest'
 import { nextStateFor, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import { canTransition, isWaiting, listedState, needsAnswer, transition } from './state-machine.js'
@@ -58,8 +54,7 @@ describe('blocking illegal transitions', () => {
   })
 
   it('approval and question requests are facts, so the table cannot swallow them (even in idle right after a resume)', () => {
-    // Ignoring a request the host actually sent leaves the agent blocked forever — the table filters only
-    // inferences
+    // Ignoring a request the host sent leaves the agent blocked forever: the table filters only inferences
     for (const type of ['approval_request', 'question_request'] as const) {
       const r = transition('idle', ev({ type }))
       expect(r.illegal).toBe(false)

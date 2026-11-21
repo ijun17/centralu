@@ -5,7 +5,7 @@ import { mockError } from './mock-error.js'
 
 /** Handoff notes and records (#78, #102, #142), written to the host's data folder rather than the project */
 export class HandoffMock {
-  /** The handoff note placed in the host's data folder (#142) — path → text. Not mixed with project files (fsState) */
+  /** Path → text, kept apart from the project files (#142) */
   handoffNotes = new Map<string, string>()
 
   private placeHandoffNote(s: SessionInfo, text: string): string {
@@ -14,12 +14,7 @@ export class HandoffMock {
     return path
   }
   readonly agents: Pick<AgentPort, 'exportHandoffRecord' | 'exportHandoffNote'> = {
-    /**
-     * A dead-agent handoff record (#78) — gives deterministic text carrying the session name,
-     * like the real thing. **Placed in the notes location**, like the real thing (#102, #142):
-     * the two modes converging on one location is the contract of this feature. The location
-     * is the host's data folder, so it is not placed in the mock's project files (fsState).
-     */
+    /** Placed where notes go, as on the host: both modes landing in one place is the feature's contract (#102, #142) */
     exportHandoffRecord: async (sessionId: string, toTool?: ToolName) => {
       const s = this.store.sessions.get(sessionId)
       if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
@@ -27,10 +22,8 @@ export class HandoffMock {
       return { text, path: this.placeHandoffNote(s, text) }
     },
     /**
-     * The note for a live handoff (#142) — the same rule as the real thing: the first human
-     * message after afterSeq is the request, and the note is the **last** assistant message
-     * before the next human message. The mock also gathers a message into one row (emit), so
-     * the last row is exactly the last message.
+     * As the host (#142): the first human message after afterSeq is the request; the note is the last assistant
+     * message before the next one. The mock's emit keeps a message in one row, so the last row is that message.
      */
     exportHandoffNote: async (sessionId: string, afterSeq: number) => {
       const s = this.store.sessions.get(sessionId)

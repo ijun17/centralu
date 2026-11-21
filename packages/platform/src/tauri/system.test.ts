@@ -16,13 +16,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: (...args: unknown[]) => open
 
 const { TauriSystemPort, pickDirectory } = await import('./index.js')
 
-/**
- * The seam between the desktop system port and the Rust commands (#159).
- *
- * There is no way to see the packaged app's behavior without a webview, so this only checks
- * **what gets called, and the shape a failure comes back in.** Whether a browser and VS Code
- * actually open is confirmed by hand in the packaged app.
- */
+/** What gets called and the shape a failure comes back in; that a browser and VS Code open is checked by hand */
 describe('TauriSystemPort', () => {
   beforeEach(() => {
     invoke.mockReset()
@@ -31,11 +25,7 @@ describe('TauriSystemPort', () => {
     isPermissionGranted.mockReset()
   })
 
-  /*
-   * #972 item 2: every call into the shell or a plugin rejects with an Error, so the screen's
-   * `err.message` names the reason. A bare string passed through makes a missing drag permission
-   * read "Could not move window: undefined".
-   */
+  // Every call into the shell or a plugin rejects with an Error (to-error.ts)
   const reasonOf = async (p: Promise<unknown>) => {
     const err = await p.then(() => null, (e: unknown) => e)
     expect(err).toBeInstanceOf(Error)

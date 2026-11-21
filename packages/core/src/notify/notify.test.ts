@@ -28,7 +28,7 @@ describe('immediate notifications (approvals only)', () => {
     expect(notificationFor(s('waiting_approval'), 'working', bg)).toMatchObject({ kind: 'approval' })
   })
 
-  // The error switch is kept in the record and followed by nothing since 2026-10-20 (#2168)
+  // The error switch is stored and followed by nothing (#2168)
   it('does not notify on a transition to error, whatever its switch says', () => {
     expect(notificationFor(s('error'), 'working', { ...bg, policy: { ...DEFAULT_NOTIFY_POLICY, error: true } })).toBeNull()
   })

@@ -82,7 +82,7 @@ describe('what a restart into this build costs (#1895 step 4, PR 3)', () => {
     expect(restartPlan({}).confirm).toBe(true)
   })
 
-  /* A keeper whose host is down reports idle and cannot stop for an update; one of beta.48 still holds agents then (review) */
+  /* A keeper whose host is down reports idle and cannot stop for an update; one of beta.48 still holds agents then */
   it('a plain stop always asks, even from a keeper that reports itself idle', () => {
     expect(restartPlan({ busy: false }).confirm).toBe(true)
     expect(restartPlan({ busy: false, stopsForUpdate: false }).confirm).toBe(true)
@@ -103,7 +103,6 @@ describe('what a restart into this build costs (#1895 step 4, PR 3)', () => {
   })
 })
 
-/** The automatic mode restarting into this build by itself (#352) */
 describe('restarting by itself with automatic updates on (#352)', () => {
   const idle: AutoRestartInput = {
     build: { app: beta11, host: beta10, keeper: beta10, busy: false, stopsForUpdate: true, sameBuild: false, keeperSameBuild: false },
@@ -126,16 +125,13 @@ describe('restarting by itself with automatic updates on (#352)', () => {
     expect(autoRestart({ ...idle, build: { ...idle.build, sameBuild: true, keeperSameBuild: true } })).toBe(false)
   })
 
-  /* Review: a keeper whose host is down reports idle and no stopsForUpdate; a beta.48 one still holds agents then */
+  /* A keeper whose host is down reports idle and no stopsForUpdate; a beta.48 one still holds agents then */
   it('never a plain stop: a keeper that cannot stop for an update, or does not say, is left to the button', () => {
     expect(autoRestart({ ...idle, build: { ...idle.build, stopsForUpdate: false } })).toBe(false)
     expect(autoRestart({ ...idle, build: { ...idle.build, stopsForUpdate: undefined } })).toBe(false)
   })
 
-  /*
-   * Opening an older build's window (a backed-up beta.10 app while beta.11 runs) must not quietly downgrade the keeper and
-   * the host. The bar still offers the restart by hand.
-   */
+  /* A backed-up beta.10 app opened while beta.11 runs must not quietly downgrade; the bar still offers it by hand */
   it('only forward: a window of an older build never restarts by itself', () => {
     expect(autoRestart({ ...idle, build: { ...idle.build, app: beta10, host: beta11, keeper: beta11 } })).toBe(false)
     // A keeper alone behind, of a newer build than this window, is not moved back either

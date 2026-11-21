@@ -42,7 +42,7 @@ describe('a linked machine’s apps on the grid (#82, remote-hub.md §11.8)', ()
     expect(gridPanelKey(theirs)).toBe('app:m1:_user/notes')
     expect(gridPanelKey(appGridPanel(null, 'notes'))).toBe('app:_user/notes')
     expect(parseAppKey('m1:_user/notes')).toEqual({ projectId: null, appId: 'notes', machine: 'm1' })
-    // A project app's qualified id already names its machine: no machine is kept, and its key is as before
+    // A project app's qualified id already names its machine: no machine is kept
     expect(appGridPanel('m1.p1', 'board', 'm1')).toEqual({ kind: 'app', projectId: 'm1.p1', appId: 'board' })
     expect(appKeyOf('m1.p1', 'board', 'm1')).toBe('m1.p1/board')
     // Only a machine's user folder can stand before `:`

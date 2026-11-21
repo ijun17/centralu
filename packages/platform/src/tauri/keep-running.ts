@@ -1,12 +1,9 @@
 import type { BackgroundPort } from '../ports/lifecycle.js'
 
 /**
- * "Quit and keep running" (#1512): turns background mode on, then stops the leftover processes the person ticked and
- * quits. The order is the point. Quitting with the mode still off would stop the turns the person just asked to keep, so a
- * keeper that cannot be told (or says the mode is still off) refuses with its reason before anything else is touched: the
- * dialog stays open, the ticked processes keep running and nothing quits.
- *
- * `stopStrays` failing does not stop the quit, as in the plain quit: what the person pressed was quit.
+ * "Quit and keep running" (#1512). Background mode goes on first: quitting with it off would stop the turns the person
+ * asked to keep, so a keeper that does not turn it on refuses before anything is touched. A failed `stopStrays` still
+ * quits, as the plain quit does.
  */
 export async function keepRunningThenQuit(opts: {
   background: Pick<BackgroundPort, 'set'> | undefined

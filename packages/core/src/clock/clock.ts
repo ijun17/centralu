@@ -1,9 +1,6 @@
 /**
- * How the app writes a moment: one fixed format, English, 24-hour, in the person's own time zone (#428).
- *
- * One format, so the same app never shows "15:12" on one screen and "3:12 PM" on the next. Formats are built by hand
- * here, not through `Intl`, so what is written never depends on the machine's language or on how an engine spells
- * midnight.
+ * One fixed format for a moment: English, 24-hour, the person's time zone (#428). Built by hand, not with `Intl`, so it
+ * never depends on the machine's language or on how an engine spells midnight.
  */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
@@ -16,7 +13,7 @@ export function formatClock(at: number | Date, opts: { seconds?: boolean } = {})
   return opts.seconds ? `${hm}:${two(d.getSeconds())}` : hm
 }
 
-/** "Oct 16", with the year ("Oct 16, 2025") when it is not `now`'s: a date a year old would otherwise read as this year's */
+/** "Oct 16", or "Oct 16, 2025" when the year is not `now`'s */
 export function formatDay(at: number | Date, now: number | Date = Date.now()): string {
   const d = new Date(at)
   const day = `${MONTHS[d.getMonth()]} ${d.getDate()}`

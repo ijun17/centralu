@@ -11,50 +11,32 @@ import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'
 import { mockSessionInfo } from './session-info.js'
 
-/** Making an app and its builder session (M4 C), error bundles, and whether a session can reach an app (#308) */
+/** Making an app and its builder session, error bundles, and whether a session can reach an app (#308) */
 export class AppBuilderMock {
-  /** What a live agent says about an attached app (#308, `apps.reach`), keyed `<sessionId> <projectId|_user>/<appId>` */
+  /** What a live agent says about an attached app, keyed `<sessionId> <projectId|_user>/<appId>` */
   readonly appAttachments = new Map<string, 'restart' | 'failed'>()
-  /** Every `apps.reach` asked, in order */
   readonly reachAsks: { sessionId: string; appId: string; projectId: string | null }[] = []
-  /** Sent bundle → time sent — only once, like the host */
+  /** A bundle is sent only once, as on the host */
   private readonly errorsSent = new Map<string, number>()
-  /** "Send to builder" calls that reached the host — empty before a click, one after */
   readonly errorSends: { appId: string; projectId: string | null; at: number; machine?: string }[] = []
-  /** How many times a bundle has been read — tests check it is re-read when "changed" arrives */
   errorReads = 0
-  /** If set, sendError waits on this — lets a test check the screen while a send is in progress */
   sendErrorGate: Promise<void> | null = null
-  /** What the "New app" window sent to the host — tests check what the window chose (id, name, tool) */
   readonly createdApps: NewAppSpec[] = []
-  /**
-   * Makes and registers a new project folder (`projects.create`, wired by the mock platform): where an app made without
-   * a project lands, as the host's does (#1141)
-   */
+  /** `projects.create`, wired by the mock platform: an app made without a project gets its own (#1141) */
   makeProject: ((name: string, parent?: string) => Promise<ProjectInfo>) | null = null
-  /** What the input line below an app screen sent to the host (M4 C-5) — tests check what was sent, from which screen, with what attached */
   readonly builderAsks: BuilderAsk[] = []
-  /**
-   * Puts a message into the builder session — like the host's `deliver`: records it, carries
-   * attachments by path, and notifies the screen with `user_message` (a message the host
-   * injected was not already drawn by the UI). The receiving session starts working.
-   */
+  /** As the host's `deliver`, with `user_message` too: the UI did not draw a message the host injected */
   private deliverToBuilder(sessionId: string, text: string, attachments?: Attachment[]): void {
     const s = this.store.sessions.get(sessionId)
     if (!s) throw mockError(`Session not found: ${sessionId}`, 'session_not_found')
     s.live = true
-    // emit records it and assigns a seq, like the host (the same path as sendViewMessage)
     this.emit({ type: 'user_message', sessionId, seq: (this.store.messages.get(sessionId)?.length ?? 0) + 1, text, ...(attachments?.length ? { attachments } : {}) })
     this.emit({ type: 'state_change', sessionId, state: 'working' })
   }
   readonly apps = {
     /**
-     * A new app (M4 C-1). Like the real thing (`ExternalApps.createApp` →
-     * `AppSessions.createAppBuilder`): rejects using the same checks (protocol's
-     * `newAppIdProblem`, reserved ids, trust, an existing id) — the rejection wording is
-     * exactly the host's, and a test checks that the window shows it as-is — then adds it to
-     * the list, broadcasts, and creates the builder session. The app stays even if the session
-     * fails to start.
+     * As `ExternalApps.createApp`: the same checks in the host's exact wording (a test checks the window shows it
+     * as-is). The app stays even if the builder session fails to start.
      */
     create: async (spec: NewAppSpec): Promise<AppCreated> => {
       this.createdApps.push(structuredClone(spec))
@@ -65,10 +47,7 @@ export class AppBuilderMock {
       let dir = `/mock/data/apps/${spec.id}`
       let projectId = spec.projectId
       if (projectId === null) {
-        /*
-         * Like the host (#1141): a new folder `<parent>/<id>` (~/Centralu), registered as a trusted project whose root is
-         * the app. The folder rules and their refusals are the new project's (`projects.create`)
-         */
+        // As the host (#1141): a trusted project `<parent>/<id>` (~/Centralu) with the app at its root (`projects.create`)
         if (!this.makeProject) throw new Error('This mock cannot make a project')
         const made = await this.makeProject(spec.id, spec.parent)
         projectId = made.id
@@ -91,7 +70,7 @@ export class AppBuilderMock {
         name,
         version: '0.1.0',
         description: spec.description?.replace(/\s+/g, ' ').trim() || `${name} (a Centralu app)`,
-        // The template's home tool — the same name as the real template (app-template/centralu.app.json)
+        // The real template's home tool (app-template/centralu.app.json)
         home: 'show',
         trusted: true,
         status: 'stopped',
@@ -112,14 +91,7 @@ export class AppBuilderMock {
       const s = id ? this.store.sessions.get(id) : undefined
       return s ? structuredClone(s) : null
     },
-    /**
-     * The builder session (M4 C-2). Like the real thing: one per app (returns the existing one
-     * if there is one), never created for an untrusted app, and if no tool is chosen, uses the
-     * project's default tool (the Assistant's tool for a user-folder app). The session fails
-     * to start if that tool is absent or not logged in. The name is a human-chosen "<app> ·
-     * builder", and the session's app slot is that app. Broadcasts `session_created` on
-     * creation.
-     */
+    /** As the host's `AppSessions.createAppBuilder`: one per app, never for an untrusted one */
     createBuilder: async (appId: string, projectId: string | null, tool?: ToolName, machine?: string): Promise<SessionInfo> => {
       const key = appKeyOf(projectId, appId)
       const have = this.registry.appBuilders.get(key)
@@ -152,14 +124,7 @@ export class AppBuilderMock {
       this.emit({ type: 'session_created', sessionId: id, session: structuredClone(info) })
       return structuredClone(info)
     },
-    /**
-     * "Fix this" (M4 C-5). Like the real thing (builder-requests.ts): rejects with the same
-     * wording, and builds the header with **the same function** (protocol's
-     * `builderRequestOf`), from facts the mock knows — the app listing (name, stopped
-     * state), the instance (screen), the run history (the front of `appRuns`, as filled in by
-     * a test). The message built that way stands as a human message in the builder session's
-     * conversation.
-     */
+    /** "Fix this", as builder-requests.ts: the same wording and the same `builderRequestOf`, fed what the mock knows */
     askBuilder: async (req: BuilderAsk): Promise<{ sessionId: string }> => {
       this.builderAsks.push(structuredClone(req))
       const key = appKeyOf(req.projectId, req.appId)
@@ -181,7 +146,7 @@ export class AppBuilderMock {
       this.deliverToBuilder(built.builder, built.frame, req.attachments)
       return { sessionId: built.builder }
     },
-    /** Error bundles (M4 C-6) — a test fills `appErrors` (most recent first). A sent bundle carries `sentAt`, like the host */
+    /** A test fills `appErrors`, most recent first */
     errors: async (appId: string, projectId: string | null, machine?: string): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
       this.errorReads++
       const key = appKeyOf(projectId, appId, machine)
@@ -189,9 +154,8 @@ export class AppBuilderMock {
       return { latest: recent[0] ?? null, recent }
     },
     /**
-     * Whether a session can use an app's tools (#308) — decision 4 as the host decides it (session-apps.ts
-     * `reach`): the app's scope first, then trust and the app's state. What a live Codex thread has is the
-     * host's to know; a test stands for it with `appAttachments` (`<sessionId> <projectId|_user>/<appId>`).
+     * Decision 4 of #308 as session-apps.ts `reach` takes it: scope, then trust, then the app's state.
+     * `appAttachments` stands for what a live Codex thread has, which only the host knows.
      */
     reach: async (sessionId: string, appId: string, projectId: string | null): Promise<AppReach> => {
       this.reachAsks.push({ sessionId, appId, projectId })
@@ -215,15 +179,10 @@ export class AppBuilderMock {
       if (live === 'failed') return { reachable: false, reason: 'bridge-failed' }
       return { reachable: true }
     },
-    /**
-     * Sends an error bundle to the builder session (M4 C-6). Like the real thing
-     * (builder-requests.ts): rejects with the same wording, sends each bundle only once
-     * (recording comes first), and builds the shape sent to the agent with **the same
-     * function** (`builderErrorFrame`).
-     */
+    /** As builder-requests.ts: the same wording, each bundle once (recorded first), framed by `builderErrorFrame` */
     sendError: async (appId: string, projectId: string | null, at: number, machine?: string): Promise<{ sessionId: string }> => {
       this.errorSends.push(machine ? { appId, projectId, at, machine } : { appId, projectId, at })
-      // So a test can hold "sending" open — checking meanwhile whether the screen accepts a second click
+      // A test holds the send open to check whether the screen takes a second click
       if (this.sendErrorGate) await this.sendErrorGate
       const key = appKeyOf(projectId, appId)
       const info = this.registry.externalAppList.find((a) => sameApp(a, { appId, projectId, machine }))

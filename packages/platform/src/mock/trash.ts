@@ -10,12 +10,8 @@ import { mockError } from './mock-error.js'
 
 /** The session archive (#204), behind the `trash` port: deleting a session moves it here until it is deleted for good */
 export class TrashMock {
-  /** Session ids deleted via deleteExternal — the observation point for whether "really delete" was actually delivered */
   readonly externallyDeleted: string[] = []
-  /**
-   * The session archive (#204), with the host's rules: deleting moves a session here with its messages, and nothing chosen in
-   * the dialog happens until it is deleted for good — only then does `externallyDeleted` record the tool's file.
-   */
+  /** As the host: nothing chosen in the dialog happens until the session is deleted for good */
   readonly trashBin = new Map<
     string,
     {
@@ -28,10 +24,7 @@ export class TrashMock {
     }
   >()
 
-  /**
-   * The records of deleted app-agent sessions (#378), as the host keeps them. The mock never runs an app's agent, so a
-   * test or a demo scene puts one here (`keepRun`).
-   */
+  /** Deleted app-agent runs (#378); the mock runs no app agent, so a test or demo puts one here (`keepRun`) */
   readonly keptRuns = new Map<string, { run: TrashedRun; request: string; answer: string; output?: unknown; messages: StoredMessage[] }>()
 
   keepRun(r: { run: Omit<TrashedRun, 'messages' | 'bytes' | 'requestPreview'>; request: string; answer: string; output?: unknown; messages: StoredMessage[] }): void {
@@ -130,7 +123,7 @@ export class TrashMock {
     purge: async (sessionId: string) => {
       const t = this.trashBin.get(sessionId)
       if (!t) throw mockError(`Not in the session archive: ${sessionId}`, 'session_not_found')
-      // The same rule as the host: if removing the original was specified, that fact stays on the record (a point tests verify)
+      // As the host: the tool's file chosen for removal goes only now
       if (t.removeExternal) this.externallyDeleted.push(sessionId)
       this.trashBin.delete(sessionId)
       // Its subagent steps go with it, in the session archive or not (#222)
