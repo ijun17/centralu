@@ -197,6 +197,12 @@ export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...` */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
+/** The hold of a sender's copy of mail across while its link is down (docs/plans/linked-mail.md §12): its sender acts on it, never the person */
+export const LINK_HOLD = 'link' as const
+
+/** The `SET` term every writer of `settled` carries: a row settled (`after`, the value it ends with) is held for its link no more, as it never goes */
+const linkHoldEnds = (after: string): string => `held = CASE WHEN held = '${LINK_HOLD}' AND ${after} IS NOT NULL THEN NULL ELSE held END`
+
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
 export const HIDDEN_HOLDS = ['policy', 'loop'] as const
 const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
@@ -554,7 +560,7 @@ export class MailboxRecords {
    * sender is gone. A row settled `legacy` or `answered` says done from now: what the person marks is theirs to mark
    */
   closeFor(recipient: string, ids: readonly string[], at: number): number {
-    return this.update(`settled = 'done', settled_at = ?`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
+    return this.update(`settled = 'done', settled_at = ?, ${linkHoldEnds("'done'")}`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
   }
 
   /** How the person closed the chain rooted at `rootId` (`facts.closed`): the last close stands */
@@ -616,9 +622,15 @@ export class MailboxRecords {
     return this.rows(`r.attempt_at IS NOT NULL AND r.delivered_at IS NULL AND ${WAITING}`)
   }
 
-  /** The rows held for the person to act on, the earliest due first */
+  /** The rows held for the person to act on, the earliest due first: not one held for its link, which is its sender's */
   heldRows(): RecipientRow[] {
-    return this.rows(`${HELD} AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
+    return this.rows(`${HELD} AND r.held <> '${LINK_HOLD}' AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
+  }
+
+  /** The rows held for their link (`LINK_HOLD`), of `sender`'s mail or everyone's, with their messages, oldest first */
+  heldForLink(sender?: string): PendingRow[] {
+    const where = `r.held = '${LINK_HOLD}' AND r.settled IS NULL${sender === undefined ? '' : ' AND m.sender = ?'} ORDER BY m.created_at, m.id`
+    return this.withMessages(sender === undefined ? this.rows(where) : this.rows(where, sender))
   }
 
   /** Every row held `policy`, with its message's `sender_project`: what the person's trust or Dismiss acts on (§7.4) */
@@ -652,12 +664,13 @@ export class MailboxRecords {
 
   /**
    * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
-   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). Returns how many
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). A row held for its link is
+   * held no more (`linkHoldEnds`). Returns how many
    */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
-        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
+        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id), ${linkHoldEnds('@how')}
           WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
             AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,
@@ -747,7 +760,7 @@ export class MailboxRecords {
     )
   }
 
-  /** The sender was told of these released rows */
+  /** The sender was told what became of these rows: released (D25), or held for their link too long to go by itself (`MailAcross.retryOwed`) */
   markTold(rows: readonly RowKey[], at: number): void {
     const told = this.db.prepare(`UPDATE mail_recipients SET told_at = ? WHERE message_id = ? AND recipient = ? AND told_at IS NULL`)
     this.transaction(() => {
@@ -768,13 +781,13 @@ export class MailboxRecords {
 
   /**
    * The open tasks given after `since` to addresses that start with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`), oldest first,
-   * at most `limit` (#2289)
+   * at most `limit` (#2289). Not one held for its link: it never went, so the machine cannot have it
    */
   openTasksToward(prefix: string, since: number, limit: number): string[] {
     return this.db
       .prepare<[string, number, number], { id: string }>(
         `SELECT m.id FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND m.created_at > ?
+          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND COALESCE(r.held, '') <> '${LINK_HOLD}' AND m.created_at > ?
           ORDER BY m.created_at, m.id LIMIT ?`,
       )
       .all(likePrefix(prefix), since, limit)
@@ -822,7 +835,7 @@ export class MailboxRecords {
           `UPDATE mail_recipients SET
              delivered_at = COALESCE(@deliveredAt, delivered_at),
              read_at = COALESCE(read_at, @readAt),
-             settled = COALESCE(settled, @settled),
+             settled = COALESCE(settled, @settled), ${linkHoldEnds('COALESCE(settled, @settled)')},
              settled_at = CASE WHEN settled IS NULL THEN @settledAt ELSE settled_at END,
              answer_id = COALESCE(answer_id, @answerId),
              released_at = COALESCE(released_at, @releasedAt),

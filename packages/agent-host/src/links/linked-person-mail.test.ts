@@ -109,7 +109,7 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
     await expect(person.reply(id, 'main', 'answer')).rejects.toThrow('w1 on Remote box is in the session archive there or was deleted, so your answer was not sent.')
   })
 
-  it('a machine started again while its hub is away still knows the hub: the person’s mail is refused naming it, not kept here', async () => {
+  it('a machine started again while its hub is away still knows the hub: the person’s mail is held for it, not kept in this computer’s Inbox', async () => {
     const { machine, hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
@@ -117,19 +117,21 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
     const again = new LinkedHubs({ call: async () => undefined, settings: machine.store.settings })
     expect(again.mailHubs().map((h) => ({ id: h.id, name: h.name, reachable: h.reachable, you: h.you }))).toEqual([{ id: hub.id, name: 'Hub mac', reachable: false, you: 'm1' }])
     machine.mail!.across.usePeers(mailPeers({ hostId: machine.id, selfName: () => 'Remote box', hubs: again, settings: machine.store.settings }))
-    expect(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })).toEqual({ text: 'Refused (link_down): Hub mac is not reachable right now, so nothing was sent. Send it again once the link is back.', isError: true })
+    expect((await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })).text).toMatch(/^Held \S+ for the person: Hub mac is not reachable right now, so it is held here/)
     expect(machine.store.mailbox.feedOf(PERSON, { limit: 10 })).toEqual([])
+    expect(machine.store.mailbox.heldForLink(at(machine, 'w1')).map((p) => p.row.recipient)).toEqual([sessionAddress(hub.id, PERSON_ID)])
   })
 
-  it('is refused at once while the link is down, written on neither side, and goes once it is back', async () => {
+  it('is held while the link is down, written only as the copy here, and goes to the hub’s person by itself once it is back (#2354)', async () => {
     const { machine, hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
-    expect(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })).toEqual({ text: 'Refused (link_down): Hub mac is not reachable right now, so nothing was sent. Send it again once the link is back.', isError: true })
-    expect([machine.store.mailbox.postsSince(at(machine, 'w1'), 0), hub.store.mailbox.feedOf(PERSON, { limit: 10 }).length]).toEqual([0, 0])
+    const r = await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })
+    expect(r.text).toMatch(/^Held \S+ for the person: Hub mac is not reachable right now/)
+    expect(hub.store.mailbox.feedOf(PERSON, { limit: 10 })).toEqual([])
     await hub.router.handle('machines.reconnect', { machineId: 'm1' })
-    await eventually(async () => !(await tool(machine, 'w1', { action: 'send', to: 'person', text: 'ping' })).isError)
-    expect(hub.store.mailbox.feedOf(PERSON, { limit: 10 }).map((m) => m.body)).toEqual(['ping'])
+    await eventually(() => hub.store.mailbox.feedOf(PERSON, { limit: 10 }).length === 1)
+    expect(hub.store.mailbox.feedOf(PERSON, { limit: 10 })[0]?.body).toMatch(/^\[Written at .+ UTC on Remote box, while the link between the computers was down\.\]\n\nping$/)
   })
 
   it('with several hubs and none that started the session, it stays in this computer’s Inbox, and the answer says so', async () => {

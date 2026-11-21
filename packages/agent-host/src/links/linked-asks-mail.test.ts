@@ -103,6 +103,18 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     await call
   })
 
+  it('its link dropping while the card stands: the task is held, and the call answers working at once, saying so (#2354)', async () => {
+    const { machine, hub, at, project, taskTo } = await asksRig()
+    const call = hub.mgr.askProject('h1', { project, task: 'say hello' })
+    await eventually(() => Boolean(hub.card()))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => !hub.links.get('m1')!.reachable)
+    await hub.answer('allow')
+    expect(await call).toMatchObject({ ok: true, state: 'working', sessionId: 'm1.w1', notice: expect.stringContaining('Remote box is not reachable right now, so it is held here') })
+    expect(hub.store.mailbox.heldForLink(at.hub('h1'))).toHaveLength(1)
+    expect(taskTo(machine, at.machine('w1'), at.hub('h1'))).toBeUndefined()
+  })
+
   it('is refused before the card by a machine that takes no work from this computer, naming it to update', async () => {
     const { hub, project } = await asksRig({ machineMail: false })
     const r = await hub.mgr.askProject('h1', { project, task: 'say hello' })

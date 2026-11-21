@@ -776,7 +776,7 @@ sends.
 | `settled` | null, or `answered`, `done`, `withdrawn`, `reported`, `gone`, `legacy` (D8) |
 | `settled_at`, `answer_id` | when, and the reply that settled it (`answered`); `answer_id` set with `settled` null is an answer still held (D8) |
 | `reminded`, `reminded_at` | how many delivered reminders named this row (0 to 2), and the last one's time |
-| `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender's gathered notice listed it; null until then |
+| `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender was told what became of the row (its gathered notice listed it, or held for its link it is too old to go by itself, linked-mail.md §12); null until then |
 | `given_again_at` | when a task a turn took in while it ran was given again at rest (§10.6.3, #2369, v77); null once it no longer waits for that delivery: delivered, dismissed, released or moved |
 
 Only watched rows (§4) count for waiting (§10.3), and only those of `needsReply` messages to sessions are reminded. A
@@ -2580,8 +2580,9 @@ section when it is briefed:
 
 ## 14. Linked machines
 
-The owner's decisions of 2026-11-08 (#2067) replace the outline below where they differ: nothing is held while a link
-is down, so there is no outbox. The plan is [linked-mail.md](linked-mail.md).
+The owner's decisions of 2026-11-08 (#2067) replace the outline below where they differ: there is no per-link
+numbering, and mail sent while a link is down is held by its sender's host ([linked-mail.md](linked-mail.md) §12). The
+plan is [linked-mail.md](linked-mail.md).
 
 Old §11 stays: one mailbox per host, store-and-forward, the hub pulls, the receiving host wakes its own session, and
 §11.9's chains and declines. Without threads, these parts go: a thread's home host, `seq` and `home_seq`; task-field

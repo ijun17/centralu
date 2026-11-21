@@ -1,8 +1,10 @@
 import { HubMailResult, errorMessage, oneLineText } from '@cc/protocol'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
+import { durationText } from '../timing.js'
 import { PERSON, PERSON_ID, inHubTerms, parseAddress, sessionAddress } from './address.js'
 import type { FoundEntry } from './find.js'
+import type { MessageCalls } from './frame.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
 
@@ -11,8 +13,21 @@ import type { MailReach } from './reach.js'
  * its failure in the sender's words, and the sends from here whose answer did not come back (`unsure`), kept by their id
  */
 
-/** What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written */
-export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string } | { ok: false; why: string; text: string }
+/**
+ * What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written. `held`: the link to
+ * that computer is down, so the copy here is held for it (`LINK_HOLD`) and nothing went yet (`heldLine` says so)
+ */
+export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; held?: true } | { ok: false; why: string; text: string }
+
+/** How long mail held for its link goes by itself once the link is back (docs/plans/linked-mail.md §12) */
+export const LINK_HOLD_MS = 10 * 60_000
+
+/** What a send held for its link says, in the mail tool's answer, a delegation's and the inbox alike */
+export const heldLine = (computer: string): string =>
+  `${computer} is not reachable right now, so it is held here and goes when the link is back, saying when it was written. Held longer than ${durationText(LINK_HOLD_MS)}, it waits for you to send it or drop it.`
+
+/** What the sender of mail held for its link can do with it */
+export const sendOrDrop = (calls: MessageCalls, id: string): string => `send it with ${calls.send(id)}, or drop it with ${calls.done(id)}`
 
 /** One side of a link this host calls: a hub that offered on a connection here, or a machine this hub links */
 export type AcrossPeer = {
@@ -60,7 +75,7 @@ export type MailAcrossDeps = {
   hostId: string
   service: MessageService
   records: MailboxRecords
-  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant'>
+  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant' | 'gone'>
   /** This host's own sessions as the directory lists them */
   ownEntries(): FoundEntry[]
   now?: () => number
@@ -81,7 +96,7 @@ export type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; ses
 export const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 
 /** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
-export type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }; computer: string; at: number; task?: Work }
+export type Unsure = { sender: string; to: string; fields: Kept; computer: string; at: number; task?: Work }
 
 /** Work given across a link (#1948 step 6): the copy kept here is a task (a note) from that tool, whichever side's word comes first */
 export type Work = { origin: DelegationOrigin; note?: true }
@@ -93,6 +108,12 @@ const sameMessage = (a: Unsure['fields'], b: Unsure['fields']): boolean =>
 /** How long, and how many, unsure sends are kept: a copy is kept for one only while it is likely to be heard of */
 const UNSURE_MS = 24 * 60 * 60_000
 const UNSURE_MAX = 500
+
+/** What a send across keeps in its copy here: the fields that cross, and that its sender marked it as a question (#2348, `MailFacts.question`), which only this side reads */
+export type Kept = { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }
+
+/** The other side's answer to one call (`AcrossCore.ask`): written there, or refused; `maybe`: it may have been written there */
+export type Answer = { ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }
 
 /** A send to a side not connected now: not sent */
 export const unreachable = (peer: AcrossPeer) => ({ ok: false as const, why: 'link_down', text: `${peer.name} is not reachable right now, so nothing was sent. Send it again once the link is back.` })
@@ -189,7 +210,7 @@ export class AcrossCore {
    * one, kept as unsure until the other side answers. A send again that changes any of them is another message: under the
    * same id the other side would keep the first, and its urgency or question would be lost (#2067 re-check)
    */
-  protected idFor(sender: string, to: string, fields: Unsure['fields'], computer: string, task?: Work): string {
+  protected idFor(sender: string, to: string, fields: Kept, computer: string, task?: Work): string {
     const now = this.now()
     for (const [id, u] of this.unsure) {
       if (now - u.at > UNSURE_MS) this.unsure.delete(id)
@@ -225,7 +246,7 @@ export class AcrossCore {
   }
 
   /** One call to the other side, its failure in the words the sender reads; `maybe`: it may have been written there */
-  protected async ask(peer: AcrossPeer, method: string, params: unknown): Promise<{ ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }> {
+  protected async ask(peer: AcrossPeer, method: string, params: unknown): Promise<Answer> {
     if (!peer.reachable) return unreachable(peer)
     let raw: unknown
     try {

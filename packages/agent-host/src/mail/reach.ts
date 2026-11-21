@@ -56,6 +56,8 @@ export type MailReach = {
   parentOf(address: string): string | null
   /** Whether the address is a session this host knows on another computer (a child it started on a linked machine, #2067): alive there, out of mail's reach */
   elsewhere(address: string): boolean
+  /** Whether the address is a session of this host that is no longer here: in the trash or deleted */
+  gone(address: string): boolean
   /** A session's name, or its address while the host gives none: the word a sentence to an agent uses for it */
   labelOf(address: string): string
   /** A project's name, or its id while the host gives none */
@@ -90,6 +92,10 @@ export function mailReach(host: ReachHost): MailReach {
     },
     labelOf: (address) => sessionOf(address)?.info?.name ?? address,
     elsewhere: (address) => sessionOf(address)?.info?.host === 'elsewhere',
+    gone: (address) => {
+      const s = sessionOf(address)
+      return s !== undefined && s.info?.here !== true
+    },
     projectLabel: (projectId) => host.project(projectId)?.name ?? projectId,
 
     mayWrite(from, to, asRequest = true) {

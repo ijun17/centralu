@@ -6,6 +6,7 @@ import { awayRefusal } from '../links/machine-reach.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import type { DelegationOrigin } from '../mail/messages.js'
+import { heldLine } from '../mail/across-core.js'
 import type { TaskStanding } from '../mail/delegation.js'
 import { inTurn } from '../idle.js'
 import { depthOf } from './agent-depth.js'
@@ -381,6 +382,8 @@ export class RemoteAgents {
     // It counts by itself now: its task is open (`workingIn`)
     counted()
     const unchecked = [
+      // The link dropped since the session was made: the task waits here for it
+      sent.held ? heldLine(machine.name) : '',
       fellBack ?? '',
       // Where its worktree forked from, as the machine said (#1488); a machine from before it says nothing
       made.worktreeBase ?? '',
@@ -391,12 +394,12 @@ export class RemoteAgents {
       there ? autoNotice(machine.name, there.auto && childPreset !== 'auto' ? { auto: false, withheld: 'machine_off' } : there) : '',
     ].filter(Boolean).join('; ') || undefined
     const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
-    const result = opts.wait === false ? this.working(rec, true) : await this.awaitReport(rec, callerId, sent.messageId, signal, Math.min(ASK_WAIT_MS, left))
+    const result = opts.wait === false || sent.held ? this.working(rec, true) : await this.awaitReport(rec, callerId, sent.messageId, signal, Math.min(ASK_WAIT_MS, left))
     return result.ok && unchecked ? { ...result, notice: [result.notice, unchecked].filter(Boolean).join('; ') } : result
   }
 
   /** Work for the child, as a task from the caller across the link (#1948 step 6): the machine holds it while the child is busy, and reports it */
-  private giveTask(rec: RemoteAgent, callerId: string, text: string, origin: DelegationOrigin): Promise<{ ok: true; messageId: string } | { ok: false; text: string }> {
+  private giveTask(rec: RemoteAgent, callerId: string, text: string, origin: DelegationOrigin): Promise<{ ok: true; messageId: string; held?: true } | { ok: false; text: string }> {
     const tasks = this.host.linkedTasks
     return tasks ? tasks.send(callerId, rec.sessionId, text, { origin }) : Promise.resolve({ ok: false, text: NO_MAIL })
   }
@@ -461,8 +464,8 @@ export class RemoteAgents {
         if (full) return { ok: false, error: full }
         const sent = await this.giveTask(rec, callerId, opts.text, 'agent_session')
         if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }
-        // Its machine gives it the task once it is free, and its report comes back as mail
-        return this.working(rec, true)
+        // Its machine gives it the task once it is free (or once the link is back), and its report comes back as mail
+        return sent.held ? { ...this.working(rec, true), notice: heldLine(rec.machine) } : this.working(rec, true)
       }
       case 'stop': {
         const r = await this.stopThere(rec, callerId, reader)

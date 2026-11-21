@@ -1,7 +1,7 @@
 import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON, isPerson, parseAddress } from './address.js'
-import type { DelegationOrigin, MessageService } from './messages.js'
+import type { DelegationOrigin, MessageService, TaskAcross } from './messages.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
 import type { AcrossSent } from './across-core.js'
@@ -47,7 +47,7 @@ export function unfinished(s: TaskStanding): string | null {
  * agent_session, send_to_session and ask_project read and do of it, by session id (a hub's session, on a machine, by its address)
  */
 export type LinkedTasks = {
-  send(callerId: string, childId: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent>
+  send(callerId: string, childId: string, text: string, task: TaskAcross): Promise<AcrossSent>
   /** The caller's newest task to the child that is not settled, by id */
   open(callerId: string, childId: string): string | undefined
   standing(taskId: string): TaskStanding
@@ -89,10 +89,10 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
         ...(typeof answer === 'string' ? { answer } : {}), ...(typeof error === 'string' ? { error } : {}), ...(typeof reason === 'string' ? { reason } : {}),
       }
     }
-    // A task across has one recipient, the session there
+    // A task across has one recipient, the session there; none once a held one was dropped or refused
     const row = records.recipients(taskId)[0]
-    if (!row || (row.settled === null && row.releasedAt === null)) return { state: 'open' }
-    return { state: 'ended', why: row.releasedWhy ?? row.settled ?? 'gone' }
+    if (row && row.settled === null && row.releasedAt === null) return { state: 'open' }
+    return { state: 'ended', why: row?.releasedWhy ?? row?.settled ?? 'gone' }
   }
   return {
     send: (callerId, childId, text, task) => across.sendTask(callerId, mail.sessionAddress(childId), text, task),

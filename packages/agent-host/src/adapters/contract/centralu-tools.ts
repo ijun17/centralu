@@ -564,7 +564,7 @@ export type CentraluTools = {
    *
    * A session that cannot take it now (in a turn, on a card, at a limit) is sent it as mail (`busy.state` `mailed`,
    * docs/plans/mailbox.md §10.6.2): a task with `reportBack`, reported as any task's; without it a note that needs no reply, at rest too (#2258).
-   * On a linked machine, a new instruction without `reportBack` still replaces this Assistant's earlier request (#166).
+   * On a linked machine, a new instruction without `reportBack` still replaces this Assistant's earlier request (#166). `held`: why it waits here
    */
   sendToSession(
     sessionId: string,
@@ -572,7 +572,7 @@ export type CentraluTools = {
     reportBack?: boolean,
     /** A fork instead of mail when the session cannot take it now */
     ifBusy?: IfBusy,
-  ): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }>
+  ): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer; held?: string }>
   /**
    * Reads a session's recent conversation.
    *
@@ -657,7 +657,8 @@ export type CentraluTools = {
      * work it hears the end of, as start_agent's is. Means nothing without `firstMessage`
      */
     reportBack?: boolean
-  }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string }>
+    /** In the answer, `held`: as `sendToSession`'s, for the first instruction */
+  }): Promise<{ ok: boolean; error?: string; sessionId?: string; name?: string; held?: string }>
   /**
    * Changes a session's performance settings (#30).
    *

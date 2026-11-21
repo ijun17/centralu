@@ -5,6 +5,7 @@ import { awayFor, matchProjects } from './ask-project.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import type { Asker } from '../mail/asked-by.js'
+import { heldLine } from '../mail/across-core.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { AssistantProposals } from './assistant-proposals.js'
@@ -215,12 +216,13 @@ export function centraluToolsFor(
    * back to this seat as a local session's does; without `reportBack`, a note that asks for nothing back. Only this host's Assistant's
    * send_to_session is said to be for the person (`forPerson`), as its own is here (#2258)
    */
-  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session', reader?: LinkedSessions): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }> => {
+  const sendLinked = async (sessionId: string, text: string, reportBack: boolean | undefined, origin: 'send_to_session' | 'create_session', reader?: LinkedSessions): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer; held?: string }> => {
     if (!host.linkedTasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
     // Where the session stands, as its machine says now: one in a turn is answered as a busy one here is. Unknown (the read failed) says nothing of it
     const now = reader ? await reader.read(sessionId, 1).catch(() => null) : null
     const r = await host.linkedTasks.send(assistantId, sessionId, text, { origin, ...(reportBack ? {} : { note: true as const }), ...(origin === 'send_to_session' ? { forPerson: true as const } : {}) })
     if (!r.ok) return { ok: false, error: r.text }
+    if (r.held) return { ok: true, held: `Held ${r.messageId}: ${heldLine(r.computer)}` }
     // Mailed, waiting there until it is free
     return now?.ok && isInTurn(now.state) ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
   }
@@ -395,6 +397,7 @@ export function centraluToolsFor(
           // On a linked machine as a task across the link, as send_to_session's (#1948 step 6)
           const sent = await sendLinked(r.sessionId, opts.firstMessage, reportBack, 'create_session')
           if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
+          if (sent.held) return { ok: true, sessionId: r.sessionId, name: r.name, held: sent.held }
         }
         return { ok: true, sessionId: r.sessionId, name: r.name }
       }

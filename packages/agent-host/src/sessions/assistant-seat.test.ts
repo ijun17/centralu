@@ -432,6 +432,9 @@ describe('what a send leaves', () => {
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'fyi', false)).toEqual({ ok: true, busy: { state: 'mailed', sessionId: 'm1/x', sessionName: 'X', messageId: 'hub.m_2', note: true } })
     send.mockResolvedValueOnce({ ok: false, why: 'older', text: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
     expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: false, error: 'Far runs an older Centralu, which takes no work from this computer. Update Centralu on Far.' })
+    // Its link down: held here, and the Assistant is told so (#2354)
+    send.mockResolvedValueOnce({ ok: true, messageId: 'hub.m_3', to: 'X', address: 'session:hub/m1.x', computer: 'Far', held: true })
+    expect(await centraluToolsFor(host, 'orch').sendToSession('m1/x', 'hi', true)).toEqual({ ok: true, held: expect.stringMatching(/^Held hub\.m_3: Far is not reachable right now, so it is held here/) })
     expect(host.send).not.toHaveBeenCalled()
     // A coordinator does not reach the machines: the same id is just not one of its sessions
     expect(await centraluToolsFor(host, 'orch', ['a']).sendToSession('m1/x', 'hi')).toEqual({ ok: false, error: 'Not a member of this coordinating session: m1/x' })
@@ -538,6 +541,9 @@ describe('a session the Assistant creates', () => {
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.not.objectContaining({ callerPreset: expect.anything() }))
     // Its first message is a task across the link (#1948 step 6), not said to be for the person: that is send_to_session's alone
     expect(host.linkedTasks!.send).toHaveBeenCalledWith('orch', 'm1/s', 'go', { origin: 'create_session' })
+    // Its link down by then: the first message is held, and the answer says so (#2354)
+    vi.mocked(host.linkedTasks!.send).mockResolvedValueOnce({ ok: true, messageId: 'hub.m_4', to: 's', address: 'session:hub/m1.s', computer: 'Far', held: true })
+    expect(await centraluToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true, held: expect.stringMatching(/^Held hub\.m_4: Far is not reachable/) })
   })
 
   it("an auto seat's session on a trusted linked project carries auto for that machine's own switch to take, normal at most otherwise", async () => {

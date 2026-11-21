@@ -64,6 +64,8 @@ class Tasks {
   readonly gone: string[] = []
   readonly answered: string[] = []
   refusal: string | null = null
+  /** The link is down: each task is held there for it */
+  held = false
   private readonly listeners = new Set<() => void>()
   private n = 0
   /** The report on task `id` comes back */
@@ -78,7 +80,7 @@ class Tasks {
         const id = `hub.m_${++this.n}`
         this.sent.push({ callerId, childId, text, task })
         this.standing.set(id, { state: 'open' })
-        return { ok: true, messageId: id, to: 'Child', address: childId, computer: 'Box' }
+        return { ok: true, messageId: id, to: 'Child', address: childId, computer: 'Box', ...(this.held ? { held: true as const } : {}) }
       },
       open: () => [...this.standing].reverse().find(([, s]) => s.state === 'open')?.[0],
       standing: (id) => this.standing.get(id) ?? { state: 'open' },
@@ -184,6 +186,13 @@ describe('the work a start and a send give a child on a linked machine (#1948 st
     machine.state = 'working'
     expect(await send(ra, 'and this')).toMatchObject({ ok: true, state: 'working', reported: true })
     expect(tasks.sent.at(-1)).toEqual({ callerId: 'h1', childId: CHILD, text: 'and this', task: { origin: 'agent_session' } })
+  })
+
+  it('answers a start that waits, and a send, whose task is held for the link at once, saying so', async () => {
+    const ra = agents()
+    tasks.held = true
+    expect(await start(ra, { wait: true })).toMatchObject({ ok: true, state: 'working', notice: expect.stringContaining('Box is not reachable right now, so it is held here') })
+    expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: true, state: 'working', notice: expect.stringContaining('Box is not reachable right now, so it is held here') })
   })
 
   it("says the machine's refusal of a send in its words", async () => {

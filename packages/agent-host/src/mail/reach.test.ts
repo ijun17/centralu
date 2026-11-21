@@ -162,6 +162,16 @@ describe('what the service reads of a session', () => {
     expect(reach.askGroupMembers(A).sort()).toEqual([A, B, W].sort())
   })
 
+  it('gone: a session of this host in the trash or deleted, never one here, the person or a session of another computer', () => {
+    const { reach, sessions } = world()
+    sessions.set('away', { projectId: 'p1', here: false })
+    expect(reach.gone(addr('away'))).toBe(true)
+    expect(reach.gone(addr('never'))).toBe(true)
+    expect(reach.gone(A)).toBe(false)
+    expect(reach.gone(PERSON)).toBe(false)
+    expect(reach.gone(sessionAddress('hub-bbbbbbbb', 'a'))).toBe(false)
+  })
+
   it('looks up only the sessions of this host: an address on another computer is no session here, whatever its id', () => {
     const { reach } = world()
     const other = sessionAddress('hub-bbbbbbbb', 'a')
