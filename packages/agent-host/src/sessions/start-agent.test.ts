@@ -1293,7 +1293,7 @@ describe('starting another agent in the same project', () => {
 
   /*
    * `stop` ends background work only of a child the caller started, at rest, with nobody else's turn, wait or report on
-   * it (#718 review): the person may have typed into a finished child, and an auto caller reaches sessions it did not start
+   * it (#718): the person may have typed into a finished child, and an auto caller reaches sessions it did not start
    */
   describe('stopping background work at rest (#718)', () => {
     const dev = { id: 'bg-dev', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const, stoppable: true }
@@ -1352,14 +1352,14 @@ describe('starting another agent in the same project', () => {
       const c = childrenOf(orch.id)[0]!
       expect(c).toMatchObject({ projectId: null, kind: 'worker', askedBy: orch.id, permissionPreset: orch.permissionPreset })
       expect(handleOf(c.id)!.sent[0]).toContain('Look up the release notes')
-      // No Centralu tools, and only the person's own settings: no project's trust to read the folder's by (#994 review)
+      // No Centralu tools, and only the person's own settings: no project's trust to read the folder's by (#994)
       expect(handleOf(c.id)!.opts.centraluTools).toBeUndefined()
       expect(handleOf(c.id)!.opts.projectTrusted).toBeFalsy()
     })
 
     /*
-     * #994 review: children worked in the Assistant's own folder, where one could leave `.agents/skills` that Codex
-     * loads into the session directing every other one, and several wrote over each other there.
+     * #994: in the Assistant's own folder one child could leave `.agents/skills` that Codex loads into the session directing
+     * every other one, and several would write over each other there.
      */
     it("gives each child a folder of its own, never the Assistant's, gone when the child is deleted for good", async () => {
       const { orch, tools } = await centraluTools()
@@ -1382,7 +1382,7 @@ describe('starting another agent in the same project', () => {
       expect(existsSync(b!)).toBe(true)
     })
 
-    // #994 review: a fork of such a child was refused as "its project is no longer registered"
+    // #994: a fork of such a child is not refused as "its project is no longer registered"
     it('refuses to fork a child busy with the person\'s turn, saying it works outside any project', async () => {
       const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
@@ -1480,7 +1480,7 @@ describe('starting another agent in the same project', () => {
           worktree: 'kept', path: c.worktree!.path, branch: 'feat/made', why: 'it is not the worktree Centralu made for an agent started on feat/other',
         })
         expect([existsSync(c.worktree!.path), trashed(c.id)]).toEqual([true, true])
-        // The person's own worktree session, on the very branch asked for: not an agent's (#1161 review)
+        // The person's own worktree session, on the very branch asked for: not an agent's (#1161)
         const mine = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', worktree: true, worktreeBranch: 'feat/mine' })
         expect(await w.mgr.worktrees.deleteHubChild(mine.id, 'feat/mine')).toMatchObject({ worktree: 'kept', why: expect.stringContaining('not the worktree Centralu made for an agent') })
         expect(existsSync(mine.worktree!.path)).toBe(true)
@@ -1488,7 +1488,7 @@ describe('starting another agent in the same project', () => {
         const plain = await session()
         expect(await w.mgr.worktrees.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none' })
         expect(existsSync(w.caller.path)).toBe(true)
-        // Asked again, it is deleted already: said, not refused (#1161 review)
+        // Asked again, it is deleted already: said, not refused (#1161)
         expect(await w.mgr.worktrees.deleteHubChild(plain, 'feat/made')).toEqual({ worktree: 'none', note: 'it had been deleted there already' })
       })
 
@@ -1601,9 +1601,9 @@ describe('starting another agent in the same project', () => {
     })
 
     /*
-     * A manager checks whether its worktree branches were merged when it starts, without waiting, and that check runs
-     * gh in the project's folder. The check used to outlive the manager: on windows-2022, where gh is installed and
-     * can take 10 s, removing the project right after the test failed with EPERM (#368).
+     * A manager checks whether its worktree branches were merged when it starts, without waiting, and that check runs gh in the
+     * project's folder. The check must not outlive the manager: on windows-2022, where gh is installed and can take 10 s,
+     * removing the project right after the test fails with EPERM (#368).
      */
     it('a manager let go of leaves no merge check working in the project folder (#368)', async () => {
       repo()
@@ -1762,7 +1762,7 @@ describe('starting another agent in the same project', () => {
         await w.until(() => !!handleOf(c.id)?.sent.length)
         const task = handleOf(c.id)!.sent[0]!
         expect(task).toContain('[Centralu: this worktree was set up only in part')
-        // What failed is quoted data after Centralu's bracket, never inside it (#989 review)
+        // What failed is quoted data after Centralu's bracket, never inside it (#989)
         expect(task).toContain('\n["copy skipped (missing): .env"]\n')
         expect(task.split('\n').find((l) => l.startsWith('[Centralu: this worktree'))).not.toContain('.env')
         expect(task.endsWith('Write the parser')).toBe(true)

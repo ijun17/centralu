@@ -77,7 +77,7 @@ describe('approval rules persist (C-2)', () => {
   })
 
   /*
-   * What is remembered is the host's key for the card, not what the window sent (#838 review): a window from before
+   * What is remembered is the host's key for the card, not what the window sent (#838): a window from before
    * #838, during a swap, sends a command ending in `*` or a flagged command as its matcher.
    */
   it('remembers nothing the card’s key is not: a wider matcher, another command, a flagged command, one ending in *', async () => {
@@ -157,8 +157,8 @@ describe('approval rules persist (C-2)', () => {
   })
 
   /*
-   * A session outside any project (an Assistant, #994) has no project to remember for: ⌥ Always there used to be
-   * stored as a project rule with no project, which `rulesFor` then matched for every other session with no project.
+   * A session outside any project (an Assistant, #994) has no project to remember for: ⌥ Always there must not be stored as a
+   * project rule with no project, which `rulesFor` would match for every other session with no project.
    */
   it('a project-scoped answer in a session with no project stays with that session', async () => {
     const store = new Store()

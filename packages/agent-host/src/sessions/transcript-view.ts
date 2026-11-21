@@ -68,17 +68,11 @@ function payloadText(payload: unknown): string {
 }
 
 /**
- * A name a person can actually **tell sessions apart by.**
- *
- * A session that has gone through compaction ends up with the same name every time: "This session
- * is being continued from a previous…" (the compaction summary becomes the first user message, and
- * the auto-name just picks that up). During dogfooding, four sessions in list_sessions all shared
- * the same title — it is barely disambiguated today by the project name, but **two sessions in the
- * same project still cannot be told apart.** The Assistant must never guess in that case, so it
- * would have had to keep asking the person every single time.
- *
- * In that case, **the first real instruction** is used as the name instead of the title. It says
- * what the session is actually doing far better than the title ever could.
+ * A name a person can actually **tell sessions apart by.** A session that has gone through compaction ends up with the same
+ * name every time: "This session is being continued from a previous…" (the compaction summary becomes the first user message,
+ * and the auto-name just picks that up). Four sessions in list_sessions once shared the same title: the project name barely
+ * disambiguates, but **two sessions in the same project cannot be told apart,** and the Assistant must never guess, so it would
+ * have to ask the person every time. In that case, **the first real instruction** is used as the name instead of the title.
  */
 export function labelOf(reader: MessageReader, s: SessionInfo): string {
   if (!/^This session is being continued|^Caveat: The messages below/i.test(s.name)) return s.name
@@ -170,7 +164,7 @@ export function progressOf(reader: MessageReader, sessionId: string, now = Date.
   return { quietFor: durationText(ms), ...(lastStep ? { lastStep } : {}) }
 }
 
-/** When it last moved — used to tell which session's conversation is happening right now */
+/** When it last moved, to tell which session's conversation is happening right now */
 export function lastActiveOf(reader: MessageReader, sessionId: string): string | undefined {
   const rows = reader.loadMessages(sessionId, 1)
   const ts = rows[rows.length - 1]?.ts
@@ -200,23 +194,16 @@ export function previewOf(reader: MessageReader, sessionId: string, maxChars = 1
 }
 
 /**
- * **Hands past memory over** to a freshly born assistant.
- *
- * Switching tools splits off a new process, and that tool's context disappears with it — the screen
- * still shows the conversation from yesterday exactly as it was, while the party on the other end
- * knows none of it. For a worker session, "started a new conversation" is an honest description, but
- * the Assistant is the app's one and only **standing counterpart.** Losing its memory is losing
- * the relationship itself, so this has to be handled differently.
- *
- * Since that conversation still exists in our own store, a summary of it is appended to the new
- * process's system prompt. This is not a resume — it is a **handoff**: it cannot restore it word for
- * word, but it hands over what was being talked about.
- *
- * **Only the person's own words and its own answers go in.** Not a message another session or an app sent (#838), and
- * each message's own line breaks are indented, so its text cannot start a line that reads as the person's. Tool results (the body of another
- * session pulled in through read_session or recall) are excluded: opening a path where text a worker
- * wrote gets promoted into a system prompt would recreate exactly the channel from lower privilege
- * to higher privilege (the same reason assistant-home.ts turns off folder documents).
+ * **Hands past memory over** to a freshly born assistant. Switching tools splits off a new process and that tool's context
+ * disappears with it, while the screen still shows the conversation: for a worker session "started a new conversation" is
+ * honest, but the Assistant is the app's one **standing counterpart,** and losing its memory is losing the relationship itself.
+ * A summary of the conversation in our own store is appended to the new process's system prompt: not a resume but a
+ * **handoff**, which cannot restore it word for word but hands over what was being talked about. **Only the person's own words
+ * and its own answers go in.** Not a message another session or an app sent (#838), and each message's own line breaks are
+ * indented, so its text cannot start a line that reads as the person's. Tool results (the body of another session pulled in
+ * through read_session or recall) are excluded: opening a path where text a worker wrote gets promoted into a system prompt
+ * would recreate exactly the channel from lower privilege to higher privilege (the same reason assistant-home.ts turns off
+ * folder documents).
  */
 export function assistantMemory(reader: MessageReader, sessionId: string): string {
   const rows = reader.loadMessages(sessionId, MEMORY_MESSAGES)

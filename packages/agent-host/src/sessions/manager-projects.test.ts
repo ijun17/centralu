@@ -53,8 +53,8 @@ describe('projects', () => {
    * that anywhere; case, the drive letter's included, and a short name (`RUNNER~1`) only where paths fold case.
    */
   /*
-   * #849 review: the folder match folded case with JS's rules, where the Kelvin sign (U+212A) lowers to k. Windows
-   * keeps the two apart, so two folders became one project. Only the real spelling on disk is compared now.
+   * #849: JS's case folding lowers the Kelvin sign (U+212A) to k, while Windows keeps the two folders apart, so only the real
+   * spelling on disk is compared.
    */
   it('keeps two folders apart whose names only JS folds together', async () => {
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-two-projects-')))
@@ -212,9 +212,8 @@ describe('project trust → session (#92)', () => {
 })
 
 /**
- * M2.6 dogfooding. "Hide (archive)" used to sit alongside this — dropped on 2026-09-02: there was
- * a door in (`d` in the inbox) but no door out, so to a person it looked the same as delete.
- * All that is left is delete, which makes what delete actually erases matter more.
+ * M2.6 dogfooding. There is no "Hide (archive)" beside this: it would be a door in (`d` in the inbox) but no door out, so to a
+ * person it would look the same as delete. Only delete is left, which makes what delete actually erases matter more.
  */
 /*
  * #288 changed the grid's RPC from bare session ids to tagged panels, by expanding it (protocol.md §4) rather than

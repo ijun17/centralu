@@ -591,7 +591,7 @@ describe('compact_self then (#2024)', () => {
     expect(during.notices.map((n) => n[1])).toEqual([expect.stringMatching(/^The compaction did not happen \(the turn was interrupted before the compaction\)/)])
     expect(during.noticeLabels).toEqual(['nothing compacted, next step not sent'])
 
-    // The compaction was reported and the person interrupted that same turn: they took control (#2024 review)
+    // The compaction was reported and the person interrupted that same turn: they took control (#2024)
     const after = world()
     asked(after, undefined, 'next')
     await compactTurn(after, interrupted)

@@ -150,18 +150,16 @@ export class TrashFlow {
   }
 
   /**
-   * delete_session (#1219, fourth slice): moves a session that is not the caller's child to the session archive. It **asks**
-   * unless moving it loses nothing and the caller does not run under `safe` (#1512): what comes back with `restore_archived` is the conversation, the worktree and the tool's file, but the host lets go
-   * of what the session held when it leaves (a caller's wait for its report, delegations, its children's reports, the
-   * start_agent cards it raised, what the person allowed it), and the card names what is lost for this session
-   * (`SessionTrash.lossesOf`). A worker the person started themselves is named as theirs.
-   *
-   * Refused before the card, from the window's list: the caller itself, a session that is not a worker, a child the caller
-   * started (that is `agent_session delete`), one on a machine that cannot be reached, one busy now (a turn, a card, a
-   * background job: moving it ends its process). After Allow the host decides at the last moment, in the step that moves it
-   * and with nothing awaited between (`SessionTrash.trashIfQuiet`): a message the person sent meanwhile, a card, a job, or
-   * a change in what is lost since the card keeps the session where it is. A linked machine's session is moved by that
-   * machine's own `agents.deleteSession`, which cannot be decided in the step, so there the card is the safeguard.
+   * delete_session (#1219): moves a session that is not the caller's child to the session archive. It **asks** unless moving it
+   * loses nothing and the caller does not run under `safe` (#1512): `restore_archived` brings back the conversation, the
+   * worktree and the tool's file, but the host lets go of what the session held (a caller's wait for its report, delegations,
+   * its children's reports, the start_agent cards it raised, what the person allowed it), and the card names it
+   * (`SessionTrash.lossesOf`). A worker the person started themselves is named as theirs. Refused before the card: the caller
+   * itself, a session that is not a worker, a child the caller started (that is `agent_session delete`), one on a machine that
+   * cannot be reached, one busy now (a turn, a card, a background job: moving it ends its process). After Allow the host
+   * decides at the last moment, in one step with nothing awaited (`SessionTrash.trashIfQuiet`): a message the person sent
+   * meanwhile, a card, a job, or a change in what is lost since the card keeps the session where it is. A linked machine's
+   * session is moved by its own `agents.deleteSession`, which cannot be decided in the step: there the card is the safeguard.
    */
   private async deleteSession(rpc: WindowRpc, caller: string, id: string, signal?: AbortSignal): Promise<TrashAnswer> {
     if (id === caller) return { ok: false, error: 'This session cannot delete itself.' }

@@ -56,9 +56,8 @@ export class RestartPolicy {
   readonly restartReasons = new Map<string, RebuildCause>()
 
   /**
-   * Session whose configuration changed mid-turn — the process is swapped once that turn ends
-   * (#164). It used to be swapped on the spot, which made the running turn vanish (Codex closes its
-   * app-server), even though the screen said "starting next turn".
+   * Session whose configuration changed mid-turn — the process is swapped once that turn ends (#164). It is not swapped on the
+   * spot: that would make the running turn vanish (Codex closes its app-server), though the screen says "starting next turn".
    */
   readonly restartAfterTurn = new Set<string>()
 

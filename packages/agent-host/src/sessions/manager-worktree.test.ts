@@ -226,7 +226,7 @@ describe('worktree sessions', () => {
     adapter.failCreate = 'claude is not installed'
     const named = { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-login' }
     await expect(wtRpc('agents.createSession', named)).rejects.toThrow(/not installed/)
-    // The unnamed path used to pile up a centralu/… branch for every failure.
+    // The unnamed path must not pile up a centralu/… branch for every failure.
     await expect(create(true)).rejects.toThrow(/not installed/)
     expect(branches()).toEqual(['main'])
 
@@ -236,8 +236,9 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * #774: a step after `git worktree add` that throws, before any session owns the worktree. It used to leave the folder
-   * and its branch with nothing pointing at them, since the cleanup below only began around the adapter's start.
+   * #774: a step after `git worktree add` that throws, before any session owns the worktree. It must not leave the folder and
+   * its branch with nothing pointing at them: the cleanup around the adapter's start does not cover this step, and this pins
+   * the one that does.
    */
   it('leaves no worktree or branch behind when its setup throws after the checkout (#774)', async () => {
     const branches = () =>
@@ -347,8 +348,8 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * #561 part 3: the worktree manager was folded into ordinary sessions. A worktree session the person makes stands on
-   * its own; it used to hang under a manager made for it (#69). Only one start_agent started hangs under a session.
+   * #561 part 3: the worktree manager was folded into ordinary sessions. A worktree session the person makes stands on its own;
+   * it does not hang under a manager made for it (#69). Only one start_agent started hangs under a session.
    */
   it('a worktree session the person makes stands on its own: no manager is made for it', async () => {
     const isolated = await create(true)
@@ -1560,9 +1561,8 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * What holding the trunk actually means (#76). Merge judgment must not waver even after the
-   * person switches the root to a different branch — the baseline used to be whatever HEAD
-   * happened to be, and its meaning quietly shifted.
+   * What holding the trunk actually means (#76). Merge judgment must not waver even after the person switches the root to a
+   * different branch — the baseline is not whatever HEAD happens to be, as its meaning would quietly shift.
    */
   it('a merge is still detected even when the root sits on another branch, as long as the trunk is fixed (#76)', async () => {
     await wtMgr.projectRegistry.setWorktreeTrunk(project.id, 'main')

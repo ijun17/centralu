@@ -130,7 +130,7 @@ describe("a session's subagent steps, to the session archive and back without th
     expect(((await rpc('sessions.list', {})) as SessionInfo[]).map((x) => x.id).sort()).toEqual([a.id, b.id].sort())
   })
 
-  // #418 review: both ways of deleting for good took steps moved after the window read the session archive
+  // #418: neither way of deleting for good takes steps moved after the window read the session archive
   it('steps moved after the window read the session archive survive deleting the entry it listed, and deleting all archived sessions', async () => {
     const p = await project()
     const s = await newSession(p)

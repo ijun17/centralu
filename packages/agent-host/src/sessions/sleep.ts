@@ -2,29 +2,15 @@ import type { NormalizedEvent, SessionInfo, SleepPolicy, ToolName } from '@cc/pr
 import type { SessionIdle } from '../idle.js'
 
 /**
- * Putting idle sessions to sleep (#568, docs/agent-host/lifecycle/agent-cli-updates.md "Putting idle sessions to sleep").
- *
- * Every session runs its own agent process, and an idle one keeps its memory: a Claude process was 240-300 MB after a
- * few turns and grew while idle (a three-day Opus session was 814 MB, #561). Ending it frees all of it, and resuming
- * the conversation later reads the prompt cache as the live process would have (measured in #561: ~100% at 2, 6 and 10
- * minutes on the 1 h lifetime, at 2 and 4 minutes on a forced 5 min one), for +0.7 s (p50) / +1.8 s (p95) before the
- * first token. So a session that has said nothing for `afterMinutes` and holds nothing a person would lose has its
- * process ended. It stays in the list, asleep; the next message (or its composer taking focus) wakes it through
- * `resumeSession`, the same path a session takes after a host restart.
- *
- * A host policy, not a tool's: the rule lives here, and a tool says only whether it may sleep at all
- * (`capabilities.sleep`, resume measured to keep the cache). What keeps a session awake:
- *
- *   - anything `sessionIdle` counts (idle.ts): a turn, an approval or a question waiting, background work, or a tool
- *     that cannot report its background work;
- *   - work it waits on (`waitsOn`): a child it started with `start_agent`, or a session handling its ask_project task,
- *     still in the turn it gave them, a session it owns (`askedBy`, a former worktree manager's children, #561) while it
- *     works, and a session that owes it a report (`reportBack`). Waking it for the answer would
- *     cost the resume it saved, moments later. A child waiting on its parent sleeps by the ordinary rule: it is idle;
- *   - having said anything in the last `afterMinutes` (any event: a message, a card, a state change, a resume).
- *
- * The clock starts at host start for a session this host has not heard from, so a host that just replaced another (a
- * restart, a swap) does not put to sleep a session the person used a second ago.
+ * Putting idle sessions to sleep (#568; the rules, the measurements and what keeps a session awake:
+ * docs/agent-host/lifecycle/agent-cli-updates.md "Putting idle sessions to sleep"). A host policy, not a tool's: the rule lives
+ * here, and a tool says only whether it may sleep at all (`capabilities.sleep`, resume measured to keep the cache). A session
+ * that has said nothing for `afterMinutes` and holds nothing a person would lose has its process ended; it stays in the list,
+ * asleep, and the next message (or its composer taking focus) wakes it through `resumeSession`, the path a session takes after
+ * a host restart. What keeps it awake: anything `sessionIdle` counts (idle.ts), work it waits on (`waitsOn`: waking it for the
+ * answer would cost the resume it saved, moments later), and any event in the last `afterMinutes`. The clock starts at host
+ * start for a session this host has not heard from, so a host that just replaced another (a restart, a swap) does not put to
+ * sleep a session the person used a second ago.
  */
 
 /** The default, "Put idle sessions to sleep after 15 minutes" (the owner's decision, 2026-10-12) */

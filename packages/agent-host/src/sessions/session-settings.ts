@@ -55,17 +55,13 @@ export class SessionSettings {
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.host.store.sessions.upsertSession(m)
     /*
-     * The model and effort chosen most recently become this project's default (#69, item 5). The
-     * same lesson default_tool learned: instead of building a settings screen, the fact is recorded
-     * that the act of choosing already told us. This is where the repetition ends for someone using
-     * Opus/high who had to click through the same four clicks on every new session.
-     *
-     * **Recorded under this session's own tool slot** (#107). There used to be only one slot, which
-     * had to be guarded with the condition "only record a choice from a session using the project's
-     * default tool" — and that condition broke the moment the default tool changed: a single codex
-     * session switching the default back to codex would let the next codex choice overwrite the value
-     * saved for claude. Now that the tool is part of the key, no condition is needed: any tool's
-     * choice lands only in its own slot.
+     * The model and effort chosen most recently become this project's default (#69, item 5). The same lesson default_tool
+     * learned: instead of building a settings screen, the fact is recorded that the act of choosing already told us. This is
+     * where the repetition ends for someone using Opus/high who had to click through the same four clicks on every new session.
+     * **Recorded under this session's own tool slot** (#107). With one slot, a guard "only record a choice from a session using
+     * the project's default tool" breaks the moment the default tool changes: a single codex session switching the default back
+     * to codex would let the next codex choice overwrite the value saved for claude. With the tool part of the key, no
+     * condition is needed: any tool's choice lands only in its own slot.
      */
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
       const before = this.host.store.projects.projectToolDefaults(m.projectId)[m.tool]
@@ -195,16 +191,12 @@ export class SessionSettings {
   }
 
   /**
-   * The person sets a name (FR-18).
-   *
-   * **autoNamed is cleared so an auto-name can never overwrite it again.** An auto-name cuts down the
-   * first prompt, but a session created by resuming or importing all share the same first line, so
-   * four sessions named `This session is being continued…` once stood side by side in the list — the
-   * name alone could not distinguish anything, and the body itself had to be searched (issue #5). So a
-   * name the person has chosen once must survive no matter what happens.
-   *
-   * **Never silently passes through.** This used to just `return` when the session did not exist, and
-   * the RPC still reported `{ ok: true }` — the name never changed, but the screen wore the face of success.
+   * The person sets a name (FR-18). **autoNamed is cleared so an auto-name can never overwrite it again.** An auto-name cuts
+   * down the first prompt, but a session created by resuming or importing all share the same first line, so four sessions named
+   * `This session is being continued…` once stood side by side in the list — the name alone could not distinguish anything, and
+   * the body itself had to be searched (issue #5). So a name the person has chosen once must survive no matter what happens.
+   * **Never silently passes through.** A bare `return` when the session does not exist would let the RPC still report `{ ok:
+   * true }`: the name never changes, but the screen wears the face of success.
    */
   rename(sessionId: string, name: string): void {
     const m = this.host.sessionOf(sessionId)

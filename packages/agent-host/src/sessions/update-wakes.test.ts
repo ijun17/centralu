@@ -142,7 +142,7 @@ function engine(n: number) {
   return { engine, meta, sent, steps, ids }
 }
 
-// Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264 review)
+// Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264)
 describe('the sessions an update stopped wake a few at a time (#1913)', { timeout: 30_000 * SLOW }, () => {
   it(`never has more than ${UPDATE_WAKES_AT_ONCE} waiting for their first answer, cut turns first, and wakes every one in the end`, async () => {
     const { store, folder, ids, all } = await updated(2, 3)
