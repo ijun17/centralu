@@ -239,6 +239,7 @@ function rawBytes(raw: RawData): number {
   return raw.byteLength
 }
 
+/** Bytes a server-to-client frame adds around its payload (RFC 6455 §5.2, unmasked): a client's carry 4 more, so this undercounts incoming bytes */
 function frameOverhead(payloadBytes: number): number {
   return payloadBytes < 126 ? 2 : payloadBytes < 65_536 ? 4 : 10
 }
@@ -290,7 +291,7 @@ export class HostServer {
     /*
      * A whitespace-only token is not a credential, as the browser treats it: apps/web/src/bootstrap.ts trims VITE_HOST_TOKEN and
      * throws MissingHostTokenError when empty. With no trim here, `CC_HOST_TOKEN=" "` split the two sides (reproduced): the host
-     * listened with " " as the secret while the UI sent '' and never connected
+     * listened with " " as the secret, which a few guesses would have opened, while the UI sent '' and never connected
      */
     if (!opts.token.trim()) throw rpcError('Host token must not be empty')
     this.signing = new HostSigningKey(opts.token)
@@ -608,6 +609,8 @@ export class HostServer {
           this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac: hostProof(this.opts.token, ask.nonce), ...answer.fields }))
           return
         }
+        // From `open`, not `full`: while serve.json cannot be read `full` is empty and `open` keeps the last list, so a paired hub still
+        // gets a correct proof and its hello is refused as "credential file unreadable", not taken for an impostor. A proof lets nothing in
         const named = ask.credential ? read?.open.find((c) => c.id === ask.credential) : undefined
         const mac = named ? credentialProof(named.verifier, ask.nonce) : hostProof(this.opts.token, ask.nonce)
         this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac }))
@@ -882,6 +885,7 @@ export class HostServer {
     call.reject(peerAnswer(rpcError(e?.message ?? 'The other side refused the call', e?.code ?? 'internal', { retryable: e?.retryable === true, ...(e?.data !== undefined ? { data: e.data } : {}) })))
   }
 
+  /** Every call still waiting on a socket that is gone is answered, not retryable: its outcome there is unknown, and a retry could run it twice */
   private failCalls(ws: WebSocket, why: string): void {
     const pending = this.calls.get(ws)
     if (!pending) return

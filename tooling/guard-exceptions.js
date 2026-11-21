@@ -242,37 +242,20 @@ export const ARCHIVE_ALLOWED = [
  * changed without a tool reading it as a comment it must keep (#2355); each sweep removes the lines it clears
  */
 export const COMMENTS_LEFT = [
-  'packages/agent-host/src/app-home-view.test.ts',
   'packages/agent-host/src/app-list-events.test.ts',
-  'packages/agent-host/src/app-secrets.test.ts',
-  'packages/agent-host/src/app-versions.test.ts',
-  'packages/agent-host/src/app-views.test.ts',
-  'packages/agent-host/src/builder-requests.test.ts',
   'packages/agent-host/src/data-dir.test.ts',
   'packages/agent-host/src/data-dir.ts',
-  'packages/agent-host/src/drain.test.ts',
-  'packages/agent-host/src/env-path.test.ts',
-  'packages/agent-host/src/external-app-runs.test.ts',
-  'packages/agent-host/src/external-apps.test.ts',
-  'packages/agent-host/src/host-requests.test.ts',
-  'packages/agent-host/src/inline-views.test.ts',
   'packages/agent-host/src/log-file.test.ts',
   'packages/agent-host/src/log-file.ts',
   'packages/agent-host/src/main.ts',
   'packages/agent-host/src/os.ts',
   'packages/agent-host/src/os/kill-tree.test.ts',
   'packages/agent-host/src/os/real.test.ts',
-  'packages/agent-host/src/project-settings-events.test.ts',
-  'packages/agent-host/src/rpc.test.ts',
   'packages/agent-host/src/transport/limited-token.test.ts',
-  'packages/agent-host/src/transport/link-keys.test.ts',
   'packages/agent-host/src/transport/link-proof.test.ts',
-  'packages/agent-host/src/transport/server.test-helpers.ts',
   'packages/agent-host/src/transport/server.test.ts',
   'packages/agent-host/src/update-apply.test.ts',
   'packages/agent-host/src/updates.test.ts',
-  'packages/agent-host/src/user-app-adoption.test.ts',
-  'packages/agent-host/src/views/view-host.test.ts',
 ]
 
 /**

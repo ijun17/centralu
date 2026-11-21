@@ -1,13 +1,16 @@
 import { APP_DRAG_NOTIFICATION, APP_DRAG_TEXT_MAX } from '@cc/protocol'
 
 /**
- * The drag relay (#308): a script added to every app view so an item dragged out of it can land in a session's composer.
- * Why the drag's own data cannot do it, and the messages it sends: docs/apps/view-theme-layout-drag.md "Dragging an item out of a view"
+ * The drag relay (#308): a script added to every app view so a dragged item can land in a session's composer; it only posts
+ * what the document could post itself, so it gives the app nothing it did not have. Why the drag's own data cannot do it, and
+ * the messages: docs/apps/view-theme-layout-drag.md "Dragging an item out of a view"
  */
 
 /**
- * The relay script, kept to ES5 and wrapped so it runs in any page and leaves no name behind. A drag the app cancelled is left
- * alone; an end is reported only for a drag whose start was (the board's column moves carry no link or text)
+ * The relay script, kept to ES5 and wrapped so it runs in any page and leaves no name behind. The data can be read only during
+ * `dragstart`, heard on the window after the item's own handler set it. A drag the app cancelled is left alone; an end is
+ * reported only for a drag whose start was (the board's column moves carry no link or text). It needs inline script: a view
+ * whose own `<meta>` CSP forbids it silently loses dropping
  */
 export const DRAG_RELAY_SCRIPT = `(function () {
   'use strict'

@@ -51,6 +51,7 @@ const NPM_RETRY_WINDOW_MS = 10 * 60 * 1000
 /** The registry's answer; failure is a value too, since throwing would force the caller to stop the app */
 export type LatestResult = { ok: true; version: string } | { ok: false; reason: string }
 
+/** What a source tree's version carriers hold until a build stamps them: the same as `scripts/app-version.mjs` PLACEHOLDER */
 export const UNSTAMPED_VERSION = '0.0.0-dev'
 
 /**
@@ -64,7 +65,8 @@ export function installsByItself(build: string | undefined, current: string): bo
 
 /**
  * Whether this hub updates its linked machines by itself to its own version (#1508, `LinkDeps.autoUpdate`): "Automatic updates"
- * on, not mid-swap, from a build that may install by itself (`installsByItself`)
+ * on, not mid-swap, from a build that may install by itself (`installsByItself`). A dev hub's machines would refuse anyway
+ * (`channel('0.0.0-dev')` is `dev`); this does not rely on it
  */
 export function hubUpdatesMachines(f: { build: string; current: string; autoApply: boolean; draining: boolean }): boolean {
   return installsByItself(f.build, f.current) && f.autoApply && !f.draining
@@ -317,6 +319,7 @@ export class UpdateService {
         deps.schedule ??
         ((fn, ms) => {
           const t = setTimeout(fn, ms)
+          // A pending retry must not hold the process open, no more than the check timer does
           t.unref?.()
           return () => clearTimeout(t)
         }),
@@ -361,6 +364,7 @@ export class UpdateService {
     this.startTimer()
   }
 
+  /** Shutdown (including a host swap): no asynchronous continuation may start more work */
   stop(): void {
     this.stopped = true
     this.stopTimer()
@@ -542,11 +546,12 @@ export class UpdateService {
 
   /**
    * Installs the newer version and says so; does not restart the app, which is the window's step (#352). Answers once the target
-   * is settled (after the fresh lookup, when `npm i -g` is about to start, or when the registry shows nothing newer), not when
-   * the install is done: `npm i -g` regularly outlasts the RPC deadline, and the rest arrives as `update_status` events. With
-   * nothing newer known it refreshes first (#645), as the stored answer may be hours old or absent with automatic checks off; "up
-   * to date" is a result (`idle`, no error), never `failed`, since a recorded refusal stayed on the line through every later
-   * check. While a release waits to be restarted into, it installs only one past it (#2130), replacing the waiting build
+   * is settled (after the fresh lookup: at most the forced deadline, plus an older check it waits for; when `npm i -g` is about
+   * to start, or when the registry shows nothing newer), not when the install is done: `npm i -g` regularly outlasts the RPC
+   * deadline, and the rest arrives as `update_status` events. With nothing newer known it refreshes first (#645), as the stored
+   * answer may be hours old or absent with automatic checks off; "up to date" is a result (`idle`, no error), never `failed`,
+   * since a recorded refusal stayed on the line through every later check. While a release waits to be restarted into, it
+   * installs only one past it (#2130), replacing the waiting build
    */
   apply(): Promise<UpdateStatus> {
     if (this.stopped) return Promise.resolve(this.current())
@@ -618,16 +623,17 @@ export class UpdateService {
       if (this.stopped) return
       packageInstalled = true
       /*
-       * Refreshes the copy that gets launched, only if one exists (on macOS `centralu install` creates `/Applications/…`, not
-       * for someone who never asked). Not over a maintainer's local build newer than the target (`keepsInstalledCopy`, #645:
-       * `pnpm local-update` waiting for "Apply now" outranks its release); every other copy is replaced, a higher released one
-       * too (npm is the source of truth), and an unreadable version as well. A kept local build still gets the package updated,
-       * and the notice says what was kept. The launcher is the one npm just installed (`installCopy`), not `centralu` from PATH
-       * (a hub's shim, #1736). This replaces the bundle we run out of (`swapInto` in `swap.mjs`: new to `<app>.new`, old
-       * renamed aside, new renamed in): macOS keeps the process alive but between the renames paths inside the bundle do not
-       * resolve (#2117), so the end is "restart". On Windows it renames the folder we run out of: NTFS allows it with the exe
-       * mapped while no process has its working directory inside (measured on Windows 11, 2026-10-08; the app leaves it at
-       * start, `leave_app_folder`), and a later install sweeps the old one
+       * Refreshes the copy that gets launched, only if one exists (on macOS `centralu install` creates `/Applications/…`, not for
+       * someone who never asked). Not over a maintainer's local build newer than the target (`keepsInstalledCopy`, #645: `pnpm
+       * local-update` waiting for "Apply now" outranks its release); every other copy is replaced, a higher released one too (npm is
+       * the source of truth), and an unreadable version as well (a corrupt plist must not block updates). A kept local build still
+       * gets the package updated, and the notice says what was kept. The launcher is the one npm just installed (`installCopy`), not
+       * `centralu` from PATH (a hub's shim, #1736). `npm` resolves through the login-shell PATH that `env-path.ts` adds at startup: a
+       * GUI app inherits none. This replaces the bundle we run out of (`swapInto` in `swap.mjs`: new to `<app>.new`, old renamed
+       * aside, new renamed in): macOS keeps the process alive but between the renames paths inside the bundle do not resolve (#2117),
+       * so the end is "restart". On Windows it renames the folder we run out of: NTFS allows it with the exe mapped while no process
+       * has its working directory inside (measured on Windows 11, 2026-10-08; the app leaves it at start, `leave_app_folder`), and a
+       * later install sweeps the old one
        */
       if (copy) {
         const copyVersion = this.deps.installedCopyVersion(copy)
@@ -669,14 +675,14 @@ export class UpdateService {
   }
 
   /**
-   * Brings the installed desktop copy up to this host's version (#1736), once per host start; main.ts calls it only for a host
-   * a linked hub installed (`copyFollowsHost`). Only a copy older than this host, or unreadable or malformed, is replaced:
-   * after a hub rollback the copy is newer and stays, as does a maintainer's newer local build. The two steps of an install
-   * from the app (`runApply`): `npm i -g centralu@<this version>`, then the global package's launcher `install` by path
-   * (`installCopy`). A global package at or above this version is not taken down: only its `install` runs, after npm installs
-   * the package's own version again when its platform package is missing or at another (#2282). No status changes; a failure is
-   * one stderr line, tried at the next start. Never beside an install from the app: one running leaves this for the next start,
-   * and one asked for meanwhile waits for this
+   * Brings the installed desktop copy up to this host's version (#1736), once per host start; main.ts calls it only for a host a
+   * linked hub installed (`copyFollowsHost`). Only a copy older than this host, or unreadable or malformed, is replaced: after a
+   * hub rollback the copy is newer and stays (a window of the same protocol works with the older host), as does a maintainer's
+   * newer local build. The two steps of an install from the app (`runApply`): `npm i -g centralu@<this version>`, then the global
+   * package's launcher `install` by path (`installCopy`). A global package at or above this version is not taken down: only its
+   * `install` runs, after npm installs the package's own version again when its platform package is missing or at another
+   * (#2282). No status changes; a failure is one stderr line, tried at the next start. Never beside an install from the app: one
+   * running leaves this for the next start, and one asked for meanwhile waits for this
    */
   followHost(): Promise<void> {
     if (this.stopped || this.installing || this.following) return this.following ?? Promise.resolve()
@@ -729,6 +735,7 @@ export class UpdateService {
       } catch (err) {
         if (this.stopped) return
         if (!(err instanceof PlatformPackageMissing) && !npmHasNotServedVersion(err, version)) throw err
+        // npm's own line, which `failureLine` still reads (stderr, exit code), is copied onto what ran out
         if (this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw Object.assign(new Error(`npm did not serve ${version} within ${NPM_RETRY_WINDOW_MS / 60_000} minutes: ${errorMessage(err)}`), err)
         this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
         this.emit()
@@ -797,7 +804,6 @@ function npmHasNotServedVersion(err: unknown, version: string): boolean {
   const tarball = `/${APP_SLUG}/-/${APP_SLUG}-${version}.tgz`.replace(/[.+]/g, '\\$&')
   return /\bETARGET\b|\bnotarget\b/i.test(errorMessage(err)) || new RegExp(`\\b404 Not Found - GET \\S+${tarball}(?!\\S)`, 'i').test(stderrOf(err))
 }
-
 
 function retryDelay(failures: number): number {
   return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1] ?? CHECK_INTERVAL_MS
