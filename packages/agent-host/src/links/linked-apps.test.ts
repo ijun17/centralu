@@ -261,12 +261,24 @@ describe('a session whose app call was refused while its host was away hears onc
     expect(told.map(([id]) => id)).toEqual(['s1'])
   })
 
+  it('tells nothing of an app the session called again once the host was back', async () => {
+    const { linked, told, ref, away } = rig()
+    await linked.refresh('s1')
+    away(true)
+    for (const appId of ['board', 'notes']) await linked.call('s1', ref(appId), 'peek', {}, { name: appId })
+    away(false)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board' })
+    linked.back('m1')
+    expect(told).toEqual([['s1', '[Centralu] Box is reachable again; notes was not called while it was away. Call it again if it is still needed.']])
+  })
+
   it('tells nothing of a deleted session', async () => {
     const { linked, told, ref, away } = rig()
     await linked.refresh('s1')
     away(true)
     await linked.call('s1', ref('board'), 'peek', {}, { name: 'board' })
     linked.forget('s1')
+    away(false)
     linked.back('m1')
     expect(told).toEqual([])
   })

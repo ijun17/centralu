@@ -149,6 +149,17 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     expect(told).toEqual([['w1', '[Centralu] Hub mac is reachable again; board was not called while it was away. Call it again if it is still needed.']])
   })
 
+  it('tells nothing when its hub offers again of an app that hub withheld while reachable: it was never away', async () => {
+    const { machine, hub, attach } = await world()
+    const told: [string, string][] = []
+    machine.apps!.linked.usePeers(appsPeers({ hubs: machine.hubs, settings: machine.store.settings }), (id, body) => void told.push([id, body]))
+    // `w2`: the hub has no record of starting it, so it lists it nothing
+    const r = await attach('w2').call('app-board', 'peek', {})
+    expect(text(r)).toMatch(/Hub mac does not offer board to this session now/)
+    machine.apps!.linked.back(hub.id)
+    expect(told).toEqual([])
+  })
+
   it("answers that the hub did not answer in time when it is linked but its list does not come, and never runs the copy", async () => {
     const { machine, hub, attach } = await world()
     machine.apps!.linked.forget('w1')

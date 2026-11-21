@@ -21,7 +21,7 @@ import { MailPerson, personSessions } from '../mail/person.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
 import { recordStartingHub, startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
-import { appsBackNotice, appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './apps-across.js'
+import { appsBackNotice, appsBackOn, appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './apps-across.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { hostApps } from './apps-across.test-helpers.js'
 
@@ -118,7 +118,7 @@ export async function machineHost(
     mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
     const apps = o.apps ? hostApps(store, mgr) : null
     apps?.linked.usePeers(appsPeers({ hubs, settings: store.settings }), mail ? appsBackNotice(mail.service, id) : undefined)
-    if (apps) hubs.onMailOffer((hubId) => apps.linked.back(hubId))
+    if (apps) appsBackOn(apps.linked, { hubs })
     if (apps) mgr.apps.useLinkedNotices(linkedNotices({ hubs }))
     const appsAcross =
       apps && o.apps === true ? { appsAcross: { calls: machineAppCalls(apps.rt, { projectName: apps.projectName }), notice: (hub: { id: string }, p: LinkedAppNoticeParams) => mgr.apps.linkedNoticeIn(hub.id, p) } } : {}
@@ -267,14 +267,11 @@ export async function hubHost(
           }),
           ...(across ? { hubMail: true } : {}),
           ...(apps ? { hubApps: true } : {}),
-          ...(across || apps
-            ? {
-                onOfferAnswered: (id: string, lacks: readonly string[]) => {
-                  across?.offerAnswered(id, lacks)
-                  apps?.linked.back(id)
-                },
-              }
-            : {}),
+          ...(apps
+            ? { onOfferAnswered: appsBackOn(apps.linked, across ? { answered: (id, lacks) => across.offerAnswered(id, lacks) } : {}) }
+            : across
+              ? { onOfferAnswered: (id: string, lacks: readonly string[]) => across.offerAnswered(id, lacks) }
+              : {}),
           ...(across ? { openTasks: (id: string) => across.openTasksTo(id) } : {}),
         }
   const links = new Links({

@@ -285,6 +285,8 @@ export class LinkedApps {
       return failed('', awayRefusal(peer.name, NOT_REACHABLE, `${what} was not called; nothing ran`))
     }
     if (!peer.answers) return failed('', `Update Centralu on ${peer.name} to use its apps from here. Nothing ran.`)
+    // Called now, it is no longer one that was not called (`back`)
+    this.refusedAway.get(peer.id)?.sessions.get(sessionId)?.delete(opts.name ?? ref.appId)
     const call = randomUUID()
     let runId = ''
     const cancel = () => void peer.call('appCancel', { call }, this.deps.lookupMs ?? LOOKUP_MS).catch(() => {})

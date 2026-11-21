@@ -1641,12 +1641,13 @@ Never a fallback to a copy: an app of another machine that cannot be reached ans
   link is back.
 - **Back.** A refused call is never made again by itself, since a call may change something there. The waste is the
   session idling: once the host is back (a machine answering the hub's offer, or a hub offering again to a machine),
-  each session whose call it refused in the last `LINK_HOLD_MS` (10 minutes, the same bound as held mail) gets one Centralu notice in its mail,
-  "<host> is reachable again; <app> was not called while it was away" (`LinkedApps.back`). An offer answered also
-  comes while the host is still away or does not answer app calls on that connection, so a session's record waits
-  until it can call the host. An older call is not told: its session has moved on. A call of a tool not in a list the
-  session has is not kept, as it would be refused there too; with no list yet, it is. Kept in memory, so a restart of
-  the caller's host forgets them.
+  each session whose call it refused in the last `LINK_HOLD_MS` (10 minutes, the same bound as held mail) gets one
+  Centralu notice in its mail, "<host> is reachable again; <app> was not called while it was away" (`LinkedApps.back`,
+  wired by `appsBackOn`). An offer answered also comes while the host is still away or does not answer app calls on
+  that connection, so a session's record waits until it can call the host. An older call is not told: its session has
+  moved on. Nor is an app the session has called since the host could take it. A call of a tool not in a list the
+  session has is not kept, as it would be refused there too; with no list yet, it is. A copy withheld by a hub that is
+  reachable is not kept either: that hub was not away. Kept in memory, so a restart of the caller's host forgets them.
 - **An older machine** answers `host.apps` "Unknown method": "Update Centralu on <machine> to use its apps from here".
 - **An older hub** drops a call from the machine unanswered (client-frames.ts l.68-74), which would cost the full
   30 minutes of a reverse call. So the machine calls `hub.apps` / `hub.appCall` only on a hub whose `host.hubOffer`
