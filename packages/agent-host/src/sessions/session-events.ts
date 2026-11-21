@@ -93,6 +93,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
 export class SessionEvents {
   /** The context figure during a turn, from each request's size (#1492, context-meter.ts) */
   private readonly meter = new ContextMeter()
+  /** The wakes a tool is being handed (`deliverMail`), by session: whether it ended a turn of its own while one waited (#2318, `ownTurn`) */
+  private readonly taking = new Map<string, { ownTurn: boolean }>()
 
   constructor(private readonly host: SessionEventsHost) {}
 
@@ -194,7 +196,7 @@ export class SessionEvents {
           continues = this.host.selfCompaction.stepOpens(m.id)
           // A turn runs: a settle waiting for one is over, and this turn's end answers (`ChildReports.settleAtRest`)
           this.host.reports.stopSettling(m.id)
-          this.inputWaits.delete(m.id)
+          this.host.reports.inputEnded(m.id)
           this.host.children.turnStarted(m.id)
           // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
           this.host.children.noteTurnStart(m.id, m.lastSeq)
@@ -297,17 +299,13 @@ export class SessionEvents {
         this.host.children.noteContinuedCut(e.sessionId)
         this.host.reports.noteCut(e.sessionId)
       }
-      this.host.reports.settleAtRest(e.sessionId)
-      this.inputWaits.add(e.sessionId)
+      this.host.reports.inputWaiting(e.sessionId)
+      const taking = this.taking.get(e.sessionId)
+      if (taking) taking.ownTurn = true
     }
-    // Its process went before the waiting input's turn began: that input's turn is lost, and the work stops as a turn's would (`ownTurn` above)
-    if (processWent && !endedTurn && e.sessionId && this.inputWaits.delete(e.sessionId)) {
-      this.host.children.dropContinuedCut(e.sessionId)
-      this.host.reports.stopSettling(e.sessionId)
-      this.host.reports.turnStopped(e.sessionId)
-      this.host.mailStopped(e.sessionId, 'error', this.stopTold(e.sessionId, false, undefined))
-    }
-    if (e.type === 'session_deleted') this.inputWaits.delete(e.sessionId)
+    // Its process went before the waiting input's turn began (`ownTurn` above)
+    if (processWent && !endedTurn && e.sessionId && this.host.reports.inputEnded(e.sessionId)) this.inputLost(e.sessionId)
+    if (e.type === 'session_deleted') this.host.reports.inputEnded(e.sessionId)
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
@@ -390,8 +388,14 @@ export class SessionEvents {
     return { ...(waited ? { told: [asker] } : {}), starter: asker }
   }
 
-  /** Sessions whose tool ended a turn of its own while an input waits to run, until that input's turn begins (#2318, `ownTurn`) */
-  private readonly inputWaits = new Set<string>()
+  /** The input given the session will not run (its process went first, or it was counted at rest): that turn is lost, and the work stops as a turn's would (#2318) */
+  private inputLost(sessionId: string): void {
+    this.host.reports.inputEnded(sessionId)
+    this.host.children.dropContinuedCut(sessionId)
+    this.host.reports.stopSettling(sessionId)
+    this.host.reports.turnStopped(sessionId)
+    this.host.mailStopped(sessionId, 'error', this.stopTold(sessionId, false, undefined))
+  }
 
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
     const m = this.host.meta.get(e.sessionId)
@@ -725,7 +729,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's head (`mail` when absent: its kind; a compaction's next step says what happened); an update's continued turn says `update` (#1618). `audience`: whose the line is to act on, when it is placed (a compaction's next step is Centralu's) */
-    input: { text: string; quiet: boolean; line: string; label?: string; audience?: 'you' | 'centralu'; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string; listed?: MailInput['listed'] },
+    input: { text: string; quiet: boolean; line: string; label?: string; audience?: 'you' | 'centralu'; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string; listed?: MailInput['listed']; taken?: MailInput['taken'] },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -757,7 +761,12 @@ export class SessionEvents {
       this.host.record.closeStream(sessionId)
       // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
       this.host.cardRests.turnAsked(sessionId)
-      await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, late, input.id)
+      const taking = { ownTurn: false }
+      this.taking.set(sessionId, taking)
+      const took = await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, { ...(late ? { late } : {}), ...(input.id ? { id: input.id } : {}), ...(input.taken ? { taken: input.taken } : {}) }).finally(() => this.taking.delete(sessionId))
+      // Counted after the tool ran a turn of its own instead (#2318), and none runs now: no turn runs the wake, so the work stops as a lost input's does.
+      // Not on state alone: in a Codex that says `working` only once its turn started, a turn may still run it and answer after a stop (`LastResponse.released`)
+      if (took === 'counted' && taking.ownTurn && !inTurn(this.host.meta.get(sessionId)?.state ?? 'working')) this.inputLost(sessionId)
     }
     /*
      * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists

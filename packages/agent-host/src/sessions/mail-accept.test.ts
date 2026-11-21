@@ -7,8 +7,10 @@ import type { InputObserver, SessionHandle } from '../adapters/contract.js'
 import { MAIL_ACCEPT_MS } from './mail-accept.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 
-function world(handle: Partial<SessionHandle>) {
+function world(handle: Partial<SessionHandle>, state = 'idle') {
   const events: unknown[] = []
+  /** The stops told to the mailbox (`mailStopped`): a wake counted after the tool ran a turn of its own instead, which no turn runs */
+  const stops: [string, string][] = []
   const handles = new Map<string, SessionHandle>([['s1', { sessionId: 's1', ...handle } as SessionHandle]])
   const host = {
     restartPolicy: { deferredRestarts: new Map() },
@@ -21,10 +23,14 @@ function world(handle: Partial<SessionHandle>) {
     record: { closeStream: () => {} },
     cardRests: { turnAsked: () => {} },
     apps: { rootAppsNotice: () => null },
+    meta: new Map([['s1', { id: 's1', state }]]),
+    reports: { inputEnded: () => false, stopSettling: () => {}, turnStopped: () => {} },
+    children: { dropContinuedCut: () => {} },
+    mailStopped: (id: string, why: string) => void stops.push([id, why]),
   }
   const sessionEvents = new SessionEvents(host as unknown as SessionEventsHost)
   Object.assign(sessionEvents, { onEvent: (e: unknown) => void events.push(e) })
-  return { sessionEvents, events }
+  return { sessionEvents, events, stops }
 }
 const input = { text: 'mail', quiet: false, line: '✉ 1 message' }
 const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -43,14 +49,20 @@ describe('handing a wake to a tool that tracks its inputs', () => {
       },
     })
     let settled = false
-    const delivery = w.sessionEvents.deliverMail('s1', input).then(() => (settled = true))
+    const taken = vi.fn()
+    const delivery = w.sessionEvents.deliverMail('s1', { ...input, taken }).then(() => (settled = true))
     await tick()
     expect(settled).toBe(false)
     expect(w.events).toEqual([])
     observer.accepted?.()
+    // Told in the same step, before the tool's next event: a turn that ends in the same read finds the delivery recorded
+    expect(taken).toHaveBeenCalledTimes(1)
     await delivery
     expect(origin).toEqual({ kind: 'channel', server: 'centralu' })
     expect(w.events).toHaveLength(1)
+    observer.complete()
+    expect(taken).toHaveBeenCalledTimes(1)
+    expect(w.stops).toEqual([])
   })
 
   it('fails, writing no line, when the tool failed it before it took it: the mailbox keeps the mail and tries again', async () => {
@@ -85,16 +97,39 @@ describe('handing a wake to a tool that tracks its inputs', () => {
     expect(w.events).toHaveLength(1)
   })
 
-  it('a tool that never says is taken as having taken it after a while, not sent again', async () => {
+  it('a tool that never says is taken as having taken it after a while, not sent again, and not stopped: a turn may still run it', async () => {
     vi.useFakeTimers()
-    const w = world({ sendTracked: () => new Promise(() => {}) })
-    let settled = false
-    const delivery = w.sessionEvents.deliverMail('s1', input).then(() => (settled = true))
-    await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS - 1_000)
-    expect(settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(2_000)
-    await delivery
-    expect(w.events).toHaveLength(1)
+    // At rest: a Codex whose `turn/start` has not answered says `working` only once its turn started. In a turn: the wake waits behind it
+    for (const state of ['idle', 'working']) {
+      const w = world({ sendTracked: () => new Promise(() => {}) }, state)
+      let settled = false
+      const taken = vi.fn()
+      const delivery = w.sessionEvents.deliverMail('s1', { ...input, taken }).then(() => (settled = true))
+      await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS - 1_000)
+      expect(settled).toBe(false)
+      expect(taken).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await delivery
+      expect(taken).toHaveBeenCalledTimes(1)
+      expect(w.events).toHaveLength(1)
+      // Only a turn of the tool's own while it waited says none will run it (links/own-turn-report.test.ts)
+      expect(w.stops).toEqual([])
+    }
+  })
+
+  it('a wake counted after a turn of the tool\'s own is stopped at rest, but not while a second turn of its own still runs', async () => {
+    vi.useFakeTimers()
+    for (const [state, stopped] of [['idle', [['s1', 'error']]], ['working', []]] as const) {
+      const w = world({ sendTracked: () => new Promise(() => {}) }, state)
+      const delivery = w.sessionEvents.deliverMail('s1', input)
+      await vi.advanceTimersByTimeAsync(0)
+      // The tool ended a turn of its own while the wake waited (links/own-turn-report.test.ts drives it from the tool's events)
+      const taking = (w.sessionEvents as unknown as { taking: Map<string, { ownTurn: boolean }> }).taking.get('s1')
+      if (taking) taking.ownTurn = true
+      await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS + 1_000)
+      await delivery
+      expect(w.stops).toEqual(stopped)
+    }
   })
 
   it('a tool that fails it after the wait ran out is told to the mailbox, which puts the mail back; one that took it is not', async () => {

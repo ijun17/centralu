@@ -67,6 +67,8 @@ export class ChildReports {
 
   /** The settle timer of a session whose own background work ended with no turn running (`settleAtRest`) */
   private readonly settles = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Sessions whose tool ended a turn of its own while an input waits to run (#2318), until that input's turn begins, it is lost, or the settle answers */
+  private readonly inputWaits = new Set<string>()
   /** Sessions whose turn an update cut and Centralu continued (#1966), ended when they were not at rest: the answer that follows says so. Memory only */
   private readonly cutsUntold = new Set<string>()
 
@@ -124,6 +126,8 @@ export class ChildReports {
       this.settles.delete(sessionId)
       const now = this.host.meta.get(sessionId)
       if (this.host.disposing || !now || inTurn(now.state) || this.ownTasksRunning(sessionId).length > 0) return
+      // It answers now: a later end of its process is no stop of work it owes
+      this.inputWaits.delete(sessionId)
       this.answerAtRest(sessionId, false)
     }, OWN_WORK_SETTLE_MS)
     timer.unref?.()
@@ -137,6 +141,17 @@ export class ChildReports {
    */
   questionSettled(sessionId: string): void {
     this.answerAtRest(sessionId, false)
+  }
+
+  /** The tool ended a turn of its own while an input waits to run (#2318): if that input's turn never begins, the session settles at rest and answers */
+  inputWaiting(sessionId: string): void {
+    this.inputWaits.add(sessionId)
+    this.settleAtRest(sessionId)
+  }
+
+  /** The waiting input's turn began, it was lost, or the session went: whether one waited (`inputWaiting`) */
+  inputEnded(sessionId: string): boolean {
+    return this.inputWaits.delete(sessionId)
   }
 
   /** Ends a settle timer; with no session, every one (the host is leaving) */

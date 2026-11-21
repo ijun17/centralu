@@ -81,6 +81,11 @@ export type MailInput = {
   shown?: { senderId: string; text: string; alone: boolean; messageId: string }
   /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
   id?: string
+  /**
+   * Told once, in the same step the tool took the input (or it was counted as taken, `takeInput`), before the tool's next event is handled: the
+   * delivery is recorded there, so the end of a turn that begins and ends in one read finds its mail delivered in it
+   */
+  taken?: () => void
   /** The agent depth a task from another computer's session gives the receiver while it works on it (`TaskInput.depth`, #838): the deepest it carries */
   depth?: number
 }
@@ -402,7 +407,7 @@ export class MailDelivery {
         this.records.failedTry(recipient, messageIds, error, this.now())
         this.service.hold(recipient, messageIds.map((messageId) => ({ messageId, reason: 'failed' })))
       })
-      this.tellNoteFailed(recipient, messageIds, error)
+      this.tellHeldFailed(recipient, messageIds, error)
       return
     }
     const retryIn = Math.min(this.o.maxRetryMs, this.o.retryBaseMs * 2 ** Math.max(0, attempts - 1))
@@ -411,22 +416,22 @@ export class MailDelivery {
   }
 
   /**
-   * A note that could not be delivered tells its sender, quietly (#2258 review): no report comes for a note, so this is how the Assistant learns of it
-   * and can tell the person at its next turn. A task's sender waits for its report, and the person's Inbox holds both. Best effort: the hold is
-   * committed already, and a notice that fails is logged, never the hold's failure
+   * A note or task that could not be delivered tells its session sender, quietly (#2258 review): no report comes for a note, and none for a task until
+   * the person sends it again, so this is how the sender learns of it and can tell the person at its next turn (a task given again until it is held,
+   * #2385). The person's Inbox holds it. Best effort: the hold is committed already, and a notice that fails is logged, never the hold's failure
    */
-  private tellNoteFailed(recipient: string, messageIds: readonly string[], error: string): void {
+  private tellHeldFailed(recipient: string, messageIds: readonly string[], error: string): void {
     for (const id of messageIds) {
       try {
         const m = this.records.message(id)
-        if (!m || !isSendNote(m) || parseAddress(m.sender)?.kind !== 'session') continue
+        if (!m || !(isSendNote(m) || m.kind === 'task') || parseAddress(m.sender)?.kind !== 'session') continue
         this.service.notice(m.sender, {
-          body: `Your note ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
-          facts: { quiet: true, noteFailed: { message: id, to: recipient } },
-          dedupeKey: `notefailed:${id}:${recipient}`,
+          body: `Your ${m.kind === 'task' ? 'task' : 'note'} ${id} to ${this.service.labelOf(recipient)} could not be delivered (${oneLineText(error, 200)}). It is held in the person's Inbox, where they can send it again or dismiss it.`,
+          facts: { quiet: true, heldFailed: { message: id, to: recipient } },
+          dedupeKey: `heldfailed:${id}:${recipient}`,
         })
       } catch (e) {
-        console.error(`[mail] ${recipient}: its sender could not be told that note ${id} failed (${errorMessage(e)})`)
+        console.error(`[mail] ${recipient}: its sender could not be told that ${id} failed (${errorMessage(e)})`)
       }
     }
   }
@@ -568,13 +573,36 @@ export class MailDelivery {
     const shown = quiet ? undefined : this.shownOf(drained)
     const inputId = joins ? randomUUID() : undefined
     const depth = Math.max(0, ...drained.messageIds.map((id) => this.records.message(id)?.facts.agentDepth ?? 0))
+    // The tool took it (§7.6): delivered, and read for what went in whole. Once, as the tool takes it (`MailInput.taken`), else when `deliver` returns
+    const taken = () => {
+      if (delivered.at !== undefined) return
+      const deliveredAt = this.now()
+      delivered.at = deliveredAt
+      this.records.transaction(() => {
+        // Delivered in the turn this began, or quietly into the one running (§8.2): the rows name it, which the pair's count and a request's end read
+        this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
+        this.records.markRead(recipient, drained.inline, deliveredAt)
+      })
+      if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
+      if (!quiet && !joins) this.lastWake.set(recipient, this.now())
+      // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
+      if (waiting) {
+        this.left.delete(recipient)
+        this.crowd = this.crowd?.filter((r) => r !== recipient) ?? null
+        if (this.crowd?.length === 0) this.crowd = null
+        this.crowdChanged()
+      }
+      // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done. A join too: a task it carries is counted (`pairTurnsSince`)
+      if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
+    }
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}), taken }, (e) => {
         cancelTurn()
-        // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
       })
     } catch (e) {
+      // Taken already: what failed after it is not the delivery's, and giving the mail again could run the work twice
+      if (delivered.at !== undefined) return void console.error(`[mail] ${recipient}: after the tool took the mail: ${errorMessage(e)}`)
       cancelTurn()
       if (e instanceof MailNotAtRest) {
         this.records.takeBack(recipient, drained.messageIds)
@@ -583,25 +611,7 @@ export class MailDelivery {
       this.failedTry(recipient, drained.messageIds, errorMessage(e))
       return
     }
-    // The tool took it (§7.6): delivered, and read for what went in whole
-    const deliveredAt = this.now()
-    delivered.at = deliveredAt
-    this.records.transaction(() => {
-      // Delivered in the turn this began, or quietly into the one running (§8.2): the rows name it, which the pair's count and a request's end read
-      this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
-      this.records.markRead(recipient, drained.inline, deliveredAt)
-    })
-    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
-    if (!quiet && !joins) this.lastWake.set(recipient, this.now())
-    // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
-    if (waiting) {
-      this.left.delete(recipient)
-      this.crowd = this.crowd?.filter((r) => r !== recipient) ?? null
-      if (this.crowd?.length === 0) this.crowd = null
-      this.crowdChanged()
-    }
-    // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done. A join too: a task it carries is counted (`pairTurnsSince`)
-    if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
+    taken()
   }
 
   /**

@@ -1,4 +1,3 @@
-import { stamped } from '../log-file.js'
 import type { Store } from '../dev-services/store.js'
 import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
@@ -67,9 +66,8 @@ export function tunnelsFor(store: Store, log: (line: string) => void): (record: 
  * function (#1405 review)
  */
 export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor' | 'projectDeletes'>): LinkDeps {
-  // Every `[links]` and `[ssh]` line carries its time (#1784): a link that drops and returns is placed against the other logs by it
-  const log = (line: string) => rest.log?.(stamped(line))
-  return { ...rest, log, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, log), projectDeletes: storeProjectDeletes(store) }
+  const log = rest.log ?? (() => {})
+  return { ...rest, mirror: storeMirror(store), registry: storeRegistry(store), tunnelFor: tunnelsFor(store, log), projectDeletes: storeProjectDeletes(store) }
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')

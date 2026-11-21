@@ -1,4 +1,5 @@
 import type { EventSink } from '../contract.js'
+import { centraluInputId } from '../input-receipts.js'
 import type { ClaudeInput } from './sdk-query.js'
 
 /**
@@ -47,6 +48,8 @@ export class ClaudeRaceRetry {
   private raceSeen: string | null = null
   /** A resend waiting out its delay, and what it will send */
   private retry: { timer: ReturnType<typeof setTimeout>; texts: ClaudeInput[] } | null = null
+  /** The ids resent inputs went to the CLI under, to each input's own id (`ownId`) */
+  private readonly sentAs = new Map<string, string>()
 
   constructor(private readonly host: RaceRetryHost) {}
 
@@ -77,7 +80,8 @@ export class ClaudeRaceRetry {
    *
    * What goes again is what the CLI read since its last result. The CLI has already recorded those
    * messages in its conversation, so the model reads them twice, next to each other — the cost of
-   * not losing what the person sent.
+   * not losing what the person sent. Each goes under an id of its own (`sentAs`): the CLI drops a
+   * message whose id it has recorded, starting no turn and answering nothing (measured on CLI 2.1.296).
    *
    * @returns whether the turn goes again (its error is then not reported)
    */
@@ -110,13 +114,39 @@ export class ClaudeRaceRetry {
     const timer = setTimeout(() => {
       this.retry = null
       if (this.host.closed()) return
-      this.host.resend(sent)
+      this.host.resend(sent.map((input) => {
+        const sentAs = centraluInputId()
+        this.sentAs.set(sentAs, input.uuid)
+        return { ...input, sentAs }
+      }))
     }, delay)
     this.retry = { timer, texts: sent }
     return true
   }
 
-  /** A resend still waiting out its delay is called off; returns how many messages it would have sent */
+  /** An input's own id for the id the CLI has it under: the same id but for a resent input */
+  ownId(id: string): string {
+    return this.sentAs.get(id) ?? id
+  }
+
+  /** The message with the input ids it carries read back as their own ids (`ownId`). No message carries an input's id after its result, so a result lets its ids go */
+  ownIds<M extends { type?: unknown; user_message_uuid?: unknown; user_message_uuids?: unknown }>(m: M): M {
+    if (this.sentAs.size === 0) return m
+    const own = (id: unknown) => (typeof id === 'string' ? this.ownId(id) : id)
+    const listed: unknown[] = Array.isArray(m.user_message_uuids) ? m.user_message_uuids : []
+    const read = {
+      ...m,
+      ...(m.user_message_uuid !== undefined ? { user_message_uuid: own(m.user_message_uuid) } : {}),
+      ...(Array.isArray(m.user_message_uuids) ? { user_message_uuids: listed.map(own) } : {}),
+    }
+    if (m.type === 'result') for (const id of [m.user_message_uuid, ...listed]) if (typeof id === 'string') this.sentAs.delete(id)
+    return read
+  }
+
+  /**
+   * A resend still waiting out its delay is called off; returns how many messages it would have sent. The ids resent inputs went under
+   * stay: a Stop's receipt gives the inputs it cancelled by them, after this
+   */
   cancel(): number {
     if (!this.retry) return 0
     clearTimeout(this.retry.timer)
