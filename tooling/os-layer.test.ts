@@ -7,14 +7,15 @@
  * checked on virtual files laid over the repository (`osSelector`).
  */
 import { execFile, execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
+import { g, gitAsT } from './git-fixture.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, droppedPieces, droppedPiecesSince, everyOsTestsIn, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, treeAt, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -173,14 +174,8 @@ describe('the allowlist', () => {
   it(
     "lists nothing main's list does not: no new line but a file git sees renamed",
     () => {
-      const ref = process.env.CC_LINT_BASE ?? 'origin/main'
-      const base = baseCommit(ROOT, ref)
-      if (!base) {
-        // CI's verify job fetches main's history and sets CC_LINT_BASE: there, main's list has to be read
-        expect(process.env.CC_LINT_BASE, `no merge base with ${ref}`).toBeUndefined()
-        console.warn(`os-layer.test.ts: not compared with main's list (no merge base with ${ref})`)
-        return
-      }
+      const base = mainBase('the allowlist')
+      if (!base) return
       const main = mainList(base)
       if (main === null) {
         // Once main has the layer, its list must be readable: a list renamed or unreadable there would pass anything
@@ -358,6 +353,18 @@ function gitOk(args: string[]): boolean {
   }
 }
 
+/** main's merge base, or null (with a warning) where there is none to read */
+function mainBase(what: string): string | null {
+  const ref = process.env.CC_LINT_BASE ?? 'origin/main'
+  const base = baseCommit(ROOT, ref)
+  if (!base) {
+    // CI's verify job fetches main's history and sets CC_LINT_BASE: there, main has to be read
+    expect(process.env.CC_LINT_BASE, `no merge base with ${ref}`).toBeUndefined()
+    console.warn(`os-layer.test.ts: ${what} not compared with main (no merge base with ${ref})`)
+  }
+  return base
+}
+
 /** main's allowlist at `base`, or null when there is none to read */
 function mainList(base: string): string[] | null {
   try {
@@ -463,6 +470,89 @@ describe('the tests that run on every OS', () => {
     expect(await select(helper).selectMacTests([T])).toEqual([T])
     // Reading a file of the repository is not it
     expect(await select(code("import { readFileSync } from 'node:fs'", "readFileSync('x')")).selectMacTests([T])).toEqual([])
+  })
+
+  it('names the tests cut from a picked one that are not picked themselves, and no other new test', () => {
+    const text = (n: number) => 'x\n'.repeat(n)
+    const whole = 'tooling/pre-pr.test.ts'
+    const [reports, prs] = ['tooling/pre-pr-reports.test.ts', 'tooling/pre-pr-open-prs.test.ts'] as [string, string]
+    const at = (base: Record<string, string>, now: Record<string, string>): SplitFiles => ({ base: (f) => base[f] ?? null, now: (f) => now[f] ?? null })
+    const split = at({ [whole]: text(1400) }, { [whole]: text(750), [reports]: text(160), [prs]: text(370) })
+    const dropped = (picked: string[], files = split, pickedAtBase = (t: string): boolean => t === whole) => droppedPieces([whole, reports, prs], new Set(picked), [whole], files, pickedAtBase)
+    expect(dropped([whole])).toEqual(new Map([[whole, [reports, prs]]]))
+    // A piece picked for its own text is not dropped; nor is anything cut from a test that ran on Linux only
+    expect(dropped([whole, reports])).toEqual(new Map([[whole, [prs]]]))
+    expect(dropped([], split, () => false)).toEqual(new Map())
+    // The whole removed: its pieces are named all the same
+    expect(dropped([], at({ [whole]: text(1400) }, { [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports, prs]]]))
+    // A new test beside a picked one that lost no lines (however small), longer than what it lost, or one that was there at the base, is no piece
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1400), [reports]: text(20), [prs]: text(20) }))).toEqual(new Map())
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1300), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
+    expect(dropped([whole], at({ [whole]: text(1400), [prs]: text(370) }, { [whole]: text(1030), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports]]]))
+    // What is left of a shortened test keeps its setup, so its pieces get no lines for one; a removed test's do
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1390), [reports]: text(30), [prs]: text(30) }))).toEqual(new Map())
+    expect(dropped([], at({ [whole]: text(10) }, { [reports]: text(30), [prs]: text(30) }))).toEqual(new Map([[whole, [reports, prs]]]))
+  })
+
+  it("reads the base from git: a test picked there, by its own text or by the base's list alone, cut into tests not picked now", () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-pieces-'))
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }))
+    const write = (file: string, text: string) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true })
+      writeFileSync(join(root, file), text)
+    }
+    const text = (n: number, first = '') => first + 'x\n'.repeat(n)
+    const asks = "export const w = process.platform === 'win32'\n"
+    const listed = text(100)
+    g(root, 'init', '-q', '-b', 'main')
+    write('tooling/os-layer.js', "export const EVERY_OS_TESTS = ['listed'].map((n) => ({ file: `tooling/${n}.test.ts`, why: 'started by path' }))\n")
+    write('tooling/listed.test.ts', listed)
+    write('tooling/asks.test.ts', text(100, asks))
+    write('tooling/plain.test.ts', text(100))
+    write('tooling/kit.test-helpers.ts', text(100, asks))
+    gitAsT(root, 'add', '-A')
+    gitAsT(root, 'commit', '-q', '-m', 'base')
+    const base = g(root, 'rev-parse', 'HEAD')
+
+    const tree = treeAt(base, `${root}/`)
+    expect([tree.read('tooling/listed.test.ts'), tree.isFile('tooling/listed.test.ts'), tree.isFile('tooling'), tree.isFile('tooling/gone.test.ts')]).toEqual([listed, true, false, false])
+    expect(() => tree.read('tooling/gone.test.ts')).toThrow(/not a file of/)
+
+    // The listed test removed with its line, the asking one, a plain one and a helper (no test to run) shortened, each
+    // into new tests of their name
+    rmSync(join(root, 'tooling/listed.test.ts'))
+    write('tooling/os-layer.js', 'export const EVERY_OS_TESTS = []\n')
+    write('tooling/listed-start.test.ts', text(60))
+    write('tooling/listed-autostart.test.ts', text(5))
+    write('tooling/asks.test.ts', text(40, asks))
+    write('tooling/asks-more.test.ts', text(50))
+    write('tooling/plain.test.ts', text(40))
+    write('tooling/plain-more.test.ts', text(50))
+    write('tooling/kit.test-helpers.ts', text(40, asks))
+    write('tooling/kit-more.test.ts', text(50))
+    const tests = ['asks', 'asks-more', 'kit-more', 'listed-autostart', 'listed-start', 'plain', 'plain-more'].map((n) => `tooling/${n}.test.ts`)
+    expect(droppedPiecesSince(base, tests, new Set(['tooling/asks.test.ts']), `${root}/`)).toEqual(
+      new Map([
+        ['tooling/asks.test.ts', ['tooling/asks-more.test.ts']],
+        ['tooling/listed.test.ts', ['tooling/listed-autostart.test.ts', 'tooling/listed-start.test.ts']],
+      ]),
+    )
+  })
+
+  it(
+    'on the repository: a test cut from one picked at main is picked too',
+    async () => {
+      const base = mainBase('the pieces of picked tests')
+      if (!base) return
+      const { all, picked } = await pickedOnRepo()
+      const dropped = [...droppedPiecesSince(base, all, new Set(picked))].map(([whole, pieces]) => `${pieces.join(', ')} (from ${whole})`)
+      expect(dropped, `cut from a test that runs on every OS, these run on Linux only: name each in EVERY_OS_TESTS (tooling/os-layer.js) with its reason, or give it what picked the whole (a new test named after a shortened one is taken for a piece of it)`).toEqual([])
+    },
+    120_000 * SLOW,
+  )
+
+  it("reads this tree's EVERY_OS_TESTS as a later change reads it at its base", () => {
+    expect(everyOsTestsIn()).toEqual(layer.EVERY_OS_TESTS)
   })
 
   it('refuses to guess past an import it cannot follow', () => {
