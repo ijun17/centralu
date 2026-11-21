@@ -64,7 +64,7 @@ describe(`what the adapter makes of the app-server’s real turns (${recordedVer
     expect(ended(events)).toBe(2)
     expect(of(events, 'message_delta')[0]).toMatchObject({ text: 'hello' })
     expect(of(events, 'approval_request')).toEqual([])
-    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Edit'])
+    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Create'])
     expect(of(events, 'files_touched')).toHaveLength(1)
     expect(of(events, 'error')).toEqual([])
   })
@@ -178,9 +178,9 @@ describe(`what the adapter makes of the app-server’s real turns (${recordedVer
     expect(ended(events)).toBe(1)
   })
 
-  it('files: a file created and then deleted with the patch tool are two calls, each marking its file', async () => {
+  it('files: a file created and then deleted with the patch tool are two calls, each named for its change and marking its file (#2060)', async () => {
     const { events } = await run('files')
-    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Edit', 'Edit'])
+    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Create', 'Delete'])
     expect(of(events, 'approval_request')).toEqual([])
     expect(of(events, 'files_touched')).toHaveLength(2)
     expect(ended(events)).toBe(1)

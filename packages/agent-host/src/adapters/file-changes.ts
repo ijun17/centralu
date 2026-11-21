@@ -7,6 +7,18 @@ import { NO_PATH, type ApprovalDetail, type NormalizedEvent } from '@cc/protocol
  */
 export type FileChange = { path: string; diff: string; change?: 'add' | 'update' | 'delete' | 'move'; movePath?: string }
 
+const CHANGE_TOOL = { add: 'Create', update: 'Edit', delete: 'Delete', move: 'Move' } as const
+
+/**
+ * The card's name for a call's changes (#2060): a create, delete or move says so, in the approval row's words, when
+ * every file had that one kind of change. Anything else is an Edit.
+ */
+export function fileChangeTool(changes: readonly FileChange[]): string {
+  const kinds = new Set(changes.map((c) => c.change ?? 'update'))
+  const [only] = kinds
+  return kinds.size === 1 && only ? CHANGE_TOOL[only] : 'Edit'
+}
+
 /** How much of the diff an approval card carries, the same for both tools */
 export const DIFF_PREVIEW_CHARS = 4000
 

@@ -579,10 +579,8 @@ export const REPLAYS: Replay[] = [
     tool: 'codex',
     scenario: 'files',
     async shows(page) {
-      // A file created and one deleted are two cards of the same kind and path; nothing on the card says which is the delete (#2060)
-      const cards = await cardTexts(page)
-      expect(cards).toHaveLength(2)
-      expect(cards.every((c) => c.includes('gone.txt'))).toBe(true)
+      // A file created, then deleted: each card says which it was (#2060)
+      expect(await cardTexts(page)).toEqual([expect.stringMatching(/^Create \S*gone\.txt/), expect.stringMatching(/^Delete \S*gone\.txt/)])
     },
   },
   {

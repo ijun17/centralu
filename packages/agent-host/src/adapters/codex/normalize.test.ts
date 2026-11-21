@@ -325,7 +325,14 @@ describe('the whole record of a tool call (#221)', () => {
       { path: 'src/b.ts', kind: { type: 'add' }, diff: '+export {}' },
     ]
     const [call] = n('item/started', { item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes } })
-    expect(call).toMatchObject({ type: 'tool_call', summary: { title: 'src/a.ts, src/b.ts' }, input: { changes } })
+    expect(call).toMatchObject({ type: 'tool_call', summary: { tool: 'Edit', title: 'src/a.ts, src/b.ts' }, input: { changes } })
+  })
+
+  it('a moved file is named so on its card, not as an Edit (#2060; a create and a delete: replay.test.ts `files`)', () => {
+    const moved = n('item/started', {
+      item: { type: 'fileChange', id: 'fc', status: 'inProgress', changes: [{ path: 'src/a.ts', diff: '', kind: { type: 'update', move_path: 'src/b.ts' } }] },
+    })
+    expect(moved[0]).toMatchObject({ summary: { tool: 'Move' } })
   })
 
   it('a command keeps what was asked and none of how it went; an MCP call keeps its arguments', () => {

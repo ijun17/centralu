@@ -1,5 +1,5 @@
 import { asObj, jsonObject, str } from '../../json-value.js'
-import { type FileChange } from '../file-changes.js'
+import { fileChangeTool, type FileChange } from '../file-changes.js'
 import type { ToolSummary } from '@cc/protocol'
 import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
@@ -85,8 +85,9 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
     return { tool: 'Bash', title: cmd, paths: [] }
   }
   if (type === 'fileChange') {
-    const paths = fileChangesOf(item).map((c) => c.path).filter(Boolean)
-    return { tool: 'Edit', title: paths.join(', ') || 'Edit files', paths }
+    const changes = fileChangesOf(item)
+    const paths = changes.map((c) => c.path).filter(Boolean)
+    return { tool: fileChangeTool(changes), title: paths.join(', ') || 'Edit files', paths }
   }
   if (type === 'mcpToolCall') {
     /*
