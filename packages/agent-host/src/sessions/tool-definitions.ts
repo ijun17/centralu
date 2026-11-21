@@ -712,8 +712,7 @@ export const DELEGATE_TOOLS = [
 
 /**
  * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host/delegation/start-agent.md.
- * 400 until #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values), which #1948 step 2
- * took out again (a busy session is sent the task as mail).
+ * docs/tool-cost.md §17
  */
 export const DELEGATE_BUDGET_CHARS = 450
 
@@ -787,16 +786,10 @@ export const AGENT_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /**
- * The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in
- * docs/tool-cost.md. 1,000 until #676/#677 gave agent_session `answer`, `card` and `ifBusy` (1,060 with them, no words
- * added: the answers that need them name them). Claude defers agent_session, so its every request does not carry them.
- * 1,100 until #729: start_agent's `difficulty` and the words on it and on `worktree` (551 → 798 characters, the set
- * 1,085 → 1,332), loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, measured live
- * (docs/tool-cost.md §10). Guidance a caller needs before
- * its first call has no answer to ride in. #690's `list` made the set 1,333 (agent_session 534 → 535, deferred on Claude).
- * 1,350 until #861's `name` (a bare string, 25 characters: the set 1,333 → 1,358). 1,375 until #1038's `machine` (a bare
- * string, as `name`). 1,330 since #1948's fold of `send` into mail (owner 2026-11-12): agent_session loses `send`, `ifBusy` (now mail's) and
- * "messages," (521 → 449, the set 1,372 → 1,300), lowered by what that saves so the reader's sum rises only by the mail tool's net raise.
+ * The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Claude defers
+ * agent_session but loads start_agent, so every ordinary Claude request carries that part, and guidance a caller needs before
+ * its first call has no answer to ride in. How it moved, and why it is lowered by what the fold of `send` into mail saves:
+ * docs/tool-cost.md §17.
  */
 export const AGENT_BUDGET_CHARS = 1330
 
@@ -828,13 +821,7 @@ export const MAIL_TOOLS = [
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/**
- * The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md.
- * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231). 1240 → 1355 for #1948 (owner 2026-11-12, measured 1350): `ifBusy`
- * moved here from agent_session (+55), and the sentence on reports (+72), since every report an agent writes is mail; #2133 took " or checkpoint" from
- * `parent` (-14). AGENT_BUDGET_CHARS fell by 70. 1355 → 1175 for watches (#1324, docs/plans/mailbox.md §18.2, measured 1170): the six thread-era fields no
- * code read and `update` went, and `watch` and its words in `to` came.
- */
+/** The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). How it moved: docs/tool-cost.md §17 */
 export const MAIL_BUDGET_CHARS = 1175
 
 /**
@@ -855,7 +842,10 @@ export const COMPACT_TOOLS = [
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats. 460 → 610 for `then` (#2024; measured 606) */
+/**
+ * The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats.
+ * docs/tool-cost.md §17
+ */
 export const COMPACT_BUDGET_CHARS = 610
 
 /**
@@ -901,11 +891,9 @@ export type MailToolName = (typeof MAIL_TOOLS)[number]['name']
 export type CompactToolName = (typeof COMPACT_TOOLS)[number]['name']
 
 /**
- * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
- * schema; the deferred ones included, since Codex loads them). The set is 874 today, of which about
- * 210 per tool is the name and schema envelope rather than words — why it is three short tools and
- * not three explained ones. Claude loads find_apps (294 characters, 75 tokens) and defers the other
- * two, which cost their names in tool search only.
+ * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and schema; the deferred ones
+ * included, since Codex loads them). About 210 per tool is the name and schema envelope rather than words: why it is three
+ * short tools and not three explained ones. Claude loads find_apps and defers the other two. docs/tool-cost.md §17
  */
 export const APP_ACCESS_BUDGET_CHARS = 900
 
@@ -936,7 +924,7 @@ export type AppToolName = (typeof APP_TOOLS)[number]['name']
 
 /**
  * The ceiling for APP_TOOLS, counted like READER_BUDGET_CHARS; it rides in every profile (#2231), and each profile's ceiling
- * rises by it: the per-app tools it replaces rode outside every ceiling. Measured 467 (docs/tool-cost.md §16)
+ * rises by it: the per-app tools it replaces rode outside every ceiling. Measured in docs/tool-cost.md §16 and §17
  */
 export const APP_BUDGET_CHARS = 500
 
@@ -997,45 +985,19 @@ export function readerInstructions(subagentTool?: string, appsAttached = false):
 }
 
 /**
- * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
- * description and JSON schema, plus the instructions, including the deferred guide and update
- * definitions since Codex can load them. Measured for #581: 1,709 = 983 existing tool characters
- * + 298 for update_centralu + 428 instructions (392 before its 36-character pointer).
- * The ceiling rises from 1,400 to 1,750 for that addition, and to 1,950 for #1480 (read_session's `tools`, `maxChars`, `before`, `from` and `offset`: +204). On Claude the update definition is
- * deferred: only the pointer rides in every request. The tokens measured for the earlier
- * instructions remain in docs/tool-cost.md §11; these new figures count characters, not tokens.
- * Raising it is a decision about every session's context: a line added to READER_FIRST counts here. #957's
- * REPO_WORK_FIRST is not counted: it rides only where an app is attached, whose own tools cost more than it.
+ * The ceiling for the reader set, in characters of what the model is sent: each tool's full name, description and JSON
+ * schema, plus the instructions, including the deferred guide and update definitions since Codex can load them. Raising it
+ * is a decision about every session's context: a line added to READER_FIRST counts here. REPO_WORK_FIRST (#957) is not
+ * counted: it rides only where an app is attached, whose own tools cost more than it. How it moved: docs/tool-cost.md §17.
  */
 export const READER_BUDGET_CHARS = 1960
 
 /**
- * The ceiling for what each profile carries in every request (#513), in characters of its resident
- * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts), in the default
- * rare-commands tier. Measured 2026-10-12 on Claude: assistant 9,317 in the commands tier (7,323 + 1,994; it
- * was 11,862 with every command resident, against a ceiling of 12,000, before the tier became the default, #512),
- * scoped 2,267, builder 1,432; the tokens they cost are in docs/tool-cost.md.
- * Codex carries the same plus the 52-character
- * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
- * from 2,300 and builder from 1,450. The reader is the sum of its four sets' ceilings (#561 added the agent set).
- * Measured for #581: Claude 2,295 resident (1,867 definitions + 428 instructions), with 1,673 deferred;
- * Codex's possible loaded set 4,020 (3,540 definitions + 480 instructions), with none marked deferred.
- * Its ceiling rises from 3,700 to 4,050, covering the loaded set including Codex's header.
- * Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The worktree manager's
- * seat went with the role (#561 part 3). Scoped rises from 2,350 to 2,400 for send_to_session's `ifBusy` (#677, an
- * enum with no words: 2,330 on Claude, 2,382 on Codex); nothing makes a new coordinator since #372.
- * The reader rises with AGENT_BUDGET_CHARS for #729 (4,200 → 4,450): Claude 2,313 → 2,560, Codex 4,150 → 4,397.
- * #1480 gave read_session `tools` (three words or a boolean), `maxChars`, and the `before`/`from`/`offset` its notes name: the
- * assistant rises 9,500 → 9,700 (Codex 9,663), scoped 2,400 → 2,600 (Codex 2,560), and the reader by READER_BUDGET_CHARS' 200
- * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the Assistant, whose ceilings rise by 10 (1,960; 9,710).
- * #1447 (sessions asking the Assistant): the mail tool's description names the address (`MAIL_BUDGET_CHARS` 800 → 820, measured 811, so the reader's sum rises by 20), and the Assistant's instructions say a session's request is not the person's word and is answered in its thread (9,710 → 9,910; measured 9,906 with the commands tier).
- * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the Assistant's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
- * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `assistant` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
- * #2039 (a name for `to`): the description of `to` says a session may be named by its name or id and what a shared name gets (`MAIL_BUDGET_CHARS` 1,110 → 1,170, measured 1,160, so the reader's sum rises by 60).
- * #2231: every profile carries the `app` tool (APP_BUDGET_CHARS) in place of one MCP server per app, whose tools rode outside these ceilings.
- * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
- * #1948 (owner 2026-11-12): `send` leaves agent_session for mail with its `ifBusy`, and mail's description gains the sentence on reports: the reader's sum rises by MAIL_BUDGET_CHARS' 115 less AGENT_BUDGET_CHARS' 70 (measured +41 on Codex; Claude defers both).
- * #1324 (watches): MAIL_BUDGET_CHARS falls by 180 (1,355 → 1,175), and the reader's sum with it.
+ * The ceiling for what each profile carries in every request (#513), in characters of its resident definitions plus the
+ * server instructions the model is sent (`residentCost` in tool-cost.ts), in the default rare-commands tier. Codex carries
+ * the same plus the 52-character header its developer instructions put over them (#525, codexToolInstructionsFor). Like
+ * READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The reader is the sum of its sets'
+ * ceilings. How each moved, with the measures: docs/tool-cost.md §17.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   assistant: 10_180 + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,

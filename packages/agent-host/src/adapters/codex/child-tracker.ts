@@ -53,12 +53,12 @@ const GOAL_ID = 'goal'
  *
  * - A command item stays `inProgress` until its process exits (recorded: `long-command`, codex-cli 0.160.0), so one the
  *   `turn/completed` leaves open is listed (kind `shell`) until its `item/completed` comes or the process ends.
- * - An `active` goal is listed (kind `other`) until cleared, completed or paused: Codex runs its turns itself, which a sleep
- *   would end; the goal lives in the thread (a wake reads it back). A Stop leaves it `active` with no turn started in 90 s
- *   (codex-cli 0.160.0), so after an interrupted turn it is unlisted until `thread/goal/updated` or a turn starts (#2248).
- * - A child's first notification can come before the `spawnAgent` `item/completed` that names it, so its state is kept and it
- *   is listed once named. It ends with `{idle}` and `turn/completed` in either order (`{systemError}` is a failure); stoppable
- *   only while its turn id is known. Nested children are listed alike; one from a resumed thread is never named here: not listed.
+ * - An `active` goal is listed (kind `other`) until cleared, completed or paused: Codex runs its turns itself, which a sleep would
+ *   end; the goal lives in the thread (a wake reads it back). A Stop leaves it `active` with no turn started in 90 s (codex-cli
+ *   0.160.0), so after an interrupted turn it is unlisted until `thread/goal/updated` or a turn starts (#2248).
+ * - A child's first notification can precede the `spawnAgent` `item/completed` that names it, so it is kept and listed once
+ *   named. It ends with `{idle}` and `turn/completed` in either order, or `{systemError}`; stoppable only while its turn id is known. Nested
+ *   children are linked by that call and listed alike; a resumed thread's child is never named here, so it is not listed.
  */
 export class CodexChildTracker {
   private readonly threads = new Map<string, { active: boolean; turnId: string | null }>()

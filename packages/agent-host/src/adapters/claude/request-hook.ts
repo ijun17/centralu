@@ -15,11 +15,11 @@ const HOOK_TIMEOUT_SECONDS = 3600
  * narrower mode: a tool needing no permission (Agent, CronCreate, ScheduleWakeup, TaskStop, SendMessage) never reaches
  * `canUseTool`, and the SDK's warning on `bypassPermissions` says to gate every call with this hook. `RequestTurn` decides
  * each call: a read goes on to the CLI's flow, an allowed step goes on unasked again, a refused one gives the model the reason.
- * Left to their own gates, which ask in the call itself: Centralu's own tools (`runParsed`), the `app` tool among them, whose call the host asks
- * about knowing the app's tool (`SessionApps.call`, #2231), and only on a session given our server, never by name alone (#93).
- * Fails closed: a question that cannot be asked, or a turn that cannot be told to be a request, refuses the step (a hook that
- * throws would let the tool run). Nothing else here runs in a turn that is not a request. A step let through as asked is recorded once the CLI has run it (`PostToolUse`, which the CLI sends only for a call that did
- * not fail; a failed one, a command that exits non-zero included, gets `PostToolUseFailure`: measured with the real CLI, 2026-11-03), not when the person allowed it.
+ * Left to their own gates, which ask in the call itself: Centralu's own tools (`runParsed`; the `app` tool asks knowing the
+ * app's tool, `SessionApps.call`, #2231), and only on a session given our server, never by name alone (#93).
+ * Fails closed: a question that cannot be asked, or a turn not known to be a request, refuses the step (a throwing hook would
+ * let the tool run). A step let through as asked is recorded once the CLI has run it (`PostToolUse`, sent only for a call
+ * that did not fail; a failure, a non-zero exit included, gets `PostToolUseFailure`: measured with the real CLI, 2026-11-03).
  */
 export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn'>, ownServer: () => boolean): { PreToolUse: HookCallbackMatcher[]; PostToolUse: HookCallbackMatcher[] } | undefined {
   const request = opts.requestTurn

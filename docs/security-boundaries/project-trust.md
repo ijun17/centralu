@@ -38,10 +38,11 @@ for a checked-out repo, the session asked to run `touch`; CLI 2.1.282, SDK 0.3.2
 | `allow` in `settings.local.json` | **callback not called** | callback called |
 | `PreToolUse` hook (allow) in `settings.json` | **callback not called**, the hook runs | callback called, the hook does not run |
 
-A planted `CLAUDE.md` or `.claude/commands` is read and listed when all sources are read, and neither when only `['user']` is, under any preset.
 Under `normal` the same hook leaves the callback uncalled in both columns: the person's own bypass in `~/.claude` decides, and
 that is theirs to set everywhere. Centralu does not override the person's `defaultMode` to force a card because the folder is
 untrusted; `safe` is there for a card everywhere. A hook is itself an arbitrary command as well.
+
+A planted `CLAUDE.md` or `.claude/commands` is read and listed when all sources are read, and neither when only `['user']` is, under any preset.
 
 How projects get trust: a project registered now starts untrusted, and the sidebar asks once when
 it is added, whether the person added it or allowed the Assistant's `add_project` card (#1220; the host names the
