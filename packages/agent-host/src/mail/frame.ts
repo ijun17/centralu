@@ -1,7 +1,8 @@
 import { frameField, type MailDelivered } from '@cc/protocol'
-import { isSessionId, parseAddress } from './address.js'
+import { parseAddress } from './address.js'
 import { parseMailId } from './ids.js'
 import { MAIL_KINDS, type MailKind } from '../dev-services/store/mailbox.js'
+import { isShownId } from './session-refs.js'
 
 /**
  * The text that wakes a session with mail (docs/plans/mailbox.md §7.3), built in one place and **at drain time**: from the
@@ -49,7 +50,7 @@ function attr(name: string, value: string | number | undefined, ok: (v: string) 
 }
 
 const isMessageId = (v: string) => parseMailId(v)?.kind === 'message'
-const isParty = (v: string) => isSessionId(v) || parseAddress(v) !== null
+const isParty = (v: string) => isShownId(v) || parseAddress(v) !== null
 const isMailKind = (v: string) => (MAIL_KINDS as readonly string[]).includes(v)
 const isOutcome = (v: string) => OUTCOME_RE.test(v)
 const isCount = (v: string) => /^[0-9]{1,6}$/.test(v)

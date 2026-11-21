@@ -135,5 +135,9 @@ describe('the id a tool prints for an address', () => {
   it("is the person's word for the person under either name and an app's address as it is; a hub no longer linked goes by its id", () => {
     const r = refs()
     expect(['person', 'session:hub-0000000b/person', `app:${HOST}/p1/x`, 'centralu', 'session:hub-0000000b/h1'].map((a) => r.shown(a))).toEqual(['person', 'person', `app:${HOST}/p1/x`, 'centralu', 'hub-0000000b.h1'])
+    // Its machines' sessions too: with another hub linked, the id reads back as a machine that hub does not have, not as its m2
+    const other = refs({ hubs: [{ id: 'hub-0000000c', label: 'desk', name: 'Desk', you: 'm1' }] })
+    expect(other.shown('session:hub-0000000b/m2.w1')).toBe('hub-0000000b.m2.w1')
+    expect(other.ref('a', 'hub-0000000b.m2.w1')).toEqual({ address: 'session:hub-0000000c/hub-0000000b.m2.w1' })
   })
 })

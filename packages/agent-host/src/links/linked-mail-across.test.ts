@@ -194,6 +194,16 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.deliveredAt).not.toBeNull()
   })
 
+  it("a machine's answer to a hub this machine no longer has a link to names that hub by its name, not its id", async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is the build green?' }))
+    machine.mail!.across.usePeers({ selfName: () => 'Remote box', hub: () => undefined, hubs: () => [] })
+    expect(await tool(machine, 'w1', { action: 'reply', thread: id, text: 'yes' })).toEqual({
+      text: 'Refused (link_down): Hub mac is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.',
+      isError: true,
+    })
+  })
+
   it('send with the id of held mail sends it as written, refusing new words; with any other id it is a send missing its recipient; handled drops it', async () => {
     const { hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })

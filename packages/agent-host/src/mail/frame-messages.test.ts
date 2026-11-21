@@ -72,6 +72,15 @@ describe('the frame of mail without threads', () => {
     expect(odd).not.toContain('evil')
   })
 
+  it('keeps the longest id a session is shown by, a hub label and a machine of the longest before a UUID, so the reader can answer it', () => {
+    const longest = `${'l'.repeat(32)}.${'m'.repeat(32)}.0b6f3c2e-6a51-4f7e-9d1a-2c8e5b7a4f10`
+    const frame = buildMessageFrame([item(1, { kind: 'report', from: longest, about: longest })]).text
+    expect(frame).toContain(`from="${longest}"`)
+    expect(frame).toContain(`about="${longest}"`)
+    // A third computer is no shape it prints
+    expect(buildMessageFrame([item(2, { from: `a.${longest}` })]).text).not.toContain('from=')
+  })
+
   it('says after the list how to read it, and (S1) which of these wait for an answer and how to close them', () => {
     const none = buildMessageFrame([item(1)]).text
     expect(none).toContain(`</centralu-mail>\n${READ}\n</system-reminder>`)

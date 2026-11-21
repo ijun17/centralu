@@ -36,6 +36,13 @@ const NO_ROLE: Record<RoleWord, string> = {
   person: 'The person is not a session.',
 }
 
+/** Whether `v` has a shape `SessionRefs.shown` prints for a session: its id, behind at most two computers (`<label>.<machine>.<id>`) */
+export function isShownId(v: string, computers = 2): boolean {
+  const dot = v.indexOf('.')
+  const [computer, rest] = [v.slice(0, dot), v.slice(dot + 1)]
+  return isSessionId(v) || (computers > 0 && dot > 0 && MACHINE_ID_RE.test(computer) && isShownId(rest, computers - 1))
+}
+
 /**
  * How every tool that takes a session reads it (mail's `to`, read_session, agent_session): one set of forms, so what one tool
  * prints another takes (remote-hub.md §3.3). A session's address, whole or cut short, is refused with the id to write, never looked up as a name
@@ -116,7 +123,7 @@ export class SessionRefs {
     const hub = hubs.find((h) => h.id === p.host)
     const dot = p.sessionId.indexOf('.')
     if (dot > 0 && hub?.you === p.sessionId.slice(0, dot)) return p.sessionId.slice(dot + 1)
-    if (dot > 0 && !(hub && hubs.length > 1)) return p.sessionId
+    if (dot > 0 && hub && hubs.length === 1) return p.sessionId
     return `${hub?.label ?? p.host}.${p.sessionId}`
   }
 
