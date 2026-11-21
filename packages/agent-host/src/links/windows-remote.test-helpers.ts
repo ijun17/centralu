@@ -155,22 +155,14 @@ export function pwsh7ModulePath(dir: string): string {
 }
 
 /**
- * Whether a command on the stand-in remote ended without a word: a non-zero exit, nothing on stdout, and on stderr
- * nothing but PowerShell's progress records and what the fake ssh says of a command it could not run (`FAKE_SSH_MARK`).
- * Every script Centralu runs there says something when it fails (a `CENTRALU-INSTALL fail …` line, a JSON line with
- * `ok: false`, `Centralu: no version is installed` on stderr, PowerShell's errors in CLIXML), so what is left is a
- * process that was ended, crashed (Windows PowerShell started with `-EncodedCommand` exits 1 when its last command
- * failed, whatever the exit code of that command) or never ran, and not an answer.
- *
- * It happened on GitHub's windows-2022 runners in install-windows.test.ts (#1244): three times in one afternoon, exit 1
- * and nothing printed, after 3 to 8 seconds, from a different command each time (the stop of the old host, the install
- * step of the next version). No wall-clock bound is involved: production's stop has none beyond `SSH_EXEC_TIMEOUT_MS`
- * (30 minutes). It has not been seen on a development machine (22 runs of the file under load, 3,900 runs of the stop
- * alone on two cores), so the cause is not known. Both commands run the `node.exe` of the remote's Node folder, and
- * a scanner holding a freshly unpacked file was seen on those runners before (#1133): a guess, not a finding.
- *
- * Production does not rerun anything: there the person reads "gave no answer (exit 1)" and tries again. Whether a real
- * machine ends a command like this is not known either.
+ * Whether a command on the stand-in remote ended without a word: a non-zero exit, nothing on stdout, and on stderr only
+ * PowerShell's progress records and the fake ssh's own mark (`FAKE_SSH_MARK`). Every script Centralu runs there says something
+ * when it fails, so what is left is a process that was ended, crashed (Windows PowerShell with `-EncodedCommand` exits 1 when
+ * its last command failed, whatever that command's code) or never ran. Seen on GitHub's windows-2022 runners in
+ * install-windows.test.ts (#1244): three times in one afternoon, exit 1 and no output after 3 to 8 s, from a different command
+ * each time; never on a development machine (22 runs under load, 3,900 runs of the stop alone), so the cause is unknown (not a
+ * wall-clock bound: production's stop has none beyond `SSH_EXEC_TIMEOUT_MS`, 30 minutes; a scanner holding a freshly unpacked
+ * file, #1133, is a guess). Production reruns nothing: the person reads "gave no answer (exit 1)" and tries again.
  */
 export function diedSilently(r: RemoteRun): boolean {
   const said = clixmlErrors(r.stderr)

@@ -7,8 +7,8 @@ import { nothingOwed } from './links-world.test-helpers.js'
 import type { Tunnel } from './tunnel.js'
 
 /**
- * How often the hub tries a machine it cannot reach (#1134): from 2 s, doubling, up to 5 minutes. A laptop that is
- * closed, or a server used once a week, used to cost an ssh attempt every minute for as long as the hub ran.
+ * How often the hub tries a machine it cannot reach (#1134): from 2 s, doubling, up to 5 minutes. A laptop that is closed, or a
+ * server used once a week, would cost an ssh attempt every minute for as long as the hub ran, were the interval fixed.
  */
 
 afterEach(() => {

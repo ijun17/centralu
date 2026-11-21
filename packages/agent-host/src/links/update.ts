@@ -7,19 +7,14 @@ import { tryParseJson } from '../json-value.js'
 import { sleep } from '../timing.js'
 
 /**
- * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
- * (docs/plans/remote-hub.md §10.5 and §10.5a), over the same ssh as the link:
- *
- *   update     install beside (install.ts, `activate: false`; the running host is not touched), wait for the turns
- *              there (`beforeStop`), then hand the switch to the machine: one command runs the new version's
- *              `serve --switch`, which stops the old host, switches the pointers, starts and checks the new version,
- *              and prunes, or puts the old version back. The hub then only reads its steps and outcome
- *              (`serve --switch-status`), so a link drop or a hub that dies leaves the machine with a host
- *   rollback   the same switch towards `previous`, run by the version that runs now; `previous` is cleared
- *   uninstall  stop, then the boot entry removed (`serve --autostart off`, autostart.ts), then
- *              `<data>/remote/` removed; the data (store, `serve.json`, logs) stays
- *
- * What runs things there and what watches the link is the caller's (`HostControl`, given by `LinkedMachine`).
+ * Update, rollback and uninstall of the Centralu the hub installs on a linked machine (docs/plans/remote-hub.md §10.5, §10.5a),
+ * over the link's ssh.
+ *   update     install beside (install.ts, `activate: false`), wait for the turns there (`beforeStop`), then hand the switch to the
+ *              machine: the new version's `serve --switch` stops the old host, switches the pointers, starts and checks the new
+ *              one and prunes, or puts the old one back. The hub only reads its steps (`serve --switch-status`), so a link drop
+ *              or a dead hub leaves the machine with a host
+ *   rollback   the same switch towards `previous`, which is then cleared
+ *   uninstall  stop, remove the boot entry (`serve --autostart off`) and `<data>/remote/`; the data (store, `serve.json`, logs) stays
  */
 
 export type UpdateStep =
