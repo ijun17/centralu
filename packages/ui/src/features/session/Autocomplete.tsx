@@ -6,18 +6,9 @@ import { useStore } from '../../store/store.js'
 import { filesView, skillsView, type FileAnswer, type Skills } from './autocompleteState.js'
 import { GUI_COMMANDS } from './guiCommands.js'
 
-/**
- * Composer autocomplete — `/` for skills, `@` for files.
- *
- * The UI does not need to know the lists come from different places:
- *   skills come from each tool's official API (Claude's supportedCommands, Codex's
- *   skills/list), files are found by the host in the project index.
- *
- * Two things are held to:
- *  1. **Never block typing.** Even if the list cannot be fetched, typing and sending still work.
- *  2. **Distinguish "none" from "not yet".** Right after a session is created, the tool is still
- *     starting up and cannot be asked for skills — showing an empty list at that moment makes
- *     it look as though there are no skills.
+/*
+ * Composer autocomplete: `/` for skills (the tool's own API: Claude's supportedCommands, Codex's skills/list), `@` for
+ * files (the host's project index). A list that fails never blocks typing, and "not yet" (a tool still starting) is not "none".
  */
 
 export type Suggestion = { value: string; label: string; hint: string }

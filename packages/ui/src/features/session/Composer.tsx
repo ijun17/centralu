@@ -31,11 +31,8 @@ import { ComposerFooter } from './ComposerFooter.jsx'
 import { EMPTY_CHAT, EMPTY_QUESTIONS } from './empty.js'
 
 /**
- * A handle that lets the composer take over handling a drop received from outside it (#116).
- *
- * What it returns is "did something actually go in" — if a file is too large or saving fails,
- * nothing goes in. Expanding a collapsed composer before that check would bring up an empty
- * field that looks as if something had happened.
+ * Hands a drop on the pane to the composer (#116). Resolves whether something went in (a file
+ * can be too large or fail to save): a folded composer opens only then, never onto an empty field.
  */
 export type ComposerDrop = {
   accept: (dt: DataTransfer) => Promise<boolean>
@@ -55,23 +52,10 @@ function tabbedRecently(): boolean {
 }
 
 /**
- * The composer (FR-7).
- *
- * **There is exactly one reason this is a separate component: the draft lives in the global
- * store.** An unsent draft belongs to the session, so it has to live in the store (see the
- * `draft` comment below), which means the store changes on every keystroke. Read inside
- * SessionPane, that one keystroke re-renders **the header, the chat stream, and every message
- * bubble on screen** (measured: 1.0 renders per character for the pane, 1.0 for the stream, 2.0
- * for each row — doubled while a response streams). Typing has no reason to cost something
- * proportional to the size of the conversation.
- *
- * So this is the only place that reads the draft. Everything above it passes down only
- * `sessionId`.
- *
- * Not subscribing to the conversation (`chat`) either, for the same reason — the only place
- * that needs it is recalling with the arrow keys, and that reads it with `getState()` at the
- * moment of the keypress. Subscribing to it would re-render the composer on every streaming
- * delta, undoing exactly the cost kept out of it.
+ * The composer (FR-7), the only reader of the draft, which changes on every keystroke. Read in
+ * SessionPane, it would re-render the header, the stream and every row per character (measured: 1.0
+ * renders per character for the pane and the stream, 2.0 per row, doubled while streaming).
+ * `chat` is read with `getState()` on an arrow key, never subscribed, for the same reason.
  */
 export const Composer = memo(function Composer({
   sessionId,
@@ -84,74 +68,31 @@ export const Composer = memo(function Composer({
   onMenuOpenChange?: (open: boolean) => void
   /** A handle that hands off anything dropped anywhere on the pane to this composer's own handling (#116) */
   dropRef?: Ref<ComposerDrop>
-  /**
-   * Whether to draw its own top border.
-   *
-   * When it sits directly below the conversation, that line is **the boundary between the
-   * conversation and the composer.** But inside a collapsed card, the card's rounded border is
-   * already the boundary, and a straight line drawn right below it looks like the corner ending
-   * twice.
-   */
+  /** Its own top border; false inside a folded card, whose rounded border already is the edge */
   framed?: boolean
 }) {
-  /**
-   * What the composer's text becomes for an open question (#125, #174).
-   *
-   * This subscribes to a narrowed-down string rather than the full array — subscribing to the
-   * questions array directly would deliver a new reference every time, undoing exactly the
-   * re-render this component was built to avoid. The judgment is the same one the store's send
-   * uses (`composerTarget`), attachments included: without them, attaching a file under the
-   * "write an answer" prompt would send the text as a new turn instead, and the question would
-   * be dropped.
-   */
+  // What the text becomes for an open question (#125, #174): a string, not the questions array (a
+  // new reference every time). Attachments count as in the store's send (`composerTarget`), so the
+  // placeholder never promises an answer that would go as a new turn.
   const target = useStore((s) =>
     composerTarget(s.sessions[sessionId]?.pendingQuestions ?? EMPTY_QUESTIONS, (s.drafts[sessionId]?.attachments.length ?? 0) > 0),
   )
 
-  /*
-   * Picks up **only what this actually needs** from the session.
-   *
-   * Subscribing to the whole session object would re-render the entire composer (the attachment
-   * list, even the autocomplete menu) on every delta while a response streams — yet this
-   * component only reads three things from the session, and none of the three ever changes
-   * mid-conversation. Values that actually change, like model, permissions, and context, are
-   * subscribed to separately by ComposerFooter (ComposerFooter.tsx).
-   */
+  // Single fields, not the session object, which changes on every streamed delta
   const alive = useStore((s) => !!s.sessions[sessionId])
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')
   const isAssistant = useStore((s) => isAssistantKind(s.sessions[sessionId]?.kind))
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
-  // Pulls out just this one setting — subscribing to the whole preferences record would
-  // re-render the composer whenever any setting changes
   const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const sc = useShortcut()
-  /*
-   * An unsent draft belongs to **the session**, not to this component.
-   *
-   * Held with useState, the text would stick to that spot on screen. Since the focus view
-   * reuses the same component when the session changes, whatever is being typed for session A
-   * would stay in session B's composer, and sending it would go to the wrong session. In the
-   * grid it is the opposite problem: switching screens unmounts the component, so the text
-   * would disappear along with it — two symptoms of the same underlying cause.
-   */
+  // The draft is the session's (docs/state-management.md "Composer text and selection"): the focus
+  // view reuses this component across sessions and the grid unmounts it
   const draft = useStore((s) => s.drafts[sessionId] ?? EMPTY_DRAFT)
   const setDraft = useStore((s) => s.setDraft)
 
-  /*
-   * An older message recalled with the arrow keys (#38). `at` is its position in history,
-   * `text` is what is currently shown.
-   *
-   * **This never overwrites the unsent draft.** While browsing history, the composer shows this
-   * value instead, and the session's draft is left untouched underneath. So stepping down once
-   * more past the most recent entry brings the unsent draft right back — if this had instead
-   * kept a separate copy of the draft, there would inevitably come a day (switching sessions,
-   * a failed send) when that copy and the real draft fell out of sync.
-   *
-   * It is correctly component state: "which entry in history is being viewed" is a decision
-   * made in this exact moment, not a fact about the session. It is cleared below whenever the
-   * session changes.
-   */
+  // A sent message recalled with the arrow keys (#38), shown over the draft, which stays untouched
+  // underneath, so stepping past the newest entry brings it back
   const [recall, setRecall] = useState<{ at: number; text: string } | null>(null)
   const text = recall ? recall.text : draft.text
   const attachments = draft.attachments
@@ -164,7 +105,6 @@ export const Composer = memo(function Composer({
   )
   const setText = useCallback(
     (next: string | ((prev: string) => string)) => {
-      // While editing a recalled message, edit that message — the draft is still left untouched
       if (recall) {
         setRecall({ ...recall, text: typeof next === 'function' ? next(recall.text) : next })
         return
@@ -190,22 +130,9 @@ export const Composer = memo(function Composer({
   const [dragging, setDragging] = useState(false)
   const [caret, setCaret] = useState(0)
   /*
-   * Whether an IME is mid-composition (issue #12).
-   *
-   * This is the same fact #38 already reads off a `keydown`, held for longer. A key event can
-   * only answer "is this keystroke the IME's"; the question here is "is the value in the box
-   * finished", and that spans every event between `compositionstart` and `compositionend` —
-   * a dozen of them for five Korean syllables.
-   *
-   * It gates autocomplete and nothing else. `한` arrives as `ㅎ`, `하`, `한`, and with `@` in
-   * front each of those is an `fs.search` for a query the person never asked for. The text is
-   * deliberately *not* gated: a composing character has to appear as it is typed, so the store
-   * write behind `value` stays on every event, and so does the height measurement that keeps
-   * that character from being clipped.
-   *
-   * Note this is not a claim about latency. It removes work; whether that is visible was never
-   * measured (see the investigation on #12, which could not separate render cost from the
-   * frame it was waiting for).
+   * An IME is mid-composition (#12): between `compositionstart` and `compositionend`, not one key.
+   * It gates autocomplete only (`한` arrives as `ㅎ`, `하`, `한`, each an `fs.search` after `@`);
+   * the text and its height still update on every event. Removes work; a latency gain was never measured.
    */
   const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -218,13 +145,9 @@ export const Composer = memo(function Composer({
   const pressed = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
   /*
-   * Takes the keyboard when asked to (#528): the session was just picked in the palette or created,
-   * and what the person does next is type to it. Without this the palette's field and the dialog's
-   * button leave the keyboard on the page, and the first key goes nowhere until a click in the box;
-   * a Tab reaches it only in WebKit on macOS. Asked through the store, since the palette and the
-   * dialog never hold this element, and taken here once nothing covers the session: the dialog asks
-   * while it is still closing. The rules (an approval card's keys, a field being typed in) are
-   * `composerFocusAnswer`'s.
+   * Takes the keyboard when asked through the store (#528): a session just picked in the palette or
+   * created. Otherwise the first key goes nowhere (a Tab reaches the box only in WebKit on macOS).
+   * Taken once nothing covers the session, as the dialog asks while still closing; rules in `composerFocusAnswer`.
    */
   const focusAsked = useStore((s) => s.composerFocusFor === sessionId)
   const focusCovered = useStore((s) => s.composerFocusFor === sessionId && approvalCardCovered(s, sessionId))
@@ -246,35 +169,17 @@ export const Composer = memo(function Composer({
     if (useStore.getState().composerFocusFor === sessionId) useStore.getState().askComposerFocus(null)
   }, [sessionId, focusAsked, focusCovered, focusApproval])
   const attachFile = useStore((s) => s.attachFile)
-  /*
-   * Attachments still uploading (#180). A chip only enters the draft once the host has finished
-   * storing it — sending before that would send only the text, and a chip that finishes late
-   * would be attached to the draft afterward and ride along on the *next* message instead. While
-   * something is uploading, nothing sends, and the list shows what it is waiting on.
-   */
+  // Nothing sends while an attachment uploads (#180): a chip enters the draft only once stored, so
+  // one finishing late would ride on the next message
   const uploading = useStore((s) => s.uploading[sessionId] ?? 0)
-  /*
-   * The composer's height comes **from the value.**
-   *
-   * Setting `style.height` in onChange keeps the height correct only when the value changes
-   * through typing: after sending, `setText('')` clears the value but leaves the height
-   * standing, so an empty composer sits there tall, and inserting a long path through
-   * autocomplete does not grow it at all.
-   *
-   * The number of paths that change the value will only keep growing (paste, restoring a draft,
-   * switching sessions...). Instead of re-fitting the height on every one of those paths, this
-   * only ever watches the single value. It is a useLayoutEffect that measures before paint, so
-   * there is no flicker.
-   */
+  // The height follows the value, whatever changed it (a send, autocomplete, a paste); measured before paint
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
     fitComposerHeight(el)
   }, [text])
 
-  // Apply the requested caret with its value, before another input event. A next-frame move
-  // can collapse a newer selection (#368), making replacement text append to the old draft.
-  // Consume on every commit: recalled entries can share both their text and their caret.
+  // The caret lands in the commit of its text (docs/state-management.md "Composer text and selection", #368)
   useLayoutEffect(() => {
     const next = pendingSelection.current
     pendingSelection.current = null
@@ -284,26 +189,15 @@ export const Composer = memo(function Composer({
     el.setSelectionRange(next.caret, next.caret)
   })
 
-  /*
-   * A switch to a different session undoes any recall in progress (#38).
-   *
-   * The focus view reuses this same component when the session changes. Without clearing it,
-   * text recalled from A's history would still be sitting in B's composer, and that is exactly
-   * the situation keeping the unsent draft on the session prevents — sending it as-is would
-   * go to the wrong session.
-   *
-   * Cleared before render (layout). As an effect, someone else's text would flash for one frame.
-   */
+  // Another session ends a recall (#38), in layout: as an effect, A's text would flash in B's box for a frame
   useLayoutEffect(() => {
     setRecall(null)
   }, [sessionId])
 
   /*
-   * The quiet line under a link dropped from an app this session cannot reach (#308): the link went
-   * in, but the agent will not have the app's tools, and the line says what would give them. It is
-   * about this session, so another session in the same composer (the focus view reuses it) clears
-   * it, as does sending, dismissing it, or the next drop. `asked` drops a late answer to an earlier
-   * drop.
+   * The line under a link dropped from an app this session cannot reach (#308): it says what would
+   * give the agent the app's tools. Another session, a send, a dismissal or the next drop clears it;
+   * `asked` drops a late answer to an earlier drop.
    */
   const platform = usePlatform()
   const [appNotice, setAppNotice] = useState<{ text: string; reason: string } | null>(null)
@@ -313,30 +207,21 @@ export const Composer = memo(function Composer({
     setAppNotice(null)
   }, [sessionId])
 
-  // Autocomplete: `/` for skills, `@` for files
   const suggestionsId = useId()
   const ac = useAutocomplete({
     sessionId,
     projectId,
     text,
     caret,
-    // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
-    // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
+    // Not while composing (#12): a half-formed syllable is not a query. Closed, the arrows go back to the caret.
     enabled: alive && caret >= 0 && !composing,
-    // The Assistant's `@` picks a session — what it targets is a session, not a file.
-    // Judged by an explicit marker (kind): the Assistant has no file tree to pick from
+    // The Assistant has no file tree: its `@` picks a session
     atSource: isAssistant ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {
-    /*
-     * A GUI command (2026-09-07): the moment it is picked from the list is the execution
-     * itself — filling '/usage' into the composer and then requiring another Enter would turn
-     * the promise "pressing Enter opens the screen" into two presses of Enter. This clears the
-     * text and opens the screen instead.
-     */
-    // A session command's value has a trailing space — this does not intercept it when a real
-    // skill of the same name is picked
+    // A GUI command runs on the pick, not on a second Enter. A session command's value ends in a
+    // space, so a real skill of the same name is not taken for one.
     const gui = item.value.endsWith(' ') ? null : guiCommandFor(item.value)
     if (gui) {
       setRecall(null)
@@ -350,30 +235,14 @@ export const Composer = memo(function Composer({
   }
 
   /**
-   * Recalls a sent message with the arrow keys (#38). Returns true when history took over —
-   * in that case the caret does not move.
-   *
-   * The judgment lives in history.ts; the caret rule lives here. History only takes over when
-   * all three hold:
-   *  - autocomplete is closed (if it is open, the arrow key belongs to the list — the caller
-   *    has already filtered that out)
-   *  - no text is selected (an arrow key with a selection is a key that clears the selection)
-   *  - the caret is on the first line for the up arrow, or the last line for the down arrow —
-   *    **counting wrapped lines too**
-   *
-   * History is scanned from the conversation fresh each time. Precomputing it would mean
-   * rescanning thousands of rows on every streaming delta, when it is only ever actually used
-   * at the moment an arrow key is pressed.
+   * Recalls a sent message (#38); true when history took the key. Only with no selection and the
+   * caret on the first (up) or last (down) line, wrapped lines counted. History is scanned on the
+   * key, not kept: that would rescan the conversation on every streamed delta.
    */
   const recallHistory = (el: HTMLTextAreaElement, dir: -1 | 1): boolean => {
     if (el.selectionStart !== el.selectionEnd) return false
     const caret = el.selectionStart
-    /*
-     * Newlines are checked first (a value comparison, free). Only what passes that gets
-     * measured with the mirror — a long line that has wrapped has no newline, yet looks like
-     * several lines, and an arrow key pressed in the middle of it belongs to the caret, not to
-     * history.
-     */
+    // Newlines first (free); only then the mirror, for a wrapped line that has none
     const onEdge =
       dir === -1
         ? onFirstLine(text, caret) && onFirstVisualLine(el)
@@ -388,21 +257,13 @@ export const Composer = memo(function Composer({
     if (step.kind === 'none') return false
 
     const next = step.kind === 'draft' ? draft.text : step.text
-    /*
-     * The caret goes to the end. A shell does the same, and for a single-line history entry,
-     * that spot is both the first line and the last, so it can still keep scrolling up and
-     * down. Recalling a multi-line entry stops there, and that is the right behavior — it was
-     * pulled up to be read and edited.
-     */
+    // The caret at the end, as a shell puts it: a one-line entry can keep stepping, a multi-line one stops to be edited
     requestSelection({ text: next, caret: next.length })
     setRecall(step.kind === 'draft' ? null : { at: step.at, text: step.text })
     return true
   }
 
-  // Pasting a screenshot is the most common flow here (FR-13)
-  // Returns "did at least one thing get attached" — the side that expands a collapsed composer
-  // decides based on this (#116).
-  // Expanding it when nothing was attached would bring up an empty field, lying that something happened.
+  // Whether anything was attached: a folded composer opens only then (#116)
   const takeFiles = async (files: FileList | File[] | null) => {
     if (!files || !alive) return false
     let added = false
@@ -416,18 +277,9 @@ export const Composer = memo(function Composer({
     return added
   }
 
-  /*
-   * All the handling for accepting a drop (#116).
-   *
-   * Dropping **anywhere on the pane**, not just this composer, needs to do the same thing, and
-   * having two separate copies of that judgment and handling would eventually mean only one of
-   * them getting fixed — a path dragged from the tree ending up in the sentence when dropped on
-   * the composer, but silently disappearing when dropped elsewhere on the pane. So there is
-   * exactly one place that handles it, and the pane calls into it through a handle (dropRef).
-   */
+  // Every drop on the pane or the composer, one handling (#116); the pane reaches it through `dropRef`
   const acceptDrop = async (dt: DataTransfer) => {
-    // A path dragged from the tree goes into the sentence, not into an attachment.
-    // Without telling them apart, `files` would be empty and nothing would happen.
+    // A path from the tree goes into the sentence; its `files` is empty
     const path = readDragPath(dt)
     if (path) {
       setText((prev) => {
@@ -437,19 +289,12 @@ export const Composer = memo(function Composer({
       })
       return true
     }
-    /*
-     * Only a file from outside the app is attached (#286). A session or panel dragged inside the
-     * app can carry the images it shows as files in WebKit; dropped here, that is the grid's drop,
-     * and attaching the screenshot it happens to show would be wrong. Checked here, in the one place
-     * both the pane and the composer hand their drop to, so neither can miss it.
-     */
+    // Only a file from outside the app is attached (#286): in WebKit a session or panel dragged
+    // inside the app carries the images it shows as files, and that drop is the grid's
     const types = [...dt.types]
     if (isOsFileDrag(types)) return takeFiles(dt.files)
-    /*
-     * A link or text goes into the sentence at the caret (#308) — after the file check, since a
-     * file dragged in from the OS can carry its `file:` address as `text/uri-list` too. A drag
-     * with a session, panel or project type is still the grid's, as above (`isTextDrag`).
-     */
+    // A link or text at the caret (#308), after the file check: an OS file carries its `file:`
+    // address as `text/uri-list` too
     if (!isTextDrag(types)) return false
     const dropped = droppedText(dt.getData('text/uri-list'), dt.getData('text/plain'))
     if (!dropped) return false
@@ -457,11 +302,7 @@ export const Composer = memo(function Composer({
     return true
   }
 
-  /**
-   * Puts a dropped link or text at the caret: in place of the selection, or at the end when the
-   * composer's text is not what the field shows yet. The caret goes right after it, and the field
-   * takes focus, so typing goes on from there.
-   */
+  // At the end when the field does not show the composer's text yet
   const insertDropped = (dropped: DroppedText) => {
     const piece = droppedPiece(dropped)
     setText((prev) => {
@@ -474,10 +315,9 @@ export const Composer = memo(function Composer({
   }
 
   /**
-   * An item dragged out of an app view (#308). The link goes in whatever the answer, and the host
-   * says whether this session can use that app's tools (`apps.reach`); if not, the quiet line says
-   * why. A user-folder app on another computer than the session's is told by the window, without asking
-   * (`appDropVerdict`). An older host that has no answer leaves the line off rather than guess.
+   * An item dragged out of an app view (#308): the link goes in, and the host says whether this
+   * session can use the app's tools (`apps.reach`). A user-folder app on another computer is told
+   * by the window (`appDropVerdict`); an older host with no answer leaves the line off.
    */
   const acceptAppLink = (drop: AppLinkDrop): boolean => {
     const dropped = droppedText(drop.uri, drop.text)
@@ -486,7 +326,6 @@ export const Composer = memo(function Composer({
     const ask = ++asked.current
     setAppNotice(null)
     const { appId, projectId: appProject } = drop.from
-    // A user-folder app of another computer than this session's: the window says so itself, as it knows both (no one is asked)
     const here = useStore.getState()
     const verdict = appDropVerdict(drop.from, here.sessions[sessionId]?.machine, here.externalApps, here.machines)
     if (verdict.kind === 'tell') {
@@ -504,12 +343,9 @@ export const Composer = memo(function Composer({
     )
     return true
   }
-  // No deps here — the closure above needs to see each render's draft and state, so the handle
-  // must be recreated every render too
+  // No deps: the handlers close over this render's draft
   useImperativeHandle(dropRef, () => ({ accept: acceptDrop, acceptAppLink }))
 
-  // Avoid rendering even at the moment the session disappears (deleted, archived) — this is
-  // decided after every hook has run
   if (!alive) return null
 
   return (
@@ -520,12 +356,7 @@ export const Composer = memo(function Composer({
         const t = text.trim()
         if (!t && attachments.length === 0) return
         if (uploading > 0) return
-        /*
-          A GUI command (2026-09-07): a name like `/usage` has no response in the protocol to
-          send to the session — Enter opens an app screen instead of a message. This does not
-          intercept it if there is an attachment: attaching something means the person is
-          talking to the session.
-        */
+        // A GUI command (`/usage`) opens a screen; with an attachment the person is talking to the session
         const gui = attachments.length === 0 ? guiCommandFor(t) : null
         if (gui) {
           setRecall(null)
@@ -533,13 +364,7 @@ export const Composer = memo(function Composer({
           gui.run({ sessionId })
           return
         }
-        /*
-            After sending, the composer really does go empty (#38).
-            **Both** the recall state and the draft have to be cleared — clearing only one
-            would bring the earlier unsent text back to life right where the message was just
-            sent. The message just sent is now at the top of history, so one press of the
-            arrow key brings it back if needed.
-          */
+        // Both, or the cleared one's text comes back where the message was sent (#38)
         setRecall(null)
         setDraft(sessionId, EMPTY_DRAFT)
         asked.current++
@@ -565,14 +390,8 @@ export const Composer = memo(function Composer({
         </div>
       )}
       <div
-        /*
-         * The input field is filled: the surface for typing has to be **a different surface**
-         * from the one for reading. The collapsed card is low enough to hide the field itself,
-         * so no row of it peeks out above the pane's floor to look like a hole.
-         *
-         * The rule that brightness marks something currently happening is still kept by the
-         * border — line-strong on focus, ink-muted when a file is dragged over it.
-         */
+        // Filled, so typing is on another surface than reading; the border says what is happening
+        // (line-strong on focus, ink-muted under a drag)
         className={`relative flex items-end gap-2 rounded-md border bg-surface-raised px-3 py-2 transition-colors focus-within:border-line-strong ${
           dragging ? 'border-ink-muted' : 'border-line'
         }`}
@@ -583,7 +402,7 @@ export const Composer = memo(function Composer({
         }}
         onDragOver={(e) => e.preventDefault()}
         onDragLeave={(e) => {
-          // A leave event also fires when moving into a child, so this only reacts to actually leaving
+          // Also fired on entering a child
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
         }}
         onDrop={(e) => {
@@ -612,23 +431,17 @@ export const Composer = memo(function Composer({
           rows={1}
           value={text}
           /*
-              Focusing here wakes the session, and this is the one place that does ahead of a
-              send (#568): selecting a session in the sidebar only shows it, and the grid's
-              panels stay asleep until used. Waking here moves the resume (about 0.7 s on Claude)
-              into the typing instead of after the send button, and lets the slash list answer
-              from the live process rather than the disk cache (which can serve an uninstalled
-              plugin's commands). wake() dedups and stays quiet, so a second call on
-              an already-live session costs nothing.
+              The one wake ahead of a send (#568): the resume (about 0.7 s on Claude) happens while
+              typing, and the slash list answers from the live process, not the disk cache (which
+              can list an uninstalled plugin's commands). wake() dedups.
             */
           onPointerDown={() => {
             pressed.current = true
           }}
           onFocus={() => {
             /*
-              Only the person's focus wakes it, a press on the composer or a Tab to it (#590). The app also moves the
-              keyboard here, when a session is opened from the sidebar or a search hit (#528) and when a closing
-              palette or dialog returns focus (focusReturn.ts); an asleep session that is only being looked at stays
-              asleep. A focus the app gave is caught by the first key instead (onChange below).
+              Only the person's focus wakes it, a press or a Tab (#590). A focus the app gives (a
+              session opened, #528, or focus returned by a palette or dialog) waits for the first key.
             */
             if (pressed.current || tabbedRecently()) void wake(sessionId)
             pressed.current = false
@@ -639,18 +452,13 @@ export const Composer = memo(function Composer({
           onChange={(e) => {
             setText(e.target.value)
             setCaret(e.target.selectionStart)
-            /*
-              A composer that kept the keyboard while the host put its session to sleep (#568) wakes
-              on the first key, not only on the next focus. Not after a failed wake: that one waits
-              for its Retry rather than a request per keystroke.
-            */
+            // Also wakes a session put to sleep under a focused box (#568); after a failed wake, its Retry does
             const st = useStore.getState()
             if (st.sessions[sessionId]?.live === false && !st.wakeError[sessionId]) void wake(sessionId)
           }}
           onKeyDown={(e) => {
             const composing = composingKey(e.nativeEvent)
-            // While autocomplete is open, the arrow keys, Enter and Tab belong to the list — unless
-            // the input method is using them (#181): an `@파일` still being composed
+            // The list's keys, unless the input method is using them (#181): an `@파일` still composing
             if (ac.open && !composing) {
               const action = autocompleteKeyAction(e)
               if (action === 'down') return (e.preventDefault(), ac.move(1))
@@ -668,20 +476,10 @@ export const Composer = memo(function Composer({
               }
             }
             /*
-                While an IME is composing, Enter and the arrows belong to **the candidate list**,
-                not to us (#38, #12). The arrows move through candidates; Enter commits the
-                syllable being formed. Enter is the worse one to take: our answer to Enter is to
-                send, so the keystroke that was meant to finish a word posts a half-written
-                message instead — and Korean needs that keystroke far more often than English,
-                which is the shape of "this only happens in Korean".
-
-                This reads the key event rather than the `composing` state above, on purpose. The
-                state answers "is the value still forming", which is the right question for
-                autocomplete and the wrong one for a keystroke: it is set from an event that in
-                principle might not arrive, and a stuck `true` there would mean a message that
-                cannot be sent at all. These flags are scoped to this one key and cannot go stale.
-                `composingKey` (app/keys.ts) reads all three signals engines use, including
-                WebKit's keyCode 229 on the Enter it dispatches after `compositionend`.
+                While an IME composes, Enter and the arrows are the candidate list's (#38, #12): an
+                Enter that commits a Korean syllable must not send. Read from the key, not `composing`,
+                which a lost `compositionend` could leave stuck true, and then nothing sends;
+                `composingKey` also reads WebKit's keyCode 229 on the Enter after `compositionend`.
               */
             if (!composing && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
               if (recallHistory(e.currentTarget, e.key === 'ArrowUp' ? -1 : 1)) {
@@ -689,16 +487,7 @@ export const Composer = memo(function Composer({
                 return
               }
             }
-            /*
-                What counts as sending is decided by the setting (composerKeys.ts). This does
-                not judge it directly here because the combination of cases it is tangled up
-                with, together with the composition check (composing) above, needs to live
-                somewhere testable without a browser.
-
-                For someone who has turned the setting on, a plain Enter does nothing here — it
-                is not intercepted, so the textarea just breaks the line as usual. That is the
-                entire effect of the setting.
-              */
+            // With the setting on, a plain Enter is left to the textarea, which breaks the line
             const sendKey = { key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, composing }
             if (isComposerSendKey(sendKey, sendWithModifierEnter)) {
               e.preventDefault()
@@ -712,11 +501,7 @@ export const Composer = memo(function Composer({
               void takeFiles(files)
             }
           }}
-          /*
-           * With a question open, **whatever is typed here goes as the answer to that
-           * question** (#125). That fact needs to be known before pressing send, or the question
-           * is dropped without the person knowing what they just got rid of.
-           */
+          // What a send does to an open question, said before the send (#125)
           placeholder={
             target === 'answer'
               ? 'Type your answer to the question'
@@ -725,11 +510,7 @@ export const Composer = memo(function Composer({
                 : 'Type a message'
           }
           data-testid="prompt-input"
-          /*
-            The box keeps its own role (#842 item 7): a <textarea> may not be made a combobox, and a screen reader would
-            then lose the multi-line editing it announces for the main input. It says it can raise a list, and while the
-            list is open, which list and which option is under the cursor.
-          */
+          // Not a combobox (#842 item 7): a <textarea> may not take that role, and would lose its multi-line editing
           aria-haspopup="listbox"
           aria-expanded={ac.open}
           aria-controls={ac.open ? suggestionsId : undefined}
@@ -737,11 +518,8 @@ export const Composer = memo(function Composer({
           // Whose composer this is: that session's approval card takes mod+⇧Y/D/L from here, where y/n/a are letters
           data-composer-session={sessionId}
         />
-        {/*
-            The attach button uses **the same component** as send, so the two buttons standing
-            side by side match in size and height (inner padding, icon size). The file picker is
-            opened by clicking a hidden input — it does the same job without a label.
-          */}
+        {/* Opened by the attach button, an IconButton as send is,
+            so the two match */}
         <input
           ref={fileRef}
           type="file"
@@ -749,13 +527,7 @@ export const Composer = memo(function Composer({
           className="hidden"
           data-testid="attach-input"
           onChange={(e) => {
-            /*
-             * The chosen files are copied out before the field is cleared (#180). If the value
-             * were left as-is, the browser would not fire `change` again for picking the same
-             * file a second time, so removing the chip (or sending it) would mean the same file
-             * could never be attached again. `files` is a live list, so clearing the value clears it
-             * too — this copies it into an array first, then clears.
-             */
+            // Cleared so the same file fires `change` again (#180); copied first, as `files` is live
             const files = Array.from(e.currentTarget.files ?? [])
             e.currentTarget.value = ''
             void takeFiles(files)
@@ -772,12 +544,7 @@ export const Composer = memo(function Composer({
         </IconButton>
         <IconButton
           type="submit"
-          /*
-            The label follows the setting, since the send key itself changes with it. This is
-            **the only place in the app that names that key**, so getting it wrong leaves
-            someone who turned the setting on with no way to know what to press the first time.
-            Whether it reads `⌘` or `Ctrl` is answered by the keyboard.
-          */
+          // The one place that names the send key
           label={`Send (${sendWithModifierEnter ? sc('mod', 'Enter') : 'Enter'})`}
           disabled={(!text.trim() && attachments.length === 0) || uploading > 0}
           testId="send"
@@ -788,17 +555,10 @@ export const Composer = memo(function Composer({
           <SendIcon />
         </IconButton>
       </div>
-      {/*
-          Model, effort and permissions are decided **right before sending**, so they sit below
-          the composer. In the header they would be at the opposite end of the screen, so what is
-          being sent and under which settings would never show together at a glance. Here, the hand
-          and the eye stay in the same spot.
-        */}
-      {/*
-          No shortcut hint. Sending with Enter and breaking the line with Shift+Enter is the
-          default for a chat composer — learned once and done — but a hint takes up space every
-          single time. Once read, it is noise from then on.
-        */}
+      {/* The settings sit under the box, chosen just before a send,
+          not in the header across the screen */}
+      {/* No shortcut hint: Enter to send is learned once,
+          and a hint takes room every time */}
       <ComposerFooter sessionId={sessionId} onMenuOpenChange={onMenuOpenChange} />
     </form>
   )

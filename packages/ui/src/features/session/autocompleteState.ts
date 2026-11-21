@@ -1,13 +1,9 @@
 import type { CommandInfo } from '@cc/protocol/client'
 import type { Loaded } from '../../app/useLoad.js'
 
-/**
- * What the composer's lists know about what they were asked, kept apart from the hook so it is tested on its own.
- *
- * Both lists are read with `useLoad`, which says "loading", "answered" or "failed". The three ways a list can be
- * empty must not look alike: it is still being read, the host said there is nothing, or the read did not work. A
- * failure must not look like "none" (#1143 U14), nor like "still loading" (U13), where the menu would say
- * "Loading skills…" until the person retyped the `/`.
+/*
+ * The composer's lists as `useLoad` read them, apart from the hook for its tests. Loading, none and failed look unalike:
+ * a failure read as none (#1143 U14), or as loading (U13), which said "Loading skills…" until the `/` was retyped.
  */
 
 /** The `/` list as the host answered it, with the session it answers (the pane is reused for another session) */

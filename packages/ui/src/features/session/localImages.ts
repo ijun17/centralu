@@ -1,11 +1,8 @@
 import type { MessageImage } from '@cc/protocol/client'
 
-/**
- * Local images in an agent's reply: which destinations are files, and the answers the host gave for them.
- *
- * The window cannot load `![shot](/Users/me/out/shot.png)` itself (its origin is the app, and the desktop CSP takes
- * images from `data:` and `blob:` only), so such an image is asked of the session's host (`messages.image`) and drawn
- * from the bytes it sends back. A web address stays an ordinary `<img>`.
+/*
+ * Local images in an agent's reply, asked of the session's host (`messages.image`): the window cannot load a file path
+ * (the desktop CSP takes images from `data:` and `blob:` only). A web address stays an ordinary `<img>`.
  */
 
 /**

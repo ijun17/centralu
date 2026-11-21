@@ -1,34 +1,16 @@
-/**
- * Recalling sent messages with the arrow keys (#38).
- *
- * Only the judgment lives here — it knows neither the DOM nor the store. That way "when
- * does the caret move, and when does history come up" can be tested as plain values (the same
- * reason scroll.ts stands apart).
- */
+/** Recalling sent messages with the arrow keys (#38), the judgment alone, as plain values a test holds */
 
 import type { ChatItem } from '../../store/store.js'
 
 /**
- * Sent messages, oldest first.
- *
- * Not stored separately — the conversation already has them all as `{ kind: 'user' }`, split
- * per session, and surviving restarts. A second store just for history would eventually drift
- * out of sync with that one.
- *
- * The same message sent back to back is counted once. This is the same rule a shell uses, and
- * for the same reason: sending the same command twice is common (retrying, confirming), and
- * counting it as two entries would mean pressing the arrow key twice to reach the previous one
- * — to the person pressing it, it looks as though nothing happened.
+ * Oldest first, read from the conversation rather than kept apart, which would drift. A repeat
+ * counts once, as in a shell: otherwise one press seems to do nothing.
  */
 export function sentMessages(chat: ChatItem[]): string[] {
   const out: string[] = []
   for (const item of chat) {
     if (item.kind !== 'user') continue
-    /*
-     * Only what the person sent here (#745). A brief another session sent through Centralu's tools (start_agent,
-     * agent_session, ask_project: `from`) or a message an app view wrote (`fromApp`) sits in the same list as a user
-     * message, but the person never typed it, and recalling it would bury their own last message under it.
-     */
+    // Only what the person typed here (#745), not a brief from another session, an app or a script
     if (item.from || item.fromApp || item.fromScript) continue
     if (out[out.length - 1] === item.text) continue
     out.push(item.text)
@@ -36,35 +18,17 @@ export function sentMessages(chat: ChatItem[]): string[] {
   return out
 }
 
-/**
- * Whether the caret is on the first line / the last line — **by newlines only**.
- *
- * This does not count visually wrapped lines. Counting those needs the caret's on-screen
- * coordinates, which is not a judgment that can be tested as plain values without a DOM.
- * Wrapped lines are measured by caret.ts with a mirror element, and Composer.tsx combines the
- * two — filtering first with the cheap judgment keeps the expensive measurement rare. Newlines
- * alone would bring up history from the wrapped second line of a long line (caret.ts).
- */
+/** By newlines only; wrapped lines are caret.ts's, measured only after this cheap check passes */
 export const onFirstLine = (text: string, caret: number): boolean => !text.slice(0, caret).includes('\n')
 
 export const onLastLine = (text: string, caret: number): boolean => !text.slice(caret).includes('\n')
 
-/**
- * The result of one arrow-key press.
- *
- *   `none`    this is not history's place to act — move the caret as usual
- *   `recall`  put this text in the composer
- *   `draft`   fully stepped out of history — go back to the unsent draft
- */
+/** `none`: the caret moves as usual; `draft`: stepped out of history, back to the unsent draft */
 export type HistoryStep = { kind: 'none' } | { kind: 'recall'; at: number; text: string } | { kind: 'draft' }
 
 /**
- * Where things are now, and where to go next.
- *
- * When `at` is null, history is not being browsed — the composer holds an unsent draft.
- *
- * Going further up from the oldest entry **stays put.** Letting the caret move instead would
- * make "history has ended" look like "the arrow key stopped working".
+ * `at` null: the draft is shown. Up from the oldest entry stays there; a moving caret would read
+ * as the key no longer working.
  */
 export function stepHistory(p: { history: string[]; at: number | null; dir: -1 | 1 }): HistoryStep {
   const last = p.history.length - 1
@@ -75,7 +39,6 @@ export function stepHistory(p: { history: string[]; at: number | null; dir: -1 |
     return { kind: 'recall', at, text: p.history[at]! }
   }
 
-  // Down arrow outside of history is just the caret — there is nowhere to go back to
   if (p.at === null) return { kind: 'none' }
   if (p.at >= last) return { kind: 'draft' }
   return { kind: 'recall', at: p.at + 1, text: p.history[p.at + 1]! }

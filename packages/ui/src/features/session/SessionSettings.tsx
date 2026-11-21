@@ -7,28 +7,12 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
 
-/**
- * The settings menu below the composer — model, reasoning effort, permissions, agent (FR-7).
- * Can be changed even after a conversation has started — that turns out to be more useful than
- * deciding it all up front.
- *
- * **The four selectors are not lined up side by side.** As a row of `<select>` elements, four
- * things nobody looks at most of the time would permanently take up a whole row below the
- * composer, and in a narrow pane like the grid the four push against each other and cut off the
- * text. The current values read as a single button, and the menu only opens to change them (the
- * same approach as Claude Code).
- *
- * **The model list is never hardcoded here.** It shows exactly what the tool's official API
- * reports (Claude's `supportedModels()`, Codex's `model/list`).
- * A hardcoded list leaves no way to pick a model the tool has just launched (Fable, for one): the
- * tool has moved on and only this app is stuck.
+/*
+ * The settings menu below the composer (FR-7): one button with the values, not four selects a grid pane cannot fit. The
+ * models are what the tool's API reports (Claude's `supportedModels()`, Codex's `model/list`), never hardcoded.
  */
 
-/*
- * Hints have to be short. 'Asks only for risky actions' (27 characters) uses up all the label
- * space in the w-56 menu, so **the word "Normal" itself disappears** — once the description
- * erases the name, that row cannot be picked.
- */
+// Short: 'Asks only for risky actions' (27 characters) filled the w-56 row and erased the word "Normal"
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
   { value: 'normal', label: 'Normal', hint: 'Asks when risky' },
@@ -36,10 +20,7 @@ const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'auto', label: 'Auto', hint: 'Never asks' },
 ]
 
-/**
- * The model list per tool. Spawning the tool every time the selector opens would make that
- * click slow, so the host caches it, and this only asks once, when the tool changes.
- */
+/** Cached by the host, as spawning the tool per open made the click slow */
 export function useModels(
   tool: ToolName,
   live: boolean,
@@ -49,40 +30,20 @@ export function useModels(
   const platform = usePlatform()
 
   /*
-   * Why `live` is a dependency:
-   *
-   * The Claude SDK only exposes the model list through a Query. So **it cannot be read without
-   * a running session**. If the app is opened and a sleeping session is selected, there is no
-   * query at that moment, so the list comes back empty, and an empty result never re-fetched
-   * would leave the selector with only "Default" for good. This re-fetches the moment the
-   * session wakes up.
+   * Read again on `live`: the Claude SDK lists models only through a running Query, so a sleeping session reads none.
+   * Another tool or machine clears the list (one tool's models are not the other's, and Claude's can take seconds);
+   * a wake refreshes the same tool's list in place.
    */
-  /*
-   * **Clears the list first.**
-   *
-   * The list is the tool's own vocabulary — 'sonnet' and 'gpt-5.6-sol' are words in each
-   * other's dictionary that do not exist, so showing another tool's list even briefly offers
-   * something the screen cannot actually pick. Leaving **the previous tool's list sitting
-   * there** until a new response comes back would show Codex models for a moment when switching
-   * from a Codex session to a Claude session's menu, and because Claude only returns its list
-   * once a session is alive (while it is waking up), that window can stretch for whole seconds.
-   */
-  // (`useLoad`: the tool and the machine are the subject, so a change clears the list; waking is a refresh of the same
-  // tool's list, which may stay until the new one arrives)
   const read = useLoad(() => platform.agents.models(tool, machine), [platform, tool, machine], [live])
   return useMemo(() => {
-    // The session must stay usable even if the list cannot be read — this falls back to the
-    // default and only keeps the reason
     if (read.error !== null) return { models: read.data?.models ?? [], reason: read.error }
     if (!read.data) return NO_MODELS
     return { models: read.data.models, reason: read.data.supported ? undefined : read.data.reason }
   }, [read.data, read.error])
 }
 
-/** No list yet: the same object each render */
 const NO_MODELS: { models: ModelOption[]; reason?: string } = { models: [] }
 
-/** The same empty list each render, so a menu reading it does not see a new one every time */
 const NO_LEVELS: string[] = []
 
 function useCapabilities(tool: ToolName, machine: string | null): AdapterCapabilities | undefined {
@@ -90,14 +51,7 @@ function useCapabilities(tool: ToolName, machine: string | null): AdapterCapabil
   return useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data
 }
 
-/**
- * A single menu row.
- *
- * The selected mark only ever goes in **one column on the left**. Putting it on the right would
- * shift its horizontal position from row to row depending on label length, so the eye would
- * have to scan the whole list to see what is selected. Always reserving that empty column keeps
- * the start of the text aligned in one line, whether the mark is there or not.
- */
+/** The check in a fixed left column, so it and the labels line up whatever the label's length */
 function MenuRow({
   label,
   hint,
@@ -133,28 +87,21 @@ function MenuRow({
       <span className="w-2 shrink-0 text-2xs leading-none text-ink-muted" aria-hidden>
         {selected ? '✓' : ''}
       </span>
-      {/*
-        The label wins. With a hint that cannot shrink, as space runs out **the label shrinks
-        all the way to zero** — the description stays and the name vanishes. Lowering the
-        label's shrink weight lets it hold out the longest, but when the label itself is long,
-        like a model name, it still gets truncated (min-w-0 truncate).
-      */}
+      {/* The label shrinks last,
+          or the hint would outlive the name */}
       <span className="min-w-0 shrink-[0.2] truncate text-sm">{label}</span>
       {hint && <span className="ml-auto min-w-0 truncate text-2xs text-ink-faint">{hint}</span>}
     </button>
   )
 }
 
-/*
- * The menu in the conversation's shapes (owner, 2026-10-18): a 14px card, rows on an 8px (rounded-lg) hover inside its
- * 4px inset, the chosen row marked by its check and brighter ink (a fill would read as the hover); group names in sentence case, not small capitals; hints in the UI face.
- */
+// The chosen row is its check and brighter ink: a fill would read as the hover (owner, 2026-10-18)
 function MenuSection({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
     <div className="border-t border-line p-1 first:border-t-0">
       <p className="px-2 pb-0.5 pt-1 text-2xs text-ink-faint">{label}</p>
-      {/* Why this group is different is written at the top of the group — repeating it on
-      every row would make the list unreadable */}
+      {/* Once for the group,
+          not on every row */}
       {note && <p className="px-2 pb-1 text-2xs leading-body text-ink-faint">{note}</p>}
       {children}
     </div>
@@ -176,20 +123,13 @@ export function SessionSettings({
   tool: ToolName
   model: string | null
   effort: string | null
-  /** Response length (#54). null means the tool's default */
+  /** Response length (#54); null: the tool's default */
   verbosity: string | null
-  /** Response speed (Codex's service_tier). null means the tool's default */
+  /** Codex's service_tier; null: the tool's default */
   serviceTier: string | null
   preset: PermissionPreset
-  /** Whether the process is alive — Claude only returns a model list once a session is alive */
   live: boolean
-  /**
-   * Tells the outside when the menu opens and closes (for the grid's collapsed composer).
-   *
-   * A collapsed composer folds back down once the hand leaves it, and this menu opens **on top
-   * of** that composer — the ground must not disappear from under it while a choice is being
-   * made, so it is held open for as long as the menu is open.
-   */
+  /** A folded composer stays up while the menu over it is open */
   onOpenChange?: (open: boolean) => void
 }) {
   const update = useStore((s) => s.updateSessionSettings)
@@ -211,9 +151,7 @@ export function SessionSettings({
     [compactPlatform, sessionId, open],
     [compactSetting.controlled, compactSetting.share, model],
   )
-  /** The menu stays on screen for its exit animation (cc-hang-out), then goes */
   const { shown, leaving } = usePresence(open)
-  // Tells the outside when it opens/closes (the collapsed composer must not fold away meanwhile)
   useEffect(() => {
     onOpenChange?.(open)
   }, [open, onOpenChange])
@@ -240,38 +178,20 @@ export function SessionSettings({
   const current = listed ?? unlisted ?? undefined
   const options = unlisted ? [...models, unlisted] : models
 
-  /*
-   * Closes on an outside click or Esc.
-   *
-   * Unlike a `<select>`, the browser does not close this menu on its own. Once it is open, a
-   * menu left sitting there becomes a wall blocking the composer, so every way to close it is
-   * handled here in one place. (When a confirmation dialog opens, this closes first, so Esc is
-   * never consumed by two places at once.)
-   */
   useDismiss({ open, onClose: close, refs: [rootRef], returnFocusTo: triggerRef })
 
-  // The `/model` GUI command (2026-09-07) — a signal from the composer to open this session's
-  // menu
+  // The `/model` GUI command opens this session's menu
   const menuRequest = useStore((s) => s.settingsMenuRequest)
   useEffect(() => {
     if (menuRequest?.sessionId !== sessionId) return
     setOpen(true)
   }, [menuRequest, sessionId])
 
-  /*
-   * **Picking an option does not close the menu.** "Close on pick, except for model" breaks
-   * expectations more: effort closing the menu while model keeps it open is an asymmetry. This menu is a place for
-   * touching several knobs in a row — there are three ways to close it (outside click, Esc,
-   * the toggle button), and the first click on the composer already counts as an outside click,
-   * so it never becomes a wall in the way.
-   */
+  // No pick closes the menu, the model's included: it is for several knobs in a row, and a click on the composer closes it
   const choose = (patch: Parameters<typeof update>[1]) => void update(sessionId, patch)
 
   const modelLabel = listed?.label ?? model ?? 'Default'
-  // The current values must be readable without opening the menu — this pays back the cost of
-  // hiding them inside one.
-  // verbosity shares level names with effort (low/medium/high), so shown bare it would be
-  // ambiguous which is which — this labels it
+  // The values read without opening the menu; verbosity is labelled, as it shares effort's level names
   const summary = [
     modelLabel,
     effort,
@@ -304,12 +224,7 @@ export function SessionSettings({
       </button>
 
       {shown && (
-        /*
-          Opens upward. This row sits at the bottom of the window (or the grid pane), so opening
-          downward would get clipped immediately — the autocomplete menu uses the same direction
-          for the same reason.
-          cc-hang on the way up, cc-hang-out on the way down — not a target while it is closing.
-        */
+        // Upward, as the row is at the pane's bottom; no target while closing
         <div
           role="menu"
           data-testid="settings-menu"
@@ -318,11 +233,8 @@ export function SessionSettings({
           }`}
         >
           <MenuSection label="Model">
-            {/*
-              If the tool already supplies its own 'default' entry (Claude's `default`), this
-              does not add a second one — two rows meaning the same thing leaves no way to know
-              which one to pick.
-            */}
+            {/* Not a second Default beside the tool's own
+                (Claude's `default`) */}
             {!models.some((m) => m.id === 'default') && (
               <MenuRow
                 testId="settings-model-default"
@@ -339,16 +251,14 @@ export function SessionSettings({
                 // A stored full id shows as its entry; picking the entry sets the alias, so the pin is named here
                 title={m.id === listed?.id && model !== m.id ? `${m.label} · pinned ${model}` : m.description}
                 selected={m.id === current?.id}
-                // Effort and speed are reset when the model changes — support differs from
-                // model to model, so carrying the old value over would silently leave an
-                // unsupported combination in place
+                // Reset: support differs per model
                 onPick={() => choose({ model: m.id, effort: null, serviceTier: null })}
               />
             ))}
           </MenuSection>
 
-          {/* Effort only shows for a model that supports it — showing an option that does
-          nothing would be a lie */}
+          {/* Only for a model
+              that takes it */}
           {current && current.efforts.length > 0 && (
             <MenuSection label="Effort">
               <MenuRow
@@ -369,8 +279,8 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {/* Response length (#54) — only shows when the tool offers this knob. Measured: 82
-          words for low, 269 for high (same question) */}
+          {/* #54, measured: 82 words at low,
+              269 at high, for one question */}
           {verbosities.length > 0 && (
             <MenuSection label="Verbosity" note="How long answers run — shorter arrives sooner.">
               <MenuRow
@@ -391,8 +301,8 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {/* Response speed — only shows when the model offers tiers (measured: gpt-5.4+ has
-          one, Fast; mini has none) */}
+          {/* Measured: gpt-5.4 and later offer one tier,
+              Fast; mini none */}
           {current && current.tiers.length > 0 && (
             <MenuSection label="Speed" note="Faster answers spend more of your usage.">
               <MenuRow
@@ -428,12 +338,8 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {/*
-            **There is no role group here.** A row that promotes a session to "project
-            assistant" is easily confused with the worktree manager (#69), the seat that directs
-            sessions within a project. The director's seat comes from the relationship (having
-            children makes it a manager) — it is not something to pick.
-          */}
+          {/* No role group: a manager (#69) is one by having children,
+              not by a pick */}
 
           <MenuSection label="Permissions">
             {PRESETS.map((p) => {
@@ -454,18 +360,8 @@ export function SessionSettings({
           </MenuSection>
 
           {/*
-            **There is no switching agents here.**
-
-            The conversation does not carry over, so changing the tool from this menu is not
-            "switching" — it is "starting a new conversation", and creating a new session
-            already does that, more honestly. It would be a second door doing the same thing
-            under a different name, with a confirmation dialog every time to explain what would
-            be kept and what would be lost.
-
-            The one remaining exception is the Assistant, and that lives in app settings
-            (Cmd+,) under Assistant — because it is the only session that exists exactly once
-            per app, so "create a new one with a different tool" does not make sense for it.
-            It is a value scoped to the install, so app settings is the right place for it too.
+            No tool switch: the conversation would not carry over, so it is a new session. The
+            Assistant's tool, one per install, is in app settings.
           */}
         </div>
       )}

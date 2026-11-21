@@ -3,43 +3,25 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 /**
- * A streaming reply split into the blocks that can no longer change and the one that still can (#364).
- *
- * Handing the whole reply to react-markdown on every `message_delta` parses it from the first character again: a
- * reply of forty paragraphs is parsed forty times over while its last one arrives. Chromium showed none of
- * that survives a collection; WebKit kept its high-water mark (docs/spikes/2026-10-memory-heavy-store.md §3).
- *
- * CommonMark reads a reply line by line, and a top-level block that a whole line of another top-level block has
- * followed is closed: text appended later cannot reopen it, and parsing from the line where the next block starts
- * gives what parsing the whole text gives there. So once a block has such a successor, it is rendered on its own and
- * kept; only the text from the last kept block on is parsed per delta. Two things in Markdown do reach backwards, and
- * a reply with either is not split at all: a link reference definition (`[x]: url`, which an earlier `[text][x]`
- * reads) and a GFM footnote definition (`[^1]: …`, which numbers the calls above it and is gathered at the end).
- *
- * The blocks are found with the same parser and plugins react-markdown uses, so where a block ends is decided by the
- * Markdown that renders it, not by a guess at fences, lists and tables. That parse runs only when the new text holds
- * a line break, since no line is whole without one, and only over the text after the last kept block.
+ * A streaming reply split into closed blocks and the one still written (#364, docs/state-management.md §4).
+ * Parsed whole per delta, a forty-paragraph reply was parsed forty times, and WebKit kept the high-water mark
+ * (docs/spikes/2026-10-memory-heavy-store.md §3). CommonMark closes a top-level block once a whole line of the
+ * next follows it. A link reference or GFM footnote definition reads backwards, so a reply with one is not split.
+ * Blocks are found with react-markdown's own parser and plugins, and only when the new text has a line break.
  */
 export type MarkdownSplit = {
-  /** The text this split is of */
   readonly text: string
-  /** Finished pieces, each the source text of one or more whole top-level blocks, from first line to first line */
+  /** Each the source of one or more whole top-level blocks, from first line to first line */
   readonly blocks: readonly string[]
-  /** Where the text still being written starts: `text.slice(tailStart)` */
   readonly tailStart: number
-  /** How far the text has been looked at for new blocks */
   readonly scannedTo: number
-  /** The text reaches backwards (a definition): rendered whole, never split */
+  /** Holds a definition: rendered whole */
   readonly whole: boolean
 }
 
 const parser = unified().use(remarkParse).use(remarkGfm).freeze()
 
-/**
- * A link reference or footnote definition: `[label]:` at the start of a line, after any quote markers, list markers
- * and indentation (it may sit in a list item or a quote). A label may run over a line break. Text that only looks
- * like one (an indented `[key]: value` in a code block) costs the split, never the rendering.
- */
+/** `[label]:` after any quote or list markers; a false match (in a code block) costs the split, never the rendering */
 const DEFINITION = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*\[[^\]]*\]:/m
 
 /** A text seen for the first time is not split: a reply read back from history is drawn once, as one parse */
@@ -47,16 +29,12 @@ export function wholeSplit(text: string): MarkdownSplit {
   return { text, blocks: [], tailStart: 0, scannedTo: text.length, whole: DEFINITION.test(text) }
 }
 
-/**
- * The split of `text`, carried on from `prev` when `text` only extends it (a delta arrived). Anything else (another
- * message in the same row, an edit) starts over from `wholeSplit`.
- */
+/** Carried on from `prev` only when `text` extends it (a delta) */
 export function advanceSplit(prev: MarkdownSplit | null, text: string): MarkdownSplit {
   if (!prev) return wholeSplit(text)
   if (prev.text === text) return prev
   if (!text.startsWith(prev.text) || prev.whole) return wholeSplit(text)
   if (DEFINITION.test(text.slice(prev.tailStart))) return wholeSplit(text)
-  // A block is closed by a whole line of its successor (`closedUpTo`): with no new line break, nothing closed
   if (!text.includes('\n', prev.scannedTo)) return { ...prev, text }
   const { starts, children } = topLevel(text, prev.tailStart)
   const keep = closedUpTo(text, prev.tailStart, starts, children)
@@ -66,29 +44,20 @@ export function advanceSplit(prev: MarkdownSplit | null, text: string): Markdown
   return { text, blocks, tailStart: starts[keep]!, scannedTo: text.length, whole: false }
 }
 
-/**
- * What is drawn, in order: the finished blocks, then the text still being written; the whole text as one piece when
- * nothing is split. Joined with a line break between pieces, as react-markdown joins top-level blocks, they render to
- * what the whole text renders to.
- */
+/** Joined by a line break, as react-markdown joins top-level blocks, they render as the whole text does */
 export function piecesOf(split: MarkdownSplit): string[] {
   return split.blocks.length ? [...split.blocks, split.text.slice(split.tailStart)] : [split.text]
 }
 
 type Block = ReturnType<typeof parser.parse>['children'][number]
 
-/**
- * The top-level blocks of `text.slice(from)`, and where each starts, as the offset of the start of its first line.
- * The start of the line rather than of the node: a list indented by a space or two keeps its indentation, which its
- * continuation lines are measured against.
- */
+/** Each block starts at its first line's start, not the node's: an indented list's continuation lines are measured against it */
 function topLevel(text: string, from: number): { starts: number[]; children: Block[] } {
   const slice = text.slice(from)
   const starts: number[] = []
   const children: Block[] = []
   for (const child of parser.parse(slice).children) {
     const offset = child.position?.start.offset
-    // A node without a position cannot be placed; the text from the last known start stays one piece
     if (offset === undefined) break
     starts.push(from + slice.lastIndexOf('\n', offset - 1) + 1)
     children.push(child)
@@ -97,20 +66,11 @@ function topLevel(text: string, from: number): { starts: number[]; children: Blo
 }
 
 /**
- * How many of the leading blocks can be kept: closed for good, and drawing alone what they draw here. 0 for none.
- *
- * A block is closed only once the first line of the block after it is whole. Until then that line can still turn
- * into a continuation of it: `1` under a list is a paragraph, and `1) ` a moment later is the list's next item. A
- * whole line is read once and for all, as CommonMark reads lines.
- *
- * And micromark does not start afresh at every block. After indented code and a blank line it reads `3. three` as a
- * paragraph, where alone it is a list starting at 3; after a quote that ends in a fence, indented code split by a
- * blank line comes out as two blocks, where alone it is one. Lists, quotes, indented code and HTML carry state into
- * the lines after them like this, so the text is only cut after a block that ends cleanly (a paragraph, a heading, a
- * rule, a table or a fenced code block) and is followed by a blank line; the blocks in between stay with the next
- * cut. Then what is about to be kept and what will be the tail are each parsed alone, and the cut is made only if they
- * parse to what they parsed to in place. That is two parses when a block is kept, not per delta. The randomized test in
- * markdownBlocks.test.tsx turns up all three cases.
+ * How many leading blocks are closed for good and draw alone what they draw here. Until the next block's first line
+ * is whole it can still continue this one (`1` under a list, then `1) `). micromark carries state past lists, quotes,
+ * indented code and HTML (after indented code and a blank line `3. three` is a paragraph), so the cut is only after a
+ * paragraph, heading, rule, table or fence and a blank line, and only if both sides parse alone as they did in place.
+ * The randomized test in markdownBlocks.test.tsx turns up all three cases.
  */
 function closedUpTo(text: string, from: number, starts: number[], children: Block[]): number {
   let keep = starts.length - 1
@@ -132,7 +92,7 @@ function endsCleanly(block: Block, source: string): boolean {
   return block.type === 'paragraph' || block.type === 'heading' || block.type === 'thematicBreak' || block.type === 'table'
 }
 
-/** The same Markdown tree, wherever in the text it was parsed from: `position` is the only thing left out */
+/** Equal trees, `position` left out */
 function sameBlocks(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false

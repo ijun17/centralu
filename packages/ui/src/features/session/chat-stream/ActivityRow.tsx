@@ -7,52 +7,20 @@ import { PlanStepIcon } from '../../../components/icons.jsx'
 import { formatElapsed, useElapsedNow } from '../elapsed.js'
 
 /**
- * The indicator that says a response is being waited for.
- *
- * It is common for the first character to take tens of seconds to arrive, and if the screen is
- * completely quiet the whole time, **there is no way to tell whether it is working or has
- * stopped**.
- *
- * So two things are shown together:
- *   - A moving dot: "it is alive". In the end, movement is the only thing that sets it apart
- *     from a frozen screen.
- *   - Elapsed time: "how long has this been going". 3 seconds and 3 minutes are not the same
- *     kind of "waiting" — watching the number climb also confirms it has not stopped.
- *
- * The stop button lives here too. It is also at the top, but the eyes of someone waiting are at
- * the bottom of the conversation.
- *
- * **The count is derived; only the tick lives here** (issue #23). A start read from
- * `Date.now()` on mount would reset whenever the component remounts — switching to the grid
- * and back, or moving between sessions, would put a three-minute turn back at zero, and the
- * longer a wait, the more the number would understate it.
- *
- * An elapsed count is derived, and derived values should not be the thing that survives. The
- * start instant lives on the store (`workingSince`), and this subtracts it from the current
- * time. The clock below carries no state; it exists only to make the time be re-read when the
- * shown count would change (elapsed.ts).
+ * A turn being waited for: a moving dot (a first character can take tens of seconds, and only motion
+ * tells working from frozen), the elapsed time and Stop, where the waiting eye is. The count is derived
+ * from the store's `workingSince` (#23): a start taken on mount would reset on every remount.
  */
 export function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
   const startedAt = useStore((s) => s.workingSince[sessionId])
-  // The amount of thinking (#58) — Claude's thinking body is encrypted, so this estimate is all
-  // there is to show
+  // An estimate (#58): Claude's thinking body is encrypted
   const thinkingTokens = useStore((s) => s.sessions[sessionId]?.thinkingTokens ?? null)
-  // A plan snapshot (#58, Codex) — it has the same lifetime as activity, so this row (which
-  // only lives while working) is the right home for it
   const plan = useStore((s) => s.sessions[sessionId]?.plan ?? null)
-  /*
-   * What Stop does to the background work (#290), said before it is pressed: an interrupt can stop background
-   * subagents without a word, and the tools differ (Claude stops a subagent and keeps a
-   * shell, Codex keeps a child agent), so the line comes from what each task says about itself.
-   */
+  // What Stop does to background work, said before the press (#290): the tools differ (Claude stops a
+  // subagent and keeps a shell, Codex keeps a child agent), so each task says it of itself
   const notice = useStore((s) => interruptNotice(s.sessions[sessionId]?.backgroundTasks ?? []))
-  /*
-   * A Stop pressed in this turn (#1060). Stopped is said once the tool confirms it, which can take a moment (Codex's
-   * `turn/completed`, Claude's answer to the interrupt), so the button says so until the session leaves working. When
-   * the tool says the Stop has not taken effect, the button is Stop again and the line says why, in place of the
-   * background notice.
-   */
+  // Stopping until the tool confirms (#1060: Codex's `turn/completed`, Claude's answer); a refusal says why in the notice's place
   const stop = useStore((s) => s.stopping[sessionId])
   const pressed = stop !== undefined && stop.turn === startedAt
   const unconfirmed = pressed ? stop.failed : undefined
@@ -62,17 +30,13 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
   // Re-read only when the shown count changes and someone can see it (elapsed.ts, #364)
   const now = useElapsedNow(startedAt ?? null, rowRef)
 
-  // No instant means we genuinely do not know when this turn began — say nothing rather
-  // than start a fresh count, which is the mistake this whole row is here to stop making
+  // Unknown start: no count rather than a fresh one
   const seconds = startedAt == null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000))
 
   return (
     <div ref={rowRef} className="py-2" data-testid="activity-row">
-      {/*
-        The plan checklist (#58, Codex's turn/plan/updated). Being progress display, it lives
-        here (visible only while working) — it disappears along with activity once the turn
-        ends. Status is told apart by glyph, not color (the palette rule: distinguish by shape).
-      */}
+      {/* Codex's plan (#58, turn/plan/updated), gone with the turn;
+          status by glyph, not colour */}
       {plan && plan.length > 0 && (
         <ul className="mb-1.5 flex flex-col gap-0.5" data-testid="activity-plan">
           {plan.map((step, i) => (
@@ -92,18 +56,13 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
         </ul>
       )}
       {/*
-        What gives way in a narrow panel is the background notice, and only it (0.1.0-beta.9, the owner's screenshot):
-        with every part free to shrink, the notice's long line squeezed the label onto three lines and the dot into a
-        sliver. The dot, the label, the elapsed time and Stop keep their size; the notice takes what is left, cut short
-        with its whole text on hover, down to nothing before anything else wraps.
+        In a narrow panel only the notice gives way, down to nothing, its whole text on hover: free to shrink,
+        it squeezed the label onto three lines and the dot into a sliver.
       */}
       <div className="flex items-center gap-2">
         <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-ink" aria-hidden data-testid="activity-dot" />
-        {/*
-        Not the same kind of "waiting". Compacting has been measured to take up to 39 seconds,
-        and with the same wording, someone waiting has no way to tell whether it has stopped or
-        is just taking a while.
-      */}
+        {/* Compacting was measured at up to 39 seconds,
+            so it has its own words */}
         <span className="shrink-0 whitespace-nowrap text-sm text-ink-muted" data-testid="activity-label">
           {activity === 'compacting'
             ? 'Compacting context'
@@ -116,10 +75,8 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
                 ? `Thinking · ~${formatCount(thinkingTokens)} tokens`
                 : 'Waiting for response'}
         </span>
-        {/*
-          Showing a number for a one-second wait would just be noise. The minimum width holds the widest the count gets
-          ("9m 50s", "2h 11m"), so a count that grows a digit does not move the notice next to it.
-        */}
+        {/* The width of the widest count ("9m 50s", "2h 11m"),
+            so a new digit does not move the notice */}
         {seconds >= 2 && (
           <span className="readout min-w-[6.5ch] shrink-0 whitespace-nowrap text-xs text-ink-faint" data-testid="activity-elapsed">
             {formatElapsed(seconds)}

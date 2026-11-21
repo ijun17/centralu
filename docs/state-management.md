@@ -100,6 +100,23 @@ only update suggestions; they never restore the composer's text.
 - A streaming `message_delta` is appended to the last message — only that row re-renders, without recreating list items (including the virtual list's measure recalculation). The list itself is copied once per delta (`replaceAt` in `store/transcript.ts`), every other row kept as the same object. Within the row, the reply's finished Markdown blocks are rendered once and kept, and only the block still being written is parsed again (`features/session/markdownBlocks.ts`, #364): a delta used to re-parse the whole reply.
 - **A launch card's subagent steps are outside the window** (#222). They are not in the conversation (`chat`) and are never paged with it: `subagentSteps[session][callId]` holds them once the person opens that card, read a page at a time from `messages.subagent`. A live `subagent_event` joins an opened card only once every earlier step is read, and touches nothing else — not the conversation, not the session's state, not unread. Whether the section is open lives in the store, not the card, because the virtual list detaches rows that scroll away and a card drawn again must come back as it was left. When the conversation is cut back to the window, a closed card's steps go with the cut (#392); opening it again reads them again. With the first page the window asks how many of the card's steps are in the session archive (`messages.subagentTrashed`, #418), held as `trashed`, so the card says where they went. Archiving a session's steps, or restoring them, makes its open cards read again and its closed cards forget what they read.
 
+### The conversation's scroll position (#31, #61)
+
+- **A conversation opens where it was left**: at the bottom if it was there, else at the row it was left on, kept as
+  that row's `seq` and the offset into it (`scrollAnchor`), never as a pixel offset. Rows are 64px guesses until they
+  render, so a pixel offset lands elsewhere once the rows above it are measured.
+- **Arriving is re-aimed every frame**, for up to 30 frames, because the target moves while rows measure: one
+  `scrollTop = scrollHeight` came to rest 339px short on an 80-turn conversation. The view is hidden meanwhile
+  (`visibility: hidden`; `display: none` leaves nothing to measure) and shown once the aim holds and the rows above
+  it lie where they were measured. The person's wheel, key or pointer ends it at once.
+- **Where the person was is written on leaving, from values taken at their last scroll.** The focus view keeps the
+  pane and swaps the session, and React runs the cleanup after rendering the next session, so the element then
+  answers about the wrong conversation (a 3,959px jump in e2e). Nothing is written while still arriving: those
+  positions are the code's, not the person's, and under load writing them lost the reader's place at random.
+- **At the bottom, the view follows** new rows and an answer growing its last row. A fall of `scrollTop` lets go
+  only when the person moved the list a moment before (a wheel, a held pointer, a key that scrolls up): layout lowers
+  `scrollTop` too, and in WebKit a burst of answer did so by 54px with no input (`features/session/scroll.ts`).
+
 ## 5. Persistence and restore (FR-10)
 
 - **Writing**: write-through after applying an event. Messages are appended in batches (500ms debounce); session metadata and workspace on every change. There is no such concept as "save on exit" — crash safety comes for free.

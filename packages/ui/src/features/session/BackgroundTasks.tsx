@@ -10,16 +10,9 @@ import { Tooltip } from '../../components/primitives.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useStore } from '../../store/store.js'
 
-/**
- * A session's background work, on screen (#290).
- *
- * Interrupting the turn can stop background subagents, and nothing else on screen says they are gone. So what runs
- * behind the turn is counted where the session is named (the header, the sidebar row), and the list it opens keeps a
- * task that ended — stopped, failed or completed — with how it ended, for as long as one still runs. When the last one ends
- * the badge goes with the list (owner, 2026-11-12, #2213), and what ended is in the conversation.
- *
- * The count leaves out what the tool calls ambient (housekeeping, not activity), and ended tasks: it answers "is
- * something still running back there".
+/*
+ * A session's background work (#290), counted where the session is named, as an interrupt can stop it unsaid. The list
+ * keeps ended tasks while one runs; the badge goes with the last (#2213). The count leaves out ended and ambient tasks.
  */
 
 const KIND: Record<BackgroundTask['kind'], string> = {

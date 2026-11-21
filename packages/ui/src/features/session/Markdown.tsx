@@ -230,18 +230,9 @@ function tryDecode(href: string): string {
 }
 
 /**
- * A single file link inside the conversation — a backticked path and a markdown link are the
- * same button. Click opens the read-only viewer (#39), right-click reveals it in the file manager. Right-click
- * opens directly instead of showing a menu because a menu with only one entry just slows the
- * hand down (the file tree has several entries, so a menu makes sense there).
- */
-/*
- * The link carries and opens with its own project (#182). The path is relative to this pane's
- * session's project, so if the viewer picked its project from whichever session is focused, a
- * link in the neighboring pane of the grid would open the same path in a different project —
- * WKWebView does not give focus on a button click, so a pane's onFocusCapture cannot move focus.
- * It carries its session too (#1209): the path is relative to that session's folder, its worktree when it has one, and
- * the host reads it from there; with the project alone a worktree session's link opened the main checkout's copy.
+ * A backticked path or a Markdown link: a click opens the viewer (#39), a right-click reveals the file at once (a menu of
+ * one entry only slows the hand). It carries its own project (#182), as WKWebView gives no focus on a button click for a
+ * grid pane to take, and its session (#1209), whose worktree the path is relative to, not the main checkout.
  */
 export function FileLink({
   refInfo,
