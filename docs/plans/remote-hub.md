@@ -72,6 +72,16 @@ machine it runs on.
    protocol's id pattern already allows `.` after the first character, and every parser in the UI
    splits on `/` or `:`, so the prefix passes unchanged. Per-host counters (`term-N`, `run-N`,
    approval rule integers, pids) need the prefix too.
+   - **Agents take the same ids** (owner, 2026-11-21). Every tool that takes a session (mail,
+     read_session, agent_session) reads one set of forms (`SessionRefs`): an id here,
+     `<computer>.<id>`, a name, or `assistant`, `parent`, `person`. A text shaped as a mail address
+     that is not one is refused, never looked up as a name.
+   - **A hub's label.** On a machine, a hub's own sessions go under the label the hub sends in
+     `host.hubOffer` (`hubLabel`): made from its name, never one of its machines' ids or a role
+     word. An older hub sends none, and the machine makes one from the name. Two hubs with one
+     label are refused as ambiguous.
+   - **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
+     renamed hub breaks no stored reference, only the ids an agent was shown before.
 4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are
    not shown on the hub; the hub has one orchestrator. A remote host's **user-folder apps are
    shown** (owner, 2026-10-05), grouped by machine (in "Your apps" with a machine badge since #734) and qualified by it (`_user/<appId>` collides

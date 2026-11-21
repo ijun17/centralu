@@ -8,6 +8,7 @@ import { OUTCOME_WORDS } from './last-response.js'
 import { CITE_MS, SUBJECT_CHARS, waitsForReply, type InboxView, type MessageService, type ReadItem, type SendResult } from './messages.js'
 import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
+import type { SessionRef, SessionRefs } from './session-refs.js'
 import { refusalReason, refuse } from './rules.js'
 import { isTimeWatch, prNumberOf, type Watches } from './watches.js'
 
@@ -72,8 +73,8 @@ export type MailToolHost = {
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
   /** The Assistant's session id, or null while there is none */
   assistantId(): string | null
-  /** The sessions of this host a name or id can mean: the ones that are here (not archived or deleted) */
-  sessions(): { id: string; name: string; project: string | null; state: string }[]
+  /** How the call's `to` names a session (`SessionRefs`), as every tool that takes one reads it */
+  refs: Pick<SessionRefs, 'ref'>
   /** How the session makes the calls an answer names: the tool, or `centralu_run` for the Assistant */
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the Assistant (§7.6) */
@@ -106,7 +107,7 @@ export class MailTool {
   constructor(
     private readonly service: MessageService,
     private readonly records: MailboxRecords,
-    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel' | 'elsewhere'>,
+    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel'>,
     private readonly host: MailToolHost,
   ) {
     this.now = host.now ?? Date.now
@@ -149,10 +150,11 @@ export class MailTool {
         const r = await across.sendHeld(me.address, held)
         return r.ok ? { text: `Sent ${r.messageId} to ${JSON.stringify(r.to)} on ${r.computer}.` } : { text: `Refused (${r.why}): ${r.text}`, isError: true }
       }
+      const ref = args.action === 'send' ? this.host.refs.ref(sessionId, this.need(args.to, 'to')) : null
       // Work first: a start request's handle or a linked child's id is no name to look for on other computers, one of which may be away
-      const work = await this.work(sessionId, me, args, signal)
+      const work = ref ? await this.work(sessionId, ref, args, signal) : null
       if (work) return work
-      const far = across ? await this.acrossTarget(sessionId, me, args, across) : null
+      const far = across ? await this.acrossTarget(sessionId, me, args, ref, across) : null
       if (far && 'refused' in far) return { text: `Refused (${far.refused.why}): ${far.refused.text}`, isError: true }
       if (far && 'several' in far) {
         const r = this.run(sessionId, args)
@@ -195,6 +197,7 @@ export class MailTool {
     sessionId: string,
     me: { address: string; askedBy: string | null; fromHub?: boolean },
     a: MailToolArgs,
+    ref: SessionRef | null,
     across: NonNullable<MailToolHost['across']>,
   ): Promise<{ address: string; replyTo?: string; person?: true } | { several: true } | { refused: { why: string; text: string } } | null> {
     if (a.action === 'reply') {
@@ -202,21 +205,16 @@ export class MailTool {
       const m = this.records.message(id)
       return m && across.foreign(m.sender) && this.records.recipient(id, me.address) ? { address: m.sender, replyTo: id, ...(isPerson(m.sender) ? { person: true as const } : {}) } : null
     }
-    if (a.action !== 'send') return null
-    const t = this.need(a.to, 'to')
-    const lower = t.toLowerCase()
-    if (lower === 'parent') return !me.askedBy && me.fromHub ? { address: 'parent' } : null
-    if (lower === PERSON) {
+    if (!ref) return null
+    if ('role' in ref) {
+      if (ref.role === 'parent') return !me.askedBy && me.fromHub ? { address: 'parent' } : null
+      if (ref.role === 'assistant') return null
       const to = across.personTarget(sessionId, !me.askedBy && me.fromHub === true)
       return to && 'address' in to ? { ...to, person: true } : to
     }
-    if (lower === 'assistant') return null
-    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
-    if (parseAddress(t)) return across.foreign(t) ? { address: t, ...(isPerson(t) ? { person: true as const } : {}) } : null
-    if (parseAddress(own + t) && across.foreign(own + t)) return { address: own + t }
-    const here = this.host.sessions()
-    if (here.some((s) => s.id === t)) return null
-    const local = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === lower)
+    if ('address' in ref) return across.foreign(ref.address) ? { address: ref.address, ...(isPerson(ref.address) ? { person: true as const } : {}) } : null
+    const { word: t, here: local } = ref
+    if (local.some((s) => s.id === t)) return null
     const far = await across.named(t, { here: local.length > 0 })
     // Found nowhere: the refusal names the computers that could not be asked, where the session may be (§8)
     if (far.found.length === 0 && local.length === 0 && far.away.length > 0) {
@@ -240,22 +238,19 @@ export class MailTool {
    * `MailToolHost.work` for the one session `to` names here, else for the word itself (a start request's handle, a linked child's id); a role is
    * never work. The subject leads the words, so the child reads what the card shows, and the answer says it went as work
    */
-  private async work(sessionId: string, me: { address: string }, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
-    const t = a.to?.trim() ?? ''
-    if (a.action !== 'send' || !this.host.work || !t || [PERSON, 'assistant', 'parent'].includes(t.toLowerCase()) || !a.text?.trim()) return null
-    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
-    const word = t.startsWith(own) ? t.slice(own.length) : t
-    const [only, other] = this.sessionsNamed(sessionId, word)
+  private async work(sessionId: string, ref: SessionRef, a: MailToolArgs, signal?: AbortSignal): Promise<MailToolResult | null> {
+    if (!this.host.work || 'role' in ref || !a.text?.trim()) return null
+    const target = 'address' in ref ? this.ownId(ref.address) : ref.here.length === 1 && ref.here[0] ? ref.here[0].id : ref.word
+    if (target === null) return null
     const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
-    const r = await this.host.work(sessionId, only && !other ? only.id : word, subject + a.text.trim(), a.ifBusy, signal)
+    const r = await this.host.work(sessionId, target, subject + a.text.trim(), a.ifBusy, signal)
     return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind: "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
   }
 
-  /** The sessions here a word names: the one with that id, else those of that name but the caller (after a handoff the heir has the name of the session it replaced, and writes to that one) */
-  private sessionsNamed(sessionId: string, word: string): ReturnType<MailToolHost['sessions']> {
-    const here = this.host.sessions()
-    const exact = here.find((s) => s.id === word)
-    return exact ? [exact] : here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
+  /** The id of a session of this host's own an address names, a linked machine's child among them (`<machine>.<id>`); null for another host's */
+  private ownId(address: string): string | null {
+    const p = parseAddress(address)
+    return p?.kind === 'session' && this.service.sessionAddress(p.sessionId) === address ? p.sessionId : null
   }
 
   private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
@@ -326,41 +321,35 @@ export class MailTool {
   }
 
   /**
-   * A party the call names: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an absolute address, or a
-   * session of this host by its id or its exact name (any case; `session:<this host>/<name>` too, which is what an agent gets back when it writes a name).
-   * Several sessions of one name are refused with their addresses: a guess could send the words to the wrong one
+   * A party the call names, as `SessionRefs` reads it: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an
+   * address, or a session of this host by its id or exact name (any case). Several sessions of one name are refused with their addresses: a guess
+   * could send the words to the wrong one
    */
   private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
-    const t = to.trim()
-    // Started from a hub, on a host whose mail does not cross: `acrossTarget` reaches the parent there, and the person, where it does (#1987)
-    if (!me.askedBy && me.fromHub && (t.toLowerCase() === 'parent' || (t.toLowerCase() === PERSON && !this.host.across))) {
-      const where = t.toLowerCase() === PERSON ? 'the person works on' : 'your parent is a session on'
-      throw refuse(t.toLowerCase() === PERSON ? 'elsewhere' : 'unknown', `${where} the computer that started this session, and mail does not cross computers from this one, so nothing was sent. End your turn with the answer: that is how your parent hears from you.`)
-    }
-    if (t.toLowerCase() === PERSON) return { address: PERSON }
-    // #2133: the address is `assistant`, with no alias for the old `orchestrator`; the stored `via` keeps its old value until the store's rename
-    // (docs/plans/assistant-rename.md, step 4), so the previous release still reads these rows
-    if (t.toLowerCase() === 'assistant') {
-      const id = this.host.assistantId()
-      if (!id) throw refuse('no_mailbox', 'there is no Assistant to ask yet: write to the person instead')
-      return { address: this.service.sessionAddress(id), via: ROLE_VIA }
-    }
-    if (t.toLowerCase() === 'parent') {
+    const ref = this.host.refs.ref(sessionId, to)
+    if ('role' in ref) {
+      // Started from a hub, on a host whose mail does not cross: `acrossTarget` reaches the parent there, and the person, where it does (#1987)
+      if (!me.askedBy && me.fromHub && (ref.role === 'parent' || (ref.role === PERSON && !this.host.across))) {
+        const where = ref.role === PERSON ? 'the person works on' : 'your parent is a session on'
+        throw refuse(ref.role === PERSON ? 'elsewhere' : 'unknown', `${where} the computer that started this session, and mail does not cross computers from this one, so nothing was sent. End your turn with the answer: that is how your parent hears from you.`)
+      }
+      if (ref.role === PERSON) return { address: PERSON }
+      // #2133: the address is `assistant`, with no alias for the old `orchestrator`; the stored `via` keeps its old value until the store's rename
+      // (docs/plans/assistant-rename.md, step 4), so the previous release still reads these rows
+      if (ref.role === 'assistant') {
+        const id = this.host.assistantId()
+        if (!id) throw refuse('no_mailbox', 'there is no Assistant to ask yet: write to the person instead')
+        return { address: this.service.sessionAddress(id), via: ROLE_VIA }
+      }
       if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "assistant" or "person".')
       return { address: this.service.sessionAddress(me.askedBy) }
     }
     // An address of an app, of Centralu or of another computer is the service's to judge (it refuses all three, each in its own words)
-    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
-    const absolute = parseAddress(t)
-    if (absolute && !(absolute.kind === 'session' && t.startsWith(own))) return { address: t }
-    const word = t.startsWith(own) ? t.slice(own.length) : t
+    if ('address' in ref) return ref
+    const { word, here: named } = ref
     if (word === sessionId) throw refuse('bad_value', 'a message is for someone else')
-    const named = this.sessionsNamed(sessionId, word)
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
-    // A child this host started on a linked machine (#2067): the service refuses it in its own words (elsewhere), not as a session it never had
-    // (a name with spaces is no session id, and makes no address)
-    if (!only && parseAddress(own + word) && this.reach.elsewhere(own + word)) return { address: own + word }
     if (only) {
       const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`}, ${s.state})`)
       throw refuse('ambiguous', `${named.length} sessions are named ${JSON.stringify(word)}: ${shown.join(', ')}${named.length > shown.length ? ', and more' : ''}. Send to one of them by its address.`)

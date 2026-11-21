@@ -26,6 +26,8 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   readonly apps: Pick<SessionAppWiring, 'requireAppAccess' | 'appsHub'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs, signal?: AbortSignal) => Promise<{ text: string; isError?: boolean }>
+  /** The session a tool's argument names (`MailHooks.session`); without a mailbox, the argument as it is */
+  sessionRef: (sessionId: string, text: string) => { ok: true; id: string } | { ok: false; error: string }
   /** The `compact_self` tool of a session (#1451) */
   readonly selfCompaction: Pick<SelfCompaction, 'request'>
 }
@@ -164,7 +166,7 @@ export class SessionTools {
    * What both seats share: another project's apps on demand (#371 part A, #1205), the one thing the reader seat may change and only
    * for itself; the mailbox (#1347), whose tool runs as a command; and `compact_self` (#1451)
    */
-  private appAndMailTools(sessionId: string): Pick<CentraluTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
+  private appAndMailTools(sessionId: string): Pick<CentraluTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'session' | 'compactSelf'> {
     return {
       findApps: async (query) => {
         const access = this.host.apps.requireAppAccess()
@@ -176,6 +178,7 @@ export class SessionTools {
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       mail: (args, signal) => this.host.mailTool(sessionId, args, signal),
+      session: (text) => this.host.sessionRef(sessionId, text),
       compactSelf: (focus, then) => this.host.selfCompaction.request(sessionId, focus, then),
     }
   }

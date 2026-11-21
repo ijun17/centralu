@@ -8,10 +8,11 @@ import { LinkedAppCallResult, LinkedAppsResult } from './linked-apps.js'
 
 /**
  * `host.hubOffer`. The machine calls the hub back on the connection the offer came in on and no other. `mail` holds
- * whatever `on` says; without `you`, a machine's session mails only its `parent`.
+ * whatever `on` says; without `you`, a machine's session mails only its `parent`. `label`: the prefix the hub's own
+ * sessions go under there, `<label>.<id>`; an older hub sends none, and the machine makes one from `name`.
  */
 export const HubOffer = z.object({
-  hub: z.object({ id: MachineId, name: z.string().min(1).max(200) }),
+  hub: z.object({ id: MachineId, name: z.string().min(1).max(200), label: MachineId.optional() }),
   on: z.boolean(),
   mail: z.boolean().optional(),
   you: MachineId.optional(),

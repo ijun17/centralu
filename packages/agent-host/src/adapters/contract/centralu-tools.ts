@@ -689,6 +689,11 @@ export type CentraluTools = {
   /** The mailbox for the session that has these tools (#1347, mail): an ordinary session's alone; absent where there is none */
   mail?(args: MailToolArgs, signal?: AbortSignal): { text: string; isError?: boolean } | Promise<{ text: string; isError?: boolean }>
   /**
+   * The id read_session and agent_session take for the session their argument names: an id, `<machine>.<id>`, a name or a role word,
+   * read as mail reads `to` (`SessionRefs`). Absent: the argument is the id
+   */
+  session?(text: string): { ok: true; id: string } | { ok: false; error: string }
+  /**
    * This session's apps (#2231), what the `app` tool lists and calls: its live attachment, or null when the session has no
    * live agent (nothing calls then) or the host runs no apps. Absent on a bundle that has no session behind it
    */

@@ -201,10 +201,12 @@ const HANDLERS: ToolHandlers = {
   },
 
   async agent_session(args, { tools, signal, caller }) {
-    const sessionId = trimmed(args.sessionId)
     const { action } = args
     if (action === 'list') return agentCallsFor(caller.profile, agentListText(await tools.listAgents()))
-    if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
+    if (!trimmed(args.sessionId)) return { text: 'Give the sessionId start_agent returned.', isError: true }
+    const named = sessionNamed(tools, args.sessionId)
+    if (!named.ok) return { text: named.error, isError: true }
+    const sessionId = named.id
     const text = args.text?.trim() ? args.text : undefined
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
     const card = trimmed(args.card)
@@ -246,7 +248,10 @@ const HANDLERS: ToolHandlers = {
   async read_session(args, { tools, caller }) {
     // The reader set has no list_sessions — listing is read_session without an id (#320, see READER_TOOLS)
     if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller, trimmed(args.project))
-    const r = await tools.readSession(args.sessionId ?? '', args.limit, {
+    const named = sessionNamed(tools, args.sessionId)
+    if (!named.ok) return { text: `Could not read it — ${named.error}`, isError: true }
+    const sessionId = named.id
+    const r = await tools.readSession(sessionId, args.limit, {
       around: args.around,
       tools: toolLinesOf(args.tools),
       ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : {}),
@@ -271,8 +276,8 @@ const HANDLERS: ToolHandlers = {
         : ''
     // The cards of a session this seat has work open in (#676), after the conversation: the way to answer depends on the seat
     const answer = caller.profile === 'reader'
-      ? callForm(caller.profile, 'agent_session', { sessionId: String(args.sessionId), action: 'answer', card: FILL, text: FILL })
-      : callForm(caller.profile, 'answer_question', { sessionId: String(args.sessionId), card: FILL, text: FILL })
+      ? callForm(caller.profile, 'agent_session', { sessionId, action: 'answer', card: FILL, text: FILL })
+      : callForm(caller.profile, 'answer_question', { sessionId, card: FILL, text: FILL })
     const cards = r.cards?.length
       ? `\n\nWaiting on you in work you gave it:\n${cardsText(r.cards)}\n` +
         (answer ? `${answer} answers it. ${ANSWER_FORM}` : 'Only the person can answer it from here; tell them if it matters.')
@@ -762,4 +767,10 @@ async function trashCommand(req: TrashRequest, { tools, signal }: ToolCall): Pro
   if (!tools.trash) return { text: 'This session cannot manage the session archive.', isError: true }
   const r = await tools.trash(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** The id a tool's session argument names (`CentraluTools.session`), or the argument itself where no mailbox reads it */
+function sessionNamed(tools: CentraluTools, text: string | undefined): { ok: true; id: string } | { ok: false; error: string } {
+  const t = text?.trim() ?? ''
+  return t && tools.session ? tools.session(t) : { ok: true, id: t }
 }

@@ -49,6 +49,8 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
+  /** The id read_session and agent_session take for the session a caller's argument names, as mail reads it (`SessionRefs.sessionId`) */
+  session?(sessionId: string, text: string): { ok: true; id: string } | { ok: false; error: string }
   /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns the task, and how to withdraw it when it could not go in */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): GivenTask
   /**
