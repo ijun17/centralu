@@ -290,8 +290,9 @@ Not seen: what §5 lists as not seen by the rule, and a process started by path 
 The rule judges each file alone, so a test cut from a picked one can lose the selection: the OS question stays in one
 piece, and the others reach the OS through tooling and scripts, which do not count. `os-layer.test.ts` fails when a test
 new since main's merge base, cut from a test picked there (`piecesOf`, the allowlist's split rule), is not picked now
-(#2402); the piece is then named in `EVERY_OS_TESTS`, or given what picked the whole. A piece is found by name and size,
-so a new test named after a shortened picked one counts as its piece.
+(#2402); the piece is then named in `EVERY_OS_TESTS`, or given what picked the whole. The selection at the base reads
+the base's `EVERY_OS_TESTS`: a listed test that is removed loses its line, and its pieces are the likeliest to be dropped.
+A piece is found by name and size, so a new test named after a shortened picked one counts as its piece.
 
 ### 6.2 Where it applies
 

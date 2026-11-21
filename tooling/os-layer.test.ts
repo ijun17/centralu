@@ -7,14 +7,15 @@
  * checked on virtual files laid over the repository (`osSelector`).
  */
 import { execFile, execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
+import { g, gitAsT } from './git-fixture.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, droppedPieces, droppedPiecesSince, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, droppedPieces, droppedPiecesSince, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, treeAt, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -488,6 +489,50 @@ describe('the tests that run on every OS', () => {
     expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1400), [reports]: text(20), [prs]: text(20) }))).toEqual(new Map())
     expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1300), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
     expect(dropped([whole], at({ [whole]: text(1400), [prs]: text(370) }, { [whole]: text(1030), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports]]]))
+    // What is left of a shortened test keeps its setup, so its pieces get no lines for one; a removed test's do
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1390), [reports]: text(30), [prs]: text(30) }))).toEqual(new Map())
+    expect(dropped([], at({ [whole]: text(10) }, { [reports]: text(30), [prs]: text(30) }))).toEqual(new Map([[whole, [reports, prs]]]))
+  })
+
+  it("reads the base from git: a test picked there, by its own text or by the base's list alone, cut into tests not picked now", () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-pieces-'))
+    const write = (file: string, text: string) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true })
+      writeFileSync(join(root, file), text)
+    }
+    const text = (n: number, first = '') => first + 'x\n'.repeat(n)
+    const asks = "export const w = process.platform === 'win32'\n"
+    const listed = text(100)
+    g(root, 'init', '-q', '-b', 'main')
+    write('tooling/os-layer.js', "export const EVERY_OS_TESTS = ['listed'].map((n) => ({ file: `tooling/${n}.test.ts`, why: 'started by path' }))\n")
+    write('tooling/listed.test.ts', listed)
+    write('tooling/asks.test.ts', text(100, asks))
+    write('tooling/plain.test.ts', text(100))
+    gitAsT(root, 'add', '-A')
+    gitAsT(root, 'commit', '-q', '-m', 'base')
+    const base = g(root, 'rev-parse', 'HEAD')
+
+    const tree = treeAt(base, `${root}/`)
+    expect([tree.read('tooling/listed.test.ts'), tree.isFile('tooling/listed.test.ts'), tree.isFile('tooling'), tree.isFile('tooling/gone.test.ts')]).toEqual([listed, true, false, false])
+    expect(() => tree.read('tooling/gone.test.ts')).toThrow(/not a file of/)
+
+    // The listed test removed with its line, the asking one and a plain one shortened, each into new tests of their name
+    rmSync(join(root, 'tooling/listed.test.ts'))
+    write('tooling/os-layer.js', 'export const EVERY_OS_TESTS = []\n')
+    write('tooling/listed-start.test.ts', text(60))
+    write('tooling/listed-autostart.test.ts', text(5))
+    write('tooling/asks.test.ts', text(40, asks))
+    write('tooling/asks-more.test.ts', text(50))
+    write('tooling/plain.test.ts', text(40))
+    write('tooling/plain-more.test.ts', text(50))
+    const tests = ['asks', 'asks-more', 'listed-autostart', 'listed-start', 'plain', 'plain-more'].map((n) => `tooling/${n}.test.ts`)
+    expect(droppedPiecesSince(base, tests, new Set(['tooling/asks.test.ts']), `${root}/`)).toEqual(
+      new Map([
+        ['tooling/asks.test.ts', ['tooling/asks-more.test.ts']],
+        ['tooling/listed.test.ts', ['tooling/listed-autostart.test.ts', 'tooling/listed-start.test.ts']],
+      ]),
+    )
+    rmSync(root, { recursive: true, force: true })
   })
 
   it(

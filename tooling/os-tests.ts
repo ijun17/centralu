@@ -138,26 +138,34 @@ const CODE = /\.(ts|tsx|mts|cts|mjs|cjs|js|jsx)$/
 /** The repository's files as a selection reads them: the working tree's, or a commit's (`treeAt`) */
 export type Tree = { read: (file: string) => string; isFile: (file: string) => boolean }
 
-const WORKING_TREE: Tree = {
-  read: (file) => readFileSync(`${ROOT}${file}`, 'utf8'),
-  isFile: (file) => existsSync(`${ROOT}${file}`) && statSync(`${ROOT}${file}`).isFile(),
-}
+/** The files of the working tree at `root` (a folder path ending in a separator) */
+const workingTree = (root: string): Tree => ({
+  read: (file) => readFileSync(`${root}${file}`, 'utf8'),
+  isFile: (file) => existsSync(`${root}${file}`) && statSync(`${root}${file}`).isFile(),
+})
 
-/** The files of `commit` */
-export function treeAt(commit: string): Tree {
-  const files = new Set(execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', commit], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0'))
+const WORKING_TREE = workingTree(ROOT)
+
+/** The files of `commit` in the repository at `root` */
+export function treeAt(commit: string, root = ROOT): Tree {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+  const files = new Set(git('ls-tree', '-r', '-z', '--name-only', commit).split('\0'))
   return {
     read: (file) => {
-      const text = gitShow(commit, file)
-      if (text === null) throw new Error(`${file} is not a file of ${commit}`)
-      return text
+      if (!files.has(file)) throw new Error(`${file} is not a file of ${commit}`)
+      return git('show', `${commit}:${file}`)
     },
     isFile: (file) => files.has(file),
   }
 }
 
-/** The questions the selection asks, over `tree` (the working tree by default) with `virtual` files laid over it (for tests) */
-export function osSelector(virtual: ReadonlyMap<string, string> = new Map(), tree: Tree = WORKING_TREE) {
+type EveryOsTest = { file: string; why: string }
+
+/**
+ * The selection's questions, over `tree` (the working tree by default) with `virtual` files laid over it (for tests), and
+ * `everyOs` for the tests picked whatever they import
+ */
+export function osSelector(virtual: ReadonlyMap<string, string> = new Map(), tree: Tree = WORKING_TREE, everyOs: readonly EveryOsTest[] = EVERY_OS_TESTS) {
   const scans = new Map<string, Scan>()
   const read = (file: string) => virtual.get(file) ?? tree.read(file)
   const isFile = (file: string) => virtual.has(file) || tree.isFile(file)
@@ -215,7 +223,7 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map(), tre
 
   /** Why a test runs on every OS, or null: the first module on its import path that touches the OS */
   function whyEveryOs(test: string): string | null {
-    const named = EVERY_OS_TESTS.find((t) => t.file === test)
+    const named = everyOs.find((t) => t.file === test)
     if (named) return `named in EVERY_OS_TESTS: ${named.why}`
     if (inOsLayer(test)) return 'in the OS layer'
     const own = scanFile(test)
@@ -438,12 +446,19 @@ export function formatDurations(durations: Durations, source: string): string {
 /** What the split rule reads of a file: its text at main's merge base and in the working tree, null when it is not there */
 export type SplitFiles = { base: (file: string) => string | null; now: (file: string) => string | null }
 
-/** At most this many pieces are cut from a file, and together they may hold this many lines more than it lost, plus `SPLIT_LINES_PER_PIECE` for each */
+/**
+ * At most this many pieces are cut from a file, and together they may hold `SPLIT_LINES_PER_PIECE` lines each more than it
+ * lost, and `SPLIT_LINES` more when it is gone: what is left of a shortened file keeps its own setup
+ */
 export const SPLIT_MAX_PIECES = 5
 export const SPLIT_LINES = 50
 export const SPLIT_LINES_PER_PIECE = 20
 
-const isTestFile = (file: string) => /\.(test|test-helpers)\.(ts|tsx|mts|mjs)$/.test(file)
+const TEST_FILE = /\.(test|test-helpers)\.(ts|tsx|mts|mjs)$/
+/** A test or a test helper */
+const isTestFile = (file: string) => TEST_FILE.test(file)
+/** A test, not its helper */
+const isTest = (file: string) => TEST_FILE.exec(file)?.[1] === 'test'
 
 /**
  * May `piece` have been cut from `whole`:
@@ -461,9 +476,9 @@ function mayBePieceOf(whole: string, piece: string, files: SplitFiles): boolean 
 
 /**
  * The files of `wholes` that this change removed or shortened, each with the `candidates` it was cut into: those that
- * may be its pieces (`mayBePieceOf`), at most `SPLIT_MAX_PIECES`, together no longer than the lines it lost by `SPLIT_LINES`
- * and `SPLIT_LINES_PER_PIECE` for each (the imports each repeats, the setup moved to a helper): the same code cut in
- * pieces, not more of it. A candidate goes to the first file that takes it.
+ * may be its pieces (`mayBePieceOf`), at most `SPLIT_MAX_PIECES`, together no longer than the lines it lost by
+ * `SPLIT_LINES_PER_PIECE` for each (the imports each repeats) and `SPLIT_LINES` when it is gone (the setup moved to a
+ * helper): the same code cut in pieces, not more of it. A candidate goes to the first file that takes it.
  */
 export function piecesOf(wholes: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> {
   const lines = (text: string | null) => (text === null ? 0 : text.split('\n').length)
@@ -476,7 +491,7 @@ export function piecesOf(wholes: readonly string[], candidates: readonly string[
     const lost = lines(files.base(whole)) - lines(now)
     const size = pieces.reduce((sum, f) => sum + lines(files.now(f)), 0)
     // A file still there was cut only if it lost lines: a new test beside one left as it was is no piece of it
-    if ((now !== null && lost <= 0) || size > lost + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
+    if ((now !== null && lost <= 0) || size > lost + (now === null ? SPLIT_LINES : 0) + SPLIT_LINES_PER_PIECE * pieces.length) continue
     for (const f of pieces) taken.add(f)
     out.set(whole, pieces)
   }
@@ -495,7 +510,7 @@ export const splitPieces = (main: readonly string[], current: readonly string[],
  * The tests of `tests` that this change cut (`piecesOf`) from a test the selection picked at main's merge base, and that it
  * does not pick now (#2402), each under the test it was cut from. The selection is made file by file, so a piece whose own
  * text earns it nothing (the OS question stayed in the other piece) would leave Windows without a word. `changed` are the
- * tests changed or removed since the base, and `pickedAtBase` asks the selection there (with this change's `EVERY_OS_TESTS`).
+ * tests changed or removed since the base, and `pickedAtBase` asks the selection there.
  */
 export function droppedPieces(tests: readonly string[], picked: ReadonlySet<string>, changed: readonly string[], files: SplitFiles, pickedAtBase: (test: string) => boolean): Map<string, string[]> {
   const unpicked = tests.filter((t) => !picked.has(t))
@@ -503,29 +518,38 @@ export function droppedPieces(tests: readonly string[], picked: ReadonlySet<stri
   return piecesOf(wholes, unpicked, files)
 }
 
-/** `droppedPieces` of the repository since `base`, for the tests the selection picks now */
-export function droppedPiecesSince(base: string, tests: readonly string[], picked: ReadonlySet<string>): Map<string, string[]> {
-  const changed = execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=DM', base, '--'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter((f) => /\.test\.(ts|tsx|mts|mjs)$/.test(f))
-  const atBase = osSelector(new Map(), treeAt(base))
-  return droppedPieces(tests, picked, changed, splitFilesAt(base), (t) => atBase.whyEveryOs(t) !== null)
+/**
+ * `droppedPieces` of the repository at `root` since `base`, for the tests the selection picks now. The selection at the
+ * base reads the base's `EVERY_OS_TESTS`: a test listed there for what its imports do not show loses its line when it is
+ * removed, and its pieces are the ones that cannot earn the selection from their own text.
+ */
+export function droppedPiecesSince(base: string, tests: readonly string[], picked: ReadonlySet<string>, root = ROOT): Map<string, string[]> {
+  const changed = execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=DM', base, '--'], { cwd: root, encoding: 'utf8' }).split('\0').filter(isTest)
+  const before = treeAt(base, root)
+  const atBase = osSelector(new Map(), before, everyOsTestsIn(before, root))
+  return droppedPieces(tests, picked, changed, splitFiles(before, workingTree(root)), (t) => atBase.whyEveryOs(t) !== null)
 }
 
-/** A file's text at `base`, or null when it was not there */
-export function gitShow(base: string, file: string): string | null {
-  try {
-    return execFileSync('git', ['show', `${base}:${file}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch {
-    return null
-  }
+const OS_LAYER_MODULE = 'tooling/os-layer.js'
+
+/** `EVERY_OS_TESTS` of `tree`'s tooling/os-layer.js, none without one. The list is code (entries built with `map`), so a Node of its own runs it */
+function everyOsTestsIn(tree: Tree, root: string): EveryOsTest[] {
+  if (!tree.isFile(OS_LAYER_MODULE)) return []
+  const script = `${tree.read(OS_LAYER_MODULE)}\nprocess.stdout.write(JSON.stringify(EVERY_OS_TESTS))\n`
+  const list: unknown = JSON.parse(execFileSync(process.execPath, ['--input-type=module'], { cwd: root, input: script, encoding: 'utf8' }))
+  const isEntry = (t: unknown): t is EveryOsTest => typeof t === 'object' && t !== null && 'file' in t && typeof t.file === 'string' && 'why' in t && typeof t.why === 'string'
+  if (!Array.isArray(list) || !list.every(isEntry)) throw new Error(`${OS_LAYER_MODULE}: EVERY_OS_TESTS is not a list of { file, why }`)
+  return list
 }
 
-/** The files of the working tree, with the text at `base` (null when there is no merge base to read) */
-export function splitFilesAt(base: string | null): SplitFiles {
-  return {
-    base: (f) => (base === null ? null : gitShow(base, f)),
-    now: (f) => (existsSync(`${ROOT}${f}`) ? readFileSync(`${ROOT}${f}`, 'utf8') : null),
-  }
+/** What the split rule reads of `before` (none: nothing was there) and `now` */
+function splitFiles(before: Tree | null, now: Tree): SplitFiles {
+  const text = (tree: Tree | null, file: string) => (tree?.isFile(file) ? tree.read(file) : null)
+  return { base: (f) => text(before, f), now: (f) => text(now, f) }
 }
+
+/** The files of the working tree, with the text at `base` (none when there is no merge base to read) */
+export const splitFilesAt = (base: string | null): SplitFiles => splitFiles(base === null ? null : treeAt(base), WORKING_TREE)
 
 /**
  * The allowlist's text with every line the code no longer needs taken out (`--tighten`): a file that moved behind the
