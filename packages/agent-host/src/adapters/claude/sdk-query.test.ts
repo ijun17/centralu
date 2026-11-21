@@ -84,7 +84,7 @@ describe('a session whose choice tool is off is told how to ask (#1630)', () => 
   it('says it in the mail tool, for every seat that is served the tool', () => {
     const served = TOOL_PROFILES.filter((p) => off(p) && toolDefsFor(p).some((t) => t.name === 'mail'))
     expect(served).toContain('reader')
-    for (const p of served) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description).toContain('Ask the person with kind "question".')
+    for (const p of served) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description).toContain('Ask the person with kind: "question".')
   })
 })
 

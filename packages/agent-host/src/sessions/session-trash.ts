@@ -109,29 +109,23 @@ export class SessionTrash {
 
   readonly trashing = new Map<string, Promise<void>>()
   /**
-   * The host's own deletes under way (`trashIf`), and whether a delete somebody asked for joined one (#378 review): a
+   * The host's own deletes under way (`trashIf`), and whether a delete somebody asked for joined one (#378): a
    * joined delete is the person's, so the session stays in the session archive instead of being purged after it, and the tool's
    * conversation file stays unless they asked for it to go
    */
   private readonly hostDeletes = new Map<string, { joined: { removeExternal: boolean } | null }>()
 
   /**
-   * Archives a session (#204) — what deleting a session means now. Nothing is destroyed: the process
-   * stops, and the session leaves every list (sidebar, inbox, palette, grid, search, the agents' session tools and
-   * the apps' `sessions.list`, all of which read `meta` or filter the session archive in the store). Its rows, attachments,
-   * handoff note, the tool's conversation file and its worktree stay until the person deletes it for good in
-   * Settings (`purgeSession`).
-   *
-   * @param removeWorktree remove the worktree **when it is purged**. The default is to keep it — hours
-   * of an agent's work can be sitting there. It stays registered with git and in place while the session is
-   * in the session archive:
-   * moving a worktree folder leaves git's record pointing at nothing (`git worktree list` calls it prunable, and
-   * `git worktree prune` or a `gc` then drops it), and Claude files a conversation by its working directory, so the
-   * restored session would not find its own history either.
-   * @param removeExternal delete the tool's conversation file **when it is purged**. It stays where the tool keeps
-   * it while the session is in the session archive: the file is the tool's, in the tool's layout, and only the tool's own
-   * delete knows that layout (the Claude SDK's `deleteSession`). Left in place it is also a second way back — the
-   * tool, and **+ → Past conversations**, still have it.
+   * Archives a session (#204) — what deleting a session means. Nothing is destroyed: the process stops, and the session leaves
+   * every list (sidebar, inbox, palette, grid, search, the agents' and apps' session lists). Its rows, attachments, handoff
+   * note, the tool's conversation file and its worktree stay until the person deletes it for good in Settings (`purgeSession`).
+   * @param removeWorktree remove the worktree **when it is purged**. The default keeps it, as hours of an agent's work can be
+   * sitting there: it stays registered with git and in place while archived, as moving the folder leaves git's record pointing
+   * at nothing (`git worktree prune` or a `gc` then drops it) and Claude files a conversation by its working directory, so a
+   * restored session would not find its own history.
+   * @param removeExternal delete the tool's conversation file **when it is purged**. It stays where the tool keeps it while
+   * archived: only the tool's own delete knows its layout (the Claude SDK's `deleteSession`), and left in place it is a second
+   * way back (the tool, and **+ → Past conversations**, still have it).
    */
   async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
     await this.trashShared(sessionId, removeWorktree, removeExternal, recovery, fromCleanup)
@@ -321,10 +315,10 @@ export class SessionTrash {
       return false
     }
     /*
-     * A session with worktree children used to be undeletable while one was unmerged (#69): a worktree whose manager
-     * disappeared was an orphan nobody saw. Since #561 a child is an ordinary session that outlives the session that
-     * started it: deleted, the parent leaves its children in the sidebar on their own, each with its worktree, its
-     * branch and a "started by a session no longer here" mark, so nothing is hidden and nothing pins the parent.
+     * A session with worktree children is deletable though one is unmerged (#69: a worktree whose manager disappeared would be
+     * an orphan nobody sees; but a child is an ordinary session that outlives the session that started it, #561): deleted, the
+     * parent leaves its children in the sidebar on their own, each with its worktree, its branch and a "started by a session no
+     * longer here" mark, so nothing is hidden and nothing pins the parent.
      */
     /*
      * A tool that cannot delete its conversation file is refused now, not when the session archive is emptied: the person
@@ -336,14 +330,13 @@ export class SessionTrash {
       throw rpcError(`${m.tool} does not support deleting its conversation file`)
     }
     /*
-     * If a wake is in progress, it is withdrawn and this waits for it to finish (#163). It used to
-     * not wait — a wake would place a handle on the deleted session and rewrite the row, the deleted
-     * session would come back on the next startup, and if the wake had started from a send, the
-     * agent would go on to execute the message that had just been sent.
+     * If a wake is in progress, it is withdrawn and this waits for it to finish (#163): without the wait, a wake would place a
+     * handle on the deleted session and rewrite the row, the deleted session would come back on the next startup, and if the
+     * wake had started from a send, the agent would go on to execute the message that had just been sent.
      */
     if (!onlyIf) await this.host.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
     /*
-     * The host's own delete (#378 review) is decided here, with nothing awaited from this line until the session has left
+     * The host's own delete (#378) is decided here, with nothing awaited from this line until the session has left
      * `meta` below (a handle to dispose is one `onlyIf` refuses): a person's message, a wake or a card either came before
      * it and keeps the session, or finds the session gone. Checked earlier, a message in between woke the session and the
      * delete then cancelled that wake, and the message was lost.
@@ -376,7 +369,7 @@ export class SessionTrash {
     }
     this.host.readGrants.delete(sessionId)
     this.host.delegationFlow.starts.agentConsents.delete(sessionId)
-    // Its children on linked machines (#1038 review): nobody is left to report to; they stay on their machines
+    // Its children on linked machines (#1038): nobody is left to report to; they stay on their machines
     this.host.delegationFlow.remote.forgetCaller(sessionId)
     // What a handoff gave away from it, or to it, or the given work itself (#693)
     this.host.children.forgetHandedOver(sessionId)
@@ -403,9 +396,9 @@ export class SessionTrash {
     // Its process is gone with it, and a restored session starts a new one (#648)
     this.host.restartPolicy.forgetBackground(sessionId)
     /*
-     * The message being streamed is written out, not dropped (#66 used to drop it, because the rows were about to go).
-     * The rows now stay, and an archived conversation that stops mid-sentence is not the one that was deleted. Written
-     * before the session archive step, so its index row is dropped with the rest.
+     * The message being streamed is written out, not dropped: the rows stay, and an archived conversation that stops
+     * mid-sentence is not the one that was deleted. Written before the session archive step, so its index row is dropped with
+     * the rest.
      */
     this.host.record.closeStream(sessionId)
     let project: { name: string; path: string } | undefined
@@ -651,7 +644,7 @@ export class SessionTrash {
         const repo = record.projectPath
         await gitWorktreeRemove(repo, path, { worktreeRoot: this.host.worktreeRoot }).catch((e: Error) => {
           if (!existsSync(path)) return
-          // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
+          // The project folder moved or went (#990): git has no repository to remove it from, and only the person can
           if (!existsSync(repo)) {
             throw rpcError(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the session archive: delete that folder yourself, then delete this entry again.`)
           }
@@ -678,7 +671,7 @@ export class SessionTrash {
       }
       await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
-      // An Assistant's child worked in a folder of its own (#853, #994 review), which goes with it
+      // An Assistant's child worked in a folder of its own (#853, #994), which goes with it
       if (cwd && isAssistantAgentFolder(cwd)) {
         await realOs().files.promises.rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[archive] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
       }

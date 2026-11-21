@@ -6,19 +6,10 @@ import { projectLabelOf } from '../../store/names.js'
 import { useToolMeta } from '../../store/selectors.js'
 
 /**
- * A pinned view's `ui/message` — asks the person which session to send it to (M4 B-4).
- *
- * An in-conversation view's message goes to that conversation; where it is sent is already fixed.
- * A pinned view has no such conversation. Letting the app pick on its own would let the view (the
- * app's own code) put a message into any session without the person knowing. So **nothing is sent
- * before the person chooses.** Canceling has the view receive a decline (so it never believes it
- * was sent).
- *
- * The text about to be sent is shown exactly as it is. The person reading that text and choosing is
- * the entirety of this confirmation. A non-text part (an image, etc.) is not sent, and that fact is
- * stated. The list ranks this app's own project sessions first, then the Assistant and other
- * projects' sessions. A user-folder app has no project, so the Assistant comes first (decision 4:
- * a user-folder app belongs to the Assistant).
+ * A pinned view's `ui/message` (M4 B-4): the person picks the session. A pinned view has no conversation, and letting
+ * the app's code pick would put messages anywhere unseen, so nothing goes before the pick; cancel tells the view it was
+ * declined. The text shows as is; a non-text part is said to be dropped. This app's project first, then the Assistant
+ * and the rest; a user-folder app belongs to the Assistant (decision 4), so it comes first.
  */
 export type MessageAskState = { text: string; dropped: number; resolve: (sent: boolean) => void }
 

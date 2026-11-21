@@ -2,68 +2,25 @@ import { endsWorkWithJob, powershell } from '../os.js'
 import { execText } from '../os/exec.js'
 
 /**
- * **The host's work ends with it on Windows** (#1067, #840 item 7, owner's option b).
- *
- * Windows does not end a process's children when it ends. Node (libuv) puts each child it starts into a job of its own
- * with `KILL_ON_JOB_CLOSE`, so a direct child ends with the host, but that job also lets a child's own children leave it
- * silently (`SILENT_BREAKAWAY_OK`), and what a ConPTY starts leaves it the same way. So whatever an agent CLI, a Run
- * command, a git hook or an app server started through a program that is not Node (codex's MCP servers, a dev server
- * PowerShell started, `start`) kept running after the host crashed or was ended, holding its ports and memory
- * (measured on Windows 11: every such grandchild survived `taskkill /F` of the host, and was in no job).
- *
- * At start the host puts **itself** into a new job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and no breakaway, and
- * holds the only handle to it, not inheritable. Every process it starts from then on, and everything those start, is
- * created in it, in all five ways the host starts one. Two things then end them with the host (both measured):
- *
- * 1. **No process can leave any more.** The job allows no breakaway, so libuv's silent breakaway no longer lets a
- *    child's children out of libuv's job, and that job (`KILL_ON_JOB_CLOSE`) ends them when the host does. A Node
- *    process is itself in a job once it has started a child (measured: in none before its first spawn, in one after);
- *    with this job held open by another process, so that it could not close, everything still ended.
- * 2. **This job's own `KILL_ON_JOB_CLOSE`**, when the host's handle closes. It does not depend on how libuv sets up
- *    its jobs, which is libuv's to change; `work-job.test.ts` reads the flag back from the job the host holds.
- *
- * The host itself rather than each child: a child added by its pid after the spawn could already have started its own
- * (cmd.exe runs its command at once), while a child of a process in a job is in it from its creation.
- *
- * - **Terminals are not in it.** What a person starts in a Centralu terminal is theirs, not the host's work: it must
- *   outlive a host that crashes (the owner's decision on #840 item 7), as it does today. Terminals are started by a
- *   broker the host starts **before** it joins (`dev-services/broker-pty.ts`), which is in no job of the host's. Run
- *   commands are the host's work and stay in the job.
- * - **What the host opens for the person** is not in it either: "Open in IDE" and `system.openUrl` are opened by the
- *   window, outside the host's tree.
- * - **No breakaway** (`JOB_OBJECT_LIMIT_BREAKAWAY_OK` is not set): only a process that asks to break away could leave,
- *   and Git for Windows' sh (MSYS) asks. With it allowed, what a git hook started, or anything under Git Bash (Claude
- *   Code's Bash tool on Windows), outlived the host (measured with the real host; without it, it ended, and the hook ran
- *   as before). This is the only end of a program a hook's `sh` started (#2142): MSYS's fork gives it a parent that has
- *   already exited, so neither a stop's tree kill nor its sweep by parent links finds it, and a git call that is stopped
- *   leaves it running until the host exits (measured 2026-11-09, `git commit` with a hook `sleep`: without the job the
- *   hook's `sh` and `sleep` outlived their Node parent, with it both ended). A job per run would end it with the run, but
- *   costs one PowerShell (0.3–0.8 s) per program started, so the run itself is not put in one.
- * - **Under a keeper too.** The keeper holds none of the host's children any more (#1895 step 4: the host owns its agents,
- *   terminals and commands, and a swap ends them with the old host), so a job of the host's takes nothing from it.
- *   Measured on native Windows with `CC_KEEPER=1`: without the job a detached grandchild a dev server started survived
- *   `taskkill /F` of the host, with it none did.
- * - **A host swap or restart:** the next host is started by the window, not by this host, so it is in no job of this
- *   one's.
- * - **Already in a job** (a Node launcher's under `pnpm dev`, a CI runner's): the new job nests inside it (measured
- *   under a Node parent). Where Windows refuses (an outer job that forbids it), the host goes on as before and says so
- *   in its log.
- *
- * Node has no Job Object API. One PowerShell (~0.3–0.8 s on Windows 11, almost all of it PowerShell starting) creates
- * the job, puts the host in it, copies the handle into the host and exits. It runs while the host opens its store, and
- * the host waits for it before it starts anything (`START_ORDER`'s `work job`). A native addon would be a build step
- * per architecture for one call; the window (Rust) could create it, but `pnpm dev`, e2e and a Windows remote's
- * `serve` start the host without the window.
+ * **The host's work ends with it on Windows.** Windows does not end a process's children with it, and libuv's own job lets a
+ * child's children leave it silently (`SILENT_BREAKAWAY_OK`), as a ConPTY's do, so what an agent CLI, a Run command, a git hook
+ * or an app server started through a non-Node program outlived a host that crashed. At start the host puts **itself** into a
+ * new job with `KILL_ON_JOB_CLOSE` and no breakaway, holding the only handle (not inheritable): everything it starts is created
+ * in it, libuv's job still ends what cannot leave it, and the job's own flag ends the rest (`work-job.test.ts` reads it back).
+ * The host itself, not each child by pid: a child added after the spawn may already have started its own. No breakaway because
+ * Git for Windows' sh (and anything under Git Bash, Claude Code's Bash tool on Windows) asks for it: its fork leaves a hook's `sleep` with an exited parent that no tree kill or sweep finds. Not
+ * in it: terminals, started by a broker the host starts **before** it joins (`dev-services/broker-pty.ts`). Node has no Job
+ * Object API: one PowerShell (0.3–0.8 s) does it while the store opens, and the host waits for it before it starts anything
+ * (`START_ORDER` `work job`). More: docs/agent-host/host-process.md.
  */
 
 /** `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` alone (no breakaway, see the file header) */
 export const WORK_JOB_LIMITS = 0x2000
 
 /**
- * Creates the job, sets its limits, copies the handle into the process (not inheritable: a child holding it would
- * keep the job, and its processes, alive past the host), puts the process in the job and closes its own handles.
- * Prints `ok <handle>` (the handle's number in the process, for a test to read the job back), or the step that failed
- * and Windows' error number.
+ * Creates the job, sets its limits, copies the handle into the process (not inheritable: a child holding it would keep the job
+ * alive past the host), joins the process and closes its own handles. Prints `ok <handle>` (the handle's number, for a test to
+ * read the job back), or the failed step and Windows' error number
  */
 const JOIN_SCRIPT = (pid: number, limits: number) => `
 $ErrorActionPreference = 'Stop'
@@ -126,7 +83,12 @@ const REAL_OS: WorkJobOs = {
 }
 
 /**
- * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Never throws
+ * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Never throws. Node has no Job
+ * Object API, and a native addon is a build step per architecture for one call; the window could, but
+ * `pnpm dev`, e2e and `serve` start the host without it. A host already in a job (a launcher's under `pnpm dev`, a CI
+ * runner's) nests this one inside it (measured under a Node parent); where Windows refuses, it goes on and says so in its log.
+ * The next host of a swap is started by the window, so it is in no job of this one's. A job per run would cost one PowerShell
+ * (0.3–0.8 s) per program started, so a run is not put in one
  */
 export async function joinWorkJob(pid: number = process.pid, os: WorkJobOs = REAL_OS): Promise<WorkJob> {
   if (!workJobWanted(os)) return { state: 'not needed' }

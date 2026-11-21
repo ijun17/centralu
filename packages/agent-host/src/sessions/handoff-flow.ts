@@ -16,7 +16,7 @@ import { isOrdinary } from './tool-profiles.js'
 export type HandoffFlowHost = {
   readonly meta: ReadonlyMap<string, SessionInfo>
   readonly store: Store
-  /** `log`: what the auto log line names instead of the card's kind (#694 review) */
+  /** `log`: what the auto log line names instead of the card's kind */
   askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card?: { log?: string }): Promise<HostAskAnswer>
   /** Why this tool cannot start a session here (unknown, not installed, signed out), or null */
   toolProblem(tool: string): Promise<string | null>
@@ -72,25 +72,16 @@ type Run = {
 }
 
 /**
- * The Assistant's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the
- * window's session menu does (`handoffSession` in the UI's store), with the same note, the same first message and the
- * same move of the original's children (#693) and copy of its attached apps (#1638).
- *
- * **Who may hand off what.** Only the Assistant has the tool (`profileAllows`); a lead, an ordinary session
- * and an app's agent do not. Its target is a session of its own view on this computer (`centraluToolsFor`), and of
- * those only a project's ordinary session: never itself, an Assistant or coordinator, an app's session (an app's
- * agent or its builder, whose tie to the app the successor would not carry), a worktree session (refused with the
- * window's reason), or a session mid-turn (refused, never cut short). The person's consent is a card in the
- * Assistant's own session for each handoff, unless the Assistant runs under `auto` (#603, logged), the person
- * answered "always" on an earlier card (which lasts while this host serves that Assistant), or the handoff
- * guards nothing (#1509, owner 2026-10-24): the target is at rest (never mid-turn, above) and the successor's preset,
- * which is the original's, is within the Assistant's own (`covered`). The original stays, so nothing is lost and
- * no power is added. The checks run again after the card, since the target may have started a turn while it stood.
- *
- * What moves is what the person's own handoff moves: the children go to the successor, and the apps the original attached are copied, which is then owed their
- * reports; `moveChildren` checks no authority itself, which is why every check above precedes it. The original always
- * stays (the issue: never deleted automatically); the person removes it. The successor runs with the original's
- * preset, which the card names, so the handoff raises no session above what the person set for it.
+ * The Assistant's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the window's session
+ * menu does, with the same note, first message, move of the original's children (#693) and copy of its attached apps (#1638).
+ * **Who may hand off what.** Only the Assistant has the tool (`profileAllows`). Its target is a session of its own view on this
+ * computer, and of those only a project's ordinary session: never itself, an Assistant or coordinator, an app's session (whose
+ * tie to the app the successor would not carry), a worktree session or a session mid-turn (both refused, never cut short). The
+ * person's consent is a card in the Assistant's own session for each handoff, unless the Assistant runs under `auto` (#603,
+ * logged), the person answered "always" on an earlier card (which lasts while this host serves that Assistant), or the handoff
+ * guards nothing (`covered`, #1509, owner 2026-10-24). The checks run again after the card: the target may have started a turn
+ * meanwhile. What moves is what the person's own handoff moves; `moveChildren` checks no authority itself, so every check above
+ * precedes it. The original stays (the person removes it); the successor runs with the original's preset, which the card names.
  */
 export class HandoffFlow {
   /** Handoffs running now, by the session being handed off: two at once would start two successors */
@@ -133,7 +124,7 @@ export class HandoffFlow {
     return caller !== undefined && presetWithin(target.permissionPreset, caller.permissionPreset)
   }
 
-  /** A refusal, logged with who asked and for which session (#694 review) */
+  /** A refusal, logged with who asked and for which session */
   private refuse(callerId: string, targetId: string, error: string): HandoffResult {
     console.error(`[agent-host] handoff_session by ${callerId.slice(0, 8)} of ${targetId.slice(0, 8)} refused: ${error}`)
     return { ok: false, error }
@@ -158,7 +149,7 @@ export class HandoffFlow {
     const instructions = opts.instructions?.trim() || undefined
     const refused = this.refusal(callerId, target, mode)
     if (refused) return this.refuse(callerId, target.id, refused)
-    // The tool is checked before any card: a name that cannot start a session never reaches the person's eyes (#694 review)
+    // The tool is checked before any card: a name that cannot start a session never reaches the person's eyes
     const problem = await this.host.toolProblem(tool)
     if (problem) return this.refuse(callerId, target.id, `Nothing was handed off: ${problem}`)
 
@@ -166,8 +157,8 @@ export class HandoffFlow {
     // Whether no card stood for this call (#1509); the presets are then read once more where the successor starts, as an agent's note takes minutes
     let uncarded = false
     /*
-     * Under `auto` no card is raised, and the allowance is logged only once this call holds the session (#797): a
-     * burst of calls logged "allowed" for each before all but one were refused. Asked here without logging.
+     * Under `auto` no card is raised, and the allowance is logged only once this call holds the session (#797): a burst of
+     * calls would log "allowed" for each before all but one were refused. Asked here without logging.
      */
     const viaAuto = this.host.autoBoundaryOpen(callerId)
     // The session as it is after the tool check awaited, not the object the call came with
@@ -189,7 +180,7 @@ export class HandoffFlow {
     if (!now) return this.refuse(callerId, target.id, `${trustedJsonText(target.name)} is gone.`)
     const again = this.refusal(callerId, now, mode)
     if (again) return this.refuse(callerId, now.id, again)
-    // "Always" counts only for a call that went through every check (#694 review): a refused one grants nothing
+    // "Always" counts only for a call that went through every check: a refused one grants nothing
     if (always) this.always.add(callerId)
 
     // Claimed before anything is awaited, and held until the whole handoff ends
@@ -331,7 +322,7 @@ export class HandoffFlow {
   /**
    * The card's one question: what is handed off, to what, from which note, and what stays. Every name in it is someone
    * else's text (the target's name, the tool the model asked for, its words), so each is JSON-quoted on one line and
-   * cannot read as the card's own sentence (#694 review); the words are cut at 400 characters and say so.
+   * cannot read as the card's own sentence; the words are cut at 400 characters and say so.
    */
   private question(target: SessionInfo, tool: ToolName, mode: 'record' | 'agent', instructions: string | undefined): string {
     const name = trustedJsonText(target.name)

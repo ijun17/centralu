@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import type { RemoteRuntime } from './install.js'
 
 /**
  * A local stand-in for registry.npmjs.org and nodejs.org/dist (links/install tests): signed version
@@ -64,6 +65,52 @@ export async function tarGzAsync(top: string, files: Record<string, FakeFile>): 
 export const sha512 = (b: Buffer) => `sha512-${createHash('sha512').update(b).digest('base64')}`
 export const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
+/**
+ * This POSIX machine playing a Linux x64 machine a hub links to, for the install, update and dev-build tests. In `root`:
+ * `bin/uname` says Linux x86_64 and `bin/getconf` says glibc `$FAKE_GLIBC` (2.39 when unset), for `bin` to come first
+ * on the remote's PATH; `ssh` hands its last argument to `/bin/sh` in `$HOME` (`<root>/home`), as sshd does, so the hub's real commands
+ * run. `archive` is the pinned Node for `FakeRegistry.addNodeArchive`: its `bin/node` runs this Node, beside a licence
+ * and `archiveFiles`; `runtime` pins it.
+ */
+export function linuxRemote(
+  root: string,
+  nodeVersion: string,
+  archiveFiles: Record<string, FakeFile> = {},
+): {
+  ssh: string
+  /** The remote's environment: `HOME`, and a PATH with the fake tools first, then `before`, then the system's folders */
+  env: (over?: Record<string, string>, before?: string[]) => Record<string, string>
+  archive: NodeArchive
+  runtime: RemoteRuntime
+} {
+  const bin = join(root, 'bin')
+  mkdirSync(bin, { recursive: true })
+  const script = (path: string, text: string) => {
+    writeFileSync(path, text)
+    chmodSync(path, 0o755)
+  }
+  script(join(bin, 'uname'), '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) /usr/bin/uname "$@" ;; esac\n')
+  script(join(bin, 'getconf'), '#!/bin/sh\necho "glibc ${FAKE_GLIBC:-2.39}"\n')
+  const ssh = join(root, 'ssh')
+  script(ssh, `#!${process.execPath}\nconst r = require('node:child_process').spawnSync('/bin/sh', ['-c', process.argv.at(-1)], { stdio: 'inherit', cwd: process.env.HOME })\nprocess.exit(r.status ?? 1)\n`)
+  const file = `node-v${nodeVersion}-linux-x64.tar.gz`
+  const bytes = tarGz(`node-v${nodeVersion}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT', ...archiveFiles })
+  return {
+    ssh,
+    env: (over = {}, before = []) => ({ HOME: join(root, 'home'), PATH: [bin, ...before, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'), ...over }),
+    archive: { version: nodeVersion, file, bytes },
+    runtime: pinnedRuntime('linux-x64', nodeVersion, file, sha256(bytes)),
+  }
+}
+
+/** A Node release archive as nodejs.org/dist serves it (`FakeRegistry.addNodeArchive`) */
+export type NodeArchive = { version: string; file: string; bytes: Buffer }
+
+/** The Node a remote install is pinned to: one platform's archive, by its file name and its sha256 */
+export function pinnedRuntime(platform: string, version: string, file: string, sha: string): RemoteRuntime {
+  return { node: { version, archives: { [platform]: { file, sha256: sha } } } }
+}
+
 export type FakeRegistry = {
   url: string
   /** Requests served, by path */
@@ -73,7 +120,7 @@ export type FakeRegistry = {
   /** Signs `name@version`'s metadata with a key the registry does not publish */
   forgeSignature(id: string): void
   /** Adds a Node archive at `/dist/v<version>/<file>` */
-  addNodeArchive(version: string, file: string, bytes: Buffer): void
+  addNodeArchive(archive: NodeArchive): void
   close(): Promise<void>
 }
 
@@ -123,39 +170,22 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
     hits,
     swapTarball: (id, bytes) => void served.set(id, bytes),
     forgeSignature: (id) => void forged.add(id),
-    addNodeArchive: (version, file, bytes) => void files.set(`/dist/v${version}/${file}`, bytes),
+    addNodeArchive: ({ version, file, bytes }) => void files.set(`/dist/v${version}/${file}`, bytes),
     close: () => new Promise((r) => server.close(() => r())),
   }
 }
 
 /**
- * A fake `centralu.mjs` for update tests: plays its version's `serve`. `--stop` and `--detach` write what
- * happened to `<data>/events` and which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that
- * version fail to start and leave a line in `host.log`. `--autostart off` and `remove` remove `<data>/autostart`, the
- * stand-in for a boot entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that
- * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse, or with `-` only when no version runs. `--connection` prints a connection line with the running
- * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
- * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
- * `FAKE_MIGRATES=<version>` plays a version whose migration only it reads: starting, it writes `needs <version>` to
- * `<data>/store.db`, and any other version refuses that store (`StoreTooNewError` in host.log).
- *
- * The data folder's lock (#1903): `--detach` refuses, as a host does, while `<data>/host.lock` names a live process.
- * With `realServe` (the URL of the real `serve.mjs`), `FAKE_HANGS=<version>` plays a version whose host takes the lock
- * and then hangs: a process started outside the session as the real launcher starts its host, which never answers,
- * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
- * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`). It listens on a port of its own,
- * `<data>/hung.port`: `hungListening` is how a test tells that it lives (not by its pid: a freed pid goes to the next process, #2082).
- *
- * The switch (plan §10.5a): with `realServe`, `--switch`, `--switch-run` and `--switch-status` are the real launcher's,
- * and `--detach` asks its gate first (`beforeHostStart`), so the real switcher drives these fake versions through their
- * CLI. A switcher started through WMI gets the account's environment, not the test's, so every `FAKE_*` is read from
- * `<data>/fake-env.json` too. `FAKE_SILENT=<version>`: `--connection` says no host runs while that version would.
- * `FAKE_HOLD=stop` or `FAKE_HOLD=start <version>` holds that command (`<data>/holding` says so) until `<data>/release`
- * appears: `go` lets it on, `quit` ends it having done nothing, as a switcher killed there leaves it. `stopped` holds a
- * stop once it stopped the host, and `connection <version>` that version's `--connection` while a host runs. Each
- * holds once. `FAKE_WMI_BLOCKED`: the handover can start nothing outside the session (WMI blocked), so the switch runs
- * in it. `FAKE_NO_GATE=<version>` plays a version from before the switch: its `--detach` asks no switch. A `--detach`
- * while a host runs answers that one, as the real launcher does.
+ * A fake `centralu.mjs` for update tests: plays its version's `serve` (`fromPackage`: the version is the one in
+ * `../package.json` beside it, as a dev build stamps it, #1036). Its `FAKE_*` knobs are read from `<data>/fake-env.json` too,
+ * because a switcher started through WMI gets the account's environment, not the test's. `FAKE_STOP_FAILS=-` fails `--stop`
+ * only when no version runs; `FAKE_MIGRATES=<v>` makes only that version read the store it wrote; `FAKE_HOLD=stop|stopped|start
+ * <v>|connection <v>` holds that command once until `<data>/release` holds `go` or `quit` (which ends it as a killed switcher
+ * leaves it). With `realServe` (the real `serve.mjs`) `--switch*` are the real launcher's and `--detach` asks its gate and
+ * refuses while `<data>/host.lock` names a live process (#1903). `FAKE_HANGS=<v>` plays a host that holds the lock and never
+ * answers: its port is in `<data>/hung.port`, which `hungListening` asks, as a freed pid goes to the next process (#2082);
+ * `FAKE_COPIES=<v>` one copying its store first, its lock saying `store` for `FAKE_COPY_MS` while `--detach` answers `starting`
+ * (#2334).
  */
 export const fakeServe = (version: string, o: { fromPackage?: boolean; installInfo?: string; realServe?: string } = {}) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -243,6 +273,14 @@ if (real && a.startsWith('serve --switch')) {
     real.recordServePort(d, free.address().port)
     await new Promise((r) => free.close(r))
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'timeout', message: 'the host did not answer within 30 s' } }))
+  } else if (real && F('FAKE_COPIES') === V) {
+    const since = Date.now()
+    const copy = "const fs=require('fs');const [d,V,ms]=process.argv.slice(1);setTimeout(function(){const l=JSON.parse(fs.readFileSync(d+'/host.lock','utf8'));delete l.store;fs.writeFileSync(d+'/host.lock',JSON.stringify(l));fs.writeFileSync(d+'/running',V)},Number(ms));setInterval(function(){},1e6)"
+    const copying = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', copy, d, V, String(F('FAKE_COPY_MS') || 35000)], env: process.env, cwd: d })
+    if (!copying.ok) throw new Error(copying.message)
+    writeFileSync(d + '/host.lock', JSON.stringify({ pid: copying.pid, started: real.processStartTime(copying.pid), at: Date.now(), by: 'serve', store: { doing: 'copy', step: 76, bytes: 1, since } }))
+    writeFileSync(d + '/hung', String(copying.pid))
+    console.log(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'starting', doing: 'copy', step: 76, since, message: 'the host is copying its data before step 76' } }))
   } else if (store.startsWith('needs ') && store.slice(6) !== V) {
     appendFileSync(d + '/host.log', 'host ' + V + ': StoreTooNewError: this store needs Centralu ' + store.slice(6) + '\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))

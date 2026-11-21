@@ -7,50 +7,26 @@ import { HostMailParams, HubOffer, LinkedAppCallParams, LinkedAppCancelParams, L
 /** A session of the hub, by its id there: one piece of a mail address (`session:<hub id>/<id>`) */
 const HubCaller = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,63}$/)
 
-/** The parameters of the `host` methods, which the host validates (docs/protocol.md §3). Their results: ./host.results.ts */
+/** Params of the `host` methods, parsed by the host (docs/protocol.md §3). Results: ./host.results.ts */
 export const hostParams = {
   /**
-   * Where this install stands against the registry (issue #43).
-   *
-   * `force` is the difference between "what do you already know" (app start, cheap,
-   * no network) and "go look now" (the Check now button). One method rather than two
-   * because the answer is the same shape either way, and a caller that wants a fresh
-   * answer wants the same fields a stale one has.
-   *
-   * **This never rejects for a network failure.** A version check that can break the
-   * screen it decorates is worse than no version check; what went wrong comes back in
-   * `error` instead, where the person who pressed the button can read it.
+   * `force`: look now (Check now) rather than answer what is known (no network). Never rejects for a network failure: a
+   * check that can break the screen it decorates is worse than none, so the failure comes back in `error`.
    */
   'updates.status': z.object({ force: z.boolean().default(false) }),
-  /**
-   * Turn the periodic check on or off.
-   *
-   * The host holds this, not the UI, because the host is what owns the timer — a
-   * preference kept on the other side of the wire from the thing it governs is one
-   * that eventually stops governing it.
-   */
+  /** Held by the host, which owns the timer it governs */
   'updates.setAuto': z.object({ enabled: z.boolean() }),
   /**
-   * "Apply updates automatically when idle" on or off (#352). The host holds it for the same
-   * reason as `updates.setAuto`: the host is what installs. Turning it on with a newer version
-   * already known starts the install at once; the window applies it once nothing is busy.
+   * Held by the host, which installs. On with a newer version known starts the install at once; the window applies it
+   * once nothing is busy (docs/agent-host/lifecycle/updates.md).
    */
   'updates.setAutoApply': z.object({ enabled: z.boolean() }),
   /**
-   * Install the newer version. Asked for by the person, or by `autoApply` (#352) when a check
-   * finds a newer version — never otherwise.
-   *
-   * Answers as soon as the work has *started*, not when it has finished: `npm i -g`
-   * routinely outruns the 30s RPC deadline, and a call that times out while the
-   * install keeps going leaves the screen saying the opposite of what happened.
-   * Progress arrives as `update_status` events instead.
+   * Asked only by the person or by `autoApply`. Answers once the install has started: `npm i -g` routinely outruns the
+   * 30 s RPC deadline. Progress comes as `update_status`.
    */
   'updates.apply': z.object({}),
-  /**
-   * A window's answer to `update_apply_request` (#665): whether its "Apply now" could relaunch into the installed build
-   * right now, and why not. The first window that is ready gets a ticket; every other answer, and any answer after the
-   * host stopped asking, gets null.
-   */
+  /** The first ready window gets a ticket; every other answer, and one after the host stopped asking, gets null */
   'updates.answerApply': z.object({
     requestId: z.string(),
     ready: z.boolean(),
@@ -58,9 +34,8 @@ export const hostParams = {
     version: z.string().optional(),
   }),
   /**
-   * The picked window's outcome (#665): `started` right before it relaunches, then with `error` when it did not, or
-   * with neither once the shell accepted the relaunch. A relaunching window may close before that last report; the
-   * host reads its connection ending as the relaunch only after `started`.
+   * `started` right before the relaunch, then `error`, or neither once the shell accepted it. The window may close before
+   * that last report: the host reads its connection ending as the relaunch only after `started`.
    */
   'updates.reportApply': z.object({
     requestId: z.string(),
@@ -69,9 +44,8 @@ export const hostParams = {
     error: z.string().optional(),
   }),
   /**
-   * A window's screen crashed and its error boundary caught it: the host writes it to its log (stderr), because the
-   * window's own console is lost on a reload. The host cuts each field and limits how many lines it writes, so a crash
-   * that repeats does not flood the log. Additive
+   * Written to the host's log (stderr), since the window's console is lost on a reload. Fields are cut and lines limited,
+   * so a crash that repeats does not flood the log.
    */
   'ui.reportCrash': z.object({
     message: z.string().max(20_000),
@@ -80,22 +54,16 @@ export const hostParams = {
     /** The build the window runs, to tell windows of a mixed host swap apart */
     version: z.string().max(100).optional(),
   }),
-  /**
-   * The host requests waiting for the person (#1405, `HostRequest`), oldest first: what a window shows after it
-   * connects or reconnects, since a `host_request` event it missed is not sent again. Additive
-   */
+  /** Read on every (re)connect: a missed `host_request` event is not sent again */
   'requests.list': z.object({}),
   /**
-   * The person's answer to a host request (#1405). Only a window holding the token may answer (the limited credential
-   * is refused it). `ok` is false when the request is no longer waiting: answered in another window, withdrawn by the
-   * program that asked, or past its time. Additive
+   * Only from a window holding the token; the limited credential is refused. `ok: false`: no longer waiting (answered in
+   * another window, withdrawn by its program, or past its time).
    */
   'requests.answer': z.object({ requestId: z.string().min(1).max(100), decision: z.enum(['allow', 'deny']) }),
   /**
-   * Linked machines (#82, docs/plans/remote-hub.md). The hub's own: these are never forwarded.
-   * Adding one is the consent for this computer to reach that machine (plan §3.2): the person can
-   * already open an SSH connection to it. The link uses the person's own `ssh` and keys
-   * (`BatchMode`), and expects `centralu serve` running there (docs/agent-host/remote/serve.md).
+   * The hub's own, never forwarded (docs/protocol.md §6). Adding a machine is the consent to reach it: the person can
+   * already ssh there. The link uses their `ssh` and keys (`BatchMode`) and expects `centralu serve` there.
    */
   'machines.list': z.object({}),
   'machines.add': z.object({
@@ -104,119 +72,71 @@ export const hostParams = {
     shell: RemoteShell.default('posix'),
     wslDistro: z.string().max(64).nullable().optional(),
     command: z.string().max(1024).nullable().optional(),
-    /** The data folder on that machine in place of its `~/.centralu` (#1903): a temporary one, for trying updates there. Additive */
+    /** Used there in place of `~/.centralu`: a temporary one, for trying updates */
     dataDir: z.string().max(255).nullable().optional(),
   }),
   /**
-   * The concrete `Host` aliases of the ssh config of the computer this host runs on (#514): `~/.ssh/config`
-   * and what it `Include`s, read by the host (never the window), each resolved by `ssh -G`, with the
-   * machines already linked through it. Pattern-only entries and `Match` blocks are left out. Nothing
-   * is connected to and no key file is opened. Additive
+   * `~/.ssh/config` and its `Include`s, read by the host (never the window), each alias resolved by `ssh -G`; pattern-only
+   * entries and `Match` blocks are left out. Nothing is connected to and no key file is opened.
    */
   'machines.sshHosts': z.object({}),
   /**
-   * One BatchMode ssh to a target, to tell what runs there before it is linked (#514): a Unix shell, or
-   * Windows with its default shell and WSL distros. Never a password or host-key prompt; a target that
-   * cannot be reached answers `reachable: false` with ssh's reason. Nothing there is changed. Additive
+   * One BatchMode ssh, never a password or host-key prompt: a Unix shell, or Windows with its shell and WSL distros. An
+   * unreachable target answers `reachable: false` with ssh's reason. Nothing there is changed.
    */
   'machines.probe': z.object({ sshTarget: z.string().min(1).max(255) }),
-  /** Unlinks a machine: its sessions and projects leave this computer's lists. Nothing on the machine changes */
+  /** Nothing on the machine changes */
   'machines.remove': z.object({ machineId: MachineId }),
   /**
-   * Tries the link again now instead of waiting out its backoff. A disconnected machine is connected (the row's
-   * Connect, #1134), and stays connected until `machines.disconnect` or the hub stops. With Auto reconnect off (#1341) it is
-   * the only way to try again after a drop or a failed attempt
+   * Tries now instead of after the backoff; the machine then stays connected until `machines.disconnect` or the hub
+   * stops. With Auto reconnect off, the only way to try again after a drop.
    */
   'machines.reconnect': z.object({ machineId: MachineId }),
-  /**
-   * Closes the link and tries none until the person connects it again or the hub starts again (#1134). The machine stays linked, with its sessions and projects listed as last
-   * known; they keep running there. Additive
-   */
+  /** Tries none until the person connects or the hub restarts. Stays linked; its sessions keep running there */
   'machines.disconnect': z.object({ machineId: MachineId }),
-  /**
-   * Withdraws one of the machine's other full credentials (#1405, `MachineInfo.otherCredentials`): runs `centralu serve
-   * --revoke <id>` there over the link's ssh, and that credential's next hello is refused. Not this hub's own, which is
-   * made again at each link. Answers the row as it is after. Additive
-   */
+  /** Runs `centralu serve --revoke <id>` there over ssh. Never the hub's own, which is made again at each link */
   'machines.revokeCredential': z.object({ machineId: MachineId, credentialId: z.string().regex(/^[0-9a-f]{8}$/) }),
-  /**
-   * Auto reconnect on or off for this machine (#1341, `MachineInfo.autoReconnect`). Kept with the machine. Turning it
-   * off while connected leaves the link up; turning it on while the link is away tries again now. Additive
-   */
+  /** Off while connected leaves the link up; on while the link is away tries now */
   'machines.setAutoReconnect': z.object({ machineId: MachineId, autoReconnect: z.boolean() }),
   /**
-   * Connects although the two sides run different versions of one protocol: the person declined to
-   * align them (plan §4). Remembered for this pair of versions only; when either side moves, the
-   * question comes again. Refused when the protocols differ.
+   * Connects across two versions of one protocol the person declined to align (docs/plans/remote-hub.md §4); remembered
+   * for this pair of versions only. Refused when the protocols differ.
    */
   'machines.acceptVersions': z.object({ machineId: MachineId }),
   /**
-   * Installs this hub's version on a linked machine over its ssh (docs/plans/remote-hub.md §10.2):
-   * the pinned Node and the npm packages, checked against the release's pin and the registry's
-   * signed metadata, beside what is there, with `current` switched to it and `previous` kept. A
-   * host running there is not touched; the next start runs the new version (`machines.update` stops
-   * and starts it in order). Refused by a development hub (its version is not on npm) and for
-   * a machine that runs a command of its own; answers when the install is done or refused
+   * docs/plans/remote-hub.md §10.2, §10.3. A host running there is not touched; its next start runs the new version.
+   * Refused by a development hub (not on npm) and for a machine with a command of its own. Answers when done or refused
    */
   'machines.install': z.object({ machineId: MachineId }),
   /**
-   * Updates a linked machine to this hub's version (docs/plans/remote-hub.md §10.5): installs it beside
-   * the running one, stops the running host in order (`centralu serve --stop`; without a keeper its
-   * agents end and resume on the new host, a turn in progress is lost), switches `current`, starts it
-   * (`serve --detach`) and waits at most 30 s for a hello from the new version. When none comes, the
-   * old version is put back and started, and the call fails with the end of the new host's log. On
-   * success only the current and previous versions are kept. Progress is the machine's `operation`
-   * in `machine_status`. Refused like `machines.install`
-   */
-  /**
-   * `when` (#1399, additive): `idle`, the default and what an older window means, installs beside and then waits until no session
-   * there is in a turn (`MachineInfo.operation.step` is `wait_idle` meanwhile; `machines.cancelUpdate` ends the wait) before it
-   * stops the host; `now` stops it at once and says what it stopped (the person chose it)
+   * docs/plans/remote-hub.md §10.5: without a keeper there, a turn in progress is lost; with no hello from the new version
+   * within 30 s the old one is put back and the call fails with the new host's log. Progress is `machine_status`'s
+   * `operation`; `when`: docs/protocol.md §3 "machines". Refused like `machines.install`
    */
   'machines.update': z.object({ machineId: MachineId, when: z.enum(['idle', 'now']).optional() }),
-  /** Ends an update's wait for the sessions there to finish (#1399); the update fails saying so and nothing was switched. Additive */
+  /** The update fails saying so; nothing was switched */
   'machines.cancelUpdate': z.object({ machineId: MachineId }),
-  /**
-   * Switches a machine back to the version the hub installed before (`previous`), stopping and starting
-   * its host as `machines.update` does and checking the same way. One step only: `previous` is cleared,
-   * so a second rollback is not offered (a store migrated twice may not read on the older build)
-   */
+  /** One step only: `previous` is cleared, since a store migrated twice may not read on the older build */
   'machines.rollback': z.object({ machineId: MachineId }),
-  /**
-   * Stops the host there and removes what the hub installed (`<data>/remote/`), keeping the machine's
-   * data and an npm install of its own. The machine stays linked
-   */
+  /** Removes `<data>/remote/`; the machine's data and its own npm install stay, and it stays linked */
   'machines.uninstall': z.object({ machineId: MachineId }),
   /**
-   * Starts a linked machine's host at boot, or stops doing that, or (without `on`) reads whether it
-   * does (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by default). The
-   * Centralu there writes its own entry (`centralu serve --autostart`): a systemd user unit with
-   * lingering on Linux, a scheduled task at sign-in on Windows and for WSL. A host running there is
-   * neither started nor stopped. Refused by a machine that predates it or offers none (macOS)
+   * Without `on`, reads (docs/plans/remote-hub.md §10.4: per machine, off by default). The Centralu there writes the entry:
+   * a systemd user unit with lingering on Linux, a scheduled task at sign-in on Windows and WSL. A running host is left
+   * as it is. Refused where it predates this or offers none (macOS)
    */
   'machines.autostart': z.object({ machineId: MachineId, on: z.boolean().optional() }),
-  /**
-   * What would stop on a linked machine if its host stopped now (`host.activity`, asked of it), for the
-   * "Update <machine>" prompt. Null when the machine cannot say (unreachable, other protocol, older)
-   */
+  /** For the "Update <machine>" prompt. Null when the machine cannot say (unreachable, other protocol, older) */
   'machines.activity': z.object({ machineId: MachineId }),
-  /**
-   * A linked machine's own "Allow auto from a linked computer" switch (#1273 review, owner decision 2026-10-19), read,
-   * or set when `allowed` is given (`host.hubAuto` / `host.setHubAuto` there), for the hub's Settings → Machines: a
-   * machine with no window of its own (`centralu serve`) is set here. The machine reads it at each start; this is the
-   * person's say, no boundary against the hub. `older`: that machine's Centralu predates it; `unreachable`: the link is
-   * not up. Additive
-   */
+  /** The person's say, read by the machine at each start; no boundary against the hub (docs/protocol.md §3 "machines") */
   'machines.hubAuto': z.object({ machineId: MachineId, allowed: z.boolean().optional() }),
   /**
-   * Lets a linked machine's sessions ask this computer's projects, or stops it (#550, docs/plans/remote-hub.md §12.7,
-   * owner decision 2026-10-18): the per-machine switch, off by default, stored with the machine. Each pair (a session
-   * there, a project here) is asked on this computer's card once; off forgets every pair approved for it. Additive
+   * docs/plans/remote-hub.md §12.7: off by default. Each pair (a session there, a project here) is asked once on this
+   * computer's card; off forgets every pair approved for the machine.
    */
   'machines.setAsks': z.object({ machineId: MachineId, on: z.boolean() }),
-  /** The pairs approved for the reverse direction, every machine's, newest first (#550). Additive */
   'machines.askConsents': z.object({}),
-  /** Withdraws one approved pair: that session's next ask into that project raises the card again (#550). Additive */
+  /** That session's next ask into that project raises the card again */
   'machines.withdrawAsk': z.object({
     machineId: MachineId,
     sessionId: z.string().min(1),
@@ -225,10 +145,8 @@ export const hostParams = {
   /** What would stop if this host stopped now (the `hostBusy` rule); for a hub's `machines.activity` */
   'host.activity': z.object({}),
   /**
-   * What a hub's Assistant reads about this host's sessions (docs/plans/remote-hub.md §12): the sessions a hub's
-   * window shows (not this host's assistant or coordinators), one conversation, and a search over them. Asked of a
-   * linked machine by the hub directly, never routed; this host's own window has no use for them. A read is capped at
-   * 200 lines and a search at 50 hits
+   * What a hub's Assistant reads (docs/plans/remote-hub.md §12), asked by the hub directly, never routed: not this host's
+   * assistant or coordinators. A read is capped at 200 lines, a search at 50 hits
    */
   'host.sessions': z.object({}),
   'host.readSession': z.object({
@@ -238,56 +156,32 @@ export const hostParams = {
     around: z.number().int().optional(),
     /** Tool calls in full rather than one line each */
     tools: z.boolean().optional(),
-    /**
-     * With `around`, the one line that starts there, from this character of its text on (#1186): a long line is cut,
-     * and says this offset to read on from. Additive: an older machine ignores it and answers the plain read
-     */
+    /** With `around`: that one line from this character on; a cut line names the offset to read on from. Older: ignored */
     offset: z.number().int().min(0).optional(),
-    /**
-     * What to show of a tool call (#1480): `none`, `titles` or `full`; `tools: true` is `full`. A machine reads this one
-     * first; `tools` stays for a 0.1.0-beta.45 hub, which still sends it beside this one
-     */
+    /** Read first; `tools` stays for a 0.1.0-beta.45 hub, which sends both */
     toolLines: z.enum(['none', 'titles', 'full']).optional(),
-    /** The most characters the lines come to in all (#1480); 12,000 by default, 2,000 to 40,000. Additive: an older machine ignores it */
+    /** The lines' total; 12,000 by default. An older machine ignores it */
     maxChars: z.number().int().min(2000).max(40_000).optional(),
-    /** The read on a budget's note names (#1480): the lines older than this seq, back from it. Additive: an older machine ignores it */
+    /** A budget note's read: the lines older than this seq, back from it. An older machine ignores it */
     before: z.number().int().optional(),
-    /** The read on a budget's note names (#1480): the lines from this seq on, forward. Additive: an older machine ignores it */
+    /** A budget note's read: the lines from this seq on. An older machine ignores it */
     from: z.number().int().optional(),
   }),
   'host.recall': z.object({ query: z.string(), limit: z.number().int().positive().optional() }),
   /**
-   * Whether this host takes `auto` for a session a hub's `auto` session starts here (#1273, start_agent with a
-   * machine): its own "Allow auto from a linked computer" switch (`UiPreferences.hubAuto`, on by default). The hub reads
-   * it before it decides whether to raise its card; `agents.createSession`'s `fromHub` reads the switch again. Asked by
-   * the hub directly, never routed. Every host from 0.1.0-beta.45 on has it; the hub says a failure as it came.
+   * docs/protocol.md §3 "host": read by the hub before its start_agent card; `fromHub` reads the switch again. Every host
+   * from 0.1.0-beta.45 on has it.
    */
   'host.hubAuto': z.object({}),
-  /**
-   * Sets that switch from the hub (#1273 review, owner decision 2026-10-19): the hub's Settings → Machines shows it for
-   * each machine, so a machine with no window of its own (`centralu serve`) can be set too. It restricts what the
-   * person allows and is no boundary against the hub, which holds this host's token and could ask for `auto` outright.
-   * Answers the switch as it now reads. Asked by the hub directly, never routed; an older host answers "Unknown method".
-   */
+  /** Restricts what the person allows; no boundary against the hub, which holds this host's token and could ask `auto` outright */
   'host.setHubAuto': z.object({ allowed: z.boolean() }),
   /**
-   * The full credentials of this host's `centralu serve` folder (#1405), as `serve --connection` lists them: who each was
-   * made for, when, and whether its pairing took the place of an earlier one of its label. Never their values. The hub
-   * reads it through the link at each connect and every 30 seconds, so a pairing made while the link is up shows on
-   * the machine row. Null on a host `centralu serve` did not start. Asked by the hub directly, never routed; an older
-   * host answers "Unknown method", and the hub keeps what the connection line said
+   * docs/protocol.md §3 "host"; never the values. An older host answers "Unknown method", and the hub keeps what the
+   * connection line said
    */
-  // `nonce` (#1405 review, additive): each entry then carries a `check` of it, so the hub can tell its own credential from one
-  // that only reuses its id
+  // `nonce`: each entry then carries a `check` of it, so the hub tells its own credential from one that reuses its id
   'host.credentials': z.object({ nonce: z.string().min(8).max(64).optional() }),
-  /**
-   * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
-   * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown; a failure is the hub's answer,
-   * not a read of the lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that
-   * turn begin, not the last response of the record (an older machine ignores it). `since` (#1812): with `turn`, the answer
-   * of the turn that began after that row (`TurnWho.since` on its end), not of a later one; a machine that does not read it
-   * answers for the turn it last ran
-   */
+  /** docs/protocol.md §3 "host". A failure is the hub's answer, not a read of the lines instead */
   'host.lastAnswer': z.object({
     sessionId: SessionId,
     maxChars: z.number().int().positive().max(100_000).optional(),
@@ -295,81 +189,49 @@ export const hostParams = {
     since: z.number().int().optional(),
   }),
   /**
-   * An instruction from a hub's Assistant to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
-   * step 2): delivered as the Assistant's `send_to_session` is here, recorded as sent by `from.name`. Only a session
-   * a hub is shown (not this host's assistant or coordinators). Asked by the hub directly, never routed
+   * Delivered as the Assistant's `send_to_session` is here, recorded as sent by `from.name` (docs/plans/remote-hub.md §12);
+   * only to a session a hub is shown. Asked by the hub directly, never routed
    */
   'host.send': z.object({
     sessionId: SessionId,
     text: z.string(),
     from: z.object({ name: z.string() }),
     /**
-     * The text is an ask_project task (#838 item 12), and the session works on it at this agent depth until the turn
-     * that consumes it is recorded: the hub's caller's depth, plus one. Absent from an older hub, and from an
-     * Assistant's instruction.
+     * An ask_project task, worked at this depth (the hub caller's plus one) until the turn that consumes it is recorded.
+     * Absent from an older hub, and from an Assistant's instruction.
      */
     ask: z.object({ depth: z.number().int().min(1).max(64) }).optional(),
   }),
   /**
-   * Stops this host the way a signal would: agents, terminals, command runs and app processes
-   * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host/remote/serve.md):
-   * on Windows a launcher can only be killed, and killing it ends the host without its
-   * shutdown. Answers before the host starts to leave. Refused by a host under the app's keeper,
-   * which the app stops (and which would only start the host again).
-   *
-   * `ifIdle` (#1224, additive): only if nothing a person would lose runs (the `hostBusy` rule) and no other call is in
-   * flight, decided and acted on at once: from the answer `ok: true` on, the host takes no new call (no turn, terminal or
-   * command can start), so a turn cannot slip in between the check and the stop. Otherwise `{ ok: false, busy, calls }`
-   * and nothing changes. A host older than `ifIdle` ignores it and stops; the hand-over sends it only to a host that says
-   * its logon, which came with it
-   *
-   * `forUpdate` (#1618, additive): a linked hub stops this host to update it, roll it back or put a version back, and starts
-   * one again in this folder. As it lets its sessions go, this host writes those in a turn to a list of its own in the
-   * folder, each with the last row of its conversation (docs/agent-host/lifecycle/continue-after-update.md), so the host that starts next continues
-   * each of those turns once, while its conversation still ends there. A host
-   * older than it ignores it and stops, and its turns end as a stop's always did
+   * Stops as a signal would, for `centralu serve --stop`: on Windows a launcher can only be killed, which skips the
+   * shutdown. Answers first. Refused under the app's keeper, which would only start it again. `ifIdle` and `forUpdate`:
+   * docs/protocol.md §3 "host", docs/agent-host/lifecycle/continue-after-update.md
    */
   'host.stop': z.object({ ifIdle: z.boolean().optional(), forUpdate: z.boolean().optional() }),
-  /**
-   * What a `serve` in the person's Windows sign-in says about taking over from this host (#1224): this host keeps it,
-   * says it in its hellos and sends `host_handover`, so a hub's row can say it. `handover: null` clears it. Additive
-   */
+  /** What a `serve` in the person's Windows sign-in says about taking over; said in hellos and `host_handover`. Null clears it */
   'host.handover': z.object({ handover: HostHandover.nullable() }),
   /**
-   * The system is ending (a shutdown, restart or sign-out), told by the window on a machine where the host has no window of its
-   * own to hear it: Windows, whose desktop window runs `centralu serve --window` and cannot write to a host it did not start
-   * (#1970, #1397). `cancelled`: the end announced before was called off. Additive
+   * Told by the window where the host cannot hear the system end: on Windows the desktop window runs `centralu serve
+   * --window` and cannot write to a host it did not start. `cancelled`: the announced end was called off
    */
   'host.systemEnding': z.object({ cancelled: z.boolean().optional() }),
   /**
-   * A hub linked to this host says who it is and whether this host's sessions may ask its projects (#550, the reverse
-   * direction, docs/plans/remote-hub.md §12.7). Sent by the hub at every connect and when its switch for this machine
-   * changes. This host calls that hub back (`hub.projects`, `hub.askProject`) on the connection the offer came in on
-   * only, and shows it to its sessions by its name, "not reachable" once that connection is gone. Asked by the hub
-   * directly, never routed. Additive
+   * docs/plans/remote-hub.md §12.7: sent at every connect and when its switch changes. This host calls that hub back only
+   * on the connection the offer came in on, and shows it "not reachable" once that is gone.
    */
   'host.hubOffer': HubOffer,
-  /**
-   * A message from the hub's side to a session here (#2067 item 2, docs/plans/linked-mail.md §6): taken only on a
-   * connection a hub offered on, from that hub's addresses. Asked by the hub directly, never routed. Additive
-   */
+  /** docs/plans/linked-mail.md §6: only on a connection a hub offered on, from that hub's addresses; never routed */
   'host.mail': HostMailParams,
-  /** The rows of messages that crossed, as the hub knows them (#2067 item 2). Additive */
   'host.mailRows': MailRowsParams,
-  /** A handoff on the hub gave tasks it sent here to another of its sessions (#1948 step 6). Additive */
+  /** A handoff on the hub moved the tasks its session gave here to another of its sessions */
   'host.mailMove': MailMoveParams,
   /**
-   * The cards a session here shows a hub's session `caller` (its id on the hub) as a giver of work it gave here, and answering one (#1948 step 6,
-   * docs/plans/mailbox.md §10.6.4): this host alone judges which, and whether that giver may answer, by its own rule. Taken only on a connection a hub
-   * offered on, the giver read as that hub's session. Additive
+   * docs/plans/mailbox.md §10.6.4: this host alone judges which cards, and whether that giver may answer, by its own rule.
+   * Only on a connection a hub offered on, the giver read as that hub's session
    */
   'host.cards': z.object({ sessionId: SessionId, caller: HubCaller }),
   'host.answerCard': z.object({ sessionId: SessionId, caller: HubCaller, card: z.string().min(1).max(200), text: z.string().max(20_000) }),
-  /**
-   * A project's app here used by a session of the hub (#1938, docs/plans/remote-hub.md §13): the apps it may reach, one
-   * call, its withdrawal, and a notice of a hub's app to a session here that called it. Taken only on a connection a hub
-   * offered apps on. Asked by the hub directly, never routed. Additive
-   */
+  /** docs/plans/remote-hub.md §13. Only on a connection a hub offered apps on; never routed */
   'host.apps': LinkedAppsParams,
   'host.appCall': LinkedAppCallParams,
   'host.appCancel': LinkedAppCancelParams,

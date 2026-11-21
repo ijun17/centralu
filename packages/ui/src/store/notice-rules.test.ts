@@ -7,10 +7,9 @@ import { useStore } from './store.js'
 import { computeInbox } from './inbox.js'
 
 /*
- * Notices with the top-right cards gone (owner, 2026-10-18): a notice is a line the inbox's capsule writes out for a
- * few seconds (InboxPill), so it is made on screen too. A finished turn, an approval, a request to start an agent, a
- * question and an error each leave one, whether or not the session is the one on screen; Notices.tsx clears each by
- * its kind's rule. Each test uses its own session ids: the store is one module for the whole file.
+ * Owner, 2026-10-18: a notice is a line the inbox's capsule (InboxPill) shows for a few seconds, so a finished turn, an
+ * approval, an agent start request, a question and an error each leave one, on screen or not; Notices.tsx clears each
+ * by its kind's rule. The store is one module for the file, so each test uses its own session ids.
  */
 
 function sessionInfo(id: string): SessionInfo {
@@ -23,7 +22,7 @@ function sessionInfo(id: string): SessionInfo {
   }
 }
 
-/** A session that is working, on screen, with the app in front: where the old cards were never made */
+/** A session that is working, on screen, with the app in front: a case where a notice is still made */
 async function onScreen(id: string): Promise<MockPlatform> {
   const mock = new MockPlatform()
   mock.sessions.set(id, sessionInfo(id))

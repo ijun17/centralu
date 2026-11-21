@@ -1,5 +1,5 @@
 import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
-import { ANSWER_GROUNDS } from './ask-project.js'
+import { ANSWER_GROUNDS, askBeforeFinish } from './ask-project.js'
 import { worktreeSetupFrame } from './worktree-sessions.js'
 
 /**
@@ -33,7 +33,7 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
   return PRESET_RANK[child] <= PRESET_RANK[parent]
 }
 
-/** Why a send gives no work to a child that now runs above its caller (#1273 review), here or on a linked machine; null when it may */
+/** Why a send gives no work to a child that now runs above its caller (#1273), here or on a linked machine; null when it may */
 export function aboveCallerError(name: string, child: PermissionPreset, caller: PermissionPreset): string | null {
   return presetWithin(child, caller) ? null : `"${name}" now has more permissions (${child}) than this session (${caller}), so this session cannot give it work. Tell the person.`
 }
@@ -43,7 +43,7 @@ export function aboveCallerError(name: string, child: PermissionPreset, caller: 
  * sees names. Said before it sends (#2133): a child that read "assistant" as the session that gave it the job mailed progress there, and its answer
  * reaches the parent by itself
  */
-const PARENT_MAIL = 'No progress reports needed. To ask it something before you finish, call mail with `to: "parent"` and `kind: "question"` ("assistant" is someone else). '
+const PARENT_MAIL = `No progress reports needed. ${askBeforeFinish('parent')} ("assistant" is someone else). `
 
 /**
  * Whether `child` can mail the session `senderId` as its `parent` (#1984): it was started by that session (`askedBy`) and has the mail tool, which a
@@ -97,12 +97,18 @@ export function projectInstructions(text: string): string[] {
  *   3. The project's remembered choice for the tool, as a session the person opens there gets.
  *
  * A model empty in all three is the tool's own default.
+ *
+ * A difficulty named with no model chosen for it on this tool falls to 3, and `fellBack` says so in the caller's
+ * answer, so the caller sees a model the person did not pick for that work (#2350).
  */
 export function agentChoice(
   asked: { model?: string; effort?: string; difficulty?: AgentDifficulty },
   remembered: ToolDefaults | undefined,
   byDifficulty: AgentModels[string] | undefined,
-): { model?: string; effort?: string; difficulty?: AgentDifficulty } {
+  toolLabel: string,
+  /** What runs when no model is settled here: the tool's default, or for a linked machine's child, what that machine picks */
+  noModel = `${toolLabel}'s default model`,
+): { model?: string; effort?: string; difficulty?: AgentDifficulty; fellBack?: string } {
   const picked = !asked.model && asked.difficulty ? byDifficulty?.[asked.difficulty] : undefined
   if (picked) {
     const effort = asked.effort ?? picked.effort
@@ -110,7 +116,10 @@ export function agentChoice(
   }
   const model = asked.model ?? remembered?.model ?? undefined
   const effort = asked.effort ?? (!asked.model || asked.model === remembered?.model ? (remembered?.effort ?? undefined) : undefined)
-  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  const fellBack = !asked.model && asked.difficulty
+    ? `no ${asked.difficulty} model is set for ${toolLabel}; it runs on ${model ? `"${model}"` : noModel}`
+    : undefined
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(fellBack ? { fellBack } : {}) }
 }
 
 /**

@@ -1,37 +1,19 @@
 import { atRest, busyWith, isInTurn, type BusyReason, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
 
 /**
- * The one rule for "is anything running that a person would lose" (#280, #352).
- *
- * Every decision that must wait for a quiet moment reads this rule and no other, so they cannot
- * drift apart:
- *   - the keeper's idle exit in background mode (through the activity report, keeper-link.ts);
- *   - whether switching builds asks first (the keeper passes the same report to the window);
- *   - applying an update by itself when idle (#352, the window reads the same report);
- *   - moving a session to a newly installed agent CLI (#297): `sessionIdle` below, one session at a
- *     time, which is this rule narrowed to what one session's process holds.
- *
- * Kept free of any service so it is tested as data; the host builds the snapshot (main.ts).
+ * The one rule for "is anything running that a person would lose": the keeper's idle exit, the switch-build and automatic-update
+ * questions and moving a session to a new agent CLI all read it, so they cannot drift apart (#280, #352, #297).
+ * Free of any service so it is tested as data; the host builds the snapshot in main.ts
  */
 
 /**
- * The states in which a turn is running: someone would lose it if the host went away
- * (`isInTurn`, protocol session-state.ts).
- *
- * Not `waiting_input`. That is what `turn_complete` leaves (`applySessionState`, protocol session-state.ts)
- * until the next message: the turn is over and its answer is stored. Counting it made every session
- * that had ever answered read as busy, so the keeper's idle exit and "Apply updates automatically
- * when idle" (#352) waited for a message nobody was going to send. A question waiting for an answer
- * is counted by itself (`pendingQuestions`) as well as by its state, so it holds even where the state
- * is not known.
+ * The states in which a turn is running (`isInTurn`). Not `waiting_input`: `turn_complete` leaves it until the next message, and
+ * counting it made every session that had answered read as busy, so idle exits and "Apply updates automatically when idle" (#352)
+ * waited for a message nobody sends. A pending question is counted by `pendingQuestions` too, so it holds where the state is unknown
  */
 export const inTurn = (state: SessionState): boolean => isInTurn(state)
 
-/**
- * One session as the idle rule reads it (not the protocol's `SessionActivity`, what a working session is busy with). The fields past `state` and `live` are optional so a
- * snapshot that does not carry them still reads (as nothing pending); the host's (`main.ts`,
- * `mgr.listSessions()`) carries all of them.
- */
+/** One session as the idle rule reads it; the fields past `state` and `live` are optional, so a snapshot without them reads as nothing pending */
 export type IdleActivity = Pick<SessionInfo, 'state' | 'live'> &
   Partial<Pick<SessionInfo, 'id' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>>
 
@@ -41,45 +23,28 @@ export type ActivitySnapshot = {
   commandRuns: number
 }
 
-/**
- * Whether one live session holds something a person would lose: a running turn, an approval or a
- * question waiting for them, or background work that counts as activity (#290 — the tool holds it in
- * its process). A session with no process holds nothing.
- */
+/** Whether one live session holds something a person would lose; a session with no process holds nothing (#290) */
 export function sessionBusy(s: IdleActivity): boolean {
   return s.live === true && !atRest(s)
 }
 
 /**
- * Whether the host is doing anything a person would lose if it stopped now.
- *
- * - a live session that is working, waiting for an approval or on a question, or running
- *   background work (`sessionBusy`) — an approval left in background mode is exactly what a person
- *   comes back for. A session whose turn has finished (`waiting_input`) is not busy;
- * - an open terminal or a running project command (a dev server). An open terminal counts even
- *   when its shell sits at a prompt: the host cannot yet tell an idle shell from one running a
- *   command, and guessing wrong would end someone's work.
- *
- * External app processes do not count: they start on demand and are restarted with the host
- * (#280, decision 2).
+ * Whether the host is doing anything a person would lose if it stopped now: a busy live session (`sessionBusy`), an open terminal
+ * or a running project command. A terminal counts even at a prompt, since the host cannot tell an idle shell from one running a
+ * command. External app processes do not: they start on demand and restart with the host (#280)
  */
 export function hostBusy(s: ActivitySnapshot): boolean {
   return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some(sessionBusy)
 }
 
-/**
- * `hostBusy` for a question one of the sessions asks itself, such as an agent applying an update: that session is in a
- * turn by the very act of asking, so its turn is not counted. What else it holds (a card waiting, background work) still is,
- * and every other session counts as it does for `hostBusy`.
- */
+/** `hostBusy` for a question a session asks itself (an agent applying an update): its own turn is not counted, what else it holds still is */
 export function hostBusyBesides(s: ActivitySnapshot, sessionId: string): boolean {
   return hostBusy({ ...s, sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, state: 'waiting_input' as const } : x)) })
 }
 
 /**
- * Whether applying an update is what the person's Automatic updates would do now (#1509): the switch is on, the host is not draining to stop,
- * and nothing is running (`hostBusy`; `besides` is a session asking, whose own turn is not counted, `hostBusyBesides`).
- * Pure, so each condition is tested by itself; main.ts reads the switch, the drain and the activity into it
+ * Whether Automatic updates would apply an update now: the switch is on, the host is not draining and nothing runs (`besides`
+ * is the asking session). Pure, so each condition is tested alone (#1509)
  */
 export function updateAtRest(i: { automatic: boolean; draining: boolean; activity: ActivitySnapshot; besides?: string }): boolean {
   if (!i.automatic || i.draining) return false
@@ -87,9 +52,8 @@ export function updateAtRest(i: { automatic: boolean; draining: boolean; activit
 }
 
 /**
- * What `hostBusy` counts, counted (`host.activity`, for a hub's "Update <machine>" prompt, plan §10.5).
- * Each busy session counts once, under the first of: an approval waiting, a question waiting, a
- * turn running, background work. `hostBusy(s)` is true exactly when one of the counts is above zero
+ * What `hostBusy` counts, for `host.activity` (a hub's "Update <machine>" prompt, plan §10.5): a busy session counts once,
+ * under the first of approval, question, turn, background work
  */
 export function activityCounts(s: ActivitySnapshot): HostActivity {
   const c: HostActivity = { working: 0, approvals: 0, questions: 0, background: 0, terminals: s.terminals, commandRuns: s.commandRuns }
@@ -106,19 +70,18 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
 }
 
 /**
- * Whether stopping the host now ends this session's turn (#1618): it is in a turn, working or waiting on an approval or a
- * question. The next host's start finds it so with no process and resets it (`SessionManager`'s start). Background work alone
- * is not a turn: nothing continues it, so it is not listed. What a stop lists is `cutTurns`: these, and the woken turns besides
+ * Whether stopping the host now ends this session's turn: it works or waits on an approval or question. Background work alone
+ * is not a turn, nothing continues it (#1618)
  */
 export function turnCut(s: IdleActivity): boolean {
   return inTurn(s.state)
 }
 
 /**
- * The turns stopping the host now ends, the one definition of what an update's stop lists for the next host (#1618): the sessions in a turn
- * (`turnCut`), and `woken`, the cut turns an update's start continued that have not answered yet (`TurnContinue.unanswered`, #1913). A resumed
- * process ends a turn of its own before the note's request, so one of those can read at rest: it is listed `woken`, the one entry the next start
- * takes up at rest. Not any other session at rest: a Stop writes no row, so a mark alone cannot tell the person's Stop from a woken turn's gap
+ * The turns stopping the host now ends, as an update's stop lists them for the next host (#1618): the sessions in a turn (`turnCut`)
+ * and `woken`, the cut turns an update's start continued that have not answered yet (`TurnContinue.unanswered`, #1913): a resumed
+ * process ends a turn of its own before the note's request, so one can read at rest. No other session at rest is listed: a Stop
+ * writes no row, so a mark alone cannot tell the person's Stop from a woken turn's gap
  */
 export function cutTurns(s: ActivitySnapshot, woken: readonly string[] = []): { id: string; woken?: true }[] {
   const inTurnNow = s.sessions.flatMap((x) => (x.id !== undefined && turnCut(x) ? [{ id: x.id }] : []))
@@ -126,21 +89,10 @@ export function cutTurns(s: ActivitySnapshot, woken: readonly string[] = []): { 
 }
 
 /**
- * Whether one session's agent process can be replaced without losing anything (#290, #297): the
- * rule for restarting a single session on a newly installed CLI. The session manager answers with
- * it (`SessionProcesses.sessionIdle`), adding the facts only it holds: whether a process is running
- * and whether the tool reports its background work.
- *
- * Not idle while a turn runs, while an approval or a question waits, or while background work that
- * counts as activity runs: the tool holds that work in its process, and a restart ends it. A tool
- * that cannot report its background work is never called idle while its process lives, since
- * silence there does not mean nothing is running. A session with no process is idle: it holds
- * nothing.
- *
- * The same facts about a session as `sessionBusy`, with two differences: terminals and commands do
- * not count (restarting one session's process does not touch them), and a tool that cannot report
- * its background work is not idle while its process lives. A finished turn (`waiting_input`) is
- * idle here as there.
+ * Whether one session's agent process can be replaced on a newly installed CLI without losing anything (#290, #297);
+ * `SessionProcesses.sessionIdle` answers with it, adding whether a process runs and whether the tool reports background work.
+ * Not idle during a turn, an approval, a question or background work that counts (the tool holds it in its process); a tool that
+ * cannot report background work is never idle while its process lives; no process is idle. Unlike `sessionBusy`, terminals and commands do not count
  */
 export type SessionIdle =
   | { idle: true }

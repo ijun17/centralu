@@ -86,7 +86,7 @@ beforeEach(async () => {
     ['claude', claude],
     ['codex', codex],
   ])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   // Where an app made without a project goes (#1141): this test's ~/Centralu
   mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))
@@ -154,9 +154,9 @@ describe('creating an app stands up its building session', () => {
     const picked = await create({ projectId, id: 'one', name: 'One', tool: 'codex' })
     expect(picked.builder!.tool).toBe('codex')
     expect(codex.seen).toHaveLength(1)
-    // The tool just picked became the project's default (the session-creation rule) — the next app with none picked receives it
+    // A builder's tool is that app's, not the person's pick for the project (#2350): the next app with none picked gets the default
     const defaulted = await create({ projectId, id: 'two', name: 'Two' })
-    expect(defaulted.builder!.tool).toBe('codex')
+    expect(defaulted.builder!.tool).toBe('claude')
   })
 
   it('the role prompt is loaded again even after a resume', async () => {

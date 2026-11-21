@@ -4,6 +4,7 @@ import { bytesText } from '../bytes-text.js'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
 import { labelOf } from '../sessions/transcript-view.js'
+import { liveHeirOf } from '../sessions/handoff-heirs.js'
 import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
@@ -187,6 +188,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return mailCalls(party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
+    heirOf: (address) => {
+      const party = parseAddress(address)
+      const heir = party?.kind === 'session' && party.host === hostId ? liveHeirOf(store, party.sessionId, (id) => sessions.sessionInfo(id) !== undefined) : null
+      return heir ? addressOf(heir) : null
+    },
     questionSettled: (address) => {
       const party = parseAddress(address)
       if (party?.kind === 'session' && party.host === hostId) sessions.questionSettled?.(party.sessionId)

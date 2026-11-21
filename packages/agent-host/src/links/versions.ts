@@ -2,18 +2,13 @@ import { isNewerVersion, isSupportedVersion, releaseOf, type MachineSide, type M
 
 /**
  * The version check a link runs before it connects (docs/plans/remote-hub.md §4, relaxed by #689):
- *
- *   - A different protocol never connects: the remote host would refuse the hello anyway (4002). Nor does a remote
- *     release older than `MIN_SUPPORTED_VERSION` (#1143) that this hub names as the side to update: this build no longer
- *     keeps what such a remote needed. Where the hub names no update (a dev hub, two channels), it connects as before.
- *   - One protocol connects, whatever the app versions. A different version of one channel still
- *     names the older side, so the UI can *offer* to bring it up (the hub through its own update,
- *     the remote over ssh); nothing waits for the person to answer.
- *   - A dev build (run from source, not from npm) has no "newer".
- *   - A local build (`<base>.local.N`) is compared as its base release: the remote at `<base>` is
- *     the version the hub installs there, so it is not "older" than the hub. On either side: a remote
- *     running a dev build of the hub's release (`pnpm remote-dev`, #1036) does not make the hub "older".
- *   - Releases of two channels (a beta and a stable) are not ranked against each other.
+ * - A different protocol never connects (the host would refuse the hello, 4002), nor does a remote release older than
+ *   `MIN_SUPPORTED_VERSION` (#1143: this build lacks what it needs) that this hub names as the side to update; where the hub names no update (a dev hub, two
+ *   channels) it connects.
+ * - One protocol connects whatever the app versions; the older side of one channel is named so the UI can offer to update it.
+ * - A dev build (run from source) has no "newer". A local build (`<base>.local.N`) compares as its base release, so a remote at
+ *   `<base>` is not "older" than the hub, and a dev build of the hub's release (`pnpm remote-dev`, #1036) does not make the hub "older".
+ * - Releases of two channels (a beta and a stable) are not ranked against each other.
  */
 export function compareVersions(hub: MachineSide, remote: MachineSide, accepted: boolean): MachineVersions {
   const hubRelease = releaseOf(hub.version)

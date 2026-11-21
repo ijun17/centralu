@@ -12,18 +12,7 @@ import type { ProjectConsentsPort, ProjectPort } from './projects.js'
 import type { PlatformCapabilities, SystemPort } from './system.js'
 import type { CommandRunPort, TerminalPort } from './terminal.js'
 
-/**
- * The Platform port (docs/platform-abstraction.md §2).
- * The only outside world ui knows about. The implementations (web/tauri/mock) know only the
- * apps entry point.
- *
- * Rules:
- *  - Every method returns a Promise (even a synchronous implementation — the signature stays
- *    stable even if it later moves to IPC)
- *  - Streams are unified as subscribe(handler): Unsubscribe
- *  - Input and output types all come from protocol. Implementation details (WS frames, invoke
- *    names) must not leak out
- */
+// The only outside world ui knows; the port signature rules are docs/platform-abstraction.md §2
 
 export * from './common.js'
 export * from './agents.js'
@@ -59,15 +48,12 @@ export interface Platform {
   commands: CommandRunPort
   processes: ProcessPort
   machines: MachinesPort
-  /** The person's side of the mailbox (#1347) */
   mail: MailPort
-  /** The calls of the limited credential waiting for the person (#1405) */
   requests: HostRequestsPort
-  /** What this window tells the host about its own failures (a crashed screen) */
   diagnostics: DiagnosticsPort
-  /** Present only where the host outlives the window (desktop, through the keeper — #280) */
+  /** Only where the host outlives the window (desktop, through the keeper, #280) */
   background?: BackgroundPort
-  /** Present only in the desktop app with the keeper: relaunching into an installed update (#352) */
+  /** Only in the desktop app, with or without the keeper (#352) */
   relaunch?: RelaunchPort
   capabilities: PlatformCapabilities
   dispose(): Promise<void>

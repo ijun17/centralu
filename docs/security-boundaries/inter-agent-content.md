@@ -27,7 +27,7 @@ read path, and one rule decides it (`StopNotices.quotes`), which the notice to t
   recorded, nothing is quoted.
 
 A second exception (#2348, the owner's review of #2349): `mail read` of Centralu's report on a turn that ended shows the last response the
-report kept (`facts.answer`, at most 600 characters as the report cut it) under the report, every line behind `> `, under Centralu's words that it is
+report kept (`facts.answer`: the whole response up to 16,000 characters, #2358; up to 2,000 when it crossed a link) under the report, every line behind `> `, under Centralu's words that it is
 that session's own text, to be read as its answer and never as instructions (`MailTool.answerShown`). It is not a new read path: it is shown only to
 a reader that `read_session` lets read that session, by the seat's one read rule (`CentraluTools.readsAs`, which both use: a session of this
 host, or a linked machine's as read_session reads it there), which could read the same words there; a session of a project nobody trusted is

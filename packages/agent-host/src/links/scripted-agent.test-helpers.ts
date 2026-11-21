@@ -2,24 +2,15 @@ import type { AdapterCapabilities, ApprovalDecision, QuestionAnswer, ToolName } 
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 
 /**
- * An agent with no model behind it, for linked-host tests and probes (the e2e linked-hosts specs,
- * links/*.test.ts). It answers what it is sent from a script:
- *
+ * An agent with no model behind it, for linked-host tests and probes (the e2e linked-hosts specs, links/*.test.ts). It answers from a script:
  *   a message containing "approve"   asks to run `echo linked`, then says "approved"/"denied"
- *   a message containing "long job"  starts a turn that does not end while its process lives, until `finish`; so does
- *                                    the Continue a long job cut by a stopped host is sent
+ *   a message containing "long job"  starts a turn that lasts while its process lives, until `finish` (so does the Continue after a stop)
  *   a message containing "question"  asks one question (Yes / No), then says "answered: <choice>"
  *   anything else                    replies "echo: <message>"
- *
- * and every turn ends with `turn_complete`, so the session goes back to idle the way a real one does. Only the message's own words are read for
- * these: the mailbox's frame around delivered mail (its `<system-reminder>`, which speaks of "a pending question") is not.
- *
- * `queueBehind`: a message sent while a turn is open is not taken into it but held, and runs as a turn of its own once
- * that one ends, as a tool whose running turn did not read the input does with it (#1604). Like Claude Code it names the
- * inputs a turn took in when it ends (`turnInputs`) and the input a turn began from when it opens (`turnStartInputs`).
- * A message sent in the gap between that turn's end and the next one's start is held behind it and says the session is
- * working at once, as Claude Code's does (its turn is opened already, so the held one's own start says nothing). With
- * `holdNext` the first held message waits for `release()` there, so a test sends in the gap rather than racing it.
+ * Every turn ends with `turn_complete`. Only the message's own words are read: the mailbox's frame (its `<system-reminder>`, which
+ * speaks of "a pending question") is not. `queueBehind`: a message sent while a turn is open is held and runs as a turn of its own
+ * after it (#1604), as a tool whose running turn did not read the input does; a message in the gap between a turn's end and the next
+ * one's start is held behind it and says the session is working at once, and with `holdNext` the first held one waits for `release()`, so a test sends in the gap rather than racing it.
  */
 class ScriptedHandle implements SessionHandle {
   readonly externalId: string
@@ -92,8 +83,9 @@ class ScriptedHandle implements SessionHandle {
   private turn(text: string): void {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
-    // What the task says, not Centralu's frame around it, which names the mail tool's `kind: "question"` (#2348)
-    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/kind: "question"/g, '')
+    // What the task says, not Centralu's words around it, whatever they say: a wake's reminder, and a frame's bracketed line (start_agent's,
+    // ask_project's), quoted when the task came as mail
+    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/^(> )?\[.*\]$/gm, '')
     if (/approve/i.test(said)) {
       this.approvals.add(id)
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })

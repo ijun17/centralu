@@ -16,10 +16,9 @@ import type { SessionAppWiringHost } from './session-app-wiring.js'
 export type HandoffNotesHost = Pick<DelegationHost, 'adapters' | 'meta' | 'store' | 'trashing'> & Pick<SessionAppWiringHost, 'sessionOf'>
 
 /**
- * A handoff's note as the sessions meet it (#102, #106, #142, #738): written from a dead agent's record or a living
- * agent's answer into the data folder, the folder a successor may read it from, the sweep of notes nobody owns, and
- * the live session that took over. Moved out of the session manager as it was (#428); what it reaches of the manager
- * is `HandoffNotesHost`.
+ * A handoff's note as the sessions meet it (#102, #106, #142, #738): written from a dead agent's record or a living agent's
+ * answer into the data folder, the folder a successor may read it from, the sweep of notes nobody owns, and the live session
+ * that took over. What it reaches of the manager is `HandoffNotesHost`.
  */
 export class HandoffNotes {
   constructor(private readonly host: HandoffNotesHost) {}
@@ -55,32 +54,21 @@ export class HandoffNotes {
   }
 
   /**
-   * Deletes a handoff note that has no owner left (#106).
-   *
-   * **This never cleans up at a turn boundary.** #102 moved this sweep from right after
-   * `createSession` to the completion of the successor's first turn, but even that still ran ahead
-   * of the reader: it checked neither whether the first turn succeeded nor whether the note was ever
-   * actually read. In a real incident, the first turn died with a 400 in under a second, and the
-   * successor was left holding a path to a file that was already gone. "Was it read" is not a fact
-   * we can observe, so the whole idea of hanging this off a turn is abandoned.
-   *
-   * The two moments left cannot race a reader — when a session disappears (that session will never
-   * read again) and at startup (no handoff is in progress). What is left behind is just one file in
-   * the data folder.
-   *
-   * **Cleanup only ever touches the data folder** (#142). It used to read and delete
-   * `<project>/.centralu/handoff` under every registered project, but that folder belongs to the
-   * user's own repository, so a single symlink could point it at the repository root or outside the
-   * repository entirely (measured: a startup cleanup once deleted a README.md). A note in that old
-   * location is no longer ours — it is never looked at.
+   * Deletes a handoff note that has no owner left (#106). **This never cleans up at a turn boundary:** hanging the sweep off
+   * the successor's first turn (#102) still ran ahead of the reader, as it checked neither whether the first turn succeeded nor
+   * whether the note was ever read (a real incident: the first turn died with a 400 in under a second and the successor was
+   * left holding a path to a file that was already gone), and "was it read" is not a fact we can observe. The two moments left
+   * cannot race a reader: when a session disappears (it will never read again) and at startup (no handoff is in progress); what
+   * is left behind is one file in the data folder. **Cleanup only ever touches the data folder** (#142): the project's
+   * `.centralu/handoff` belongs to the user's own repository, so a single symlink could point it at the repository root or
+   * outside it (measured: a startup cleanup once deleted a README.md). A note in that old location is never looked at.
    */
   async sweepOrphanHandoffNotes(projectId?: string): Promise<void> {
     /*
-     * Ownership is asked per note, at the moment that note is judged — not snapshotted before the folder
-     * is read. The sweep awaits the listing and each delete, and in that time a handoff can finish and its
-     * predecessor be deleted (the last step of a handoff): the predecessor leaves `meta`, and only a
-     * claim or the session archive read now still says the note has a reader. A snapshot taken earlier said neither,
-     * and the note the successor had just been pointed at was deleted.
+     * Ownership is asked per note, at the moment that note is judged, not snapshotted before the folder is read. The sweep
+     * awaits the listing and each delete, and in that time a handoff can finish and its predecessor be deleted (the last step
+     * of a handoff): the predecessor leaves `meta`, and only a claim or the session archive read now still says the note has a
+     * reader. A snapshot taken earlier would say neither, and the note the successor had just been pointed at would be deleted.
      */
     await sweepHandoffNotes(
       (owner) =>
@@ -104,17 +92,12 @@ export class HandoffNotes {
   }
 
   /**
-   * A dead-agent handoff record (#78) — built **without calling that session's tool.**
-   *
-   * The moment this method is called is exactly when that tool cannot respond: the only material
-   * available is the full original text in our own store, plus (for codex) the last compact summary
-   * from the rollout file. Neither failing blocks the record from being generated — if there is no
-   * summary, the builder falls back to compressing the original text.
-   *
-   * **The result is written out as a file** (#102). The key point is that it writes to the same slot
-   * as the mode where an agent gives it as an answer (exportHandoffNote): only the material differs,
-   * and the first message a successor receives ends up the same either way. text is also returned
-   * alongside it so the caller can pull out the first few lines as a preview.
+   * A dead-agent handoff record (#78), built **without calling that session's tool:** it is called exactly when that tool
+   * cannot respond, so the material is the full original text in our own store plus (for codex) the last compact summary from
+   * the rollout file; neither failing blocks the record, and with no summary the builder falls back to compressing the original
+   * text. **The result is written out as a file** (#102), to the same slot as the mode where an agent gives it as an answer
+   * (exportHandoffNote): only the material differs, and the first message a successor receives is the same either way. The text
+   * is returned too, so the caller can pull out the first few lines as a preview.
    */
   async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
     const m = this.host.sessionOf(sessionId)
@@ -157,25 +140,15 @@ export class HandoffNotes {
   }
 
   /**
-   * A note for a living handoff (#142) — the host writes what an agent gives **as its answer** out to
-   * a file.
-   *
-   * The agent itself used to write directly to `<project>/.centralu/handoff/<id>.md`. Once the note
-   * moved outside the repository (into the data folder), that write turned into a request for more
-   * permission: Claude asks before writing outside the working folder, and Codex's workspace-write
-   * sandbox blocks writes outside its write root — and `turn/start.sandboxPolicy`, which would widen
-   * that root, applies to "this turn and **every turn after it**" and replaces the user's whole
-   * sandbox configuration wholesale. So the agent is never granted any extra permission at all, and
-   * the write is instead done by the host, which already writes to the data folder anyway.
-   *
-   * **The answer is read from the store** — not the streaming chunks the screen has assembled
-   * (mixed-in chunks were exactly why this moved to a file read in the first place). afterSeq is the
-   * last seq right before the request was sent. The first person-message after it is the request, and
-   * the **last** assistant text before the next person-message after that is the note: whatever the
-   * agent said while first checking the state, and any tool calls, come before the request and do not
-   * count, and text that comes before the request (a report from a turn still running, the answer to
-   * a past handoff) is not counted either. If a turn is still running, this returns null — its last
-   * text at that point could be a status update in progress rather than the note.
+   * A note for a living handoff (#142): the host writes what an agent gives **as its answer** out to a file. The agent is never
+   * granted extra permission to write it itself: Claude asks before writing outside the working folder, Codex's workspace-write
+   * sandbox blocks writes outside its write root, and `turn/start.sandboxPolicy`, which would widen that root, applies to "this
+   * turn and **every turn after it**" and replaces the user's whole sandbox configuration wholesale. **The answer is read from
+   * the store**, not the streaming chunks the screen has assembled (chunks mixed in other output). afterSeq is the last seq
+   * right before the request was sent: the first person-message after it is the request, and the **last** assistant text before
+   * the next person-message is the note; the agent's first checks and tool calls come before the request and do not count, nor
+   * does text before the request (a report from a turn still running, the answer to a past handoff). If a turn is still running
+   * this returns null: its last text could be a status update in progress rather than the note.
    */
   async exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null> {
     const m = this.host.sessionOf(sessionId)

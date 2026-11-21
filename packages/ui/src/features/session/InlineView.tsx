@@ -8,37 +8,14 @@ import { AppIcon } from '../../components/icons.jsx'
 import { Button } from '../../components/Button.jsx'
 
 /**
- * An in-conversation app view (M4 B-1) — when the agent calls an app tool that has a view, this
- * stands below that call's card.
+ * An in-conversation app view (M4 B-1), below the call's card; its lifetime is the host's (`app_view`), this only renders it.
+ * See docs/apps/views.md "Inline, under the tool card (standard)". On close, teardown is sent first, then it collapses
+ * into the placeholder. Its `ui/message` always goes to this conversation, and only after the person presses "Send".
  *
- * The view's lifetime is decided by the host (`app_view`: open → result/cancel → closed). This
- * component only renders it: while open, it mounts AppFrame and, per the spec, sends tool-input
- * once and then tool-result (or tool-cancelled) once (AppFrame enforces the order). When the
- * host closes it, **teardown is sent first**, then it collapses into the placeholder.
- *
- * The view's `ui/message` always goes **to this conversation** (B-4: an in-conversation view has
- * a fixed destination for messages). It still asks first, though — the view is the app's own
- * code, so it can send a message without anyone clicking anything. Nothing goes out until the
- * person reads the text to be sent and presses "Send". A sent message is recorded in the
- * conversation as something the app said, and the agent receives it wrapped by the host as the
- * app's text (the same rule as #120).
- *
- * "Pin" opens that app's pinned view (B-2) — the way to keep using the same app outside the
- * conversation.
- *
- * **Virtual scrolling** (the plan: send teardown and leave a still image before a row leaves the
- * viewport). The conversation list detaches rows from the DOM once they scroll far enough out of
- * view — the moment a row is detached, its iframe's window disappears too, so any teardown sent
- * after that never arrives. So a row with a mounted frame is held onto by the list instead of
- * being detached (`registerInlineFrame`), and a row about to be detached is given `leaving`. At
- * that point the view sends teardown and collapses into the placeholder — only then does the row
- * actually get detached. The placeholder's "Reopen" opens a new view with the input and result
- * the host still holds, without calling the tool again.
- *
- * When the conversation itself changes or is hidden (switching sessions, moving to a pinned
- * view), the whole list unmounts and there is nothing to hold onto — in that case AppFrame's last
- * attempt (firing off teardown on unmount) is all there is, and the view stays alive and
- * re-renders when it comes back (the same instance, receiving the input and result again).
+ * The conversation list detaches rows far out of view, and a detached row's iframe window is gone, so teardown sent
+ * then never arrives. A row with a mounted frame is therefore held by the list (`registerInlineFrame`); a row about to
+ * be detached gets `leaving`: the view sends teardown and collapses, and only then does the row detach. When the whole
+ * list unmounts (session switch, pinned view) nothing can be held: AppFrame's teardown on unmount is all there is.
  */
 export function InlineViewSlot({ sessionId, callId, leaving = false }: { sessionId: string; callId: string; leaving?: boolean }) {
   const view = useStore((s) => s.inlineViews[sessionId]?.[callId])

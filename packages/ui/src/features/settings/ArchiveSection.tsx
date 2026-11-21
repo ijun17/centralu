@@ -15,14 +15,9 @@ import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './Su
 import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * Settings → Archive (#204): the way out of a deleted session, built in the same change as the way in.
- *
- * The retired archive (FR-20) is why this screen exists at all: it hid sessions with a keystroke and had no exit, so
- * a record that sat intact in the store was, to the person, gone. Here every session in the session archive can be read,
- * restored, or deleted for good, and the screen says what each one still takes on this machine and what else goes
- * with it — a store that keeps everything anyone ever pasted into a chat should not keep it out of sight.
- *
- * Deleting for good is only here. Nothing empties the session archive on its own, which is why the total is in the first line.
+ * Settings → Archive (#204): the way back for a deleted session, which is otherwise gone to the person (FR-20). Each
+ * can be read, restored or deleted for good (only here), with what it still takes on this machine: a store of all ever
+ * pasted should not keep it out of sight. Nothing empties the archive by itself, so the total leads.
  */
 export function ArchiveSection() {
   const platform = usePlatform()
@@ -41,7 +36,7 @@ export function ArchiveSection() {
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
   const [emptyReport, setEmptyReport] = useState<string | null>(null)
   /**
-   * The one confirmation open on the whole screen: `all` for the whole trash, `session:<id>` for a archived session,
+   * The one confirmation open on the whole screen: `all` for the whole trash, `session:<id>` for an archived session,
    * `steps:<id>` for a session's steps in the session archive and `held:<id>` for moving them there (#418), `runs:<key>` for a
    * kept app run or an app's runs (#378). One state, so a second "Delete for good…" closes the first
    */
@@ -103,7 +98,7 @@ export function ArchiveSection() {
         (e: unknown) => errorMessage(e),
       ),
     )
-  /** One call per machine (#378 review): a linked machine's records are deleted there */
+  /** One call per machine (#378): a linked machine's records are deleted there */
   const purgeRunsOf = async (list: readonly TrashedRun[]) => {
     const byMachine = new Map<string | null, string[]>()
     for (const r of list) byMachine.set(r.machine ?? null, [...(byMachine.get(r.machine ?? null) ?? []), r.runId])
@@ -355,9 +350,8 @@ function Confirm({ text, busy, onYes, onNo }: { text: string; busy: boolean; onY
 const PAGE = 200
 
 /**
- * A archived conversation, read-only. It is drawn plainly — the words, the tool calls by name, the boundaries —
- * because it is here to be recognised before it is restored or deleted, not worked in: nothing in it can be
- * answered, opened or run.
+ * An archived conversation, read-only and plain (words, tool calls by name, boundaries): it is here to be recognised
+ * before restoring or deleting, so nothing in it can be answered, opened or run.
  */
 function ArchiveReader({ session, onBack }: { session: TrashedSession; onBack: () => void }) {
   const platform = usePlatform()

@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PROTOCOL_VERSION } from '@cc/protocol'
+import { PROTOCOL_VERSION, type StoreWork, storeWorkWords } from '@cc/protocol'
 import { bundleHostScript, bundleInfoText } from '../packages/agent-host/scripts/bundle-host.mjs'
 // @ts-expect-error — plain JavaScript, run by bundle.mjs under plain node
 import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
@@ -79,6 +79,10 @@ import {
   markStarting,
   readStarting,
   startingNow,
+  storeWork,
+  storeWorkText,
+  isLockWriter,
+  describe as describeServe,
   markStopped,
   readStopped,
   rotateServeLog,
@@ -1612,6 +1616,30 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     }
   })
 
+  /*
+   * #2334: a host whose clear of its store work was refused (a reader held host.lock on Windows) keeps saying it until it
+   * exits. Before: a hub's stop waited on the record, and the next update hung with it
+   */
+  it('a hub’s stop asks a host that answers to stop, whatever host.lock still says of its work on its store', async () => {
+    const h = await heldFolder(null, [idle])
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    try {
+      const pid = holder.pid!
+      const store = { doing: 'copy', step: 76, bytes: 1, since: Date.now() }
+      writeFileSync(join(h.d, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at: Date.now(), by: 'serve', store }))
+      expect(storeWork(h.d)).toEqual(store)
+      const lines: string[] = []
+      const stopped = runStop({ env: { CC_DATA_DIR: h.d, CENTRALU_STOP_BY: 'hub', CENTRALU_STOP_FOR: 'update' }, home: h.d, entry: SOURCE_HOST, kill: () => {}, write: (l: string) => void lines.push(l) })
+      await eventually(() => h.calls.includes('host.stop forUpdate'), 10_000 * SLOW)
+      holder.kill()
+      await stopped
+      expect(JSON.parse(lines.join(''))).toMatchObject({ v: 1, stop: { ok: true, wasRunning: true } })
+    } finally {
+      holder.kill()
+      await h.server.close()
+    }
+  }, 60_000 * SLOW)
+
   it('reads the logon a host says in its hello', async () => {
     const h = await heldFolder('network', [idle])
     try {
@@ -2304,6 +2332,210 @@ describe('a --stop during a start (#2150)', () => {
   })
 })
 
+describe('a host that works on its store before it answers (#2334)', () => {
+  const sleepers: ChildProcess[] = []
+  const sleeper = () => {
+    const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    sleepers.push(c)
+    return c.pid!
+  }
+  afterEach(() => {
+    for (const c of sleepers.splice(0)) c.kill()
+  })
+  // The record as a host writes it (tooling/fixtures/host-lock-store-work.json), which the host's and the shell's tests read too
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/host-lock-store-work.json', import.meta.url), 'utf8')) as { record: string }
+  const said = JSON.parse(fixture.record) as { pid: number; at: number; store: StoreWork }
+  const work = said.store
+  /** host.lock as a host started by `serve` writes it, naming `pid`, with `store` while it works on its store */
+  const holdWith = (d: string, pid: number, store: StoreWork | { doing: string } | null, at = Date.now()) =>
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid, started: processStartTime(pid), at, by: 'serve', ...(store ? { store } : {}) }))
+  /** `isWriter` as it answers for a record this test wrote: the process it names is the writer while it lives */
+  const writer = (h: unknown) => isAlive((h as { pid: number }).pid)
+
+  it('is read from host.lock while the process it names lives, and not after, nor in a shape it does not know', () => {
+    const d = tempDir()
+    const pid = sleeper()
+    // The host's own bytes, naming a live process
+    writeFileSync(join(d, 'host.lock'), fixture.record.replace(`"pid":${said.pid},`, `"pid":${pid},`))
+    expect(storeWork(d, new Map(), writer)).toEqual(work)
+    holdWith(d, pid, { ...work, doing: 'index' })
+    expect(storeWork(d, new Map(), writer)).toBeNull()
+    holdWith(d, pid, null)
+    expect(storeWork(d, new Map(), writer)).toBeNull()
+    holdWith(d, pid, work)
+    expect(storeWork(d, new Map(), () => false)).toBeNull()
+  })
+
+  it('says it in the words every surface uses for it', () => {
+    for (const doing of ['copy', 'update'] as const) expect(storeWorkText({ ...work, doing })).toBe(storeWorkWords({ doing }))
+  })
+
+  /*
+   * A person's stop leaves `store` in host.lock (the host is ended in its work). Before: a writer Windows could not identify
+   * was believed for as long as its pid lived, so a stranger that got the pid kept `--detach` answering `starting` for a host
+   * ended minutes before, a hub polling, and the window on "Copying…" for good
+   */
+  it('takes a record naming a live process it cannot identify for its writer only while the record is young, as every host.lock reader does', () => {
+    const d = tempDir()
+    const pid = sleeper()
+    const unidentified = () => null
+    holdWith(d, pid, work, Date.now() - 3 * 60_000)
+    expect(storeWork(d, new Map(), unidentified)).toBeNull()
+    expect(isLockWriter(lockHolder(d), new Map(), unidentified)).toBe(false)
+    holdWith(d, pid, work)
+    expect(storeWork(d, new Map(), unidentified)).toEqual(work)
+    expect(isLockWriter(lockHolder(d), new Map(), unidentified)).toBe(true)
+  })
+
+  it('takes a record a host ended in its work left for no work, once its pid is another process’s', async () => {
+    const d = tempDir()
+    const stranger = sleeper()
+    // Written three minutes before the process that now has its pid was created
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: stranger, started: process.platform === 'win32' ? null : 'Mon Jan  5 10:00:00 2026', at: Date.now() - 3 * 60_000, by: 'serve', store: work }))
+    expect(storeWork(d)).toBeNull()
+    expect(lockHolderIsAlive(d)).toBe(false)
+    const started: unknown[] = []
+    await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async (o: unknown) => (started.push(o), { ok: false, blocked: false, message: 'stand-in' }),
+      look: async () => ({ hostRunning: false }),
+      write: () => {},
+    })
+    // Started at once: no wait on the stranger
+    expect(started).toHaveLength(1)
+  }, 60_000 * SLOW)
+
+  // Each look at the folder used to identify host.lock's writer anew: on Windows a PowerShell every 250 ms of the wait
+  it('--detach identifies host.lock’s writer once for its whole wait, its looks at the folder included', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    holdWith(d, sleeper(), work)
+    let lookups = 0
+    const counted = (h: unknown) => ((lookups += 1), writer(h))
+    await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async () => ({ ok: false, blocked: false, message: 'no second start' }),
+      timeoutMs: 200,
+      workCapMs: 1_500,
+      writer: counted,
+      write: () => {},
+    })
+    expect(lookups).toBe(1)
+  }, 60_000 * SLOW)
+
+  it('--detach waits for it, starts no second host beside it, and says `starting` with what it does once its cap is reached', async () => {
+    const d = tempDir()
+    holdWith(d, sleeper(), work)
+    const started: unknown[] = []
+    const lines: string[] = []
+    const code = await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async (o: unknown) => (started.push(o), { ok: true, pid: process.pid, exited: new Promise(() => {}) }),
+      timeoutMs: 200,
+      workCapMs: 1_000,
+      look: async () => ({ hostRunning: false }),
+      write: (l: string) => void lines.push(l),
+    })
+    expect(code).toBe(1)
+    // Before: a 200 ms wait, then a second launcher started on a folder the first host holds
+    expect(started).toEqual([])
+    expect(JSON.parse(lines.join(''))).toMatchObject({ v: 1, detach: { ok: false, reason: 'starting', work } })
+  })
+
+  it('--detach answers as soon as the host answers once its work is done', async () => {
+    const d = tempDir()
+    const pid = sleeper()
+    holdWith(d, pid, work)
+    let asked = 0
+    const lines: string[] = []
+    const code = await runDetach({
+      env: { CC_DATA_DIR: d },
+      home: d,
+      entry: SOURCE_HOST,
+      version: '1.0.0',
+      cliPath: null,
+      platform: 'linux',
+      how: 'setsid',
+      start: async () => ({ ok: false, blocked: false, message: 'no second start' }),
+      timeoutMs: 2_000,
+      // The host works for about 3 s (looks are 250 ms apart), past the 2 s wait, then is done and answers two looks later
+      look: async () => {
+        asked += 1
+        if (asked === 12) holdWith(d, pid, null)
+        return asked >= 14 ? { hostRunning: true, port: 1, protocolVersion: 1, version: '1.0.0', dataDir: d } : { hostRunning: false }
+      },
+      write: (l: string) => void lines.push(l),
+    })
+    expect(code).toBe(0)
+    expect(JSON.parse(lines.join(''))).toMatchObject({ hostRunning: true, detach: { ok: true, already: true } })
+  })
+
+  it('the connection line says it while no host answers', async () => {
+    const d = tempDir()
+    // A port nothing listens on: the default one may be another serve's
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const state = readServeState(d)!
+    holdWith(d, process.pid, work)
+    const line = await describeServe({ env: { CC_DATA_DIR: d }, dataDir: d, state, entry: SOURCE_HOST, version: '1.0.0' })
+    expect(line).toMatchObject({ hostRunning: false, starting: work })
+    expect(JSON.parse(connectionLine(line))).toMatchObject({ starting: work })
+  })
+
+  it('a hub’s stop waits for it past the grace a start that hung gets, and stops it once it listens; a person’s stop ends it and says so', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    markStarting(d)
+    const pid = sleeper()
+    holdWith(d, pid, work)
+    const stop = async (env: Record<string, string>) => {
+      const lines: string[] = []
+      await runStop({ env: { CC_DATA_DIR: d, ...env }, home: d, entry: SOURCE_HOST, writer, write: (l: string) => void lines.push(l) })
+      return JSON.parse(lines.join('')) as { stop: Record<string, unknown> }
+    }
+    let ended = false
+    const hubStop = stop({ CENTRALU_STOP_BY: 'hub', CENTRALU_STOP_FOR: 'update' }).then((r) => ((ended = true), r))
+    // Before: past LOCK_GRACE_MS the start counted as one that hung, and the host was ended in its copy
+    await new Promise((r) => setTimeout(r, LOCK_GRACE_MS + 3_000))
+    expect(ended).toBe(false)
+    expect(isAlive(pid)).toBe(true)
+    // Its work done, it is stopped as any host that does not answer is (this stand-in never listens)
+    clearStarting(d)
+    holdWith(d, pid, null)
+    expect((await hubStop).stop).toMatchObject({ ok: true, wasRunning: true })
+
+    const other = tempDir()
+    ensureServeState(other)
+    recordServePort(other, await freePort())
+    const second = sleeper()
+    holdWith(other, second, { ...work, doing: 'update' })
+    const lines: string[] = []
+    await runStop({ env: { CC_DATA_DIR: other }, home: other, entry: SOURCE_HOST, writer, write: (l: string) => void lines.push(l) })
+    expect(JSON.parse(lines.join('')).stop).toMatchObject({ ok: true, message: expect.stringContaining('it was updating its data for the new version, which its next start does again') })
+  }, 120_000 * SLOW)
+})
+
+
 describe('centralu serve --detach and --stop, end to end (the host as it ships, a temporary data folder)', () => {
   /*
    * The host as a release ships it (#2144): `--detach` gives the host it starts 30 s to answer, a bound for that build.
@@ -2664,6 +2896,24 @@ describe('asking the host on the port without handing the token to anyone else (
     } finally {
       await server.close()
     }
+  }, 30_000 * SLOW)
+
+  /*
+   * A record whose writer cannot be identified (its creation unreadable, as another logon's process on Windows, and no
+   * start time recorded) names any process that got a dead host's pid, however young the record: waited on, never signalled
+   */
+  it('a stop never signals a process host.lock names that it cannot identify as its writer, however young the record', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    recordServePort(d, await freePort())
+    const stranger = lockHolderProcess(d, 'serve')
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: stranger.pid, started: null, at: Date.now(), by: 'serve' }))
+    const signals: Array<[number, string]> = []
+    const stopped = await stopServedHost({ dataDir: d, entry: SOURCE_HOST, timeoutMs: 300, graceMs: 300, kill: (pid: number, sig: string) => void signals.push([pid, sig]), createdAt: () => null })
+    expect(signals).toEqual([])
+    expect(stopped).toMatchObject({ ok: true, wasRunning: false })
+    expect(stopped.message).toContain('centralu serve is not running')
+    expect(stranger.alive()).toBe(true)
   }, 30_000 * SLOW)
 
   /*

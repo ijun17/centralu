@@ -2,15 +2,12 @@ import { systemStoppingQueries } from '../os.js'
 import { realOs } from '../os/real.js'
 
 /**
- * That the system was ending (a shutdown, restart or sign-out) as the last host went, written by that host when it was told and read
- * by the next start (#1397). Told, not guessed: a boot time against a last-alive time cannot tell a quit from a shutdown, and Windows'
- * uptime does not even restart at a Fast Startup shutdown. Chrome keeps its profile's exit type the same way (`SessionEnded`).
- *
- * Written on a notice (the `system-ending` control line from the window or the keeper, or systemd answering `stopping` as the host
- * leaves, `askSystemStopping`), removed when the notice is called off or the host outlives it. Nothing else is recorded: any other
- * ending, a host killed with no notice included, leaves no file (the start before removed the last), and the next start finds a cut
- * turn a quit and a crash an error, as before. In the data folder beside `stopped.json`, which keeps its meaning for a hub; both are
- * read and written in stopped-mark.ts (`writeSystemEnd`, `takeSystemEnd`).
+ * That the system was ending (a shutdown, restart or sign-out) as the last host went, written by that host when it was told and
+ * read by the next start. Told, not guessed: a boot time against a last-alive time cannot tell a quit from a shutdown, and
+ * Windows' uptime does not restart at a Fast Startup shutdown. Written on a notice (the `system-ending` control line from the
+ * window or the keeper, or systemd answering `stopping`, `askSystemStopping`), removed when the notice is called off or the
+ * host outlives it; any other ending, a killed host included, leaves no file, and the next start finds a cut turn a quit and a
+ * crash an error. A file of its own, as `stopped.json` keeps its meaning for a hub; read and written in stopped-mark.ts.
  */
 export const SYSTEM_END_FILE = 'system-end.json'
 
@@ -18,8 +15,8 @@ export const SYSTEM_END_FILE = 'system-end.json'
 export type SystemEnd = { at: number }
 
 /**
- * This host's notice, kept in the file. A notice it outlives by `SYSTEM_END_TAIL_MS` was no end (the system did not go), so a host
- * that runs on leaves none behind.
+ * This host's notice, kept in the file. A notice it outlives by `SYSTEM_END_TAIL_MS` was no end (the system did not go), so a
+ * host that runs on leaves none behind
  */
 export class SystemEndNotice {
   private at: number | null = null
@@ -78,14 +75,14 @@ export function parseSystemEnd(text: string): SystemEnd | null {
 export const systemEndText = (end: SystemEnd): string => `${JSON.stringify({ v: 1, at: end.at })}\n`
 
 /**
- * How long before the notice an agent's exit is still the system's. Where the system ends every process at once (Linux's SIGTERM to
- * the whole session) the agent may exit, and the host writes it, before the host's own signal is read
+ * How long before the notice an agent's exit is still the system's: where the system ends every process at once (Linux's
+ * SIGTERM to the whole session) the agent may exit, and the host writes it, before the host's own signal is read
  */
 export const SYSTEM_END_LEAD_MS = 30_000
 /**
- * How long after the notice a host ended by it may still write. Bounded: the host's leave exits within `SHUTDOWN_BOUND_MS`, but a
- * Windows notice comes at the question, before the end, which a person may hold open on the "apps are preventing shutdown" screen.
- * A session with a row later than this was in a later host's life, such as one of an older build that does not read this file
+ * How long after the notice a host ended by it may still write. Bounded: the leave exits within `SHUTDOWN_BOUND_MS`, but a
+ * Windows notice comes at the question, before the end, which a person may hold open on the "apps are preventing shutdown"
+ * screen. A session with a row later than this was in a later host's life, such as an older build that does not read this file
  */
 export const SYSTEM_END_TAIL_MS = 2 * 60_000
 
@@ -94,8 +91,8 @@ export const inSystemEnd = (end: SystemEnd | null | undefined, ts: number): bool
   !!end && ts >= end.at - SYSTEM_END_LEAD_MS && ts <= end.at + SYSTEM_END_TAIL_MS
 
 /**
- * Whether a turn the last host lost (a session left `working`) is the system's end's: its last row (`lastTs`) is no later than that
- * end. However long the turn ran before it, it was running when the system ended
+ * Whether a turn the last host lost (a session left `working`) is the system's end's: its last row (`lastTs`) is no later than
+ * that end. However long the turn ran before it, it was running when the system ended
  */
 export const cutBySystemEnd = (end: SystemEnd | null | undefined, lastTs: number | undefined): boolean =>
   !!end && (lastTs === undefined || lastTs <= end.at + SYSTEM_END_TAIL_MS)
@@ -109,8 +106,8 @@ function errorCodeOf(payload: unknown): string | undefined {
 
 /**
  * Whether a session in `error` got there by its agent's exit in the system's end: the newest error among its last rows (`rows`,
- * oldest first) is an `adapter_crashed` stamped in it. An `internal` error after it is skipped: closing the handle says so for the
- * follow-ups still queued (`undeliveredError`, adapters/session-kit.ts), which is the crash's consequence, not a new failure
+ * oldest first) is an `adapter_crashed` stamped in it. An `internal` error after it is skipped: closing the handle says so for
+ * the follow-ups still queued (`undeliveredError`, adapters/session-kit.ts), the crash's consequence, not a new failure
  */
 export function crashedInSystemEnd(s: { state: string }, rows: readonly { ts: number; payload: unknown }[], end: SystemEnd | null | undefined): boolean {
   if (s.state !== 'error' || !end) return false
@@ -127,10 +124,10 @@ type Query = { kill(signal?: NodeJS.Signals): boolean }
 type RunQuery = (command: string, args: readonly string[], options: { timeoutMs: number; onChild: (child: Query) => void }) => Promise<{ stdout: Buffer }>
 
 /**
- * Asks whether the system says it is ending now, where it can say so (`systemStoppingQueries`: Linux's systemd, the manager or the
- * user's manager `stopping`; systemctl(1), is-system-running). `stopping` answers true as soon as one query says so, and false once
- * all said otherwise, or after `timeoutMs`; it is `null` where there is no question to ask. `end` ends the queries
- * still running: called as soon as it is answered, and by the host as it exits, whichever way it exits.
+ * Asks whether the system says it is ending now, where it can (`systemStoppingQueries`: Linux's systemd, the manager or the
+ * user's manager `stopping`). `stopping` answers true as soon as one query says so, and false once all said otherwise or after
+ * `timeoutMs`; `null` where there is no question to ask. `end` ends the queries still running: called when it is answered and
+ * by the host as it exits
  */
 export function askSystemStopping(
   o: { queries?: readonly (readonly string[])[] | null; run?: RunQuery; timeoutMs?: number } = {},

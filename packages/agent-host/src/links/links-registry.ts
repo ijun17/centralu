@@ -208,7 +208,7 @@ export class Links {
     return this.need(id).activity()
   }
 
-  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
+  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273) */
   hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'> {
     return this.need(id).hubAuto(allowed)
   }

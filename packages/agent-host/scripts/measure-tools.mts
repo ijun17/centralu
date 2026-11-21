@@ -27,6 +27,7 @@ import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { CENTRALU_TOOLS, commandsFor, instructionsFor, toolDefsFor } from '../src/sessions/centralu-tools.js'
+import { execTool } from '../src/tool-run.js'
 import { CLAUDE_SUBAGENT_TOOL } from '../src/adapters/claude/centralu-mcp.js'
 import { CODEX_SUBAGENT_TOOL } from '../src/adapters/codex/thread-open.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
@@ -93,15 +94,12 @@ const FIXTURE = fileURLToPath(new URL('../src/apps/external/test-fixtures/app.mj
 const OK = 'Reply with the single word OK.'
 const log = (...a: unknown[]) => console.error('[measure]', ...a)
 
-function version(cmd: string): string | null {
-  try {
-    return execFileSync(cmd, ['--version'], { encoding: 'utf8' }).trim()
-  } catch {
-    return null
-  }
+/** A CLI's `--version` (`execTool`); null when it does not answer */
+async function version(cmd: string): Promise<string | null> {
+  return execTool(cmd, ['--version'], { timeoutMs: 30_000 }).then((r) => r.stdout.trim(), () => null)
 }
 
-const versions = { claude: version('claude'), codex: version('codex'), node: process.version }
+const versions = { claude: await version('claude'), codex: await version('codex'), node: process.version }
 const commit = (() => {
   try {
     return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()

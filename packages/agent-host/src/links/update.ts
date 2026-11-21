@@ -7,19 +7,14 @@ import { tryParseJson } from '../json-value.js'
 import { sleep } from '../timing.js'
 
 /**
- * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
- * (docs/plans/remote-hub.md §10.5 and §10.5a), over the same ssh as the link:
- *
- *   update     install beside (install.ts, `activate: false`; the running host is not touched), wait for the turns
- *              there (`beforeStop`), then hand the switch to the machine: one command runs the new version's
- *              `serve --switch`, which stops the old host, switches the pointers, starts and checks the new version,
- *              and prunes, or puts the old version back. The hub then only reads its steps and outcome
- *              (`serve --switch-status`), so a link drop or a hub that dies leaves the machine with a host
- *   rollback   the same switch towards `previous`, run by the version that runs now; `previous` is cleared
- *   uninstall  stop, then the boot entry removed (`serve --autostart off`, autostart.ts), then
- *              `<data>/remote/` removed; the data (store, `serve.json`, logs) stays
- *
- * What runs things there and what watches the link is the caller's (`HostControl`, given by `LinkedMachine`).
+ * Update, rollback and uninstall of the Centralu the hub installs on a linked machine (docs/plans/remote-hub.md §10.5, §10.5a),
+ * over the link's ssh.
+ *   update     install beside (install.ts, `activate: false`), wait for the turns there (`beforeStop`), then hand the switch to the
+ *              machine: the new version's `serve --switch` stops the old host, switches the pointers, starts and checks the new
+ *              one and prunes, or puts the old one back. The hub only reads its steps (`serve --switch-status`), so a link drop
+ *              or a dead hub leaves the machine with a host
+ *   rollback   the same switch towards `previous`, which is then cleared
+ *   uninstall  stop, remove the boot entry (`serve --autostart off`) and `<data>/remote/`; the data (store, `serve.json`, logs) stays
  */
 
 export type UpdateStep =
@@ -202,7 +197,11 @@ export async function readSwitchStatus(c: Pick<HostControl, 'exec' | 'spec'>, se
 }
 
 const POLL_MS = 2_000
-/** Past the longest switch the switcher can take, with a link that comes back on its backoff */
+/**
+ * Past the longest switch the switcher can take, with a link that comes back on its backoff. A new version's work on a
+ * large store (#2334) has no bound and can outlast it: the hub then says it could not follow the switch to its end, and
+ * the outcome reaches it at the next status read
+ */
 const FOLLOW_MS = 15 * 60_000
 
 /** The step the row shows for the switcher's: its `restart` is the put-back's start */
@@ -264,7 +263,7 @@ export function switchResult(s: SwitchState, machine: string, stoppedTurns: stri
 }
 
 /** The time a switch started, as the person reads it: HH:MM, as the machine says it too (serve-switch.mjs `clockOf`) */
-const clock = (at: number | null | undefined) => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
+export const clock = (at: number | null | undefined): string => (typeof at === 'number' ? new Date(at).toTimeString().slice(0, 5) : 'an unknown time')
 
 /**
  * Hands a switch to the machine and follows it to its outcome (plan §10.5a steps 3 to 5): the turns there are waited

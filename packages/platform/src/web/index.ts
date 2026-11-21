@@ -29,44 +29,28 @@ import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 
-/**
- * The browser (dev) implementation. Most of it is "delegate to the host over WS" —
- * step 1 of the Tauri transition reuses this implementation as-is (docs/platform-abstraction.md §5).
- */
+/** The browser (dev) implementation, which the Tauri one reuses as is (docs/platform-abstraction.md §5) */
 export type WebPlatformOptions = {
-  /** A subscription that reports a new port and token when the host restarts (injected by Tauri) */
+  /** A new port and token when the host restarts (from Tauri) */
   onEndpointChange?: (cb: (info: { port: number; token: string }) => void) => Unsubscribe
   hostUrl?: string
   token: string
   WebSocketImpl?: typeof WebSocket
   /**
-   * The desktop shell's own file operations, injected by the Tauri build (#18/#19).
-   *
-   * Trashing and revealing are the two things the Node host cannot do — a real OS trash is
-   * `NSFileManager trashItem` / the freedesktop spec, not an unlink into a temp folder — so
-   * they belong to Rust. Absent here means "there is no desktop under this page", which is
-   * exactly the browser's situation, and the port answers `supported: false` for it rather
-   * than pretending.
+   * The two things Node cannot do: a real trash is `NSFileManager trashItem` or the freedesktop spec, not an unlink
+   * into a temp folder. Absent in a browser, where the port answers `supported: false`.
    */
   nativeFiles?: {
     trash(absPath: string): Promise<void>
     reveal(absPath: string): Promise<void>
   }
-  /**
-   * What the desktop shell answered about the machine (the keyboard, the window controls, the file manager), over the
-   * defaults a browser keeps — so the Tauri build hands over one capability object instead of building a second one
-   */
+  /** The desktop shell's answers, over the defaults a browser keeps */
   capabilities?: Partial<PlatformCapabilities>
 }
 
-/**
- * The `machine` parameter of a per-machine call (#82): absent for this computer. Never null on the
- * wire: the host's schema takes a machine id or nothing, and a host from before linked machines
- * strips the field it does not know.
- */
+/** Absent for this computer, never null: the host's schema takes a machine id or nothing */
 const on = (machine?: MachineRef) => (machine ? { machine } : {})
 
-/** A call whose answer the port does not return: the same rejection, no value. */
 const done = (p: Promise<unknown>): Promise<void> => p.then(() => {})
 
 class WebAgentPort implements AgentPort {
@@ -96,11 +80,8 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
-  /*
-   * The role's methods keep their old names (#2133, docs/plans/assistant-rename.md §3.3): the window can reach a host older
-   * than step 3 (a keeper of an earlier release, or on Windows the data folder's `centralu serve`, which the hub installed
-   * at whatever version), and every host answers the old names
-   */
+  // The old names, which every host answers (docs/plans/assistant-rename.md §3.3): the window can reach a host older
+  // than step 3 (an earlier keeper, or on Windows a `centralu serve` the hub installed at whatever version)
   assistant() {
     return this.rpc.call('orchestrator.get', {})
   }
@@ -113,7 +94,7 @@ class WebAgentPort implements AgentPort {
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
   }
-  // The grid in panels (#288); `tagged` for a host up to 0.1.0-beta.45, which answers bare session ids without it
+  // `tagged` for a host up to 0.1.0-beta.45, which answers bare session ids without it
   grid() {
     return this.rpc.call('grid.get', { tagged: true })
   }
@@ -140,13 +121,7 @@ class WebAgentPort implements AgentPort {
       sessionId,
     })
   }
-  /*
-   * Uses exactly the same type as the port (Omit<UpdateSettingsParams,'sessionId'>).
-   * Writing this out by hand once **worked even with effort missing** — because TS does not
-   * check for excess properties when the store passes a variable (the commands.ts incident).
-   * Uses only the one named type from protocol, so the type cannot lie — cleaned up while
-   * adding verbosity (#54).
-   */
+  // The protocol's own type: a copy here can lack a field unseen, as TS skips the excess check on a variable
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
@@ -325,13 +300,12 @@ class WebProjectPort implements ProjectPort {
   }
 }
 
-/** Whether this page has asked for notification permission: a page asks once (#1010 review) */
 let askedNotifications = false
 
 /**
- * Why a notification cannot be shown, or null when it can. A notice comes from a host event, not a click, so the
- * permission is asked only while it is undecided and only once a page: Safari and Firefox refuse a request outside a
- * gesture, and Chrome blocks a page that keeps asking. An undecided answer is not reported as blocked.
+ * Why a notification cannot be shown, or null. Asked only while undecided and once a page: a notice comes from a
+ * host event, not a click, and Safari and Firefox refuse a request outside a gesture; Chrome blocks a page that keeps
+ * asking.
  */
 async function notificationRefusal(): Promise<string | null> {
   if (typeof Notification === 'undefined') return 'This browser has no notifications — use the desktop app'
@@ -345,17 +319,11 @@ async function notificationRefusal(): Promise<string | null> {
     : "Notifications are not allowed for this page yet — allow them in the browser's site settings"
 }
 
-/**
- * The browser's system port (the dev build). What a browser cannot do is refused with the reason and where to go
- * instead, never resolved as if it had happened (#972 item 5): the UI shows every one of these failures as a toast.
- */
+/** What a browser cannot do is refused with the reason and where to go instead, never resolved as if done */
 class WebSystemPort implements SystemPort {
   private warned = false
 
-  /**
-   * A browser notification, after asking for permission the first time. Like the desktop's, a notification that cannot
-   * be shown says so once rather than on every notice.
-   */
+  /** Says once, as the desktop's does, when it cannot notify */
   async notify(title: string, body: string) {
     const reason = await notificationRefusal()
     if (reason === null) {
@@ -367,9 +335,7 @@ class WebSystemPort implements SystemPort {
     throw new Error(reason)
   }
   async alert(_kind: AlertKind, sound: boolean) {
-    // A browser has no dock. Sound can be played, but it is routinely blocked by autoplay
-    // policy, so it cannot be trusted as "the notification that sometimes rings" — the web
-    // build is for dev, so this passes through quietly.
+    // No dock, and autoplay policy routinely blocks a sound, so the dev build passes this quietly
     void sound
   }
   async setBadge(_count: number) {
@@ -386,48 +352,34 @@ class WebSystemPort implements SystemPort {
   }
 
   async pickDirectory(): Promise<string | null> {
-    // A browser has no directory picker — a dev-only fallback
     return window.prompt('Enter the full path of the project directory', '')
   }
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
-    // The same fallback as the directory picker — a browser's file selection gives no path (the host needs a path it can read)
+    // A browser's file selection gives no path the host can read
     return window.prompt(`${opts.title} — enter the full path (${opts.extensions.map((e) => `.${e}`).join(', ')})`, '')
   }
   async openInIde(_path: string, _line?: number) {
     throw new Error('A browser cannot open an IDE — use the desktop app')
   }
-  /**
-   * In a browser this is simply opening it outside — a new tab, so it never touches this app's own work. With the
-   * `noopener` feature `window.open` answers null even when the tab opened, which would hide a blocked pop-up; so the
-   * tab is opened plainly and cut off from this page right after.
-   */
+  /** With `noopener`, `window.open` answers null even when the tab opened, hiding a blocked pop-up; cut off after */
   async openUrl(url: string) {
     const tab = window.open(url, '_blank')
     if (!tab) throw new Error('The browser blocked the new tab — allow pop-ups for this page')
     tab.opener = null
   }
   onAppLink(_cb: (link: string) => void): () => void {
-    // A browser has no OS handing links to this app (M4 E-4) — those only arrive on desktop
+    // No OS hands links to a browser
     return () => {}
   }
 }
 
-/*
-  The reasons for the two things a browser cannot do. **Never just ends at "cannot."** Says why
-  it cannot, and where to go instead (the same as `models()` attaching a reason to supported=false).
-*/
 const NO_DESKTOP_TRASH = 'A browser has no trash — use the desktop app to delete files'
 const NO_DESKTOP_REVEAL = 'A browser cannot open a file manager — use the desktop app'
 
 /**
- * `apps.invoke`'s response → the MCP result the screen receives.
- *
- * If the app answered, gives that answer **exactly as it is**. `structuredContent`, `isError`
- * and `_meta` all belong to the screen too (per spec: a screen receives a tool result).
- * Wrapping it down into text would leave a screen that reads state from `structuredContent`
- * empty-handed. A call that could not reach the app (rejected by the host, failed to start,
- * cancelled) has no answer from the app — in that case, gives the reason the host wrote as a
- * failed tool result. The screen's SDK receives this as a result, not as a thrown error.
+ * The app's answer exactly as it is: a screen reads `structuredContent` and `_meta` too (the MCP Apps spec). A call
+ * that never reached the app becomes a failed tool result with the host's reason, which the screen's SDK takes as a
+ * result, not a throw.
  */
 function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }): AppToolResult {
   const raw = r.result
@@ -440,7 +392,6 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
   rpc.connect()
 
-  // If the host restarts, switches to the new address (the Tauri supervisor reports it)
   const unsubscribeEndpoint = opts.onEndpointChange?.((next) => {
     rpc.updateEndpoint(`ws://127.0.0.1:${next.port}`, next.token)
   })
@@ -448,37 +399,29 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
   return {
     agents: new WebAgentPort(rpc),
     apps: {
-      // The app screen (M4 B-3). Both the address and the secret are made by the host — this side only reports the calling screen's origin
+      // The host makes the address and the secret; this side only reports the calling screen's origin
       viewFrame: (appId, instanceId, { projectId = null, hostOrigin }) =>
         rpc.call('apps.viewFrame', { appId, projectId, instanceId, hostOrigin }),
-      /*
-        A tool call from a screen goes through `apps.invoke`, and scope and logging are handled
-        together by the host's mediation (the plan's "there is one call path").
-
-        `projectId` is always carried (null for a user-folder app). A host from before #372 reads
-        a call without it as a person calling a built-in app, and a screen is an external app's
-        code, so it must never enter through that door. `instanceId` becomes the owner of the "changed" this
-        call produces — only that screen skips that notification (B-5).
-      */
+      // One call path (docs/apps/trust-lifecycle-calls.md). `projectId` is always sent, null for a user-folder app: a
+      // host before #372 reads a call without it as a person calling a built-in app, a door a screen's code must never
+      // use. Only `instanceId`'s screen skips the "changed" this call produces.
       callTool: async (appId, tool, args, from) =>
         viewToolResult(await rpc.call('apps.invoke', { appId, name: tool, args, projectId: from?.projectId ?? null, instanceId: from?.instanceId })),
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),
-      // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this carries it as it is when it is one, and as a failed result when it is not
       openView: async (appId, projectId, machine, openKey, recover = false) => {
         // Leased to this window's connection (#392): a reload or a closed window lets the host close it
         const params = { appId, projectId, ...(machine ? { machine } : {}), lease: true }
         const v = recover && openKey
           ? await rpc.call('apps.recoverView', { ...params, openKey })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
-        // Checked as `callTool`'s and `reopenInlineView`'s results are: a result the screen cannot read is a failed one, not a crash there
+        // A result the screen cannot read is a failed one, not a crash there
         return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read' }) }
       },
       closeView: (instanceId) => done(rpc.call('apps.closeView', { instanceId })),
       holdViews: async (instanceIds) => (await rpc.call('apps.holdViews', { instanceIds })).missing,
       sendViewMessage: (sessionId, instanceId, text) => done(rpc.call('apps.viewMessage', { sessionId, instanceId, text })),
-      // The result is exactly the MCP result the app gave — carried through as with openView
       inlineViews: (sessionId) => rpc.call('apps.inlineViews', { sessionId }),
       reopenInlineView: async (sessionId, callId) => {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
@@ -558,12 +501,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       move: (projectId, from, toDir) => rpc.call('fs.move', { projectId, from, toDir }),
       importFile: (projectId, toDir, name, dataBase64) =>
         rpc.call('fs.importFile', { projectId, toDir, name, dataBase64 }),
-      /*
-        The trash and "reveal in file manager" are **two steps**: get the absolute path from
-        the host, which knows the project root, and hand that to the shell, which can pass it
-        to the OS. This is why the UI never assembles the path itself — the place that decides
-        whether something goes outside the root has to be exactly one place.
-      */
+      // Two steps: the host, which knows the root and is the one place that decides what is outside it, makes the
+      // absolute path; the shell hands it to the OS
       trash: async (projectId, path) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
         // The entry itself, a link included, never what it points at (#838)
@@ -614,7 +553,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       onOutput: (h) => rpc.onTerminalOutput(h),
       onExit: (h) => rpc.onTerminalExit(h),
     },
-    // The runner for frequently used commands (#60) — output rides on terminal.onOutput/onExit above, as-is
+    // Output rides on terminal.onOutput/onExit
     commands: {
       run: (projectId, command, cols, rows) => rpc.call('commands.run', { projectId, command, cols, rows }),
       stop: (projectId, command) => done(rpc.call('commands.stop', { projectId, command })),
@@ -622,7 +561,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       log: async (projectId, command) => (await rpc.call('commands.log', { projectId, command })).run,
       resize: (projectId, command, cols, rows) => done(rpc.call('commands.resize', { projectId, command, cols, rows })),
     },
-    // Leftover processes still running from our folders (what the quit modal asks about)
+    // Leftover processes running from Centralu's folders, which the quit modal asks about
     processes: {
       strays: () => rpc.call('processes.strays', {}),
       stop: (pids) => rpc.call('processes.stop', { pids }),
@@ -656,19 +595,13 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         return await rpc.call('workspace.load', {})
       },
     },
-    /*
-      Screen preferences live in the host's DB — not in browser storage.
-
-      Keeping them in localStorage would let the dev server and the app hold different
-      settings even on the same machine, and worse, clearing storage (clearing the cache)
-      would become the same as clearing preferences. A value the person chose has to live
-      alongside conversations and projects to survive along with them.
-    */
+    // Preferences live in the host's store, not browser storage: the dev server and the app would differ, and clearing
+    // the cache would clear them
     themes: {
       list: () => rpc.call('themes.list', {}),
       save: (id, content) => rpc.call('themes.save', { id, content }),
       importFile: (path) => rpc.call('themes.import', { path }),
-      // The same two steps as fs.trash/reveal: the host resolves the path, the shell hands it to the OS
+      // The same two steps as fs.trash
       remove: async (id) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
         const { path } = await rpc.call('themes.resolve', { id })
@@ -686,14 +619,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       load: () => rpc.call('prefs.get', {}),
       save: (patch) => rpc.call('prefs.set', { patch }),
     },
-    /*
-      Updates are entirely delegated to the host (issue #43).
-
-      It is correct that the Tauri implementation does not override this spot — running
-      `npm i -g` is Node's job, not Rust's, and checking also happens over the same WS. There
-      is no separate channel for the screen to hear progress: `update_status` rides the same
-      stream as every other event (agents.subscribe).
-    */
+    // The host's, in Tauri too: `npm i -g` is Node's job, and progress rides the event stream as `update_status`
     updates: {
       status: (force = false) => rpc.call('updates.status', { force }),
       setAuto: (enabled) => rpc.call('updates.setAuto', { enabled }),
@@ -707,7 +633,6 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       list: () => rpc.call('requests.list', {}),
       answer: (requestId, decision) => rpc.call('requests.answer', { requestId, decision }),
     },
-    // The page does not guess the machine: the desktop build passes the shell's answers in (`defaultCapabilities`)
     capabilities: defaultCapabilities(opts.capabilities),
     async dispose() {
       unsubscribeEndpoint?.()

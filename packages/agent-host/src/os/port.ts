@@ -1,22 +1,14 @@
 /**
- * The OS as the host is given it (#1599, docs/plans/os-layer.md §7.1): files, paths, processes, the environment and the
- * clock, as an interface with a real implementation (`real.ts`, the OS layer) and one in memory (`memory.ts`) that
- * follows Windows' or POSIX rules on any OS.
- *
- * Code behind it does not import `node:fs`, `node:child_process`, `node:os` or `node:path` (`local/os-imports`), and
- * does not ask which OS it is on: it asks `traits`. Its logic tests then run on `memoryOs({ as: 'windows' })` on
- * Linux, and leave the Windows job; a few tests on the real OS stay for what only the OS can answer.
- *
- * The shapes follow Node's own (`readFileSync`, `fs.promises.readFile`, a `ChildProcess`'s events), so moving a module
- * behind it is a change of where the call goes, not of what it means. What differs from Node is said where it is.
- * Types only: importing this runs nothing.
+ * The OS as the host is given it (#1599, docs/plans/os-layer.md §7.1): files, paths, processes, environment and clock as an
+ * interface with a real implementation (`real.ts`) and an in-memory one (`memory.ts`) that follows Windows' or POSIX rules on
+ * any OS. Code behind it imports no `node:fs`/`child_process`/`os`/`path` (`local/os-imports`) and asks `traits`, not which OS
+ * it is. Shapes follow Node's; differences are said where they are
  */
 import type Database from 'better-sqlite3'
 import type { PlatformPath } from 'node:path'
 import type { Duplex, Readable, Writable } from 'node:stream'
 import type { OsTraits, ToolLaunch } from './rules.js'
 
-/** A path in the OS's own form (backslashes and a drive on Windows). The wire form is `protocol/paths.ts`'s. */
 export type HostPath = string
 
 export type Env = Record<string, string | undefined>
@@ -42,7 +34,6 @@ export interface OsStats {
   readonly ino: bigint
   readonly atimeMs: number
   readonly mtimeMs: number
-  /** The modification time in nanoseconds, for a change stamp finer than milliseconds */
   readonly mtimeNs: bigint
   readonly ctimeMs: number
   readonly birthtimeMs: number
@@ -86,9 +77,10 @@ export type CopyTreeOptions = {
   errorOnExist?: boolean
   links?: { from: string; to: string }
   /**
-   * `promises.cp` only, the `Os`'s own: a step that reads a name (a stat, a listing, a link; not a file's copy) that has not answered within this many
-   * milliseconds fails the copy with `ETIMEDOUT`, naming it. The step itself goes on in libuv's pool until the OS gives
-   * up, so the copy does not hold a caller that cannot wait for a link into a share that does not answer (#1707)
+   * `promises.cp` only, the `Os`'s own: a step that reads a name (a stat, a listing, a link; not a file's copy) that has not
+   * answered within this many milliseconds fails the copy with `ETIMEDOUT`, naming it. The step itself goes on in libuv's pool
+   * until the OS gives up, so the copy does not hold a caller that cannot wait for a link into a share that does not answer
+   * (#1707)
    */
   stepMs?: number
 }
@@ -124,17 +116,14 @@ export interface OsFileConstants {
   readonly O_EXCL: number
   readonly O_TRUNC: number
   readonly O_APPEND: number
-  /** 0 on Windows, which has no such flag: there a caller walks the links itself */
   readonly O_NOFOLLOW: number
-  /** 0 on Windows */
   readonly O_NONBLOCK: number
   readonly COPYFILE_EXCL: number
 }
 
 /**
- * The files, synchronous, under Node's names. Where Node's behaviour differs by OS (a folder held open by a running
- * process, a file replaced while open, a junction), the real one is Node's and the in-memory one models the family's
- * as measured (docs/plans/os-layer.md §7.1).
+ * The files, synchronous, under Node's names; where Node differs by OS (a folder held open, a file replaced while open, a
+ * junction) the in-memory one models the family's as measured (docs/plans/os-layer.md §7.1)
  */
 export interface OsFiles {
   readonly constants: OsFileConstants
@@ -155,16 +144,14 @@ export interface OsFiles {
   writeFileSync(path: HostPath, data: string | Uint8Array, options?: WriteOptions): void
   appendFileSync(path: HostPath, data: string | Uint8Array, options?: { mode?: number }): void
   mkdirSync(path: HostPath, options?: MkdirOptions): void
-  /** A new folder whose name is `prefix` and six random characters; answers its path */
   mkdtempSync(prefix: HostPath): HostPath
   renameSync(from: HostPath, to: HostPath): void
   copyFileSync(from: HostPath, to: HostPath, mode?: number): void
   /**
-   * A copy of a file or, with `recursive`, a tree, that never follows a link (os/copy.ts): every link, the root too,
-   * is made again as a link, on Windows a link to a folder at a whole drive path as a junction, any other as a
-   * symlink (which needs the right to make one: Developer Mode or an administrator). So no link can make a copy endless or end the
-   * process, as Node's own `cpSync` did over a link in a circle or a Windows junction back into the tree. The promise
-   * form never blocks the event loop.
+   * A copy of a file or, with `recursive`, a tree, that never follows a link (os/copy.ts): every link, the root too, is made
+   * again as a link (on Windows a link to a folder at a whole drive path as a junction, any other as a symlink, which needs
+   * Developer Mode or an administrator), so a link in a circle or a Windows junction back into the tree, which made Node's own
+   * `cpSync` endless, cannot. The promise form never blocks the event loop
    */
   cpSync(from: HostPath, to: HostPath, options?: CopyTreeOptions): void
   unlinkSync(path: HostPath): void
@@ -185,27 +172,24 @@ export interface OsFiles {
   writeSync(fd: number, data: string | Uint8Array): number
   fstatSync(fd: number): OsStats
   fchmodSync(fd: number, mode: number): void
-  /** What was written to the file `fd` is open on reaches the disk before this answers: a rename after it names a whole file, a power cut or not */
   fsyncSync(fd: number): void
   /**
-   * The names in the folder at `path` (a file made in it, a rename into it) reach the disk before this answers. Does
-   * nothing where the OS has no sync of a folder (Windows, which does not open one as a file), a missing folder included.
+   * The names in the folder at `path` reach the disk before this answers; nothing where the OS has no folder sync (Windows), a
+   * missing folder included
    */
   fsyncDirSync(path: HostPath): void
   closeSync(fd: number): void
   /**
-   * The bytes this process may still write on the disk `path` is on, or null when the OS cannot say (nothing at `path`,
-   * a file system that does not answer). Not Node's shape: its `statfsSync` answers blocks, and throws.
+   * The bytes this process may still write on the disk `path` is on, or null when the OS cannot say. Not Node's shape:
+   * `statfsSync` answers blocks and throws
    */
   freeBytesSync(path: HostPath): number | null
-  /** A file read as a stream (a record file too large to read whole) */
   createReadStream(path: HostPath, options?: { encoding?: 'utf8'; start?: number; end?: number }): Readable
   /**
-   * A watch on a folder. `recursive` watches below it too; on Windows that is the one watch a project gets, since a
-   * watched folder's parents cannot be moved there (`traits.locksWatchedFolders`).
+   * A watch on a folder; `recursive` watches below it too, and on Windows that is the one watch a project gets, since a watched
+   * folder's parents cannot be moved there (`traits.locksWatchedFolders`)
    */
   watch(path: HostPath, options: { recursive?: boolean }, listener: WatchListener): OsWatcher
-  /** The same operations, not blocking the host, under `node:fs/promises`' names */
   readonly promises: OsFilesAsync
 }
 
@@ -238,19 +222,15 @@ export interface OsFilesAsync {
 }
 
 /**
- * The OS's path rules. `path` is Node's `win32` or `posix` for the OS (join, resolve, relative, dirname, basename,
- * parse, sep, delimiter); relative paths resolve from the host's working folder only through `env.cwd()`, which
- * `resolve` with no absolute part reads.
+ * The OS's path rules: `path` is Node's `win32` or `posix` for the OS; relative paths resolve from the host's working folder
+ * only through `env.cwd()`
  */
 export interface OsPaths {
   readonly path: PlatformPath
   /** The null device (`\\.\nul`, `/dev/null`): what git's `core.hooksPath` is set to so no hook runs */
   readonly devNull: HostPath
-  /** Two spellings of one path, by name: case folded where the OS folds it (`traits.foldsPathCase`) */
   same(a: HostPath, b: HostPath): boolean
-  /** `candidate` is `root` or inside it, by segment and the OS's case rule */
   inside(root: HostPath, candidate: HostPath): boolean
-  /** A key to compare or index paths by (resolved, no trailing separator, case folded where the OS folds it) */
   key(path: HostPath): string
   fromFileUrl(url: string | URL): HostPath
   toFileUrl(path: HostPath): URL
@@ -260,39 +240,33 @@ export interface OsPaths {
 export type OsExit = { code: number | null; signal: NodeJS.Signals | null }
 
 /**
- * One of the child's standard streams: a pipe to the host, nothing, an extra duplex pipe (`'overlapped'`: the apps'
- * broker channel on fd 3), or a file the host opened (`openSync`): the child reads it as its stdin (from the
- * descriptor's position), or writes into it.
+ * One of the child's standard streams: a pipe to the host, nothing, an extra duplex pipe (`'overlapped'`: the apps' broker
+ * channel on fd 3), or a file the host opened (`openSync`) the child reads as stdin or writes into
  */
 /** `'inherit'`: the host's own (a child whose output is the host's log); in memory, discarded */
 export type OsStdio = 'pipe' | 'ignore' | 'inherit' | 'overlapped' | number
 
 export type StartOptions = {
   cwd?: HostPath
-  /** The child's whole environment; default the host's (`env.all()`) */
   env?: Env
   /** One entry per fd from 0; default three pipes */
   stdio?: readonly OsStdio[]
   /**
-   * Whether the child leads a tree of its own, by what it is. One rule:
-   * - **Contained (the default)** is a child that the host itself ends, by its own step at shutdown or its own stop, and
-   *   that keeps running for a supervisor's signal to the host's group: an agent CLI, a terminal's shell, an app, a git call
-   *   (it has `stopAll`). On POSIX it leads a process group of its own (`detached`); on Windows it is started attached,
-   *   and its leftovers are found by parent links after it ends.
-   * - **`false`** is a child that must not outlive the host and that no step of its own ends: an ssh forward, a probe of
-   *   a tool's version, a setup script. It stays in the host's group, so whatever supervises the host ends it with the
-   *   group (`host_proc.rs`'s `kill_group` after the host has gone, also when the host crashed), and a stop still ends
-   *   what it started (`killTree` signals the members of its tree that stand in the host's group, one by one).
-   * Always without a window on Windows.
+   * Whether the child leads a tree of its own. Contained (the default) is a child the host itself ends, by its own step at
+   * shutdown or its own stop, and that keeps running for a supervisor's signal to the host's group: an agent CLI, a terminal's
+   * shell, an app, a git call (it has `stopAll`); on POSIX it leads a process group (`detached`), on Windows it is attached and
+   * its leftovers are found by parent links. `false` is a child that must not outlive the host and that no step of its own ends
+   * (an ssh forward, a version probe, a setup script): it stays in the host's group, so the supervisor ends it with the group
+   * (`host_proc.rs`'s `kill_group`, also after a crash), and a stop still ends what it started (`killTree` signals the members of
+   * its tree in the host's group one by one). Always windowless on Windows
    */
   contained?: boolean
 }
 
 /**
- * A started child, as Node's `ChildProcess` describes one, so its callers keep their code: `'spawn'`, `'exit'` (code,
- * signal), `'close'` (after its output ended) and `'error'` (it could not be started: `ENOENT`, `EACCES`, or `EINVAL`
- * for a Windows batch file, which Node throws at once and this answers as an event like the others). `exited`
- * settles once with `'exit'`'s values, or with `{ code: null, signal: null }` and `error` when it never started.
+ * A started child as Node's `ChildProcess` describes one: `'spawn'`, `'exit'`, `'close'` and `'error'` (could not start:
+ * `ENOENT`, `EACCES`, or `EINVAL` for a Windows batch file, which Node throws at once). `exited` settles once with `'exit'`'s
+ * values, or `{ code: null, signal: null }` and `error` when it never started
  */
 export interface OsChild {
   readonly pid: number | undefined
@@ -308,13 +282,11 @@ export interface OsChild {
   readonly killed: boolean
   readonly exited: Promise<OsExit & { error?: OsError }>
   /**
-   * One signal to this process alone (Node's `kill`, default SIGTERM); false once it has ended. `stop` ends a tree.
-   * On Windows only SIGTERM, SIGKILL, SIGINT and SIGQUIT are sent, and each ends the process at once; any other throws
-   * (`ENOSYS`, or `ERR_UNKNOWN_SIGNAL` for a name Node does not know there, as `SIGUSR1`) and leaves it running
-   * (`signalRefusal` in rules.ts). On POSIX a program may trap any but SIGKILL; a name Linux does not know throws.
+   * One signal to this process alone (default SIGTERM); false once it has ended. On Windows only SIGTERM, SIGKILL, SIGINT and
+   * SIGQUIT are sent, each ending it at once, and any other throws (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`; `signalRefusal` in rules.ts);
+   * on POSIX a program may trap any but SIGKILL
    */
   kill(signal?: NodeJS.Signals): boolean
-  /** The host may end while this runs (Node's `unref`); in memory, nothing */
   unref(): void
   on(event: 'spawn', listener: () => void): this
   on(event: 'exit' | 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
@@ -330,21 +302,15 @@ export interface OsChild {
 export type RunOptions = {
   cwd?: HostPath
   env?: Env
-  /** Written to stdin, which is then closed */
   input?: string | Uint8Array
-  /** Ended (its whole tree) after this long; the result says `ended: 'timeout'` */
   timeoutMs?: number
-  /** Ended once stdout or stderr passes this many bytes; `ended: 'overflow'` */
   maxBuffer?: number
-  /** Ended when this aborts; `ended: 'aborted'` */
   signal?: AbortSignal
-  /** stdout goes to this file (made 0600) instead of the result */
   stdoutFile?: HostPath
-  /** The child as soon as it is started (the host keeps those it must end at its own shutdown) */
   onChild?: (child: OsChild) => void
   /**
-   * Each piece of stdout as it arrives, in place of collecting it (the result's stdout is empty, and `maxBuffer` does
-   * not count it); returning true ends the program (`ended: 'stopped'`)
+   * Each piece of stdout as it arrives, in place of collecting it (the result's stdout is empty and `maxBuffer` does not count
+   * it); returning true ends the program (`ended: 'stopped'`)
    */
   onStdout?: (chunk: Buffer) => boolean | void
   /** Keeps this many bytes of stderr, its first or its last, in place of all of it: `maxBuffer` does not count it */
@@ -358,22 +324,21 @@ export type RunOptions = {
 export type RunResult = OsExit & {
   stdout: Buffer
   stderr: Buffer
-  /** Why the host ended it, when it did */
   ended?: 'timeout' | 'overflow' | 'aborted' | 'stopped'
 }
 
 export type RunSyncOptions = Omit<RunOptions, 'signal' | 'stdoutFile'> & {
   /**
-   * How the output is answered: 'utf8' (the default) decodes it as UTF-8, 'buffer' gives the bytes. Windows' own
-   * tools (cmd, taskkill, PowerShell to a pipe) write in the console's code page, not UTF-8: Korean from `cmd /c echo`
-   * on a Korean Windows comes out as replacement characters in 'utf8', so read anything beyond ASCII as bytes.
+   * How the output is answered: 'utf8' (default) or 'buffer'. Windows' own tools (cmd, taskkill, PowerShell to a pipe) write in
+   * the console's code page: Korean from `cmd /c echo` came out as replacement characters in 'utf8', so read anything beyond
+   * ASCII as bytes
    */
   encoding?: 'utf8' | 'buffer'
 }
 
 /**
- * How a `runSync` ended: `error` when it did not start (`ENOENT`), passed `maxBuffer` on stdout or stderr (`ENOBUFS`,
- * the output so far kept, ended with SIGTERM) or `timeoutMs` (`ETIMEDOUT`, ended with SIGTERM)
+ * How a `runSync` ended: `error` when it did not start (`ENOENT`), passed `maxBuffer` (`ENOBUFS`, output so far kept, SIGTERM)
+ * or `timeoutMs` (`ETIMEDOUT`, SIGTERM)
  */
 export type RunSyncResult<T extends string | Buffer = string> = OsExit & {
   stdout: T
@@ -383,17 +348,19 @@ export type RunSyncResult<T extends string | Buffer = string> = OsExit & {
 
 export interface OsProcesses {
   /**
-   * Starts a child (see `StartOptions`); never throws: a child that could not start emits `'error'`. On Windows a
-   * path without an extension is tried with `.com` and `.exe` only, never as written (`programCandidates`)
+   * Starts a child; never throws, a child that could not start emits `'error'`. On Windows a path without an extension is tried
+   * with `.com` and `.exe` only (`programCandidates`)
    */
   start(command: string, args: readonly string[], options?: StartOptions): OsChild
   /**
-   * Runs a program to its end and answers its exit and output, a non-zero exit included; rejects only when it could
-   * not be started (`ENOENT`, `EACCES`, `EINVAL`). On a timeout, an overflow or an abort the whole tree is ended
-   * (`stop` with a 2 s grace).
+   * Runs a program to its end and answers its exit and output, non-zero included; rejects only when it could not be started. A
+   * timeout, overflow or abort ends the whole tree (`stop`, 2 s grace)
    */
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>
-  /** The same, holding the host until it ends (the layer's own `taskkill` and `ps`, a lock's owner): keep these few */
+  /**
+   * The same, holding the host until it ends, for a program that starts nothing (`STARTS_NOTHING`, the list `guard/timed-start`
+   * holds): a limit ends the pid alone, since ending a tree cannot be done synchronously without blocking on a process-table read
+   */
   runSync(
     command: string,
     args: readonly string[],
@@ -407,66 +374,51 @@ export interface OsProcesses {
   /** A command line through the OS's shell (`cmd.exe /d /s /c`, `/bin/sh -c`): a person's own setup command, never built from parts */
   runShell(commandLine: string, options?: Omit<RunOptions, 'stdoutFile'>): Promise<RunResult>
   /**
-   * Ends a child and everything it started: on POSIX TERM to every group in its tree, then KILL to what is left after
-   * `graceMs`; on Windows the child alone, then what it started, parents first, from the process table read just before
-   * (#2142). Then sweeps what it left running (its group, or on Windows the processes it started, by parent links and
-   * creation time), unless `sweep` is false: for a caller that ended the tree on purpose and has nothing left to look
-   * for. Answers how it ended.
+   * Ends a child and everything it started: on POSIX TERM to every group in its tree, then KILL to what is left after `graceMs`;
+   * on Windows the child, then what it started, parents first, from the process table read just before (#2142). Then sweeps what
+   * it left running (its group; on Windows by parent links and creation time) unless `sweep` is false
    */
   stop(child: OsChild, graceMs: number, options?: { sweep?: boolean }): Promise<OsExit>
-  /**
-   * `stop` for several children, each swept after; settles once all have exited and been swept. On Windows one reading
-   * of the process table before and one sweep after serve them all, where `stop` each would read it twice per child
-   */
+  /** `stop` for several children; on Windows one table read before and one sweep after serve all, where `stop` each would read it twice per child */
   stopAll(children: readonly OsChild[], graceMs: number): Promise<void>
-  /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */
   alive(pid: number): boolean
   /**
-   * One signal to a process the host did not start, by pid (`process.kill`: a stray from a host before, a lock's
-   * owner): false when there is no such process; throws `EPERM`. Which signals are sent is `OsChild.kill`'s rule:
-   * on Windows TERM, KILL, INT and QUIT end it, any other throws (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`).
+   * One signal to a process the host did not start, by pid (a stray from a host before, a lock's owner): false when there is
+   * none, throws `EPERM`; which signals are sent is `OsChild.kill`'s rule
    */
   signal(pid: number, signal: NodeJS.Signals): boolean
-  /** The host's own pid */
   readonly pid: number
 }
 
 /**
- * Programs by name, the way the host finds and starts them (`env-path.ts`, `tool-launch.ts`). On Windows a name is
- * never started bare: given one, Windows looks in the child's working folder before PATH.
+ * Programs by name, the way the host finds and starts them (`env-path.ts`, `tool-launch.ts`); on Windows a name is never
+ * started bare, as Windows looks in the child's working folder before PATH
  */
 export interface OsTools {
-  /** A tool's path on PATH, with PATHEXT on Windows; null when it is not there */
   find(name: string): HostPath | null
   /** A program the host runs in a project's folder (`git`, `gh`): an absolute path on Windows, never a planted one */
   program(name: string): HostPath
-  /** How to start `command` from `cwd`: a batch shim becomes the program it starts */
   resolve(command: string, options?: { cwd?: HostPath; env?: Env }): ToolLaunch
 }
 
 export interface OsEnv {
   /** A variable, in any case on Windows (`Path` is `PATH`) */
   get(name: string): string | undefined
-  /** A copy of the whole environment, for a child; keys as the OS keeps them */
   all(): Env
   /** Sets one for this host and the children it starts after (the tool PATH at start, `ensureToolPath`) */
   set(name: string, value: string | undefined): void
   readonly home: HostPath
-  /** Read when asked: `TMPDIR` (POSIX) or `TEMP` (Windows) as set now */
   readonly temp: HostPath
-  /** The Node running the host */
   readonly execPath: HostPath
   readonly username: string
-  /** The host's working folder, which a relative path is read from */
   cwd(): HostPath
 }
 
 export type Timer = { cancel(): void }
 
 /**
- * Time, for the waits that are about the OS: a grace before a second shot, a retry while Windows holds a file, a poll
- * of a file. A real `setTimeout` does not keep the host alive (`unref`); a `sleep`, awaited, does. In memory, time moves
- * only when a test moves it.
+ * Time for the waits about the OS (a grace before a second shot, a retry while Windows holds a file, a poll). A real
+ * `setTimeout` does not keep the host alive (`unref`); an awaited `sleep` does. In memory, time moves only when a test moves it
  */
 export interface OsClock {
   now(): number
@@ -478,7 +430,6 @@ export type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeo
 
 /** SQLite (better-sqlite3) on the real OS; the in-memory OS has none (`ENOSYS`) */
 export interface OsSqlite {
-  /** `':memory:'` opens a database with no file */
   open(path: HostPath, options?: SqliteOptions): Database.Database
 }
 
@@ -490,6 +441,5 @@ export interface Os {
   readonly env: OsEnv
   readonly clock: OsClock
   readonly sqlite: OsSqlite
-  /** What differs between OSes, by name (`os.ts`); asked instead of which OS this is */
   readonly traits: OsTraits
 }

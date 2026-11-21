@@ -138,7 +138,7 @@ describe('the turns an update cut, in the data folder', () => {
   })
 
   /*
-   * #1626 review 1a: a virus scanner holds the list just written (EBUSY on Windows), and a start that gave up at once ended
+   * A virus scanner holds the list just written (EBUSY on Windows), and a start that gave up at once ended
    * the turn as a quit's although the list was intact.
    */
   const busy = () => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })

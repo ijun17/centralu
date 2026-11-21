@@ -7,36 +7,18 @@ import type { SessionSummary } from '@cc/core'
 import { candidates } from './inbox.js'
 import { machineNameOf, projectMachineOf } from './names.js'
 
-/**
- * All derived state is computed here (docs/state-management.md §3) — never stored.
- * Caution: a zustand selector that builds a new object on every call causes an infinite
- * re-render loop. So either only a stable reference (the sessions map) is pulled out of the store
- * and the computation is wrapped in useMemo, or the selector is wrapped in `useShallow`, which
- * keeps the last result while its entries are the same. The second is for what is always on
- * screen: the sessions map changes with every event of every session, and a component that reads
- * it whole draws again for each of them.
- */
+// Derived state, never stored (docs/state-management.md §3). A selector that builds a new object per call
+// re-renders forever: pull a stable reference and useMemo, or wrap it in `useShallow` (what is always on
+// screen, docs/state-management.md §3).
 
-/**
- * The agent tools this machine has, as the host reported them when the app connected.
- *
- * Empty until that first snapshot lands. The screens that draw a row per tool used to read
- * a `TOOL_META` constant compiled into `@cc/protocol`, so the list was always present and
- * always exactly two; now it is data, and a new adapter can appear without either side
- * being rebuilt. The cost is this one instant of emptiness, which reads as a row that has
- * not arrived rather than a row that is wrong.
- */
+/** Empty until the host's first snapshot: the list is data, so a new adapter needs no rebuild */
 export function useTools(): ToolStatus[] {
   return useStore((s) => s.tools)
 }
 
 /**
- * How to present one tool — its label and its one-glyph mark.
- *
- * **Falls back to the bare identifier instead of throwing.** A stored session can name a
- * tool this build has no adapter for: one that was removed, or one from a newer build that
- * wrote the row. `TOOL_META[tool].label` on such a row was a crash in the middle of the
- * sidebar. A chip that reads `codex` where it should read `Codex` is a smaller failure.
+ * Falls back to the bare identifier: a stored session can name a tool this build has no adapter for
+ * (removed, or from a newer build), and throwing would crash the sidebar.
  */
 export function useToolMeta(tool: ToolName): ToolDescriptor {
   const tools = useStore((s) => s.tools)
@@ -64,15 +46,10 @@ export function useInbox(now: number): InboxItem[] {
   )
 }
 
-/** The waiting counts the top bar shows: it draws again when a count moves, not on every event of every session */
 export function useCounts(): WaitingCounts {
   return useStore(useShallow((s) => countWaiting(candidates(s))))
 }
 
-/**
- * A project's sessions, the same array while none of them changed: an event of another project's session does not
- * draw this project's sidebar block again.
- */
 export function useSessionsOf(projectId: string): SessionSummary[] {
   return useStore(useShallow((s) => Object.values(s.sessions).filter((x) => x.projectId === projectId)))
 }
@@ -82,15 +59,8 @@ export function useFocusedSession(): SessionSummary | undefined {
 }
 
 /**
- * What is currently selected in the sidebar.
- *
- * While looking at the grid, neither a session nor a project is selected — the grid is what is
- * selected. A session row used to look only at `focusedSessionId`, so entering the grid left the
- * session row still lit up as if it were selected (dogfooding). With two bright things on
- * screen at once, the screen contradicts itself about which one is being looked at.
- *
- * Why this is computed in one place: if the session row and the project row each made their own
- * judgment, one of them would eventually get fixed while the other did not.
+ * In the grid no sidebar row is selected: a row lit by `focusedSessionId` alone would stay lit beside the grid.
+ * One place, so the session and project rows agree.
  */
 export function useSelectedSessionId(): string | null {
   return useStore((s) => (s.view === 'focus' ? s.focusedSessionId : null))
@@ -105,20 +75,14 @@ export function useIsProjectOpen(projectId: string): boolean {
   return useStore((s) => openProjectOf(s) === projectId)
 }
 
-/**
- * The linked machine a project lives on (#82), or null for this computer. What stays off for a
- * project on another machine in phase 1 asks this: reveal in the file manager, open in the IDE,
- * moving files to this computer's session archive, app views (docs/plans/remote-hub.md §6).
- */
+/** The machine a project lives on (#82), null for this computer; what is off for a remote one asks this (docs/plans/remote-hub.md §6) */
 export function useProjectMachine(projectId: string | null | undefined): string | null {
   return useStore((s) => projectMachineOf(s.projects, projectId))
 }
 
 /**
- * The folder a session works in, which every path its conversation names is relative to (#1209): its worktree when it
- * has one, its project's folder otherwise, and null for a session with no project (the Assistant), whose words then
- * link nowhere (`parseFileRef`). One answer for the conversation's links and the approval rows: the conversation used
- * the project's folder while the rows used the worktree, so a worktree session's link opened the main checkout's file.
+ * What a session's paths are relative to (#1209); null (the Assistant) links nowhere. One answer for the conversation's
+ * links and the approval rows, or a worktree session's link would open the main checkout's file.
  */
 export function sessionFolderOf(state: Pick<AppState, 'sessions' | 'projects'>, sessionId: string): string | null {
   const s = state.sessions[sessionId]
@@ -126,7 +90,6 @@ export function sessionFolderOf(state: Pick<AppState, 'sessions' | 'projects'>, 
   return s.worktree?.path ?? (s.projectId ? state.projects[s.projectId]?.path : undefined) ?? null
 }
 
-/** `sessionFolderOf` for a component: a string, so the selector is stable */
 export function useSessionFolder(sessionId: string): string | null {
   return useStore((s) => sessionFolderOf(s, sessionId))
 }

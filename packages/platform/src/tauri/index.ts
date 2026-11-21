@@ -6,7 +6,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort, WindowAction } from '../ports/index.js'
 import type { HostBuild } from '@cc/protocol/client'
-import { isRecord } from '@cc/protocol/client'
+import { isRecord, type StoreWork, storeWorkOf } from '@cc/protocol/client'
 import { createWebPlatform } from '../web/index.js'
 import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart } from './switch-plan.js'
@@ -24,16 +24,14 @@ export {
 } from './switch-plan.js'
 
 /**
- * The Tauri implementation (docs/platform-abstraction.md §5, migration playbook steps 2-3).
- *
- * agents/projects **reuse the web implementation as-is** — both delegate to the host over the
- * same WS, so there is no new code to write. Tauri only does two things differently:
- *   1. Gets the host's port and token from the sidecar supervisor (the person never opens a
- *      terminal)
- *   2. The system port becomes real OS functionality (notifications, badge, opening the IDE)
+ * The Tauri implementation (docs/platform-abstraction.md §5): the web platform as is, with the host's port and token
+ * from the shell's supervisor and a system port of real OS calls.
  */
 
 type HostInfo = { port: number; token: string }
+
+/** The shell reads it from host.lock (`host_store_work`) */
+export type { StoreWork }
 
 type HostStatus =
   | { state: 'starting' }
@@ -41,14 +39,12 @@ type HostStatus =
   | { state: 'restarting'; attempt: number }
   | { state: 'failed'; message: string }
 
-/**
- * Listens for the host's status, the shell's `host-status` report (#184). The one reader of that payload, for
- * the wait below, the endpoint switch and the desktop's failure screen (#850 item 17): anything that is not an
- * object with a state is dropped.
- * @returns a promise of the unsubscribe, settled once the listener is registered
- */
 const isHostStatus = (p: unknown): p is HostStatus => isRecord(p) && typeof p.state === 'string'
 
+/**
+ * The one reader of the shell's `host-status` report.
+ * @returns a promise of the unsubscribe, settled once the listener is registered
+ */
 function listenHostStatus(cb: (status: HostStatus) => void): Promise<() => void> {
   return listen<unknown>('host-status', (e) => {
     const p = e.payload
@@ -56,33 +52,25 @@ function listenHostStatus(cb: (status: HostStatus) => void): Promise<() => void>
   })
 }
 
-/** `listenHostStatus` for a caller that does not wait on the registration */
 export function onHostStatus(cb: (status: HostStatus) => void): () => void {
   const un = listenHostStatus(cb)
   return () => void un.then((f) => f()).catch(() => {})
 }
 
 /**
- * Waits for the sidecar to be ready. The app comes up before the host does.
- *
- * **Order matters:** subscribe to the event first, then ask for the current state.
- * Doing it the other way around can miss the signal if readiness finishes in between, and
- * stall all the way to the timeout (this actually happened once the host started coming up in
- * under a second). Polling is added on top as a third layer of defense.
- *
- * Polling also asks about **failure** (#184). The supervisor only leaves a failure message
- * when it gives up (a restart clears it), so if there is a message, that is the answer. It
- * used to be that missing the `failed` event — when a supervisor restarted by Retry gave up
- * again before the webview was listening — meant waiting out the full 30 seconds.
+ * Waits for the sidecar, which comes up after the app. Subscribes first, then asks, then polls: asked the other way
+ * round, a readiness in between is missed and the wait runs to the timeout (the host can be up in under a second).
+ * The poll asks for a failure too: the supervisor leaves one only when it gives up, and a `failed` sent before the
+ * webview listens would otherwise cost the full 30 s. A host working on its store (#2334: a copy before an update, a
+ * long step) is not late: while the shell reports it the timeout starts over, and `onStoreWork` hears each change.
  */
-async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
+async function waitForHost(timeoutMs = 30_000, onStoreWork: (work: StoreWork | null) => void = () => {}): Promise<HostInfo> {
   return new Promise<HostInfo>((resolve, reject) => {
     let done = false
     const stop = () => {
       done = true
       clearTimeout(timer)
       clearInterval(poll)
-      // Unsubscribes so subscriptions do not pile up on every retry
       void unlisten.then((f) => f()).catch(() => {})
     }
     const finish = (info: HostInfo) => {
@@ -96,19 +84,19 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
       reject(new Error(message))
     }
 
-    const timer = setTimeout(() => {
+    const expire = () => {
       void invoke<string | null>('host_error')
         .catch(() => null)
         .then((err) => fail(err ?? 'agent-host did not become ready in time'))
-    }, timeoutMs)
+    }
+    let timer = setTimeout(expire, timeoutMs)
+    let saidWork: string | undefined
 
-    // (1) Subscribes first
     const unlisten = listenHostStatus((p) => {
       if (p.state === 'ready') finish({ port: p.port, token: p.token })
       else if (p.state === 'failed') fail(p.message)
     })
 
-    // (2) Checks whether it was already ready (or had already given up) — in case it finished before the subscription
     const check = () => {
       void invoke<HostInfo | null>('host_info')
         .then((info) => info?.token && finish(info))
@@ -116,40 +104,42 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
       void invoke<string | null>('host_error')
         .then((err) => err && fail(err))
         .catch(() => {})
+      void invoke<unknown>('host_store_work')
+        .then((w) => {
+          if (done) return
+          const work = storeWorkOf(w)
+          // Only on a change: a screen drawn again on each check would never tick its clock
+          const key = JSON.stringify(work)
+          if (key !== saidWork) onStoreWork(work)
+          saidWork = key
+          if (!work) return
+          clearTimeout(timer)
+          timer = setTimeout(expire, timeoutMs)
+        })
+        .catch(() => {})
     }
     check()
 
-    // (3) Eventually catches up even if the event was missed
     const poll = setInterval(check, 400)
   })
 }
 
 /**
- * Restarts a supervisor that gave up (#184 — the failure screen's Retry). Reloading the
- * webview alone does not bring the host back up. Returns true if it started running, and
- * false if it was already running (an answer will follow shortly).
+ * The failure screen's Retry (docs/runtime-lessons/single-instance-and-supervision.md SU2): reloading the webview
+ * alone does not bring the host back. False when the supervisor was already running; its answer follows.
  */
 export async function restartHost(): Promise<boolean> {
   return invoke<boolean>('restart_host').catch(rethrowAsError)
 }
 
-/** Quits the app (`quit_app`), rejecting with an Error that names the shell's reason */
 export async function quitApp(): Promise<void> {
   await invoke('quit_app').catch(rethrowAsError)
 }
 
 /**
- * The receiver for a quit request (`quit-requested`) (#184). Wired up once, **before the
- * first render**.
- *
- * The shell catches ⌘Q, the menu's Quit, and closing the window, all alike, and sends this
- * event to the webview. It used to be that the only listener was the app screen (the quit
- * modal), so on the screen waiting for the host and on the startup-failure screen, the event
- * vanished with nobody to receive it — the only way to close the app was from the Dock or by
- * force-quitting.
- *
- * If something to ask (a modal) is up, hands it off to that; if not, there is nothing to ask,
- * so it quits right away.
+ * The receiver of the shell's `quit-requested` (⌘Q, the menu's Quit, closing the window;
+ * docs/runtime-lessons/quit-relaunch-update.md UP1), wired once before the first render: with only the quit modal
+ * listening, a quit on the startup screens goes nowhere. Hands it to what is installed to ask, or quits at once.
  * @returns a handle that installs something to ask (a function) or takes it down (null)
  */
 export function listenForQuit(): (ask: (() => void) | null) => void {
@@ -163,12 +153,7 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   }
 }
 
-/**
- * Where a build came from (#280) — the keeper's record, as the shell hands it over. The host's own record (`HostBuild`,
- * protocol envelope.ts) with what only the keeper records: when it was built and the folder it runs from. The keeper's
- * record may lack the protocol version, so it is optional here. Named apart from this file's `ShellHostBuild`, the
- * shell's whole report, which used to share the protocol's name (#428).
- */
+/** The keeper's record of a build, as the shell hands it over: the host's own record, the protocol version optional */
 export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
   protocolVersion?: number
   builtAt?: string
@@ -176,23 +161,17 @@ export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
 }
 
 /**
- * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
- * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
- * `sameBuild` is false when a window of one build is attached to a host of another — the case the
- * window offers a restart into its build for. The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's `HostBuild`, which is
- * one host's record (#428).
+ * The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's (protocol.md §4). `mode` `direct`: the
+ * host is the app's own child (`pnpm app:dev`). `sameBuild` false: a restart into this window's build is offered.
  */
 export type ShellHostBuild = {
   mode: 'keeper' | 'direct' | 'serve'
   app?: BuildSource
   host?: BuildSource
   sameBuild?: boolean
-  /** The build of the keeper itself (#280 step 4); absent for a keeper older than step 4 */
+  /** Absent from a keeper older than #280 step 4 */
   keeper?: BuildSource
-  /**
-   * False when the keeper is from another build than this window: a restart into this build is offered. A keeper older
-   * than step 4 (no `keeper`) counts as another build (#461). Absent when not attached to a keeper.
-   */
+  /** A keeper without `keeper` counts as another build (#461); absent when not attached to a keeper */
   keeperSameBuild?: boolean
   background?: boolean
   /**
@@ -200,9 +179,9 @@ export type ShellHostBuild = {
    * keeper gets a plain stop. Absent before the keeper's first report
    */
   stopsForUpdate?: boolean
-  /** A session working or waiting, a terminal or a command running: what a restart could cost */
+  /** What a restart could cost (docs/runtime-lessons/front-door-and-store.md SW16) */
   busy?: boolean
-  /** How the last keeper start went through the macOS shell (thin-shell plan §6); absent when none was tried */
+  /** The last keeper start through the macOS shell (docs/plans/thin-shell.md §6); absent when none was tried */
   shell?: ShellStart
 }
 
@@ -210,14 +189,10 @@ export async function hostBuild(): Promise<ShellHostBuild> {
   return invoke<ShellHostBuild>('host_build').catch(rethrowAsError)
 }
 
-/**
- * Listens for changes to which builds are involved (a host or the keeper restarted).
- * @returns a promise of the unsubscribe, settled once the listener is registered
- */
 const isHostBuild = (p: unknown): p is ShellHostBuild => isRecord(p) && typeof p.mode === 'string'
 
+/** @returns a promise of the unsubscribe, settled once the listener is registered */
 function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
-  // Read as `listenHostStatus` reads its report (#972 item 7): anything that is not an object with a mode is dropped
   return listen<unknown>('host-build', (e) => {
     const p = e.payload
     if (isHostBuild(p)) cb(p)
@@ -225,13 +200,9 @@ function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
 }
 
 /**
- * Follows which builds are involved: the current report, then every change (#850 item 17).
- *
- * The order is the one `waitForHost` keeps: the listener is registered first and only then is the current report
- * asked for. Asked the other way round, a report sent between the answer and the registration was missed, and an
- * answer read before a report but arriving after it put the older state back. Once a report has arrived, the
- * answer to the question is dropped for the same reason. `onAskFailed` is called when asking fails and no report
- * has arrived.
+ * The current report, then every change. Registers first, then asks, as `waitForHost` does; once a report has
+ * arrived the answer is dropped, since an answer read before a report but arriving after it would put the older state
+ * back. `onAskFailed`: asking failed and no report has arrived.
  */
 export function watchHostBuild(cb: (b: ShellHostBuild) => void, onAskFailed?: () => void): () => void {
   let stopped = false
@@ -253,39 +224,27 @@ export function watchHostBuild(cb: (b: ShellHostBuild) => void, onAskFailed?: ()
   }
 }
 
-/**
- * "Quit completely" (#280): stops the keeper, the host and everything they hold (agents,
- * terminals, running commands, app processes) whatever background mode says, then quits
- */
+/** "Quit completely": stops the keeper, the host and all they hold whatever background mode says, then quits */
 export async function quitAndStopAgents(): Promise<void> {
   await invoke('quit_and_stop_agents').catch(rethrowAsError)
 }
 
 /**
- * The build bar's restart into this build (#387, #1895 step 4 PR 3): stops the keeper of another build, for an update when
- * it can (`stopsForUpdate`) and as "Quit completely" does otherwise, but keeps this window open; the window then starts a
- * keeper of its own build and reattaches. Returns once the keeper has taken the request (a stop for an update answers once
- * its host is gone); the reconnect arrives as `host-status` and `host-build`. What it can cost is `restartPlan`'s to say.
+ * The build bar's restart into this build (docs/runtime-lessons/quit-relaunch-update.md UP8). Returns once the keeper
+ * took the request (a stop for an update answers once its host is gone); the reconnect arrives as `host-status` and
+ * `host-build`.
  */
 export async function restartKeeper(): Promise<void> {
   await invoke('restart_keeper').catch(rethrowAsError)
 }
 
-/** Exported for testing — checks the seam with the Rust commands without a webview */
+/** Exported for the tests of the seam with the Rust commands */
 export class TauriSystemPort implements SystemPort {
   private granted: boolean | null = null
 
   private warned = false
 
-  /**
-   * A notification is **the only way to reach a person who has stepped away.** So if one could
-   * not be sent, this says so.
-   *
-   * It used to just return if permission was missing. That leaves no way to ever find out "the
-   * notification never came" — the code looks fine and nothing happens on screen, so the tool
-   * ends up being the one suspected. Warns only once (raising it on every single notification
-   * would be more noise than it is worth).
-   */
+  /** Says once when it cannot notify: returning quietly leaves "the notification never came" unexplained */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
       this.granted = await asError(async () => (await isPermissionGranted()) || (await requestPermission()) === 'granted')
@@ -299,18 +258,10 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
-   * Sound and the dock — **the path that actually reaches a person.**
-   *
-   * `notify` above is kept, but not trusted. Reading the plugin's source shows that on
-   * desktop, `permission_state()` and `request_permission()` **both return the constant
-   * `Ok(Granted)`**, and a delivery failure is dropped with `let _ = notification.show()`. In
-   * other words, the `granted` check above checks nothing, and that throw never fires. On top
-   * of that, the macOS path uses `NSUserNotification`, deprecated since 2018, so the banner
-   * never shows up.
-   *
-   * So this side takes responsibility for whether a notification actually arrived. Throws on
-   * failure — passing it through silently would once again make "the notification never came"
-   * impossible to find out.
+   * Sound and the dock: the path that reaches a person. On desktop the notification plugin's `permission_state()` and
+   * `request_permission()` both return a constant `Ok(Granted)` and it drops a delivery failure
+   * (`let _ = notification.show()`), so `notify`'s check checks nothing; on macOS it uses `NSUserNotification`,
+   * deprecated since 2018, whose banner never shows. Throws on failure, so a lost alert is never silent.
    */
   async alert(kind: AlertKind, sound: boolean): Promise<void> {
     await invoke('alert', { kind, sound }).catch(rethrowAsError)
@@ -322,22 +273,19 @@ export class TauriSystemPort implements SystemPort {
 
   async windowAction(action: WindowAction): Promise<void> {
     const w = getCurrentWindow()
-    // close() asks first: the shell turns the close into the quit question (lib.rs, CloseRequested)
+    // close() asks first: the shell turns it into the quit question (docs/runtime-lessons/quit-relaunch-update.md UP2)
     if (action === 'minimize') await w.minimize().catch(rethrowAsError)
     else if (action === 'toggleMaximize') await w.toggleMaximize().catch(rethrowAsError)
     else await w.close().catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
-    // If Rust's Err(String) arrived as-is, the screen would show "Could not open in IDE: undefined" (#159)
     await invoke('open_in_ide', { path, line }).catch(rethrowAsError)
   }
 
   /**
-   * Calls the opener plugin's command directly — the exact command
-   * `@tauri-apps/plugin-opener`'s `openUrl` calls, using the `opener:default` permission
-   * (http/https addresses) and the one scoped entry beside it (VS Code Remote-SSH links, #82) already granted. Called by name to avoid pulling the plugin's JS
-   * package into this package.
+   * The command `@tauri-apps/plugin-opener`'s `openUrl` calls, by name so that package stays out of this one; under
+   * `opener:default` (http/https) and the scoped entry beside it (VS Code Remote-SSH links, #82).
    */
   async openUrl(url: string): Promise<void> {
     await invoke('plugin:opener|open_url', { url }).catch(rethrowAsError)
@@ -347,7 +295,7 @@ export class TauriSystemPort implements SystemPort {
     return pickDirectory()
   }
 
-  /** One file (M4 E-3 — the .zip to import). This is the dialog plugin's `open`, so it uses the `dialog:default` permission already granted, as is */
+  /** The dialog plugin's `open`, under the `dialog:default` permission already granted */
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
     const picked = await asError(() =>
       openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] }),
@@ -360,10 +308,8 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
-   * The window's appearance and background (#312). `setTheme(null)` hands the appearance back to
-   * the OS, which is what lets the webview's `prefers-color-scheme` follow it in System mode
-   * (tauri.conf.json no longer holds the window to Dark). The background arrives as a computed
-   * CSS colour (`rgb(29, 29, 29)`); Tauri wants channels, so anything else is left alone.
+   * `setTheme(null)` hands the appearance back to the OS, which lets the webview's `prefers-color-scheme` follow it
+   * (tauri.conf.json does not hold the window to Dark). Tauri wants channels: a background that is not `rgb()` is left.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
     await asError(async () => {
@@ -375,17 +321,10 @@ export class TauriSystemPort implements SystemPort {
   }
 
   /**
-   * App links (M4 E-4). The shell queues up links it received through the OS's open event and
-   * calls `app-link` — that call means only "come get it," and the link itself is retrieved
-   * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as
-   * subscribed: if the app was launched by a link, a link that arrived before the webview came
-   * up is already sitting in the queue.
-   *
-   * Taking clears the shell's queue, so a link taken for a listener that unsubscribed while the
-   * call was out is not dropped (#972 item 6): it goes to a listener still there, or is kept for
-   * the next one, as the shell would have. Kept for the window, not the port (#1010 review): a
-   * platform made again makes a new port, and a listener that joined while the call was out has
-   * already looked at what was kept.
+   * The shell queues the links the OS opened it with and sends `app-link` to say "come get them"; `take_app_links`
+   * takes and clears them. Drains once at once: a link that launched the app is already queued. A link taken for a
+   * listener that left meanwhile goes to another or waits for the next, kept per window since a new platform makes a
+   * new port.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -410,32 +349,26 @@ export class TauriSystemPort implements SystemPort {
 
 /** The app-link listeners of this window, on any port */
 const appLinkListeners = new Set<(link: string) => void>()
-/** Links taken from the shell after their listener had gone and before another came */
 const heldAppLinks: string[] = []
 
-/** Links whose listener left while they were being taken: to a listener still here, or kept for the next one */
 function handOnAppLinks(links: string[]): void {
   const listener = appLinkListeners.values().next().value
   if (!listener) return void heldAppLinks.push(...links)
   for (const l of links) listener(l)
 }
 
-/** Brings the window forward (a notification click, a global shortcut) */
 export async function focusWindow(): Promise<void> {
   await invoke('focus_window').catch(rethrowAsError)
 }
 
-/** Directory picker — replaces typing a path, which is what web dev does instead (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
   const picked = await asError(() => openDialog({ directory: true, multiple: false, title: 'Choose project directory' }))
   return typeof picked === 'string' ? picked : null
 }
 
 /**
- * "Apply now" (#352) through the Rust shell: `relaunch_info` says whether this window's bundle on
- * disk now holds another build, `apply_update_relaunch` stops the host for an update (#1895: itself, or through the
- * keeper, which exits; an older keeper is told to hold on instead) and relaunches, and the keeper's activity report (in
- * `host-build`) is what an automatic apply waits on: there is none without a keeper, so nothing applies by itself there.
+ * "Apply now" through the shell (docs/runtime-lessons/quit-relaunch-update.md UP4, UP6). An automatic apply waits on
+ * the keeper's activity report (in `host-build`): without a keeper there is none, so nothing applies by itself there.
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {
@@ -452,13 +385,9 @@ export function tauriRelaunchPort(): RelaunchPort {
 export type TauriPlatform = Platform
 
 /**
- * Follows the host's address from before the first read of it (#972 item 1).
- *
- * The order `waitForHost` keeps, for the whole of startup: the listener is registered first, and only then is the
- * address read. Startup reads the address and then awaits several more shell calls before the web platform exists; a
- * `ready` for a new port in that gap (a crash restart, a swap) used to be lost, and the client retried the old
- * address forever. Here the latest `ready` heard is kept, and handed to the web platform the moment it subscribes,
- * then every later one; the client ignores an address it already has.
+ * Follows the host's address from before the first read of it: startup awaits several shell calls before the web
+ * platform exists, and a `ready` for a new port in that gap (a crash restart, a swap) would leave the client on the
+ * old address for good. The latest `ready` is handed over when the web platform subscribes, then every later one.
  */
 async function followEndpoint(): Promise<{
   onEndpointChange: (cb: (info: HostInfo) => void) => () => void
@@ -467,7 +396,7 @@ async function followEndpoint(): Promise<{
   let latest: HostInfo | null = null
   let forward: ((info: HostInfo) => void) | null = null
   let stopped = false
-  // A listener that cannot be registered costs only the following, as it did before: startup itself goes on
+  // A listener that cannot be registered costs only the following, not the startup
   const un = await listenHostStatus((p) => {
     if (stopped || p.state !== 'ready') return
     latest = { port: p.port, token: p.token }
@@ -489,62 +418,43 @@ async function followEndpoint(): Promise<{
   }
 }
 
-export async function createTauriPlatform(): Promise<TauriPlatform> {
+export async function createTauriPlatform({ onStoreWork }: { onStoreWork?: (work: StoreWork | null) => void } = {}): Promise<TauriPlatform> {
   const endpoint = await followEndpoint()
   try {
-    return await createOnHost(endpoint.onEndpointChange)
+    return await createOnHost(endpoint.onEndpointChange, onStoreWork)
   } catch (e) {
     endpoint.stop()
     throw e
   }
 }
 
-async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
-  const { port, token } = await waitForHost()
+async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void, onStoreWork?: (work: StoreWork | null) => void): Promise<TauriPlatform> {
+  const { port, token } = await waitForHost(undefined, onStoreWork)
 
-  // Ask the shell how much of our top bar the OS has already claimed. Only Rust knows
-  // (it is a build-time `cfg!`), and this is the one place allowed to know it — the
-  // number reaches ui as a width, never as an OS name.
-  // A failure here must not stop the app from starting: a wrong inset is a cosmetic
-  // problem, and blocking startup over one would turn it into a fatal one.
+  // Only Rust knows the OS (a build-time `cfg!`); ui gets widths and words, never an OS name. A failed ask must not
+  // stop the start: a wrong inset is cosmetic. `MAC_SHORTCUT_KEYS` says why the keys fall back to it.
   const windowControlsInset = await invoke<number>('window_controls_inset').catch(() => 0)
 
-  // Same deal for the two modifier keys we print: only Rust knows which keyboard is under
-  // the app, and the labels reach ui as words, never as an OS name (#32).
-  // The fallback is the Mac spelling because a failure here can only mean the command is
-  // missing from the handler list, which is a build-time mistake affecting every platform
-  // equally — and every other implementation in this package answers the same way.
   const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch((): ShortcutKeys => MAC_SHORTCUT_KEYS)
 
-  // And the same again for what this desktop calls its file manager (#19), so the context
-  // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
   const fileManagerName = await invoke<string>('file_manager_name').catch(() => ANY_FILE_MANAGER)
 
-  // Whether the top bar draws the window's controls itself (Windows, where the shell turned the OS title bar off)
+  // Windows, where the shell turned the OS title bar off
   const windowControls = await invoke<boolean>('window_controls_drawn').catch(() => false)
 
-  // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
-  // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
+  // Background mode needs the keeper (#280); a failed ask reads as none, which hides a switch that cannot work
   const mode = await hostBuild()
     .then((b) => b.mode)
     .catch(() => 'direct' as const)
   const servesHost = mode === 'serve'
 
-  // If the supervisor revives the host, the port and token change → this has to switch to the new address.
-  // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
-  // It was registered before the address above was read (`followEndpoint`), so a restart during startup is not missed.
+  // `onEndpointChange` follows a revived host's new port and token (docs/runtime-lessons/front-door-and-store.md SW1)
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
-    // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
+    // frameDragEndInPage is left to the webview itself (engine.ts)
     capabilities: { windowControlsInset, shortcutKeys, fileManagerName, windowControls, servesHost },
-    /*
-      The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
-      A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
-      that moves a file to a temp folder, so this goes down to Rust here rather than through
-      the Node sidecar. Building the path is still the host's job — it is the only side that
-      knows the project root.
-    */
+    // A real trash is `NSFileManager trashItem` or the freedesktop spec, which Node cannot do (`WebPlatformOptions`)
     nativeFiles: {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
       reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
@@ -562,7 +472,7 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
           },
         }
       : {}),
-    // Without a keeper too (#1895): the shell says whether it can relaunch, and stops the host for an update first
+    // Without a keeper too: the shell says whether it can relaunch
     relaunch: tauriRelaunchPort(),
     system: new TauriSystemPort(),
   }

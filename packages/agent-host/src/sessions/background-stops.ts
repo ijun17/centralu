@@ -17,9 +17,8 @@ export function taskList(tasks: readonly BackgroundTask[], status = false): stri
 }
 
 /**
- * A child's own background work, stopped for agent_session (#718, #721): the work a child at rest still runs, and which of that work a
- * caller may stop. Moved out of `DelegationFlow` as it was (#428); what it
- * reaches of the manager is `DelegationHost`.
+ * A child's own background work, stopped for agent_session (#718, #721): the work a child at rest still runs, and which of that
+ * work a caller may stop. What it reaches of the manager is `DelegationHost`.
  */
 export class BackgroundStops {
   constructor(private readonly host: DelegationHost) {}
@@ -41,7 +40,7 @@ export class BackgroundStops {
       }
     }
     const unstoppable = left.length ? `Not stoppable from here, still running: ${taskList(left)}; the person can stop it, or you can ask the child to stop it.` : ''
-    // Nothing stopped and no wait ended: nothing was done (#718 review)
+    // Nothing stopped and no wait ended: nothing was done (#718)
     if (!stopped.length) return { ok: false, error: `Nothing of "${child.name}" was stopped. ${unstoppable}` }
     /*
      * The tool reports a task's end after its stop returns (Claude's `background_tasks_changed` follows `stopTask`), so

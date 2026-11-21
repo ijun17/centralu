@@ -30,7 +30,7 @@ describe("the Assistant's children in the sidebar", () => {
     expect(ids(assistantChildren(without, 'orc'))).toEqual({ current: ['child'], earlier: [] })
   })
 
-  // #994 review: a child whose assistant was replaced had no row at all
+  // #994: a child whose assistant was replaced still has a row
   it('keep a row for a child whose assistant is gone, among the earlier ones', () => {
     const { orc: _, ...without } = sessions
     const withNew = { ...without, orc2: row('orc2', { kind: 'orchestrator' }) }

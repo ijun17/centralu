@@ -29,7 +29,7 @@ describe('the approved skills', () => {
     expect(render()).toBe('')
   })
 
-  // #841: a failed read hid the section, which read as "no skills approved"
+  // #841: a section hidden on a failed read would read as "no skills approved"
   it('says it could not read them instead of hiding the section', () => {
     shown = { error: 'RPC timed out' }
     const html = render()

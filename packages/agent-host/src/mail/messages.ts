@@ -62,7 +62,10 @@ export type SendInput = {
   /** 1 to 10 addresses. Empty with `replyTo`: the sender of the message answered */
   to: readonly string[]
   text: string
+  /** Whether it waits for a reply, given only when decided elsewhere (a peer across a link, the person's window); else `waitsForReply` decides */
   needsReply?: boolean
+  /** The sender needs no answer (the tool's `kind: "note"`) */
+  note?: true
   replyTo?: string
   /** A reply the sender marked as the answer to the task it replies to (the tool's `kind: "answer"`): only such a reply settles a task (`replyAnswers`) */
   answer?: boolean
@@ -82,6 +85,14 @@ export type SendInput = {
   /** The sender marked it as a question (`facts.question`, #2348): kept only on a message that needs a reply */
   question?: true
 }
+/**
+ * Whether a session's message waits for a reply (D3, #2357), the one rule: a reply, or a message to the giver of the task its turn is for (a
+ * clarification, `MessageService.clarifies`), only when marked a question (`kind: "question"` or choices); any other new message unless it is a note
+ */
+export function waitsForReply(m: { question: boolean; note: boolean; reply: boolean; clarifies: boolean }): boolean {
+  return m.reply || m.clarifies ? m.question : !m.note
+}
+
 /**
  * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
  * a task only by a reply marked as its answer that asks nothing back. Any other reply to a task is a message in its thread, and the task stays open, so
@@ -177,7 +188,7 @@ export type MailChange = { messageId: string; rootId: string; recipients: string
  * each one short line and no two the same. Anything else is refused, so a choice never reaches another session as a field it might take for Centralu's
  */
 function checkedChoices(c: MailChoices, cls: SenderClass, to: readonly string[], question: boolean): MailChoices {
-  if (cls !== 'session' || !question || to.length !== 1 || to[0] !== PERSON) throw refuse('field_not_allowed', 'choices go only with a question to the person (kind "question", to "person")')
+  if (cls !== 'session' || !question || to.length !== 1 || to[0] !== PERSON) throw refuse('field_not_allowed', 'choices go only with a question to the person (kind: "question", to: "person")')
   const choices = c.map((label) => oneLineText(label, CHOICE_CHARS))
   if (choices.length < 2 || choices.length > 6 || choices.includes('') || new Set(choices).size < choices.length) throw refuse('bad_value', 'a question offers 2 to 6 choices, none empty and no two the same')
   return choices
@@ -212,6 +223,8 @@ export class MessageService {
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
       /** A question the session at that address asked was settled with no answer to it (`questionSettled`): the report it held is owed now (#2348) */
       questionSettled?: (sessionAddress: string) => void
+      /** The live session that took over from a gone one by a handoff, by address, which a refusal to write to the gone one names; null when none */
+      heirOf?: (sessionAddress: string) => string | null
     } & StopNoticeOptions,
   ) {
     this.now = opts.now ?? Date.now
@@ -282,15 +295,17 @@ export class MessageService {
     if (to.length > MAX_RECIPIENTS) throw refuse('recipients', REFUSAL_TEXT.recipients())
 
     const causeId = this.causeOf(sender)
-    const cause = causeId === null ? null : (this.records.message(causeId) ?? null)
-    // A clarification: a session's word to the owner of the task its turn is for (§9.7). It is no request
-    const clarifies = cls === 'session' && cause?.kind === 'task' && to.length === 1 && to[0] === cause.sender ? cause.id : undefined
+    // A clarification (§9.7) is no request
+    const [only] = to
+    const clarifies = cls === 'session' && only !== undefined && to.length === 1 ? this.clarifies(sender, only) : undefined
     // The owner's answer to one is work again: a task from the owner to the one who asked
     const asWork = target !== undefined && this.answersClarification(sender, target, to)
     const kind: MailKind = asWork ? 'task' : 'message'
+    const needsReply =
+      kind === 'message' && (input.needsReply ?? waitsForReply({ question: input.question === true, note: input.note === true, reply: target !== undefined, clarifies: clarifies !== undefined }))
 
     const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
-    const choices = input.choices && checkedChoices(input.choices, cls, to, kind === 'message' && (input.needsReply ?? target === undefined))
+    const choices = input.choices && checkedChoices(input.choices, cls, to, needsReply)
     for (const [i, r] of to.entries()) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
@@ -307,7 +322,6 @@ export class MessageService {
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
 
-      const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
       const urgent = input.urgent === true
       const senderProject = this.reach.projectOf(sender)
       // The hold judges what the message is to the one hold, whatever it is stored as
@@ -676,7 +690,7 @@ export class MessageService {
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
       given.push({ threadId: message.rootId, messageId: message.id, relation })
-      items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row.lastError === 'maybe_repeated'))
+      items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row))
     }
     const frame = buildMessageFrame(items, this.opts.calls?.(recipient))
     // What this delivery gives: the messages the frame names (one folded over its budget waits for the next), which the line counts and opens to
@@ -1014,9 +1028,15 @@ export class MessageService {
     return text
   }
 
+  /** A gone session's refusal, naming the session that took over from it by a handoff when there is one (a reply to its question, say): write to that one */
+  private goneText(to: string): string {
+    const heir = this.opts.heirOf?.(to) ?? null
+    return `${REFUSAL_TEXT.gone(to)}${heir ? ` ${JSON.stringify(this.reach.labelOf(heir))} (${heir}) took over from it by a handoff: write to that session.` : ''}`
+  }
+
   private refusalText(why: ReturnType<MailReach['mayWrite']> & string, to: string): string {
     const text: Record<string, string | undefined> = {
-      gone: REFUSAL_TEXT.gone(to),
+      gone: this.goneText(to),
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
       elsewhere: REFUSAL_TEXT.elsewhere(to),
       assistant_asks: REFUSAL_TEXT.assistant_asks(),
@@ -1031,6 +1051,21 @@ export class MessageService {
     const row = m && m.sender !== reader ? this.records.recipient(id, reader) : undefined
     if (!m || (m.sender !== reader && (!row || isHidden(row)))) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
     return m
+  }
+
+  /**
+   * The task a session's message to `to` is about when `to` gave it that task, the one its turn is for (a clarification, §9.7), or undefined. `to`
+   * is an address, or `{ host }` for `parent` across a link: a session of the computer that started the sender (`MailAcross.parentHost`), which
+   * alone knows which session that is. The one condition for a clarification, on this host and across (#2357)
+   */
+  clarifies(sender: string, to: string | { host: string }): string | undefined {
+    if (senderKind(sender) !== 'session') return undefined
+    const causeId = this.causeOf(sender)
+    const cause = causeId === null ? undefined : this.records.message(causeId)
+    if (cause?.kind !== 'task') return undefined
+    const giver = parseAddress(cause.sender)
+    const gave = typeof to === 'string' ? cause.sender === to : giver?.kind === 'session' && giver.host === to.host
+    return gave ? cause.id : undefined
   }
 
   /** Whether `target` is a clarification of a task `owner` gave, and the answer goes to the one who asked (§9.7) */
@@ -1172,7 +1207,7 @@ export class MessageService {
     return { message: stub, row: null, relation: '', phantom: 'gone' }
   }
 
-  private frameItem(recipient: string, m: MailRow, relation: string, inline: boolean, maybeRepeated: boolean): MessageFrameItem {
+  private frameItem(recipient: string, m: MailRow, relation: string, inline: boolean, row: Pick<RecipientRow, 'lastError' | 'givenAgainAt'>): MessageFrameItem {
     const about = asObj(m.facts.about).session
     const answered = m.replyTo === null ? undefined : this.records.message(m.replyTo)
     return {
@@ -1192,7 +1227,8 @@ export class MessageService {
       ...(m.facts.waitingOn !== undefined && m.facts.waitingOn > 0 ? { waitingOn: m.facts.waitingOn } : {}),
       ...(m.facts.personNote === true ? { personNote: true } : {}),
       ...(this.forPerson(m) ? { forPerson: this.forPerson(m) } : {}),
-      ...(maybeRepeated ? { maybeRepeated: true } : {}),
+      ...(row.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
+      ...(row.givenAgainAt !== null ? { givenAgain: true } : {}),
       ...(inline ? { inline: m.body } : {}),
     }
   }

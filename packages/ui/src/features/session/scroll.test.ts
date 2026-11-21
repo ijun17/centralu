@@ -43,15 +43,13 @@ describe('whether to follow', () => {
   })
 
   /*
-   * This is a race that actually happened in this project.
+   * A real race: the person scrolls up, but before the scroll event is processed and while the
+   * flag is still true, the virtual scroller re-measures a row and changes the total height, so
+   * "follow" runs first. Looking at the flag alone would drag the person back down to the
+   * bottom right here.
    *
-   * The person scrolled up, but before the scroll event was processed and while the flag was
-   * still true, the virtual scroller re-measured a row and changed the total height, so
-   * "follow" ran first. Looking at the flag alone would have dragged the person back down to
-   * the bottom right here.
-   *
-   * e2e could not catch this moment — adding a wait made it break against the pre-fix code
-   * too. Pulling the judgment out reduces it to a few plain values.
+   * e2e cannot catch this moment — a wait makes it break with the fix as well as without. As a
+   * judgment on its own it is a few plain values.
    */
   it('releases when the flag is still true but the person has already moved the view up', () => {
     expect(decideFollow({ sticking: true, scrollTop: 0, lastTop: 12084, touched: true })).toBe('release')

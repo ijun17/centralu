@@ -4,7 +4,7 @@ import { ATTACHMENT_MAX_BASE64, FsResolvePurpose } from '../files.js'
 import { machineParam } from '../machine-fields.js'
 import { AGENT_INSTRUCTIONS_MAX, SavedCommand } from '../projects.js'
 
-/** The parameters of the `projects` methods, which the host validates (docs/protocol.md §3). Their results: ./projects.results.ts */
+/** Params of the `projects` methods, parsed by the host (docs/protocol.md §3). Results: ./projects.results.ts */
 export const projectsParams = {
   'git.status': z.object({ projectId: ProjectId }),
   'git.diff': z.object({ projectId: ProjectId, path: z.string(), staged: z.boolean().optional() }),
@@ -12,11 +12,8 @@ export const projectsParams = {
   'git.commitDetail': z.object({ projectId: ProjectId, sha: z.string() }),
   'git.branches': z.object({ projectId: ProjectId }),
   /**
-   * The things git ignores (#76) — the list of things that will **not** exist in a new worktree.
-   *
-   * Offered as candidates for "what to copy" by the worktree setup window. bytes only assists
-   * and can be null (measuring it is abandoned if it takes too long) — the list itself is the
-   * answer, and the size is only material for the decision.
+   * What will not exist in a new worktree, offered as what to copy. `bytes` may be null (measuring gives up when it takes
+   * too long): the list is the answer, the size only helps decide.
    */
   'git.ignoredEntries': z.object({ projectId: ProjectId }),
   'git.checkout': z.object({ projectId: ProjectId, branch: z.string(), dryRun: z.boolean().optional() }),
@@ -25,16 +22,15 @@ export const projectsParams = {
     paths: z.array(z.string()),
     unstage: z.boolean().optional(),
   }),
-  /** `cancelled`: the person ended it with `git.cancel` (#1007); the screen says so rather than that it failed */
+  /** `cancelled`: the person ended it with `git.cancel`; the screen says so rather than that it failed */
   'git.commit': z.object({ projectId: ProjectId, message: z.string() }),
   'git.push': z.object({ projectId: ProjectId }),
   /**
-   * Ends the git write still running for this project (a switch, stage, commit or push from the git panel, #1007): a
-   * hook or a credential helper waiting on a sign-in otherwise holds the panel for up to ten minutes. git is ended as
-   * a timeout ends it, so it takes its `index.lock` away. `cancelled` is whether there was one to end.
+   * Ends the git panel's running write: a hook or a credential helper waiting on a sign-in otherwise holds it for up to
+   * ten minutes. git is ended as a timeout ends it, so it removes its `index.lock`.
    */
   'git.cancel': z.object({ projectId: ProjectId }),
-  /** The host saves a pasted image as a file (so base64 never goes into the database) */
+  /** Saved as a file, so base64 never goes into the database */
   'attachments.save': z.object({
     sessionId: SessionId,
     name: z.string(),
@@ -43,32 +39,15 @@ export const projectsParams = {
   }),
   'fs.listDir': z.object({ projectId: ProjectId, path: z.string() }),
   /**
-   * The full set of directories to watch in this project (#34). **Received as the complete
-   * whole every time** — same syntax as projects.reorder, for the same reason: the set of
-   * expanded rows on screen is exactly the watch set, so exchanging it as "add this, drop that"
-   * would let the two sides drift apart with no error at all.
-   * Changes arrive as `fs_changed` events. If watched is smaller than the count sent, it was
-   * truncated by the cap.
+   * The whole watch set every time: it is the set of expanded rows, and "add this, drop that" would let the two sides
+   * drift apart with no error. Changes come as `fs_changed`; `watched` below the count sent means the cap cut it.
    */
   'fs.watch': z.object({ projectId: ProjectId, paths: z.array(z.string()) }),
-  /**
-   * `sessionId` (#1209): the path is that session's, so it is read from the session's folder (its worktree, or the
-   * project when it has none) and refused outside it. The session must be one of this project's. Absent, the project.
-   */
+  /** With `sessionId` (one of this project's), read from that session's worktree and refused outside it */
   'fs.readFile': z.object({ projectId: ProjectId, path: z.string(), sessionId: SessionId.optional() }),
-  /**
-   * Move a file or folder into another folder of the same project (#19).
-   *
-   * The destination is a **folder**, not a full path: the gesture is a drop onto a row, and
-   * the new name is always the old one. `moved: false` means it landed where it already was.
-   */
+  /** `toDir` is a folder: the gesture is a drop on a row and the name stays. `moved: false`: it was already there */
   'fs.move': z.object({ projectId: ProjectId, from: z.string(), toDir: z.string() }),
-  /**
-   * Put a file dragged in from the desktop into the project (#19).
-   *
-   * Bytes, not a source path — the webview never tells the page where a dropped file lives,
-   * which is the same reason attachments travel this way.
-   */
+  /** Bytes, not a source path: the webview never tells the page where a dropped file lives */
   'fs.importFile': z.object({
     projectId: ProjectId,
     toDir: z.string(),
@@ -76,47 +55,33 @@ export const projectsParams = {
     dataBase64: z.string(),
   }),
   /**
-   * The absolute path of a project file, for the desktop shell's own OS calls
-   * (revealing it in the file manager, moving it to the trash).
-   *
-   * The host is the only side that knows the project root, so it is the only side allowed
-   * to build one — and it refuses paths that leave the project, or that are not there.
+   * For the shell's own OS calls (reveal, trash). Only the host knows the project root, so only it builds the path, and
+   * it refuses one that leaves the project or is not there.
    */
   'fs.resolve': z.object({
     projectId: ProjectId,
     path: z.string(),
     /**
-     * What the path is for (#838). `trash`: the entry itself, a link included, never what it points at. `project`:
-     * the project folder itself, for "Delete project and trash folder" only (the path is ignored). Otherwise (reveal,
-     * open in an IDE, or absent from an older window) what it is, a link followed inside the project. The project
-     * folder only for `project`, and for an older window's literal root (`.`), which only its delete dialog sends.
+     * `trash`: the entry itself, a link included, never its target. `project`: the project folder (the path ignored), for
+     * "Delete project and trash folder" only. Otherwise (reveal, open in an IDE, an older window) a link is followed
+     * inside the project. The folder itself only for `project`, and for an older window's delete dialog's `.`.
      */
     purpose: FsResolvePurpose.optional(),
-    /**
-     * The session whose folder the path is in, as `fs.readFile`'s (#1209): revealing or opening a worktree session's
-     * file. Only for reveal and open; refused with `trash` and `project`, which act on the project's own files.
-     */
+    /** As `fs.readFile`'s, for reveal and open only; refused with `trash` and `project` */
     sessionId: SessionId.optional(),
   }),
   'projects.add': z.object({ path: z.string(), ...machineParam }),
   /**
-   * What a folder is, read on the machine it is on and nothing changed (#1220): the Assistant's add_project shows
-   * it on the person's card before `projects.add` registers the folder. `path` comes back absolute, in that machine's
-   * own terms (a leading `~` is that machine's home); a path that is not absolute is refused. `git`: the folder is in
-   * a git repository, and `origin` is that repository's `origin` remote as its config has it (no program of the
-   * repository runs). `project`: the project already registered for that folder, in whatever spelling it was kept.
+   * Read on the folder's machine, nothing changed, for add_project's card. `path` comes back absolute in that machine's
+   * terms (`~` its home); a relative one is refused. `origin` is read from the repository's config (no program of it
+   * runs). `project`: the one already registered for that folder, in whatever spelling it was kept.
    */
   'projects.inspect': z.object({ path: z.string().max(4096), ...machineParam }),
   /**
-   * Makes a new project (#515): an **empty** folder named `name` (no git init, no template) inside `parent`, or
-   * `~/Centralu` (`PROJECTS_DIR`) of the machine the project lives on when `parent` is absent, then registers it as `projects.add` does.
-   * The machine's own host makes it. Refused with one sentence when the name is not one folder name, when `parent` is
-   * not a full path to a folder, or when anything of that name is already there: nothing existing is reused.
-   *
-   * With `source` the folder is a **clone** of that repository instead of empty, made by that machine's own git with
-   * its own saved sign-ins, never asking for one (a repository that needs a password it does not have is refused with
-   * one sentence). An empty `name` is then the repository's own (`repoNameOf`). A failed clone leaves nothing: the
-   * folder it made is removed and no project is registered. Submodules are not cloned.
+   * An empty folder `name` (no git init) in `parent` (that machine's `~/Centralu` when absent), registered as
+   * `projects.add` does. Refused with one sentence for a bad name or `parent`, or when anything of that name exists.
+   * With `source`, a clone by that machine's git and saved sign-ins, never prompting; an empty `name` is the repository's
+   * (`repoNameOf`). A failed clone leaves nothing behind. No submodules.
    */
   'projects.create': z.object({
     name: z.string().max(255),
@@ -125,9 +90,8 @@ export const projectsParams = {
     ...machineParam,
   }),
   /**
-   * Where `projects.create` would make the folder, without making anything (#515): the dialog shows it as the person
-   * types. `parent` is the resolved location (that machine's `~/Centralu` when none is given). With an empty name, `path` and `error`
-   * are null; otherwise exactly one of them is set, `error` being the sentence `projects.create` would refuse with.
+   * Makes nothing; shown as the person types. With an empty name, `path` and `error` are null; otherwise exactly one is set,
+   * `error` being the sentence `projects.create` would refuse with.
    */
   'projects.createPreview': z.object({
     name: z.string().max(255),
@@ -136,75 +100,35 @@ export const projectsParams = {
     ...machineParam,
   }),
   /**
-   * **Deletes** a project — not just removing it from the list, but erasing it from this app's
-   * records entirely (its sessions, conversations, search index, approval rules, even usage
-   * attribution).
-   *
-   * **It never touches the folder.** Discarding files only ever happens through the OS trash,
-   * which is the shell's (Rust's) job, and the caller finishes that before this command runs.
-   * This is also why there is no `deleteFiles` switch here — the host has no hand that can
-   * discard files, so accepting one would just be a promise it cannot keep.
+   * Erases the project from every record (sessions, conversations, search, rules, usage attribution) and never touches
+   * the folder: only the shell can use the OS trash, and does so first. Hence no `deleteFiles` switch here.
    */
   'projects.delete': z.object({ projectId: ProjectId }),
   /**
-   * What deleting this project may do to its folder (#1301), read when the Delete project dialog opens: nothing changed. A folder of
-   * the user folder registered in place as a project (#1141) is moved to `app-trash/` once nothing can restore it (#1204), which
-   * the dialog says. The answer is exact where the list's mark (`ProjectInfo.fromUserFolder`) is not: it compares real paths, as that
-   * give-back does, so a project added again through a junction, a symbolic link or a `subst` drive counts, and a path it cannot
-   * resolve (a UNC path, a drive that is not there) counts as "may move" (`unsure`, which the dialog words as not sure).
-   *   stays            deleting it leaves its folder alone
-   *   may_move         the project is the app's folder itself: the host may move that folder
-   *   around_may_move  the project lies inside an app folder, whose own project is gone: the host may move the folder around it
-   *   unsure           an app folder's own project is gone and this project's path cannot be told from it (a UNC path, a drive that
-   *                    is not there, no answer in time): the give-back counts that as at the folder, so it may be
-   * "May" because the move also waits for the trash and for any other project at the folder. A host without this method answers
-   * "Unknown method", and the dialog goes by the mark.
+   * docs/protocol.md §3 "project folder on delete". `may_move`: the project is an app folder registered in place, which
+   * the host may move to `app-trash/`; `around_may_move`: it lies inside one whose own project is gone; `unsure`: it cannot
+   * be told from such a folder, and counts as at it. "May": the move also waits for the trash and any other project there.
    */
   'projects.deleteOutlook': z.object({ projectId: ProjectId }),
   /**
-   * Whether this project's code is allowed to run on this machine (M4 A-2, plan decision 3).
-   *
-   * The default is "no" — simply opening a repository someone handed over must not let the app
-   * server inside it run with the user's own permissions. Turning it off brings that project's
-   * apps down immediately.
+   * Whether the project's code may run here. "No" by default: opening a repository someone handed over must not run its
+   * app server with the user's permissions. Off takes its apps down at once.
    */
   'projects.setTrusted': z.object({ projectId: ProjectId, trusted: z.boolean() }),
-  /**
-   * Reorders the sidebar. **Receives the entire order as a whole** — exchanging it as
-   * "move this one there" would drift out of sync if the list changed in the meantime.
-   */
+  /** The whole order: "move this one there" would drift if the list changed meanwhile */
   'projects.reorder': z.object({ orderedIds: z.array(z.string()) }),
   /**
-   * Replace this project's saved shell commands (issue #44).
-   *
-   * The **whole list**, like `projects.reorder` above and for the same reason: it is a
-   * short list a person edits by hand, so "make it look like this" states every edit —
-   * adding, deleting and (one day) reordering all arrive through one door instead of three.
-   *
-   * Nothing on the way through inspects the commands. These are the user's own, the same
-   * as typing into the terminal below; the approval system is for what an *agent* wants to
-   * run, and asking permission for what the person just typed would teach them to wave the
-   * prompt through where it matters.
-   *
-   * Answers with the stored list rather than the project so that saving a command does not
-   * cost a `git status` — the caller already has everything else about the project.
+   * The whole list, as `projects.reorder`. Not inspected: they are the person's own, like typing into the terminal, and
+   * asking about them would teach waving prompts through. Answers the list, not the project, to spare a `git status`.
    */
   'projects.setCommands': z.object({ projectId: ProjectId, commands: z.array(SavedCommand) }),
-  /**
-   * Sets the project's worktree trunk (#76): where a new worktree forks from by default and what "merged" is measured
-   * against. Since the worktree manager was folded into ordinary sessions (#561 part 3), this is how the trunk is
-   * chosen; `ProjectInfo.worktreeManager.baseBranch` still carries it.
-   */
+  /** Where a new worktree forks from and what "merged" is measured against; `ProjectInfo.worktreeManager.baseBranch` carries it */
   'worktrees.setTrunk': z.object({ projectId: ProjectId, baseBranch: z.string() }),
-  /** Saves worktree provisioning settings (#69) — edited by the worktree section of the new-session window */
   'projects.setWorktreeSetup': z.object({
     projectId: ProjectId,
     setup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable(),
   }),
-  /**
-   * Saves the instructions for agents started in this project (#1161 item 2, `ProjectInfo.agentInstructions`). The
-   * whole text, as the project's settings show it; an empty text clears it. Bounded, as it travels in every task.
-   */
+  /** The whole text; empty clears it. Bounded, as it travels in every task */
   'projects.setAgentInstructions': z.object({
     projectId: ProjectId,
     text: z.string().max(AGENT_INSTRUCTIONS_MAX),
@@ -212,10 +136,10 @@ export const projectsParams = {
   'projects.list': z.object({}),
   'projects.gitStatus': z.object({ projectId: ProjectId }),
   /**
-   * The project's `origin` remote, as git has it (#1038): how a hub tells which project of a linked machine is a checkout
-   * of the same repository as one of its own (`gitRemoteKey`). Null when the folder is not a git repository or has no
-   * `origin`.
+   * How a hub tells which linked machine's project is a checkout of one of its own (`gitRemoteKey`). Null: not a git
+   * repository, or no `origin`.
    */
   'projects.origin': z.object({ projectId: ProjectId }),
+  /** For `@` autocomplete, within the project only */
   'files.search': z.object({ projectId: ProjectId, query: z.string(), limit: z.number().default(20) }),
 } as const

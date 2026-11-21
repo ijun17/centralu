@@ -10,20 +10,12 @@ import { Store } from '../dev-services/store.js'
 import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
- * The world shared by tests that attach apps to a session (A-5) — a real runtime, a real app
- * process (a fixture), and a real run record (`storeRunLedger`, the same seam the host's main
- * uses).
- *
- *   p1     a trusted project
- *   p2     an untrusted project
- *   user   the user folder (`<dataRoot>/apps`) — always trusted
- *
- * (A test-only file. Product code never imports it.)
- *
- * Planting app folders (`apps/external/test-helpers.ts`) is **handed in by the test.** This file
- * is not a `.test.ts`, so it is still bound by the layer rule (`host-core-blind-to-apps`) — rather
- * than loosening the rule so that a core-side file could import behind the runtime's door
- * (`runtime.ts`), the test file carries it in instead.
+ * The world shared by tests that attach apps to a session (A-5) — a real runtime, a real app process (a fixture), and a real
+ * run record (`storeRunLedger`, the same seam the host's main uses). p1: a trusted project; p2: an untrusted project; user: the
+ * user folder (`<dataRoot>/apps`), always trusted. Planting app folders (`apps/external/test-helpers.ts`) is **handed in by the
+ * test.** This file is not a `.test.ts`, so it is still bound by the layer rule (`host-core-blind-to-apps`) — rather than
+ * loosening the rule so that a core-side file could import behind the runtime's door (`runtime.ts`), the test file carries it
+ * in instead. Product code never imports this file.
  */
 
 /** The two hands of `apps/external/test-helpers.ts` — passed straight through by the test file */

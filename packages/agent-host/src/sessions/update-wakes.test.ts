@@ -89,7 +89,7 @@ function host(store: Store, folder: UpdateResumeFolder) {
   const adapter = new Adapter()
   const events: NormalizedEvent[] = []
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, dir('wakes-data-'), { updateResume: folder })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: dir('wakes-data-'), updateResume: folder })
   hosts.push(mgr)
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, events, session, rpc: createRpcHandler(mgr, adapters) }
@@ -142,7 +142,7 @@ function engine(n: number) {
   return { engine, meta, sent, steps, ids }
 }
 
-// Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264 review)
+// Two hosts over one store and several sessions each: every wait is on an event, and the limit is the work's, scaled for a loaded machine (#2264)
 describe('the sessions an update stopped wake a few at a time (#1913)', { timeout: 30_000 * SLOW }, () => {
   it(`never has more than ${UPDATE_WAKES_AT_ONCE} waiting for their first answer, cut turns first, and wakes every one in the end`, async () => {
     const { store, folder, ids, all } = await updated(2, 3)

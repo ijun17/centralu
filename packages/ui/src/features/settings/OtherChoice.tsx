@@ -3,13 +3,9 @@ import { isPlainEnter } from '../../app/keys.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 
 /**
- * The selects of the settings, in the two shapes they come in: `compact` (on the floor, a row's
- * quiet value: the idle-sleep time, a model) and `raised` (a value on its own line: a theme, a font).
- * `className` adds what is specific to one place, such as a width; it goes on the frame around the select.
- *
- * Drawn rather than left to the OS (owner, 2026-10-19): the native control's arrow and fill differ per engine and
- * read as a form dropped into the window. The select underneath is the same element (its props, its test id, its
- * list), so picking from it works as it always did; only its face and the chevron are ours.
+ * The settings' selects: `compact` (a row's quiet value: sleep time, a model) or `raised` (a value on its own line: a
+ * theme, a font); `className` goes on the frame (a width). Drawn, not the OS's: the native arrow and fill differ per
+ * engine and look dropped in. The select underneath is native (props, test id, list); only the face and chevron are ours.
  */
 const SELECT_TONE = {
   compact: 'bg-surface-floor',
@@ -43,12 +39,8 @@ export function OtherOption() {
 }
 
 /**
- * The state of a select with an "Other…" choice that opens a text field: whether the field is open
- * and what is typed in it.
- *
- * `asked` says the field was opened by choosing "Other…", as against starting open because the
- * current value is not listed. Only a field the person just asked for takes the keyboard: one that
- * is open from the start must not pull focus when the settings open.
+ * The state of a select whose "Other…" opens a text field. `asked`: opened by choosing "Other…", not open from the
+ * start for an unlisted value; only an asked field takes the keyboard, so opening Settings pulls no focus.
  */
 export function useOtherChoice(initial: { other: boolean; draft: string }) {
   const [other, setOther] = useState(initial.other)

@@ -53,10 +53,10 @@ export type HostCardsHost = {
 }
 
 /**
- * The cards the host raises in a session's approval slot (#428): an app's capability question (M4 D-4), a project
- * reaching another (#371), a start_agent request (#673), an update (#665), and the questions of a chain started from
- * the screen. They share the slot with the adapter's card and are answered here, never by the adapter. Moved out of
- * the session manager as it was; what it reaches of the manager is `HostCardsHost`.
+ * The cards the host raises in a session's approval slot (#428): an app's capability question (M4 D-4), a project reaching
+ * another (#371), a start_agent request (#673), an update (#665), and the questions of a chain started from the screen. They
+ * share the slot with the adapter's card and are answered here, never by the adapter. What it reaches of the manager is
+ * `HostCardsHost`.
  */
 export class HostCards {
   constructor(private readonly host: HostCardsHost) {}
@@ -127,8 +127,8 @@ export class HostCards {
     if (signal?.aborted) return Promise.resolve(null)
     if (!card.uncovered && this.isCovered(sessionId)) return Promise.resolve('allow')
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
-    // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694 review)
-    // `alwaysAsk`: a card auto does not answer either (#1038 review: start_agent on another computer)
+    // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694)
+    // `alwaysAsk`: a card auto does not answer either (#1038: start_agent on another computer)
     if (!card.alwaysAsk && this.host.autoBoundaryOpen(sessionId, card.log ?? `${detail.kind}${note}`)) return Promise.resolve('allow')
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
@@ -148,16 +148,14 @@ export class HostCards {
   }
 
   /**
-   * Closes a card the host raised, the one way every path does (#428): the person's answer, a withdrawal, an aborted
-   * call, and a handoff moving the card. A card standing in its session's slot leaves it, back into the rest it was
-   * raised from between turns (`restAfterCard`), and `emitted` is the decision its `approval_resolved` records. Every
-   * path used to write this itself, and an aborted call skipped the rest, so a session stopped while a card raised
-   * between turns stood was left `waiting_approval` with no card, which no turn would ever end.
-   *
-   * `answer` is what the caller waiting on the card hears. `{ moveTo }` instead keeps the card waiting and stands it in
-   * that session as a card raised between turns (a handoff, #693): moved before the original's slot empties, so closing
-   * it there raises the next card waiting there, never this one again. A withdrawal closes only a card that stands; the
-   * person's answer is recorded either way, as their answer has always been.
+   * Closes a card the host raised, the one way every path does (#428): the person's answer, a withdrawal, an aborted call, and
+   * a handoff moving the card. A card standing in its session's slot leaves it, back into the rest it was raised from between
+   * turns (`restAfterCard`), and `emitted` is the decision its `approval_resolved` records. One path for all of them: an
+   * aborted call that skipped the rest left a session stopped while a card raised between turns stood `waiting_approval` with
+   * no card, which no turn would ever end. `answer` is what the caller waiting on the card hears. `{ moveTo }` instead keeps
+   * the card waiting and stands it in that session as a card raised between turns (a handoff, #693): moved before the
+   * original's slot empties, so closing it there raises the next card waiting there, never this one again. A withdrawal closes
+   * only a card that stands; the person's answer is recorded either way.
    */
   closeAsk(ask: HostAsk, emitted: ApprovalDecision, answer: HostAskAnswer | { moveTo: string }): void {
     const moveTo = answer !== null && typeof answer === 'object' ? answer.moveTo : null
@@ -178,19 +176,13 @@ export class HostCards {
   }
 
   /**
-   * Raises a capability question in front of the person (M4 D-4) — **at wherever the chain started.**
-   *
-   *   Started from a session   That session's approval card. The person is looking at that session's
-   *                            agent having called the app (or the inbox calls it out), and while the
-   *                            answer is awaited that session sits in waiting-for-approval — riding the
-   *                            same traffic light, inbox and notification as an adapter's own card.
-   *   Started from a screen    That app's question over its pinned view (`apps.questions`) and a badge
-   *                            on the app's sidebar row. A screen is the app's own code and has no
-   *                            session — the screen the person clicked is where the answer belongs.
-   *
-   * If the session has disappeared (deleted), this falls back to a screen question, standing in the
-   * requesting app's own slot instead. If the signal fires (timed out, canceled), the card or question
-   * is torn down and this ends with null.
+   * Raises a capability question in front of the person (M4 D-4) **at wherever the chain started.** From a session: that
+   * session's approval card, as the person is looking at that session's agent having called the app (or the inbox calls it
+   * out), and while the answer is awaited the session sits in waiting-for-approval, riding the same traffic light, inbox and
+   * notification as an adapter's own card. From a screen: that app's question over its pinned view (`apps.questions`) and a
+   * badge on the app's sidebar row, as a screen is the app's own code and has no session, and the screen the person clicked is
+   * where the answer belongs. If the session has disappeared (deleted), this falls back to a screen question in the requesting
+   * app's own slot. If the signal fires (timed out, canceled), the card or question is torn down and this ends with null.
    */
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
     return new Promise((resolve) => {

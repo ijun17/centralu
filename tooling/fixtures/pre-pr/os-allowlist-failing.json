@@ -1,0 +1,520 @@
+{
+  "numTotalTestSuites": 8,
+  "numPassedTestSuites": 6,
+  "numFailedTestSuites": 2,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 45,
+  "numPassedTests": 14,
+  "numFailedTests": 2,
+  "numPendingTests": 29,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1795228400546,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer refuses each OS module, bare or node:, however it is imported",
+          "status": "skipped",
+          "title": "refuses each OS module, bare or node:, however it is imported",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer refuses it in tests and in every checked package, not only the host",
+          "status": "skipped",
+          "title": "refuses it in tests and in every checked package, not only the host",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer refuses sockets, servers, workers and the installed modules that reach the OS: the terminal, SQLite, WebSockets",
+          "status": "skipped",
+          "title": "refuses sockets, servers, workers and the installed modules that reach the OS: the terminal, SQLite, WebSockets",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer lets through what runs nothing or reads paths the same way on every OS",
+          "status": "skipped",
+          "title": "lets through what runs nothing or reads paths the same way on every OS",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer refuses the OS reached without importing an OS module: process's, and node:url's path conversions",
+          "status": "skipped",
+          "title": "refuses the OS reached without importing an OS module: process's, and node:url's path conversions",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer lets the layer, its tests and the listed files touch it",
+          "status": "skipped",
+          "title": "lets the layer, its tests and the listed files touch it",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer lets a layer module's test in by its exact name only, not a name that starts like it",
+          "status": "skipped",
+          "title": "lets a layer module's test in by its exact name only, not a name that starts like it",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer does not check build scripts, tooling or e2e, which work on the repository",
+          "status": "skipped",
+          "title": "does not check build scripts, tooling or e2e, which work on the repository",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "touching the OS outside the OS layer"
+          ],
+          "fullName": "touching the OS outside the OS layer names only layer modules that exist",
+          "status": "skipped",
+          "title": "names only layer modules that exist",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist is sorted, one path per line, none in the layer and all in the checked code",
+          "status": "passed",
+          "title": "is sorted, one path per line, none in the layer and all in the checked code",
+          "duration": 2.256800000000112,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist says no more than is true: every listed file exists and still touches the OS, and every such file is listed",
+          "status": "failed",
+          "title": "says no more than is true: every listed file exists and still touches the OS, and every such file is listed",
+          "duration": 12363.294699999999,
+          "failureMessages": [
+            "AssertionError: tooling/os-allowlist.txt is not what `tsx tooling/os-tests.ts --offenders` prints. Listed, but gone or no longer touching the OS: packages/protocol/src/index.ts. Touching the OS, not listed: none: expected { …(2) } to deeply equal { extra: [], missing: [] }\n    at <root>\\tooling\\os-layer.test.ts:168:9\n    at <root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+          ],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist lists nothing main's list does not: no new line but a file git sees renamed",
+          "status": "failed",
+          "title": "lists nothing main's list does not: no new line but a file git sees renamed",
+          "duration": 106.45199999999932,
+          "failureMessages": [
+            "AssertionError: tooling/os-allowlist.txt lists more than main's (packages/protocol/src/index.ts): put the new code behind the OS layer instead (docs/plans/os-layer.md): expected [ 'packages/protocol/src/index.ts' ] to deeply equal []\n    at <root>\\tooling\\os-layer.test.ts:194:162\n    at <root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<root>/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist holds the repository's apps to their own door for starting programs, and nothing else of theirs",
+          "status": "passed",
+          "title": "holds the repository's apps to their own door for starting programs, and nothing else of theirs",
+          "duration": 682.0455999999995,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist reads the board app's time only through its clock (clock.mjs)",
+          "status": "passed",
+          "title": "reads the board app's time only through its clock (clock.mjs)",
+          "duration": 12.254799999998795,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist cannot grow: a new line is refused, a renamed file keeps its line, and only that file",
+          "status": "passed",
+          "title": "cannot grow: a new line is refused, a renamed file keeps its line, and only that file",
+          "duration": 0.20060000000012224,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file takes the pieces, in the list and in tightening",
+          "status": "passed",
+          "title": "takes the pieces, in the list and in tightening",
+          "duration": 0.5791999999983091,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file refuses a brand-new file of another name, a name that only begins like the stem, and one in another folder",
+          "status": "passed",
+          "title": "refuses a brand-new file of another name, a name that only begins like the stem, and one in another folder",
+          "duration": 0.2782000000006519,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file (A) hands nothing to a file that was there before, such as shipped code with the same stem",
+          "status": "passed",
+          "title": "(A) hands nothing to a file that was there before, such as shipped code with the same stem",
+          "duration": 0.19750000000021828,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file (B) does not let the allowance grow with the number of pieces, and caps them",
+          "status": "passed",
+          "title": "(B) does not let the allowance grow with the number of pieces, and caps them",
+          "duration": 0.2963999999992666,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file hands nothing to a file that existed at the base and not on the list, though it reaches the OS now",
+          "status": "passed",
+          "title": "hands nothing to a file that existed at the base and not on the list, though it reaches the OS now",
+          "duration": 0.22040000000015425,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file caps the pieces at five, though six small ones are within the line budget",
+          "status": "passed",
+          "title": "caps the pieces at five, though six small ones are within the line budget",
+          "duration": 0.20759999999972933,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist",
+            "hands the line of a removed file to the pieces it was split into, and to no other new file"
+          ],
+          "fullName": "the allowlist hands the line of a removed file to the pieces it was split into, and to no other new file (C) hands a test no line for shipped code, nor the other way round",
+          "status": "passed",
+          "title": "(C) hands a test no line for shipped code, nor the other way round",
+          "duration": 0.15729999999894062,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist is tightened from the code (pnpm os:tighten): lines no longer needed go, comments stay, nothing is added",
+          "status": "passed",
+          "title": "is tightened from the code (pnpm os:tighten): lines no longer needed go, comments stay, nothing is added",
+          "duration": 0.18739999999888823,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist is tightened along renames: a renamed file keeps its line under its new path, sorted, and lends it to no other",
+          "status": "passed",
+          "title": "is tightened along renames: a renamed file keeps its line under its new path, sorted, and lends it to no other",
+          "duration": 0.11160000000018044,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the allowlist"
+          ],
+          "fullName": "the allowlist is a mechanical file for the merge queue, regenerated by os:tighten and checked by this test",
+          "status": "passed",
+          "title": "is a mechanical file for the merge queue, regenerated by os:tighten and checked by this test",
+          "duration": 1.278200000000652,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS picks a test that imports the layer, directly or through other modules",
+          "status": "skipped",
+          "title": "picks a test that imports the layer, directly or through other modules",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS picks a test that imports a listed file, or is one",
+          "status": "skipped",
+          "title": "picks a test that imports a listed file, or is one",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS leaves a pure ui or core test to Linux, and a tooling test that only reads the repository",
+          "status": "skipped",
+          "title": "leaves a pure ui or core test to Linux, and a tooling test that only reads the repository",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS picks a test that asks which OS this is, and one that touches the OS through a test helper",
+          "status": "skipped",
+          "title": "picks a test that asks which OS this is, and one that touches the OS through a test helper",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS follows every way a test loads a module, as the lint rule reads it, and vitest loading the real one",
+          "status": "skipped",
+          "title": "follows every way a test loads a module, as the lint rule reads it, and vitest loading the real one",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS picks a test that reaches the OS through process, or converts a path with node:url",
+          "status": "skipped",
+          "title": "picks a test that reaches the OS through process, or converts a path with node:url",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS counts the repository's own apps, which run on the person's machine, but not tooling helpers",
+          "status": "skipped",
+          "title": "counts the repository's own apps, which run on the person's machine, but not tooling helpers",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS adds to the macOS job's full run the tests that make folders in the OS temp folder, and only those",
+          "status": "skipped",
+          "title": "adds to the macOS job's full run the tests that make folders in the OS temp folder, and only those",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS refuses to guess past an import it cannot follow",
+          "status": "skipped",
+          "title": "refuses to guess past an import it cannot follow",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the tests that run on every OS"
+          ],
+          "fullName": "the tests that run on every OS on the repository: every layer test and every listed test runs, no ui or core test does, and a listed run runs exactly the list",
+          "status": "skipped",
+          "title": "on the repository: every layer test and every listed test runs, no ui or core test does, and a listed run runs exactly the list",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "a listed run (vitest.config.ts `CC_TEST_FILES`)"
+          ],
+          "fullName": "a listed run (vitest.config.ts `CC_TEST_FILES`) refuses a line that is not an existing repository path, rather than run less without a word",
+          "status": "skipped",
+          "title": "refuses a line that is not an existing repository path, rather than run less without a word",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "a listed run (vitest.config.ts `CC_TEST_FILES`)"
+          ],
+          "fullName": "a listed run (vitest.config.ts `CC_TEST_FILES`) does not pass its list on: a listed test that starts a vitest of its own runs that vitest's files",
+          "status": "skipped",
+          "title": "does not pass its list on: a listed test that starts a vitest of its own runs that vitest's files",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time puts every test in exactly one shard, the longest apart, and the same split on every shard",
+          "status": "skipped",
+          "title": "puts every test in exactly one shard, the longest apart, and the same split on every shard",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time weighs a file with no measured time as the median one, at least a second",
+          "status": "skipped",
+          "title": "weighs a file with no measured time as the median one, at least a second",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time reads each file's time from vitest JSON reports, wherever the runner checked the repository out",
+          "status": "skipped",
+          "title": "reads each file's time from vitest JSON reports, wherever the runner checked the repository out",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time",
+            "--refresh-durations, on a durations file and reports in a folder"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time --refresh-durations, on a durations file and reports in a folder writes the run over the file for the tests that exist, and keeps or drops the rest (#1983)",
+          "status": "skipped",
+          "title": "writes the run over the file for the tests that exist, and keeps or drops the rest (#1983)",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time",
+            "--refresh-durations, on a durations file and reports in a folder"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time --refresh-durations, on a durations file and reports in a folder leaves the file alone when only the date would change, and says so",
+          "status": "skipped",
+          "title": "leaves the file alone when only the date would change, and says so",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time",
+            "--refresh-durations, on a durations file and reports in a folder"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time --refresh-durations, on a durations file and reports in a folder refuses reports that time fewer than half of the selected tests, and writes nothing",
+          "status": "skipped",
+          "title": "refuses reports that time fewer than half of the selected tests, and writes nothing",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time refreshes from a run that predates a split and a delete: the files on this checkout, never the ones the run knew",
+          "status": "skipped",
+          "title": "refreshes from a run that predates a split and a delete: the files on this checkout, never the ones the run knew",
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "the Windows shards, split by each file's measured time"
+          ],
+          "fullName": "the Windows shards, split by each file's measured time keeps tooling/test-durations.json as --refresh-durations writes it, with a time for most tests Windows runs",
+          "status": "skipped",
+          "title": "keeps tooling/test-durations.json as --refresh-durations writes it, with a time for most tests Windows runs",
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1795228402227,
+      "endTime": 1795228415397.2783,
+      "status": "failed",
+      "message": "",
+      "name": "<root>/tooling/os-layer.test.ts"
+    }
+  ]
+}

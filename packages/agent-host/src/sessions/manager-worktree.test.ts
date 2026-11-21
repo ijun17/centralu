@@ -25,6 +25,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import type { NormalizedEvent, SessionInfo, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
@@ -83,7 +84,7 @@ describe('worktree sessions', () => {
     cpSync(template, repo, { recursive: true })
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-    wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)
+    wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
     // Default to "unknown" — calling the real gh would make the test depend on whether gh is installed on
     // this machine (#76 stage 3).
     wtMgr.prLookup = async () => null
@@ -136,7 +137,7 @@ describe('worktree sessions', () => {
 
     // Simulates a host restart — calling resume on an already-live session does nothing.
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     // Not the real gh, like every other manager here (#368; why: 'remembers the worktree even after the host restarts')
     restarted.prLookup = async () => null
     const restartedRpc = createRpcHandler(restarted, adapters)
@@ -159,7 +160,7 @@ describe('worktree sessions', () => {
   it("the wake-up catch-up also reads from the worktree's history", async () => {
     const a = new CwdFiledAdapter()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
-    const first = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const first = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     first.prLookup = async () => null
     const s = (await createRpcHandler(first, adapters)('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -167,7 +168,7 @@ describe('worktree sessions', () => {
     await first.tenure.disposeAll()
 
     a.toolHistory = [{ role: 'user', text: 'something said in the worktree terminal' }]
-    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     restarted.prLookup = async () => null
     await restarted.processes.resumeSession(s.id)
 
@@ -180,7 +181,7 @@ describe('worktree sessions', () => {
     const s = await create(true)
     const path = s.worktree!.path
 
-    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, { worktreeRoot: wtRoot })
     /*
      * Not the real gh (#368). A manager that comes up with a worktree session checks for its merge at once and does
      * not wait for it (#69), and that check ends in `gh pr view` in the repository. On windows-2022 that gh took 10 s,
@@ -225,7 +226,7 @@ describe('worktree sessions', () => {
     adapter.failCreate = 'claude is not installed'
     const named = { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-login' }
     await expect(wtRpc('agents.createSession', named)).rejects.toThrow(/not installed/)
-    // The unnamed path used to pile up a centralu/… branch for every failure.
+    // The unnamed path must not pile up a centralu/… branch for every failure.
     await expect(create(true)).rejects.toThrow(/not installed/)
     expect(branches()).toEqual(['main'])
 
@@ -235,8 +236,9 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * #774: a step after `git worktree add` that throws, before any session owns the worktree. It used to leave the folder
-   * and its branch with nothing pointing at them, since the cleanup below only began around the adapter's start.
+   * #774: a step after `git worktree add` that throws, before any session owns the worktree. It must not leave the folder and
+   * its branch with nothing pointing at them: the cleanup around the adapter's start does not cover this step, and this pins
+   * the one that does.
    */
   it('leaves no worktree or branch behind when its setup throws after the checkout (#774)', async () => {
     const branches = () =>
@@ -346,8 +348,8 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * #561 part 3: the worktree manager was folded into ordinary sessions. A worktree session the person makes stands on
-   * its own; it used to hang under a manager made for it (#69). Only one start_agent started hangs under a session.
+   * #561 part 3: the worktree manager was folded into ordinary sessions. A worktree session the person makes stands on its own;
+   * it does not hang under a manager made for it (#69). Only one start_agent started hangs under a session.
    */
   it('a worktree session the person makes stands on its own: no manager is made for it', async () => {
     const isolated = await create(true)
@@ -474,6 +476,54 @@ describe('worktree sessions', () => {
       expect(existsSync(old.worktree!.path)).toBe(false)
     })
 
+    it("takes over an archived session's worktree made under another root, by the path the session recorded", async () => {
+      const old = await archived('pr/moved-root')
+      await wtMgr.tenure.disposeAll()
+      const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+      const next = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: join(root, 'data', 'worktrees') })
+      next.prLookup = async () => null
+      try {
+        const s = (await createRpcHandler(next, adapters)('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'pr/moved-root' })) as SessionInfo
+        expect(s.worktree!.path.startsWith(join(root, 'data', 'worktrees'))).toBe(true)
+        expect(existsSync(old.worktree!.path)).toBe(false)
+      } finally {
+        await next.tenure.disposeAll()
+      }
+    })
+
+    it("keeps an archived session's worktree that another session still works in", async () => {
+      const s = await start('pr/occupied')
+      commit(s.worktree!.path, 'occupied.txt')
+      git(s.worktree!.path, 'push', '-q', 'origin', 'pr/occupied')
+      const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
+      wtMgr.rename(helper.id, 'helper')
+      await wtRpc('agents.deleteSession', { sessionId: s.id })
+
+      await expect(start('pr/occupied')).rejects.toThrow(/"helper" working in it/)
+      expect(existsSync(s.worktree!.path)).toBe(true)
+    })
+
+    it("never takes a worktree named as an archived session that is not the one it recorded", async () => {
+      const old = await archived('pr/recorded')
+      const namesake = join(root, 'elsewhere', old.id)
+      git(repo, 'worktree', 'add', '-q', '-b', 'pr/namesake', namesake)
+
+      await expect(start('pr/namesake')).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(namesake)).toBe(true)
+    })
+
+    it("never takes another project's archived worktree, though both are of one repository", async () => {
+      const old = await archived('pr/other-project')
+      mkdirSync(join(repo, 'sub'))
+      const sub = (await wtRpc('projects.add', { path: join(repo, 'sub') })) as { id: string }
+      await wtRpc('projects.setTrusted', { projectId: sub.id, trusted: true })
+
+      await expect(
+        wtRpc('agents.createSession', { projectId: sub.id, cwd: join(repo, 'sub'), tool: 'claude', worktree: true, worktreeBranch: 'pr/other-project' }),
+      ).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(old.worktree!.path)).toBe(true)
+    })
+
     it("keeps an archived session's worktree with uncommitted changes, and says whose it is", async () => {
       const old = await archived('pr/dirty')
       writeFileSync(join(old.worktree!.path, 'a.txt'), 'not committed\n')
@@ -530,7 +580,7 @@ describe('worktree sessions', () => {
     it("never takes a worktree a session not archived works in", async () => {
       const live = await start('pr/live')
 
-      await expect(start('pr/live')).rejects.toThrow(new RegExp(`the worktree of the session "${live.name}"`))
+      await expect(start('pr/live')).rejects.toThrow(new RegExp(`a folder named for the session "${live.name}", which is not archived`))
       expect(existsSync(join(live.worktree!.path, 'a.txt'))).toBe(true)
     })
   })
@@ -1124,7 +1174,7 @@ describe('worktree sessions', () => {
       const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
       wtMgr.rename(helper.id, 'helper')
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         expect(next.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
         const r = await next.runCentraluTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })
@@ -1213,7 +1263,7 @@ describe('worktree sessions', () => {
         await gate
         return repair(...args)
       })
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       spy.mockRestore()
       try {
         const restoring = next.trash.restoreSession(s.id)
@@ -1238,7 +1288,7 @@ describe('worktree sessions', () => {
       renameSync(worktreeRecoveryDir(gone.s.id), `${worktreeRecoveryDir(gone.s.id)}.purging-2`)
       await store.trash.purgeSession(gone.s.id)
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         await vi.waitFor(() => expect(existsSync(`${worktreeRecoveryDir(gone.s.id)}.purging-2`)).toBe(false))
         await vi.waitFor(() => expect(existsSync(saved(kept.s).dir)).toBe(true))
@@ -1271,7 +1321,7 @@ describe('worktree sessions', () => {
       expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         await vi.waitFor(() => expect(existsSync(saved(s).dir)).toBe(true))
         const back = await next.trash.restoreSession(s.id)
@@ -1511,9 +1561,8 @@ describe('worktree sessions', () => {
   })
 
   /*
-   * What holding the trunk actually means (#76). Merge judgment must not waver even after the
-   * person switches the root to a different branch — the baseline used to be whatever HEAD
-   * happened to be, and its meaning quietly shifted.
+   * What holding the trunk actually means (#76). Merge judgment must not waver even after the person switches the root to a
+   * different branch — the baseline is not whatever HEAD happens to be, as its meaning would quietly shift.
    */
   it('a merge is still detected even when the root sits on another branch, as long as the trunk is fixed (#76)', async () => {
     await wtMgr.projectRegistry.setWorktreeTrunk(project.id, 'main')
@@ -1590,6 +1639,71 @@ describe('worktree sessions', () => {
     await wtRpc('agents.deleteSession', { sessionId: s.id })
 
     expect(existsSync(path)).toBe(true)
+  })
+
+  it('a manager given no worktree root makes its worktrees in the data folder, not the home folder (#2344)', async () => {
+    const data = join(root, 'data')
+    vi.stubEnv('CC_DATA_DIR', data)
+    // A stand-in home folder: where the worktree would land without the data folder's root, never the person's
+    const home = join(root, 'home')
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+    const mgr = new SessionManager(store, adapters, () => {})
+    mgr.prLookup = async () => null
+    const s = (await createRpcHandler(mgr, adapters)('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true })) as SessionInfo
+
+    expect(s.worktree?.path).toBe(join(data, 'worktrees', project.id, s.id))
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it('a start removes the session folders a worktree removal left part way, and keeps every other (#2344)', async () => {
+    const live = await create(true)
+    const archived = await create(true)
+    await wtRpc('agents.deleteSession', { sessionId: archived.id })
+    const dir = join(wtRoot, project.id)
+    // What git's own delete left on Windows: no `.git`, no longer listed, with paths past 260 characters
+    const partWay = join(dir, randomUUID())
+    let deep = join(partWay, 'node_modules')
+    for (let i = 0; i < 12; i++) deep = join(deep, `.pnpm-store-package-${i}`)
+    mkdirSync(deep, { recursive: true })
+    writeFileSync(join(deep, 'index.js'), '')
+    expect(join(deep, 'index.js').length).toBeGreaterThan(260)
+    // No session owns it, and git still lists it: a purge without "remove worktree" kept it
+    const listed = join(dir, randomUUID())
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-at-purge', listed], { cwd: repo })
+    // The same, with its `.git` gone and a file git ignores: still listed, so still kept
+    const listedNoGit = join(dir, randomUUID())
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'kept-listed', listedNoGit], { cwd: repo })
+    writeFileSync(join(listedNoGit, 'local.env'), 'what git ignores\n')
+    rmSync(join(listedNoGit, '.git'))
+    // Not a session's folder at all
+    const other = join(dir, 'not-a-session')
+    mkdirSync(other)
+    // Part-way folders a session of another id still owns: its working folder is inside one, its worktree is the other
+    const workedIn = join(dir, randomUUID())
+    mkdirSync(join(workedIn, 'sub'), { recursive: true })
+    const plain = await create(false)
+    store.sessions.setSessionCwd(plain.id, join(workedIn, 'sub'))
+    const movedInto = join(dir, randomUUID())
+    mkdirSync(movedInto)
+    const holder = await create(false)
+    store.sessions.upsertSession({ ...holder, worktree: { path: movedInto, branch: 'held' } })
+    // Unlisted, but with a `.git` of its own: not what a removal leaves
+    const ownGit = join(dir, randomUUID())
+    mkdirSync(ownGit)
+    writeFileSync(join(ownGit, '.git'), 'gitdir: elsewhere\n')
+    // A folder of a project this host does not know
+    const unknownProject = join(wtRoot, randomUUID(), randomUUID())
+    mkdirSync(unknownProject, { recursive: true })
+
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, { worktreeRoot: wtRoot })
+    restarted.prLookup = async () => null
+    await restarted.worktreeSweep
+
+    expect(existsSync(partWay)).toBe(false)
+    const kept = [live.worktree!.path, archived.worktree!.path, listed, listedNoGit, other, workedIn, movedInto, ownGit, unknownProject]
+    expect(kept.filter((p) => !existsSync(p))).toEqual([])
   })
 
   /*

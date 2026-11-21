@@ -7,18 +7,8 @@ import { Button } from '../../../components/Button.jsx'
 import { Segmented } from '../../../components/Segmented.jsx'
 
 /**
- * The handoff confirmation dialog (a dogfooding request).
- *
- * States the whole sequence in sentences — because this one button bundles three steps together:
- * "ask for a note → new session → (by default) archive." Archiving can be undone (Settings → Archive
- * restores it), so the dialog and its button use the ordinary palette (#1477): the delete palette is for a
- * step that cannot be undone, and only the sentence about deleting it for good there is marked. Typing the name
- * is not required: if the last step fails, nothing is lost, there are just two sessions left over,
- * and if it succeeds, the only thing lost is exactly what the person just read and approved.
- *
- * The receiving agent can be chosen (a dogfooding request) — the note is plain text, so it does
- * not lock in a tool. It defaults to the current tool. Archiving is also a checkbox, on by default
- * (#1477): turning it off turns this from switching tools into branching.
+ * The handoff dialog: one button for note → new session → archive, said in sentences. Archiving can be undone, so the
+ * ordinary palette (#1477), and no typing of the name. The note is plain text, so any tool can receive it.
  */
 export function ConfirmHandoff({
   name,
@@ -32,35 +22,22 @@ export function ConfirmHandoff({
 }: {
   name: string
   tool: ToolName
-  /** A session unable to respond due to an error or a rate limit (#78) — the receiving tool defaults to the other one */
+  /** It cannot respond (an error or a rate limit, #78): the receiving tool defaults to the other one */
   dead: boolean
-  /** A card currently up (#174) — while one is up, the agent cannot be asked. The record mode does not ask, so it goes through as is */
+  /** A card is up (#174), so the agent cannot be asked; the record mode does not ask */
   blocked: 'question' | 'approval' | null
-  /** How many background tasks of this session run now (#290, ambient ones left out): a kept original is woken by each one's end (#1477) */
+  /** Background tasks running now (#290, ambient left out): each one's end wakes a kept original (#1477) */
   backgroundTasks: number
-  /** A turn is running now: the note is built from what is stored so far, and archiving ends the turn (#1477) */
+  /** A turn runs: the note holds what is stored so far, and archiving ends the turn (#1477) */
   working: boolean
   onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
   /*
-   * The note comes from the record by default, for every session (owner decision on #694): the
-   * session being replaced is the one least likely to summarize correctly, and a note it writes can
-   * carry its drift or injected text. Asking the agent stays one click away.
-   *
-   * Archiving defaults to **on**, for both note sources (#1477, owner direction). It was off since #694
-   * (#78's pairing: keep the original until the successor is known to work), but a kept original is not
-   * idle: its process keeps running, and when one of its background tasks ends it wakes for a turn that rewrites
-   * its whole context (after an hour idle the cache has expired), its apps stay attached to it
-   * (#1638), and two sessions claim one piece of work. Archiving is not deleting: the original stays in the
-   * archive and can be restored, so the safety the old default gave is still there. The box stays, so
-   * branching (keeping both) is one click, and when it is off and the original has background work running
-   * the dialog says what that costs.
-   *
-   * For a dead session (#78) the target defaults to **the other tool**: if the service is down and
-   * that is why the handoff is happening, defaulting to the same tool is a one-click trap. Only the
-   * initial values are set — changing one radio afterward never silently changes another selection
-   * (no silent actions).
+   * Defaults. The note from the record (#694): the replaced session is least likely to summarize well, and its note can
+   * carry drift or injected text. Archive on (#1477): a kept original still runs, a background task's end wakes it for a
+   * turn that rewrites its expired cache, its apps stay attached (#1638), and two sessions claim one piece of work. A
+   * dead session hands to the other tool (#78). Only initial values: one choice never silently changes another.
    */
   const tools = useTools()
   const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
@@ -74,7 +51,7 @@ export function ConfirmHandoff({
         <p className="text-md text-ink">Hand off to a fresh session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
 
-        {/* Where the note comes from — the app builds it from the transcript by default (#694), or the session writes it itself */}
+        {/* Where the note comes from (#694) */}
         <Badge as="p" className="mt-3">
           Handoff note
         </Badge>
@@ -101,7 +78,7 @@ export function ConfirmHandoff({
           </p>
         )}
 
-        {/* The receiving agent — choosing a different tool does not carry over tool-specific settings like model or reasoning effort */}
+        {/* Another tool does not inherit tool-specific settings (model, reasoning effort) */}
         <Badge as="p" className="mt-3">
           Hand off to
         </Badge>
@@ -173,10 +150,7 @@ export function ConfirmHandoff({
   )
 }
 
-/**
- * What the dialog says when the original is kept (the box is off). Background work still running in it is the cost worth
- * naming (#1477): the end of each task wakes the session for a turn nobody asked for.
- */
+/** The note when the original is kept; its running background work is the cost named (#1477) */
 export function KeepNote({ backgroundTasks }: { backgroundTasks: number }) {
   return (
     <div className="mt-3 text-xs leading-body text-ink-muted" data-testid="handoff-keep-note">

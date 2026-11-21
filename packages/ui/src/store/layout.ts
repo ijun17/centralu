@@ -7,56 +7,29 @@ import { gridAppViewKey } from './appKeys.js'
 import { omitKey } from './patch.js'
 import { machineNameOf } from './names.js'
 
-/**
- * How the window is arranged: the evidence panel and the lane widths, the wide surface over the
- * conversation, the layers and dialogs opened over the screen, the sidebar's folds and the project
- * screens' arrangements, the grid's panels, a conversation's scroll position, and the window's focus.
- */
-
-/**
- * One higher than the last one opened. Coming from outside git resets it to 1 — panels opened
- * in between are appended fresh.
- */
+// Coming from outside git resets it to 1
 const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
 
-/** Limits on the evidence panel's width. Too narrow kills the path; too wide kills the conversation */
 export const PANEL_MIN = 260
 export const PANEL_MAX = 900
 export const PANEL_DEFAULT = 340
-
-/** Width of the session list (observation lane) */
-/** The height "history" takes up in the git tab. "Changes" gets the rest */
 
 export const SIDEBAR_MIN = 180
 export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
 
-/**
- * The minimum width the conversation lane must keep.
- *
- * Without this, stretching both side panels squeezes the center down to zero and beyond, pushing
- * the whole layout past the window edge so the entire screen scrolls horizontally (this actually
- * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
- * creating feedback where dragging it makes it grow larger still.
- */
+// Without it, two wide side lanes push the layout past the window edge, and a drag handle then grows as it is dragged
 const CENTER_MIN = 360
 
 /**
- * The width the conversation lane keeps when the window is narrower than the two side lanes' widths allow (#1561): the
- * lanes give way before it does (the sidebar down to SIDEBAR_MIN, the evidence panel to nothing). Real pixels, like the
- * lanes' own minimums. Lower than CENTER_MIN, which is how much a drag leaves it while there is room to leave.
+ * What the conversation keeps in a window too narrow for the side lanes (#1561), which give way first. Real pixels.
+ * Lower than CENTER_MIN, which is what a drag leaves while there is room.
  */
 export const CENTER_FLOOR = 300
 
 /**
- * Clamps to the width that can actually fit inside the window.
- *
- * Why `zoom` is needed (for overall text size): the layout width is in zoom coordinates, while
- * `window.innerWidth` is in **real pixels**. Without dividing by it, the available width gets
- * inflated at higher zoom and the layout is pushed past the window edge. The minimum width, on
- * the other hand, is **pinned to real pixels** — if it were allowed to grow with the zoom level up
- * to the point where the panel could be narrowed, raising the zoom in a narrow window would let
- * the panel eat the whole screen (per a dogfooding request: the minimum width stays fixed).
+ * The layout is in zoom coordinates and `innerWidth` in real pixels, so the room is divided by `zoom`; the minimum
+ * stays in real pixels, or zooming a narrow window lets the panel eat the screen.
  */
 function fitWidth(px: number, minReal: number, max: number, otherLane: number, zoom = 1): number {
   const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom
@@ -64,10 +37,9 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
   return Math.min(max, Math.max(Math.round(minReal / zoom), Math.round(Math.min(px, available))))
 }
 
-/** The newest save of the folded groups (#666): an older one that fails must not undo what a later one is saving */
+// The newest save of the folded groups (#666): an older one that fails must not undo a later one
 let foldSaveSeq = 0
 
-/** The store's actions for how the window is arranged */
 type LayoutActions = Pick<
   AppState,
   | 'setBuilderPane'
@@ -115,24 +87,12 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   },
 
   setAppFocused(focused) {
-    /*
-     * **Only the false→true edge.** `onVisibility` fires once at mount while `appFocused`
-     * is already true and `attach` has just fetched every project — refreshing on every
-     * call would repeat that fetch for no new information. Focus and visibilitychange also
-     * both fire for a single alt-tab; the debounce would collapse those anyway, but there
-     * is no reason to arm two timers to learn one thing.
-     */
+    // Only the false→true edge: `onVisibility` fires at mount, and focus and visibilitychange both fire for one alt-tab
     const returning = focused && !get().appFocused
     set({ appFocused: focused })
-    /*
-     * Coming back to the window is the only signal we get for work done **outside** the app
-     * (issue #41): a commit typed in a terminal, a rebase, a `git clean`. Nothing in here
-     * watched it happen, so no project is more suspect than another and all of them are
-     * re-measured — refreshing only the focused one would leave every other sidebar row
-     * exactly as stale as before, which is the bug.
-     */
+    // The only signal of work done outside the app (#41), on any project, so every one is measured again
     if (returning) for (const id of Object.keys(get().projects)) get().refreshProjectGit(id)
-    // The same signal for an agent CLI updated in a terminal (#297): the host reads the installed versions again
+    // Or an agent CLI updated in a terminal (#297)
     if (returning) void get().checkAgentVersions(false)
   },
 
@@ -141,7 +101,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     const drop = new Set(sessionIds)
     set((s) => {
       const kept = s.notices.filter((n) => !drop.has(n.sessionId))
-      // Leave it as is when nothing changed — putting in a new array reruns any effect watching this
+      // A new array would rerun every effect watching it
       return kept.length === s.notices.length ? {} : { notices: kept }
     })
   },
@@ -169,7 +129,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   },
 
   setPanelSplit(share) {
-    // If one group drops below 15%, only the tab strip remains and it reads as "gone" — a floor is set
+    // Below 15% only the tab strip remains, which reads as gone
     const clamped = Math.min(0.85, Math.max(0.15, share))
     if (clamped === get().panelSplit) return
     set({ panelSplit: clamped })
@@ -178,7 +138,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
 
   setSidebarWidth(px) {
     const s = get()
-    // If the panel is collapsed, it only occupies a 32px strip
+    // A collapsed panel is a 32px strip
     const panel = s.panelOpen ? s.panelWidth : 32
     set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, s.prefs.textSize) })
     get().saveWorkspace()
@@ -188,11 +148,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     set({ viewerPath: path, viewerProjectId: projectId ?? null, viewerSessionId: sessionId ?? null, overlay: { kind: 'viewer' } })
   },
 
-  /*
-   * Opens Finder from a right-click. The path arrives with the same credentials as a file link
-   * (relative to the currently viewed session's project), and goes through the same port as the file
-   * tree's reveal — a failure is loud with the same wording as the tree's.
-   */
+  // A path relative to the viewed session's project, as a file link's; through the file tree's port and wording
   async revealFile(path, from, sessionId) {
     const s = get()
     const projectId = from ?? (s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null)
@@ -212,7 +168,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   },
 
   openGit(path, staged) {
-    // The tab is recorded explicitly — clicking a changed file while viewing history must return to changes
+    // Explicit: a changed file clicked while viewing history returns to changes
     set((s) => ({ overlay: { kind: 'git', path: path ?? null, staged, sub: 'changes', pick: nextPick(s.overlay) } }))
   },
 
@@ -253,7 +209,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   },
 
   openImport(source = '', fromLink = false) {
-    // `at` is needed so a new link arriving at an already-open window still makes the window stand up again for that link (a request to open the same window twice)
+    // `at`: a new link reaching an open dialog still brings it up again for that link
     set({ importDialog: { source, fromLink, at: Date.now() }, settingsOpen: false })
   },
 
@@ -269,8 +225,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     set((s) => {
       // Scrolling fires this by the dozen; only a change is worth a new state object
       if ((s.stickToBottom[sessionId] ?? true) === sticking) return {}
-      // Sticking is the default, so it is recorded by *not* being recorded — that way the
-      // map only ever holds the sessions someone has actually scrolled away from
+      // Sticking is the default and is not recorded: the map holds only sessions scrolled away from
       if (sticking) return { stickToBottom: omitKey(s.stickToBottom, sessionId) }
       return { stickToBottom: { ...s.stickToBottom, [sessionId]: false } }
     })
@@ -279,7 +234,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   setScrollAnchor(sessionId, anchor) {
     set((s) => {
       if (!anchor) {
-        // Left at the bottom — if the previous anchor were left behind, arriving next time would go to that old spot
+        // Left at the bottom: an old anchor kept would be where the next visit lands
         if (!(sessionId in s.scrollAnchor)) return {}
         return { scrollAnchor: omitKey(s.scrollAnchor, sessionId) }
       }
@@ -292,10 +247,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
   toggleDir(projectId, path) {
     set((s) => {
       const cur = s.expandedDirs[projectId] ?? []
-      /*
-        Closing a folder leaves its children in the list on purpose. "As you left it" means
-        the whole shape comes back when you open the parent again, not just its first row.
-      */
+      // Closing a folder keeps its children's entries, so reopening it brings the whole shape back
       const next = cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]
       return { expandedDirs: { ...s.expandedDirs, [projectId]: next } }
     })
@@ -326,11 +278,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     if (!platform) return
     const mine = ++foldSaveSeq
     platform.prefs.save({ foldedGroups: next }).catch((e: unknown) => {
-      /*
-       * Undone only when this is still the newest save and the list is still what it wrote: a later fold has its own
-       * save in flight, and its state must not be rolled back by this one's failure. Compared by value, not identity:
-       * a reconnect reads the preferences again and hands the screen a new array with the same keys.
-       */
+      // Undone only if still the newest save and list; by value, since a reconnect hands over a new array of the same keys
       if (mine === foldSaveSeq && sameKeys(get().prefs.foldedGroups, next)) {
         set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
       }
@@ -369,23 +317,14 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     await get().setGridPanels(withPanelSpan(get().gridPanels, key, span))
   },
 
-  /**
-   * Saves the whole arrangement (adding, removing and reordering all arrive as this one action).
-   *
-   * The screen changes first and the save follows — if a dropped panel waited for a round trip to
-   * the server before settling into place, the hand would feel like it stumbled. A failure reverts to
-   * whatever the host says is true.
-   */
+  // The screen changes first, so a dropped panel does not wait a round trip; a failure reverts
   async setGridPanels(panels) {
     const platform = get().platform
     if (!platform) return
     const before = get().gridPanels
     /*
-     * An app panel taken off the grid closes its view, teardown first — the project screen's × rule (#288). Here
-     * rather than at the grid's ×, so every way a panel leaves the list (the ×, a test, a future caller) takes its view
-     * with it instead of leaving a frame alive behind a screen that no longer shows it. The view is not inside the
-     * panel (it is laid over it from PinnedApps), so the panel leaving first does not cut teardown off: the frame stays
-     * in the document, hidden, until `dismissPinnedView` has had its answer.
+     * An app panel leaving the grid by any path closes its view, teardown first (#288). The view is laid over the panel
+     * (PinnedApps), not in it, so it stays hidden in the document until `dismissPinnedView` is answered.
      */
     const kept = new Set(panels.map(gridPanelKey))
     for (const p of before) {

@@ -4,14 +4,9 @@ import { deliver } from '../deliver.js'
 
 /** What the desktop app's keeper offers: background mode (#280), leftover processes, and "Apply now" (#352) */
 export class KeeperMock {
-  /**
-   * The "leftover process" list a test plants — the real thing finds these with ps and lsof,
-   * but the mock only fakes that spot (what is being verified is the shutdown flow, not
-   * process detection; the detection rules are covered by the host's unit tests).
-   */
+  /** A test plants it: the host finds these with ps and lsof, and its unit tests cover the detection */
   strayProcesses: { pid: number; command: string; cwd: string }[] = []
 
-  /** Background mode (#280). The mock stands in for the desktop app, which offers it through the keeper */
   backgroundOn = false
 
   readonly background = {
@@ -31,24 +26,15 @@ export class KeeperMock {
     },
   }
 
-  /**
-   * "Apply now" (#352), as the desktop app with the keeper offers it. Nothing is relaunched here:
-   * the count says how often the screen asked, and a test sets what `check` answers and what the
-   * keeper's activity report says.
-   */
+  /** Nothing is relaunched: the count says how often the screen asked */
   relaunchCheck: RelaunchCheck = { ready: false, reason: 'The mock does not relaunch until a test says so' }
   relaunches = 0
-  /** For tests: the relaunch is refused with this reason */
   relaunchFails: string | null = null
   private hostBusy: boolean | null = false
   private busyWatchers = new Set<(busy: boolean | null) => void>()
 
   readonly relaunch: RelaunchPort = {
-    /*
-     * The real shell reads the version out of the bundle on disk (#665 review), which an install just replaced: a test
-     * that says only `ready` gets the version it installed. One that names a `version` gets that one, an older bundle
-     * included.
-     */
+    // The shell reads the version from the bundle on disk an install just replaced (#665)
     check: async () => {
       const c = { ...this.relaunchCheck }
       const installed = this.updatesMock.updateStatus.phase === 'restart_required' ? this.updatesMock.updateStatus.latest : null
@@ -65,7 +51,6 @@ export class KeeperMock {
     },
   }
 
-  /** Scenario helper: what the keeper's activity report says (a session working, a terminal…) */
   setHostBusy(busy: boolean | null): void {
     this.hostBusy = busy
     deliver(this.busyWatchers, busy)

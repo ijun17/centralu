@@ -3,7 +3,7 @@ import { MockPlatform } from './index.js'
 import { seedDemo } from './demo.js'
 
 describe('the demo scene', () => {
-  // "Next waiting" takes the newest wait and breaks a tie by session id, the approval's first: the approval raised before the question lost to it when a tick fell between the two
+  // "Next waiting" takes the newest wait (ties by session id): an approval raised first loses if a tick falls between
   it('raises the approval after the question, so the shortcut for the next waiting item lands on the approval', async () => {
     const m = new MockPlatform()
     const raised: string[] = []

@@ -83,17 +83,13 @@ export class SessionRecord {
   readonly unborn = new Map<string, NormalizedEvent[]>()
 
   /**
-   * Only saves events meant to become part of the conversation record. If it was saved, returns the
-   * in-session seq assigned to it — carried in the broadcast, it is the basis for the UI's unread
-   * tracking.
-   *
-   * **A streaming delta never creates a row — it grows the row already open** (#66).
-   * A single delta used to be a single row — one sentence became nine rows, 84% of the DB was
-   * fragments, pagination lost all meaning while it was busy counting rows, and the trigram index
-   * could not index a 1-2 character body, which killed search. Now a single row is created when a
-   * message starts (the first chunk is written there and then, so at least the start survives a
-   * crash), and every chunk after that is appended to the body and flushed only periodically. It is
-   * indexed exactly once, when the stream closes.
+   * Only saves events meant to become part of the conversation record. If it was saved, returns the in-session seq assigned to
+   * it — carried in the broadcast, it is the basis for the UI's unread tracking. **A streaming delta never creates a row — it
+   * grows the row already open** (#66). A row per delta would make one sentence nine rows, 84% of the DB fragments, pagination
+   * meaningless while it counts rows, and the trigram index could not index a 1-2 character body, which kills search. So a
+   * single row is created when a message starts (the first chunk is written there and then, so at least the start survives a
+   * crash), and every chunk after that is appended to the body and flushed only periodically. It is indexed exactly once, when
+   * the stream closes.
    */
   persistMessage(e: NormalizedEvent, m: SessionInfo): number | null {
     // Which chunks grow a row and where a message ends are shared with the mock (protocol transcript-rows.ts)
@@ -236,10 +232,10 @@ export class SessionRecord {
    * text-only.
    */
   /**
-   * **Its row is taken at once, in the order the image came** (#868), and the file is written after. The row used to be
-   * taken only once the file was saved, so the text that followed the image could take its number first and be stored
-   * above it. The row first holds what the event says (a path the tool gave, a note); once the bytes are in a file it is
-   * rewritten with that file's path, or with why it could not be saved. Returns the row's number.
+   * **Its row is taken at once, in the order the image came** (#868), and the file is written after. The row is not taken only
+   * once the file is saved: the text that follows the image could take its number first and be stored above it. The row first
+   * holds what the event says (a path the tool gave, a note); once the bytes are in a file it is rewritten with that file's
+   * path, or with why it could not be saved. Returns the row's number.
    */
   persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): number {
     const ts = Date.now()

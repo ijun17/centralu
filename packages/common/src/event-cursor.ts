@@ -1,30 +1,21 @@
 /**
- * The cursor a client keeps into a host's numbered event stream (#82, #173, #2163): the window's connection to its host
- * and a hub's link to a machine both read events this way, and were kept in step only by a comment.
- *
- * A greeting says whether the gap since the last event can be replayed: only when the cursor is a cursor into this host
- * lifetime (the same `streamEpoch`, or none said) and the host is not behind it (`currentSeq < seq` is a host that came back
- * up at the same address). Otherwise the cursor starts from the host's current number and the client re-reads what it
- * holds. Then each event is taken once, in order: a repeat or a first-met host's old news is dropped.
+ * The one cursor into a host's event stream, for the window and a hub's link (#82, #173, #2163). The gap replays only in
+ * the same lifetime (`streamEpoch`) with the host not behind it (`currentSeq < seq`: it came back at the same address).
  */
 export type Greeting = { currentSeq: number; streamEpoch?: string | undefined; resyncRequired?: boolean | undefined }
 
 export class EventCursor {
   private seq = 0
   private epoch: string | undefined
-  /** Whether `seq` is a cursor into the current host: false means the next greeting is a first contact */
+  /** False: the next greeting is a first contact */
   private valid = false
 
-  /** What a reconnect asks to be replayed from, or nothing on a first contact */
   resumeFrom(): { afterSeq: number; streamEpoch?: string } | null {
     if (!this.valid) return null
     return { afterSeq: this.seq, ...(this.epoch ? { streamEpoch: this.epoch } : {}) }
   }
 
-  /**
-   * Reads a greeting. `firstContact`: the cursor held nothing; `newLifetime`: it is not this host lifetime's; `resync`: the
-   * gap cannot be replayed (a first contact, the host said so, or another lifetime), and the cursor now starts at `currentSeq`
-   */
+  /** `resync`: the gap cannot be replayed, and the cursor now starts at `currentSeq` */
   greet(g: Greeting): { firstContact: boolean; newLifetime: boolean; resync: boolean } {
     const firstContact = !this.valid
     const sameLifetime = !firstContact && (g.streamEpoch === undefined || this.epoch === undefined || g.streamEpoch === this.epoch) && g.currentSeq >= this.seq
@@ -35,22 +26,19 @@ export class EventCursor {
     return { firstContact, newLifetime: !sameLifetime, resync }
   }
 
-  /** Whether an event is new. The cursor moves before its handlers run, so an event is handed on once */
+  /** The cursor moves before handlers run, so an event is handed on once */
   take(seq: number): boolean {
     if (seq <= this.seq) return false
     this.seq = seq
     return true
   }
 
-  /**
-   * What every client of this host lifetime calls the event numbered `seq`, the same in every window (#2168): its number
-   * within the lifetime. None from a host that names no lifetime, whose numbers start again when it does
-   */
+  /** The same in every window (#2168); none from a host that names no lifetime, whose numbers restart with it */
   eventId(seq: number): string | undefined {
     return this.epoch === undefined ? undefined : `${this.epoch}:${seq}`
   }
 
-  /** Another host (a new endpoint): its numbers mean nothing to this cursor, and the next greeting is a first contact */
+  /** For a new endpoint, whose numbers mean nothing to this cursor */
   forget(): void {
     this.seq = 0
     this.epoch = undefined

@@ -10,14 +10,7 @@ describe('is the app in front of the person', () => {
     expect(isForeground(true, 'hidden')).toBe(false)
   })
 
-  /*
-   * The spot where notifications used to be silently blocked.
-   *
-   * When switching to another app, the window is still 'visible' but has no focus.
-   * Looking only at visibility would answer 'in front' here, and from that point notifications
-   * would stop going out — a state where the person has stepped away but the app believes it is
-   * in front of them.
-   */
+  // After a switch to another app the window is still 'visible': visibility alone would block notifications
   it('is not in front when covered by another app even if the window is visible', () => {
     expect(isForeground(false, 'visible')).toBe(false)
   })

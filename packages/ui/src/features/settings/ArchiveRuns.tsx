@@ -11,7 +11,7 @@ import { SettingsCard } from './SettingsLayout.jsx'
 /** One app's records, in the order the session archive lists them (most recently kept first) */
 type RunGroup = { key: string; name: string; projectName: string | null; runs: TrashedRun[] }
 
-/** The key of a run's app: a linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378 review) */
+/** The key of a run's app: a linked machine's project ids name it already; its user-folder apps are told from the hub's by the machine (#378) */
 const runGroupKey = (r: TrashedRun): string => appKeyOf(r.app.projectId, r.app.id, r.machine)
 
 /** Whether a row error's id names one of these runs: the run, or the app whose runs were all being deleted */

@@ -654,7 +654,7 @@ describe('cards across a host restart (#676, docs/plans/mailbox.md §10.6.4)', (
   /** A host on the world's store, its mail wired; `updateResume` is the data folder's lists of the turns an update cut (#1618) */
   const host = (updateResume?: UpdateResumeFolder) => {
     const claude = new CrossAdapter('claude')
-    const mgr = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, updateResume ? { updateResume } : {})
+    const mgr = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, updateResume ? { updateResume } : {})
     hosts.push(mgr)
     const m = wireHostMail(mgr, w.store)
     return { mgr, claude, m }

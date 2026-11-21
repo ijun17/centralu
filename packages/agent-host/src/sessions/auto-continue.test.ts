@@ -48,7 +48,7 @@ function host() {
   const adapter = new Adapter()
   adapter.apiUrl = () => API
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, dir)
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: dir })
   const session = (id: string): SessionInfo => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }
 }

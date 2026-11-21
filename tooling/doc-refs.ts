@@ -123,16 +123,33 @@ export function targets(text: string): Doc {
   return { numbers, titles, anchors }
 }
 
+/**
+ * Whether a change to a Markdown file takes away something a reference may cite (tooling/guards.ts): the file, a section number,
+ * a heading or bold lead-in, or an anchor; or turns a document's name into a folder's (a new docs/<name>/README.md). `before` and
+ * `after` answer its text on each side, null where there is no file; one is asked only when needed.
+ */
+export function losesTargets(path: string, before: () => string | null, after: () => string | null): boolean {
+  const was = before()
+  if (was === null) return FOLDER_INDEX.test(path)
+  const now = after()
+  if (now === null) return true
+  const [b, a] = [targets(was), targets(now)]
+  return [...b.numbers].some((n) => !a.numbers.has(n)) || b.titles.some((t) => !a.titles.includes(t)) || [...b.anchors].some((x) => !a.anchors.has(x))
+}
+
 /** The documents a reference may name: every Markdown file by path; by name, those under docs/ and at the root */
 export function indexDocs(root: string, files: string[]): DocIndex {
   return indexTexts(new Map(files.filter((f) => f.endsWith('.md')).map((f) => [f, readFileSync(join(root, f), 'utf8')])))
 }
 
+/** The index of a document split into a folder (docs/README.md): its old name is a finding then */
+const FOLDER_INDEX = /^docs\/([\w-]+)\/README\.md$/
+
 /** The same index, from the texts of the Markdown files by path */
 export function indexTexts(texts: Map<string, string>): DocIndex {
   const folders = new Set<string>()
   for (const f of texts.keys()) {
-    const m = /^docs\/([\w-]+)\/README\.md$/.exec(f)
+    const m = FOLDER_INDEX.exec(f)
     if (m?.[1]) folders.add(m[1])
   }
   const byPath: DocIndex['byPath'] = new Map()

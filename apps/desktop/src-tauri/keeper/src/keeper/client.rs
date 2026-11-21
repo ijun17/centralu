@@ -61,8 +61,8 @@ pub fn alive(sock: &Path) -> bool {
     request(sock, &json!({ "op": "status" }), Duration::from_secs(2)).is_ok()
 }
 
-// The window's requests, one function per op it sends (`server::handle` answers them), each with the
-// bound the window has always given it.
+// The window's requests, one function per op it sends (`server::handle` answers them), each with its
+// own bound.
 
 /// `system_ending` (#1970): tells the host, through the keeper, that the system is ending (`cancelled`: that it is not after all)
 pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
@@ -113,7 +113,7 @@ pub enum Stopped {
 
 /// Asks a keeper answering on `sock` to stop (`stop`, which any process of this user may ask for: its host ends what it
 /// runs as a quit does), and waits up to `limit` for the keeper to be gone: its `lock` (`keeper.lock`) free. Not its
-/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`, PR 7 review); the lock goes with
+/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`); the lock goes with
 /// the keeper's process, which exits only once its host has.
 pub fn stop_and_wait(sock: &Path, lock: &Path, limit: Duration) -> Stopped {
     if !alive(sock) {
@@ -267,8 +267,8 @@ mod tests {
         (sock, asked)
     }
 
-    /// The window's requests used to be written inline at each call; the keeper matches the op by name
-    /// (`server::handle`), so each function must send exactly the request the window always sent.
+    /// The keeper matches the op by name (`server::handle`), and keepers of every build read these
+    /// requests, so each function must send exactly the request below.
     #[test]
     fn each_request_sends_its_op_and_reads_its_answer() {
         let check = |name: &str, answer: &'static str, call: &dyn Fn(&Path) -> String, sent: Value, got: &str| {

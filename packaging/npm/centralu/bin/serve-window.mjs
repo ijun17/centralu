@@ -61,7 +61,8 @@ export async function runWindow({
   if (!host.running) {
     say(`no Centralu host runs for ${dataDir}: starting one in this Windows sign-in, which keeps running for a linked hub when the window closes`)
     let answer = null
-    await detach({ env, home, entry, version, cliPath, platform, write: (line) => (answer = line) })
+    // No cap on a host's work on its store: the window shows it, and nothing outside waits on this (`runDetach`)
+    await detach({ env, home, entry, version, cliPath, platform, workCapMs: Infinity, write: (line) => (answer = line) })
     const d = parseLine(answer)
     if (!d?.hostRunning) {
       say(`could not start the host: ${d?.detach?.message ?? 'centralu serve --detach did not answer'}`)

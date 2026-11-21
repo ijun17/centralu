@@ -35,7 +35,7 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, stopped, hostKey, keyId }) {
+export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, stopped, starting, hostKey, keyId }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub up to 0.1.0-beta.45's adds `--from <its name>`
    * to `--detach` only when the line says so, since an older serve answers an option it does not know with an error. `window`: the
@@ -73,6 +73,8 @@ export function connectionLine({ port, token, credential, limited, others, versi
     proof: true,
     // The person stopped the host here, and when (#1143, `readStopped`); absent: an older serve, or no such stop
     ...(stopped ? { stopped } : {}),
+    // The host holds the folder and works on its store before it answers (#2334, `storeWork`): `{ doing, step, since }`
+    ...(starting ? { starting } : {}),
     takes,
   })
 }

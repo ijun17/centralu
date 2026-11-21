@@ -24,7 +24,7 @@ const AppHomeViewResult = z.object({
   runId: z.string(),
 })
 
-/** The results of the `apps` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./apps.params.ts */
+/** Results of the `apps` methods, read through `parseRpcResult`. Params and what each method does: ./apps.params.ts */
 export const appsResults = {
   'apps.viewFrame': z.object({
     url: z.string(),
@@ -83,9 +83,8 @@ export const appsResults = {
   'apps.restart': z.object({ ok: z.literal(true) }),
   'apps.remove': z.object({ ok: z.literal(true) }),
   /**
-   * Creating an app also stands up its building session (C-2). If that session fails to stand
-   * up, the app still remains — `builder` is null and `builderError` states why. In that case
-   * it can be stood up again with `apps.createBuilder`.
+   * Its building session is stood up too. If that fails the app stays: `builder` is null, `builderError` says why, and
+   * `apps.createBuilder` tries again.
    */
   'apps.create': z.object({
     app: ExternalAppInfo,

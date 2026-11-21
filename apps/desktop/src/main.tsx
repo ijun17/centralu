@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
-import { errorMessage } from '@cc/protocol/client'
-import { App, confirmKeyAction, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
+import { errorMessage, sentenceStart, storeWorkWords } from '@cc/protocol/client'
+import { App, confirmKeyAction, formatBytes, formatDuration, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
   autoRestart,
   buildBar,
@@ -18,6 +18,7 @@ import {
   restartKeeper,
   restartPlan,
   type ShellHostBuild,
+  type StoreWork,
   type TauriPlatform,
   watchHostBuild,
 } from '@cc/platform/tauri'
@@ -47,9 +48,9 @@ boot()
 
 function boot() {
   // **Draw something first.** If nothing is rendered while waiting on the host, an empty black
-  // window shows up, and that reads as broken (flagged during dogfooding).
+  // window shows up, and that reads as broken.
   root.render(<Starting />)
-  createTauriPlatform()
+  createTauriPlatform({ onStoreWork: (work) => root.render(<Starting work={work} />) })
     .then(async (platform) => {
       await firstPaint
       root.render(<DesktopRoot platform={platform} />)
@@ -59,10 +60,9 @@ function boot() {
 }
 
 /**
- * Retry on the failure screen (#184). This used to be `location.reload()`, which only
- * reloaded the webview, and a supervisor that had already given up did not restart, so the
- * same message reappeared 30 seconds later. This restarts the supervisor and waits again as
- * if from the start.
+ * Retry on the failure screen (#184). Restarts the supervisor and waits again as if from the
+ * start: reloading the webview alone does not restart a supervisor that has already given up,
+ * so the same message would reappear 30 seconds later.
  */
 function retry() {
   root.render(<Starting />)
@@ -72,8 +72,8 @@ function retry() {
 }
 
 /**
- * Prevents ⌘Q and ⌘W from quitting immediately (dogfooding, 2026-09-04) — lives here because
- * it is a desktop-only concern.
+ * Prevents ⌘Q and ⌘W from quitting immediately — lives here because it is a desktop-only
+ * concern.
  *
  * Rust intercepts every path toward quitting (the menu's Quit, ⌘Q, closing the window) and
  * fires `quit-requested`, and this modal does the asking. Only "Quit" calls quit_app to open
@@ -85,8 +85,7 @@ function retry() {
 function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   const [askQuit, setAskQuit] = useState(false)
   /**
-   * Leftover processes still running from our project folders (requested by the person,
-   * 2026-09-07).
+   * Leftover processes still running from our project folders.
    *
    * A dev server an agent launched via bash is not caught by our shutdown procedure — measured
    * directly, that process has ppid=1 and is its own process group, so both the parent chain
@@ -105,7 +104,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   /*
    * Background mode (#280), read each time the dialog opens: with it on, plain Quit leaves the
    * agents running, so the dialog says so and offers the one way to stop them anyway. Null while
-   * unknown or where the platform has no keeper — then the dialog reads as it always did.
+   * unknown or where the platform has no keeper — then the dialog reads as with the mode off.
    */
   const [background, setBackground] = useState<boolean | null>(null)
   // The window runs on the computer's `centralu serve` host, which stays running when it closes (#1466)
@@ -187,8 +186,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
 
   /*
    * The case where the host gives up after exceeding its restart limit once the app is already
-   * up (#184). This signal used to be received by nobody, so the top bar just stayed on
-   * Connecting/Disconnected, and the reason the host gave was nowhere on screen. This puts the
+   * up (#184). Without this the top bar would stay on Connecting/Disconnected, with the reason
+   * the host gave nowhere on screen. This puts the
    * same message and Retry as the launch-failure screen on top of the app, and clears it once
    * the host comes back up (ready) — switching to the new address is already handled by the
    * platform's onEndpointChange.
@@ -259,9 +258,9 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   useEffect(() => {
     if (!askQuit) return
     /*
-     * Moves focus to the dialog when it opens (#181). The dialog was not taking focus, so
-     * focus stayed on the app underneath, and Tab passed through the elements below it first.
-     * This traps focus inside the dialog and returns it to where it was once the dialog closes.
+     * Moves focus to the dialog when it opens (#181), so focus does not stay on the app
+     * underneath and Tab does not pass through the elements below it first. This traps focus
+     * inside the dialog and returns it to where it was once the dialog closes.
      */
     const before = document.activeElement as HTMLElement | null
     dialogRef.current?.focus()
@@ -282,8 +281,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       }
       /*
        * Enter = quit, Esc = keep going — except for an in-progress IME composition and an
-       * Enter pressed on a button (#181, `confirmKeyAction`). While Enter was read as quit
-       * regardless of focus, pressing Enter after tabbing to Cancel also quit the app.
+       * Enter pressed on a button (#181, `confirmKeyAction`): Enter after tabbing to Cancel
+       * must not quit the app.
        */
       const onButton = pressesItself(e.target)
       const action = confirmKeyAction({ key: e.key, isComposing: e.isComposing, keyCode: e.keyCode, onButton })
@@ -299,7 +298,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   }, [askQuit, quit])
   /*
    * Handed to App, which draws it between its top bar and the lanes (#326). Laid over the window
-   * here (fixed, top 0) it covered the macOS traffic lights and the header's controls.
+   * here (fixed, top 0) it would cover the macOS traffic lights and the header's controls.
    */
   const buildBarNode =
     build && bar.kind !== 'none' ? (
@@ -363,13 +362,41 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   )
 }
 
-function Starting() {
+/**
+ * The screen while the host starts. A host that works on its store first (#2334, `work`) says what, and for how long
+ * by its own clock, so a long copy reads as one and not as a start that hung; a second of it shows nothing, so a
+ * fast start does not flicker.
+ */
+function Starting({ work = null }: { work?: StoreWork | null }) {
+  const [now, setNow] = useState(Date.now)
+  // Kept on whether there is work, not on the report: the next step's report does not set the clock back
+  const working = work !== null
+  useEffect(() => {
+    if (!working) return
+    setNow(Date.now())
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [working])
+  const shown = work && now - work.since >= 1000 ? work : null
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-surface-floor" data-testid="starting">
-      <p className="text-md text-ink-muted">Starting the agent host…</p>
-      {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
-          Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
-      <p className="text-xs text-ink-faint">On first run, your system may ask for folder access.</p>
+      {shown ? (
+        <>
+          <p className="text-md text-ink-muted">
+            {sentenceStart(storeWorkWords(shown, "Centralu's"))} ({formatBytes(shown.bytes)})…
+          </p>
+          <p className="text-xs text-ink-faint">
+            This can take a few minutes. Centralu opens when it is done ({formatDuration(now - shown.since, { coarse: true })} so far).
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-md text-ink-muted">Starting the agent host…</p>
+          {/* Not "macOS may ask": it is the OS that asks, and on Linux nothing asks at all.
+              Naming one OS in a message every platform sees makes it read as a bug elsewhere. */}
+          <p className="text-xs text-ink-faint">On first run, your system may ask for folder access.</p>
+        </>
+      )}
     </div>
   )
 }

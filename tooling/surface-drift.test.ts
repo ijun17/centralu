@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import type { AdapterSurface, SurfaceEnv, ToolSurface } from '../packages/agent-host/src/adapters/contract.js'
 import { baselineSource } from '../packages/agent-host/src/adapters/surface-drift.js'
-import { runSurfaceDrift, type Gh } from '../scripts/surface-drift.mjs'
+import { alive, cleanUp, plantTreeScript, settle, treePids } from '../packages/agent-host/src/dev-services/process-tree.test-helpers.js'
+import { latestEnv, runSurfaceDrift, type Gh } from '../scripts/surface-drift.mjs'
+import { SLOW } from './test-timing.js'
 
 /*
  * The weekly run (#270) with recorded readings and a fake gh: what it files, when it leaves an issue alone, and when it
@@ -136,4 +140,48 @@ describe('the surface drift run', () => {
     expect(written[0]![1]).toBe(baselineSource(latest, '2026-10-25'))
     expect(calls).toEqual([])
   })
+})
+
+describe('the real environment the run reads tools in', () => {
+  let dir = ''
+  // Read again here, so a run that failed before it read them still has its tree ended
+  const pidsOf = () => (dir ? treePids(join(dir, 'pids')) : [])
+  afterEach(async (test) => {
+    await cleanUp(pidsOf(), test)
+    if (dir) rmSync(dir, { recursive: true, force: true })
+    dir = ''
+  })
+
+  /*
+   * The tool answers nothing to `--version` and has started a child, which started its own, both outside the tool's job
+   * on Windows (`plantTreeScript`). It is on PATH as a `.cmd` shim on Windows (which the run starts through its entry, as
+   * npm's) and as a shell script elsewhere.
+   */
+  it('ends a tool that never answers, and what it started, at the run limit (#2346)', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-drift-hang-'))
+    const pidFile = join(dir, 'pids')
+    const tree = plantTreeScript(dir)
+    writeFileSync(
+      join(dir, 'faketool.cjs'),
+      [
+        "const { spawn } = require('node:child_process')",
+        "const { appendFileSync } = require('node:fs')",
+        `spawn(process.execPath, [${JSON.stringify(tree)}, ${JSON.stringify(pidFile)}, '1'], { detached: true, stdio: 'ignore', windowsHide: true }).unref()`,
+        `appendFileSync(${JSON.stringify(pidFile)}, '2 ' + process.pid + '\\n')`,
+        'setInterval(() => {}, 1000)',
+      ].join('\n'),
+    )
+    if (process.platform === 'win32') writeFileSync(join(dir, 'faketool.cmd'), `@"${process.execPath}" "%~dp0\\faketool.cjs" %*\r\n`)
+    else writeFileSync(join(dir, 'faketool'), `#!/bin/sh\nexec "${process.execPath}" "${join(dir, 'faketool.cjs')}" "$@"\n`, { mode: 0o755 })
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`)
+    const { env, dispose } = latestEnv({ timeoutMs: 4_000 * SLOW })
+    try {
+      await expect(env.run('faketool', ['--version'])).rejects.toMatchObject({ ended: 'timeout' })
+      const pids = treePids(pidFile)
+      expect(pids).toHaveLength(3)
+      expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000 * SLOW)).toEqual([])
+    } finally {
+      dispose()
+    }
+  }, 60_000 * SLOW)
 })

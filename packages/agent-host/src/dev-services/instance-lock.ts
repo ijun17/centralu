@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { hasPs } from '../os.js'
 import { realOs } from '../os/real.js'
+import { writeFileWhole } from '../os/write-file-whole.js'
+import type { SayStoreWork } from './store/store-work.js'
 
 /**
  * Only one host per data folder.
@@ -37,7 +39,16 @@ import { realOs } from '../os/real.js'
  * are not reliable.
  */
 
-export type LockResult = { ok: true; release: () => void } | { ok: false; heldByPid: number | null; holder: Holder | null; lockPath: string }
+/**
+ * `sayWork` puts what the host does to its store into `host.lock` (`store`, store/store-work.ts), or takes it out with
+ * null. The file is replaced whole (`writeFileWhole`), so a reader never sees half of it: readers take a file they
+ * cannot parse for no holder. A rename still refused after the Os tries again leaves the file as it was: a failed first
+ * write leaves the starters waiting as they did before the work was said, and a failed clear leaves the record until the
+ * host exits, which is why every reader takes a host that answers for one past its work.
+ */
+export type LockResult =
+  | { ok: true; release: () => void; sayWork: SayStoreWork }
+  | { ok: false; heldByPid: number | null; holder: Holder | null; lockPath: string }
 
 /** The file whose exclusive lock is the ownership */
 export const OWNERSHIP_FILE = 'host-ownership.sqlite'
@@ -109,7 +120,7 @@ export function acquireInstanceLock(
   now: () => number = Date.now,
 ): LockResult {
   // an in-memory database is never shared
-  if (dbPath === ':memory:') return { ok: true, release: () => {} }
+  if (dbPath === ':memory:') return { ok: true, release: () => {}, sayWork: () => {} }
 
   const lockPath = join(dirname(dbPath), 'host.lock')
   const readHolder = (): Holder | null => {
@@ -136,6 +147,13 @@ export function acquireInstanceLock(
   let released = false
   return {
     ok: true,
+    sayWork: (work) => {
+      try {
+        writeFileWhole(realOs().files, lockPath, JSON.stringify(work ? { ...own, store: work } : own))
+      } catch (err) {
+        console.error(`[agent-host] host.lock could not ${work ? 'say what the host does to its store' : 'be put back'}: ${errorMessage(err)}`)
+      }
+    },
     release: () => {
       if (released) return
       released = true

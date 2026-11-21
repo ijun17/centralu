@@ -168,7 +168,7 @@ export type MachinesPort = {
   offerAutoCompact?(): Promise<void>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
-  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
+  /** That machine's "Allow auto from a linked computer", read or set over the link (#1273) */
   hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'>
   /** The reverse direction's switch for one machine (#550) */
   setAsks(id: string, on: boolean): Promise<MachineInfo>
@@ -176,7 +176,7 @@ export type MachinesPort = {
   followHub?(): void
 }
 
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; window?: true }
 
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
@@ -356,6 +356,8 @@ export function createRpcHandler(
         onWorktreeBase: (note) => (worktreeBase = note),
         fromScript: scriptAuthor('agents.createSession', ctx),
         ...(startedByHub ? { startedByHub } : {}),
+        // The person's own window (#2350): the only start whose tool becomes the project's default
+        ...(ctx?.window ? { personsPick: true as const } : {}),
       })
       // Created before that hub's offer arrived on this connection: recorded when it does
       if (p.fromHub && ctx && !startedByHub) hubs?.awaitOffer?.(ctx.client, info.id)
@@ -428,7 +430,7 @@ export function createRpcHandler(
        * through whole means this spot never needs fixing again as more settings are added.
        */
       const { sessionId, by, ...settings } = p
-      // `by` comes only from a hub's Assistant, which directs no Assistant nor coordinator here (#1941 review)
+      // `by` comes only from a hub's Assistant, which directs no Assistant nor coordinator here (#1941)
       if (by) mgr.linkedHost.directedFromHub(sessionId)
       // `assistant` is the same hand under the role's new name (#2133); this build records and broadcasts it as `orchestrator`
       return await mgr.updateSettings(sessionId, settings, by ? 'orchestrator' : 'person')
@@ -717,12 +719,10 @@ export function createRpcHandler(
       mgr.projectRegistry.reorderProjects(p.orderedIds),
     'projects.delete': async ({ projectId }) => {
       /*
-       * That project's terminals and Run-menu executions are also ended here (#177). Both use the
-       * path as their key, and the manager does not know about them, so this door does it. The path
-       * is read **before** the row is deleted — after deletion, cwdOfProject throws Project not
-       * found, leaving neither the view nor this door any way to reach that process (this used to
-       * be the spot where a port stayed held until the app quit). If deletion fails, the project
-       * remains, so its terminal is left in place too.
+       * That project's terminals and Run-menu executions are also ended here (#177): both use the path as their key and the
+       * manager does not know them. The path is read before the row is deleted, as cwdOfProject throws once it is gone and
+       * nothing could reach that process (else a port stays held until the app quit). If deletion fails the project remains, so its
+       * terminal stays
        */
       let cwd: string | null = null
       try {
@@ -887,7 +887,7 @@ export function createRpcHandler(
     'machines.sshHosts': async () => requireMachines().sshHosts(),
     'machines.remove': async ({ machineId }) => {
       await requireMachines().remove(machineId)
-      // Its asks' cards close with it (#550 review)
+      // Its asks' cards close with it (#550)
       mgr.closeMachineAskCards(machineId)
       return { ok: true as const }
     },
@@ -914,7 +914,7 @@ export function createRpcHandler(
     // The reverse direction (#550): the switch per machine, and the pairs approved on this computer's card
     'machines.setAsks': async ({ machineId, on }) => {
       const machine = await requireMachines().setAsks(machineId, on)
-      // Off closes what still stands: the card would only be refused once answered (#550 review)
+      // Off closes what still stands: the card would only be refused once answered (#550)
       if (!on) mgr.closeMachineAskCards(machineId)
       return machine
     },
@@ -1006,7 +1006,7 @@ export function createRpcHandler(
     // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
     'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.prefs.uiPreferences()) }),
     // Who else holds full access here (#1405): the hub's machine row reads it between links
-    // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
+    // The hub's Settings → Machines sets it for a machine with no window of its own (#1273)
     'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.prefs.setUiPreferences({ hubAuto: p.allowed })) }),
     'host.send': async ({ sessionId, text, from, ask }) => ack(await mgr.linkedHost.sendFromHub(sessionId, text, from.name, ask)),
     'updates.setAutoApply': async (p) => {
@@ -1064,20 +1064,10 @@ export function createRpcHandler(
     const result: unknown = await Reflect.apply(h, undefined, [Object.hasOwn(raw, method) || h.length === 0 ? params : RpcMethods[name].params.parse(params), ctx])
 
     /*
-     * Checks here whether what is being sent out **matches its declared shape.**
-     *
-     * The 50 result schemas went a long time without ever being run against the runtime — they
-     * were documentation only, a promise nobody actually kept. All that time, nothing happened even
-     * when the wire diverged from the schema, and it actually diverged twice (the effort field
-     * being lost, and the Codex model shape).
-     *
-     * Before turning this on, 47 of 50 were checked against a real host to confirm the schemas
-     * matched the real responses (`pnpm smoke:schemas`). Turning it on without doing that would let
-     * a wrong schema kill a perfectly working feature.
-     *
-     * Why this throws: sending a malformed response through as is makes it show up oddly on the
-     * screen, and by then there is no way to tell where it went wrong. This is the closest point to
-     * where it actually happened.
+     * Checks that what is sent out matches its declared shape: result schemas that are never run against the runtime are documentation
+     * only, and the wire diverged from them (the effort field lost, the Codex model shape). A schema is checked against a real host
+     * (`pnpm smoke:schemas`) before it is enforced, as a wrong one would kill a working feature. It throws, as a malformed response
+     * sent through shows up oddly on screen with no way to tell where it went wrong; this is the closest point to where it happened
      */
     const checked = RpcMethods[name].result.safeParse(result)
     if (!checked.success) {

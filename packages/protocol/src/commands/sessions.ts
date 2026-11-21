@@ -15,45 +15,30 @@ import {
 } from '../entities.js'
 import { machineField } from './machine-fields.js'
 
-/**
- * A session's role (#13).
- *
- * The judgment that `projectId === null` means assistant used to be scattered across six
- * places, and this field gathers that scattering into a single marker. Once the project
- * assistant was discontinued (2026-09-01), the two judgments became equivalent again, but the
- * marker stays — having the judgment live in one place is still better, and a migration to
- * revert it would carry risk with nothing to gain.
- */
+/** A session's role: one marker, so no reader judges it from `projectId === null` */
 export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'assistant'])
 export type SessionKind = z.infer<typeof SessionKind>
 
 /**
- * Whether a session of this kind is the Assistant (#2133). The kind is sent as `'orchestrator'`, the value every
- * release before the rename knows; a later release sends `'assistant'` (docs/plans/assistant-rename.md, step 4), and a
- * linked machine or a window may meet either. Every reader asks this, never the literal (lint: `guard/assistant-kind`).
+ * Whether a kind is the Assistant: sent as `'orchestrator'`, a later release sends `'assistant'`
+ * (docs/plans/assistant-rename.md, step 4), and a peer may meet either. Readers ask this (lint: `guard/assistant-kind`).
  */
 export function isAssistantKind(kind: unknown): boolean {
   return kind === 'orchestrator' || kind === 'assistant'
 }
 
-/** A directing seat's kind (#2162): the Assistant or a coordinator, which carry role text and are not shown to a hub */
+/** The Assistant or a coordinator: the seats that carry role text and are not shown to a hub */
 export function isAssistantOrCoordinator(kind: unknown): boolean {
   return isAssistantKind(kind) || kind === 'coordinator'
 }
 
-/** The Assistant's kind as this build sends and stores it: the old value, which every supported release parses (#2133) */
+/** The Assistant's kind as this build sends and stores it: the value every supported release parses */
 export const ASSISTANT_KIND = 'orchestrator' satisfies SessionKind
 
 export const SessionInfo = z.object({
   id: z.string(),
-  /**
-   * The project this session belongs to. Null for a session that belongs to none: the Assistant
-   * (it crosses projects, and attached to one it would die along with that project when the
-   * project is deleted), a coordinator, the builder and agent sessions of a user-folder app, and a
-   * session in the trash (its project is kept in the trash record). docs/domain-model.md §2.1.
-   */
+  /** Null for a session of no project (docs/domain-model.md §2.1); the Assistant's would go with a deleted project */
   projectId: z.string().nullable(),
-  /** Whether this is a worker or an Assistant. Defaults to worker — old frames do not have this field */
   kind: SessionKind.default('worker'),
   tool: ToolName,
   externalId: z.string().nullable(),
@@ -63,181 +48,81 @@ export const SessionInfo = z.object({
   lastReadSeq: z.number().default(0),
   lastSeq: z.number().default(0),
   createdAt: z.number(),
-  /** When waiting began — used for inbox ordering and showing elapsed time (FR-12/15) */
   waitingSince: z.number().nullable().default(null),
-  /** Whether the process is alive. If false, resuming is required to continue the conversation (FR-10) */
+  /** False: the conversation continues only after a resume */
   live: z.boolean().default(true),
-  /** Can be changed mid-conversation (FR-7) — chosen from the session header */
   model: z.string().nullable().default(null),
-  /** Reasoning effort. Null if the model does not support it */
+  /** Null when the model has no effort setting */
   effort: z.string().nullable().default(null),
-  /**
-   * Response length (#54). Null means the tool's default.
-   *
-   * Unlike effort, this takes effect **the next time the session wakes up** — codex's
-   * turn/start has no slot for it, it only flows through the thread config (confirmed absent
-   * from generated/v2/TurnStartParams.ts — measured). The manager's drift restart already knows
-   * that path, so the plumbing is the same as for effort.
-   */
+  /** Null: the tool's default. Applies at the next wake: codex's turn/start has no slot for it (measured) */
   verbosity: z.string().nullable().default(null),
-  /** Response speed (same plumbing as #54). Null means codex's default. Like verbosity, it applies the next time the session wakes up */
+  /** Null: codex's default; applies at the next wake, as verbosity */
   serviceTier: z.string().nullable().default(null),
   permissionPreset: PermissionPreset.default('normal'),
-  /**
-   * The identifier of the prior conversation this session inherited (only for sessions created
-   * by importing). Can differ from externalId, since the tool issues a new identifier when it
-   * resumes.
-   */
+  /** The conversation an imported session inherited; can differ from externalId, as the tool issues a new id on resume */
   importedFrom: z.string().nullable().default(null),
-  /**
-   * The worktree this session runs in. Null means it runs directly in the project directory
-   * (the default).
-   *
-   * Why the path is held here: on resume, the session must return to **the same worktree**.
-   * Falling back to the project path would silently break isolation — the person would still
-   * believe it is isolated.
-   */
+  /** Null: the project directory. Held so a resume returns to the same worktree, never silently unisolated */
   worktree: z
     .object({
       path: z.string(),
       branch: z.string(),
-      /** The HEAD sha at creation time (#69) — the baseline for merge detection. Keeps a freshly created branch from reading as merged. */
+      /** HEAD at creation, the merge baseline: keeps a fresh branch from reading as merged */
       base: z.string().optional(),
     })
     .nullable()
     .default(null),
-  /**
-   * Whether this worktree branch's work has fully landed in the project trunk (#69).
-   *
-   * Not stored, since it is a fact derived from git — it is re-judged on startup and whenever
-   * the project's git state is refreshed. Squash and rebase merges cannot be detected locally
-   * (measured), so this value can stay false even after the work has landed. The cost of that is
-   * a single badge: the person can always delete it manually regardless.
-   */
+  /** Judged from git, not stored; a squash or rebase merge is invisible locally (measured), so it can stay false */
   worktreeMerged: z.boolean().default(false),
-  /**
-   * The pull request for this worktree branch (#76 stage 3). Null means "unknown," not "none."
-   *
-   * Not stored, since it is a derived fact measured through the gh CLI (same principle as
-   * worktreeMerged). The reason this field exists is the blind spot above: squash and rebase
-   * merges cannot be detected locally, and squash is the dominant outcome for a GitHub PR. A
-   * PR's MERGED state is a fact recorded by the server, so it has no such blind spot. If gh is
-   * missing or the machine is offline, this value simply stays null — it is only the basis for
-   * one badge.
-   */
+  /** Null: unknown (no gh, offline), not none. Read through gh, not stored; it sees the squash merges git cannot */
   worktreePr: z
     .object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() })
     .nullable()
     .default(null),
-  /**
-   * The goal set on the session (2026-09-07). Not stored, since it is a derived fact judged by
-   * the tool — after a restart, codex re-asks via thread/goal/get, and claude learns it again at
-   * the next judgment.
-   */
+  /** Not stored: after a restart codex is asked again (thread/goal/get), and claude reports it at its next judgment */
   goal: SessionGoal.nullable().default(null),
-  /**
-   * The agent's background work (#290): every running task, then the ended ones still listed with how they ended.
-   * Live-only like `goal` — the tool process holds these tasks, and a new process starts with none.
-   */
+  /** Running tasks, then ended ones with how they ended. Live-only: the tool process holds them, a new one has none */
   backgroundTasks: z.array(BackgroundTask).default([]),
   /**
-   * The version of the agent CLI this session's process runs (#297), or null when it has no process or the version is
-   * not known. Claude reports it in its init message (`claude_code_version`), the Codex app-server in its `initialize`
-   * answer; until then, and for a process the keeper kept, it is the version installed when the process was started.
-   * Live-only, like `goal`: a new process reports its own. Compared with `AgentVersions.installed` to say a session runs
-   * an older CLI than the one installed.
+   * The agent CLI version the session's process runs, null with no process or unknown. Claude reports it in its init
+   * (`claude_code_version`), the Codex app-server in its `initialize` answer; until then, and for a process the keeper
+   * kept, it is the version installed at start. Compared with `AgentVersions.installed`.
    */
   agentVersion: z.string().nullable().default(null),
-  /**
-   * A coordinating session's view allowlist (#80, #81 — unnamed core handle #1).
-   *
-   * The sessions visible to the Assistant tool of a session with kind='coordinator'. The host
-   * enforces this (enforcement does not live in app code, which can be turned off). There is no
-   * concept of "task" in the core — this is purely the physical fact of visibility.
-   */
+  /** A coordinator's view allowlist; the host enforces it, not app code, which can be turned off */
   scopeSessionIds: z.array(z.string()).nullable().default(null),
-  /**
-   * The role text pinned at creation time (#80, #81 — unnamed core handle #2).
-   *
-   * Lives on the row because it must be reapplied on restart or resume. The core does not know
-   * what the content means — only the app does. The core just carries it as systemPromptAppend
-   * when spawning.
-   */
+  /** Role text pinned at creation, on the row so restart and resume reapply it (as systemPromptAppend) */
   roleAppend: z.string().nullable().default(null),
   /**
-   * The app that created this session (#81 — unnamed core handle #3, requested by the person on
-   * 2026-09-09).
-   *
-   * All the core knows is **a single id line naming the owner**; only the app knows what it
-   * means. A session of a project stands in that project's sidebar list whatever this says; a
-   * session with no project stands under the row of the user-folder app this names, whether that
-   * app is running or not (docs/apps/views.md "Pinned, in the main area"). One that names no listed app has no sidebar row and
-   * is reached through search, the palette and the inbox.
-   *
-   * An app cannot write this itself: the value comes from the registered id of the app that
-   * called the tool.
+   * The app that created this session: the host sets it from the calling app's registered id, never the app. Where a
+   * session with no project stands in the sidebar: docs/apps/views.md "Pinned, in the main area".
    */
   appId: AppId.nullable().default(null),
   /**
-   * The manager session this session hangs off of (#69). Null means top-level (the usual case).
-   *
-   * A worktree session must always stand under a manager — without that attachment, the
-   * number-one documented failure in this category happens (an orphaned worktree: Vibe Kanban
-   * #1764/#2335/#1571). A manager is not a new kind of session, just an ordinary session with
-   * children, and the sidebar tree is drawn entirely from this one field.
-   *
-   * Why it lives on the row rather than in the conversation: the attachment must outlive the
-   * session process. Even if the tool-side conversation disappears (deleted externally), this
-   * link remains and the relationship is restored.
+   * The manager this session hangs under; null is top-level. A worktree session always has one, against orphaned
+   * worktrees (Vibe Kanban's top documented failure). On the row, so the link outlives the tool's conversation.
    */
   parentSessionId: z.string().nullable().default(null),
   /**
-   * The same-project session that started this agent (`start_agent`, #561). Person-created and app
-   * sessions have no owner. Cross-project tasks keep their asking session in the conversation's
-   * `from` instead (#614).
-   *
-   * **The meaning moved, the field did not (#844).** Until #614 it named the session of another
-   * project that asked for this one through ask_project (#371), and store step v48 copied a former
-   * worktree manager's `parent_session_id` into it. Store step v55 clears the cross-project rows
-   * (the host start did until #844). A window of beta.20 or before reads a start_agent child as
-   * "asked by" its parent, which is now what it means; a host of beta.20 or before still writes the
-   * old meaning, and a row it writes after v55 keeps it (agent-host/store-migrations.md "Migration steps: expand, then contract").
+   * The same-project session that started this one (`start_agent`); a cross-project ask keeps its asker in the
+   * conversation's `from`. What an older peer reads: docs/protocol.md §3.3 ("Fields whose meaning moved").
    */
   askedBy: z.string().nullable().optional(),
-  /**
-   * The session whose conversation this one was forked from (#677): another session asked a busy session for work and
-   * chose a fork, a sub-session starting from a copy of its conversation. The sidebar hangs it under that session;
-   * the requester is `askedBy`. Absent from a host that predates it.
-   */
+  /** The session this one was forked from (a busy session's copy of its conversation); the sidebar hangs it there */
   forkedFrom: z.string().nullable().optional(),
-  /**
-   * A session on a linked computer (this host's hub) started this one (#1273, `CreateSessionParams.fromHub`): the
-   * sidebar row and the header show its preset, here and on that computer. Absent from a host that predates it.
-   */
+  /** Started by a session on a linked computer (`CreateSessionParams.fromHub`): row and header show its preset */
   startedFromHub: z.boolean().optional(),
   ...machineField,
   /**
-   * The hub could not reach this session's machine, and answered from what it last heard (#82): the
-   * headers mirror. `live` is then the last-known value, not a fact, so the UI must neither drop the
-   * session nor try to wake it; it waits for that machine's `machine_resync`.
+   * The hub could not reach this session's machine and answered from what it last heard. `live` is then last-known,
+   * so the UI neither drops nor wakes the session; it waits for that machine's `machine_resync`.
    */
   unreachable: z.boolean().optional(),
   /**
-   * **Facts valid only while the process is alive** — these come from the host's memory, not
-   * the database.
-   *
-   * While these fields were missing, refetching the list after a reconnect or app restart could
-   * show state=waiting_approval with **no payload to draw the card from**, so the approval card
-   * never appeared, and with no requestId there was no way to respond — the agent stayed blocked
-   * forever (measured). If the host process itself restarts, the fact really is gone, so the
-   * default (null/[]) is correct.
+   * Live-only, from host memory. Without it a list read after a reconnect shows waiting_approval with no card and no
+   * requestId, and the agent stays blocked (measured). After a host restart the fact is gone, so the default is right.
    */
   pendingApproval: z.object({ requestId: z.string(), detail: ApprovalDetail }).nullable().default(null),
-  /**
-   * Why the last turn did not run to its end (#698), until the session works again. Stored (`sessions.interruption`,
-   * store v53) except for `reconnecting`, which describes the running process. Absent from a host that predates it;
-   * a value this build cannot read is dropped rather than failing the whole row.
-   */
+  /** Stored, except `reconnecting` (the running process); a value this build cannot read drops alone, not the row */
   interruption: Interruption.nullable().optional().catch(null),
   pendingQuestions: z.array(z.object({ requestId: z.string(), questions: z.array(Question) })).default([]),
   activity: SessionActivity.nullable().default(null),
@@ -246,24 +131,17 @@ export const SessionInfo = z.object({
       resumeAt: z.string().optional(),
       usedPercent: z.number().optional(),
       windowMins: z.number().optional(),
-      /** A Codex credits or spend limit (#1415): it does not reset with time, so Centralu never continues it by itself */
+      /** A Codex credits or spend limit: it does not reset with time, so Centralu never continues it by itself */
       credits: z.boolean().optional(),
     })
     .nullable()
     .default(null),
   usage: TokenUsage.nullable().default(null),
-  /**
-   * How full the conversation's context is — **the one above that survives a restart** (#48).
-   *
-   * It sits with the live-only fields because it arrives the same way (an event, once a turn),
-   * but it is not a fact about our process: it describes the conversation, which belongs to the
-   * tool and outlives us. So the store writes it down and reads it back (schema v17), and
-   * `null` here means "this session has never reported one" rather than "we forgot".
-   */
+  /** Stored, unlike the live-only fields: it describes the conversation, which outlives the process; null: never reported */
   context: z
     .object({
       used: z.number(),
-      /** The model's full window when known (`capped` absent), else the tool's own reading of it (#1553, `contextShare`) */
+      /** The model's full window when known (`capped` absent), else the tool's own reading of it (`contextShare`) */
       window: z.number(),
       exactness: z.enum(['exact', 'estimate']),
       /** `window` is a floor under the model's window, not the window itself */
@@ -276,31 +154,20 @@ export const SessionInfo = z.object({
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
 
-/**
- * The fields of a session the state rule writes (`applySessionState`, session-state.ts): a `SessionInfo`, or a copy of one
- * kept elsewhere, read with this schema (a hub's copy of a linked machine's sessions, #2288)
- */
+/** The fields the state rule writes (`applySessionState`), also read from a hub's copy of a linked machine's sessions */
 export const LiveStateFields = SessionInfo.pick({ state: true, waitingSince: true, pendingApproval: true, pendingQuestions: true, activity: true, limit: true })
 export type LiveStateFields = z.infer<typeof LiveStateFields>
 
 /**
- * When a settings change reached the running process (#164) — so the screen can say exactly
- * what happened.
- *
- *   restarted    The tool process was just replaced (an idle session)
- *   after_turn   The running turn is not interrupted — the process is replaced once this turn ends (working, waiting_approval)
- *   saved        Only saved — either there is no running process (this value appears when the session wakes up) or it is already running with the same values
+ * How a settings change reached the running process: `restarted` (an idle session's process was replaced),
+ * `after_turn` (replaced once the running turn ends), `saved` (no process, or it already runs with these values).
  */
 export const SettingsApplied = z.enum(['restarted', 'after_turn', 'saved'])
 export type SettingsApplied = z.infer<typeof SettingsApplied>
 export const UpdateSettingsResult = SessionInfo.extend({ applied: SettingsApplied.optional() })
 export type UpdateSettingsResult = z.infer<typeof UpdateSettingsResult>
 
-/**
- * The initial values for the live-only fields. Used when assembling a SessionInfo from a store
- * row or a new session — listing them by hand risks a build that still compiles with one spot
- * left out whenever a field is added.
- */
+/** The live-only fields' initial values, one list so an added field cannot be left out at one spot that builds a row */
 export function sessionLiveDefaults(): Pick<
   SessionInfo,
   | 'pendingApproval'
@@ -322,15 +189,10 @@ export function sessionLiveDefaults(): Pick<
     limit: null,
     usage: null,
     context: null,
-    // Merge status (#69) also lives here — it is a fact derived from git, re-judged on startup
     worktreeMerged: false,
-    // PR status (#76 stage 3) follows the same principle — measured again through gh
     worktreePr: null,
-    // The goal (2026-09-07) follows the same principle — the tool tells us again
     goal: null,
-    // Background tasks (#290) live in the tool process, and a new one starts with none
     backgroundTasks: [],
-    // The CLI version (#297) belongs to the process too; a new one reports its own
     agentVersion: null,
   }
 }
@@ -339,11 +201,7 @@ export const StoredMessage = z.object({
   sessionId: z.string(),
   seq: z.number(),
   role: z.enum(['user', 'assistant', 'system']),
-  /*
-   * `app_view`: the fact that some app's screen stood up (or was refused) under this tool card
-   * (M4 B-1). There is no body — this is only the basis for a reopened UI to plant a placeholder
-   * there (`app_view` in events.ts).
-   */
+  // `app_view`: an app's screen stood up (or was refused) under this tool card; no body, only a placeholder's place
   kind: z.enum(['text', 'tool_call', 'tool_result', 'approval', 'marker', 'image', 'reasoning', 'app_view']),
   payload: z.unknown(),
   ts: z.number(),
@@ -351,71 +209,56 @@ export const StoredMessage = z.object({
 export type StoredMessage = z.infer<typeof StoredMessage>
 
 /**
- * How many of a subagent's steps one `messages.subagent` page carries (#222). A launch card's steps come as cards
- * (`summary` only), so a page is at most a few hundred kilobytes: 251 measured subagent runs averaged 80 tool calls
- * each, so most fit in one page.
+ * A subagent's steps per `messages.subagent` page; steps come as cards (`summary` only), so a page is at most a few
+ * hundred kilobytes. 251 measured subagent runs averaged 80 tool calls, so most fit in one page.
  */
 export const SUBAGENT_STEPS_PAGE = 500
 
 /**
- * A session in the session archive (#204), as Settings lists it. The concept was called "the trash" until #1404;
- * the names `Trashed*` and `trash.*` stay because the protocol only grows. Say "archive" in anything a person or an
- * agent reads.
- *
- * Archiving a session moves it here instead of destroying it; only Settings deletes it for good (or the Assistant, after the person's card, #1219). The list says what
- * each one still holds and what goes with it, because an archive that shows names but not contents is the hidden store
- * the retired hide-a-session feature was (FR-20): it had a way in and no way out, and nobody could see what it kept.
+ * A session in the archive, as Settings lists it. The wire keeps "trash" (the protocol only grows); people and agents
+ * read "archive". Only Settings, or the Assistant after the person's card, deletes for good. It lists what each one
+ * holds, since an archive of names only is a hidden store with no way out (FR-20).
  */
 export const TrashedSession = z.object({
   id: SessionId,
   name: z.string(),
   tool: ToolName,
-  /**
-   * Where it came from, null for a session that had no project. `exists` is false when that project has been
-   * deleted since: restoring then registers the folder again, and refuses if the folder is gone too.
-   */
+  /** `exists` false: the project was deleted; restoring registers the folder again, and refuses if it is gone */
   project: z
     .object({ id: z.string(), name: z.string(), path: z.string().nullable(), exists: z.boolean() })
     .nullable(),
   deletedAt: z.number(),
   messages: z.number(),
-  /** What it takes on this machine: its messages in the store, and its attachments and handoff note in the data folder */
+  /** Its messages in the store, and its attachments and handoff note in the data folder */
   bytes: z.number(),
-  /**
-   * The tool's own conversation file (Claude JSONL, Codex rollout), which stays where the tool keeps it while the
-   * session is in the trash: `remove` if deleting for good deletes it too, as the person chose; `keep` if it stays
-   * in the tool; `none` if the session never had one.
-   */
+  /** The tool's own file (Claude JSONL, Codex rollout): `remove` if deleting for good deletes it, else `keep`, or `none` */
   conversationFile: z.enum(['remove', 'keep', 'none']),
-  /** The session's worktree, kept in place while it is in the trash; `remove` if deleting for good removes it */
+  /** Kept in place while archived; `remove` if deleting for good removes it */
   worktree: z.object({ path: z.string(), branch: z.string(), remove: z.boolean() }).nullable(),
   ...machineField,
 })
 export type TrashedSession = z.infer<typeof TrashedSession>
 
 /**
- * An app-agent run kept in the trash (#378), as Settings lists it.
- *
- * A session an app stood up with `run_agent` is deleted once its run ends cleanly and nobody took part in it; what it
- * did stays here as the run's record: the app's request, the answer, and the whole conversation with its tool calls
- * (owner decision, 2026-10-06). The record is self-contained, so it outlives the app's run log line and the project.
- * It leaves the store when the person deletes it here, or when the run log's 30-day retention passes.
+ * An app-agent run's record. A `run_agent` session that ends cleanly with nobody taking part is deleted; this keeps
+ * the request, the answer and the whole conversation, self-contained so it outlives the run log line and the project.
+ * It goes when the person deletes it or the run log's 30-day retention passes.
  */
 export const TrashedRun = z.object({
   runId: z.string(),
-  /** The app that asked; `projectName` is null for an app in the user folder */
+  /** `projectName` is null for an app in the user folder */
   app: z.object({
     id: z.string(),
     name: z.string(),
     projectId: z.string().nullable(),
     projectName: z.string().nullable(),
   }),
-  /** The name the deleted session had (`<app> · agent HH:MM`) */
+  /** `<app> · agent HH:MM` */
   sessionName: z.string(),
   tool: ToolName,
   status: z.string(),
-  /** When the run started, and when its session was deleted and the record kept */
   startedAt: z.number(),
+  /** When the session was deleted and this record kept */
   keptAt: z.number(),
   durationMs: z.number().nullable(),
   tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
@@ -423,20 +266,15 @@ export const TrashedRun = z.object({
   requestPreview: z.string(),
   messages: z.number(),
   bytes: z.number(),
-  /** The linked machine whose record it is (#378 review): the run, and the delete, happened where its app runs */
+  /** The run, and the delete, happen on the machine where its app runs */
   ...machineField,
 })
 export type TrashedRun = z.infer<typeof TrashedRun>
 
 /**
- * What one session's subagent steps take (#418): the steps the native subagents it launched took (Claude Code's
- * `Agent`, Codex's `spawn_agent`), kept under their launch cards (#222). They are often most of what a long session
- * holds (the measured case: 46 MB of a 237 MB store, all from one session still in use), so Settings shows them per
- * session and lets them go to the trash without the conversation.
- *
- *   runs    the launch cards whose steps these are
- *   steps   the steps, every run together
- *   bytes   their size in the store
+ * A session's native subagent steps (Claude Code's `Agent`, Codex's `spawn_agent`): often most of a store (measured:
+ * 46 MB of 237 MB, from one session in use), so Settings shows them per session and archives them alone.
+ * `runs` counts the launch cards, `steps` every run's steps, `bytes` their size in the store.
  */
 export const SubagentStepsHeld = z.object({
   sessionId: SessionId,
@@ -450,10 +288,6 @@ export const SubagentStepsHeld = z.object({
 })
 export type SubagentStepsHeld = z.infer<typeof SubagentStepsHeld>
 
-/**
- * A session's subagent steps in the trash (#418), while the session itself stays. `deletedAt` is the latest move: steps
- * moved there twice are one entry. Restoring puts them back under their cards; deleting them for good is the trash's
- * rule, as for a session (only the person, from Settings, one at a time or by emptying the trash).
- */
+/** A staying session's archived subagent steps; `deletedAt` is the latest move, and only Settings deletes for good */
 export const TrashedSubagentSteps = SubagentStepsHeld.extend({ deletedAt: z.number() })
 export type TrashedSubagentSteps = z.infer<typeof TrashedSubagentSteps>

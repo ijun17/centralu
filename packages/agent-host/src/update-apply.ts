@@ -2,26 +2,16 @@ import { randomUUID } from 'node:crypto'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * An agent's "Apply now" (#665): `update_centralu` action "apply" asks the windows to relaunch into the installed build,
- * the way the window's own button does (#352), and answers once a relaunch started or says why not.
- *
- * Only a window can relaunch: the host has no relaunch of its own, and the checks (installed build newer than the
- * window, the bundle verified, a relaunch port that the keeper holds the host for) are the window's. So the host
- * asks, in two steps over the event stream:
- *
- *   1. `update_apply_request`: every window makes the button's checks and answers (`updates.answerApply`). The first
- *      that is ready gets a ticket; nothing relaunches yet. With no window ready the call ends here, with the windows'
- *      reasons, before the person is asked anything.
- *   2. After the caller's consent, the windows are asked again (a minute on a card can change what is installed or
- *      which windows are open), and `update_apply_go` names the first ready window's ticket. That window alone runs its
- *      "Apply now" and reports (`updates.reportApply`): "started" right before it relaunches, then an error or done.
- *      Its connection ending counts as the relaunch only after "started", since a relaunching window can close before
- *      its last report is written; ending before it is answered as not known.
- *
- * One window relaunches: tickets go to one answer per request, and the keeper's relaunch (`apply_update_relaunch`) is
- * the one owner of the swap that follows, as it is for the button. A replayed request or go (a window reconnecting
- * within this host's event log) finds no request waiting, or holds no ticket, and starts nothing. A host swap in the
- * middle ends this host and its requests: the next host knows none of them, so a late answer gets no ticket.
+ * An agent's "Apply now" (#665): `update_centralu` action "apply" asks the windows to relaunch into the installed build as the
+ * window's own button does (#352), answering once a relaunch started or saying why not. Only a window can relaunch (its checks:
+ * installed build newer, bundle verified, a relaunch port the keeper holds the host for), so the host asks in two steps over
+ * the event stream. `update_apply_request`: every window makes the button's checks and answers (`updates.answerApply`); the
+ * first ready gets a ticket and nothing relaunches yet; with none ready the call ends with their reasons before the person is
+ * asked. After the caller's consent the windows are asked again (a minute on a card can change what is installed) and
+ * `update_apply_go` names the first ready window's ticket; that window alone runs "Apply now" and reports
+ * (`updates.reportApply`): "started" right before it relaunches. Its connection ending counts as the relaunch only after
+ * "started". A replayed request or go finds no request waiting or holds no ticket and starts nothing; the keeper's relaunch
+ * owns the swap
  */
 export type ApplyProbe =
   | { ready: true; requestId: string; ticket: string; client: number; version?: string }
@@ -79,10 +69,10 @@ export class UpdateApplyBroker {
   ) {}
 
   /**
-   * The whole call: ask, then the caller's consent (null to go on, or why not), then ask again and relaunch one window.
-   * `consent` runs only when a window was ready, so "nothing installed" never raises a card.
-   * `unasked` is for a consent that went without a card (#1509): read again after the second probe, it answers null to go on
-   * (the window then also waits out typing), a reason to stop, or undefined when a person's card stood for it.
+   * The whole call: ask, then the caller's consent (null to go on, or why not), then ask again and relaunch one window. `consent`
+   * runs only when a window was ready, so "nothing installed" raises no card. `unasked` is for a consent that went without a card
+   * (#1509): read after the second probe, null to go on (the window then also waits out typing), a reason to stop, or undefined
+   * when a person's card stood for it
    */
   async apply(consent: () => Promise<string | null>, unasked?: () => string | null | undefined): Promise<ApplyOutcome> {
     const first = await this.probe()
@@ -136,10 +126,10 @@ export class UpdateApplyBroker {
   }
 
   /**
-   * Tells the picked window to relaunch and waits for its outcome (#665 review). The window says "started" right before
-   * it relaunches; only after that does its connection ending count as the relaunch. Ending before it — a crash, a
-   * reload, a lost socket — is not a success: the window is given `goneGraceMs` to come back and report under the same
-   * ticket, then the answer says whether it relaunched is not known.
+   * Tells the picked window to relaunch and waits for its outcome. The window says "started" right before relaunching; only then
+   * does its connection ending count as the relaunch. Ending before (a crash, a reload, a lost socket) is not a success: the
+   * window gets `goneGraceMs` to come back and report under the same ticket, then the answer says whether it relaunched is not
+   * known
    */
   go(ready: Extract<ApplyProbe, { ready: true }>, unasked = false): Promise<ApplyOutcome> {
     return new Promise<ApplyOutcome>((resolve) => {
@@ -172,9 +162,9 @@ export class UpdateApplyBroker {
   }
 
   /**
-   * `updates.reportApply`: the picked window's outcome. Matched by ticket, not by connection: only that window was given
-   * it, and a window that reconnected has a new connection number. A report naming another ticket, or a settled one, is
-   * dropped. The connection it came on is the one whose end is watched from then on.
+   * `updates.reportApply`: the picked window's outcome, matched by ticket, not connection (only that window was given it, and a
+   * reconnected window has a new connection number); a report naming another or a settled ticket is dropped. The connection it
+   * came on is the one whose end is watched from then on
    */
   report(client: number, r: { requestId: string; ticket: string; started?: boolean; error?: string }): void {
     const g = this.goes.get(r.ticket)

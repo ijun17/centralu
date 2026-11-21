@@ -155,7 +155,7 @@ describe('Centralu update tool', () => {
     expect(checkedAfterFailure.text).toBe('Centralu update failed: npm did not serve 0.1.1 within 10 minutes. update_centralu(action="install") tries again.')
     const assistantAfterFailure = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'check' }, { sessionId: 's', profile: 'assistant' })
     expect(assistantAfterFailure.text).toBe('Centralu update failed: EACCES. centralu_run(command="update_centralu", args={action: "install"}) tries again.')
-    // #2279 review: a check during the install, npm's wait included, says it is installing, not that the release is available
+    // #2279: a check during the install, npm's wait included, says it is installing, not that the release is available
     for (const phase of ['updating', 'waiting_for_npm'] as const) {
       const checkedDuringInstall = await runCentraluTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase }) }), 'update_centralu', { action: 'check' })
       expect(checkedDuringInstall.text, phase).toBe('Installing Centralu 0.1.1. The person applies the installed build from Centralu; their automatic-update setting was not changed.')
@@ -391,7 +391,7 @@ describe('the reader set', () => {
 
   // #1948: every report an agent writes is mail, so the line on saying what a claim rests on is in the words of every seat that has mail
   it('says in the mail tool, for every seat that has it as a tool or a command, what a report says about its claims', async () => {
-    const sentence = 'In a report, say what each claim was checked against, and what was not.'
+    const sentence = 'In a report, say what each claim rests on and what you did not check.'
     const seats = TOOL_PROFILES.filter((p) => toolDefsFor(p).some((t) => t.name === 'mail'))
     expect(seats).toContain('reader')
     for (const p of seats) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description, p).toContain(sentence)

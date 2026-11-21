@@ -1,13 +1,9 @@
 /**
- * How many times each view may reopen on its own within a window (M4 C-4, `followAppCode` in the store).
- *
- * `allow` answers for one view's key and records the reopen when it says yes. A view that was closed, or whose
- * session was deleted, never asks again, so every key whose reopens all fall outside the window is swept on each
- * ask: otherwise a key stays for the life of the window for every view that ever reopened.
+ * How many times each view may reopen on its own within a window (apps-plan C-4, `followAppCode`). Each ask sweeps
+ * the keys whose reopens all fall outside the window: a closed view never asks again, so its key would stay forever.
  */
 export type ReloadBudget = {
   allow(key: string, now?: number): boolean
-  /** How many views are still counted */
   size(): number
 }
 

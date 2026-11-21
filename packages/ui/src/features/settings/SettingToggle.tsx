@@ -3,20 +3,10 @@ import { Switch } from '../../components/Switch.jsx'
 import { SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * One switch of Settings (#850 item 12): a row of a settings card, its label and a short line saying what it does on
- * the left, the switch on the right.
- *
- * About a dozen rows wrote this by hand, and only some guarded a change still saving: the background switch took a
- * second click while the keeper had not answered the first, so the two changes raced. Here a change that returns a
- * promise disables the switch until it settles, for every switch.
- *
- * The switch is a checkbox underneath (`Switch`): `testId` is on the input itself, so `checked`, `check()` and a
- * click reach it as before, and the label names it.
- *
- * - `hint` goes under the label; `more` is the rest of a longer explanation, behind "More" (still in the page).
- *   `hintInside` is kept for its callers and no longer changes the layout: every hint sits under its label now.
- * - `children` stand beside the switch (a control the switch turns on).
- * - `className` places the row; the rest of its look is this component's.
+ * One Settings switch (#850 item 12): a card row, label and hint on the left, switch on the right. A change returning
+ * a promise disables it until settled, or a second click would race the keeper's answer. A checkbox underneath
+ * (`Switch`) with `testId` on the input. `more` is the rest of a long hint behind "More"; `hintInside` changes nothing
+ * in the layout; `children` stand beside the switch; `className` only places the row.
  */
 export function SettingToggle({
   checked,

@@ -1,12 +1,6 @@
 /**
- * What an event of one session draws again in the sidebar: that session's row, and nothing in another project. Every
- * event of every session used to draw every row of every project, a streamed reply's every piece included, and that was
- * most of what the window allocated while sessions worked out of view (perf:memory --steps background).
- *
- * Real React, the real store and the real list (`ProjectSessionList`), so a function it made anew on each draw and
- * passed to its rows would fail this. The node test run has no DOM: the row's element (`SessionRow`) is replaced by one
- * that counts and draws nothing, and the list's one element is drawn into a stand-in that only takes it (as in
- * useChatScroll.test.ts).
+ * An event of one session redraws only its row (redrawing all was most of the window's allocation, perf:memory --steps
+ * background). Real React, store and `ProjectSessionList`; with no DOM, `SessionRow` is a counting stand-in.
  */
 import { act, createElement, Fragment, useMemo } from 'react'
 import { createRoot, type Root } from 'react-dom/client'

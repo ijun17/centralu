@@ -1,19 +1,7 @@
 /**
- * How tall the composer's text is, for fitting the box to it (#744).
- *
- * The box used to be fitted by reading its own `scrollHeight` at `height: auto`. At that height
- * the box is one row tall, so a text of several rows makes it show a scrollbar, and where a
- * scrollbar takes room (WebKit with classic scrollbars) the text wraps narrower and the box laid
- * the text out one row longer than it ends up: it came out one blank row too tall at some
- * lengths, and the row count read off its height disagreed with the rows on screen (the up arrow
- * went to history a wrapped line early). WebKit even keeps that narrower layout after the
- * scrollbar is gone (`overflow: hidden` on the box does not undo it), so the box itself cannot be
- * asked.
- *
- * So the text is laid out in **a hidden clone of the textarea that never has a scrollbar**: the
- * same font and width, `overflow: hidden`, no height of its own. A textarea rather than a `<div>`,
- * because that is the widget whose wrapping and trailing newline are being measured. The real
- * textarea is only read (its width and its styles), never changed.
+ * The composer's text height, from a hidden textarea clone that never has a scrollbar (#744): in WebKit with classic
+ * scrollbars the box at `height: auto` wraps narrower, one row too tall, and keeps that layout even under
+ * `overflow: hidden`. A textarea, as its wrapping and trailing newline are what is measured.
  */
 
 let probe: HTMLTextAreaElement | null = null

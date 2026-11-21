@@ -26,6 +26,7 @@ export { gridAppViewKey, isApp } from './appKeys.js'
 import { screenOf } from './screens.js'
 import { cachedThemeFiles } from '../app/theme.js'
 export {
+  evidenceProjectOf,
   gridScreenAppKeys,
   newSessionProjectOf,
   openProjectOf,
@@ -69,21 +70,11 @@ import { sendActions } from './sessions/send.js'
 export { composerTarget, droppedQuestionsText } from './sessions/send.js'
 import { focusActions } from './sessions/focus.js'
 
-/**
- * The store only does the wiring — all state-change logic lives in core (docs/state-management.md
- * §2). Commands go out through ports, and state updates come in only as events routed through the
- * core reducer (CQRS-lite: no optimistic updates).
- */
+// The store only wires; state changes come back as events through the core reducer (docs/state-management.md §1, §2).
 
-/**
- * The tab set and arrangement live in panelLayout.ts (#20) — the single `panelTab`
- * value became a group structure when the panel learned to split, and the reasoning
- * for what the tabs *are* (e.g. why `history` sits beside `git` rather than inside it,
- * #21) moved with the type. Re-exported so screens keep one import site for the store.
- */
 export type { PanelTab } from './panelLayout.js'
 
-/** Registers a drawn frame in `inlineFrames` (apps.ts, with the reason it exists); here because each change bumps the store's counter */
+/** Here because each change bumps the store's counter; why `inlineFrames` exists is in apps.ts */
 export function registerInlineFrame(sessionId: string, callId: string, frame: InlineFrame): () => void {
   const key = inlineFrameKey(sessionId, callId)
   inlineFrames.set(key, frame)
@@ -96,46 +87,16 @@ export function registerInlineFrame(sessionId: string, callId: string, frame: In
 }
 
 /**
- * The root's CSS zoom factor (a protocol `TEXT_SIZES` value; the middle of the five is the default). Used to convert
- * between real pixels and zoom coordinates.
- *
- * It is a zoom, not a font-only scale: switching to rem would be a full rewrite, because every bit of text in this
- * codebase is fixed in px (text-xs…), and if only the text grows while the panel does not, line wrapping breaks first
- * in a narrow grid panel. Scaling the whole screen by the same factor is predictable, because it follows the same rule
- * as the OS's own display scaling.
+ * The root's CSS zoom (a protocol `TEXT_SIZES` value). A zoom, not a text-only scale: all text is fixed in px, and text
+ * that grows alone breaks wrapping in a narrow grid panel first. It scales as the OS's display scaling does.
  */
 export function useTextZoom(): number {
   return useStore((s) => s.prefs.textSize)
 }
 
 /**
- * A conversation item's unique number. This value is both the React key and the virtual scroll's
- * item key.
- *
- * **Must never overlap an item read back from the store.** An overlap means two items share the
- * same key, and the virtual scroll draws them both in the same spot, mashing the text together as
- * if it had run on. (This was in fact the reported symptom "it sometimes renders strangely": a
- * session that had loaded history — stored seq 1..N — started its own seq count over at 1 the
- * moment a new message was appended.)
- * So this number is pushed above every stored item as it is brought in.
- */
-
-/**
- * Which tools the Usage modal should report on — deduplicated, in screen order (#26).
- *
- * Usage is an **account** property that differs per tool, so the only honest question is
- * "which tools are on screen right now". The old picker asked a narrower one — *the*
- * focused session's tool, then the project default, then a hardcoded `'claude'` — and
- * that question has no answer in the grid: `focusedSessionId` does not name one of nine
- * panels, so a grid of Codex agents fell through to Claude's limits with nothing on
- * screen saying a substitution had happened.
- *
- * Deduplicated because usage belongs to the account, not the session: two Claude panels
- * share one number, and printing it twice would suggest they are two separate budgets.
- *
- * **An empty result is a real result.** The `'claude'` fallback is gone — it turned
- * "we cannot tell" into "here is the wrong tool", which is the failure the caller has no
- * way to detect. The modal says it does not know instead.
+ * The tools on screen, deduplicated (#26): usage belongs to the account, so two Claude panels share one budget. Empty is
+ * a real answer: a fallback tool would be the wrong one, and the modal says it does not know.
  */
 export function usageTools(s: AppState): ToolName[] {
   const out: ToolName[] = []
@@ -149,17 +110,13 @@ export function usageTools(s: AppState): ToolName[] {
     return out
   }
 
-  // Focus (and the Assistant) still look at one conversation — unchanged behaviour
   const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
   if (session) return [session.tool]
   add(s.focusedProjectId ? (s.projects[s.focusedProjectId]?.defaultTool ?? undefined) : undefined)
   return out
 }
 
-/**
- * The store's `set`, raising `toastAt` with every write that says a toast (#842 item 14). The actions write `toast`
- * directly in well over a hundred places; stamping it here keeps the count right for all of them.
- */
+/** Raises `toastAt` with every write that says a toast (#842): over a hundred places write `toast` directly */
 export function stampToasts(set: StoreSet): StoreSet {
   return ((partial: Parameters<StoreSet>[0], replace?: boolean) =>
     (set as (p: unknown, r?: boolean) => void)((st: AppState) => {
@@ -171,9 +128,8 @@ export function stampToasts(set: StoreSet): StoreSet {
 }
 
 /**
- * This window's own saves of the preferences that are on their way (#1306). Every save is announced to every window,
- * this one too (`prefs_changed`), and reading the record again while one is in flight would put an older reading over
- * the change (a fold saved meanwhile may not be in it yet, #666): the reading waits for the saves, then happens.
+ * This window's preference saves in flight (#1306). Its own `prefs_changed` comes back too, and a read during a save
+ * could put an older record over the change (#666), so the read waits for the saves.
  */
 let prefsSaves = 0
 let prefsRefreshWaiting = false
@@ -327,14 +283,14 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     async refreshPrefs() {
       const platform = get().platform
       if (!platform) return
-      // A save of this window's own is on its way: the reading would be older than it, so it waits for the save
+      // A save of this window's is on its way: the read waits for it
       if (prefsSaves > 0) {
         prefsRefreshWaiting = true
         return
       }
       try {
         const prefs = parseUiPreferences(await platform.prefs.load())
-        // A save started while the reading was on its way: the reading may be older than it, so it is read again after
+        // A save started meanwhile: this read may be older, so it is read again after
         if (prefsSaves > 0) {
           prefsRefreshWaiting = true
           return
@@ -352,11 +308,8 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
       prefsSaves++
       try {
         const saved = parseUiPreferences(await platform.prefs.save(patch))
-        /*
-         * Only what this patch wrote is taken from the answer (#666). The answer is the host's whole record at that
-         * moment: a host from before a field answers without it (so reading it whole would reset the field to its default
-         * on every unrelated save), and a fold saved meanwhile may not be in it yet.
-         */
+        // Only what this patch wrote (#666): a host from before a field answers without it, and a fold saved meanwhile
+        // may be missing from its record
         set((s) => ({
           prefs: {
             ...s.prefs,
@@ -417,11 +370,7 @@ export function usableThemeFiles(s: {
   return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
 }
 
-/**
- * Records every screen change (#374), from whatever action made it — the one place history is written. A change
- * inside a screen (a keystroke, a session picked inside the grid, a panel moved) leaves the screen the same and adds
- * nothing (`visit` folds a repeat). Closing Settings steps back over it (`closeLayer`).
- */
+/** The one place history is written (docs/state-management.md §5a) */
 function recordScreen(next: AppState, prev: AppState): void {
   if (navigating || restoringWorkspace) return
   const now = screenOf(next)

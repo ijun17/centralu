@@ -53,8 +53,8 @@ describe('projects', () => {
    * that anywhere; case, the drive letter's included, and a short name (`RUNNER~1`) only where paths fold case.
    */
   /*
-   * #849 review: the folder match folded case with JS's rules, where the Kelvin sign (U+212A) lowers to k. Windows
-   * keeps the two apart, so two folders became one project. Only the real spelling on disk is compared now.
+   * #849: JS's case folding lowers the Kelvin sign (U+212A) to k, while Windows keeps the two folders apart, so only the real
+   * spelling on disk is compared.
    */
   it('keeps two folders apart whose names only JS folds together', async () => {
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-two-projects-')))
@@ -152,23 +152,26 @@ describe('projects', () => {
   }, 30_000 * SLOW)
 
   /*
-   * The last tool chosen becomes that project's default (2026-08-27 flow review).
-   *
-   * default_tool was hardcoded to 'claude' when a project was created, and there was **no place**
-   * that ever updated it afterward — a person using codex had to reselect it forever, on every new
-   * session. The fact that matters here is not the settings screen but the act of creating a
-   * session, so both the UI and the Assistant get the same rule.
+   * The tool the person last picked in their window becomes the project's default; a start an agent, a script or a
+   * linked hub makes never moves it (#2350).
    */
-  it('creating a session makes that tool the project default', async () => {
+  it('a session the person creates in their window makes that tool the project default; no other start does', async () => {
     const p = await addProject()
     const list = async () => ((await rpc('projects.list', {})) as { id: string; defaultTool: string }[])
+    const window = { client: 1, rights: 'full' as const, window: true as const }
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
 
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' }, window)
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('codex')
 
     // Switching back follows the same path — the last choice always wins.
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' }, window)
+    expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
+
+    // A linked hub (a full credential, no window), a script (the limited one) and the host's own starts do not move it
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex', fromHub: { callerPreset: 'normal' } }, { client: 2, rights: 'full' })
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' }, { client: 3, rights: 'limited', label: 'script' })
+    await mgr.createSession({ projectId: p.id, cwd: p.path, tool: 'codex', permissionPreset: 'normal' })
     expect((await list()).find((x) => x.id === p.id)!.defaultTool).toBe('claude')
   })
 })
@@ -209,9 +212,8 @@ describe('project trust → session (#92)', () => {
 })
 
 /**
- * M2.6 dogfooding. "Hide (archive)" used to sit alongside this — dropped on 2026-09-02: there was
- * a door in (`d` in the inbox) but no door out, so to a person it looked the same as delete.
- * All that is left is delete, which makes what delete actually erases matter more.
+ * M2.6 dogfooding. There is no "Hide (archive)" beside this: it would be a door in (`d` in the inbox) but no door out, so to a
+ * person it would look the same as delete. Only delete is left, which makes what delete actually erases matter more.
  */
 /*
  * #288 changed the grid's RPC from bare session ids to tagged panels, by expanding it (protocol.md §4) rather than

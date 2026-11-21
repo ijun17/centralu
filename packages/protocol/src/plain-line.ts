@@ -4,17 +4,18 @@ import { oneLineText } from './app-frames.js'
 const LINE_MARKS = /^\s*(?:`{3,}|~{3,}|#{1,6}\s+|>\s?|(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?)+/
 
 /**
- * A message body as one line of plain words (#2228): the thread's subject, the Inbox row's preview and a notification's text.
- * The window draws the body itself as Markdown (`MailThread`); here the marks that would show as stray characters in a line
- * are dropped and their words kept: emphasis, code spans, links and images (the text, not the address), headings, quotes and
- * list bullets. A mark counts only where Markdown would read it as one (the word `snake_case` and `2 * 3` keep theirs).
- * Then `oneLineText` makes it one line, cut to `max`.
+ * A Markdown body as one line of plain words (#2228), for a subject, a preview or a notification. A link keeps its
+ * text, not its address; a mark counts only where Markdown reads one (`snake_case` and `2 * 3` keep theirs).
  */
 export function plainLine(body: string, max: number): string {
   return oneLineText(plainText(body), max)
 }
 
-/** A body's first `lines` lines as plain words, the lines kept (a question's card), cut to `max` characters */
+export function sentenceStart(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** The lines kept, for a question's card */
 export function plainLines(body: string, lines: number, max: number): string {
   const text = plainText(body)
     .split('\n')

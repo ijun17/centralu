@@ -64,7 +64,7 @@ fn check_native_path(path: &Path, final_link_allowed: bool) -> Result<(), Native
         return Err(NativePathError::NonAbsolute(path.to_path_buf()));
     }
     // `components()` drops a trailing separator and a trailing `.`: `link/` and `link/.` would be checked as `link`
-    // (whose final link the entry check allows) while the OS follows the link (#838 review). Refused as written.
+    // (whose final link the entry check allows) while the OS follows the link (#838). Refused as written.
     if ends_like_a_folder(path) {
         return Err(NativePathError::TrailingSeparator(path.to_path_buf()));
     }
@@ -159,8 +159,8 @@ mod tests {
         let temp = TempTree::new("parent-traversal");
         // Built as a string, not with `join`: on Windows `canonicalize` returns a verbatim path
         // (`\\?\C:\…`), and pushing `..` onto a verbatim path pops the last component instead,
-        // so `join("..")` produced no traversal at all and the check below saw only a missing
-        // file (the first Windows run, #14).
+        // so `join("..")` would produce no traversal at all and the check below would see only a
+        // missing file (#14).
         let sep = std::path::MAIN_SEPARATOR;
         let path = PathBuf::from(format!("{}{sep}..{sep}outside.txt", temp.path().display()));
 
@@ -296,7 +296,7 @@ mod tests {
         fs::write(dir.join("file.txt"), b"x").expect("test file should be written");
 
         // Then: the entry check takes the final link as the entry, still refuses a middle one,
-        // traversal and a relative path; the ordinary check refuses the final link as before.
+        // traversal and a relative path; the ordinary check still refuses the final link.
         assert_eq!(assert_safe_native_entry(&link), Ok(()));
         assert!(matches!(assert_safe_native_entry(&pivot.join("file.txt")), Err(NativePathError::SymlinkComponent(p)) if p == pivot));
         assert!(matches!(assert_safe_native_entry(Path::new("relative")), Err(NativePathError::NonAbsolute(_))));

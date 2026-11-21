@@ -3,25 +3,11 @@ import type { CacheStats } from '@cc/protocol/client'
 import type { MockPlatform } from './index.js'
 
 /**
- * A screen meant to be looked at by hand (requested by the person, 2026-09-10).
- *
- * The mock (MockPlatform) exists so that e2e can drive it **programmatically**, so opening it
- * as a person just gives an empty shell: it takes picking a folder on the intro screen,
- * creating a session and typing before even one line stands, and an answer never actually
- * arrives (the mock's `send` only flips the state to working). While fixing the UI, a reload
- * on every save meant redoing that setup every time.
- *
- * So instead, **we lay down a scene.** The moment it opens, projects, sessions, conversations,
- * git and usage are already filled in, and saying something gets an answer flowing. The same
- * scene grows back from the seed even after a reload.
- *
- * One rule: **build it only through the public doors (the ports).** Reaching directly into
- * internal data structures would split the mock's contract from the scene, and then what is
- * seen here would say something different from e2e and from the real thing. Conversation
- * content goes in through `emit` — the exact path events take from the real thing.
+ * A seeded scene to look at by hand (`?demo`): projects, sessions, conversations, git and usage filled in, and an answer
+ * when spoken to. Built only through the ports, conversation through `emit`, so it says what e2e and the host say.
  */
 
-/** The scenes that exist right now. `?demo=<name>` */
+/** `?demo=<name>` */
 const DEMO_SCENES = ['focus', 'grid'] as const
 export type DemoScene = (typeof DEMO_SCENES)[number]
 
@@ -29,32 +15,18 @@ export function isDemoScene(v: string): v is DemoScene {
   return (DEMO_SCENES as readonly string[]).includes(v)
 }
 
-/**
- * Lays down a scene, and makes it answer when spoken to.
- *
- * What it returns are **the things to lay onto the workspace snapshot** (which panels the
- * grid should show, and so on). Since these have to be in the mock before the app reads the
- * snapshot, they are decided here rather than by the caller.
- */
+/** Also writes the workspace snapshot (the grid's panels): it has to be in the mock before the app reads it */
 export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): Promise<void> {
   installResponder(mock)
 
-  // Skips the intro screen — the point of the scene is the screen after it
   mock.assistantTool = 'claude'
 
   const centralu = await mock.projects.add('/Users/you/code/centralu')
   const site = await mock.projects.add('/Users/you/code/landing-site')
-  /*
-   * The project the scene works in has been trusted, as one a person works in would be: a worktree session needs a
-   * trusted project, as on the host (#407, #999). The landing site stays as newly added.
-   */
+  // A worktree session needs a trusted project, as on the host (#407, #999)
   await mock.projects.setTrusted(centralu.id, true)
 
-  /*
-   * Usage — the donut needs a weekly window to show up. Leaves both tools logged in
-   * (`detected` is what decides that — the dashboard only shows a donut for installed and
-   * logged-in tools).
-   */
+  // The donut needs a weekly window, and shows only for tools `detected` as installed and logged in
   mock.usageState = {
     supported: true,
     usage: {
@@ -68,7 +40,6 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     },
   }
 
-  // Git — so the sidebar's change count and the evidence panel's changes/history tabs do not stand empty
   mock.gitState = {
     ...mock.gitState,
     files: [
@@ -114,20 +85,9 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     { command: 'pnpm exec vitest run', label: 'Unit' },
   ])
 
-  /*
-   * The sessions. Their states are deliberately scattered — working (rainbow ring), waiting
-   * for approval, waiting for a question, and asleep all need to be on screen together for
-   * the sidebar, inbox and grid to show what they actually do.
-   */
+  // States scattered on purpose: working, waiting for approval, for a question, and asleep, all on screen at once
   const working = await session(mock, centralu.id, 'claude', 'Finish the collapsed composer')
-  /*
-   * The conversation is long **enough to scroll** (requested by the person, 2026-09-12).
-   *
-   * There are several things a two-line scene cannot show by hand: scroll restoration when
-   * paging up, virtualization, the density of stacked collapsed tool cards, how markdown
-   * renders inside a long answer. So a whole real dogfooding transcript is moved in wholesale
-   * — closer to what this app actually receives than padding it out with made-up chatter.
-   */
+  // A real transcript, long enough to show scroll restoration, virtualization, stacked cards and long markdown
   talk(mock, working.id, [
     ['user', "When the composer rises in the grid, don't let it cover the rainbow ring."],
     ['assistant', "The ring is the panel's border, so it has to sit above the card. Let me check the stacking order first."],
@@ -170,11 +130,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     ['assistant', 'All three pass. I also confirmed the first one fails with the ring removed — so the test really is watching that line.'],
     ['user', 'Good. And can you fetch the resource list one more time?'],
   ])
-  /*
-   * One chunk with no line breaks — the place to check by hand whether the collapsed card's
-   * **height cap** is doing its job. Without the cap, this single line covers the whole
-   * screen (pointed out by the person, 2026-09-12).
-   */
+  // One chunk with no line breaks: checks the collapsed card's height cap by hand
   tool(
     mock,
     working.id,
@@ -211,15 +167,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   })
   mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact', compactAt: 120_000 })
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
-  /*
-   * The plan checklist is sent **after the screen has attached**.
-   *
-   * A plan does not stay in the session list — the real thing (the host) does not write it
-   * into SessionInfo either; it is a fact that lives only while a turn runs, so the UI's
-   * reducer holds it from events. So firing it before anything is drawn means nobody is
-   * listening. The mock does not keep it around just for itself, since that would show a
-   * screen the real thing does not have.
-   */
+  // After the screen attaches: a plan lives only in the reducer, from events, as the host keeps none in SessionInfo
   setTimeout(
     () =>
       mock.emit({
@@ -257,9 +205,8 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   })
 
   /*
-   * The approval is raised **after** the question. "Next waiting" (Ctrl+Shift+A) takes the newest wait, and two waits
-   * raised in the same millisecond tie on the session id, where the approval's, made first, sorts first; raised before
-   * the question, a tick between the two put the question on top and the shortcut opened the wrong session.
+   * The approval after the question: "next waiting" takes the newest wait, and a same-millisecond tie sorts by session
+   * id, the approval's first; raised before, a tick between them put the question on top.
    */
   mock.emit({
     type: 'approval_request',
@@ -287,22 +234,12 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   )
 
   if (scene === 'grid') {
-    // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
     const extra = await session(mock, centralu.id, 'claude', 'Put together the release notes')
-    /*
-     * Left at rest, as the scene has always shown it: the mock's list used to ignore a state_change, so the
-     * "working" said here never reached the screen. Now that the mock keeps the host's rules (#428), saying it would
-     * put a second panel mid-response.
-     */
+    // At rest: the mock keeps the host's rules (#428), so "working" would put a second panel mid-response
     talk(mock, extra.id, [['user', "Write release notes from this week's commits."]])
     const panels = [working.id, approving.id, asking.id, extra.id]
     await mock.agents.setGridView(panels.map((sessionId) => ({ kind: 'session' as const, sessionId })))
-    /*
-     * If the scene's name is `grid`, opens it in grid view. The way of looking belongs to the
-     * workspace snapshot, so it is written here — since the mock's ids grow in the same order
-     * from the seed and **stay the same across a reload**, a layout the person changed by hand
-     * also survives into the next load.
-     */
+    // The mock's ids grow from the seed in the same order, so a layout changed by hand survives a reload
     const saved = (await mock.workspace.load()) ?? {}
     await mock.workspace.save({ ...saved, view: 'grid', focusedSessionId: working.id })
   } else {
@@ -311,10 +248,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   }
 }
 
-/**
- * The prompt cache the gauge's dropdown shows: a Claude that mostly hits and rebuilt a few times, a Codex that reports
- * reads only. Counted since well before both windows, so they show under their own names.
- */
+/** Codex reports reads only; counted since before both windows, so they show under their own names */
 function demoCache(
   claude: { sessionId: string; name: string; write: number; causes: Record<string, number> }[],
   codex: { sessionId: string; name: string; input: number }[],
@@ -340,7 +274,7 @@ function demoCache(
         rebuilds: n(3, scale) + 3 * n(1, scale),
         rebuildCauses: { expired: n(3, scale), model_change: n(1, scale), compaction: n(1, scale), unknown: n(1, scale) },
         expiredIdleMs: { min: 64 * 60_000, max: 3 * 3600_000 },
-        // What the rebuilds wrote, and the cache cost weighted by the price ratios (reads 0.1, writes 1.25 to 2): writes are ~43% of it
+        // Price ratios: reads 0.1, writes 1.25 to 2; writes are ~43% of the cost
         rebuildTokens: n(1_020_000, scale),
         cacheReadCost: n(3_120_000, scale),
         cacheWriteCost: n(2_380_000, scale),
@@ -383,14 +317,12 @@ function demoCache(
   }
 }
 
-/** One session — creates it, and returns the id so the screen can pick it */
 async function session(mock: MockPlatform, projectId: string, tool: 'claude' | 'codex', name: string) {
   const info = await mock.agents.createSession({ projectId, cwd: '', tool, permissionPreset: 'normal' })
   await mock.agents.rename(info.id, name)
   return info
 }
 
-/** One past tool call — the call and its result are a pair, so they are bundled here */
 function tool(
   mock: MockPlatform,
   sessionId: string,
@@ -403,7 +335,7 @@ function tool(
   mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: result })
 }
 
-/** A few lines of past conversation — sent in as events (the exact path they come by in the real thing) */
+/** As events: the path they take from the host */
 function talk(mock: MockPlatform, sessionId: string, lines: ['user' | 'assistant', string][]): void {
   for (const [role, text] of lines) {
     if (role === 'user') mock.emit({ type: 'user_message', sessionId, seq: 0, text })
@@ -412,13 +344,8 @@ function talk(mock: MockPlatform, sessionId: string, lines: ['user' | 'assistant
 }
 
 /**
- * An answer arrives when someone says something.
- *
- * The mock's `send` only flips the state to working — that is right for e2e (the test feeds in
- * the answer itself). On a screen a person is watching, that would only ever look like "a
- * session running forever," so a **short script** is layered on here: pretend to think → one
- * tool call → a few chunks of an answer → done. The composer collapsing, the rainbow ring, the
- * flourish on finishing, and marking as read all actually move through this one cycle.
+ * The mock's `send` only flips the state to working (e2e feeds the answer itself); here a short script answers: think,
+ * one tool call, a few chunks, done.
  */
 function installResponder(mock: MockPlatform): void {
   const original = mock.agents.send.bind(mock.agents)
@@ -460,10 +387,7 @@ function installResponder(mock: MockPlatform): void {
     ]
     for (const [at, run] of steps) setTimeout(run, at)
   }
-  /*
-   * An answer lets the agent go on, as the host's does (#999): it no longer ends the turn by itself. The demo's agent
-   * finishes the call it asked about with a line and ends its turn, so an approved card does not leave it working forever.
-   */
+  // An answer does not end the turn, as on the host (#999): the demo's agent ends it after a line
   const answer = mock.agents.respondApproval.bind(mock.agents)
   mock.agents.respondApproval = async (sessionId, requestId, decision, scope, matcher) => {
     const asked = mock.sessions.get(sessionId)?.pendingApproval?.requestId === requestId

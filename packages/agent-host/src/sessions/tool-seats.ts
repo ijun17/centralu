@@ -288,7 +288,7 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
   switch (profile) {
     case 'scoped': return SCOPED_INSTRUCTIONS
     case 'builder': return BUILDER_INSTRUCTIONS
-    // With an app attached at the start, the line on repository work (#957, #992 review)
+    // With an app attached at the start, the line on repository work (#957, #992)
     case 'reader': return readerInstructions(subagentTool, appsAttached)
     default: {
       const text = assistantInstructions(subagentTool)

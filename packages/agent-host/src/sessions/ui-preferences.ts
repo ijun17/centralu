@@ -74,7 +74,7 @@ export class UiPreferenceStore {
       this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, notifyPolicy: carried }))
     }
     /*
-     * "Allow auto from a linked computer" fails closed (#1273 review, owner decision 2026-10-19): its only job is to
+     * "Allow auto from a linked computer" fails closed (#1273, owner decision 2026-10-19): its only job is to
      * restrict, and a damaged record must not bring back what the person turned off. Absent still reads as on (the
      * default); a row that is not an object, or a value that is not true or false, reads as off.
      */
@@ -114,7 +114,7 @@ export class UiPreferenceStore {
     // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
     const before = readAutoCompact(current.autoCompact)
     const asked: AutoCompact | undefined = compact ? { ...before, ...withoutUndefined(compact) } : undefined
-    // The whole setting that would result is judged, not the patch (#1504 review): the two notice shares sit in order, below the
+    // The whole setting that would result is judged, not the patch (#1504): the two notice shares sit in order, below the
     // tool's own compaction share, and a patch that moves both is judged on the new share. A person's choice that does not fit
     // is refused; a share moved under a second share chosen before is not a choice, and takes it down (`settledSecond`).
     if (compact && asked && asked.nudgeSecond !== null && (compact.nudgeSecond != null || compact.nudgeFirst !== undefined)) {
@@ -141,9 +141,9 @@ export class UiPreferenceStore {
     }
     const stored = this.storedUiPreferences()
     /*
-     * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273
-     * review): a broken row reads back as `{}`, so saving any other setting over it would drop the field, and absent
-     * reads as on. Written as off, unless this change sets it
+     * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273): a
+     * broken row reads back as `{}`, so saving any other setting over it would drop the field, and absent reads as on. Written
+     * as off, unless this change sets it
      */
     const damaged = this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')
     const kept = damaged && patch.hubAuto === undefined ? { hubAuto: false } : {}

@@ -441,7 +441,7 @@ export class AskProjectFlow {
       case 'cancelled':
         return { ok: false, error: `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
       case 'failed':
-        this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
+        this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) }, d.taskId)
         return {
           ok: false,
           error: `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
@@ -454,7 +454,7 @@ export class AskProjectFlow {
      */
     const running = this.host.ownTasksRunning(d.sessionId)
     const paused = running.length ? running : undefined
-    this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer })
+    this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer }, d.taskId)
     return {
       ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside,
       ...(paused ? { paused: pausedWords(paused, d.sessionId) } : {}),

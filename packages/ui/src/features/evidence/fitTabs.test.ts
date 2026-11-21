@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { PanelTab } from '../../store/panelLayout.js'
 import { fitTabs } from './fitTabs.js'
 
-/**
- * The rule for collapsing tabs in a narrow strip (user request, 2026-09-07).
- * Widths are fixed by the test — real measurement is the browser's job, and only the decision
- * logic is under test here.
- */
+// Fixed widths: measuring is the browser's job, the decision is under test here
 describe('fitTabs', () => {
   const ORDER: PanelTab[] = ['files', 'git', 'history', 'terminal']
   const W: Record<string, number> = { files: 50, git: 40, history: 60, terminal: 70 }

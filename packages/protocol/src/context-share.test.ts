@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { contextShare, nextContext } from './session-state.js'
 import type { NormalizedEvent } from './events.js'
 
-/**
- * The context share is used / the model's full window, for every tool (#1553). The host says which window that is in the reading
- * (`context_update.window`); this is the one place a screen or a text turns the reading into a share.
- */
+// The share is used / the model's full window, for every tool. The host names the window in the reading
+// (`context_update.window`); this is the one place a screen or a text turns the reading into a share.
 const update = (over: Partial<Extract<NormalizedEvent, { type: 'context_update' }>>): NormalizedEvent => ({
   type: 'context_update',
   sessionId: 's1',

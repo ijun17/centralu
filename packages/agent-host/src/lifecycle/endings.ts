@@ -2,8 +2,8 @@ import { appendFileSync } from 'node:fs'
 import { MAX_LOG_BYTES, rotateIfLarge } from '../log-file.js'
 
 /**
- * Every way the host process can be asked to end, and what each one means (lessons HO5–HO7,
- * HO10, HO15). The process is a parameter, so a test can hand in an emitter and send it signals.
+ * Every way the host process can be asked to end, and what each means (lessons HO5–HO7, HO10, HO15). The process is a
+ * parameter: a test hands in an emitter
  */
 
 type Listener = (...args: unknown[]) => void
@@ -22,17 +22,16 @@ export type Stdin = {
 }
 
 /*
- * SIGHUP too: a terminal that closes sends it, often right after the SIGINT of a Ctrl+C, and with no
- * listener its default ends the host on the spot, without the shutdown (HO5).
+ * SIGHUP too: a closing terminal sends it, often right after Ctrl+C's SIGINT, and with no listener its default ends the host on
+ * the spot, without the shutdown (HO5)
  */
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 type Signal = (typeof SIGNALS)[number]
 
 /**
- * How long after a signal another one is still the same request delivered twice, not a person
- * asking again (owner's decision on #504, 2026-10-12). One request often arrives as two: the npm
- * launcher forwards the Ctrl+C that the terminal also delivered to the host directly, and a closing
- * terminal sends SIGHUP right after SIGINT. Only a signal later than this forces the exit.
+ * How long after a signal another is still the same request delivered twice (owner's decision on #504): the npm launcher
+ * forwards the Ctrl+C the terminal also delivered, and a closing terminal sends SIGHUP right after SIGINT. Only a later one
+ * forces the exit
  */
 export const REPEAT_AFTER_MS = 1000
 
@@ -42,21 +41,12 @@ function deliberateRepeat(first: number, now: number): boolean {
 }
 
 /**
- * A signal that arrives before the shutdown exists is held, not obeyed (HO6, #82, #390).
- *
- * Until a process has a listener for SIGINT or SIGTERM the kernel's default applies, which ends it
- * on the spot: no shutdown, no WAL checkpoint, and whatever it had started already left behind. The
- * ready line goes out well before the real handlers are attached (the services start in between),
- * and `centralu serve` measured the gap: a Ctrl+C passed on as soon as the ready line was read
- * killed the host by SIGINT every time, while the same signal 3 s later shut it down cleanly.
- *
- * Installed right after the lock is taken. These only record the signal; `act` replaces them and
- * runs the one that came. **A second signal while still starting exits at once with 1**, so a start
- * that hangs can still be stopped from the terminal; one within `REPEAT_AFTER_MS` of the first is the
- * same request delivered twice and changes nothing.
- *
- * No handler here or anywhere else ends the process on its own (HO5): handlers run in the order
- * they were added, and an early `process.exit` in one used to mean the real shutdown never ran.
+ * A signal before the shutdown exists is held, not obeyed (HO6): until a process has a listener the default ends it on the
+ * spot, with no shutdown or WAL checkpoint, and the ready line goes out well before the real handlers (a Ctrl+C passed on as
+ * soon as `centralu serve` read the ready line killed the host every time; 3 s later it shut down cleanly). Installed right
+ * after the lock is taken; these only record the signal and `act` replaces them. **A second signal while still starting exits
+ * at once with 1**, so a start that hangs can be stopped; one within `REPEAT_AFTER_MS` is the same request twice. No handler
+ * ends the process on its own (HO5): handlers run in the order added, so an early `process.exit` would skip the real shutdown.
  */
 export function holdSignals(
   proc: ProcessLike,
@@ -89,17 +79,11 @@ export function holdSignals(
 }
 
 /**
- * The host ends when its parent's pipe closes, and only when asked to watch it (HO7).
- *
- * A supervisor keeps the host's stdin open as a pipe, so whatever the parent dies of (a crash,
- * SIGKILL) the pipe closes and EOF arrives; an exit hook alone left an orphaned host holding its
- * port (8cc60ff0). **Only with `--watch-parent`**: a host started by some other script has stdin on
- * `/dev/null`, where EOF arrives at once, and deciding by "is stdin a TTY" made such a host end
- * itself (M1.5 defect 4). On Windows this is the only parent-death signal there is.
- *
- * The listeners are attached at the end of start-up, and a pipe's end is read even while the stream is
- * paused, so a parent that went during start-up has already closed it and no event will come (#1942):
- * a stream that is already ended or closed is the parent gone at once.
+ * The host ends when its parent's pipe closes, only with `--watch-parent` (HO7): a supervisor keeps stdin open as a pipe, so
+ * whatever the parent dies of the pipe closes (an exit hook alone left an orphaned host holding its port); a host from another
+ * script has stdin on `/dev/null`, where EOF arrives at once, so "is stdin a TTY" cannot decide. The only parent-death signal
+ * on Windows. The listeners are attached at the end of start-up, and a pipe's end is read even while paused, so a parent that
+ * went before has already closed it and no event comes: a stream already ended or closed is the parent gone at once
  */
 export function watchParent(enabled: boolean, stdin: Stdin, onGone: () => void): void {
   if (!enabled) return
@@ -111,13 +95,10 @@ export function watchParent(enabled: boolean, stdin: Stdin, onGone: () => void):
 }
 
 /**
- * Rejections are survived; uncaught exceptions end the host through its shutdown (HO10).
- *
- * Node ends the process on an unhandled rejection, and this host is the parent of every session:
- * one rejection leaking while a project was added cut off every unrelated session, and the
- * packaged app had no stderr to say why (df8ad446). A rejection is usually one request's problem,
- * so it is logged loudly and survived. After an uncaught exception state may be broken: it is
- * logged, then the host leaves the normal way.
+ * Rejections are survived; uncaught exceptions end the host through its shutdown (HO10). Node ends the process on an unhandled
+ * rejection, and this host is the parent of every session: one leaking rejection would cut off every unrelated session, with no
+ * stderr in the packaged app to say why. A rejection is usually one request's problem, so it is logged loudly and survived;
+ * after an uncaught exception state may be broken, so it is logged and the host leaves the normal way
  */
 export function guardErrors(
   proc: ProcessLike,
@@ -131,9 +112,8 @@ export function guardErrors(
 }
 
 /**
- * Writes what `guardErrors` caught to stderr (host.log) and to `host-errors.log`, which keeps one
- * previous generation like host.log (HO4): on a day when rejections repeat it grew by hundreds of MB.
- * A failure to write is never thrown again.
+ * Writes what `guardErrors` caught to stderr (host.log) and to `host-errors.log`, which keeps one previous generation like
+ * host.log (HO4): it grew by hundreds of MB on a day of repeating rejections. A failure to write is never thrown again
  */
 export function crashRecorder(
   path: string,
@@ -153,13 +133,10 @@ export function crashRecorder(
 }
 
 /**
- * Every ending, wired to the one shutdown (HO15).
- *
- * - a signal, a crash and the parent going away: a stop. Nothing is handed over: the host owns its
- *   children and stops them (#1895), and a crash or a vanished parent hands no open app views over
- *   either (nothing is known to start a next host, and the state that threw is not one to carry forward);
- * - `host.stop` (`centralu serve --stop`): a stop. `serve --stop` remembers the person's stop itself, and a hub's
- *   update stops through it too.
+ * Every ending, wired to the one shutdown (HO15). A signal, a crash and the parent going away are a stop, and nothing is handed
+ * over: the host owns its children and stops them, and a crash or a vanished parent hands no open app views over (nothing is
+ * known to start a next host, and the state that threw is not one to carry forward). `host.stop` (`serve --stop`) is a stop
+ * too: `serve --stop` remembers the person's stop itself, and a hub's update stops through it.
  */
 export function wireEndings(o: {
   proc: ProcessLike
@@ -175,11 +152,10 @@ export function wireEndings(o: {
 }): { stopAsked: () => void } {
   guardErrors(o.proc, { record: o.record, onCrash: () => o.leave() })
   /*
-   * A second signal while leaving is someone insisting (a second Ctrl+C on `centralu serve`): the
-   * host exits at once rather than run a second, different ending. Not one within `REPEAT_AFTER_MS`
-   * of the first: that is the same request delivered twice (the launcher's forward and the
-   * terminal's own, or SIGHUP right after SIGINT), and forcing on it would skip the shutdown it asked
-   * for. Under the keeper a second TERM is its group TERM after the grace, followed by SIGKILL anyway.
+   * A second signal while leaving is someone insisting (a second Ctrl+C on `centralu serve`): the host exits at once rather
+   * than run a second ending. Not one within `REPEAT_AFTER_MS` of the first (the same request delivered twice): forcing on it
+   * would skip the shutdown it asked for. Under the keeper a second TERM is its group TERM after the grace, followed by SIGKILL
+   * anyway
    */
   let signalledAt: number | null = null
   const now = o.now ?? Date.now

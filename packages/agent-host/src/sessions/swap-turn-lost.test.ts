@@ -12,7 +12,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 /**
  * An update's stop while a session's turn runs (#1618): the turn is over, and Centralu itself cut it, so the next host
  * continues it (#1966). When that Continue cannot be sent (the tool takes no input), the session says so as a quit does:
- * idle, with the quit mark and its line, not `working` forever with a Stop that does nothing (#1562 review).
+ * idle, with the quit mark and its line, not `working` forever with a Stop that does nothing (#1562).
  */
 
 class Handle implements SessionHandle {
@@ -76,7 +76,7 @@ beforeEach(() => {
 function host(updateResume: UpdateResumeFolder, failSend = false) {
   const adapter = new Adapter(failSend)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { updateResume })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: tmpdir(), updateResume })
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }
 }

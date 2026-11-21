@@ -169,14 +169,12 @@ export class SessionProcesses {
   }
 
   /**
-   * The event sink handed to an adapter — **it carries which handle sent it** (#157).
-   *
-   * Every handle used to receive the same callback, so the manager could only look at the session id
-   * and read an event as coming from "whichever handle is currently registered". When a settings
-   * change swapped the process, a late message from the old handle (text from a turn that was
-   * winding down, a late adapter_crashed) would be attributed to the new handle, and a late crash
-   * would tear down the freshly launched process. A message that arrives before a handle has been
-   * placed (before `own`) has no known owner yet, so it is still received the same way as now.
+   * The event sink handed to an adapter — **it carries which handle sent it** (#157). A callback shared by every handle would
+   * let the manager only look at the session id and read an event as coming from "whichever handle is currently registered".
+   * When a settings change swaps the process, a late message from the old handle (text from a turn that was winding down, a
+   * late adapter_crashed) would be attributed to the new handle, and a late crash would tear down the freshly launched process.
+   * A message that arrives before a handle has been placed (before `own`) has no known owner yet, so it is still received by
+   * session id alone.
    */
   handleSink(): { sink: EventSink; own: (h: SessionHandle) => void } {
     let handle: SessionHandle | null = null
@@ -257,22 +255,14 @@ export class SessionProcesses {
     m.externalId = null
     m.importedFrom = null
     /*
-     * **The model and its dependent settings are also let go together.**
-     *
-     * Measured (smoke-switch-tool): switching a session that had sonnet picked on claude over to
-     * codex brings the process up, but the first turn dies with a 400 —
-     *   "The 'sonnet' model is not supported when using Codex with a ChatGPT account."
-     * Clearing the model and doing the same thing works fine. In other words, this is not a feature
-     * that does not work — a value with meaning only to one tool was being carried across to another.
-     *
-     * A model id is a tool's own vocabulary — 'sonnet' and 'gpt-5.6-terra' are not two names for the
-     * same slot, they are words that do not exist in each other's dictionary. effort also has
-     * different ranges (claude goes up to max, codex up to high), and verbosity/serviceTier are
-     * codex-only entirely. So these are not values to carry over but **values to pick fresh**, and
-     * null means "that tool's default".
-     *
-     * The permission preset is kept: safe/normal/auto is a policy the person sets, not the tool, and
-     * both adapters implement it with the same meaning.
+     * **The model and its dependent settings are also let go together.** Measured (smoke-switch-tool): switching a session that
+     * had sonnet picked on claude over to codex brings the process up, but the first turn dies with a 400, "The 'sonnet' model
+     * is not supported when using Codex with a ChatGPT account"; clearing the model works. A value with meaning only to one
+     * tool would be carried across to another. A model id is a tool's own vocabulary ('sonnet' and 'gpt-5.6-terra' are words
+     * that do not exist in each other's dictionary), effort has different ranges (claude up to max, codex up to high), and
+     * verbosity/serviceTier are codex-only. So these are **values to pick fresh**, and null means "that tool's default". The
+     * permission preset is kept: safe/normal/auto is a policy the person sets, not the tool, and both adapters implement it
+     * with the same meaning.
      */
     m.model = null
     m.effort = null
@@ -290,9 +280,9 @@ export class SessionProcesses {
     // fail to wake
     this.host.store.settings.setAppSetting(freshStartKey(m.id), String(this.host.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
     /*
-     * The broadcast state is also written into meta (#163). It used to only broadcast idle while
-     * saving meta as working, so a screen that reconnected and the Assistant's list_sessions both
-     * saw an interrupted turn as "still working" (the settings tool refused that session outright).
+     * The broadcast state is also written into meta (#163). Broadcasting idle while saving meta as working would show an
+     * interrupted turn as "still working" to a screen that reconnected and to the Assistant's list_sessions (the settings tool
+     * would refuse that session outright).
      */
     this.host.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })
 

@@ -4,9 +4,9 @@ import { StateDot } from '../../components/primitives.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * A party of the mailbox by name, with its live state's dot before it when the state says something (#2258, owner 2026-11-14: working, an error, an
- * approval waiting; idle draws nothing). The window's own copy of the session wins over the state the host listed, which is only as fresh as the list.
- * The name does not truncate: what stands beside it on a row gives up its width first
+ * A mailbox party by name, after its live state's dot when that says something (#2258: working, an error, an approval
+ * waiting; idle draws nothing). The window's copy of the session wins over the host's listed state, only as fresh as the
+ * list. The name does not truncate: what stands beside it on a row gives up its width first
  */
 export function PartyName({ party, className = '' }: { party: MailParty; className?: string }) {
   const live = useStore((s) => {

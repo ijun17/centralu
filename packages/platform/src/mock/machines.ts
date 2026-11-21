@@ -5,37 +5,21 @@ import { mockError } from './mock-error.js'
 
 /** The linked machines (#82), behind the `machines` port */
 export class MachinesMock {
-  /**
-   * Linked machines (#82). The mock reaches no machine: one added here stands as connected at once,
-   * so a screen can be built against the shape; the real link's states come from two real hosts in
-   * e2e (`e2e/fixtures/linked-hosts.ts`).
-   */
+  /** Connected at once; the real link's states come from two hosts in `e2e/fixtures/linked-hosts.ts` */
   machinesList: MachineInfo[] = []
-  /**
-   * The ssh config the mock "reads" (#514): none by default, so the Add machine dialog opens on its
-   * fields as before; a test or the demo sets hosts here, and what each answers to the probe in
-   * `probeAnswers` (unreachable when absent). `linked` is filled from `machinesList` as the host fills it
-   */
+  /** The ssh config the mock "reads" (#514); a host absent from `probeAnswers` is unreachable */
   sshConfig: SshHostList = { configFile: '~/.ssh/config', hosts: [], notes: [] }
   probeAnswers: Record<string, Omit<MachineProbe, 'sshTarget'>> = {}
-  /**
-   * The pairs approved for the reverse direction (#550): none until a test or the demo puts one here, as the mock
-   * raises no card of a machine's session
-   */
+  /** The reverse direction's pairs (#550): the mock raises no card for a machine's session */
   askPairs: MachineAskConsent[] = []
-  /** Every `machines.update` the window sent (#1399), in order, with when it asked the update to stop the host */
   updates: { machineId: string; when: 'idle' | 'now' }[] = []
-  /** Each mock machine's "Allow auto from a linked computer" (#1273): on unless a test turned it off */
   hubAutoOff = new Set<string>()
   /**
-   * How a Connect that finds the machine not connected ends (#1533): the machine stands as `connecting`, then moves to
-   * `status` with `error` (a failed attempt keeps its reason) after `afterMs`, or, with no `afterMs`, when the test calls
-   * `finishReconnect` (so it can look at the connecting state for as long as it needs). Unset: the mock's old rule, a
-   * disconnected machine connects at once and any other state stays as it is
+   * A Connect stands as `connecting`, then moves to `status` after `afterMs`, or at `finishReconnect` (#1533). Unset: a
+   * disconnected machine connects at once and any other state stays.
    */
   reconnectPlan: { afterMs?: number; status: MachineInfo['status']; error: string | null } | null = null
   private heldReconnects = new Map<string, () => void>()
-  /** Ends an attempt the plan held, as its plan says */
   finishReconnect(machineId: string): void {
     const end = this.heldReconnects.get(machineId)
     this.heldReconnects.delete(machineId)
@@ -50,7 +34,6 @@ export class MachinesMock {
     this.emit({ type: 'machine_status', machine: { ...next } })
     return { ...next }
   }
-  /** Installs or updates a mock machine to this mock's own version at once: no steps, nothing stops */
   private mockInstall(machineId: string, _kind: 'install' | 'update') {
     const m = this.machinesList.find((x) => x.id === machineId)
     const current = { version: m?.versions?.hub.version ?? '0.0.0', node: '24.21.0' }
@@ -88,7 +71,6 @@ export class MachinesMock {
         operation: null,
         autostart: { on: false, how: spec.shell === 'posix' ? 'systemd' : 'task', linger: null },
         elevated: null,
-        // The reverse direction is off for a machine just linked (#550)
         asks: { on: false, note: null },
         logon: null,
         handover: null,
@@ -135,9 +117,8 @@ export class MachinesMock {
       }
       return this.machineRow(machineId, was === 'disconnected' ? { status: 'connected', error: null } : {})
     },
-    /** The mock's link closes and opens at once (#1134): no ssh, no hold */
     disconnect: async (machineId: string) => this.machineRow(machineId, { status: 'disconnected', error: null }),
-    /** The credential leaves the row, as the hub's does once `serve --revoke` said so there (#1405) */
+    /** As the hub once `serve --revoke` confirmed (#1405) */
     revokeCredential: async (machineId: string, credentialId: string) =>
       this.machineRow(machineId, { otherCredentials: (this.machinesList.find((m) => m.id === machineId)?.otherCredentials ?? []).filter((c) => c.id !== credentialId) }),
     setAutoReconnect: async (machineId: string, autoReconnect: boolean) =>
@@ -164,7 +145,7 @@ export class MachinesMock {
       const machine = this.machineRow(machineId, { status: 'not_running', install: { managed: false, current: null, previous: null }, autostart: was && { ...was, on: false, linger: null } })
       return { machine, stopped: true }
     },
-    /** A mock machine takes the change at once; a systemd one lingers, as most would after `loginctl enable-linger` */
+    /** A systemd one lingers, as most would after `loginctl enable-linger` */
     autostart: async (machineId: string, on?: boolean) => {
       const was = this.machinesList.find((m) => m.id === machineId)?.autostart
       if (!was?.how) throw mockError('Starting Centralu at boot is offered on Linux and Windows')
@@ -180,7 +161,7 @@ export class MachinesMock {
       }
       return this.hubAutoOff.has(machineId) ? ('off' as const) : ('on' as const)
     },
-    /** The switch takes at once; off forgets the machine's pairs, as the host does */
+    /** Off forgets the machine's pairs, as the host does */
     setAsks: async (machineId: string, on: boolean) => {
       if (!on && this.askPairs.some((c) => c.machineId === machineId)) {
         this.askPairs = this.askPairs.filter((c) => c.machineId !== machineId)

@@ -8,91 +8,65 @@ import { execText, execTextSync } from './os/exec.js'
 import { sleep } from './timing.js'
 
 /**
- * The in-app update check (issue #43).
- *
- * **Why this runs here and not in the launcher.** The launcher already knows how to
- * ask the registry and how to install — but the copy that runs is the one already on
- * the user's machine, and beta.1's copy compares versions wrong (#42). No fix can
- * reach it retroactively: the broken check is what would have to notice the fix. A
- * check that runs in the host ships *with the app*, so it is never older than the app
- * it is checking, and it bypasses every stale launcher on the way.
- *
- * **Notify; install when asked or allowed.** The check is read-only and its failures are swallowed;
- * replacing the running program is not, so it happens by a click, or by itself with `autoApply` on (#352), which is part
- * of Settings' "Automatic updates" and on for a person who never chose (owner decision 2026-10-20, update-switches.ts). Either way the host stops at `restart_required`: relaunching into the new build is
- * the window's step ("Apply now"), because only the window knows whether someone is typing,
- * and the keeper's switch afterwards is what keeps every running turn.
+ * The in-app update check (#43), run in the host rather than the launcher: the launcher's copy is the one already on the
+ * machine (beta.1's compares versions wrong, #42) and no fix reaches it retroactively, while a check in the host ships with the
+ * app. It notifies and installs when asked or allowed: the check is read-only and its failures swallowed; replacing the running
+ * program happens by a click, or by itself with `autoApply` (#352, update-switches.ts). The host stops at `restart_required`:
+ * only the window knows whether someone is typing, and the keeper's switch afterwards keeps every running turn
  */
 
 /** The registry is the update channel — no server of ours, no signing keys (same as the launcher) */
 const REGISTRY_URL = `https://registry.npmjs.org/${APP_SLUG}/latest`
 
 /**
- * How often to look again while the app is running.
- *
- * Six hours for background polling; explicit checks and installs refresh sooner (#635).
- * "Once at startup" is not enough, because
- * this app is meant to be left open for days watching agents work, and a window that
- * has been up since Monday would never hear about Wednesday's release. Six hours is at
- * most four requests a day and still surfaces a release within the working day it ships.
+ * How often to look again while the app runs: an app left open for days would never hear of Wednesday's release from a
+ * startup-only check; six hours is at most four requests a day. Explicit checks and installs refresh sooner (#635)
  */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 /**
- * Two deadlines, because the two callers want opposite things.
- *
- * The scheduled check is background noise nobody asked for — it gives up quickly and
- * says nothing. The one behind "Check now" has a person waiting on an answer, so it
- * waits as long as the launcher's own `update` does before admitting defeat.
+ * Two deadlines: the scheduled check is background noise and gives up quickly and silently; "Check now" has a person waiting
+ * and waits as long as the launcher's own `update`
  */
 const SCHEDULED_TIMEOUT_MS = 3_000
 const FORCED_TIMEOUT_MS = 8_000
-/** Reuse a check that just found the release, especially when it starts auto-apply. */
 const INSTALL_CHECK_MAX_AGE_MS = 60_000
-/** A recent observation may outpace an npm edge; older tags must yield to a rollback. */
+// A recent observation may outpace an npm edge; older tags must yield to a rollback
 const STORED_RELEASE_MAX_AGE_MS = 60 * 60 * 1000
 
 /**
- * How long "Apply updates automatically when idle" waits before trying a failed install again (#645).
- *
- * A network blip or an npm edge that has not caught up should not switch automatic installs off for
- * the host's life, which is what "retry at the next check" meant once checks stopped erasing a
- * failure (#636). Soon the first time, then a step back, then the check interval: a persistent cause
- * (EACCES, a full disk) costs one `npm i -g` per six hours, not one per focus. In memory only, like
- * the rest of this status — a new host starts over, which is also what fixes most causes.
+ * How long automatic installs wait before retrying a failed one (#645): soon the first time, then a step back, then the check
+ * interval, so a persistent cause (EACCES, a full disk) costs one `npm i -g` per six hours while a network blip or an npm edge
+ * that has not caught up does not switch them off for the host's life (#636). In memory only: a new host starts over, which
+ * fixes most causes
  */
 const AUTO_RETRY_DELAYS_MS = [10 * 60 * 1000, 60 * 60 * 1000, 6 * 60 * 60 * 1000]
 
-/** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
-/** npm can publish the dist-tag before every registry edge has the tarball. Wait for propagation, not a person. */
+// npm can publish the dist-tag before every registry edge has the tarball: wait for propagation, not a person
 const NPM_RETRY_DELAY_MS = 30_000
 const NPM_RETRY_WINDOW_MS = 10 * 60 * 1000
 
-/**
- * The registry's answer. Failure is returned as a value too — throwing would force the caller to
- * stop the app.
- */
+/** The registry's answer; failure is a value too, since throwing would force the caller to stop the app */
 export type LatestResult = { ok: true; version: string } | { ok: false; reason: string }
 
-/** What a source tree's version carriers hold until a build stamps them (#1501, `scripts/app-version.mjs` PLACEHOLDER) */
+/** What a source tree's version carriers hold until a build stamps them: the same as `scripts/app-version.mjs` PLACEHOLDER */
 export const UNSTAMPED_VERSION = '0.0.0-dev'
 
 /**
- * Whether this build may install a release by itself (#1501 review): never a host run from source (`build` `dev`), nor
- * one whose version is the placeholder (a source tree, or a remote dev build's host bundle). Every release is newer than
- * `0.0.0-dev`, so a stored "Automatic updates" on would otherwise run `npm i -g centralu@<latest>` on the machine of
- * whoever runs `pnpm host` against their own data folder. The update line still shows the release; a click installs it.
+ * Whether this build may install a release by itself (#1501): never a host run from source (`build` `dev`) nor one with the placeholder version.
+ * Every release is newer than `0.0.0-dev`, so a stored "Automatic updates" on would run `npm i -g centralu@<latest>` on the machine of whoever runs
+ * `pnpm host` against their own data folder. The update line still shows the release; a click installs it
  */
 export function installsByItself(build: string | undefined, current: string): boolean {
   return build !== 'dev' && current !== UNSTAMPED_VERSION
 }
 
 /**
- * Whether this hub updates its linked machines by itself to its own version (#1508, `LinkDeps.autoUpdate`): with
- * "Automatic updates" on, not mid-swap, and only from a build that may install by itself (`installsByItself`). A dev
- * hub's machines would also refuse on their own (`channel('0.0.0-dev')` is `dev`), but this does not lean on that.
+ * Whether this hub updates its linked machines by itself to its own version (#1508, `LinkDeps.autoUpdate`): "Automatic updates"
+ * on, not mid-swap, from a build that may install by itself (`installsByItself`). A dev hub's machines would refuse anyway
+ * (`channel('0.0.0-dev')` is `dev`); this does not rely on it
  */
 export function hubUpdatesMachines(f: { build: string; current: string; autoApply: boolean; draining: boolean }): boolean {
   return installsByItself(f.build, f.current) && f.autoApply && !f.draining
@@ -100,65 +74,47 @@ export function hubUpdatesMachines(f: { build: string; current: string; autoAppl
 
 /**
  * What the service reaches of the machine, each given and none defaulted (#2299): the registry, `npm i -g`, the global npm
- * package and the app copy `centralu install` made. A service that took them as defaults reached the real ones from any
- * test that left one out, and a test passed or failed by what the machine running it had installed (the install tests waited
- * for npm on any machine with a global `centralu`, once #2294 read that package after an install). The host gets the real
- * ones from `realUpdateService`; a test gives fakes (`isolatedUpdateService`, `updates.test-helpers.ts`). A seam added here
- * is required, so a type error finds every place that builds the service.
+ * package and the app copy. A defaulted one reached the real machine from any test that left it out, and a test passed or
+ * failed by what was installed there. The host gets the real ones from `realUpdateService`, a test fakes them
+ * (`isolatedUpdateService`, `updates.test-helpers.ts`); a seam added here is required, so a type error finds every builder
  */
 export type UpdateMachine = {
-  /** Ask the registry what `latest` points at */
   fetchLatest: (timeoutMs: number) => Promise<LatestResult>
-  /** Run a command to completion, rejecting with its stderr */
   run: (file: string, args: string[]) => Promise<void>
-  /** The copy `centralu install` made, when there is one (`installedCopyPath`) */
   installedCopy: () => string | null
-  /** The version that copy carries, when it can be read (`readInstalledCopyVersion`) */
   installedCopyVersion: (copy: string) => string | null
-  /** The globally installed npm package, when it is there (`npmGlobalPackage`) */
   globalPackage: () => Promise<GlobalPackage | null>
 }
 
 /** What else the service is given, none of it reaching the machine: tests give some of it, the host the rest */
 export type UpdateServiceOptions = {
-  /**
-   * The version this build is: `APP_VERSION` when not given. Tests give a release, since a source tree carries the
-   * placeholder `0.0.0-dev` (#1501) and every release is newer than that
-   */
+  /** The version this build is: `APP_VERSION` when not given; tests give a release, as a source tree carries the placeholder `0.0.0-dev` (#1501) */
   current?: string
-  /** The bundled build id, `dev` for a host run from source (`BUILD`); it never installs by itself (`installsByItself`) */
   build?: string
   now?: () => number
-  /** Test seam for the automatic retry timer: runs `fn` after `ms`, returns how to cancel it */
   schedule?: (fn: () => void, ms: number) => () => void
-  /** Where the persisted "check automatically" answer lives across restarts */
   readAuto?: () => boolean
   writeAuto?: (enabled: boolean) => void
-  /** Where "Apply updates automatically when idle" lives across restarts (#352) */
   readAutoApply?: () => boolean
   writeAutoApply?: (enabled: boolean) => void
-  /** Test seam for the bounded registry-propagation wait. */
   wait?: (ms: number) => Promise<void>
-  /** The Node that runs that launcher: this host's (`process.execPath`) */
   node?: string
 }
 
 type UpdateDeps = UpdateMachine & UpdateServiceOptions
 
-/** Where `centralu install` would have put the app on this platform: a platform module's answer (`os.ts`). */
 export { installedCopyPath }
 
 /**
- * The globally installed npm package: its launcher's path and its version (null when unreadable), and this machine's
- * platform package as that launcher finds it (#2282): its name and version (null when npm left it out), or null when
- * the package lists none for this machine, so there is nothing to look for
+ * The globally installed npm package: its launcher's path and version (null when unreadable), and this machine's platform
+ * package as that launcher finds it (#2282): name and version (null when npm left it out), or null when the package lists none
+ * for this machine
  */
 export type GlobalPackage = { launcher: string; version: string | null; platform: { name: string; version: string | null } | null }
 
 /**
- * The globally installed npm package, found by `npm root -g`: its launcher (`centralu/bin/centralu.mjs`) is what
- * `install` runs, by its path. Not `centralu` from PATH: on a machine a hub manages, that may be the hub's shim
- * (`<data>/remote/bin`), whose `install` has no desktop app to copy, since the hub installs the host-only package there.
+ * The globally installed npm package, found by `npm root -g`; `install` runs its launcher by path, not `centralu` from PATH,
+ * which on a hub-managed machine may be the hub's shim (`<data>/remote/bin`) whose `install` has no desktop app to copy
  */
 async function npmGlobalPackage(): Promise<GlobalPackage | null> {
   const cmd = commandFor('npm', ['root', '-g'])
@@ -172,11 +128,10 @@ async function npmGlobalPackage(): Promise<GlobalPackage | null> {
 }
 
 /**
- * This machine's platform package (`@centralu/<os>-<arch>`) beside a launcher (#2282). Which machines have one is the
- * package's own answer, its `optionalDependencies` (the launcher's `TARGETS`, held to them by
- * `tooling/launcher-platform.test.ts`): a machine it lists none for has none by design, and nothing is looked for. Found
- * the way the launcher finds it (`bundledApp`, `require.resolve` from its own folder); npm skips an optional dependency
- * it could not fetch and exits 0, leaving the version null.
+ * This machine's platform package (`@centralu/<os>-<arch>`) beside a launcher (#2282). The package's `optionalDependencies` say
+ * which machines have one (the launcher's `TARGETS`, held to them by `tooling/launcher-platform.test.ts`): a machine it lists
+ * none for has none by design. Found as the launcher does (`bundledApp`, `require.resolve`); npm skips an optional dependency
+ * it could not fetch and exits 0, leaving the version null
  */
 export function platformPackage(launcher: string, manifest: string, machine: string): { name: string; version: string | null } | null {
   const name = `@${APP_SLUG}/${machine}`
@@ -188,7 +143,6 @@ export function platformPackage(launcher: string, manifest: string, machine: str
   }
 }
 
-/** The `optionalDependencies` of a package.json, empty when it cannot be read */
 function optionalDependencies(file: string): Record<string, unknown> {
   try {
     const pkg: unknown = JSON.parse(readFileSync(file, 'utf8'))
@@ -199,7 +153,6 @@ function optionalDependencies(file: string): Record<string, unknown> {
   }
 }
 
-/** `path` when the copy `centralu install` made is there; on Linux, a menu entry whose AppImage is gone is not */
 export function existingCopy(path: string, platform: Platform = HOST_PLATFORM): string | null {
   if (!existsSync(path)) return null
   // A menu entry whose AppImage is gone (its package was uninstalled) is no copy: refreshing it would reinstall that
@@ -207,20 +160,16 @@ export function existingCopy(path: string, platform: Platform = HOST_PLATFORM): 
   return app !== null && !existsSync(app) ? null : path
 }
 
-/** A version well-formed enough to compare: `<major>.<minor>.<patch>`, with a prerelease or not */
 const WELL_FORMED = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/
 
-/** `version` is well-formed and not older than `than` */
 function atLeast(version: string | null, than: string): boolean {
   return version !== null && WELL_FORMED.test(version) && !isNewerVersion(than, version)
 }
 
 /**
- * The version the installed copy carries, or null when there is none to read (#645).
- *
- * How to read it is the platform's answer (`installedCopyVersionSource`, `os.ts`): on macOS the
- * launcher's own `plutil` command, so the two never disagree about a copy. Unreadable is unknown,
- * and `keepsInstalledCopy` replaces a copy whose version is unknown or malformed.
+ * The version the installed copy carries, null when there is none to read (#645): how is the platform's answer
+ * (`installedCopyVersionSource`); unreadable is unknown, and `keepsInstalledCopy` replaces a copy whose version is unknown or
+ * malformed
  */
 export function readInstalledCopyVersion(copy: string, platform: Platform = HOST_PLATFORM): string | null {
   const source = installedCopyVersionSource(copy, platform)
@@ -231,8 +180,8 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
       return app ? packageVersion(join(dirname(app), 'package.json')) : null
     }
     const text =
-      source.kind === 'command'
-        ? commandOutput(source.file, source.args)
+      source.kind === 'plutil'
+        ? execTextSync('/usr/bin/plutil', source.args, { timeoutMs: 5_000 }).stdout
         : readFileSync(join(copy, source.name), 'utf8')
     return text.trim() || null
   } catch {
@@ -240,12 +189,6 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
   }
 }
 
-/** What a program prints when it exits 0 within 5 s; throws otherwise */
-function commandOutput(file: string, args: readonly string[]): string {
-  return execTextSync(file, args, { timeoutMs: 5_000 }).stdout
-}
-
-/** The AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`, as `centralu install` writes it) */
 function menuEntryApp(entry: string): string | null {
   try {
     return /^Exec="([^"]+)"/m.exec(readFileSync(entry, 'utf8'))?.[1] ?? null
@@ -254,7 +197,6 @@ function menuEntryApp(entry: string): string | null {
   }
 }
 
-/** The `version` of a package.json, or null when it cannot be read */
 function packageVersion(file: string): string | null {
   try {
     const pkg: unknown = JSON.parse(readFileSync(file, 'utf8'))
@@ -266,12 +208,8 @@ function packageVersion(file: string): string | null {
 }
 
 /**
- * Ask the registry. **Never throws** — the caller is either a timer nobody asked for
- * or a screen that has to keep working offline.
- *
- * Reasons are kept apart rather than lumped into "failed", because they send the person
- * somewhere different: unreachable means look at the network, 404 means looking will not
- * help (renamed, or unpublished).
+ * Asks the registry; never throws, as its caller is a timer or a screen that must work offline. Reasons stay apart because they
+ * send the person elsewhere: unreachable means check the network, 404 that looking will not help (renamed or unpublished)
  */
 async function fetchLatestFromRegistry(timeoutMs: number): Promise<LatestResult> {
   try {
@@ -289,15 +227,11 @@ async function fetchLatestFromRegistry(timeoutMs: number): Promise<LatestResult>
 }
 
 /**
- * The program and arguments that run `file args` without a shell.
- *
- * On Windows `npm` and `centralu` are batch files (Node's `npm.cmd`, and npm's shim
- * `centralu.cmd`). `execFile` without a shell does not find a bare `npm` at all (libuv tries
- * `.com` and `.exe` only: ENOENT, the "Update failed" of every Windows build up to
- * 0.1.0-beta.12), and given the `.cmd` by its path Node refuses it (EINVAL since
- * CVE-2024-27980). A shell would work, and the launcher's own `update` uses one, but
- * `tool-launch.ts` already reads a batch file for the program it starts, so the same is done
- * here and no argument passes through cmd.exe. Elsewhere this is `file args` unchanged.
+ * The program and arguments that run `file args` without a shell. On Windows `npm` and `centralu` are batch files: `execFile`
+ * finds no bare `npm` (libuv tries `.com` and `.exe` only: ENOENT, the "Update failed" of every Windows build up to
+ * 0.1.0-beta.12) and Node refuses a `.cmd` by path (EINVAL since CVE-2024-27980). The launcher's `update` uses a shell, but
+ * `tool-launch.ts` already reads a batch file for the program it starts, so no argument passes through cmd.exe. Elsewhere `file
+ * args` unchanged
  */
 export function commandFor(
   file: string,
@@ -312,13 +246,9 @@ export function commandFor(
 const NPM_404_NOTE = /^npm (?:error|ERR!) 404(?:\s+Note that you can also install from a|\s+tarball, folder, http url, or git (?:url|repo)\.)?$/i
 
 /**
- * The line of a failed command's stderr that says why, which is worth more than "command
- * failed": EACCES on a system Node and "no such command" are different errands.
- *
- * npm puts its cause last, then ends every failure with where its log went, which says nothing
- * about why, so that line is passed over, as is the advice it puts under an E404 (`NPM_404_NOTE`). The launcher (`centralu install`) puts its cause first
- * and what to do after it ("Windows would not replace … — Centralu is probably still running",
- * then "Quit it, then run the command again", which reads wrong inside the app).
+ * The line of a failed command's stderr that says why: npm puts its cause last, then a line on where its log went (passed over,
+ * as is the advice under an E404, `NPM_404_NOTE`); the launcher (`centralu install`) puts its cause first and then "Quit it,
+ * then run the command again", which reads wrong inside the app
  */
 export function failureDetail(file: string, stderr: string): string | null {
   const lines = stderr
@@ -328,14 +258,13 @@ export function failureDetail(file: string, stderr: string): string | null {
   return (file === 'npm' ? lines.at(-1) : lines[0]) ?? null
 }
 
-/** What a failed command wrote to stderr, which `runCommand` keeps on its error */
 function stderrOf(e: unknown): string {
   return e instanceof Error && 'stderr' in e && typeof e.stderr === 'string' ? e.stderr : ''
 }
 
 /**
- * A failed command in one line for the host log: its exit code and its first line that names an error (npm's `npm error
- * code ENOTFOUND`), which says why, where `failureDetail` keeps npm's last line for the update line.
+ * A failed command in one line for the host log: its exit code and first line naming an error (npm's `npm error code
+ * ENOTFOUND`), where `failureDetail` keeps npm's last line for the update line
  */
 export function failureLine(e: unknown): string {
   const stderr = stderrOf(e)
@@ -351,7 +280,6 @@ export function runCommand(file: string, args: string[], resolve?: (file: string
     () => undefined,
     (err: Error & { code?: unknown; stderr?: string }) => {
       if (err.code === 'ENOENT') throw new Error(`${file} was not found on PATH (${err.message})`)
-      // What `failureLine` reads besides the message
       const stderr = String(err.stderr ?? '')
       throw Object.assign(new Error(failureDetail(file, stderr) || err.message), { exitCode: err.code, stderr })
     },
@@ -364,20 +292,15 @@ export class UpdateService {
   private installing = false
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly deps: Required<UpdateDeps>
-  /** One check at a time — the timer and the button can land together */
   private inFlight: Promise<UpdateStatus> | null = null
-  /** The last failed install: which version, how many times in a row, and when (#645) */
   private retry: { version: string; failures: number; at: number } | null = null
-  /** Cancels the automatic retry timer, while one is pending */
   private retryTimer: (() => void) | null = null
-  /** The installed copy being brought to this host's version (`followHost`), while it runs */
   private following: Promise<void> | null = null
   /**
-   * The release this host installed and waits to be restarted into (`restart_required`), with the notice it carried
-   * (#2130). A newer release passes it; the same one or an older one is never offered or installed again.
+   * The release this host installed and waits to be restarted into (`restart_required`), with the notice it carried (#2130); a
+   * newer release passes it, the same or an older one is never offered or installed again
    */
   private installed: { version: string; error: string | null } | null = null
-  /** The install under way's answer (`apply`), which a second caller joins */
   private applying: Promise<UpdateStatus> | null = null
 
   constructor(
@@ -400,11 +323,9 @@ export class UpdateService {
           t.unref?.()
           return () => clearTimeout(t)
         }),
-      // If no place to persist it is given, treat auto-update as on — the same default that main.ts
-      // passes in.
+      // No place to persist it: automatic checking is on, as main.ts passes
       readAuto: deps.readAuto ?? (() => true),
       writeAuto: deps.writeAuto ?? (() => {}),
-      // Off when nothing is given (tests); the host passes the stored switch, on unless turned off (update-switches.ts)
       readAutoApply: deps.readAutoApply ?? (() => false),
       writeAutoApply: deps.writeAutoApply ?? (() => {}),
       wait: deps.wait ?? sleep,
@@ -413,13 +334,9 @@ export class UpdateService {
     }
     this.status = {
       /*
-       * The honest source for "which build is this".
-       *
-       * `APP_VERSION` is what the app was compiled from: the version a release stamped
-       * into the build with the npm packages that carry it (#1501, `tooling/brand.test.ts`),
-       * or the placeholder `0.0.0-dev` of a source tree. The workspace root's package.json
-       * is not it — that one is private, has no version anyone installs, and would have
-       * read `0.0.0` forever without ever being wrong enough to notice.
+       * `APP_VERSION` is what the app was compiled from: the version a release stamped into the build (#1501,
+       * `tooling/brand.test.ts`) or the source tree's placeholder `0.0.0-dev`; the workspace root's package.json is private and would
+       * read `0.0.0` forever
        */
       current: this.deps.current,
       latest: null,
@@ -437,11 +354,8 @@ export class UpdateService {
   }
 
   /**
-   * Start checking. Called once, at host start.
-   *
-   * The first check goes out immediately rather than waiting out the first interval,
-   * because startup is the moment the answer is most likely to be stale — the app was
-   * closed while releases happened.
+   * Starts checking, once at host start; the first check goes out at once, as the app was closed while releases happened and
+   * startup is when the answer is most likely stale
    */
   start(): void {
     this.stopped = false
@@ -450,7 +364,7 @@ export class UpdateService {
     this.startTimer()
   }
 
-  /** Shutdown (including a host swap): no asynchronous continuation may start more work. */
+  /** Shutdown (including a host swap): no asynchronous continuation may start more work */
   stop(): void {
     this.stopped = true
     this.stopTimer()
@@ -465,17 +379,13 @@ export class UpdateService {
   private startTimer(): void {
     this.stopTimer()
     this.timer = setInterval(() => void this.check(false), CHECK_INTERVAL_MS)
-    // Do not hold the process open for a version check. Without this the host outlives
-    // the window it serves by up to six hours (`pnpm host` in a terminal shows it).
+    // Not held open for a version check: the host would outlive the window it serves by up to six hours (`pnpm host` in a terminal shows it)
     this.timer.unref?.()
   }
 
   /**
-   * Turn the periodic check on or off.
-   *
-   * Turning it on goes and looks straight away. Someone who just enabled this is asking
-   * the question now, not in six hours — and an answer of "nothing yet" from a control
-   * that was flipped a second ago reads as broken.
+   * Turns the periodic check on or off; turning it on looks at once, as an answer of "nothing yet" from a control flipped a
+   * second ago reads as broken
    */
   async setAuto(enabled: boolean): Promise<UpdateStatus> {
     if (this.status.auto === enabled) return this.current()
@@ -491,12 +401,9 @@ export class UpdateService {
   }
 
   /**
-   * "Apply updates automatically when idle" on or off (#352).
-   *
-   * Turning it on with a newer version already known installs it now rather than at the next
-   * check, hours away: the person just said they want updates applied without asking. The
-   * install itself is safe while agents work (the keeper and every host run from their own
-   * copies; the bundle on disk is what changes). Applying it is the window's, once idle.
+   * "Apply updates automatically when idle" on or off (#352). Turning it on with a newer version known installs it now, not at
+   * the next check hours away; the install is safe while agents work (the keeper and every host run from their own copies), and
+   * applying it is the window's, once idle
    */
   setAutoApply(enabled: boolean): UpdateStatus {
     if (this.status.autoApply === enabled) return this.current()
@@ -509,10 +416,9 @@ export class UpdateService {
   }
 
   /**
-   * With `autoApply` on and a newer version known, install it — once, not over an install or a
-   * finished one. A failed install is tried again, but only on the backoff (#645): a check that
-   * lands right after the failure does not start another `npm i -g`, and one after the delay does,
-   * whether the retry timer or a person's Check now brought it.
+   * With `autoApply` on and a newer version known, installs it once, not over an install or a finished one. A failed install is
+   * retried only on the backoff (#645): a check right after the failure starts no `npm i -g`, one after the delay does, whether
+   * the retry timer or Check now brought it
    */
   private installIfAutomatic(): void {
     if (!this.status.autoApply || !this.status.newer || !this.status.latest) return
@@ -527,8 +433,8 @@ export class UpdateService {
   }
 
   /**
-   * A failed install may be retried once its backoff has passed — or at once for a release that
-   * is not the one that failed: a new version is a new situation, and one attempt at it is cheap.
+   * A failed install may be retried once its backoff has passed, or at once for a release other than the one that failed: a new
+   * version is a new situation and one attempt is cheap
    */
   private retryDue(): boolean {
     if (!this.retry || this.retry.version !== this.status.latest) return true
@@ -541,7 +447,6 @@ export class UpdateService {
     const delay = Math.max(0, retryDelay(this.retry.failures) - (this.deps.now() - this.retry.at))
     this.retryTimer = this.deps.schedule(() => {
       this.retryTimer = null
-      // The timer is the backoff; by the time it fires, the attempt is due
       if (this.stopped || !this.status.autoApply || this.status.phase !== 'failed' || !this.status.newer || !this.status.latest) return
       if (!installsByItself(this.deps.build, this.deps.current)) return
       void this.apply()
@@ -554,39 +459,28 @@ export class UpdateService {
   }
 
   /**
-   * Look at the registry, or answer with what we already know.
-   *
-   * `force` is the Check now button. Without it this is the timer, which is allowed to
-   * be cheap and quiet — it takes the shorter deadline, and while it does record why it
-   * failed, nothing about a background failure interrupts anyone.
+   * Looks at the registry, or answers with what is known. `force` is the Check now button; without it this is the timer, which
+   * takes the shorter deadline and records a failure without interrupting anyone
    */
   async check(force: boolean): Promise<UpdateStatus> {
-    // A second caller joins the first rather than opening its own request. The button
-    // and the timer landing together used to be two fetches racing to write one field.
+    // A second caller joins the first: the button and the timer landing together would be two fetches racing to write one field
     if (this.stopped) return this.current()
     if (this.installing) return this.withInstallTarget(this.current())
     if (this.inFlight) return this.withInstallTarget(await this.inFlight)
     /*
-     * With automatic checking off, nothing reaches the network unless a person asked.
-     *
-     * This guard is the difference between a real setting and a decoration. The UI calls
-     * this once at startup to learn where things stand, and without the guard that call
-     * would go to the registry no matter what the checkbox said — the toggle would stop
-     * the six-hourly requests and quietly keep the one at launch.
+     * With automatic checking off nothing reaches the network unless a person asked: this guard makes the setting real, as the UI's
+     * startup call would otherwise go to the registry whatever the checkbox said
      */
     if (!force && !this.status.auto) return this.current()
-    // If it is not yet time to ask, return the answer already known, so that opening the window
-    // does not send out a request every time.
+    // Not yet due: the answer already known, so opening the window sends no request each time
     if (!force && this.status.checkedAt !== null && !this.isDue()) return this.current()
     // An install outranks a check: overwriting `updating` with `checking` erases the only sign that anything is happening
     if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm') return this.current()
 
     /*
-     * Refreshing version metadata must not dismiss an install failure, nor "restart to finish" (including while
-     * fetching). A host waiting to be restarted still asks (#2130): it may stay up for days, and a release past the one
-     * it installed would otherwise never be seen nor installed. The one it installed is never offered again
-     * (`runCheck`): the running process is still the old one, so it would count it newer and tell the person to update
-     * again, having already done so.
+     * Refreshing version metadata must not dismiss an install failure or "restart to finish". A host waiting to be restarted still
+     * asks (#2130), as it may stay up for days and a later release would never be seen; the one it installed is never offered again
+     * (`runCheck`), as the running process is still the old one and would count it newer
      */
     const kept = this.status.phase === 'failed' || this.status.phase === 'restart_required' ? { phase: this.status.phase, error: this.status.error } : null
     if (!kept) this.status = { ...this.status, phase: 'checking' }
@@ -602,9 +496,9 @@ export class UpdateService {
   }
 
   /**
-   * `found`, or, while an install runs, its answer once its target is settled (#2131 review): during its registry lookup
-   * the status still names the release waiting, which a check would otherwise report as available. Not awaited inside
-   * `runCheck`, which the install itself waits for.
+   * `found`, or while an install runs its answer once its target is settled (#2131): during its registry lookup the status still
+   * names the release waiting, which a check would report as available. Not awaited inside `runCheck`, which the install waits
+   * for
    */
   private withInstallTarget(found: UpdateStatus): Promise<UpdateStatus> {
     const applying = this.applying
@@ -613,25 +507,18 @@ export class UpdateService {
 
   private async runCheck(force: boolean, kept: Pick<UpdateStatus, 'phase' | 'error'> | null): Promise<UpdateStatus> {
     const res = await this.deps.fetchLatest(force ? FORCED_TIMEOUT_MS : SCHEDULED_TIMEOUT_MS)
-    // An install may have started while this older check was waiting. Its fresh lookup owns the target.
+    // An install may have started while this older check was waiting; its fresh lookup owns the target
     if (this.stopped || this.installing) return this.current()
     if (!res.ok) {
-      /*
-       * A failed check keeps the last good answer.
-       *
-       * Dropping `latest` on a failure would make a laptop that went offline look like
-       * it had just been told it was up to date — the check would erase its own finding
-       * every time the network blinked.
-       */
+      /* A failed check keeps the last good answer: dropping `latest` would make a laptop that went offline look just told it is up to date */
       this.status = { ...this.status, phase: kept ? kept.phase : 'idle', error: kept ? kept.error : res.reason }
       this.emit()
       return this.current()
     }
     const latest = res.version
     /*
-     * Nothing past the release installed and waiting: "restart to finish" stays, never an offer of what is installed. A
-     * failed install of a later one stays failed, with its error and its retry, and the time it was seen is not renewed:
-     * the next attempt looks again and settles it (#2131 review).
+     * Nothing past the release installed and waiting: "restart to finish" stays, never an offer of what is installed; a failed
+     * install of a later one stays failed with its error and retry, and the time it was seen is not renewed (#2131)
      */
     if (!this.passesInstalled(latest)) {
       this.status = kept?.phase === 'failed' ? { ...this.status, phase: 'failed', error: kept.error } : { ...this.waitingStatus(), checkedAt: this.deps.now() }
@@ -639,9 +526,8 @@ export class UpdateService {
       return this.current()
     }
     /*
-     * A failure stays with the release that failed (#2282): one past it is a new offer, not that failure, and with
-     * `autoApply` on it is installed at once (`retryDue`). Saying the old error under it would name a version nobody
-     * is installing any more.
+     * A failure stays with the release that failed (#2282): one past it is a new offer and, with `autoApply` on, installed at once
+     * (`retryDue`); the old error under it would name a version nobody is installing
      */
     const failed = this.retry?.version
     const failure = kept?.phase === 'failed' && !(failed && isNewerVersion(latest, failed)) ? kept : null
@@ -654,38 +540,25 @@ export class UpdateService {
       checkedAt: this.deps.now(),
     }
     this.emit()
-    // Asked for in advance (#352): a newer version found is installed without a click
     this.installIfAutomatic()
     return this.current()
   }
 
   /**
-   * Install the newer version, then say so. **Does not restart the app** — that is the
-   * window's step (#352).
-   *
-   * Answers once the target is settled: after the fresh lookup (at most the forced deadline, plus
-   * an older check it waits for), when `npm i -g` is about to start, or when the registry shows
-   * nothing newer. Not when the install is done — `npm i -g` regularly takes longer than the RPC
-   * deadline, and a caller that has already given up cannot be told how it went; the rest of the
-   * story arrives as `update_status` events.
-   *
-   * With nothing newer known it refreshes first rather than refusing (#645): the stored answer
-   * may be hours old, or there may be none at all with automatic checks off. "Up to date" is then
-   * a result (`idle`, no error), never `failed` — a refusal recorded as a failure stayed on the
-   * line through every later check.
-   *
-   * While a release waits to be restarted into, this installs only one past it (#2130), which replaces the waiting
-   * build; with none, the line goes back to "restart to finish".
+   * Installs the newer version and says so; does not restart the app, which is the window's step (#352). Answers once the target
+   * is settled (after the fresh lookup: at most the forced deadline, plus an older check it waits for; when `npm i -g` is about
+   * to start, or when the registry shows nothing newer), not when the install is done: `npm i -g` regularly outlasts the RPC
+   * deadline, and the rest arrives as `update_status` events. With nothing newer known it refreshes first (#645), as the stored
+   * answer may be hours old or absent with automatic checks off; "up to date" is a result (`idle`, no error), never `failed`,
+   * since a recorded refusal stayed on the line through every later check. While a release waits to be restarted into, it
+   * installs only one past it (#2130), replacing the waiting build
    */
   apply(): Promise<UpdateStatus> {
     if (this.stopped) return Promise.resolve(this.current())
-    // A second click or call joins the install under way, and answers once its target is settled, as the first does
     if (this.installing) return this.applying ? this.applying.then(() => this.current()) : Promise.resolve(this.current())
     this.installing = true
-    // A person's click or the timer: either way this is the attempt, so no second timer waits behind it
     this.cancelRetry()
     const known = this.status.newer && this.status.latest && this.passesInstalled(this.status.latest) ? this.status.latest : null
-    // Nothing known yet: the line says "Checking…", not "Installing…", until the lookup answers
     this.status = { ...this.status, phase: known ? 'updating' : 'checking', error: null }
     this.emit()
     this.applying = new Promise((settled) => void this.runApply(known, settled))
@@ -703,10 +576,9 @@ export class UpdateService {
     }
     const copy = this.deps.installedCopy()
     try {
-      // Finish an older check before asking again, including when auto-apply started inside it.
-      // Keep the install busy throughout: checks and another click must not replace its target.
+      // Finish an older check first, including one auto-apply started inside; the install stays busy throughout so a check or click
+      // cannot replace its target
       await this.inFlight
-      // Never two installs at once: one bringing the copy to this host's version finishes first (`followHost`)
       await this.following
       if (this.stopped) return
       const age = this.status.checkedAt === null ? Infinity : this.deps.now() - this.status.checkedAt
@@ -719,7 +591,7 @@ export class UpdateService {
           const keepStored = version !== null && storedAge >= 0 && storedAge < STORED_RELEASE_MAX_AGE_MS && isNewerVersion(version, fresh.version)
           const target: string = keepStored && version !== null ? version : fresh.version
           version = target
-          // Keeping an earlier observation must not renew it indefinitely across failed installs.
+          // Keeping an earlier observation must not renew it indefinitely across failed installs
           this.status = { ...this.status, latest: target, newer: isNewerVersion(target, this.status.current), checkedAt: keepStored ? this.status.checkedAt : now }
           if (!this.passesInstalled(target)) {
             this.status = { ...this.waitingStatus(), checkedAt: this.status.checkedAt }
@@ -730,8 +602,8 @@ export class UpdateService {
             return
           }
         } else if (version === null) {
-          // Nothing stored to fall back on: the same answer as a failed check, and as little lasting
-          // Over a release waiting, its own notice (a local build kept) stays beside why nothing was looked up (#2131 review)
+          // Nothing stored to fall back on: the answer of a failed check, and over a waiting release its own notice (a local build kept)
+          // stays beside why nothing was looked up (#2131)
           const notice = this.installed?.error
           this.status = this.installed ? { ...this.waitingStatus(), error: notice ? `${fresh.reason}. ${notice}` : fresh.reason } : { ...this.status, phase: 'idle', error: fresh.reason }
           return
@@ -744,53 +616,19 @@ export class UpdateService {
       this.emit()
       answer()
       /*
-       * **Pin the exact version instead of asking for `@latest`.**
-       *
-       * `centralu update` would do all of this in one command — and would refuse to,
-       * because the launcher doing the deciding is the installed one, and the installed
-       * one may be the copy whose compare says every beta is already the newest (#42).
-       * Naming the version we found does not consult it.
+       * The exact version is pinned, not `@latest`: `centralu update` is decided by the installed launcher, which may be the copy
+       * whose compare says every beta is the newest (#42); naming the version does not consult it
        */
       await this.installPackage(version)
       if (this.stopped) return
       packageInstalled = true
       /*
-       * Refresh the copy that gets launched.
-       *
-       * Only if one exists: on macOS `centralu install` *creates* `/Applications/…`, and
-       * putting an app there is not something to do to someone who never asked. By this
-       * point the launcher on disk is the new one, so running it is safe — its `install`
-       * keeps a newer local build (#645), the same rule as here.
-       *
-       * And not over a maintainer's local build newer than the target (#645, `keepsInstalledCopy`):
-       * one (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release it
-       * was cut from, and replacing it would undo it. Every other copy is replaced, a higher
-       * released one too: npm is the source of truth for releases, and one pulled from `latest`
-       * must not survive in /Applications to be offered by "Apply now". An unreadable or malformed
-       * version is replaced as well, so a corrupt plist cannot block updates. When a local build is
-       * kept the package is still updated — the launcher and `centralu serve` come from it — and
-       * the notice says what was kept; the window's own bundle check offers to apply the copy.
-       *
-       * The launcher is the one npm just installed, found by `npm root -g` (`installCopy`), not
-       * `centralu` from PATH, which on a machine a hub manages may be the hub's shim (#1736). `npm`
-       * resolves through PATH, which the host augments from the login shell at startup
-       * (`env-path.ts`) precisely because a GUI app does not inherit one.
-       *
-       * **This replaces the bundle we are running out of** (`swapInto` in `swap.mjs`, inside
-       * `centralu install`: the new one copied to `<app>.new`, the old one renamed aside, the
-       * new one renamed in, the aside deleted). macOS keeps a running process alive through
-       * that — the launcher has always done exactly this to a running app — but between the
-       * two renames paths inside the bundle do not resolve, and the running window's own
-       * executable is named by no path from then on (#2117), which is one
-       * more reason the honest end of this is "restart" and not "carry on".
-       *
-       * **On Windows it renames the folder we are running out of** (`Centralu` aside to
-       * `Centralu.old-<time>`, then `Centralu.new` into its place). NTFS allows that with the
-       * exe and the host's native modules mapped, as long as no process has its working
-       * directory inside (measured on Windows 11, 2026-10-08), which the app sees to at start
-       * (`leave_app_folder` in `src-tauri/src/lib.rs`). The running app keeps the old files
-       * it has open; the next start runs the new folder. The old one cannot be deleted while
-       * it runs and is left for the next install to sweep.
+       * Refreshes the copy that gets launched, only if one exists (on macOS `centralu install` creates `/Applications/…`, not
+       * for someone who never asked). Not over a maintainer's local build newer than the target (`keepsInstalledCopy`, #645:
+       * `pnpm local-update` waiting for "Apply now" outranks its release); every other copy is replaced, a higher released one
+       * too, and an unreadable version as well (a corrupt plist must not block updates). A kept local build still gets the
+       * package updated. The launcher is the one npm just installed (`installCopy`), not `centralu` from PATH (a hub's shim,
+       * #1736).
        */
       if (copy) {
         const copyVersion = this.deps.installedCopyVersion(copy)
@@ -798,6 +636,14 @@ export class UpdateService {
           const notice = `The local build ${copyVersion} at ${copy} is newer than ${version} and was kept.`
           this.status = { ...this.status, error: this.status.error ? `${this.status.error} ${notice}` : notice }
         } else {
+          /*
+           * `npm` resolves through the login-shell PATH that `env-path.ts` adds at startup: a GUI app inherits none. This
+           * replaces the bundle we run out of (`swapInto` in `swap.mjs`: new beside, old renamed aside, new renamed in): macOS
+           * keeps the process alive but between the renames paths inside the bundle do not resolve (#2117), so the end is
+           * "restart". On Windows it renames the folder we run out of: NTFS allows it with the exe mapped while no process has
+           * its working directory inside (measured on Windows 11; the app leaves it at start, `leave_app_folder`), and a later install sweeps
+           * the old one
+           */
           await this.installCopy()
         }
       }
@@ -807,9 +653,8 @@ export class UpdateService {
       this.retry = null
     } catch (e) {
       /*
-       * Say which half failed. "npm i -g worked but the installed copy did not get
-       * refreshed" leaves the person launching the old app forever with no sign of it, and
-       * that is the outcome most worth naming, with the one command that finishes it.
+       * Say which half failed: "npm i -g worked but the installed copy did not refresh" leaves the person launching the old app with
+       * no sign, so it is named with the command that finishes it
        */
       if (this.stopped) return
       console.error(`[updates] install failed: ${failureLine(e)}`)
@@ -819,7 +664,6 @@ export class UpdateService {
         : reason
       // Not waiting, also when npm took it: the copy is still the old build, so this is retried as any failure is
       this.status = { ...this.status, phase: 'failed', error }
-      // Counted per target: a release that is not the one that failed starts its own count
       const target = version ?? this.status.latest ?? ''
       this.retry = { version: target, failures: this.retry?.version === target ? this.retry.failures + 1 : 1, at: this.deps.now() }
     } finally {
@@ -827,7 +671,6 @@ export class UpdateService {
       this.applying = null
       if (!this.stopped) {
         this.emit()
-        // Asked for in advance (#352): a failure is tried again on the backoff, not left for good (#645)
         if (this.status.phase === 'failed') this.installIfAutomatic()
       }
       answer()
@@ -835,20 +678,14 @@ export class UpdateService {
   }
 
   /**
-   * Bring the installed desktop copy up to this host's own version (#1736), once per host start; main.ts calls it only
-   * for a host a linked hub installed (`copyFollowsHost`, update-switches.ts, which says why and which switch rules it).
-   *
-   * Only a copy older than this host, or whose version cannot be read or is malformed, is replaced: after a rollback by
-   * the hub the copy is newer and stays, since a window of the same protocol works with the older host, and a
-   * maintainer's local build newer than this host stays by the same compare.
-   *
-   * The same two steps as an install from the app (`runApply`): `npm i -g centralu@<this version>`, pinned since the hub
-   * decides it, then the npm package's own launcher's `install` by its path (`installCopy`), which on Windows renames the
-   * running copy aside. A global package already at or above this version is never taken down to it: only its `install`
-   * runs, after npm installs that package's own version again when its platform package is missing or at another version
-   * (#2282: an npm that skipped it would otherwise fail every start until a newer release). Nobody sees it: no status changes. A failure is one line on stderr and is tried again at the next host start,
-   * which is also when the hub's next update arrives. Never beside an install from the app: one running leaves this for
-   * the next start, and one asked for meanwhile waits for this to end (`runApply`).
+   * Brings the installed desktop copy up to this host's version (#1736), once per host start; main.ts calls it only for a host a
+   * linked hub installed (`copyFollowsHost`). Only a copy older than this host, or unreadable or malformed, is replaced: after a
+   * hub rollback the copy is newer and stays (a window of the same protocol works with the older host), as does a maintainer's
+   * newer local build. The two steps of an install from the app (`runApply`): `npm i -g centralu@<this version>`, then the global
+   * package's launcher `install` by path (`installCopy`). A global package at or above this version is not taken down: only its
+   * `install` runs, after npm installs the package's own version again when its platform package is missing or at another
+   * (#2282). No status changes; a failure is one stderr line, tried at the next start. Never beside an install from the app: one
+   * running leaves this for the next start, and one asked for meanwhile waits for this
    */
   followHost(): Promise<void> {
     if (this.stopped || this.installing || this.following) return this.following ?? Promise.resolve()
@@ -867,7 +704,6 @@ export class UpdateService {
     try {
       const global = await this.deps.globalPackage()
       if (!atLeast(global?.version ?? null, to)) await this.installGlobal(to)
-      // One npm left without its platform package (#2282) is installed again at the version it holds, never taken down
       else if (global?.version && global.platform && global.platform.version !== global.version) await this.installGlobal(global.version)
       if (this.stopped) return
       await this.installCopy()
@@ -877,7 +713,6 @@ export class UpdateService {
     }
   }
 
-  /** The global npm package's launcher's `install`, by its path (`npmGlobalPackage`), never `centralu` from PATH */
   private async installCopy(): Promise<void> {
     if (this.stopped) return
     const global = await this.deps.globalPackage()
@@ -887,12 +722,10 @@ export class UpdateService {
   }
 
   /**
-   * A just-published release can be visible from `latest` before its package is on the npm edge
-   * this machine reaches: `notarget`/ETARGET while the packument lacks it, or E404 on its own tarball while the packument
-   * already lists it (#2279, the registry edge serves the two apart), or an exit 0 without this machine's platform
-   * package, whose tarball the edge did not serve yet (#2282, `installGlobal`). That narrow condition only; credentials, disk and
-   * package errors still fail immediately. The ten minute cap makes this a wait with an end, not
-   * a hidden retry loop. `--prefer-online` makes npm revalidate instead of trusting its stale cache.
+   * A just-published release can be visible from `latest` before its package reaches this machine's npm edge: `notarget`/ETARGET,
+   * E404 on its own tarball while the packument lists it (#2279), or an exit 0 without this machine's platform package (#2282,
+   * `installGlobal`). Only that condition waits, capped at ten minutes; credentials, disk and package errors fail at once.
+   * `--prefer-online` makes npm revalidate its stale cache
    */
   private async installPackage(version: string): Promise<void> {
     const started = this.deps.now()
@@ -905,7 +738,7 @@ export class UpdateService {
       } catch (err) {
         if (this.stopped) return
         if (!(err instanceof PlatformPackageMissing) && !npmHasNotServedVersion(err, version)) throw err
-        // npm's own line, which `failureLine` still reads (stderr, exit code), after what ran out
+        // npm's own line, which `failureLine` still reads (stderr, exit code), is copied onto what ran out
         if (this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw Object.assign(new Error(`npm did not serve ${version} within ${NPM_RETRY_WINDOW_MS / 60_000} minutes: ${errorMessage(err)}`), err)
         this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
         this.emit()
@@ -918,11 +751,10 @@ export class UpdateService {
   }
 
   /**
-   * `npm i -g centralu@<version>`, and this machine's platform package with it (#2282): npm skips an optional dependency
-   * whose tarball the registry edge does not serve yet and exits 0, which leaves a launcher with no app and no host.
-   * That is the same publish race as a 404 on `centralu`'s own tarball, so it throws `PlatformPackageMissing`, which
-   * the install waits out (`installPackage`). A global package npm root does not lead to is left to `installCopy`,
-   * which says so.
+   * `npm i -g centralu@<version>` and this machine's platform package with it (#2282): npm skips an optional dependency whose
+   * tarball the edge does not serve yet and exits 0, leaving a launcher with no app and no host. That is the publish race of a
+   * 404 on `centralu`'s tarball, so it throws `PlatformPackageMissing`, which the install waits out (`installPackage`). A global
+   * package npm root does not lead to is left to `installCopy`, which says so
    */
   private async installGlobal(version: string): Promise<void> {
     await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${version}`])
@@ -931,19 +763,16 @@ export class UpdateService {
     if (platform && platform.version !== version) throw new PlatformPackageMissing(`npm installed ${APP_SLUG} ${version} without ${platform.name}@${version}`)
   }
 
-  /** `version` is past the release installed and waiting, or nothing is waiting */
   private passesInstalled(version: string): boolean {
     return !this.installed || isNewerVersion(version, this.installed.version)
   }
 
-  /** "Restart to finish" the release installed and waiting (`installed`), with the notice its install left */
   private waitingStatus(): UpdateStatus {
     const w = this.installed
     if (!w) return this.current()
     return { ...this.status, phase: 'restart_required', latest: w.version, newer: isNewerVersion(w.version, this.status.current), error: w.error }
   }
 
-  /** The scheduled check is due; a `force: false` caller in between reuses the last answer */
   private isDue(): boolean {
     return this.deps.now() - (this.status.checkedAt ?? 0) >= CHECK_INTERVAL_MS
   }
@@ -954,8 +783,8 @@ export class UpdateService {
 }
 
 /**
- * The service of the host: the real registry, `npm i -g`, global npm package and installed copy (`UpdateMachine`). The one
- * place they are named; a bare `new UpdateService` reaches none of them (#2299).
+ * The service of the host: the real registry, `npm i -g`, global package and installed copy (`UpdateMachine`), named only here;
+ * a bare `new UpdateService` reaches none of them (#2299)
  */
 export function realUpdateService(publish: (status: UpdateStatus) => void, options: UpdateServiceOptions = {}): UpdateService {
   return new UpdateService(publish, {
@@ -968,19 +797,17 @@ export function realUpdateService(publish: (status: UpdateStatus) => void, optio
   })
 }
 
-/** npm exited 0 without this machine's platform package at the version it installed (`installGlobal`) */
 class PlatformPackageMissing extends Error {}
 
 /**
- * ETARGET by npm's last line only, as a warning above an unrelated error may name it; the tarball's 404 anywhere in
- * stderr, as npm's last line under it never names the URL
+ * ETARGET by npm's last line only, as a warning above an unrelated error may name it; the tarball's 404 anywhere in stderr, as
+ * npm's last line under it never names the URL
  */
 function npmHasNotServedVersion(err: unknown, version: string): boolean {
   const tarball = `/${APP_SLUG}/-/${APP_SLUG}-${version}.tgz`.replace(/[.+]/g, '\\$&')
   return /\bETARGET\b|\bnotarget\b/i.test(errorMessage(err)) || new RegExp(`\\b404 Not Found - GET \\S+${tarball}(?!\\S)`, 'i').test(stderrOf(err))
 }
 
-/** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
 function retryDelay(failures: number): number {
   return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1] ?? CHECK_INTERVAL_MS
 }

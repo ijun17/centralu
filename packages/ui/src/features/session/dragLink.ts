@@ -1,11 +1,6 @@
-/**
- * A link or text dropped on the composer (#308): what it becomes in the message, and where it goes.
- *
- * The drag carries the two standard types an item puts on: `text/uri-list` (the item's address) and
- * `text/plain` (its words, `#306 App panels too narrow` for a board card). A link becomes a Markdown
- * link, `[#306 App panels too narrow](https://…/issues/306)`: the agent reads both the words and the
- * address, and can open the address or call the app's own tools with what it names. Text with no
- * address goes in as it is, as a drop into any text field would.
+/*
+ * A link or text dropped on the composer (#308): `text/uri-list` and `text/plain` become a Markdown link
+ * (`[#306 App panels too narrow](https://…/issues/306)`), so the agent has the words and the address; plain text goes as is.
  */
 import { INTERNAL_DRAG_MIME } from '../files/dragPath.js'
 

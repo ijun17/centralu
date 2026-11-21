@@ -1,50 +1,36 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 
 /**
- * Where a popover that hangs under a button goes, so that all of it is inside the window.
+ * Where a popover hung off a button goes, all of it inside the window. It is rendered into body and `fixed`, as the
+ * tooltip and the sidebar's row menu are: as an `absolute` child it is clipped by the first ancestor with an overflow,
+ * and a grid panel is `overflow-hidden` (its rounded corners), so the header's list lost its right side, Stop included.
  *
- * Why this exists: a popover drawn as an `absolute` child of its button is clipped by the first ancestor with an
- * overflow, and a grid panel is `overflow-hidden` (it has to be — its rounded corners and its border). The
- * background-task list hung off the session header that way and lost its right side, Stop included, in any panel
- * narrower than the list (0.1.0-beta.9, the owner's screenshot). The popover is therefore rendered into
- * `document.body` and placed `fixed`, which leaves no box to clip it — the same reason the tooltip and the sidebar's
- * row menu are fixed.
- *
- * All numbers are layout pixels: the caller divides the anchor's screen rect and the window by the zoom
- * (`--text-zoom`) first. A rect is in screen pixels, already multiplied by the zoom, while the `top`/`left` set on a
- * fixed popover are lengths inside the zoomed root, so the zoom is multiplied in a second time when it is drawn. Mixed as
- * they were, the sidebar's menu sat 24px below and 103px left of its button at zoom 1.1 (54px/249px at 1.25, measured:
- * the dogfooding report "the menu position looks wrong"), and the e2e tests missed it because they only measured at
- * zoom 1.0. The window size has no notion of zoom and `offsetHeight` is already raw layout pixels: only the rect and the
- * window are divided, so everything lands in one coordinate system.
+ * All numbers are layout pixels: a rect is in screen pixels (zoom already applied), while a fixed `top`/`left` gets the
+ * zoom (`--text-zoom`) applied again, so the caller divides the rect and the window by it (`offsetHeight` is already
+ * layout pixels). Mixed, the sidebar's menu sat 24px below and 103px left of its button at zoom 1.1 (54px/249px at
+ * 1.25, measured), which a test at zoom 1.0 cannot see.
  */
 
-/** Between the button and the popover — flush, it is unclear where the button ends */
+/** Between the button and the popover: flush, it is unclear where the button ends */
 const GAP = 4
-/** Off the window's edge — flush against it reads as cut off even when it is not */
+/** Off the window's edge: flush against it reads as cut off */
 const EDGE = 8
 
 export type Placement = { top: number; left: number; maxHeight: number }
 
 type Box = { top: number; bottom: number; left: number; right?: number }
 type Options = {
-  /** Which edge of the anchor the popover's own edge lines up with. Default `left`; `right` for a menu that flows out of a button at the window's right */
+  /** The anchor edge the popover lines up with; `right` for a menu off a button at the window's right */
   align?: 'left' | 'right'
-  /** The side tried first. Default `below`; the other side is used when this one does not fit and has less room */
+  /** The side tried first; the other is used when this one does not fit and has less room */
   side?: 'below' | 'above'
-  /** Between the anchor and the popover. Default 4 */
   gap?: number
 }
 
 /**
- * Next to the anchor, edges lined up (`align`), on the side asked for (`side`, below by default) unless that runs off
- * the window:
- * - sideways it shifts until the popover is EDGE inside the window, but never past the window's left edge;
- * - if it does not fit on its side and there is more room on the other, it opens there;
- * - either way its height is capped by the room on its side, and it scrolls inside.
- *
- * `height` is the popover's natural height (its content's), not the capped one, so a list that grew is placed for
- * what it now holds.
+ * Next to the anchor on `side` unless that runs off the window: shifted sideways to EDGE inside (never past the left
+ * edge), flipped when the other side has more room, height capped by the room on its side (it scrolls inside).
+ * `height` is the natural height, not the capped one, so a list that grew is placed for what it now holds.
  */
 export function placeUnder(
   anchor: Box,
@@ -64,10 +50,7 @@ export function placeUnder(
   return { top, left, maxHeight }
 }
 
-/**
- * A menu opened at a point (a right-click): its corner at the point, no gap, otherwise `placeUnder`'s rules, so a menu
- * near the bottom or right edge comes up or to the left of the pointer instead of running off the window.
- */
+/** A menu opened at a point (a right-click): its corner at the point, no gap, otherwise `placeUnder`'s rules */
 export function placeAt(
   point: { x: number; y: number },
   size: { width: number; height: number },
@@ -83,11 +66,9 @@ const isPoint = (a: Anchor): a is { x: number; y: number } => a !== null && 'x' 
 const elementOf = (a: Anchor): Element | null => (a === null || isPoint(a) ? null : 'current' in a ? a.current : a)
 
 /**
- * `placeUnder` (`placeAt` for a point) for a mounted popover, measured before paint (null until then: hide the popover
- * while it is null, so the frame where it sits at 0,0 never reaches the screen).
- *
- * It is placed again when anything scrolls (the anchor moved, the popover did not — capture, because scroll does not
- * bubble), when the window resizes, and when the popover's own content changes size (a row added, steps expanded).
+ * `placeUnder` (`placeAt` for a point) for a mounted popover, measured before paint; null until then: hide the popover
+ * while it is null, so it is never drawn at 0,0. Placed again on any scroll (capture: scroll does not bubble), on
+ * resize, and when its content changes size.
  */
 export function useAnchoredPlacement(
   anchor: Anchor,
@@ -131,10 +112,7 @@ export function useAnchoredPlacement(
     place()
     window.addEventListener('scroll', place, true)
     window.addEventListener('resize', place)
-    /*
-     * The children, not just the popover: once the popover is at its cap its own box stops changing, while the content
-     * inside it keeps growing — and that growth is what may have to move it upward.
-     */
+    // The children too: at its cap the popover's box stops changing while its content grows, which may move it upward
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
     const el = popoverRef.current
     if (el && observer) for (const node of [el, ...Array.from(el.children)]) observer.observe(node)

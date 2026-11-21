@@ -62,9 +62,8 @@ export function OlderSentinel({
     )
     io.observe(el)
     /*
-     * This does not rely on IntersectionObserver alone (found in dogfooding on 2026-09-04:
-     * scrolling up on a real WKWebView failed to load older content — every reproduction in
-     * Chromium passed). Even in an environment where the observer never fires, the scroll
+     * This does not rely on IntersectionObserver alone: scrolling up on a real WKWebView can
+     * fail to load older content where every reproduction in Chromium passes. Even in an environment where the observer never fires, the scroll
      * position does not lie — since it calls the same `fire`, there is no double-firing.
      */
     const onScroll = () => {
@@ -79,10 +78,9 @@ export function OlderSentinel({
 
   if (!more) return null
   /*
-   * Also loadable with a click (found in dogfooding on 2026-09-04: in the Mea session, on a
-   * resource upload, scrolling up failed to load older content — every Chromium/mock
-   * reproduction passed, which points to a difference in WKWebView's IntersectionObserver or
-   * scroll anchoring). Whatever the reason the observer fails to fire, a hand-operated fallback
+   * Also loadable with a click: in WKWebView scrolling up can fail to load older content where
+   * every Chromium/mock reproduction passes, which points to a difference in WKWebView's
+   * IntersectionObserver or scroll anchoring. Whatever the reason the observer fails to fire, a hand-operated fallback
    * remains, and if that fails too, loadOlder's toast explains why — a silent wall is the worst
    * outcome.
    */

@@ -3,20 +3,8 @@ import { initialSession, type SessionSummary } from '@cc/core'
 import type { AppState } from './state.js'
 
 /**
- * Which sessions the store holds: a host's session list merged over them without undoing what
- * changed while the list was out (`mergeListedSince`), the turn clock kept in step with them
- * (`trackWorkingSince`), what goes when one is gone (`forgetSessions`), and the events held for a
- * session not registered yet (`penEvent`, `replayPendingEvents`).
- */
-
-/**
- * Picks out only the **while-alive facts** from `SessionInfo` (approval, questions, activity,
- * limit, usage).
- *
- * These values live only in the host's memory, so if they are not carried over when the list
- * arrives after a reconnect or restart, a session can sit at `state=waiting_approval` with no card
- * payload and the approval never shows up on screen. Not spread whole, because `SessionInfo` has
- * fields `SessionSummary` does not (`externalId`, `createdAt`, …) that must not leak in.
+ * Facts mostly held only in the host's memory: a list read after a reconnect that dropped them would leave a
+ * `waiting_approval` session with no card. Not spread whole: `SessionInfo` has fields `SessionSummary` must not take.
  */
 function liveFactsOf(
   s: SessionInfo,
@@ -31,30 +19,21 @@ function liveFactsOf(
     limit: s.limit,
     usage: s.usage,
     context: s.context,
-    // Background work (#290) lives in the host's memory too — a reconnect reads back what was running and what ended
     backgroundTasks: s.backgroundTasks,
-    // So does the CLI version the process runs (#297)
     agentVersion: s.agentVersion,
-    /*
-     * Where it runs, and whether the hub answered for its machine from the mirror (#82). Taken on every list read, so a
-     * machine coming back (its `machine_resync`) clears the mark the list read while it was away left behind.
-     */
+    // Taken on every list read, so a machine's resync clears the mirror mark a read while it was away left (#82)
     machine: s.machine ?? null,
     unreachable: s.unreachable === true,
-    // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
+    // Stored by the host (#698), so it survives a restart too
     interruption: s.interruption ?? null,
-    // Started from a linked computer (#1273): its header shows its preset (its sidebar row does not, 2026-11-05). Taken with every row, as `machine` is
+    // From a linked computer (#1273): the header shows its preset, the sidebar row does not (owner, 2026-11-05)
     startedFromHub: s.startedFromHub === true,
   }
 }
 
 /**
- * One session's summary built from a host's `SessionInfo`, merged over what the store already holds (`cur`).
- *
- * The only place a row is built from `SessionInfo`: a list read (initial attach, reconnect recovery, a machine's
- * recovery #82), `session_created` and `createSession`'s own answer all come through here, so they cannot drift (#37).
- * Only the facts the host knows are overwritten; local derived state (preview, `touchedPaths`, …) belongs to the
- * reducer and is kept.
+ * The only place a row is built from `SessionInfo` (list reads, `session_created`, `createSession`'s answer), so they
+ * cannot drift (#37). What the reducer derived in `cur` (preview, `touchedPaths`, …) is kept.
  */
 export function sessionFromInfo(f: SessionInfo, cur?: SessionSummary): SessionSummary {
   return {
@@ -70,7 +49,7 @@ export function sessionFromInfo(f: SessionInfo, cur?: SessionSummary): SessionSu
     autoNamed: f.autoNamed,
     state: f.state,
     live: f.live,
-    // `lastSeq` might already be further ahead here from an event we received — winding it back would resurrect an unread mark
+    // An event may have moved `lastSeq` past the list's; winding it back would resurrect an unread mark
     lastSeq: Math.max(cur?.lastSeq ?? 0, f.lastSeq),
     lastReadSeq: f.lastReadSeq,
     waitingSince: f.waitingSince,
@@ -87,14 +66,10 @@ export function sessionFromInfo(f: SessionInfo, cur?: SessionSummary): SessionSu
   }
 }
 
-/**
- * The sessions and fields live events named while a `sessions.list` was out, one map per read in flight
- * (`watchLiveEvents`). Empty whenever no recovery is reading, so it never holds anything for long.
- */
+/** The sessions and fields live events named while a `sessions.list` was out, one map per read in flight */
 type LiveEventFields = Map<string, Set<keyof SessionSummary>>
 export const liveEventWatchers = new Set<LiveEventFields>()
 
-/** Starts noting which sessions and fields live events touch until `stop` */
 export function watchLiveEvents(): { touched: LiveEventFields; stop: () => void } {
   const touched: LiveEventFields = new Map()
   liveEventWatchers.add(touched)
@@ -102,21 +77,9 @@ export function watchLiveEvents(): { touched: LiveEventFields; stop: () => void 
 }
 
 /**
- * The sessions a fresh `sessions.list` describes, merged over what the store holds **now**, without undoing what
- * changed after the list was asked for.
- *
- * Events keep arriving while the list is out, and the list can be older than them: the hub answers once every linked
- * machine has, so its own rows may be read long before the answer leaves (`links/router.ts`). Applying the rows as
- * they stand turned a session that `session_created` registered during the wait into a deleted one (it was not in
- * the list), and wrote an answered approval, an older state or read position back over the live ones. So, against
- * `asked` (the sessions when the list was requested):
- *
- * - a field the store changed since then keeps the store's value; every other field takes the list's
- * - a session that left the store since then (`session_deleted`) is not brought back by an older row
- * - a session the list lacks is kept if it arrived since then, or a live event named it since then (`touched`);
- *   otherwise it was deleted during the gap and is reported in `gone`
- *
- * `include` limits which held sessions this list speaks for (a machine's recovery only speaks for its own).
+ * A list can be older than the live events (docs/state-management.md §5), so it merges against `asked`, the sessions
+ * when it was asked for. A session it lacks is `gone` only if `asked` had it and no live event named it since.
+ * `include` limits which held sessions this list speaks for (a machine's recovery only for its own).
  */
 export function mergeListedSince(
   asked: Record<string, SessionSummary>,
@@ -147,28 +110,15 @@ function keepChangedSince(asked: SessionSummary | undefined, cur: SessionSummary
   const out = { ...merged } as Record<string, unknown>
   const was = asked as Record<string, unknown>
   for (const [k, v] of Object.entries(cur)) if (v !== was[k]) out[k] = v
-  // Re-attachment can reaffirm working/live without changing either pre-swap value (#640).
-  // Those reports still supersede a list captured during the replacement host's startup reset.
+  // Re-attachment reaffirms working/live at their pre-swap values (#640); they still win over the list
   for (const k of reported ?? []) out[k] = cur[k]
   return out as SessionSummary
 }
 
 /**
- * Keep `workingSince` in step with who is actually working (issue #23).
- *
- * A session that starts a turn gets the current instant; one that stops working loses its
- * entry, so the next turn cannot inherit the previous turn's start. An entry that is
- * already there is never overwritten — that is the whole point, since a turn's start does
- * not move just because we looked again.
- *
- * Returns `prev` unchanged when nothing moved. Zustand hands this object straight to
- * subscribers, so allocating a fresh one per streaming delta would re-render every reader
- * of it a few times a second for no reason.
- *
- * Sessions that were already running before we knew about them (first attach, reconnect)
- * are stamped with the moment we found out. That is not when the turn began, and we cannot
- * know when it did — the host does not send it. It is the earliest instant we can honestly
- * claim, and it is still stable across every view change after that.
+ * One start per turn (#23): an entry is never overwritten and goes when the session stops working. Returns `prev`
+ * when nothing moved, so a streaming delta re-renders no reader. A session found already working is stamped when
+ * found: the host does not send when its turn began.
  */
 export function trackWorkingSince(
   prev: Record<string, number>,
@@ -184,24 +134,14 @@ export function trackWorkingSince(
       delete copy()[s.id]
     }
   }
-  // Drop instants for sessions that no longer exist — the ids never come back, but the map grows
   for (const id of Object.keys(prev)) if (!sessions[id]) delete copy()[id]
   return next
 }
 
 /**
- * Everything the store keeps per session, for sessions that are gone. Kept in one place so a deletion and a
- * reconnect that finds a session missing clear the same things.
- *
- * Everything kept per session goes together (#163). A leftover notification card would focus a nonexistent
- * session on click, showing "Select a project or session." The rest (history cursor, draft, wake error) is dead
- * weight nobody reads any more. The conversation's views go too — the host has already closed the instance — and
- * the read position goes with the session (#61). An id can come back: restoring a session from the session archive brings
- * it back under the same id, and it then opens like a session read for the first time.
- *
- * A draft with words in it is the exception (#378 review): what the person was writing is theirs, not the session's,
- * and a session can go without them asking (the host deletes an app's agent session once its run is over). Its text
- * moves to `keptDrafts`, which offers to copy it.
+ * Everything kept per session goes together (#163), for a deletion and a reconnect that finds it missing alike: a
+ * leftover notice would focus a missing session. A draft with words moves to `keptDrafts` (#378): a session can go
+ * without the person asking (an app's agent session ends with its run).
  */
 export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<AppState> {
   if (gone.size === 0) return {}
@@ -210,7 +150,7 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
     for (const [id, v] of Object.entries(obj)) if (!gone.has(id)) out[id] = v
     return out
   }
-  // Events parked for a session that will now never register would wait forever
+  // Events parked for a session that will never register would wait forever
   for (const id of gone) pendingEvents.delete(id)
   const lost = [...gone]
     .filter((id) => s.drafts[id]?.text.trim())
@@ -232,47 +172,34 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
     wakeLocked: keep(s.wakeLocked),
     watches: keep(s.watches),
     focusedSessionId: s.focusedSessionId && gone.has(s.focusedSessionId) ? null : s.focusedSessionId,
-    // The Assistant screen shows its start state again, and a first question starts a fresh session (#1653)
+    // The Assistant shows its start state; the next question starts a fresh session (#1653)
     assistantId: s.assistantId && gone.has(s.assistantId) ? null : s.assistantId,
   }
 }
 
-/** A holding pen for events belonging to a session not yet registered in the store (replayed right after registration) */
 const pendingEvents = new Map<string, { since: number; events: { e: NormalizedEvent; id: string | undefined }[] }>()
 
 /**
- * How many events the pen holds for one session, and for how long (#392).
- *
- * A session registers within moments of its first event: `createSession` answers, or `attach` and a
- * reconnect read the list. An event for a session that never registers stayed in the pen for the
- * life of the window: a late event for a session already deleted (its `session_deleted` cleared the
- * pen before it arrived), or one for a session the list does not carry. Ten minutes is far past any
- * registration; a pen older than that is for a session that is not coming. Past the count, the
- * oldest half goes: the host has already written that output to its store, and opening the
- * session reads it from there.
+ * The pen's limits (#392): an event for a session that never registers (already deleted, or not listed) would stay for
+ * the window's life. Ten minutes is far past any registration; past the count the oldest half goes, which opening the
+ * session reads back from the host's store.
  */
 export const PENDING_EVENTS_MAX = 2000
 export const PENDING_EVENTS_MAX_AGE_MS = 10 * 60_000
 
-/** Holds an event for a session not yet registered, and lets go of pens no session is coming for */
 export function penEvent(sessionId: string, e: NormalizedEvent, id: string | undefined, now: number): void {
   for (const [id, pen] of pendingEvents) if (now - pen.since > PENDING_EVENTS_MAX_AGE_MS) pendingEvents.delete(id)
   let pen = pendingEvents.get(sessionId)
   if (!pen) pendingEvents.set(sessionId, (pen = { since: now, events: [] }))
-  // Pushed in place: copying the pen for every event made a burst of n events cost n² (#392)
+  // Pushed in place: copying the pen per event makes a burst of n events cost n² (#392)
   pen.events.push({ e, id })
   if (pen.events.length > PENDING_EVENTS_MAX) pen.events.splice(0, PENDING_EVENTS_MAX / 2)
 }
 
 /**
- * Replays events held while waiting for registration, in order, **only for sessions now
- * registered**.
- *
- * While only `createSession` drained this holding pen, events for a session that had already been
- * running on the host before the app was even opened stayed in the pen forever if they arrived
- * before `attach` registered the list — the entire output of the first turn was lost until a
- * restart. This is now called at every point a session gets registered. Cleared from the pen before
- * replay, so even overlapping calls never apply the same event twice.
+ * Called at every registration, not only `createSession`: events of a session running before the app opened can arrive
+ * before `attach` lists it, and left in the pen the first turn's output is lost. Taken out of the pen before replay, so
+ * overlapping calls never apply an event twice.
  */
 export function replayPendingEvents(get: () => AppState): void {
   for (const id of [...pendingEvents.keys()]) {

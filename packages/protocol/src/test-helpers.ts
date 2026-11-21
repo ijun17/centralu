@@ -2,10 +2,8 @@ import type { z } from 'zod'
 import { SessionInfo, sessionLiveDefaults } from './commands.js'
 import { isRecord } from './tolerant.js'
 
-/**
- * Test-only helpers for the rule in docs/protocol.md §4: a field added to a host payload has a
- * default, and the client applies it. Not exported from the package index, so nothing ships them.
- */
+// Test-only helpers for docs/protocol.md §4: a field added to a host payload has a default, and the client applies
+// it. Not exported from the package index, so nothing ships them.
 
 type Def = {
   type: string
@@ -61,10 +59,8 @@ function branchOf(schema: z.ZodType, value: unknown): z.ZodType | undefined {
 }
 
 /**
- * The payload as a host from before every defaulted field would have sent it: each field whose schema carries a
- * `.default()` is taken out, at every depth. A field the protocol added later always has a default (§4), so this is a
- * superset of any older host's omissions — it also drops fields that were there from the start and happen to have a
- * default, which a client has to survive just the same.
+ * The payload with every field that has a `.default()` taken out, at every depth: a superset of any older host's
+ * omissions, since a field added later always has a default (docs/protocol.md §4).
  */
 export function withoutDefaultedFields(schema: z.ZodType, value: unknown): unknown {
   const c = core(schema)

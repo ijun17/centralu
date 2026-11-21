@@ -2,11 +2,10 @@
 //!
 //! A `.app` launched from the GUI does not inherit the login shell's PATH, and gets only
 //! `/usr/bin:/bin:/usr/sbin:/sbin` (`host_proc::node::resolve_node` in the keeper crate records the same measurement).
-//! `code` lives in none of those four directories, so the old "Open in IDE", which just ran
-//! the command by name, always ended in `No such file or directory` on the installed app, even
-//! on a Mac with VS Code installed. `tauri dev` inherits the terminal's PATH, so this never
-//! showed up during development. The npm launcher also launches with `open -a`, so it gets
-//! the same PATH.
+//! `code` lives in none of those four directories, so running the command by name ends in
+//! `No such file or directory` on the installed app, even on a Mac with VS Code installed.
+//! `tauri dev` inherits the terminal's PATH, so development does not show it. The npm launcher
+//! also launches with `open -a`, so it gets the same PATH.
 //!
 //! This checks the known locations in order instead of asking the login shell. Spawning a
 //! shell costs around one second every time the button is pressed, and the places `code` can

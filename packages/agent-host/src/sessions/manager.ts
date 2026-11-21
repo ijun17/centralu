@@ -51,8 +51,7 @@ import { SessionSettings, type SessionSettingsHost } from './session-settings.js
 import { CacheLedger } from './cache-ledger.js'
 import { UsageRecorder } from './usage-recorder.js'
 import { usageHistory } from './usage-history.js'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { worktreesFolder } from '../data-dir.js'
 import type {
   MachineInfo,
   NormalizedEvent,
@@ -66,7 +65,6 @@ import type {
 import {
   autoCompactOf,
   autoContinueOf,
-  DATA_DIR,
   withoutToolRecord,
   errorMessage,
   ASSISTANT_CHANGE,
@@ -108,11 +106,6 @@ import type { HubsReader } from './ask-project-flow.js'
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
   SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & AssistantSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
-
-/** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
-function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
-  return Object.getPrototypeOf(o) === proto
-}
 
 /**
  * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host/adapters/contract.md), so all state
@@ -245,6 +238,7 @@ export class SessionManager {
    * restart asks again (the caller's agent then raises its own card for a read outside its folder).
    */
   private readGrants = new Map<string, Set<string>>()
+  private readonly worktreeRoot: string
 
   constructor(
     private store: Store,
@@ -257,13 +251,9 @@ export class SessionManager {
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
     private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
-    /**
-     * Root under which worktrees are created. **Placed next to the data folder** — that way dev and
-     * the packaged app naturally separate (`~/.centralu-dev` vs `~/.centralu`), and tests supply a
-     * temporary directory so they never touch the user's real home.
-     */
-    private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
     private keeperOpts: {
+      /** Root under which worktrees are created: the data folder's (`worktreesFolder`) unless a test names one */
+      worktreeRoot?: string
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
@@ -279,6 +269,7 @@ export class SessionManager {
       handoffTimings?: HandoffTimings
     } = {},
   ) {
+    this.worktreeRoot = keeperOpts.worktreeRoot ?? worktreesFolder()
     this.tenure = new HostTenure(this.parts())
     this.files = new ProjectFiles({
       rootOf: (projectId) => this.projectRegistry.cwdOf(projectId),
@@ -471,6 +462,8 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
+    // Worktree folders a removal left part way (#2344); listed now, before this host can make one of its own
+    this.worktreeSweep = this.worktrees.sweepLeftoverWorktrees().catch((e: Error) => console.error(`[worktree] the sweep of leftover worktrees stopped: ${e.message}`))
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[archive] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
@@ -729,6 +722,8 @@ export class SessionManager {
 
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
+  /** The start's sweep of leftover worktree folders (`WorktreeSessions.sweepLeftoverWorktrees`); never rejects */
+  readonly worktreeSweep: Promise<void>
 
   /** `SessionSettings.updateSettings` (session-settings.ts), kept on the manager for its callers */
   updateSettings(...a: Parameters<SessionSettings['updateSettings']>): ReturnType<SessionSettings['updateSettings']> {
@@ -1237,13 +1232,42 @@ export class SessionManager {
    * `meta`; it sorts it in place since #1143).
    */
   private seat(): AssistantSeatHost {
-    // What `parts()` already says (its getters still run when read through the prototype) plus what only the tools need
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getter below reads this manager's field when used
-    const self = this
-    const own: Pick<AssistantSeatHost, 'linkedReader' | 'proposals'> & Omit<AssistantSeatHost, keyof ManagerParts> = {
-      get proposals() {
-        return self.assistantSlot.proposals
+    const parts = this.parts()
+    const proposals = () => this.assistantSlot.proposals
+    return (this.seatHost ??= {
+      get store() {
+        return parts.store
       },
+      get meta() {
+        return parts.meta
+      },
+      get children() {
+        return parts.children
+      },
+      get emit() {
+        return parts.emit
+      },
+      get linkedTasks() {
+        return parts.linkedTasks
+      },
+      get proposals() {
+        return proposals()
+      },
+      agentSession: (...a) => parts.agentSession(...a),
+      answerRoutedCard: (...a) => parts.answerRoutedCard(...a),
+      autoBoundaryOpen: (...a) => parts.autoBoundaryOpen(...a),
+      builderRefOf: (...a) => parts.builderRefOf(...a),
+      createSession: (...a) => parts.createSession(...a),
+      firstTool: (...a) => parts.firstTool(...a),
+      mailTask: (...a) => parts.mailTask(...a),
+      projectTrusted: (...a) => parts.projectTrusted(...a),
+      refusesDelegation: (...a) => parts.refusesDelegation(...a),
+      rename: (...a) => parts.rename(...a),
+      routedCards: (...a) => parts.routedCards(...a),
+      send: (...a) => this.inputs.send(...a),
+      startAgent: (...a) => parts.startAgent(...a),
+      takesSendNow: (...a) => parts.takesSendNow(...a),
+      updateCentraluAsked: (...a) => parts.updateCentraluAsked(...a),
       linkedReader: () => this.linkedReader,
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
@@ -1266,12 +1290,7 @@ export class SessionManager {
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
       askedBy: (assistantId) => this.mail.hooks?.askedBy?.(assistantId) ?? null,
-    }
-    // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
-    const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()
-    Object.setPrototypeOf(own, parts)
-    if (!stands(own, parts)) throw new Error('The Assistant seat could not be set on the module parts')
-    return (this.seatHost ??= own)
+    })
   }
 
   /** The Assistant's session id, or none while it has not been made (#1447: `mail send to "assistant"`) */

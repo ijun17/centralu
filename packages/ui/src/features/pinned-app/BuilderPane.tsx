@@ -4,16 +4,9 @@ import { SessionPane } from '../session/SessionView.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * Opens the builder session's conversation **beside** the app view (M4 C-5).
- *
- * There was also the option of a link that jumps to that session. That would switch the center lane
- * over to the session and hide the app view — breaking the promise that "the person never leaves the
- * app" (plan C-5) the moment it is pressed. Opening it beside the view instead lets the same pair of
- * eyes catch the view changing while the builder agent fixes it, and lets the person answer a
- * follow-up question from the agent right there. Needing almost nothing new to build is another
- * reason: the conversation panel is exactly the SessionPane the grid already uses (model, permission,
- * composer, approval card, all of it). The composer folds when the pane is short (`foldWhenShort`, the grid's rule),
- * so it does not eat into reading room. Messages are usually sent through the input row below instead.
+ * The builder's conversation beside the app view (M4 C-5), not a jump to it, which would hide the app: the person
+ * never leaves the app (plan C-5), sees the view change as the builder fixes it and answers it there. The grid's
+ * SessionPane, its composer folded when short (`foldWhenShort`); messages usually go through the input row below.
  */
 export function BuilderPane({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const known = useStore((s) => !!s.sessions[sessionId])

@@ -1,18 +1,40 @@
 /** `guard/doc-refs`: a `<doc> §n`, `<doc>.md "Heading"`, `<doc>.md HO1` or Markdown link reference points at a section that exists (tooling/doc-refs.ts; #2179) */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { anchorOf, danglingRefs, indexDocs, indexTexts, scanRepository } from './doc-refs.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
+/** The documents the tests of the parser cite, in a folder of their own: a change to a real one is the guard's to judge */
+const DOCS: Record<string, string> = {
+  'docs/architecture.md': '# Architecture\n\n## 2. Layers\n\n## 6. Tests\n',
+  'docs/plans/mailbox.md': '# Mailbox\n\n## 7. Reach\n\n### 7.7 Roles\n\n## 10. Reminders\n\n### 10.1 At rest\n',
+  'docs/releasing.md': '# Releasing\n\n## Host-only packages\n',
+  'AGENTS.md': '# Working in this repository\n',
+  '.centralu/apps/project-board/AGENTS.md': '# The project board\n\n## Files\n',
+}
+
 describe('guard/doc-refs', () => {
+  let docs = ''
+  beforeAll(() => {
+    docs = mkdtempSync(join(tmpdir(), 'cc-doc-refs-'))
+    for (const [path, text] of Object.entries(DOCS)) {
+      mkdirSync(dirname(join(docs, path)), { recursive: true })
+      writeFileSync(join(docs, path), text)
+    }
+  })
+  afterAll(() => rmSync(docs, { recursive: true, force: true }))
+
   it('finds no reference to a section that is not there', () => {
-    expect(scanRepository(ROOT)).toEqual([])
+    const dangling = scanRepository(ROOT)
+    expect(dangling, `references to a section that is not there:\n${dangling.join('\n')}\n`).toEqual([])
   })
 
   it('tells a section that exists from one that does not, in the forms the repository writes', () => {
-    const index = indexDocs(ROOT, ['docs/architecture.md', 'docs/plans/mailbox.md', 'docs/releasing.md'])
+    const index = indexDocs(docs, ['docs/architecture.md', 'docs/plans/mailbox.md', 'docs/releasing.md'])
     const text = [
       'architecture §2 and docs/plans/mailbox.md §10.1 and mailbox §7.7',
       'architecture §6.2',
@@ -124,7 +146,7 @@ describe('guard/doc-refs', () => {
   })
 
   it("reads a section on a comment's next line, past its comment mark", () => {
-    const index = indexDocs(ROOT, ['docs/architecture.md', 'docs/releasing.md', 'AGENTS.md', '.centralu/apps/project-board/AGENTS.md'])
+    const index = indexDocs(docs, ['docs/architecture.md', 'docs/releasing.md', 'AGENTS.md', '.centralu/apps/project-board/AGENTS.md'])
     const text = [
       '//! started as the shell does (docs/architecture.md',
       '//! §6.2). Debug builds start the keeper.',

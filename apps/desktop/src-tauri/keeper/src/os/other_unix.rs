@@ -1,5 +1,5 @@
 //! A unix that is neither macOS nor Linux. Nothing ships for one; the keeper compiles there with
-//! the fallbacks it always had: no peer credentials (every connection is refused).
+//! fallbacks: no peer credentials (every connection is refused).
 
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -10,7 +10,7 @@ pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
 /// Nothing to hear: the host asks systemd itself where there is one (#1397), and elsewhere nothing says who sent a stop
 pub fn on_system_stop(_told: impl Fn() + Send + 'static) {}
 
-/// No portable way to ask: a zombie counts as alive here, as it always did.
+/// No portable way to ask: a zombie counts as alive here.
 pub fn is_zombie(_pid: u32) -> bool {
     false
 }

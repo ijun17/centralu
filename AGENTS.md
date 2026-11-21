@@ -22,6 +22,7 @@ costs the most when missed, and says which document holds the rules for what you
 | Everything that has to pass | `pnpm verify` (lint, dependency rules, types, tests); CI runs it too |
 | Before a pull request | `pnpm pre-pr`, then `pnpm tier` for the review it needs |
 | UI scenarios, all or one spec | `CI=1 pnpm e2e [filter]` (`E2E_BROWSER=webkit` or `=chromium`: one engine, as CI runs it) |
+| UI scenarios the branch changed | `CI=1 pnpm e2e --affected` (Chromium, then WebKit, under one lock; Chromium alone on Windows); `pnpm ux --affected`: its one engine |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |
@@ -32,12 +33,13 @@ What reaches a running app without a restart: [CONTRIBUTING.md](CONTRIBUTING.md#
 
 ## Before you change …
 
+Where one feature's screen, host, protocol, store and tests are: [docs/feature-maps/](docs/feature-maps/README.md).
 Read the row's document first. The guard is what fails when the rule is broken; UNGUARDED means
 nothing does, so your own check and the review must catch it.
 
 | What you change | Read | The rule in one line | Guard |
 |---|---|---|---|
-| Anything | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) "What is expected of code" | Fix a hazard once, at its owner. One definition per concept. Root cause, not a stopgap. Less code, no dead code | pre-pr `orphans` (dead files only); the rest UNGUARDED |
+| Anything | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) "What is expected of code" | Fix a hazard once, at its owner. One definition per concept. Root cause, not a stopgap. Less code, no dead code. A comment says why, now: no history, no excuse for the code | pre-pr `orphans` (dead files only); `guard/comments` (history words, header, block and share sizes, in swept folders); the rest UNGUARDED |
 | A concept, state or name | [domain-model.md](docs/domain-model.md) §1, §3 | One glossary. The UI never works out a session's state with conditions of its own | `guard/protocol-type-copies`, `core/session/state-parity.test.ts` |
 | Which package code goes in, an import or a dependency | [architecture.md](docs/architecture.md) §2; [folder-structure.md](docs/folder-structure.md) §1–3; [platform-abstraction.md](docs/platform-abstraction.md) §4, §6; [tech-stack.md](docs/tech-stack.md) §6 | core and common do no IO; ui reaches the outside only through ports and never knows its OS; only apps pick an implementation. A library on the forbidden list needs reasoning in tech-stack.md | dependency-cruiser (pre-pr `deps`), `tooling/boundaries.test.ts`, `guard/ui-no-os`; a dependency is `pnpm tier` deep |
 | Front-end state or settings | [state-management.md](docs/state-management.md) §3, §6 | Derived values (inbox order, counts, unread, badges) are selectors, never stored fields | UNGUARDED |
@@ -48,7 +50,7 @@ nothing does, so your own check and the review must catch it.
 | A string on screen | [ux-writing.md](docs/ux-writing.md) §1, §3 | English only, American spelling. Copy the nearest string that follows the rules; no internal words; one wording per state | `guard/archive-wording` ("trash" only) |
 | How a task is done on screen | [usability.md](docs/usability.md) "Process"; [ux-metrics.md](docs/ux-metrics.md) "Budgets" | A frequent task has a ux task; a raised budget says why in the PR | CI `ux tasks` |
 | What the product does | [product-spec.md](docs/product-spec.md) | The spec wins on what is built; the design document wins on how | UNGUARDED |
-| Host code that touches the OS or processes | [architecture.md](docs/architecture.md) §2; [runtime-lessons/](docs/runtime-lessons/README.md) (by rule id); [plans/os-layer.md](docs/plans/os-layer.md) | The OS only behind the OS layer; signal only pids you started; stdout carries the handshake only (HO1) | `local/os-imports`, `local/platform-checks`, `guard/git-start`, `log-file.test.ts` |
+| Host code that touches the OS or processes | [architecture.md](docs/architecture.md) §2; [runtime-lessons/](docs/runtime-lessons/README.md) (by rule id); [plans/os-layer.md](docs/plans/os-layer.md); its tests: [agent-host/os-layer-in-tests.md](docs/agent-host/os-layer-in-tests.md) | The OS only behind the OS layer; signal only pids you started; stdout carries the handshake only (HO1) | `local/os-imports`, `local/platform-checks`, `guard/git-start`, `log-file.test.ts` |
 | Data from outside the process | [architecture.md](docs/architecture.md) §2 "Data from outside the process…" | Check it with zod or a narrowing guard, never `as T`; a caught value's text via `errorMessage(e)` | type-aware lint, `guard/type-assertions`, `tooling/type-aware-lint.test.ts` |
 | An adapter | [agent-host/adapters/adding-a-tool.md](docs/agent-host/adapters/adding-a-tool.md) step 3, [agent-host/adapters/vendor-drift-checks.md](docs/agent-host/adapters/vendor-drift-checks.md); [architecture.md](docs/architecture.md) §2 | Tests replay recordings of real runs. A new vendor name joins the drift contract. CLI names stay in `adapters/` | `agent/agent-adapter-checks`, `.github/workflows/drift.yml` |
 | A protocol message | [protocol.md](docs/protocol.md) §4 | Additions only; a shape is declared once; an added host field has a default the client applies | `protocol.test.ts` (golden fixtures), `e2e/older-host.spec.ts`, `pnpm tier` (deep) |
@@ -64,7 +66,7 @@ nothing does, so your own check and the review must catch it.
 
 ## How work is done
 
-Before opening a PR, run `pnpm pre-pr`, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request) and write its [Situations checked](CONTRIBUTING.md#situations-checked).
+Before opening a PR, run `pnpm pre-pr`, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request), have a sub-agent run its [diff review](CONTRIBUTING.md#the-diff-review-before-the-pull-request) and write its [Situations checked](CONTRIBUTING.md#situations-checked).
 Before saying done, get the review your change's tier asks for (`pnpm tier`; light: a sub-agent of
 another model reads the diff against the self-check, deep: a separate review session with
 real-environment cases) and record in Verified who reviewed and what they found

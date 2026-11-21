@@ -1,22 +1,12 @@
 @import 'tailwindcss';
 
-/*
- * Tailwind v4's automatic source detection is anchored to the Vite root (apps/web), so it cannot
- * find the packages/ui components in this monorepo → declared explicitly.
- * Without this, not a single utility class gets generated.
- */
+/* Tailwind v4 detects sources from the Vite root (apps/web): without these no utility class is generated */
 @source '../**/*.{ts,tsx}';
 @source '../../../../apps/*/src/**/*.{ts,tsx}';
 
 /*
- * The bundled fonts (#731, assets/fonts/README.md): Pretendard for what a person or a model says,
- * D2Coding for what a machine wrote. They load from the app bundle, so `block` costs no visible wait
- * and keeps the first frame from painting in a system font that then swaps (the text would jump).
- *
- * Pretendard is one static file per weight the UI uses (400, 500, 600; a bold 700 takes the 600),
- * not the variable font: WebKit on Linux (WebKitGTK, and Playwright's WebKit in CI) lays out text
- * in a variable font about seven times slower than in a static one, which kept the main thread busy
- * enough to fail e2e scenarios there (#746).
+ * The bundled fonts (#731; static files per weight, not the variable font: assets/fonts/README.md, #746). They load from
+ * the bundle, so `block` costs no wait and the first frame never paints a system font that then swaps.
  */
 @font-face {
   font-family: 'Pretendard';
@@ -48,133 +38,69 @@
 }
 
 /*
- * ── Design tokens ────────────────────────────────────────────────
- * Named by role, not by how they look (#312). The old names (void, chalk, beacon…) described
- * brightness, which reads backwards the moment a light theme exists; a role name says what the
- * colour is for, so a theme can give it any value. Every colour the UI paints is one of these —
- * use a token, not a hex value or an arbitrary `shadow-[…]`, so a theme reaches it.
- *
- * This stays plain `@theme`, not `@theme inline`: every utility then reads `var(--color-…)` at
- * run time, which is what lets a theme switch by changing variables alone.
- *
- * **These values are the Dark preset.** Light and the two high-contrast presets are
- * `[data-theme='…']` blocks below that set the same names; a custom theme is the person's copy of a preset, written as inline
- * properties on `<html>` (app/theme.ts). A token added here has to be added to THEME_TOKENS there
- * too, or themes cannot reach it (a unit test checks the two lists agree).
- *
- * The default theme's chrome is macOS's dark greys (the owner's "Dark Graphite" file, Dark since 2026-11-17, #2335): every
- * surface, line and ink is a step or two bluer than neutral (chroma 0.003 to 0.007) and none carries a hue of its own, so
- * hierarchy is built entirely by brightness. Apple's system colours are kept for the focus ring, the selection, the diff,
- * danger and the terminal, none of which states urgency. So the rule holds literally:
- *   the brightest thing on screen = what is waiting for me right now (product-spec FR-12).
- *
- * Urgency is told by brightness, kind by shape (reads the same for color-blind viewers and on a
- * black-and-white printout).
- *   ● filled circle = waiting on my action   ✕ = failed
- *   ○ empty circle  = done, not urgent       ◆ = in progress (breathing)   ▬ = stopped
+ * ── Design tokens ── (docs/design-system.md §1, docs/themes.md)
+ * Named by role, not look (#312), so a theme can give any value: paint with a token, never a hex or an arbitrary
+ * `shadow-[…]`. Plain `@theme`, not `@theme inline`: utilities read `var(--color-…)` at run time, which is how a theme
+ * switches. These values are Dark (docs/themes.md "Choosing"; its greys sit at chroma 0.003 to 0.007). A token added
+ * here joins THEME_TOKENS (protocol theme.ts; a test checks). Brightness is urgency, shape is kind:
+ *   ● waiting on me   ○ done   ◆ in progress (breathing)   ▬ stopped   ✕ failed
  */
 @theme {
-  /*
-   * Surfaces — what things sit on, named by position. In the default theme they climb in
-   * brightness from the floor up.
-   */
-  --color-surface-floor: #1d1d1d; /* the app floor */
-  --color-surface-side: #28282a; /* the sidebar and the top bar, ΔL* 5.4 over the floor with the edge line (`line-chrome`) between (it was the floor's own value from 2026-10-27 until #2335) */
+  /* Surfaces, named by position; in Dark they climb in brightness from the floor up */
+  --color-surface-floor: #1d1d1d;
+  --color-surface-side: #28282a; /* the sidebar and the top bar */
   --color-surface-raised: #2c2c2e; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #3a3a3c; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #48484a; /* hover and pressed; also my own message bubble */
   /*
-   * The control tower's floor — the plate the panels sit on.
-   *
-   * This is the one place where the brightness is inverted. On every other screen the ground is
-   * dark and the surface is bright, but in the grid the inside of a panel is the session screen
-   * itself, so the inside has to be the floor for text to read. So the outside is brightened
-   * instead, to make the panels look carved out —
-   * with inside and outside both the same floor, the boundary was a single border line, and that
-   * made it hard to see by eye where one panel ended (dogfooding: "the panel background and the
-   * outside look the same, it's confusing"). What is actually visible is only the gaps between
-   * panels and the edges, so it does not brighten a large area.
+   * The grid's and the project screen's floor: the one inversion. A panel's inside is the session screen, so it keeps the
+   * floor and the plate around it is brighter, or panels part by one border line only. Only gaps and edges show it.
    */
-  --color-surface-deck: #232325; /* the grid's and the project screen's floor */
-  /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
+  --color-surface-deck: #232325;
+  /* The conversation's own surfaces, see the session-view block below */
   --color-surface-reading: #1d1d1d;
   --color-surface-reading-raised: #2c2c2e;
 
   /* Lines */
   --color-line: #3a3a3c; /* hairline: borders, dividers, meter tracks */
-  /*
-   * The window chrome's border: the sidebar's lines and edge, the top bar's and the shell banner's bottom line, the session panel's
-   * header and dividers, and the evidence panel's edge. One colour a theme sets, a step over `line` on the sidebar's ground. A theme
-   * file that leaves it out gets its own `line` (app/theme.ts `resolveSide`). The rule for the three lines, and what each preset
-   * draws, is in themes.md "The lines"; e2e/fixtures/theme.ts holds every preset to it.
-   */
+  /* The window chrome's border and the conversation's frames: docs/themes.md "The lines", checked by e2e/fixtures/theme.ts */
   --color-line-chrome: #4a4a4c;
   --color-line-strong: #545456; /* a border that has to show: focused inputs, checkboxes, graph lanes */
-  /*
-   * The edges of the conversation's frames that are not the hairline, each a colour the theme sets: a resting panel's, the answering
-   * ring's and your own bubble's. The agent's bubble and a tool call card draw the plain `line`. A theme file that leaves one out
-   * follows the token THEME_TOKENS names (`follows`): the panel's and your bubble's `line-strong`, the ring's `ink-muted`. Dark's
-   * values are what these were drawn with before (the ring's `ink-muted`, your bubble's `ink-faint` at 40% over `surface-hover`,
-   * as a solid colour). The high-contrast presets hold all three to 3:1 (e2e/fixtures/theme.ts).
-   */
   --color-line-panel: #545456;
   --color-line-answering: #b0b0b5;
   --color-line-bubble-mine: #646467;
 
-  /* Ink — 4 steps. Brightness is urgency */
-  --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
-  --color-ink: #f5f5f7; /* body text */
-  --color-ink-muted: #b0b0b5; /* secondary */
-  --color-ink-faint: #8e8e93; /* background information */
-  /* A session mark waiting on an approval (#1740): its fill, with the letter and the edge both `ink-signal`. Dark `#a1a1a6`, Light `#5b5b60`; the high-contrast presets take a fill the letter stays readable on */
+  /* Ink: 4 steps, brightness is urgency (docs/themes.md "The urgency order") */
+  --color-ink-signal: #ffffff; /* what is waiting for me, the only pure white on screen */
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #b0b0b5;
+  --color-ink-faint: #8e8e93;
+  /* A session mark waiting on an approval: its fill (docs/design-system.md §1, #1740) */
   --color-mark-waiting: #a1a1a6;
 
-  /*
-   * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
-   *
-   * Why the achromatic rule is relaxed only here: the green and red of additions and deletions
-   * are close to reflex, not a learned convention. At the spot where an approval decision gets
-   * made, discarding that reflex and making the person read `+`/`-` line by line costs too much.
-   * Instead, it never leaves the body of the diff — state and urgency are still spoken by
-   * brightness alone.
-   */
+  /* The diff's green and red, inside a diff only: near-reflex where an approval is judged (docs/design-system.md §1) */
   --color-diff-add: #30d158;
   --color-diff-add-bg: #163322;
   --color-diff-del: #ff9f97;
   --color-diff-del-bg: #3a1d1b;
   /*
-   * Danger — what is about to destroy something (deleting a project with its folder, purging
-   * the trash) and an action that failed (a quit or a switch that did not go through). It
-   * borrowed the diff's deletion red (dogfooding: dangerous spots are red; red already means
-   * "this is disappearing" here), so the values are the same today. It is its own token because
-   * the two answer different questions: a theme may want the diff's red softer for reading while
-   * keeping a warning loud.
+   * Danger: what destroys something, or an action that failed. The diff's deletion red, as its own token so a theme can
+   * soften the diff for reading and keep a warning loud.
    */
   --color-danger: #ff9f97;
   --color-danger-bg: #3a1d1b;
 
-  /*
-   * Interaction. Focus is the keyboard focus ring and the inset line that marks a drop target —
-   * both say "this is where it goes". Selection is translucent, see ::selection below.
-   */
+  /* Focus: the focus ring and a drop target's inset line. Selection is translucent, see ::selection */
   --color-focus: #409cff;
   --color-selection: #0a84ff4d;
-  /*
-   * The scrollbar is part of the theme: its colours and its shape. The thumb is drawn inset from
-   * its 10px track by a transparent border, which is what makes it read as a thin pill rather
-   * than a bar.
-   */
+  /* The thumb is inset from its 10px track by a transparent border, so it reads as a thin pill */
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: #48484a;
   --color-scrollbar-thumb-hover: #636366;
   --scrollbar-size: 10px;
   --scrollbar-thumb-inset: 3px;
   --scrollbar-radius: 999px;
-  /*
-   * Scrims — what lies between a dialog and the screen under it. The heavier one goes with a
-   * blur (Modal, Settings, the command palette); the thinner one is used by the dialogs that do
-   * not blur (the desktop shell's dialogs, the control app). Two values because they differ today.
-   */
+  /* Scrims: the heavier one goes with a blur (Modal, Settings, the palette), the thin one under dialogs that do not blur */
   --color-scrim: color-mix(in oklab, var(--color-surface-floor) 80%, transparent);
   --color-scrim-thin: color-mix(in oklab, #000 50%, transparent);
 
@@ -187,11 +113,9 @@
 
 
   /*
-   * The terminal (xterm). xterm paints with its own theme object, read from these when a terminal
-   * opens (components/terminalTheme.ts). The shell sits on the side surface with a visible cursor;
-   * a command's log sits on a raised surface. The 16 ANSI colours are Apple's (xterm's own defaults in the high-contrast dark preset), written
-   * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
-   * colour away from a program's output.
+   * The terminal: xterm paints with its own theme object, read from these when a terminal opens (components/terminalTheme.ts).
+   * The 16 ANSI colours are Apple's, written out so a theme can change them: the achromatic rule is for our screens, not
+   * a program's output.
    */
   --color-term-bg: #232325;
   --color-term-log-bg: #2c2c2e;
@@ -216,10 +140,8 @@
   --color-term-bright-white: #ffffff;
 
   /*
-   * Shadows. Used as `shadow-(--shadow-modal)`, not `shadow-modal`: Tailwind copies a theme
-   * shadow's value into the utility, so only the var() form follows a theme that changes it.
-   * Each value is one that was written out at its call sites before; where two looked alike but
-   * differed, they stay two tokens rather than changing what is on screen.
+   * Used as `shadow-(--shadow-modal)`: Tailwind copies a theme shadow's value into `shadow-modal`, so only var() follows a
+   * theme. Two that look alike are still two tokens, so changing one moves nothing else on screen.
    */
   --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.9); /* menus, popovers, the toast */
   --shadow-popover-up: 0 -12px 32px -8px rgb(0 0 0 / 0.9); /* the same, opening upward */
@@ -227,35 +149,21 @@
   --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.9);
   --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.9);
   --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.8); /* my pinned question over the conversation */
-  /* The folded composer: `--shadow-dock` is not drawn any more (it rests out of sight, 2026-11-07; the key stays for themes), `-raised` is its shadow while raised — tuned by measuring, see SessionView */
+  /* The folded composer: `--shadow-dock` rests out of sight (the key stays for themes), `-raised` was tuned by measuring (SessionView) */
   --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.6);
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.58);
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(0 0 0 / 0.7);
   --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 -1px 2px rgb(0 0 0 / 0.5), 0 1px 0 rgb(0 0 0 / 0.6);
 
-  /* Text a machine wrote (commands, paths, numbers, the terminal) is mono; what a person or a
-     model says is sans. Both lead with the bundled font (#731, @font-face above); D2Coding has
-     Hangul at twice the Latin width, so Korean in code stays on the grid. These are the defaults of Settings → Appearance's body and code fonts (#312 step 5): a font
-     picked there goes in front of the stack, never in place of it (app/typography.ts keeps a copy
-     of both stacks, and a test keeps the copies equal). */
+  /* docs/design-system.md §4, docs/themes.md "Text: size, fonts and line height"; app/typography.ts copies both stacks */
   --font-mono: D2Coding, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   --font-sans:
     Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
 
   /*
-   * Type, line height and radius scales (#312 step 2). Tailwind's own scales are cleared, so
-   * these are the only values a utility can name; anything else has to be written as an
-   * arbitrary value, where a reviewer sees it.
-   *
-   * Five text sizes. The app reads in a dense band: 13px is what a person reads (a message, a
-   * title), 12px the controls around it, 11px what a machine wrote (paths, logs, the code viewer),
-   * 10px labels and counts, and 19px the one heading of the first-run screen. 9px was folded into
-   * 10px: at the default zoom it was below what reads comfortably, and it sat one pixel from its
-   * neighbour. The whole UI scales by the root zoom (Settings → Appearance), not by these.
-   *
-   * No `--text-*--line-height` is defined on purpose. Without it a size utility sets only the
-   * font size, as `text-[11px]` did, so every element keeps the line height it inherits; with it,
-   * each of ~650 sites would get a new line height of its own.
+   * Type, line height and radius scales (#312 step 2; docs/design-system.md §2, §4). Tailwind's own scales are cleared,
+   * so anything else is an arbitrary value a reviewer sees. No 9px: it reads poorly at the default zoom, one pixel from
+   * its neighbour. No `--text-*--line-height`: with it, ~650 sites would each get a new line height instead of inheriting.
    */
   --text-*: initial;
   --text-2xs: 10px;
@@ -264,37 +172,13 @@
   --text-md: 13px;
   --text-display: 19px;
 
-  /*
-   * Three line heights: tight for headings and two-line labels, body for prose (the conversation,
-   * descriptions), code for code blocks. Settings → Appearance's line height (Compact, Normal,
-   * Relaxed) multiplies body and code by one factor, written on the root (app/typography.ts);
-   * these values are Normal. Tight stays: a heading or a two-line label is set to fit its box. Fixed-row views do not use these — see CodeViewer (18px
-   * rows), GitPanel's diff (17px rows) and CommitGraph (38px rows): a virtual list or a drawn
-   * lane has to know the row height in pixels, so it stays a number written next to the code that
-   * depends on it.
-   */
+  /* Normal line heights; the setting multiplies body and code, not tight, nor the fixed-row views (docs/themes.md "Text: size, fonts and line height") */
   --leading-*: initial;
   --leading-tight: 1.3;
   --leading-body: 1.65;
   --leading-code: 1.5;
 
-  /*
-   * The corners (docs/design-system.md, Shape). Each step is named for what takes it:
-   *   sm      3px   small marks: checkboxes, inline code
-   *   md      4px   controls, keycaps, tool tiles, a session's mark
-   *   lg      8px   panels, menus, dialogs, tool cards
-   *   field  10px   what is typed into or picked from: the sidebar's search field, a question's options and its
-   *                 answer box (owner, 2026-10-18: an input, so not the capsules' full round)
-   *   bubble 14px   what is said, and what waits on the person: both speakers' bubbles, the pinned message,
-   *                 approval and question cards, and the conversation's own cards (a new session's past
-   *                 conversations) (owner, 2026-10-18: rounder than the panels, so a message reads as speech, not
-   *                 as a box)
-   *   full          capsules (the top bar's) and dots
-   * `field-key` is the keycap inside a field: the field's corner less the 5px gap around the key, so the two
-   * curves run parallel (the search field's ⌘K). Any other shape inside a bordered shape takes the outer radius
-   * minus the border, written as a calc on the token at its call site (the folded composer's bottom corners).
-   * tooling/styles.test.ts fails on a corner written as a number outside components/ and styles/.
-   */
+  /* The corners: docs/design-system.md §2 (what takes each step, the field-key and nested-corner rules, the guard) */
   --radius-*: initial;
   --radius-sm: 3px;
   --radius-md: 4px;
@@ -315,43 +199,10 @@
 }
 
 /*
- * The conversation's surfaces.
- *
- * Inside the session view `surface-floor` and `surface-raised` are redefined as the reading
- * surfaces rather than swapped at a dozen call sites, so a theme can give the conversation
- * surfaces of its own (`surface-reading`, `surface-reading-raised`) and every component's class
- * stays correct. Every preset sets them to the floor's own steps (#362): the conversation is on
- * the floor, and what rests on it (the composer, tool cards, approval and question cards) is
- * raised and drawn with a `line` border, the arrangement the project-board app uses. An app's
- * view is told the floor's steps (app-frame/hostStyles.ts), so an app panel and the session panel
- * beside it on the grid stand on the same ground without a rule of their own.
- *
- * History, in one sentence: from 2026-08 to 2026-10 the conversation was lifted a step off the
- * floor (Dark #1d1d1d, its cards #2a2a2a) because the reader saw it and the sidebar as "the same
- * colour" at three steps apart (#090909 and #0c0c0c then, ΔL* 0.9, with the sidebar's hairline
- * between them), until the owner preferred the board's darker floor and the lift was found to
- * leave app panels on a different ground from the sessions beside them.
- *
- * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
- * what the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #28282a, conversation #1d1d1d: ΔL* 5.4, with the edge line (#4a4a4c, `line-chrome`) between them
- *          (Graphite's values since #2335; the sidebar was the floor's own value from 2026-10-27, with the line alone).
- *   Light  sidebar #efefef, conversation #ffffff (the owner's "Light New" since 2026-11-12; it was #e0e0e0 and #f0f0f0): ΔL* 5.0, the sidebar a recess below the floor
- *          as it was before.
- * The hairline on the sidebar's edge stays; in Light it sits beside the step.
- *
- * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 7.3 above the floor in Dark (#2c2c2e on #1d1d1d) and 4.2 in Light
- * (#f4f4f4 on #e8e8e8). That is above what the lifted conversation gave its cards (6.3), which
- * was the point of the wider steps (#725): the composer and the cards read apart from
- * the conversation without leaning on their border. The card's `line` border (ΔL* 13.7 and 7.1
- * off the floor) and its signal edge still carry the rest, as the board's borders do. The signal
- * ink keeps the highest contrast on every surface (app/theme.ts `urgencyBreaks`, checked for
- * every preset).
- *
- * Dark's inks measure against the floor #1d1d1d / the sidebar #28282a / raised #2c2c2e: signal 16.9 / 14.7 / 13.9:1,
- * body 15.5 / 13.5 / 12.8, muted 7.8 / 6.8 / 6.5, faint 5.2 / 4.5 / 4.3. The order holds on every surface, which is
- * what the urgency test checks.
+ * The conversation's surfaces (docs/themes.md "Choosing", #362): redefined inside the session view rather than swapped
+ * at a dozen call sites, so a theme can give the conversation its own and every class stays correct. The measured
+ * distances (ΔL*, CIELAB: it follows the eye at the dark end better than hex steps) and Dark's ink contrasts are there.
+ * Light's sidebar #efefef is ΔL* 5.0 below its floor; the card's `line` border sits ΔL* 13.7 and 7.1 off the floor.
  */
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
@@ -359,28 +210,8 @@
 }
 
 /*
- * ── Presets ──────────────────────────────────────────────────────
- * The `@theme` values above are Dark. Each block here is another preset, selected by
- * `data-theme` on <html> (app/theme.ts). A preset sets every colour token, so nothing of Dark
- * shows through; a custom theme file then overrides whatever it names, inline.
- *
- * Light keeps the dark rule in the form that survives the inversion: **contrast is urgency**
- * (#312 decision 2). Pure black is reserved for what is waiting for you, as pure white is in
- * dark, and each ink keeps its rank on every reading surface — signal > text > secondary >
- * background — which Settings checks for every theme (app/theme.ts `urgencyBreaks`) and a test
- * checks for every preset. Raised surfaces are lighter than the floor, so in light "lifting" a
- * card means moving it toward white.
- *
- * Light sits a step down from white (#362): the owner found the near-white version (floor
- * #f2f2f2, conversation #f8f8f8, cards #ffffff) too bright. The floor is #e8e8e8 and raised
- * #f4f4f4, never pure white, and every other surface, line and ink moved by the same lightness
- * it had from the floor before (line ΔL* 7, line-strong 16.5, hover 8.5). All of Light's values were replaced by the owner's "Light New" on
- * 2026-11-12 (themes.md); where they miss the rule in themes.md "The lines" is recorded there, so the steps read as
- * they did. The two quieter inks are a little darker to keep their contrast on the dimmer floor:
- * muted 6.1:1 (was 6.0), faint 3.3:1 (was 3.1).
- *
- * The high-contrast presets push every step further apart: black or white floors, borders that
- * meet a 3:1 contrast against the floor, and inks that all clear 4.5:1, with the order intact.
+ * ── Presets ── selected by `data-theme` on <html> (docs/themes.md "Choosing", "The urgency order", "The lines").
+ * Each sets every colour token, so nothing of Dark shows through; a custom theme overrides what it names, inline.
  */
 [data-theme='light'] {
   --color-surface-floor: #ffffff;
@@ -388,14 +219,13 @@
   --color-surface-raised: #f7f7f8;
   --color-surface-selected: #e0e0e5;
   --color-surface-hover: #e7e7ea;
-  /* The grid's floor is darker than the panels here: what was a brighter plate in dark is a
-     deeper one in light, so the panels still read as cut out of it */
+  /* The grid's floor is darker than the panels here, so they still read as cut out of it */
   --color-surface-deck: #f2f2f4;
   --color-surface-reading: #ffffff;
   --color-surface-reading-raised: #f7f7f8;
 
   --color-line: #e3e3e6;
-  --color-line-chrome: #d4d4d8; /* between line and line-strong, evenly: 1.48 / 1.29 / 1.38 on the floor / sidebar / raised */
+  --color-line-chrome: #d4d4d8;
   --color-line-strong: #c6c6cb;
   --color-line-panel: #d4d4d4;
   --color-line-answering: #9e9e9e;
@@ -415,7 +245,6 @@
   --color-danger-bg: #ffebe9;
 
   --color-focus: #0066d6;
-  /* Translucent black: it darkens whatever is under it by the same amount, as the white does in dark */
   --color-selection: rgb(0 122 255 / 0.18);
   --color-scrollbar-thumb: #c9c9ce;
   --color-scrollbar-thumb-hover: #aeaeb2;
@@ -508,7 +337,7 @@
   --color-term-fg: #f0f0f0;
   --color-term-cursor: #ffffff;
   --color-term-selection: #4a4a4a;
-  /* xterm's own 16 ANSI colours, which Dark left for Apple's in 2026-11 (#2335); this preset keeps them */
+  /* xterm's own 16 ANSI colours (Dark has Apple's, #2335) */
   --color-term-black: #2e3436;
   --color-term-red: #cc0000;
   --color-term-green: #4e9a06;
@@ -605,20 +434,15 @@
 
 @layer base {
   html {
-    /* Follows the side of the theme that is showing (app/theme.ts sets data-theme-base) */
+    /* Follows the side of the theme showing (app/theme.ts sets data-theme-base) */
     color-scheme: dark;
     /*
-     * Overall text size (Settings → Appearance) is applied as a root zoom — but vh/vw are not
-     * affected by zoom, so zooming in made the 100vh shell grow bigger than the window and cut
-     * off the bottom (the session composer) (caught in dogfooding). So (1) the shell is held with
-     * a chain of % instead of vh (html → body → #root → App), and (2) any remaining vh/vw is
-     * divided by this variable to bring it back to the real window size.
-     * The effect in App.tsx always keeps zoom and this variable at the same value.
+     * The text size is a root zoom, which vh/vw ignore: a 100vh shell would outgrow the window and cut off the composer.
+     * So the shell is a chain of % (html → body → #root → App), and any remaining vh/vw is divided by this (kept equal
+     * to the zoom by App.tsx).
      */
     --text-zoom: 1;
-    /* The desktop app's window itself does not scroll.
-       Without this, pulling at the edge bounces back like a rubber band, as on the web (caught
-       in dogfooding). */
+    /* The window does not bounce at its edge, as a web page would */
     overscroll-behavior: none;
     height: 100%;
     overflow: hidden;
@@ -632,7 +456,7 @@
     height: 100%;
     overflow: hidden;
   }
-  /* The last link in the shell's % chain — without it App's h-full leans on auto and becomes 0 */
+  /* The last link in the % chain: without it App's h-full resolves against auto, to 0 */
   #root {
     height: 100%;
   }
@@ -640,15 +464,9 @@
     color-scheme: light;
   }
   /*
-   * WebKit rounds up every box's scrollWidth by 1px under a zoom factor
-   * (measured: at 1.25x, every element has sw = cw + 1 — confirmed with Playwright WebKit).
-   * That 1px puts a phantom horizontal scrollbar on every element with overflow auto —
-   * it actually showed up in the composer (textarea's default overflow is auto) (dogfooding).
-   * Every textarea in this app is a wrapping composer, so horizontal scroll is never the right
-   * answer there, and the same is true of vertical scroll containers (.overflow-y-auto) — when
-   * content overflows, clipping or an ellipsis is the answer, not horizontal scroll. Places that
-   * genuinely need scroll on both axes (the code viewer, diffs) use overflow-auto, so this rule
-   * does not catch them.
+   * WebKit rounds every box's scrollWidth up by 1px under a zoom (measured at 1.25x: sw = cw + 1, Playwright WebKit),
+   * a phantom horizontal scrollbar on anything with overflow auto, such as a textarea. A textarea here always wraps and a
+   * vertical scroller clips; views that scroll both ways (the code viewer, diffs) use overflow-auto and are not caught.
    */
   textarea {
     overflow-x: hidden;
@@ -656,13 +474,12 @@
   .overflow-y-auto {
     overflow-x: hidden;
   }
-  /* Text must not be selectable over the window-move handle — a selection would eat the drag.
-     The body text is left untouched: an agent's reply has to stay copyable. */
+  /* A selection over the window-move handle would eat the drag; the body stays selectable so replies can be copied */
   [data-tauri-drag-region] {
     user-select: none;
     cursor: default;
   }
-  /* Inner scroll areas also do not bounce at their boundary */
+  /* Inner scrollers do not bounce either */
   [data-scroll],
   .overflow-auto,
   .overflow-y-auto {
@@ -676,18 +493,9 @@
     outline-offset: 1px;
   }
   /*
-   * We draw the checkbox ourselves (dogfooding: the background color changed when the window
-   * lost key focus).
-   *
-   * The OS draws native controls, so their color changes with the window's active/inactive state
-   * — accent-color cannot override that rule (the inactive gray is a semantic color with no room
-   * to override). Taking over drawing with appearance: none makes both states the same pixels.
-   *
-   * Color splits across two variables. The existing accent-ink-muted class can no longer do
-   * anything through accent-color, but it stays as a marker meaning "this check is the bright
-   * kind" — the mapping below reads that marker and leaves the six call sites untouched. Removing
-   * it would let the mapping fall back to the default (line-strong: the box is drawn as an
-   * outline, and checking it fills the outline with its own colour so the box stays one shape).
+   * Drawn by hand: the OS draws a native checkbox grey while the window is inactive, and accent-color cannot override that.
+   * `accent-ink-muted` sets nothing through accent-color here; it marks the bright kind for the rule below (six call
+   * sites). Without it the check fills with line-strong, its own outline's colour, so the box stays one shape.
    */
   input[type='checkbox'] {
     --cc-check-bg: var(--color-line-strong);
@@ -716,8 +524,7 @@
     background: var(--cc-check-bg);
     border-color: var(--cc-check-bg);
   }
-  /* The checkmark — a rotated L shape. A url() SVG cannot take a var() color, so it is drawn with
-     two border sides instead */
+  /* A rotated L of two borders: a url() SVG cannot take a var() colour */
   input[type='checkbox']:checked::after {
     content: '';
     position: absolute;
@@ -729,19 +536,11 @@
     border-bottom: 1.5px solid var(--cc-check-mark);
     transform: rotate(45deg);
   }
-  /* The checkbox in a markdown to-do list (read-only) draws the same way — just adds fading */
+  /* A markdown to-do list's read-only checkbox */
   input[type='checkbox']:disabled {
     opacity: 0.6;
   }
-  /*
-   * The selection highlight is translucent near-white.
-   *
-   * It used to be solid #353535, but my own message bubble's background is the same colour,
-   * so selecting text on it produced no visible change (caught in dogfooding). Using alpha
-   * brightens whatever is underneath by the same amount no matter what it is, so the same problem
-   * cannot recur even if more backgrounds get added later. Pure white itself belongs to "what is
-   * waiting for me", so opacity keeps it dimmed.
-   */
+  /* Translucent, never solid: a solid selection on a ground of its own colour (a bubble) shows no change */
   ::selection {
     background: var(--color-selection);
   }
@@ -758,10 +557,7 @@
     background-clip: content-box;
     border-radius: var(--scrollbar-radius);
   }
-  /*
-   * The conversation's top and bottom edges fade where more of it lies beyond (#1706, owner 2026-11-03): the floor's own
-   * colour over the rows, strength set from the scroll position (useEdgeFade). Opacity only, so reduced motion changes nothing.
-   */
+  /* The conversation's edges fade where more lies beyond (#1706); useEdgeFade sets the opacity from the scroll position */
   .cc-edge-fade-top,
   .cc-edge-fade-bottom {
     position: absolute;
@@ -792,30 +588,14 @@
 
 @layer components {
   /*
-   * The session marker chip.
-   *
-   * Bright text on a dark background, but the sidebar background (surface-side) and the chip
-   * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
-   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, the same value from 2026-10-27,
-   * and is #28282a on #1d1d1d since #2335), so a single border did not separate them well.
-   *
-   * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
-   * highlight on top and a shadow underneath. It reads as a distinct object without spending any
-   * more brightness — brightness is the resource this app uses to speak urgency, so spending it
-   * on decoration cuts into the signal by that much — and it speaks the same language as a
-   * keyboard keycap, so the screen reads as one consistent set.
-   *
-   * One more very faint inner shadow is layered on top to make the surface look slightly
-   * recessed. The ring of a session's look wraps around this chip, so the chip needs to recede for
-   * the ring to sit in front of it.
+   * A chip on the sidebar, whose ground is close to the chip's: a keycap's 1px highlight and shadow part them without
+   * spending brightness (the urgency signal) on a brighter border. A faint inner shadow lets the chip recede.
    */
   .cc-chip {
     box-shadow: var(--shadow-chip);
   }
 
-  /* The signature: the keycap.
-     It speaks the identity of a keyboard-first tool with the feel of black on black.
-     Only a 1px highlight on top and a shadow underneath make it read as a pressable object. */
+  /* The keycap: a 1px highlight on top and a shadow under make it read as pressable */
   .keycap {
     display: inline-flex;
     align-items: center;
@@ -824,7 +604,7 @@
     padding: 0.0625rem 0.3rem;
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    /* A keycap's own box, not a line of text: its height is the cap, so it stays off the scale */
+    /* Off the scale: the keycap's height, not a line of text */
     line-height: 1.2;
     color: var(--color-ink-muted);
     background: linear-gradient(180deg, var(--color-keycap-top) 0%, var(--color-keycap-bottom) 100%);
@@ -836,23 +616,20 @@
     color: var(--color-ink);
   }
 
-  /* Dashboard figures: the position does not shift when the digit count changes */
+  /* Figures that do not shift as their digits change */
   .readout {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: var(--tracking-readout);
   }
 
-  /* With no color to spend, "waiting" is spoken by light instead.
-     A very faint glow is laid over pure white, so even among the same white the signal draws
-     the eye first. */
+  /* A faint glow over pure white, so the signal draws the eye first even among white */
   .signal {
     color: var(--color-ink-signal);
     text-shadow: 0 0 6px var(--color-signal-glow);
   }
 }
 
-/* The in-progress indicator carries only the minimum motion needed to say it is alive */
 @keyframes breathe {
   0%,
   100% {
@@ -873,10 +650,7 @@
   }
 }
 
-/*
- * A loading placeholder (components/Skeleton.tsx) stays invisible for its first 150ms, then fades in: a read that
- * answers at once never flashes a skeleton. With reduced motion it still waits, then appears without the fade.
- */
+/* A skeleton waits 150ms before fading in, so a read that answers at once never flashes one (components/Skeleton.tsx) */
 @keyframes cc-skeleton-in {
   from {
     opacity: 0;
@@ -888,11 +662,7 @@
 .cc-skeleton {
   animation: cc-skeleton-in 200ms ease-out 150ms both;
 }
-/*
- * The conversation's cover (ChatStream) waits longer (owner, 2026-10-18): a conversation usually arrives in
- * 150-300ms, and a skeleton that half rose and was then swapped for the rows read as a flicker. Below 600ms the rows
- * simply fade in; only a slow read (a linked machine, a very long history) shows the skeleton.
- */
+/* The conversation's cover (ChatStream) waits 600ms: a conversation usually arrives in 150-300ms, and a half-risen skeleton swapped for the rows flickers */
 .cc-skeleton.cc-skeleton-late {
   animation-delay: 600ms;
 }
@@ -903,18 +673,9 @@
 }
 
 /*
- * Makes the bar hanging from the ceiling look like it is actually hanging.
- *
- * Measured, it is already flush (0px gap to the ceiling of the scroll panel, identical across
- * zoom 0.9 to 1.2). And yet it read as "not attached" — because the bar appears at that spot with
- * no warning at all. Something that appears looks like it is floating, since there is no telling
- * where it came from, while something that rises and comes to rest reads as having touched the
- * ceiling. So it starts a few px lower and rises up to rest.
- *
- * Uses transform and leaves fill-mode at its default (none): the transform has to disappear once
- * the animation ends so the inner backdrop-filter goes back to its original reference frame (if
- * the transform is left in place, the element becomes a containing block and what shows through
- * behind it changes).
+ * A bar hanging from the ceiling rises a few px to rest: measured flush (0px gap at zoom 0.9 to 1.2), it still read as
+ * floating when it simply appeared. No fill-mode: a transform left in place makes the element a containing block and
+ * changes what its inner backdrop-filter shows.
  */
 @keyframes cc-hang {
   from {
@@ -930,11 +691,7 @@
   animation: cc-hang 180ms ease-out;
 }
 
-/*
- * A short pane's composer opening (a note holds it open, or the pane grew): the card comes up from below the pane's edge
- * into its place in the layout, the way it went down when the pane folded (300ms, the same ease). The pane clips while
- * it does (SessionView). Like cc-hang it leaves no fill-mode: the transform must be gone once it ends.
- */
+/* A short pane's composer coming back up from below the pane's edge, the way it folded; no fill-mode, as cc-hang */
 @keyframes cc-composer-rise {
   from {
     transform: translateY(100%);
@@ -947,8 +704,7 @@
   animation: cc-composer-rise 300ms ease-out;
 }
 
-/* Steps up out of the way as the next user message approaches — must not stay over the bubble
-   and cover it. */
+/* Steps up out of the way of the next user message, and back down after (cc-hang-in-down) */
 @keyframes cc-hang-out-up {
   from {
     opacity: 1;
@@ -963,8 +719,6 @@
   animation: cc-hang-out-up 140ms ease-in forwards;
 }
 
-/* Once stepping up resolves the conflict with the next message, it comes back down from the
-   ceiling and re-attaches. */
 @keyframes cc-hang-in-down {
   from {
     opacity: 0;
@@ -986,17 +740,11 @@
   .cc-composer-rise {
     animation: none;
   }
-  /* Even with animation off, a conflicting banner steps out of the way immediately. */
+  /* Still out of the way at once */
   .cc-hang-out-up { opacity: 0; }
 }
 
-/*
- * The opposite direction from cc-hang — comes down from above (the header) and settles. It came
- * into being when the run-command window (#60) became a dropdown opening from the ▶ in the
- * header (user request, 2026-09-06): something coming down from below a button reads as having
- * come out of that button. The reason for not leaving a fill-mode is the same as cc-hang — a
- * leftover transform changes the containing block.
- */
+/* A layer coming down from the control that opened it (docs/design-system.md §9); no fill-mode, as cc-hang */
 @keyframes cc-drop {
   from {
     opacity: 0;
@@ -1017,12 +765,7 @@
   }
 }
 
-/*
- * The exit counterpart of cc-hang — settles back down into the spot it rose from and disappears.
- * Used for closing the settings menu (a menu that unfolds upward) (user request, 2026-09-06:
- * moving only on open and cutting off abruptly on close made it unreadable where it went). An
- * exit animation only shows if unmount is delayed, so the caller keeps it mounted for `LEAVE_MS` (usePresence).
- */
+/* cc-hang's exit (a menu that opens upward); it shows only while usePresence keeps the layer for `LEAVE_MS` */
 @keyframes cc-hang-out {
   from {
     opacity: 1;
@@ -1043,8 +786,7 @@
   }
 }
 
-/* A row's log opening downward in place and closing back up (the commands window, owner 2026-10-19): the row's grid
-   track grows from nothing, so what is under it moves with it rather than jumping */
+/* A row's log opening in place (the commands window): its grid track grows, so what is under it moves rather than jumps */
 @keyframes cc-expand {
   from {
     grid-template-rows: 0fr;
@@ -1080,15 +822,7 @@
   }
 }
 
-/*
- * A list that folds and unfolds (components/Fold.tsx: a project's rows, the Assistant's children; #1605). A transition
- * of the grid track, not a keyframe animation: one that is reversed half way (the pointer comes back while it closes)
- * goes on from where it is, and what stands under it moves with it. The rows inside are uncovered, not moved. Closing is a
- * little shorter than opening (140ms against 180ms, as a layer's exit is) and ends before the rows are taken away at `LEAVE_MS`.
- *
- * With reduced motion the track does not move at all: the rows stay at full height and only fade in and out, then go when
- * the exit ends (`usePresence`).
- */
+/* A list that folds (components/Fold.tsx; docs/design-system.md §9). The 140ms close ends before `LEAVE_MS` takes the rows away */
 .cc-fold {
   display: grid;
   /* The column may be narrower than its rows' minimum content, as a block is: a truncated name must not widen the list */
@@ -1119,12 +853,7 @@
   }
 }
 
-/* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
-   the run-command dropdown) */
-/*
- * A layer's backdrop (the palette's and settings' scrim) fades with the panel it sits under (usePresence,
- * components/presence.ts). Same lengths as cc-drop and cc-drop-out, so the two move as one.
- */
+/* A layer's scrim fades with the panel over it: the same lengths as cc-drop and cc-drop-out */
 @keyframes cc-fade {
   from {
     opacity: 0;
@@ -1147,7 +876,7 @@
 .cc-fade-out {
   animation: cc-fade-out 150ms ease-in forwards;
 }
-/* Reduced motion keeps a short fade (design-system.md §9): it is opacity only, no travel, and a layer that left at once read as cut off */
+/* Reduced motion keeps a short fade (docs/design-system.md §9): a layer that left at once read as cut off */
 @media (prefers-reduced-motion: reduce) {
   .cc-fade,
   .cc-fade-out {
@@ -1156,11 +885,9 @@
 }
 
 /*
- * A chip that leaves a row of chips (the status summary on a project's name line, #2202) fades and gives back its width in the same 150ms
- * (usePresence's LEAVE_MS), so the chips that stay slide over it, not jump by its width when it goes. The width is a max-width that goes to 0 from
- * more than any chip's own (a width cannot start from `auto`; ease-out, so the part above the chip's own is over in the first moments), and the gap
- * the row keeps between chips (gap-1, 0.25rem) goes with it as a negative margin. Reduced motion: a short fade only, the chips stay where they
- * are until it is gone.
+ * A chip leaving a row of chips (docs/design-system.md §9, #2202). A max-width from more than any chip's own, since a
+ * width cannot start from `auto` (ease-out, so the surplus is spent at once); the row's gap-1 (0.25rem) goes as a
+ * negative margin.
  */
 @keyframes cc-chip-out {
   from {
@@ -1188,11 +915,7 @@
   overflow: hidden;
   animation: cc-chip-out 150ms ease-out forwards;
 }
-/*
- * The same row, the other way (#2209): a chip that arrives grows its width and the gap beside it from nothing in 150ms while it fades in (ease-in, the exit reversed), so the chips
- * that stay slide over to make room, as they do for one that leaves. The wrapper takes this class only for the entrance and is `contents` again
- * after it (FoldSummary.tsx), so the chip's overhang (the background dot) is not clipped at rest. Reduced motion: a short fade, the chips move at once.
- */
+/* The arrival, the exit reversed (#2209). Only for the entrance: at rest the wrapper is `contents`, so the dot overhanging the chip is not clipped */
 @keyframes cc-chip-in {
   from {
     max-width: 0;
@@ -1228,11 +951,7 @@
   }
 }
 
-/*
- * A linked machine's capsule that comes (a machine whose link came back, #1616) fades in. Opacity only, so reduced motion
- * keeps it: the change is still shown, without any travel. It never holds the press: the donuts in it are live from the
- * first frame. (A donut that comes after the bar was first drawn has main's own entrance, `.cc-donut-in`.)
- */
+/* A linked machine's capsule coming back (#1616; docs/design-system.md §9). Opacity only, so reduced motion keeps it */
 @keyframes cc-capsule-in {
   from {
     opacity: 0;
@@ -1245,10 +964,7 @@
   animation: cc-capsule-in 180ms ease-out;
 }
 
-/*
- * A row of the usage panel (#1623) fades in. Opacity only, so reduced motion keeps it: the change is still shown, without
- * any travel. It never holds the press: the panel is live from the first frame.
- */
+/* A row of the usage panel (#1623). Opacity only, so reduced motion keeps it */
 @keyframes cc-row-in {
   from {
     opacity: 0;
@@ -1282,13 +998,8 @@
 }
 
 /*
- * Tells the person, right where they pressed, that the button is working.
- *
- * A restart kills the process and brings it back up, which takes a few seconds during which
- * nothing appeared to happen on screen — so the person pressed again, killing the process that
- * had just come back up. The spinning icon is not decoration, it is the response "received, and
- * working on it".
- * (Same clock: everything that spins uses 1.4s.)
+ * A button that is working says so where it was pressed: a restart takes seconds, and with nothing on screen the person
+ * pressed again, killing the process just brought back. Everything that spins uses 1.4s.
  */
 @keyframes cc-spin {
   from {
@@ -1300,33 +1011,27 @@
 }
 .cc-spin {
   animation: cc-spin 1.4s linear infinite;
-  /* Keeps the icon spinning in place — with the default origin it wobbles around the text baseline */
+  /* With the default origin the icon wobbles around the text baseline */
   transform-origin: 50% 50%;
 }
 
-/* For someone who finds rotation distracting, only brightness — the same prescription as breathe */
 @media (prefers-reduced-motion: reduce) {
   .cc-spin {
     animation: breathe 1.4s ease-in-out infinite;
   }
 }
 
-/*
- * Markdown rendering (M2.5).
- * Keeps the achromatic rule — code and quotes are told apart by background brightness and
- * spacing, not color.
- * Since this sits inside the conversation, keep spacing tight: it is speech, not a document.
- */
+/* Markdown in the conversation: code and quotes part by brightness and spacing, not colour; tight, as speech */
 @layer components {
   .cc-md {
     font-size: var(--text-md);
     line-height: var(--leading-body);
-    /* Breaks even long strings with no whitespace (URLs, paths, hashes) to prevent horizontal scroll */
+    /* Breaks URLs, paths and hashes rather than scroll sideways */
     overflow-wrap: anywhere;
     word-break: break-word;
     min-width: 0;
   }
-  /* Tables scroll only within themselves — they do not push the conversation panel */
+  /* Tables scroll within themselves, never widening the panel */
   .cc-md table,
   .cc-md pre {
     max-width: 100%;
@@ -1343,12 +1048,7 @@
     line-height: var(--leading-tight);
     margin-top: 1.1em;
   }
-  /*
-   * The sizes inside a reply stay relative (em) on purpose, though they are off the five-size
-   * scale (#312 step 2 left them for step 5). A heading or a code span is sized against the reply's
-   * own text, so they keep their proportion to it whichever font is picked; and the text size
-   * setting is a zoom over everything, so there is no other size for them to follow.
-   */
+  /* em on purpose, off the type scale: docs/themes.md "Text: size, fonts and line height" */
   .cc-md h1 { font-size: 1.25em; }
   .cc-md h2 { font-size: 1.15em; }
   .cc-md h3 { font-size: 1.05em; }
@@ -1406,11 +1106,7 @@
     border-collapse: collapse;
     font-size: 0.95em;
   }
-  /*
-   * A table's lines are `line-strong`, not the hairline (owner, 2026-10-18): the answer now sits in a bubble on
-   * `surface-raised` with a `line` border, so hairline cells and a raised header faded into the bubble itself. The
-   * header takes half a hover step over whatever it stands on, so it reads as a header on the bubble and off it.
-   */
+  /* `line-strong` cells and a half-hover-step header, so the table reads inside a bubble (docs/design-system.md §3) */
   .cc-md th,
   .cc-md td {
     border: 1px solid var(--color-line-strong);
@@ -1423,33 +1119,16 @@
     background: color-mix(in oklab, var(--color-surface-hover) 50%, transparent);
   }
   .cc-md td { color: var(--color-ink-muted); }
-  /* Drawing is left to the global checkbox rule (base) — this only handles inline placement */
+  /* Placement only; the base checkbox rule draws it */
   .cc-md input[type='checkbox'] { margin-right: 0.4em; vertical-align: -2px; }
 }
 
 /*
- * The four looks of a session (#736): how a session's mark in the sidebar and its panel on the grid
- * say what it is doing, by line and fill alone. Colour and motion are not used, so the looks read the
- * same in a still frame, in grayscale and for someone sensitive to motion; the exact state is always
- * in the tooltip. `lookOf` (features/session/look.ts) maps a session to one of them, and writes it
- * as `data-look`.
- *
- *   idle       the chip's thin grey border
- *   answering  a light grey border (`ink-muted`): it is working, nothing to do; white stays for what calls
- *              the person
- *   stopped    a white dashed border on a grey chip: the turn broke off (error, interruption, limit)
- *   waiting    a white border on a grey chip: the person has to act (approval, a question)
- *
- * The mark is one 17px chip whose own border is the look (below, 2026-10-18).
+ * The four looks of a session (#736; docs/themes.md "The urgency order"), by line and fill alone, written as `data-look`
+ * by `lookOf` (features/session/look.ts). The mark is one 17px chip whose own border is the look: a ring behind a
+ * bordered, shadowed chip read blurry, its edges a pixel apart.
  */
 .cc-mark {
-  /*
-   * One edge, not three (owner, 2026-10-18: the mark read blurry). It used to be a 1.5px ring painted as a background
-   * behind a 14px chip that had its own 1px border and the keycap's inset light and drop shadow: three edges a pixel
-   * apart, the shadow making the bottom heavier than the top, and the ring's corner not following the chip's.
-   * Now the chip is the whole 17px mark and its own border is the look: thin grey when idle, 2px when it says
-   * something. No shadow: the border alone separates it from the sidebar.
-   */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1465,14 +1144,11 @@
   border: 1px solid var(--color-line-strong);
   background-color: var(--color-surface-floor);
   box-shadow: none;
-  /* The letter sits high in the readout font's line box (measured at 4x: its middle up to 0.75px above the chip's);
-     1px on top brings every look within a quarter pixel of the middle */
+  /* The readout font's letter sits high (measured at 4x: up to 0.75px); 1px on top centres every look within 0.25px */
   padding-top: 1px;
-  /* A look changing (a session starts to wait, an approval is answered) fades in the short time every state change takes */
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
-/* A tool's letter, in the UI face (ToolMark): it sits low in its line box, the opposite of the code face's digits, so
-   the 1px goes under it (measured at 4x) */
+/* A tool's letter in the UI face sits low instead, so the 1px goes under it (measured at 4x) */
 .cc-mark > .cc-chip.cc-chip-letter {
   font-family: var(--font-sans);
   padding-top: 0;
@@ -1485,8 +1161,7 @@
   border: 2px solid var(--color-ink-signal);
   background-color: var(--color-surface-selected);
 }
-/* A session waiting on an approval: its own fill, set per preset (`mark-waiting`), and the letter in the edge's ink, so it
-   stands out without a line under the row (#1740) */
+/* Waiting on an approval: docs/design-system.md §1, #1740 */
 .cc-mark[data-look='waiting'][data-state='waiting_approval'] > .cc-chip {
   background-color: var(--color-mark-waiting);
   color: var(--color-ink-signal);
@@ -1497,13 +1172,12 @@
 }
 
 /*
- * The same looks on a panel (the grid, and a project screen): only the colour and dash of the panel's
- * own 1px border, drawn by the browser on the same pixel as the panel (#208), so all four sides show at
- * any width and the content box does not move. No fill: a panel is a screen to read.
+ * The looks on a panel: only its own 1px border's colour and dash, drawn on the panel's pixel (#208), so all four sides
+ * show at any width and the content box does not move. No fill: a panel is a screen to read.
  */
 .cc-panel[data-look='answering'] {
   border-color: var(--color-line-answering);
-  /* A half pixel more of the border's own colour, drawn outside so the content box does not move (owner, 2026-10-19) */
+  /* Half a pixel more of the border's colour, outside, so the content box does not move */
   box-shadow:
     0 0 0 0.5px var(--color-line-answering),
     0 0 8px 0 color-mix(in srgb, var(--color-line-answering) 25%, transparent);
@@ -1517,15 +1191,8 @@
 }
 
 /*
- * The gust that sweeps across the screen once, when a response finishes.
- *
- * A neutral band: the ink colour, no hue (the galaxy palette it shared with the session icon's
- * orbit left with the orbit, #736).
- *
- * Why screen blending: instead of painting over the dark background, this lays light on top of
- * it. Paint would obscure the screen for that instant, but light leaves nothing behind once it
- * passes.
- * It never gets brighter than pure white (opacity is kept down).
+ * The gust that sweeps the screen once when a response finishes: a band in the ink colour, no hue (#736). Screen blending
+ * lays light over the screen rather than paint, so nothing is hidden or left behind; opacity keeps it under pure white.
  */
 @keyframes cc-gust {
   0% {
@@ -1545,22 +1212,10 @@
 }
 
 /*
- * The band is far wider than the screen, and does not end by exiting.
- *
- * It used to be narrow — the thinking was that covering the screen would bury the text, but what
- * buried it was not the width, it was the brightness (0.42 at the time). So the brightness stays
- * held down while only the width grows.
- *
- * Widening alone was not enough. Measuring it showed the easing was a strong ease-out, so the band
- * passes through almost entirely near the start — it covers the whole screen for one instant at
- * the 15% mark, and by the halfway point only 35% of it remained, already vanishing off the right
- * edge. Wider, and still not visible across the whole screen.
- *
- * So the way it ends was changed. Instead of ending by exiting, it now fades while still covering
- * the screen: the end point (25%) is where the left edge has just reached the left of the screen.
- * It covers the screen fully throughout the brightest stretch (25-60%), and disappearing is done
- * by opacity rather than motion. The motion is still there, so it is still a gust, not a panel
- * switching on and off.
+ * The band is far wider than the screen and fades out while still covering it. Covering does not bury the text, opacity
+ * does (0.42 is already too much), so the peak stays low. Measured with this ease-out, a band that ended by exiting covered
+ * the screen only for an instant (15%) and was 35% gone by halfway; this one covers it all through the brightest stretch
+ * (25-60%), ending (translate 25%) where its left edge reaches the screen's.
  */
 .cc-gust {
   position: absolute;
@@ -1575,22 +1230,17 @@
     var(--color-ink) 64%,
     transparent 100%
   );
-  /* The blur is also part of the spread — the band's edges fade all the way to the screen edge
-     so no boundary is visible */
+  /* The band's edges fade out to the screen's, so no boundary shows */
   filter: blur(80px);
   mix-blend-mode: screen;
   animation: cc-gust 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
-/*
- * For someone sensitive to motion, a band sweeping across the screen is distracting.
- * Remove the motion and leave only a brief flash of brightness.
- */
+/* Reduced motion: a brief flash of brightness, no sweep */
 @media (prefers-reduced-motion: reduce) {
   .cc-gust {
     animation: cc-gust-still 420ms ease-out forwards;
-    /* With no motion, there is no reason to keep the band stretched past the screen edge — fit
-       it exactly to the screen, very faint */
+    /* Still, so fitted to the screen */
     left: 0;
     width: 100%;
     transform: none;
@@ -1608,31 +1258,20 @@
   }
 }
 
-/*
- * On a light theme the gust multiplies instead of screening. Screen only ever lightens, and on a
- * near-white floor there is nothing left to lighten: the band would pass invisibly. Multiply is the
- * same idea turned over — it tints what is under it and leaves nothing behind once it passes.
- */
+/* Screen cannot lighten a near-white floor, so a light theme multiplies */
 [data-theme-base='light'] .cc-gust {
   mix-blend-mode: multiply;
 }
 
 /*
- * File-kind icons on a light theme get a hairline outline. Several vscode-icons are drawn pale for a
- * dark editor (the default file, YAML, JS/JSON, SQL, text, TOML, fonts: fills from #c5c5c5 to
- * #ffe885) and all but vanish on white. A drop-shadow of half a pixel draws their edge without
- * changing their colour, so the set needs no second copy of each icon.
+ * Several vscode-icons are pale for a dark editor (the default file, YAML, JS/JSON, SQL, text, TOML, fonts: fills
+ * #c5c5c5 to #ffe885) and vanish on white; a half-pixel drop-shadow outlines them without a second icon set.
  */
 [data-theme-base='light'] img[data-file-icon] {
   filter: drop-shadow(0 0 0.6px rgb(0 0 0 / 0.55));
 }
 
-/*
- * A tool's setup line (features/tools/ToolSetupLine.tsx, #59): the line changes its words in place (Install, the
- * progress, Sign in, Waiting for the browser) and the install's bar fills. Every change is animated and none of it
- * delays input (docs/design-system.md §9). With reduced motion nothing travels: the words change by a short fade, the
- * bar's width by no transition.
- */
+/* A tool's setup line changing its words, and the install's bar (#59; docs/design-system.md §9) */
 @keyframes cc-setup-swap {
   from {
     opacity: 0;
@@ -1666,10 +1305,7 @@
   }
 }
 
-/*
- * The top bar's error donut for a tool that is installed but signed out comes and goes with a short fade and a small
- * grow, not a cut (a donut's own ring does not move once it is there). Reduced motion: the fade alone.
- */
+/* A top-bar donut that comes or goes after the bar was drawn, such as a signed-out tool's (docs/design-system.md §9) */
 @keyframes cc-donut-in {
   from {
     opacity: 0;

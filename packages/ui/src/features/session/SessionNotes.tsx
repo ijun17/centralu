@@ -122,12 +122,12 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
 /**
  * A session with no process.
  *
- * This used to block with "This session is not running" and require pressing [Continue]. That
- * pushes a machine-level concern onto the person — all they want is to keep talking, and the
- * means to continue is already something this app has. Now sending a message lets the host
- * resume it on its own. This just quietly says so (so it comes as no surprise).
+ * It does not block with "This session is not running" and a [Continue] to press: that pushes
+ * a machine-level concern onto the person — all they want is to keep talking, and the means to
+ * continue is already something this app has. Sending a message lets the host resume it on its
+ * own.
  *
- * Since #568 the usual reason is sleep: the host ends an idle session's process after 15 minutes. The
+ * The usual reason is sleep (#568): the host ends an idle session's process after 15 minutes. The
  * composer taking the keyboard wakes it (and so does a message), so nothing is said while it sleeps;
  * while it starts the line says "Waking".
  */
@@ -149,7 +149,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
         <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
         {/*
          * When something else is holding the lock, **retrying alone never opens it** — the
-         * only way forward used to be going and closing the other app. A way to fork and
+         * only other way forward is closing the other app. A way to fork and
          * continue is placed right there alongside it. The fact that it leaves the original
          * untouched has to be spelled out too, or pressing it feels risky.
          */}
@@ -180,7 +180,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
 
   /*
    * Asleep says nothing (owner, 2026-10-18): sleep needs nothing from the person, typing wakes it, so a standing line
-   * only took the conversation's room. What stays is what they would want to know: that it is waking, and (above)
+   * would only take the conversation's room. What stays is what they would want to know: that it is waking, and (above)
    * why it could not.
    */
   if (!waking) return null

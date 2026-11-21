@@ -4,13 +4,9 @@ import { logReplay } from './logReplay.js'
 import { mountXterm } from './xterm.js'
 
 /**
- * One command's log (a read-only xterm — the cheapest way there is to keep ANSI color, since it is
- * a terminal emulator). Restoring the view on remount is done by the host's log buffer: the moment
- * it attaches, it receives the entire output so far, and after that it listens on the same stream a
- * terminal uses (with runId standing in for terminalId).
- *
- * Shared by the terminal panel's running command and the run dialog's selected command; only the
- * surface's test id differs, so each screen keeps its own.
+ * One command's log in a read-only xterm, the cheapest way to keep ANSI colour; for the terminal panel's running command
+ * and the run dialog's. On attach the host's log buffer sends all output so far, then the terminal stream follows
+ * (runId as the terminalId).
  */
 export function CommandLogView({
   projectId,
@@ -31,8 +27,7 @@ export function CommandLogView({
     if (!el) return
 
     return mountXterm(el, platform, 'log', { disableStdin: true, scrollback: 5000 }, (term) => {
-      // The whole log so far, at once — the stream subscription is set up first so it does not
-      // get out of order with the chunks that follow
+      // Subscribed before the log is read, so no chunk falls between (logReplay)
       const log = logReplay((data) => term.write(data))
       const offOutput = platform.terminal.onOutput((e) => {
         if (e.terminalId !== runId) return
@@ -46,14 +41,13 @@ export function CommandLogView({
         .log(projectId, command)
         .then((run) => {
           if (!run) return log.fail()
-          // If a re-run gave it a different runId, this view is about to be replaced — the old log is not drawn
+          // A re-run gave it another runId: this view is about to be replaced
           if (run.runId !== runId) return log.drop()
           log.replay(run.history, run.running ? null : run.exitCode)
         })
         .catch(() => log.fail())
 
       return {
-        // A new code font changes the cell size: the command is told its new size
         onSize: (cols, rows) => void platform.commands.resize(projectId, command, cols, rows).catch(() => {}),
         dispose: () => {
           offOutput()

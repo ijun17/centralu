@@ -2,15 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { ShortcutKeys } from '@cc/platform/ports'
 import { navShortcut, shortcut } from './shortcut.js'
 
-/** Mac keyboard — joined directly since these are symbols */
 const MAC: ShortcutKeys = { mod: '⌘', alt: '⌥', join: '' }
-/** Everything else — joined with a separator since these are names */
 const PC: ShortcutKeys = { mod: 'Ctrl', alt: 'Alt', join: '+' }
 
 describe('shortcut notation (#32)', () => {
   it('on a Mac this is exactly what was already on screen', () => {
-    // If these strings change, e2e and the settings table break together — the sweep moved
-    // where this is decided, not the notation itself
+    // If these strings change, e2e and the settings table break together
     expect(shortcut(MAC, 'mod', 'I')).toBe('⌘I')
     expect(shortcut(MAC, 'mod', '⇧A')).toBe('⌘⇧A')
     expect(shortcut(MAC, 'mod', '⇧1~4')).toBe('⌘⇧1~4')
@@ -23,13 +20,7 @@ describe('shortcut notation (#32)', () => {
     expect(shortcut(PC, 'alt', 'a')).toBe('Alt+a')
   })
 
-  /*
-   * Why the separator comes attached to the keyboard.
-   *
-   * A Mac joins directly, like `⌘⇧A`, and that reads fine because the pieces are symbols.
-   * Applying the same rule to names produces `CtrlShiftA` — that reads as one word, not a
-   * combination.
-   */
+  // Symbols join directly (`⌘⇧A`); names joined that way read as one word (`CtrlShiftA`)
   it('names do not run together', () => {
     expect(shortcut(PC, 'mod', '⇧A')).toBe('Ctrl+⇧A')
     expect(shortcut(PC, 'mod', '⇧A')).not.toContain('Ctrl⇧')

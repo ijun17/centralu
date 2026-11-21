@@ -63,7 +63,7 @@ describe('an app holding busy (#1928)', () => {
     expect(html).not.toContain('>Running')
     expect(html).toMatch(/<button[^>]*aria-label="Stop X: running merge queue, 1 item\. It starts again the next time something needs it"[^>]*data-testid="app-stop-[^"]*"[^>]*><svg[^>]*><rect/)
     expect(html).not.toContain('>Stop<')
-    // the reserve for the icon: 36px, not the 56px the text button needed
+    // the reserve for the icon: 36px, not the 56px a text button needs
     expect(html).toContain('pr-9')
     expect(html).not.toContain('pr-14')
   })

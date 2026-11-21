@@ -3,30 +3,16 @@ import { caretAt, selectedText, type Caret, type CopyLine } from './copy.js'
 import { letterOf } from '../../app/keys.js'
 
 /**
- * Copy and ⌘A for a pane whose rows are virtualized: the code viewer and the diff (#428).
- *
- * Both panes had their own copy of this and the copies drifted: the diff let the browser copy whatever a selection that
- * ended outside the pane covered (chrome included), the viewer copied the pane's part only (#424); the diff forgot the
- * remembered anchor on a new file, the viewer did not; ⌘A in the diff painted the sticky file band too, in the viewer
- * only the rows. They now share one rule, the viewer's:
- *
- * - **What is copied is rebuilt from `lines`**, not read off the DOM, which holds only the rows near the viewport
- *   (`selectedText`). A selection that ends outside the pane copies the pane's part (the edge it left by, `edgeCaret`);
- *   a selection that does not touch the pane is left to the browser.
- * - **The anchor end is remembered while its row still exists.** The focus end is under the pointer and always
- *   mounted; the anchor end is where the drag began, and the browser walks it out of the rows once the list scrolls far
- *   enough. It is forgotten when `resetKey` or `contentKey` changes, so one file's anchor never leaks into the next.
- * - **⌘A claims the whole of `wholeText`** and paints the rows that exist, nothing else: the highlight keeps a live
- *   selection alive (without one the browser fires no `copy`), and repainting on scroll keeps it under the eye. The
- *   claim ends when the person selects something else (#842 item 9): any press of the mouse, a selection that moves out
- *   of the rows, or Shift with a key that extends a selection. It used to end on a mouse press only, so after ⌘A here,
- *   text selected by keyboard anywhere else (the composer, a field) copied as the whole file. It does **not** end when
- *   the range collapses because its rows were recycled by scrolling (#36): that range is painted again instead.
- * - **The pane takes focus once per `resetKey`** once it has rows (`ready`), so ⌘A has somewhere to land: it is not a
- *   text field, and with focus left on the sidebar button that opened it ⌘A went to the document and ⌘C then copied
- *   only the mounted rows (#118). Once per key, so it never steals focus back from a search box mid-typing.
- *
- * Spread the returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
+ * Copy and ⌘A for a pane with virtualized rows, the code viewer's and the diff's: one rule (#428, #424). Spread the
+ * returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
+ * - The copy is rebuilt from `lines` (`selectedText`): the DOM holds only the rows near the viewport. A selection that
+ *   leaves the pane copies the pane's part (`edgeCaret`); one that does not touch it is left to the browser.
+ * - The anchor end is remembered while its row exists: the browser walks it out of the rows once the list scrolls far.
+ *   A new `resetKey` or `contentKey` forgets it.
+ * - ⌘A claims `wholeText` and paints the mounted rows: with no live selection the browser fires no `copy`. The claim
+ *   ends on a mouse press, a selection leaving the rows, or Shift with a key that extends a selection (#842 item 9:
+ *   a press alone would let text selected elsewhere copy as the whole file); row recycling keeps it (#36).
+ * - The pane takes focus once per `resetKey` when `ready`, so ⌘A lands here: on the document, ⌘C copies only the rows.
  */
 export function useVirtualCopy({
   scrollRef,
@@ -72,15 +58,9 @@ export function useVirtualCopy({
   }, [ready, resetKey, scrollRef])
 
   /*
-   * Remember where the selection began, while the row it began on still exists.
-   *
-   * The reported garbage came from here: once the anchor's row is recycled the browser puts the anchor somewhere
-   * else, out of the rows and up into the app chrome, and ⌘C copied "Files / esc back to chat / Open in IDE". Reading
-   * it while it is still a row is what lets the copy handler serve lines 3…N instead.
-   *
-   * A collapsed selection is a *new* one beginning, in the rows or outside them, so it overwrites the memory even with
-   * null; otherwise a stale anchor would leak into the next copy. An anchor that has been walked out of the pane by a
-   * drag that goes on is not an answer to anything, so it is ignored rather than stored.
+   * Remember the anchor while its row exists: once the row is recycled the browser moves the anchor up into the app
+   * chrome, and ⌘C would copy "Files / esc back to chat / Open in IDE". A collapsed selection is a new one, so it
+   * overwrites the memory even with null; an anchor a continuing drag walked out of the pane is ignored.
    */
   useEffect(() => {
     if (!ready) return
@@ -94,8 +74,7 @@ export function useVirtualCopy({
       }
       if (!sel || !root || !sel.anchorNode) return
       if (!root.contains(sel.anchorNode)) {
-        // A selection that begins outside the pane (the caret is collapsed there) is a new one: what was remembered
-        // belongs to the last one. A drag that has been walked out is not collapsed, and keeps its anchor.
+        // A collapsed caret outside the pane begins a new selection; a drag walked out is not collapsed and keeps its anchor
         if (sel.isCollapsed) anchor.current = null
         return
       }
@@ -107,10 +86,8 @@ export function useVirtualCopy({
   }, [ready, scrollRef, rowsRef])
 
   /*
-   * ⌘C. Scoped by *what is selected*, not by where the event lands: once the browser has walked the selection out into
-   * the app chrome the copy event no longer passes through the pane at all, and the one case that has to be caught is
-   * the one that escapes. So the listener is on the document and asks a narrower question — does this selection touch
-   * the pane's rows? If not, it is somebody else's copy and is left alone.
+   * ⌘C, scoped by what is selected, not where the event lands: a selection walked out into the app chrome sends its
+   * copy event past the pane. So the document listens, and a selection that touches no row of the pane is left alone.
    */
   useEffect(() => {
     if (!ready) return
@@ -159,8 +136,7 @@ export function useVirtualCopy({
 
   return {
     onKeyDown: (e) => {
-      // Both modifiers, like every other shortcut here. ⌘⇧A is the global "next waiting session" and must fall through
-      // Read by meaning, as every letter shortcut here: on a Korean layout the A key types ㅁ (app/keys.ts)
+      // ⌘⇧A is the global "next waiting session" and falls through. By meaning: a Korean layout's A types ㅁ (app/keys.ts)
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || letterOf(e) !== 'a') return
       e.preventDefault()
       whole.current = true

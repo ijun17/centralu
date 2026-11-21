@@ -20,13 +20,9 @@ const MODEL_WIDTH = 'w-40'
 const EFFORT_WIDTH = 'w-32'
 
 /**
- * Which model a session's start_agent runs per tool and difficulty (#729). A calling agent says how hard the job is
- * (light, standard, heavy) instead of naming a model, and the person's choice here applies. It sits under "Running
- * agents per project" because it answers the same errand: how the agents a session starts behave.
- *
- * One select per difficulty and tool, the Background category's control, with "Other…" for a model the list does not
- * show, the font picker's pattern: Claude lists its models only while a session runs, so the list may be empty here.
- * The effort select appears once a model is chosen, as in the session menu: an effort belongs to its model.
+ * Which model start_agent runs per tool and difficulty (#729): the caller says light, standard or heavy, and this
+ * choice applies. A select each, with "Other…" as in the font picker, since Claude lists models only while a session
+ * runs. The effort select appears once a model is chosen, as an effort belongs to its model.
  */
 export function AgentModelsSection() {
   const tools = useTools()

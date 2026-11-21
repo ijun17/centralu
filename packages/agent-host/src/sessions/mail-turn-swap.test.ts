@@ -38,7 +38,7 @@ afterEach(async () => {
 function host(updateResume?: UpdateResumeFolder) {
   const claude = new Adapter(true)
   const events: NormalizedEvent[] = []
-  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'), updateResume ? { updateResume } : {})
+  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, { worktreeRoot: join(root, 'worktrees'), ...(updateResume ? { updateResume } : {}) })
   mgr.prLookup = async () => null
   hosts.push(mgr)
   const m = wireHostMail(mgr, store)
@@ -277,7 +277,7 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
   })
 
   /*
-   * #1916 review: the asker also started the session (`askedBy`), so it could hear of the same cut turn twice. The task it gave was reported when
+   * #1916: the asker also started the session (`askedBy`), so it could hear of the same cut turn twice. The task it gave was reported when
    * its turn ended; the quit found at the next start goes through the stop notice alone (mailbox.md §10.6.1, `HostMail.afterReady`, before its
    * delivery closes the turn): the asker is owed a reply, so the notice listing its question is the one word it gets, with no starter notice and
    * no quit report besides

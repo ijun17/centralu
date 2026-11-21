@@ -38,7 +38,7 @@ afterEach(async () => {
 function host() {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'))
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   hosts.push(mgr)
   return { mgr, claude }

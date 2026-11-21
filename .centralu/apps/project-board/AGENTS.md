@@ -1045,7 +1045,7 @@ and refuses with every reason at once, sending nothing.
   untouched) and removed with the refs, or named as left. A checkout out at an old commit ran its old script, and a check added since (lint) never ran, with nothing to say so. Main's, not the head's, so a pull request
   cannot loosen its own checks; when main has no such script the call says so and runs nothing (another failure to read it says what failed, and the call answers that it could not run). Only the script's folder is written out (`scripts/`, which `scripts/pre-pr.mjs` must not import outside of; a script at the repository's root takes the whole tree). The folder is named for the call's process (`cc-board-pre-pr-<pid>-…`): a call killed outright leaves it, and the next call removes those of processes that have ended. Its findings refuse the pull request and nothing is sent; its warnings (a
   head behind main) do not, and go into Verified with the pass. `prePrExempt` leaves one check out
-  (`tsc`, `orphans`, `deps`, `lint`, `store-step`, `guards`, `revert`) and `skipPrePr` all of them, each with a reason that goes into
+  (`lint`, `tsc`, `orphans`, `deps`, `repo-guards`, `store-step`, `revert`, `guards`) and `skipPrePr` all of them, each with a reason that goes into
   Verified. It runs outside `oneAtATime`, with progress every minute, since a stack takes minutes; a
   fork's branch cannot be fetched here and needs `skipPrePr`. Cancelled (`ctx.mcpReq.signal`) or
   past 30 minutes, the script's whole process tree is stopped (`taskkill /T` by its full path, or the
@@ -1190,6 +1190,8 @@ push run of CI is fully green, the full tier included (or `commit`).
   `forView` and `serially`, which every handler goes through).
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
+- `known-failures.mjs` — the known intermittent failures issue's one reader (`readKnownFailures`: read and matched), for
+  `ci_status` and for a local e2e run (`knownFailureQuotes`, which e2e/flaky-report.ts imports), so both set apart the same failures.
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
   (pure) and their steps on GitHub. `queue-screen.mjs` — which tier a batch must run (#1538): it asks the default

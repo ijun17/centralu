@@ -32,8 +32,8 @@ use quit::*;
 use sidecar::{HostBuild, HostInfo, RelaunchInfo, Supervisor};
 
 /// Whether this process was started as the keeper (`centralu --keeper`, #280). `main()` asks
-/// before anything else, so keeper mode never builds the Tauri app. Since #440 the keeper is
-/// `centralu-keeper`; this form is a debug window's keeper in its own executable, and anything else
+/// before anything else, so keeper mode never builds the Tauri app. The keeper is
+/// `centralu-keeper` (#440); this form is a debug window's keeper in its own executable, and anything else
 /// is refused (#461).
 pub fn is_keeper(args: &[String]) -> bool {
     #[cfg(unix)]
@@ -73,6 +73,12 @@ fn host_error(sup: State<'_, Supervisor>) -> Option<String> {
     sup.last_error()
 }
 
+/// What the starting host does to its store, while it says so (#2334): the window waits for it and shows it
+#[tauri::command]
+fn host_store_work(sup: State<'_, Supervisor>) -> Option<centralu_keeper_core::host_proc::store_work::StoreWork> {
+    sup.store_work()
+}
+
 /// Which builds are involved (#280): this window's, the running host's, and whether they are
 /// the same one. `mode` is `keeper` or `direct`.
 #[tauri::command]
@@ -82,8 +88,8 @@ fn host_build(sup: State<'_, Supervisor>) -> HostBuild {
 
 /**
  * Runs `work`, which waits on the keeper's socket (up to 10 s), on Tauri's pool for blocking work
- * (#840 item 6). A plain command runs on the main thread, so while the keeper was slow to answer
- * the whole window hung with the spinning cursor; `#[tauri::command(async)]` would only move the
+ * (#840 item 6). A plain command runs on the main thread, so a keeper slow to answer would hang
+ * the whole window with the spinning cursor; `#[tauri::command(async)]` would only move the
  * wait onto one of the async runtime's few workers.
  */
 async fn off_main_thread<T: Send + 'static>(app: AppHandle, work: impl FnOnce(AppHandle) -> T + Send + 'static) -> Result<T, String> {
@@ -139,8 +145,7 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
  * which continues what that one ended.
  *
- * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below (it
- * showed when this ran on the main thread; it runs off it now, #840 item 6). Through
+ * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below. Through
  * `ExitRequested` with a code (our quit gate lets a programmatic exit through) and `Exit`, Tauri
  * then runs this executable's path again, reading the executable's name from the bundle's new
  * `Info.plist` (`tauri::process::restart`, 2.11.5).
@@ -196,7 +201,7 @@ fn working_dir_away_from(cwd: &std::path::Path, exe_dir: &std::path::Path, home:
 fn leave_app_folder() {
     let (Ok(cwd), Ok(exe)) = (std::env::current_dir(), std::env::current_exe()) else { return };
     let Some(exe_dir) = exe.parent() else { return };
-    let home = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let home = centralu_keeper_core::os::home().map(std::path::PathBuf::from);
     if let Some(to) = working_dir_away_from(&cwd, exe_dir, home) {
         if let Err(e) = std::env::set_current_dir(&to) {
             eprintln!("[startup] could not leave the app folder for {}: {e}", to.display());
@@ -206,8 +211,8 @@ fn leave_app_folder() {
 
 /**
  * #840 item 6: a command that waits on the keeper's socket runs that wait off the main thread, on
- * the blocking pool (`off_main_thread`). A plain command runs on the main thread, so while the
- * keeper was slow to answer (up to 25 s for a stop for an update) the whole window hung.
+ * the blocking pool (`off_main_thread`). A plain command runs on the main thread, so a keeper
+ * slow to answer (up to 25 s for a stop for an update) would hang the whole window.
  */
 #[cfg(test)]
 mod keeper_command_tests {
@@ -241,8 +246,8 @@ mod keeper_command_tests {
 
 /**
  * `host-status` carries a `HostStatus` object, and the UI's one listener drops anything else
- * (`listenHostStatus` in packages/platform/src/tauri/index.ts). The window used to send the bare
- * string `"shutdown"` on exit, which nothing ever read.
+ * (`listenHostStatus` in packages/platform/src/tauri/index.ts), so a bare string such as
+ * `"shutdown"` would never be read.
  */
 #[cfg(test)]
 mod host_status_tests {
@@ -309,6 +314,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_info,
             host_error,
+            host_store_work,
             restart_host,
             set_badge,
             alert,
@@ -333,7 +339,7 @@ pub fn run() {
         /*
          * ⌘W and the red button both mean closing the window. Since this app has only one
          * window, closing it means quitting — so instead of closing immediately, it asks the
-         * webview (dogfooding: one mistyped ⌘W during work took down an entire session).
+         * webview (one mistyped ⌘W during work would take down an entire session).
          */
         /* Our own Quit item — sends the same message as closing the window (the modal is put
          * up by the webview). */
@@ -360,8 +366,8 @@ pub fn run() {
                 own_title_bar(app);
                 #[cfg(target_os = "macos")]
                 if let Err(e) = install_quit_menu(app.handle()) {
-                    // The app still launches even if the menu could not be changed — ⌘Q just
-                    // quits immediately again, as it used to.
+                    // The app still launches even if the menu could not be changed — ⌘Q then
+                    // quits without asking.
                     eprintln!("[menu] could not install the quit item: {e}");
                 }
                 Ok(())
@@ -378,12 +384,12 @@ pub fn run() {
                 return;
             }
             /*
-             * The exit gate (dogfooding, 2026-09-04). Until the person confirms in the modal,
+             * The exit gate. Until the person confirms in the modal,
              * exit is blocked and the webview is asked instead — only `quit_app` sets the
              * flag, so any ExitRequested that arrives after that passes straight through.
              *
-             * **⌘Q never reaches here** (not measured, confirmed against upstream source on
-             * 2026-09-07): macOS's terminate has no place to hang a veto, so this event
+             * **⌘Q never reaches here** (not measured, confirmed against upstream source; the
+             * evidence is in quit.rs): macOS's terminate has no place to hang a veto, so this event
              * simply never fires for it. That case is caught earlier by `install_quit_menu` in
              * the menu — what this gate is responsible for is the last-window-closed case and
              * the exit we call ourselves.

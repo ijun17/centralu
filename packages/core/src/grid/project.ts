@@ -6,7 +6,6 @@
 import { isRecord } from '@cc/protocol/client'
 
 export type ProjectArrangement = {
-  /** Explicit ordered membership */
   panels: string[]
 }
 

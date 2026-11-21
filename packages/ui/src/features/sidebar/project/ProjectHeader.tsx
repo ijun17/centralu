@@ -42,23 +42,23 @@ export function ProjectHeader({
   folded: boolean
   /** The saved fold alone: what the arrow's label says it will do */
   savedFolded: boolean
-  /** The arrow, or a press on the name, while the project is hover-expanded: makes it stay; otherwise folds or unfolds */
+  /** The arrow: a hover-expanded project stays; otherwise it folds or unfolds */
   onToggleFold: () => void
   /** A press on the name: a hover-expanded project stays; any other is left as it is */
   onPin: () => void
-  /** The mouse pointer came onto / left the name row, any part of it (#1578, #1605); a press on it ends a rest that has not finished */
+  /** The mouse pointer came onto / left the name row, any part of it (#1578, #1605); a press counts as leaving */
   onRowEnter: () => void
   onRowLeave: () => void
-  /** The project menu opened or closed: an open menu keeps a hover-expanded project as it is */
+  /** An open menu keeps a hover-expanded project as it is */
   onMenuChange: (open: boolean) => void
   sessions: SessionSummary[]
   /** The app this project is (#1141): its manifest stands at the project's root */
   rootApp?: ExternalCatalogApp
-  /** How many apps the project holds (its root app and those in `.centralu/apps`): trusting it opens the card that lists them */
+  /** Its root app and those in `.centralu/apps`: with any, trusting opens the card that lists them */
   appCount: number
   setNewAppOpen: (open: boolean) => void
   setDeleting: (deleting: boolean) => void
-  /** Opens the instructions for agents started in the project (#1161 item 2) */
+  /** The instructions for agents started in the project (#1161 item 2) */
   setInstructing: (open: boolean) => void
 }) {
   // A project on a linked machine opens in VS Code over Remote-SSH (#82); null for this computer's, and where that cannot work
@@ -67,48 +67,32 @@ export function ProjectHeader({
   const openNewSession = useStore((s) => s.openNewSession)
   const startSessionNow = useStore((s) => s.startSessionNow)
   const selected = useIsProjectSelected(projectId)
-  // Does the manager's worktree proposal point at this project (#69)? The ⋯ menu button lights up
+  // A worktree proposal for this project (#69) lights the ⋯ button
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => onMenuChange(menuOpen), [menuOpen, onMenuChange])
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
-  /** Where the menu hangs from — the pressed button (not a corner of the sidebar) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
   const openApp = useStore((s) => s.openApp)
   const askTrust = useStore((s) => s.askTrust)
-  // The app's own screen is the one showing: the mark is lit, as an open app row's mark is
+  // Lit while the app's screen shows, as an open app row's mark is
   const appShown = useStore(
     (s) =>
       !!rootApp && s.view === 'app' && !!s.focusedApp && appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) === rootApp.key,
   )
-  // A chain its view started waits on the person (M4 D-4): the mark says so, as the app row's "asks you" did
+  // A chain its view started waits on the person (M4 D-4): the mark says so, as an app row's "asks you" does
   const appAsks = useStore((s) => !!rootApp && s.appQuestions.some((q) => q.origin.appId === rootApp.appId && (q.origin.projectId ?? null) === projectId))
   const openRootApp = rootApp ? () => openApp(projectId, rootApp.appId) : undefined
-  /*
-   * The counts stand on the name line whether the project is folded or open (owner, 2026-11-05). They were drawn only
-   * folded, on the reasoning that an open project's rows state their own state; but the count is read from the name
-   * line, and it vanished the moment the project opened (or the pointer rested on it and it opened under it).
-   */
+  // Shown open too: drawn only folded, the counts would vanish as the project opens under a resting pointer
   const summary = foldSummary(sessions)
-  // The summary stays mounted while its last chip fades out, so the line does not jump before the fade ends
+  // Mounted while its last chip fades out, so the line does not jump
   const foldShown = usePresence(summary.length > 0).shown
 
   return (
     /*
-      Grabbed and moved by its name line — making the whole section draggable would conflict with dragging sessions.
-
-      When the project screen is open this line is marked the way an open session row is — the ink-muted bar and the
-      surface-hover/40 band — so the name row and a session row say "open" in one grammar. It replaced an underline
-      under the name, which was too faint to find once the group around it was tinted too.
-
-      **The band must not move anything.** A session row is 31.5px tall (py-1.5 around a 13px line); this line
-      is only its text. The padding that makes the band a row's height is cancelled by an equal negative margin,
-      so every row below stands exactly where it did, and both are always on, so selecting it changes nothing
-      but colour. The bar is always there too, transparent until selected. The name starts at 32px, the column every
-      level below is measured from (INDENT), with the chevron's 28px gutter just before it (#685).
-
-      Every item on the line is centred on it, not aligned on the text baseline: an icon button has no baseline of its
-      own, so the `+`, the ⋯ and the arrow each sat a different distance from the name's centre (2 to 3px).
+      Dragged by its name line: a draggable section would fight session drags. Open, it is marked as an open session row
+      is (bar and /40 band). The band's padding is cancelled by an equal negative margin and both are always on, so
+      selecting moves nothing. Items are centred, not on the baseline: icon buttons have none and would sit 2-3px off.
     */
     <header
       className={`group -my-1.5 flex items-center gap-2 border-l-2 py-1.5 pl-0.5 pr-3 transition-colors ${
@@ -121,10 +105,7 @@ export function ProjectHeader({
       onPointerDown={(e) => e.pointerType === 'mouse' && onRowLeave()}
       onDragStart={(e) => {
         e.dataTransfer.setData(PROJECT_MIME, projectId)
-        /*
-         * A project that is an app (#1141) is dragged onto the grid or its project screen the way an app row was: its
-         * line is the app's row now. The project list still reads it as a project being reordered
-         */
+        // A project that is an app (#1141) also drags as its app row; the project list still reads a reorder
         if (rootApp) {
           e.dataTransfer.setData(APP_MIME, rootApp.key)
           e.dataTransfer.setData(projectItemMime(projectId), projectId)
@@ -133,17 +114,8 @@ export function ProjectHeader({
       }}
     >
       {/*
-        The fold arrow (#205). **This is the one and only door for folding** — the name is where
-        the project screen opens (#206), so if pressing it also folded, one of the two would
-        always misfire. Resting the pointer on a folded name row for 0.1 s also shows its rows, until the
-        pointer leaves the project (#1578, owner); passing over does nothing, so the row the person
-        meant to press is not shoved out of place, and pressing the arrow makes that expansion stay.
-
-        Unlike that, it is **always visible.** Being folded is a state, not an action, and if it
-        only shows on hover there is nowhere to ask why a row is missing. The arrow stands in the
-        same gutter a session row's chevron stands in, one level out: a 28px box that ends where the name begins (the
-        button is 24px and centred in it, and the box cancels the row's gap), so a session's tool mark starts one
-        step right of the name (#685).
+        The fold arrow (#205), the only door for folding: the name opens the project screen (#206). Always visible, as
+        folded is a state. In the chevron gutter one level out (#685; the box cancels the row's gap).
       */}
       <span className={`-my-1 -mr-2 flex ${GUTTER_WIDTH} shrink-0 justify-center self-center`}>
         <IconButton
@@ -156,17 +128,11 @@ export function ProjectHeader({
         </IconButton>
       </span>
       {/*
-        Pressing the project name shows git, files and the terminal (without selecting a
-        session). Background information like branch, change count or concurrent sessions
-        **does not get its own row under the name** — with several projects, those rows would
-        stack up and push out the session list that actually needs to be seen. Instead, it is
-        answered by a tooltip when asked for (hover, focus).
+        The name opens git, files and the terminal; branch and changes are in its tooltip, not rows that push sessions out
       */}
       {/*
-        The name and its machine badge share one baseline (owner, 2026-10-20): centring their boxes, or nudging the badge
-        by a pixel, suited either a lowercase name ("cc") or a capital one ("APP") but not both; on the baseline the
-        badge's text stands on the name's line whatever the case. Half the row's gap apart, so the badge reads as part of
-        the name. Which linked machine it is on (#734); this computer's projects carry none.
+        Name and machine badge (#734) on one baseline: centring suited either "cc" or "APP" but not both. Half the gap
+        apart, so the badge reads as part of the name.
       */}
       <span className="flex min-w-0 items-baseline gap-1">
         <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
@@ -185,14 +151,12 @@ export function ProjectHeader({
           </button>
         </Tooltip>
         {project.machine && (
-          // A pixel up from the shared baseline: the room left for descenders sat the box low against the name
+          // A pixel up from the shared baseline: the room left for descenders sits the box low against the name
           <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} className="-translate-y-px" />
         )}
       </span>
       {/*
-        This project is an app (#1141): its manifest stands at the root. The mark says so where the name is, and opens
-        the app's screen. Dimmed when the app cannot run (not trusted, invalid, failed), with the reason in its label,
-        as an app row's mark was; lit while its screen shows or its view waits on the person.
+        The project is an app (#1141): its mark opens it, dimmed and lit as an app row's mark is
       */}
       {rootApp && openRootApp && (
         <span
@@ -213,19 +177,13 @@ export function ProjectHeader({
       )}
 
       {/*
-        Only marks that claim no new space stay on the name line.
-        Concurrent sessions in particular is a signal that warns of a data-loss risk, and
-        hiding it entirely behind a tooltip would violate "show it, do not block it" (FR-2).
+        Only marks that claim no new space
       */}
       <ProjectMarks project={project} />
       {foldShown && <FoldSummary name={project.name} counts={summary} />}
       {/*
-        Every action on this row sits behind one button, the menu (owner, 2026-10-18). The `+` that started a session
-        on the open project (#529) is gone: it took the line's width, and on a folded project it slid in on hover and
-        pushed the fold's marks aside. The menu's first row starts a session at once, as `+` did.
-
-        The menu's button is hidden until hover or focus but keeps its width (opacity only), so nothing on the line
-        moves when the pointer arrives. Keyboard focus and a worktree proposal (#69) surface it without hovering.
+        Every action is behind the menu; no `+` (#529), which would take the line's width. Hidden by opacity only, so
+        nothing moves on hover; focus and a worktree proposal (#69) show it.
       */}
       <span
         ref={menuAnchor}
@@ -238,9 +196,7 @@ export function ProjectHeader({
         data-worktree-proposal={proposalHere || undefined}
       >
         {/*
-          A plain button, not an IconButton — to drop the tooltip (dogfooding, 2026-09-02).
-          Since pressing it opens a named menu right there, a hover tooltip was not an
-          explanation but noise left overlapping the open menu. The screen-reader name stays.
+          Not an IconButton: a tooltip would overlap the named menu it opens
         */}
         <button
           type="button"
@@ -260,9 +216,9 @@ export function ProjectHeader({
           // A worktree proposal (#69) waits in the new-session window with its branch filled in; otherwise start at once
           onNewSession={() => (proposalHere ? openNewSession(projectId) : void startSessionNow(projectId))}
           onOpenApp={openRootApp}
-          // Making an app on another machine is not offered yet (#82): its views open here (remote-hub.md §11), its making does not
+          // Not offered on another machine yet (#82): its views open here (remote-hub.md §11), its making does not
           onNewApp={project.machine ? undefined : () => setNewAppOpen(true)}
-          // Trusting a project with apps opens the card that lists them (#1141); stopping is the safe way and needs no list
+          // Trusting a project with apps opens the card listing them (#1141); stopping is safe and needs no list
           onToggleTrust={() => (!project.trusted && appCount > 0 ? askTrust(projectId) : void setProjectTrusted(projectId, !project.trusted))}
           trustListsApps={!project.trusted && appCount > 0}
           onOpenInVsCode={remoteIde ? () => void remoteIde.open('') : undefined}

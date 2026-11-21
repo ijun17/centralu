@@ -11,49 +11,27 @@ import type {
 
 /** Updates, agent versions, screen preferences and theme files. */
 export type PreferencesSlice = {
-  /**
-   * The theme files in the data folder's `themes/` (#312), as the host last read them —
-   * re-read in full on `themes_changed` (a save from Settings, an editor, an agent).
-   */
+  /** The data folder's `themes/` files (#312) as the host last read them; read again in full on `themes_changed`. */
   themeFiles: ThemeFileEntry[]
-  /**
-   * The last version of each theme file that read cleanly. A file someone is halfway through
-   * editing comes back broken; the screen keeps showing this version of it until it reads again,
-   * rather than dropping to the preset mid-edit.
-   */
+  /** Each theme file's last clean read: a file broken mid-edit keeps showing it instead of dropping to the preset. */
   lastGoodThemes: Record<string, ThemeFileEntry>
   refreshThemes(): Promise<void>
-  /**
-   * Where this install stands relative to the registry (issue #43).
-   *
-   * **Owned entirely by the host** — not a single field here is computed. Both checking and
-   * installing happen on that side; this value is only the seat where the result lands once it
-   * arrives. `null` means it has not even been asked yet (before connecting), not "it is up to
-   * date."
-   */
+  /** This install against the registry (#43), owned by the host. `null` is not asked yet, not "up to date". */
   update: UpdateStatus | null
-  /**
-   * The agent CLIs installed on this machine, and whether idle sessions move to a newer one by themselves (#297).
-   * Owned by the host like `update`; null until the host has answered, or when it is too old to know.
-   */
+  /** Installed agent CLIs and the auto-move setting (#297), owned by the host; null until answered or from an older host. */
   agentVersions: AgentVersions | null
-  /** Where Centralu's own install and sign-in of a tool stands on this computer (`tool_setup`, #59); a tool not heard of has no entry */
+  /** Centralu's own install and sign-in of each tool here (`tool_setup`, #59); a tool not heard of has no entry */
   toolSetups: Partial<Record<string, ToolSetup>>
   /** When this host puts idle sessions to sleep (#568); null until it has answered, or when it is too old to know */
   sleepPolicy: SleepPolicy | null
   /**
-   * What this person has chosen about the screen (protocol's `UiPreferences`).
-   *
-   * **Fetched once at startup and seated here.** Letting the consumer (the composer) ask on demand
-   * would mean it runs on defaults while the answer is late, and the rule changes out from under
-   * the person's fingers — if the send key changed that way, the message would already be sent by
-   * the time it did.
+   * Read at startup and seated here, not asked for on demand: a late answer would change a rule such as the send key
+   * under the person's fingers.
    */
   prefs: UiPreferences
   /**
-   * The calls of the limited credential waiting for the person (#1405): a program that is not this window asked for
-   * something that cannot be undone, and the host holds it until the person answers. Owned by the host; this is the
-   * last list it gave, kept current by its events and read again after every reconnect.
+   * Limited-credential calls the host holds for the person's answer (#1405): another program asked for something that
+   * cannot be undone. The host's last list, kept current by its events and read again after every reconnect.
    */
   hostRequests: HostRequest[]
   /** How many host request events this window has heard: a list read before the latest of them is not laid over it */
@@ -62,52 +40,37 @@ export type PreferencesSlice = {
   refreshHostRequests(): Promise<void>
   /** The person's answer; a request no longer waiting is said in a toast, and the list is read again */
   answerHostRequest(requestId: string, decision: 'allow' | 'deny'): Promise<void>
-  /** Checks right now (the settings button). A failure stays on screen but is not thrown */
+  /** A failure stays on screen but is not thrown */
   checkUpdate(force?: boolean): Promise<void>
-  /** Turns periodic checking on and off */
   setUpdateAuto(enabled: boolean): Promise<void>
-  /** "Apply updates automatically when idle" on and off (#352) */
   setUpdateAutoApply(enabled: boolean): Promise<void>
   /**
    * Reads the installed agent CLIs (#297). `force: false` is the window gaining focus: the host answers with a reading
    * from moments ago rather than reading again. Never throws; an older host that does not know it leaves this null.
    */
   checkAgentVersions(force?: boolean): Promise<void>
-  /** "Move idle sessions to a newly installed agent CLI" on and off (#297) */
   setAgentAutoApply(enabled: boolean): Promise<void>
-  /** Reads when idle sessions go to sleep (#568). Never throws; an older host leaves it null */
+  /** Never throws; an older host leaves it null */
   loadSleepPolicy(): Promise<void>
-  /** "Put idle sessions to sleep after" (#568); null never */
+  /** null: never */
   setSleepAfter(afterMinutes: number | null): Promise<void>
-  /** Restarts every idle session that runs an older CLI on the installed one (#297) — the header's action */
+  /** Restarts every idle session on an older CLI on the installed one (#297) */
   applyAgentVersions(machine?: string | null): Promise<void>
-  /**
-   * Changes screen settings — sends **only what changed**.
-   *
-   * The screen seats the record the host hands back as is (not an optimistic update): if a setting
-   * that failed to be recorded is only turned on in the screen, the next time it is turned on it is
-   * quietly back where it started.
-   */
+  /** Sends only what changed, and seats the record the host returns: no optimistic update (docs/state-management.md §1). */
   setPrefs(patch: UiPreferencesPatch): Promise<void>
   /**
-   * Reads the preferences again (#1306): on `prefs_changed`, when another window or the Assistant changed one, and after a
-   * reconnect. Never throws. The notification switches come with them, except while this window's own change to them is on
-   * its way (its answer would otherwise be overwritten by an older reading).
+   * On `prefs_changed` and after a reconnect (#1306). Never throws. The notification switches are skipped while this
+   * window's own change to them is on its way, or an older reading would overwrite its answer.
    */
   refreshPrefs(): Promise<void>
-  /** Installs the new version. **Does not restart** — it tells the person and stops when done */
+  /** Installs the new version; does not restart */
   applyUpdate(): Promise<void>
   /**
-   * "Apply now" (#352): relaunches the desktop window into the installed version. The keeper is
-   * told first and holds every agent through it. A refusal (the keeper too old to hold on with
-   * background mode off, the bundle not replaced) is shown, never silent. Resolves with that refusal, or null once the
-   * relaunch started.
+   * "Apply now" (#352): relaunches into the installed version; the keeper is told first and holds every agent through it.
+   * Resolves with a refusal (keeper too old with background mode off, bundle not replaced), shown, or null once started.
    */
   applyUpdateNow(): Promise<string | null>
-  /**
-   * An agent's "Apply now" (#665): answers an `update_apply_request` with this window's checks, and keeps the ticket
-   * the host gives back. Nothing relaunches here
-   */
+  /** An agent's "Apply now" (#665): answers with this window's checks and keeps the host's ticket; relaunches nothing */
   answerApplyRequest(requestId: string): Promise<void>
   /** The `update_apply_go` naming this window's ticket: checks again, runs `applyUpdateNow`, reports the outcome */
   runApplyRequest(requestId: string, ticket: string, unasked?: boolean): Promise<void>

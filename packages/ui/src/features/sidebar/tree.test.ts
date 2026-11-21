@@ -5,7 +5,7 @@ import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree, treeRow
 const s = (id: string, over: Partial<SessionSummary> = {}) => ({ id, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
 const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, depth }) => `${'  '.repeat(depth)}${s.id}`)
 
-/** The sidebar groups a session's children under it by who started them (owner decision 2026-10-12, #561) */
+/** The sidebar groups a session's children under it by who started them (#561) */
 describe('orderAsTree', () => {
   it('nests every start_agent child under its parent, in its folder or a worktree, in list order', () => {
     expect(

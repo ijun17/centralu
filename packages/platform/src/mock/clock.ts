@@ -9,12 +9,10 @@ export class MockClock {
     this.now = now
   }
 
-  /** The next id number — every kind of id in the mock draws on this one counter */
   next(): number {
     return ++this.idc
   }
 
-  /** The id number last handed out */
   get id(): number {
     return this.idc
   }

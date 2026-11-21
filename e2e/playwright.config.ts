@@ -82,7 +82,8 @@ const replayPart = e2eReplayPart()
 const leftOut = ENGINE === 'webkit' ? [WEBKIT_TWIN] : ENGINE === 'chromium' ? [WEBKIT_TWIN, WEBKIT_ONLY] : []
 
 export default defineConfig({
-  // The warm-up must guard mixed runs too: individual twins override the default browser.
+  // The warm-up must guard mixed runs too: individual twins override the default browser. `pnpm e2e --affected` reads
+  // it from Playwright's listing (tooling/e2e-affected.ts), whose projects do not carry their browserName
   metadata: { e2eBrowser: ENGINE ?? 'mixed' },
   testDir: '.',
   // Keep security-diff.spec.ts in the default `pnpm e2e` suite; the separate config is only for isolated local reruns.

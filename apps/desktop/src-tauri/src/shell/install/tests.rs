@@ -210,7 +210,7 @@ fn reads_the_shell_version_from_the_plist() {
 
 /// A leftover `.new` or `.old` whose folders cannot all be made writable (a folder root owns, after an
 /// install run with sudo) is still removed when the removal itself can go through: the verifier's
-/// `remove_content`, which this used for a while, gave up at the first chmod and left it there.
+/// `remove_content` gives up at the first chmod and leaves it there.
 #[test]
 fn a_leftover_whose_folders_cannot_be_made_writable_is_still_removed_when_it_can_be() {
     let dir = temp("leftover-chmod");

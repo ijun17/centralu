@@ -4,7 +4,7 @@
  * that ends the host and every session. The start fails; nothing escapes.
  */
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { whichTool } from '../../env-path.js'
@@ -12,6 +12,7 @@ import { powershell } from '../../os.js'
 import { AppProcess, AppStartError } from './app-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { fakeTool } from '../../fake-exe.test-helpers.js'
 
 /** Each test's own folders, removed after it whether it passed or not */
 const made: string[] = []
@@ -108,12 +109,7 @@ describe('the stderr lines a failed start carries', () => {
 describe("a manifest's command as a path in the app folder", () => {
   const appDir = () => {
     const dir = tempDir('cc-app-cmd-')
-    mkdirSync(join(dir, 'bin'))
-    writeFileSync(join(dir, 'server.js'), "process.stderr.write('ran from ' + require('node:path').basename(process.cwd()) + '\\n'); process.exit(3)\n")
-    // npm's shim shape on Windows; a script that runs the same file elsewhere
-    writeFileSync(join(dir, 'bin', 'server.cmd'), '@"%~dp0\\..\\server.js" %*\r\n')
-    writeFileSync(join(dir, 'bin', 'server'), `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/../server.js" "$@"\n`)
-    chmodSync(join(dir, 'bin', 'server'), 0o755)
+    fakeTool(join(dir, 'bin'), 'server', "process.stderr.write('ran from ' + require('node:path').basename(process.cwd()) + '\\n'); process.exit(3)\n")
     return dir
   }
   const start = (dir: string, command: string) =>

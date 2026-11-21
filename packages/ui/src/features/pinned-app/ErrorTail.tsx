@@ -8,7 +8,7 @@ import { CloseIcon } from '../../components/icons.jsx'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
-/** The number of stderr lines shown — just the tail. The full bundle goes to the builder session */
+/** Stderr lines shown; the full bundle goes to the builder */
 const TAIL_LINES = 8
 
 /** A bundle's kind → a line for a person to read */
@@ -19,21 +19,10 @@ function titleOf(b: AppErrorBundle): string {
 }
 
 /**
- * A way for an error to reach the builder (M4 C-6) — when the app fails to start, dies, or a tool
- * throws, that bundle's tail is shown below the pinned view, and one press of "Send to builder"
- * hands it to the builder session.
- *
- * **Nothing is sent automatically.** This prevents an agent from repeatedly fixing and breaking
- * things without the person knowing (plan C-6). Sending happens only on that one press by the
- * person, and one bundle is only sent once — the host records that it was sent (`sentAt`) and
- * rejects a second attempt. So a reopened view, or a different dialog, also knows it was "sent."
- *
- * What is shown: the most recent bundle. If the app is stopped (crashed, failed), any bundle
- * regardless of when it happened; otherwise, only a tool failure that happened **after this view was
- * opened** — showing last week's failure while the app is running fine is noise, not a warning. Once
- * a person dismisses it (×), that bundle does not come back. When it re-reads: when the host records
- * a new bundle (the list's `lastErrorAt`), and when the app's status changes. The "changed"
- * notification is not used — a read-only tool's failure does not emit that notification.
+ * An error's way to the builder (M4 C-6): a start failure, crash or tool throw shows its tail below the view, with
+ * "Send to builder". Never automatic (plan C-6: no unseen fix-and-break loop); a bundle goes once, as the host records
+ * `sentAt` and refuses a second. Shown: the latest bundle, but while the app runs only a tool failure after this view
+ * opened. Dismissed (×), it stays gone. Re-read on `lastErrorAt` and status changes ("changed" skips read-only tools).
  */
 export function ErrorTail({
   app,
@@ -44,7 +33,7 @@ export function ErrorTail({
   app: ExternalCatalogApp | undefined
   builder: AppBuilder
   onShowBuilder: () => void
-  /** Opens this app's Runs panel — the place to forget a capability the person declined (Permissions → Forget) lives there */
+  /** Opens this app's Runs panel, where a declined capability is forgotten (Permissions → Forget) */
   onShowRuns: () => void
 }) {
   const platform = usePlatform()
@@ -53,7 +42,7 @@ export function ErrorTail({
   // A linked machine's user-folder app (#82): its errors, and where they are sent, are that machine's
   const machine = app ? userAppMachine(app.info) : undefined
   const status = app?.info.status
-  // This value in the list changes whenever the host records a new bundle — including a read-only tool's failure (which does not emit "changed")
+  // Changes with every new bundle, a read-only tool's failure too (which emits no "changed")
   const lastErrorAt = app?.info.lastErrorAt
   const [bundle, setBundle] = useState<AppErrorBundle | null>(null)
   const [dismissed, setDismissed] = useState<number | null>(null)
@@ -68,7 +57,7 @@ export function ErrorTail({
     platform.apps
       .errors(appId, projectId, machine)
       .then((r) => alive && setBundle(r.latest))
-      // On a failed read, the old value is left in place — the next signal will trigger a re-read
+      // A failed read keeps the old value until the next signal
       .catch(() => {})
     return () => {
       alive = false
@@ -84,7 +73,7 @@ export function ErrorTail({
     setError(null)
     try {
       await platform.apps.sendError(app.appId, app.projectId, bundle.at, machine)
-      // The fact that it was sent is recorded by the host — re-reading draws it from that answer (sentAt)
+      // The host records the send; the re-read shows it (sentAt)
       const r = await platform.apps.errors(app.appId, app.projectId, machine)
       setBundle(r.latest)
     } catch (e) {
@@ -95,13 +84,8 @@ export function ErrorTail({
   }
   const tail = bundle.stderr.slice(-TAIL_LINES)
 
-  /*
-   * A call blocked because the person declined a capability (M4 D-4) — this is the person's
-   * decision, not a bug in the app. Neither a stack trace nor "Send to builder" is offered: sending
-   * it would have the builder agent "fix" perfectly fine code. It states what was declined and where
-   * to reverse it (that app's Runs panel, Permissions → Forget). A bundle from an older host does not
-   * have this field — its absence means an ordinary failure.
-   */
+  // Declined by the person (M4 D-4): a decision, not a bug, so no stack or "Send to builder" (the builder would "fix"
+  // fine code); it says what and where to undo it (Runs, Permissions → Forget). Without the field (older host): an ordinary failure.
   const denied = bundle.denied ?? null
   if (denied) {
     const here = denied.appId === app.appId && (denied.projectId ?? null) === (app.projectId ?? null)

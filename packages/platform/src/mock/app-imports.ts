@@ -4,38 +4,27 @@ import type { MockClock } from './clock.js'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
 
-/** Importing an app, enabling an imported one, and an app's versions (M4 E) */
+/** Importing an app, enabling an imported one, and an app's versions */
 export class AppImportsMock {
-  /** Import source → the review window the host would return (M4 E-3). A test plugs this in — the mock does not read folders or zips */
+  /** Source → the review the host would return; the mock reads no folders or zips */
   readonly importSources = new Map<string, AppReview>()
-  /** Source → the host's rejection wording (M4 E-3) — tests check whether the window shows that wording as-is */
+  /** Source → the host's exact rejection wording */
   readonly importRefusals = new Map<string, string>()
-  /** A prepared import (token → review window), and an admitted app's review window (`(project ?? _user)/app`) */
+  /** Token → review */
   private readonly stagedImports = new Map<string, AppReview>()
+  /** Keyed `(project ?? _user)/app` */
   readonly appReviews = new Map<string, AppReview>()
-  /** What reached the host — sources prepared, admissions (whether enabled), cancellations, apps enabled */
   readonly importPrepares: string[] = []
   readonly importCommits: { token: string; enable: boolean; appId: string }[] = []
   readonly importCancels: string[] = []
   readonly enabledApps: string[] = []
-  /** An app's versions (M4 E-1) — the key is `(project ?? _user)/app`. A test fills this in: keeping a version is the runtime's job */
+  /** Keyed `(project ?? _user)/app`; a test fills it, since keeping versions is the runtime's job */
   readonly appVersions = new Map<string, AppVersions>()
-  /** Restores that reached the host — tests check they only arrive after confirmation */
   readonly restoredVersions: { appId: string; id: string }[] = []
-  /**
-   * Makes and registers a new project folder with the trust given (wired by the mock platform): where an import lands,
-   * as the host's does (#1141)
-   */
+  /** Wired by the mock platform: an import lands in a project of its own, as on the host (#1141) */
   makeProject: ((name: string, parent: string | undefined, trusted: boolean) => Promise<ProjectInfo>) | null = null
   readonly apps = {
-    /**
-     * Import (M4 E-3). The mock has no filesystem — for each source, a test plugs in the
-     * review window the host would return (`importSources`) or a rejection wording
-     * (`importRefusals`). Like the real thing (`AppHandover`): preparing does not admit it (it
-     * is not in the list yet); admitting it stands it up disabled (`unconfirmed`); and
-     * "admit and enable" or enabling only accepts the key from the window the person reviewed.
-     * The rejection wording is exactly the host's.
-     */
+    /** As `AppHandover`: preparing does not list the app yet; enabling accepts only the reviewed key */
     importPrepare: async (source: string): Promise<{ token: string; review: AppReview }> => {
       this.importPrepares.push(source)
       const refusal = this.importRefusals.get(source)
@@ -46,10 +35,7 @@ export class AppImportsMock {
       this.stagedImports.set(token, structuredClone(review))
       return { token, review: structuredClone(review) }
     },
-    /**
-     * Like the host (#1141): the app lands as a project of its own, a folder `<parent>/<id>` (~/Centralu), registered
-     * untrusted, or trusted for "Import and enable"; trusting it later is enabling it
-     */
+    /** As the host (#1141): a project `<parent>/<id>` (~/Centralu), trusted only for "Import and enable" */
     importCommit: async (token: string, opts: { enable: boolean; reviewKey?: string; parent?: string }): Promise<ExternalAppInfo> => {
       const review = this.stagedImports.get(token)
       if (!review) throw new Error('This import is no longer waiting (it was cancelled, or 30 minutes passed). Review it again')
@@ -97,12 +83,7 @@ export class AppImportsMock {
       this.emit({ type: 'external_apps_changed' })
       return structuredClone(a)
     },
-    /**
-     * An app's versions (M4 E-1) — a test fills `appVersions`. If not filled, like the host: an
-     * empty snapshot list for a user-folder app, an empty commit list for a project app.
-     * Restoring rejects a project app like the real thing, and makes the chosen version the
-     * current one, then broadcasts the list.
-     */
+    /** Unfilled, as on the host: no snapshots for a user-folder app, no commits for a project app */
     versions: async (appId: string, projectId: string | null): Promise<AppVersions> => {
       const v = this.appVersions.get(appKeyOf(projectId, appId))
       if (v) return structuredClone(v)
@@ -114,10 +95,7 @@ export class AppImportsMock {
       const v = this.appVersions.get(key)
       const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId: null, machine }))
       if (!a || !v || v.kind !== 'snapshots' || !v.snapshots.some((s) => s.id === id)) throw new Error('That version is no longer kept')
-      /*
-       * Like the host (`capture`, 'before restore'): the current files are kept as a version first, unless a kept version
-       * already matches them; the restored one becomes the current one
-       */
+      // As the host's `capture`: the current files are kept first, unless a kept version already matches them
       if (!v.snapshots.some((s) => s.current)) {
         v.snapshots.unshift({ id: `before-restore-${this.restoredVersions.length}`, at: this.clock.now(), files: 4, bytes: 2048, reason: 'before restore', current: false })
       }

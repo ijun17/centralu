@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /*
- * The shell's two reports, `host-status` and `host-build` (#850 item 17). Tauri registers a listener
- * asynchronously, so a question asked before the registration lands can miss a report sent in between, and its
- * answer, arriving after a newer report, can put the older state back. The rule above `waitForHost` says
- * subscribe first, then ask; these check that every reader follows it.
+ * Every reader of the shell's `host-status` and `host-build` subscribes first, then asks (`waitForHost`): Tauri
+ * registers a listener asynchronously.
  */
 const order: string[] = []
 const handlers = new Map<string, (e: { payload: unknown }) => void>()

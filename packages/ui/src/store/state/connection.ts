@@ -6,28 +6,20 @@ export type ConnectionSlice = {
   platform: Platform | null
   connection: ConnectionState
   /**
-   * How many times the connection came back to a host that could not replay what was missed
-   * (`resync_required`) — in practice another host lifetime: a restart, or a build switch behind
-   * the keeper's front door (#280). An open app view asks for its address again on every change
-   * (AppFrame): the new host may serve it at another address, or not at all.
+   * Reconnects to a host that could not replay (`resync_required`): another host lifetime (#280). An open app view asks
+   * for its address again on each, since the new host may serve it elsewhere or not at all.
    */
   hostResyncs: number
-  /** The same for one linked machine (`machine_resync`), by machine id: its host was another process, or its link came back (#1902) */
+  /** The same per linked machine (`machine_resync`, #1902) */
   machineResyncs: Record<string, number>
   /**
-   * The first lists have arrived and the last screen has been restored (owner, 2026-10-18). Until then the window
-   * does not know which screen to show, so it shows none: the Assistant's intro and "No projects yet" used to flash
-   * before the restored screen replaced them. Stays true across later reconnects.
+   * The first lists arrived and the last screen is restored (docs/state-management.md §5); until then no screen shows,
+   * so no intro flashes. Stays true across reconnects.
    */
   workspaceReady: boolean
   attach(platform: Platform): Promise<void>
   /** `id`: what every window of the host calls the event (`agents.subscribe`), which a notification is claimed by */
   dispatchEvent(e: NormalizedEvent, id?: string): void
-  /**
-   * Recovery after reconnecting. Merges the host's session list into the store (sessions created,
-   * changed or deleted while disconnected), and revives sessions that were running (when the host
-   * dies, its processes die with it). If `resync` is true, event replay was not possible — the
-   * conversation being viewed is also re-read from the store.
-   */
+  /** docs/state-management.md §5, §7. `resync`: no replay, so the open conversation is read again too. */
   recoverAfterReconnect(resync?: boolean): Promise<void>
 }

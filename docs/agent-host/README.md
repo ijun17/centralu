@@ -7,6 +7,7 @@ A standalone Node process. In dev the developer starts it directly (`pnpm host`)
 | File | What it holds |
 |---|---|
 | [host-process.md](host-process.md) | The host's internal structure; stdout carries the handshake only; how processes start on Windows, and Claude's and Codex's processes |
+| [os-layer-in-tests.md](os-layer-in-tests.md) | The OS layer in tests: which fake to use (the in-memory OS, a fake tool, a fake program), where the fakes are, what `local/os-imports` and `local/platform-checks` allow in a test |
 | [tool-profiles.md](tool-profiles.md) | Who gets Centralu's own tools: the profiles, their size, the Assistant's rare commands, Centralu's features first |
 | [delegation/](delegation/README.md) | `ask_project`, `start_agent` and `agent_session`: asking another project, starting agents, their workspaces, reports and deletion |
 | [assistant/](assistant/README.md) | The Assistant's own commands: handoff, sessions outside a project, making a project, what the window does |

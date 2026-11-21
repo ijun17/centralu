@@ -324,7 +324,8 @@ const signals = holdSignals(process, (line) => console.error(line))
 start.at('store')
 let store: Store
 try {
-  store = new Store(dbPath)
+  // What the store's opening does is said in host.lock, for whoever waits on this start (store/store-work.ts)
+  store = new Store(dbPath, undefined, ownership.sayWork)
 } catch (err) {
   if (!(err instanceof StoreTooNewError)) throw err
   refuse(err.message)
@@ -374,8 +375,6 @@ const mgr = new SessionManager(
     sleeperRef.current?.observe(e)
   },
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
-  // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
-  join(dirname(dbPath), 'worktrees'),
   {
     ...(updateResume ? { updateResume } : {}),
     // The last host recorded that the system was ending (#1397)

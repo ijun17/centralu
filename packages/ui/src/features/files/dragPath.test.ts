@@ -13,10 +13,7 @@ import {
 import { APP_MIME, PANEL_MIME, PROJECT_MIME, SESSION_MIME } from '../sidebar/reorder.js'
 import { PANEL_TAB_MIME } from '../../store/panelLayout.js'
 
-/**
- * Drag-and-drop and `@` autocomplete must produce the same result —
- * with two ways to insert it, a different sentence would mean the tool receives something different.
- */
+// A drop and `@` autocomplete must give the tool the same sentence
 describe('appendPath', () => {
   it('attaches directly to an empty composer', () => {
     expect(appendPath('', 'src/a.ts')).toBe('@src/a.ts ')
@@ -41,15 +38,7 @@ describe('appendPath', () => {
   })
 })
 
-/**
- * Tells apart what is being dragged **before ever opening its content** (#19).
- *
- * During `dragover`, `getData()` returns an empty string — the browser hides the content until it is
- * actually dropped. So "can this spot accept it" and "if accepted, is it a move or a copy" have to be
- * answered by looking only at `types`. Doing this through `getData` instead would make the tree a
- * place whose cursor always says "cannot drop here," and that would only ever surface as nothing
- * happening, with no error.
- */
+// By `types` alone (#19): `getData()` is empty during `dragover`, so a check through it would refuse every drop silently
 describe('what is being dragged', () => {
   const dt = (types: string[]) => ({ types }) as unknown as DataTransfer
 
@@ -69,14 +58,7 @@ describe('what is being dragged', () => {
   })
 })
 
-/**
- * Making the whole session panel a drop target (#116) ended up with **two kinds of dragging** on the
- * same surface: a drag meant to attach a file, and a drag meant to reorder a panel, session or
- * project.
- *
- * If the distinction were tied to DOM events, confirming the promise "reordering is never swallowed"
- * would require launching a browser. Here it is settled with a single types array.
- */
+// The session panel (#116) shares its surface with reordering drags; a types array settles which it takes, no browser needed
 describe('is this a drag the panel should accept', () => {
   it('accepts a file dragged from the OS', () => {
     expect(isFileDrag(['Files'])).toBe(true)
@@ -101,11 +83,7 @@ describe('is this a drag the panel should accept', () => {
   })
 })
 
-/**
- * #286: in the packaged app, a grid panel dragged onto another session panel attached a screenshot
- * from its conversation. WebKit adds the images inside a dragged element to the drag as files, so
- * the drag carried `Files` next to the session type, and the panel took it for a file from the OS.
- */
+// #286: WebKit adds a dragged grid panel's screenshots as `Files`, which must not attach to the panel it lands on
 describe('a drag that started inside the app is never a file from the OS', () => {
   const dt = (types: string[]) => ({ types }) as unknown as DataTransfer
 

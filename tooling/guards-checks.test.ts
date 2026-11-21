@@ -3,13 +3,16 @@
  * folder (#1606). Each is tried on virtual files: what it reports, what only looks like it, which files it reads, and
  * the exception lines (tooling/guard-exceptions.js) that let a file through.
  */
+import { ESLint } from 'eslint'
+import tseslint from 'typescript-eslint'
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
+import { readdirSync, readFileSync } from 'node:fs'
 import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { ARCHIVE_ALLOWED, EXCEPTIONS } from './guard-exceptions.js'
-import { guardConfigs, guards } from './eslint-guards.js'
+import { ARCHIVE_ALLOWED, COMMENT_SHARE_HELD, COMMENTS_LEFT, EXCEPTIONS } from './guard-exceptions.js'
+import { COMMENTS_SWEPT_HOST_FOLDERS, COMMENTS_UNSWEPT_HOST_FOLDERS, commentShareOf, guardConfigs, guards } from './eslint-guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = guardLinter()
@@ -728,7 +731,7 @@ describe('the guard rules as a set', () => {
       }
     }
     // A ceiling: lowered when a line goes, never raised (#1606, #1607)
-    expect(count).toBeLessThanOrEqual(37)
+    expect(count).toBeLessThanOrEqual(35)
     expect(ARCHIVE_ALLOWED.length).toBeLessThanOrEqual(11)
     for (const a of ARCHIVE_ALLOWED) expect(a.why.length, a.text).toBeGreaterThan(10)
   })
@@ -745,9 +748,10 @@ describe('guard/timed-start', () => {
     ["const run = promisify(execFile)" + NL + "await run('git', args, { cwd, ...DEFAULTS, windowsHide: true })"],
     ["execFileSync('ps', args, { ...base, encoding: 'utf8' })"],
   ])('reports %s', async (code) => {
-    expect((await lines(file, code, 'timed-start')).length).toBe(1)
+    // Reported on its one line: for its limit, and once more when it is also a probe
+    expect(new Set(await lines(file, code, 'timed-start')).size).toBe(1)
   })
-  it.each([["execFile('claude', ['--version'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
+  it.each([["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
     await quiet(file, 'timed-start', code, "execFileSync('ps', args, { timeout: 1 })")
   })
   it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {
@@ -756,5 +760,159 @@ describe('guard/timed-start', () => {
     expect(await lines('packages/agent-host/src/os/kill-tree.ts', code, 'timed-start')).toEqual([])
     expect(await lines('packages/agent-host/src/dev-services/other.ts', code, 'timed-start')).toEqual([1])
     expect(await lines('packages/agent-host/src/sessions/x.test.ts', code, 'timed-start')).toEqual([])
+  })
+  it.each([
+    ["execFileSync('agy', ['--version'], { encoding: 'utf8' })"],
+    ["execFileSync(cmd, ['--version'], { encoding: 'utf8' })"],
+    ["const run = promisify(execFile)" + NL + "await run('claude', ['--help'])"],
+    ["spawnSync(found, ['--version'])"],
+    ["execSync('agy --version')"],
+    ["execFileSync('npm', ['-v'])"],
+    ["execFileSync('go', ['version'])"],
+    ["execSync('npm -v')"],
+    ["execFileSync('agy', ['--version=json'])"],
+    ["os.processes.runSync('codex', ['--version'], { timeoutMs: 5000 })"],
+    ["execTextSync('codex', ['--version'], { timeoutMs: 5000 })"],
+  ])('reports the probe %s in host code, scripts, tests and tooling', async (code) => {
+    for (const at of ['packages/agent-host/src/sessions/x.ts', 'scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'packages/agent-host/src/x.test.ts', 'tooling/x.test.ts', 'e2e/x.spec.ts']) {
+      expect((await lines(at, code, 'timed-start')).length, at).toBe(1)
+    }
+  })
+  it.each([["execFileSync('git', ['--version'])"], ["execFileSync('git.exe', ['--help'])"], ["execSync('git --version')"], ["spawnSync('gpgv', ['--version'])"], ["execFileSync(process.execPath, ['--version'])"], ["execFileSync('codex', ['app-server', 'generate-ts'])"], ["execText(cmd, ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('git', ['--version'], { timeoutMs: 5000 })"], ["os.processes.runSync('ps', ['-o', 'pid'], { timeoutMs: 5000 })"], ["execFileSync('npm', ['view', id, 'version', '--json'])"], ["execFileSync('ssh', [host, '-v'])"]])('does not report %s as a probe', async (code) => {
+    await quiet('scripts/x.mts', 'timed-start', code, "execFileSync('agy', ['--version'])")
+  })
+  it.each([["os.processes.runSync('cmd.exe', ['/d', '/c', shim], {})"], ["runSync('node', [], {})"], ['export function execTextSync(command: string) { return os.processes.runSync(command, [], {}) }'], ['realOs().processes.runSync(found, [], {})'], ['execTextSync(source.file, source.args, {})'], ["execTextSync(systemTool(['powershell.exe']), [], {})"]])(
+    'reports %s in host code: a synchronous run ends the pid only, so it runs only a program that starts nothing (#2370)',
+    async (code) => expect(await lines('packages/agent-host/src/sessions/x.ts', code, 'timed-start')).toHaveLength(1),
+  )
+  it.each([["realOs().processes.runSync('ps', ['-A'], {})"], ["execTextSync('/usr/bin/plutil', args, {})"], ["runSync(systemTool(['reg.exe']), [], {})"]])(
+    'lets %s run synchronously in host code',
+    async (code) => quiet('packages/agent-host/src/sessions/x.ts', 'timed-start', code, "os.processes.runSync('cmd.exe', [], {})"),
+  )
+  it("reads a synchronous run in host code alone (os/exec.ts's execTextSync hands its command on): scripts, tests and tooling run what they need", async () => {
+    const code = 'runSync(process.execPath, [], {})'
+    expect(await lines('packages/agent-host/src/x.ts', code, 'timed-start')).toHaveLength(1)
+    await quiet('packages/agent-host/src/os/exec.ts', 'timed-start', 'export function execTextSync(command: string) { return os.processes.runSync(command, [], {}) }', code)
+    for (const at of ['scripts/x.mts', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) await quiet(at, 'timed-start', code, "execFileSync('agy', ['--version'])")
+  })
+  it('reads a limit in host code alone: scripts, tests and tooling are read for probes', async () => {
+    for (const at of ['scripts/x.mts', 'packages/agent-host/scripts/x.mjs', 'tooling/x.test.ts', 'packages/agent-host/src/x.test.ts']) {
+      await quiet(at, 'timed-start', "execFileSync('ps', args, { timeout: 2000 })", "execFileSync('agy', ['--version'])")
+    }
+  })
+})
+
+describe('guard/comments (#2355)', () => {
+  const file = 'packages/core/src/x.ts'
+  const code = (n: number) => Array.from({ length: n }, (_, i) => `const a${i} = ${i}`).join(NL)
+  // A JSDoc of n lines of text (its /** and */ lines carry none)
+  const block = (n: number) => ['/**', ...Array.from({ length: n }, (_, i) => ` * line ${i}`), ' */'].join(NL)
+  it.each([
+    ['// This used to wait for the host.'],
+    ['/** The list used to be sorted here. */'],
+    ['/*\n * The check that used\n * to run here.\n */'],
+    ['// Previously the host sent it twice.'],
+    ['// The host sends it once. Previously it sent it twice.'],
+    ['/**\n * - Previously: two sends\n */'],
+    ['// The pane keeps the claim (#842 review)'],
+    ['/** Asked once (#730\n * review item 2) */'],
+  ])('reports history in %j', async (text) => {
+    expect((await lines(file, 'f()' + NL + text, 'comments')).length).toBe(1)
+  })
+  it.each([
+    ['// The key is used to sign requests.'],
+    ['// It can be used to sign requests.'],
+    ['// These are only used to sort.'],
+    ['// It is then used to sort.'],
+    ['// They are always used to sort.'],
+    ["// It's used to sort."],
+    ['// The waiting list is\n// used to sort.'],
+    ['// It was previously sent: a repeat is dropped.'],
+    ["const a = 'it used to wait'"],
+    ['// The pane keeps the claim (#842)'],
+    ['// A change the owner chose (#842 reviewer)'],
+  ])('lets %j through', async (text) => {
+    await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
+  })
+  it('holds a file header to 3 lines of text', async () => {
+    expect(await lines(file, '// one\n// two\n// three\n\n' + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(3) + NL + NL + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(4) + NL + NL + code(3), 'comments')).toEqual([1])
+    expect(await lines(file, '// one\n// two\n// three\n// four\n\n' + code(3), 'comments')).toEqual([1])
+    // A doc right on the first declaration is that declaration's, held to the block limit
+    expect(await lines(file, block(6) + NL + code(3), 'comments')).toEqual([])
+  })
+  it('holds a comment block to 10 lines', async () => {
+    expect(await lines(file, code(1) + NL + block(10) + NL + code(1), 'comments')).toEqual([])
+    expect(await lines(file, code(1) + NL + block(11) + NL + code(1), 'comments')).toEqual([2])
+  })
+  it('holds a source file to 35% comment lines, from 30 lines, tests aside', async () => {
+    // 20 code lines, then n two-line comments each followed by a line of code
+    const third = (n: number) => [code(20), ...Array.from({ length: n }, (_, i) => `// note ${i}${NL}// more${NL}const b${i} = ${i}`)].join(NL)
+    expect(await lines(file, third(4), 'comments')).toEqual([])
+    expect(await lines(file, third(8), 'comments')).toEqual([1])
+    expect(await lines('packages/core/src/x.test.ts', third(8), 'comments')).toEqual([])
+    expect(await lines(file, '// a\nf()\n// b\ng()', 'comments')).toEqual([])
+  })
+  it('does not join notes after code on consecutive lines into one block', async () => {
+    const trailing = Array.from({ length: 12 }, (_, i) => `const a${i} = ${i} // note ${i}`).join(NL)
+    expect(await lines(file, 'f()' + NL + trailing, 'comments')).toEqual([])
+    const own = Array.from({ length: 12 }, (_, i) => `// note ${i}`).join(NL)
+    expect(await lines(file, 'f()' + NL + own, 'comments')).toEqual([2])
+  })
+  it('holds a listed file at its own share, not at 35%', async () => {
+    const held = 'packages/platform/src/ports/system.ts'
+    expect(COMMENT_SHARE_HELD.files[held]).toBe(63)
+    // `codeLines` lines of code, then the comments in blocks of five, each block followed by a line of code
+    const shareOf = (comments: number, codeLines: number) =>
+      [code(codeLines), ...Array.from({ length: comments }, (_, i) => `// n${i}`).flatMap((c, i) => (i % 5 === 4 ? [c, 'f()'] : [c]))].join(NL)
+    const half = shareOf(20, 16)
+    const seventy = shareOf(35, 8)
+    expect([half, seventy].map((t) => commentShareOf(t))).toEqual([{ comment: 20, lines: 40 }, { comment: 35, lines: 50 }])
+    expect(await lines(held, half, 'comments')).toEqual([])
+    expect(await lines(file, half, 'comments')).toEqual([1])
+    expect(await lines(held, seventy, 'comments')).toEqual([1])
+  })
+  it('lists each held file at its share now: a file brought down lowers its line, or leaves the list at 35% or under', () => {
+    const now = Object.fromEntries(
+      Object.keys(COMMENT_SHARE_HELD.files).map((f) => {
+        const { comment, lines } = commentShareOf(readFileSync(join(ROOT, f), 'utf8'), f)
+        return [f, Math.round((100 * comment) / lines)]
+      }),
+    )
+    expect(COMMENT_SHARE_HELD.files).toEqual(now)
+    expect(Object.values(now).filter((pct) => pct <= 35)).toEqual([])
+  })
+  it('reads only the folders whose comments are swept', async () => {
+    expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])
+    const hostSrc = 'packages/agent-host/src'
+    const reads = (file: string) => lines(file, 'f()\n// It used to wait.', 'comments')
+    expect(await reads(`${hostSrc}/x.ts`)).toEqual([2])
+    for (const folder of COMMENTS_SWEPT_HOST_FOLDERS) expect(await reads(`${hostSrc}/${folder}/x.ts`), folder).toEqual([2])
+    for (const folder of COMMENTS_UNSWEPT_HOST_FOLDERS) expect(await reads(`${hostSrc}/${folder}/x.ts`), folder).toEqual([])
+    const onDisk = readdirSync(join(ROOT, hostSrc), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    expect([...COMMENTS_SWEPT_HOST_FOLDERS, ...COMMENTS_UNSWEPT_HOST_FOLDERS].sort()).toEqual(onDisk.sort())
+    // A file in COMMENTS_LEFT is not read yet
+    expect(COMMENTS_LEFT.length).toBeGreaterThan(0)
+    expect(await lines(COMMENTS_LEFT[0]!, 'f()\n// It used to wait.', 'comments')).toEqual([])
+  })
+  it('lists in COMMENTS_LEFT only tracked files', () => {
+    const tracked = execFileSync('git', ['ls-files', '--', ...COMMENTS_LEFT], { cwd: ROOT, encoding: 'utf8' }).split(NL).filter(Boolean)
+    expect([...COMMENTS_LEFT].sort()).toEqual(tracked.sort())
+  })
+  it('lists in COMMENTS_LEFT only files that still have a finding, so a file that is cleared leaves the list', async () => {
+    const bare = new ESLint({
+      cwd: ROOT,
+      overrideConfigFile: true,
+      overrideConfig: [
+        { files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } },
+        { linterOptions: { noInlineConfig: true } },
+        // The block that switches the rule on, as the guard pass has it, without the files it leaves
+        ...guardConfigs.filter((c) => 'guard/comments' in c.rules).map(({ ignores: _left, ...c }) => c),
+      ],
+    })
+    const results = await bare.lintFiles(COMMENTS_LEFT.map((f) => join(ROOT, f)))
+    const clean = results.filter((r) => !r.messages.some((m) => m.ruleId === 'guard/comments')).map((r) => relative(ROOT, r.filePath).split(sep).join('/'))
+    expect(clean).toEqual([])
   })
 })

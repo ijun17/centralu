@@ -11,22 +11,11 @@ import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
 
-/**
- * Usage (FR-9).
- *
- * **Only covers subscription limits** — additional paid credits are out of scope.
- *
- * The number and names of windows differ by tool (Claude has 5-hour plus weekly, Codex has one
- * weekly window). So the UI draws the array without knowing how many windows there are — a new
- * window appearing does not require a change here.
- */
+/** Usage (FR-9, docs/agent-host/usage.md): subscription limits only, drawn for however many windows a tool has */
 export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A linked machine's limits (#82); null for this computer */ machine?: string | null }) {
   const platform = usePlatform()
   const meta = useToolMeta(tool)
-  /*
-   * A session the cache section names opens like a sidebar row, and the dropdown closes: the person asked "which
-   * session", and the answer is that session on screen.
-   */
+  // A session the cache section names opens like a sidebar row, and the dropdown closes
   const focusSession = useStore((s) => s.focusSession)
   const toggleUsage = useStore((s) => s.toggleUsage)
   const openSession = (id: string) => {
@@ -36,10 +25,8 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
   const read = useLoad(() => platform.agents.usage(tool, machine ?? undefined), [platform, tool, machine])
   /*
-   * A tool whose own command is slower than the host waits answers `provisional` (#1623). The panel asks once more, to
-   * settle: that one call returns when the command ends, so the plan or the totals arrive on the open panel, and nothing
-   * polls. It is asked once and never again (an answer that is still provisional stands), so a host that ignores it cannot
-   * make a loop.
+   * A slow tool command answers `provisional` (#1623): asked once more to settle, which returns when the command ends.
+   * Never again, so a host that ignores it cannot make a loop.
    */
   const provisional = read.data?.provisional === true
   const settled = useLoad(() => (provisional ? platform.agents.usage(tool, machine ?? undefined, { settle: true }) : null), [platform, tool, machine, provisional])
@@ -65,14 +52,10 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
   )
 
-  // What the host stored over the last days (§6.2): independent of the limits too; a host that predates it, or a failed read, says so in a line
+  // The stored history, independent of the limits too; an older host or a failed read says so in a line
   const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
 
-  /*
-   * A tool with no limits to report (#1623, owner 2026-10-26) is not "unavailable": nothing is wrong and nothing is to be
-   * done, and the panel says so in plain words. What the tool does say stands under it: its plan, and what it counted on this
-   * computer, labelled as totals and not a limit. A failed read (no `notReported`) is still the reason as it is.
-   */
+  // A tool with no limits (#1623): docs/design-system.md §10. A failed read (no `notReported`) shows its reason
   if (state.notReported) {
     return (
       <>
@@ -127,7 +110,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   )
 }
 
-/** The words of the panel for a tool that reports no limits (#1623): the exact copy the owner confirms */
+/** The copy for a tool that reports no limits (#1623), as the owner confirmed it */
 export const NOT_REPORTED_COPY = {
   title: (tool: string) => `${tool} does not report usage limits.`,
   plan: (plan: string) => `${plan} plan`,
@@ -136,10 +119,7 @@ export const NOT_REPORTED_COPY = {
   totalsAsOf: (at: number, now: number) => `As of ${formatReadAt(at, now)}`,
 }
 
-/**
- * How a total is written: tokens as the daily tokens are (abbreviated), dollars with their cents, and the whole-number counts
- * (sessions, messages) exactly, with the thousands separators of the person's language
- */
+/** Tokens abbreviated, dollars with cents, counts exact, in the person's locale */
 function totalText(value: number | null, unit: 'count' | 'tokens' | 'usd'): string {
   // The tool printed it in a form that could not be read: a dash, never a number that may be wrong
   if (value === null) return '—'
@@ -152,7 +132,7 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
   const machineName = useMachineName(machine)
   return (
     <div className="px-4 py-6" data-testid="usage-not-reported">
-      {/* Each part fades in as it arrives: the plan or the totals may come after the words, when the command was slow. The totals are keyed by the read, so new ones landing on the open panel (a settle) fade in as a whole, rows and time together, and do not jump */}
+      {/* Each part fades in as it arrives; the totals are keyed by the read, so a settle fades them in whole */}
       <p className="cc-row-in text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
         {NOT_REPORTED_COPY.title(label)}
       </p>
@@ -186,13 +166,7 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
   )
 }
 
-/**
- * A donut.
- *
- * With no color to use, how full it is is expressed as brightness. The more dangerous, the
- * brighter it gets — the same grain as the rule that the brightest thing on screen is what is
- * waiting on me.
- */
+/** A donut: fuller is brighter (`usageTone`) */
 function Donut({ window: w }: { window: UsageWindow }) {
   const R = 26
   const C = 2 * Math.PI * R
@@ -227,17 +201,14 @@ function Donut({ window: w }: { window: UsageWindow }) {
             strokeWidth="6"
             strokeLinecap="round"
             strokeDasharray={`${filled} ${C - filled}`}
-            // Has to start at the 12 o'clock position to match the direction people read in
+            // From 12 o'clock
             transform="rotate(-90 32 32)"
             className={tone}
           />
         </svg>
         <span className={`readout text-md leading-none ${tone}`}>{w.percent}%</span>
         {/*
-          The model name **is written out** (user's observation, 2026-09-09). Before, when a
-          scope existed, only a dangling "·" was shown and the name was left to the tooltip, so
-          two 74% weekly donuts standing side by side gave no way to read on screen which was
-          whose limit — that is what "per model seems to be missing" meant.
+          The window's name is written out: two 74% donuts side by side must say whose limit each is
         */}
         <span className="max-w-[92px] truncate text-2xs text-ink-faint" title={w.scope ?? undefined}>
           {w.label}
@@ -254,7 +225,7 @@ function ResetTime({ resetsAt }: { resetsAt: string | null }) {
   return <>{resetText(resetsAt, now)}</>
 }
 
-/** Time remaining in human units — "how much is left" matters more than the exact moment */
+/** Time remaining: how much is left matters more than the moment */
 function resetText(resetsAt: string | null, now: number): string {
   if (!resetsAt) return 'reset time unknown'
   const ms = new Date(resetsAt).getTime() - now

@@ -1,0 +1,4 @@
+{
+  "_comment": "host.lock as a host writes it while it works on its store (#2334, `StoreWork` in @cc/protocol), byte for byte, as pid 4242: the host's own test writes it (packages/agent-host/src/dev-services/instance-lock.test.ts), and every reader's test reads it: the shell's (apps/desktop/src-tauri/keeper/src/host_proc/store_work.rs), the launcher's (tooling/launcher-serve.test.ts) and the window's (packages/platform/src/tauri/startup.test.ts).",
+  "record": "{\"pid\":4242,\"started\":null,\"at\":1800000000000,\"by\":\"app\",\"store\":{\"doing\":\"copy\",\"step\":76,\"bytes\":19352965120,\"since\":1800000001000}}"
+}

@@ -3,29 +3,19 @@ import { isRecord } from '../tolerant.js'
 import { AgentModels } from './tools.js'
 
 /**
- * Preferences about the screen itself — how this person wants the app to behave, as
- * opposed to anything an agent does.
- *
- * **One record rather than a flag per errand.** Every screen preference before this one
- * either lived in the workspace snapshot (which is about *where things are*, not how they
- * behave) or nowhere at all, and the alternative on the table was a `setX` method per
- * toggle, the way `updates.setAuto` does it. That shape stops scaling the second there are
- * three of them: three methods, three handlers, three port members, all to carry booleans
- * that are read together at startup and never separately. This is a record so the next
- * preference costs one field.
+ * Screen preferences, how the person wants the app to behave: one record rather than a `setX` method per switch (as
+ * `updates.setAuto`), so the next preference costs one field, not a method, a handler and a port member.
  */
 export const ThemeMode = z.enum(['dark', 'light', 'system'])
 export type ThemeMode = z.infer<typeof ThemeMode>
 
 /**
- * The five steps of the app-wide text size (#312 step 5): the root's CSS zoom factor, with 1 as the
- * default. Why a zoom and not a font size: every text size in the UI is pinned in px, and growing
- * only the text in a narrow grid panel breaks its wrapping first; scaling the whole screen by one
- * factor follows the same rule as the OS's own display scaling (the `useTextZoom` comment in the UI store).
+ * The app-wide text size steps, as the root's CSS zoom: UI text sizes are pinned in px, and growing only the text
+ * breaks a narrow grid panel's wrapping first, so the whole screen scales like the OS's display scaling (`useTextZoom`).
  */
 export const TEXT_SIZES = [0.85, 0.925, 1, 1.1, 1.25] as const
 
-/** The nearest of the five steps — a stored value from another build, or a hand edit, lands on one */
+/** The nearest step, for a stored value from another build or a hand edit */
 export function nearestTextSize(value: number): number {
   let best: number = TEXT_SIZES[2]
   for (const step of TEXT_SIZES) if (Math.abs(step - value) < Math.abs(best - value)) best = step
@@ -33,32 +23,15 @@ export function nearestTextSize(value: number): number {
 }
 
 export type NotifyPolicy = {
-  /** Notify at once when an approval starts waiting */
   approval: boolean
-  /** Notify at once when an error occurs */
   error: boolean
-  /**
-   * When a single session finishes a response **somewhere it cannot be seen**.
-   *
-   * Originally the sound came only "once, when everything has finished". That fell out of step once every
-   * off-screen finish started leaving a card — the cards piled up every time but the sound came only at the
-   * end, so if two sessions finished while the person was away, two cards had quietly piled up. A card and
-   * a sound are the same event, so they go together.
-   */
+  /** A finish where it cannot be seen: it leaves a card, and card and sound go together, or cards pile up quietly */
   done: boolean
   /** Once, when every session has finished its work */
   allDone: boolean
-  /**
-   * Whether to notify even while the app is in the foreground (default: no — a notification about something
-   * right in front of you is noise)
-   */
+  /** Also while the app is in front (off by default: a notice about what is in front of you is noise) */
   whenFocused: boolean
-  /**
-   * Whether to make a sound.
-   *
-   * Since we measured that the macOS banner path is dead, **sound has been the main signal while the person
-   * is away**. It is the only signal that reaches them even in the next room, so it is on by default.
-   */
+  /** On by default: the macOS banner path is dead (measured), so sound is what reaches someone away, even next room */
   sound: boolean
 }
 
@@ -72,11 +45,8 @@ export const DEFAULT_NOTIFY_POLICY: NotifyPolicy = {
 }
 
 /**
- * Reads a policy from the workspace snapshot, field by field (#384). A snapshot an older build wrote
- * lacks the switches added since (`done` came after `allDone`), and a missing switch must take its
- * default rather than read as off; a value that is not a boolean is no choice either. Fields this
- * build does not know are dropped: the screen rewrites the snapshot whole on its next change, so a
- * newer build's extra switch falls back to its own default there.
+ * Reads a policy field by field (docs/stored-shapes.md "The rules"). An unknown switch is dropped: the screen rewrites
+ * the workspace snapshot whole, so a newer build's extra switch falls back to its own default there.
  */
 const isNotifyPolicyKey = (key: string): key is keyof NotifyPolicy => key in DEFAULT_NOTIFY_POLICY
 
@@ -91,33 +61,19 @@ export function readNotifyPolicy(raw: unknown): NotifyPolicy {
 }
 
 /**
- * When the agents compact their conversation by themselves (#1376): Centralu sets it as a share of the model's context
- * window, for Claude and Codex alike, instead of each tool's own default and config (Codex's `config.toml` can hold a
- * fixed 700000 for a model with a smaller window). `controlled` off passes nothing at all: each agent's own settings
- * decide, untouched.
+ * When agents compact by themselves: docs/agent-host/context-compaction.md. Not each tool's own config, as Codex's
+ * `config.toml` can hold a fixed 700000 for a smaller window; `controlled` off passes nothing, and the tools decide.
  */
 export type AutoCompact = {
-  /** Whether Centralu sets the point (default on); off, nothing is passed */
   controlled: boolean
-  /** The share of the model's window at which compaction starts, from `MIN_AUTO_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE` */
   share: number
-  /**
-   * The lower share (#1451) over which Centralu compacts a session that has been at rest for a while, before its next
-   * turn, instead of waiting for `share` in the middle of one. `share` stays the in-turn backstop. Follows `controlled`:
-   * off, Centralu compacts nothing by itself. From `MIN_IDLE_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE`.
-   */
+  /** Over it, a session at rest is compacted before its next turn; `share` stays the in-turn backstop */
   idleShare: number
-  /**
-   * Whether Centralu tells a session, quietly, to call `compact_self` once its context passes `nudgeFirst` and again at
-   * `nudgeSecond` (#1492). Follows `controlled`: off, Centralu says nothing about compacting by itself.
-   */
+  /** Tell the session quietly to call `compact_self` past `nudgeFirst` and `nudgeSecond` */
   nudge: boolean
-  /** The first share, from `MIN_NUDGE_SHARE` to `MAX_NUDGE_SHARE`. A share at or above `share` is never told: the tool compacts first */
+  /** At or above `share` it is never told: the tool compacts first */
   nudgeFirst: number
-  /**
-   * The second share, or null for the default: `NUDGE_SECOND_GAP` below `share`, following it when it moves. Always at least
-   * `NUDGE_MARGIN` below `share` (`nudgeShares`): the second notice must come before the tool's own compaction.
-   */
+  /** Null: `NUDGE_SECOND_GAP` below `share`, following it; always `NUDGE_MARGIN` below it at least (`nudgeShares`) */
   nudgeSecond: number | null
 }
 
@@ -126,9 +82,7 @@ export const MIN_IDLE_COMPACT_SHARE = 0.1
 export const MAX_AUTO_COMPACT_SHARE = 0.95
 export const MIN_NUDGE_SHARE = 0.1
 export const MAX_NUDGE_SHARE = 0.9
-/** How far below the tool's own compaction the second notice sits when the person chose no share */
 export const NUDGE_SECOND_GAP = 0.1
-/** The least the second notice may sit below the tool's own compaction share */
 export const NUDGE_MARGIN = 0.05
 export const DEFAULT_AUTO_COMPACT: AutoCompact = {
   controlled: true,
@@ -141,11 +95,7 @@ export const DEFAULT_AUTO_COMPACT: AutoCompact = {
 
 const hundredths = (n: number): number => Math.round(n * 100) / 100
 
-/**
- * The two shares a session is told at (#1492), as they are in force: the first as chosen, the second chosen or
- * `NUDGE_SECOND_GAP` below the tool's own share, and in every case at least `NUDGE_MARGIN` below it. A first share at or
- * above `share` stays as it is and is never told by the host (the tool compacts before it).
- */
+/** The two shares a session is told at, as in force (docs/agent-host/context-compaction.md) */
 export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudgeSecond'>): {
   first: number
   second: number
@@ -155,10 +105,7 @@ export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudge
   return { first: c.nudgeFirst, second: Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second)) }
 }
 
-/**
- * Reads the setting field by field: a missing one takes its default, a value that is not a boolean or a number is no
- * choice, and a share lands inside the range (an older or newer build, a hand edit, never throw the record away).
- */
+/** Reads the setting field by field (docs/stored-shapes.md "The rules"); a share lands inside its range */
 export function readAutoCompact(raw: unknown): AutoCompact {
   const out = { ...DEFAULT_AUTO_COMPACT }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
@@ -176,10 +123,8 @@ export function readAutoCompact(raw: unknown): AutoCompact {
 }
 
 /**
- * A chosen second share that does not fit the rest is held to it, so the setting as read is one that can be saved again whole
- * (#1504 review): a share lowered under it takes it down to `NUDGE_MARGIN` below the share, and one that cannot then stay above
- * the first share goes back to the default (null), which follows the share. A person's own choice that does not fit is refused
- * where it is made (`UiPreferenceStore.setUiPreferences`); this is for the share that moved under a choice made before.
+ * Holds a chosen second share the share moved under, so the setting as read can be saved again whole
+ * (docs/agent-host/context-compaction.md). A misfit choice the person makes is refused in `setUiPreferences`.
  */
 export function settledSecond(c: AutoCompact): AutoCompact {
   if (c.nudgeSecond === null) return c
@@ -188,126 +133,68 @@ export function settledSecond(c: AutoCompact): AutoCompact {
   return nudgeSecond === c.nudgeSecond ? c : { ...c, nudgeSecond }
 }
 
-/** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */
+/** A factor on the body and code line heights; `normal` is the base */
 export const LineHeight = z.enum(['compact', 'normal', 'relaxed'])
 export type LineHeight = z.infer<typeof LineHeight>
 
 export const UiPreferences = z.object({
   /**
-   * Enter writes a newline and ⌘/Ctrl+Enter sends, instead of the other way round.
-   *
-   * It exists for people who write prompts in paragraphs. Shift+Enter has always made a
-   * newline, but reaching for Shift on every line break while Enter sits there ready to
-   * send mid-thought means the cost of a slip is a half-written instruction already on its
-   * way to an agent — and you cannot unsend it.
-   *
-   * **Off by default, and that is not timidity.** Enter-sends is what every chat window
-   * does, so it is what an unfamiliar hand expects; and for someone already using this app,
-   * silently moving send onto a different key would break the one keystroke they use more
-   * than any other. A preference that has to be asked for is worse than no preference —
-   * a preference that changes under you is worse than both.
+   * Enter writes a newline and ⌘/Ctrl+Enter sends, for paragraph writers, whose slip sends a half-written prompt. Off
+   * by default: Enter-sends is what every chat does, and moving it would break someone's most-used key.
    */
   sendWithModifierEnter: z.boolean(),
-  /**
-   * Which side of the theme the screen shows (#312): always the dark one, always the light one,
-   * or whichever the OS is set to. The two sides are chosen separately (`themeDark`,
-   * `themeLight`) so that following the OS switches between two themes the person picked,
-   * rather than between whatever the app thinks dark and light should be.
-   */
+  /** Following the OS switches between the two themes the person picked (`themeDark`, `themeLight`) */
   themeMode: ThemeMode,
-  /**
-   * The theme for the dark side: a preset id (`dark`, …) or a theme file's id. Only the choice
-   * lives here; a custom theme itself is a file in the data folder's `themes/` (theme.ts), so it
-   * can be edited by hand or by an agent and shared as a file.
-   */
+  /** A preset id or a theme file's id; a custom theme is a file in the data folder's `themes/`, to edit and share */
   themeDark: z.string().max(80),
-  /** The theme for the light side: a preset id (`light`, …) or a theme file's id */
   themeLight: z.string().max(80),
-  /**
-   * An accent colour, or null for none (the default: the chrome has no hue of its own, and brightness is
-   * what speaks urgency). When set it colours focus, selection and checked
-   * controls — never the signal colour, which stays the one thing reserved for "waiting for you".
-   */
+  /** Null by default (the chrome has no hue); colours focus, selection and checks, never the "waiting for you" signal */
   accent: z.string().max(80).nullable(),
-  /**
-   * The body font, as the person wrote it: one family (`Inter`) or a list (`"IBM Plex Sans", Inter`).
-   * Empty is the app's own stack. The app's stack is always appended after it (app/typography.ts),
-   * so a font that is not installed, or one without Korean, falls back to what shows today.
-   */
+  /** One family or a list; the app's stack always follows (app/typography.ts), for a font missing or without Korean */
   bodyFont: z.string().max(200),
-  /** The code font, the same way: terminals, code blocks, paths and readouts. Empty is the app's own stack */
+  /** The same way, for terminals, code blocks, paths and readouts */
   codeFont: z.string().max(200),
-  /** Line height of prose and code blocks. Fixed-row views (the code viewer, the diff, the commit graph) stay as they are */
+  /** Prose and code blocks; fixed-row views (the code viewer, the diff, the commit graph) keep theirs */
   lineHeight: LineHeight,
-  /**
-   * The app-wide text size, one of `TEXT_SIZES` (a zoom factor, 1 = default). It lived in the
-   * workspace snapshot as a step index (`textScale`) before #312; it is a way of looking, not a
-   * place things are, so it moved here with the rest of Appearance. Any number is accepted and
-   * lands on the nearest step, so a value from another build never throws the record away.
-   */
+  /** Here, not in the workspace snapshot: a way of looking, not where things are */
   textSize: z.number().transform(nearestTextSize),
-  /**
-   * Whether ordinary sessions get Centralu's light, read-only tools (#320): their own project's
-   * sessions (`read_session`, which lists them when given no id), a search of that project's past
-   * conversations (`recall`) and the app guide. **On by default** (owner decision, 2026-10-05) — a
-   * session asked "what did the other session do?" should be able to look. Not a screen
-   * preference, but this is the one record the person's settings already live in; the host reads
-   * it when a session starts and on each call.
-   */
+  /** Ordinary sessions get read-only tools on their project (`read_session`, `recall`, the guide); read on each call */
   sessionTools: z.boolean(),
   /** Running children per project: null uses preset defaults (auto unlimited, otherwise 4); 0 is unlimited. */
   agentCeiling: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   /**
-   * How many levels of sessions may start agents (#867): at 1 only a session the person started starts agents (start_agent,
-   * a fork, ask_project); at 2 its children do too, at 3 its grandchildren. Every preset keeps to it, `auto` included.
-   * Optional, like agentCeiling: a record from before it has none and reads as `DEFAULT_AGENT_DEPTH` (`agentDepthOf`).
+   * Levels of sessions that may start agents (start_agent, a fork, ask_project): 1 only a person-started session, 2 its
+   * children too, 3 its grandchildren. Every preset keeps to it, `auto` included.
    */
   agentDepth: z.number().int().min(1).max(3).optional(),
-  /**
-   * The model and effort start_agent uses per tool and difficulty (#729), when the caller names a difficulty and no
-   * model. A difficulty with nothing chosen falls back to the project's remembered choice, as a call without one does.
-   * Optional, like agentCeiling: a record from before it has none. The patch carries the whole map.
-   */
+  /** start_agent's model and effort per tool and difficulty, else the project's choice; the patch carries the whole map */
   agentModels: AgentModels.optional(),
   /**
-   * Whether a session a linked computer's `auto` session starts on this one runs under `auto` too (#1273): start_agent
-   * with a machine, from the computer this one is linked to as its hub. On by default (owner decision 2026-10-19); off,
-   * such a session runs under `normal` and the hub's card asks each time, for a computer the person shares. Optional, as
-   * agentDepth: a record from before it has none and reads as on (`hubAutoOf`).
+   * Whether a session the hub's `auto` session starts here runs under `auto` too; off, under `normal`, and the hub's
+   * card asks each time (for a shared computer). Absent reads on (`hubAutoOf`).
    */
   hubAuto: z.boolean().optional(),
   /**
-   * Whether a turn a usage limit stopped is continued by itself at the reset, and one the network stopped once the network is
-   * back (#1415, #2238). On by default (owner decision 2026-10-26); read by this computer's host for its own sessions. Optional,
-   * as hubAuto: a record from before them has none and reads as on (`autoContinueOf`)
+   * Continue by itself a turn a usage limit stopped, at the reset, and one the network stopped, once it is back. This
+   * computer's host reads them for its own sessions; absent reads on (`autoContinueOf`).
    */
   continueAfterLimit: z.boolean().optional(),
   continueOnNetwork: z.boolean().optional(),
   /**
-   * The sidebar groups the person folded (#666): the children of a session (`session:<id>`) and the
-   * sessions of an app (`app:<key>`). Only folded groups are listed, so a group nobody touched is
-   * open and an unknown or stale key does nothing. A way of looking, kept with the other screen
-   * preferences so it survives a restart; the patch carries the whole list, since a list cannot be
-   * patched by one entry.
+   * Folded sidebar groups, `session:<id>` (children) and `app:<key>`: only folded ones are listed, so an untouched
+   * group is open and a stale key does nothing. The patch carries the whole list.
    */
   foldedGroups: z.array(z.string().max(300)).max(500),
   /**
-   * The notification switches (#1306): which events notify, and whether they make a sound. They lived in the window's
-   * workspace snapshot, which the window writes whole and the host cannot change; here the window and the Assistant
-   * share one record. **Optional**, like `agentCeiling`: a record from before it has none, and a host from before it
-   * answers without it (the window then keeps the snapshot's). The host fills it once on the first read, from the
-   * snapshot's `notifyPolicy` or the defaults (`UiPreferenceStore`), so it is there from then on. Read field by field
-   * (`readNotifyPolicy`): a switch a build does not know is dropped, a missing one takes its default.
+   * Here, not in the workspace snapshot the host cannot change, so the window and the Assistant share it. An older host
+   * answers without it, and the window keeps the snapshot's. The host fills it on first read from the snapshot or the
+   * defaults (`UiPreferenceStore`).
    */
   notifyPolicy: z
     .unknown()
     .transform((v) => readNotifyPolicy(v))
     .optional(),
-  /**
-   * When agents compact by themselves (#1376). **Optional**, like `agentDepth`: a record from before it has none and
-   * reads as the default (`autoCompactOf`: on, at 60% of the model's window); an older host ignores the field. Read field
-   * by field (`readAutoCompact`).
-   */
+  /** Absent reads as the default (`autoCompactOf`); an older host ignores it */
   autoCompact: z
     .unknown()
     .transform((v) => readAutoCompact(v))
@@ -315,16 +202,9 @@ export const UiPreferences = z.object({
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
-/**
- * A change to *some* of them. Whatever is left out keeps the value it had.
- *
- * Writing the whole record back would work today, with one field and one window. It stops
- * working the moment there are several: a screen that loaded before a preference existed
- * would post its own idea of the record and quietly undo the one it never knew about.
- * Saying only what changed cannot do that.
- */
+/** What is left out keeps its value, so a screen loaded before a preference existed cannot undo it */
 export const UiPreferencesPatch = UiPreferences.partial().extend({
-  /** Only the switches that change (#1306): the host merges them into the record, so two writers changing different switches do not undo each other */
+  /** Only the switches that change: the host merges them, so writers of different switches do not undo each other */
   notifyPolicy: z
     .object({
       approval: z.boolean(),
@@ -336,7 +216,7 @@ export const UiPreferencesPatch = UiPreferences.partial().extend({
     })
     .partial()
     .optional(),
-  /** Only what changes (#1376), merged into the record like the notification switches */
+  /** Only what changes, merged like the notification switches */
   autoCompact: z
     .object({
       controlled: z.boolean(),
@@ -353,20 +233,18 @@ export const UiPreferencesPatch = UiPreferences.partial().extend({
 export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 
 /**
- * The agent depth when none is saved (#867, owner decision 2026-10-16): only the sessions the person started may start
- * agents. Twelve sessions at once, started by `auto` children each starting their own, took a Mac's load average to 216
- * (#862).
+ * Only sessions the person started may start agents: `auto` children each starting their own ran twelve sessions at
+ * once and took a Mac's load average to 216 (#862).
  */
 export const DEFAULT_AGENT_DEPTH = 1
-/** The deepest the setting goes (#867): three levels of agents below the person's session */
 export const MAX_AGENT_DEPTH = 3
 
-/** Whether this computer takes `auto` from its hub's `auto` sessions (#1273): on unless the person turned it off */
+/** Whether this computer takes `auto` from its hub's `auto` sessions: on unless the person turned it off */
 export function hubAutoOf(prefs: Pick<UiPreferences, 'hubAuto'>): boolean {
   return prefs.hubAuto !== false
 }
 
-/** Which stops this computer continues by itself (#1415): each on unless the person turned it off */
+/** Which stops this computer continues by itself: each on unless the person turned it off */
 export function autoContinueOf(prefs: Pick<UiPreferences, 'continueAfterLimit' | 'continueOnNetwork'>): { limit: boolean; network: boolean } {
   return { limit: prefs.continueAfterLimit !== false, network: prefs.continueOnNetwork !== false }
 }
@@ -376,7 +254,7 @@ export function autoCompactOf(prefs: Pick<UiPreferences, 'autoCompact'>): AutoCo
   return prefs.autoCompact ?? DEFAULT_AUTO_COMPACT
 }
 
-/** The notification switches in force (#2168): the saved ones, else the defaults (a host from before them has none) */
+/** The notification switches in force: the saved ones, else the defaults (an older host has none) */
 export function notifyPolicyOf(prefs: Pick<UiPreferences, 'notifyPolicy'>): NotifyPolicy {
   return prefs.notifyPolicy ?? DEFAULT_NOTIFY_POLICY
 }
@@ -386,7 +264,7 @@ export function agentDepthOf(prefs: Pick<UiPreferences, 'agentDepth'>): number {
   return prefs.agentDepth ?? DEFAULT_AGENT_DEPTH
 }
 
-/** What someone who has never opened Settings gets. Each field's reason is on the field. */
+/** What someone who has never opened Settings gets */
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   sendWithModifierEnter: false,
   themeMode: 'dark',
@@ -402,23 +280,14 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
 }
 
 /**
- * Turn whatever was stored into a usable record.
- *
- * **Never throws.** The one thing this must not do is take the app down with it: these are
- * preferences, and a blob that is missing, empty, half-written by an older build or plain
- * corrupt is a reason to fall back to the defaults, not a reason to fail to start. Fields
- * that did not exist when the blob was written fill in from the defaults for the same
- * reason — that is what lets the record grow without a migration.
+ * Never throws: a missing, half-written or corrupt blob falls back to the defaults rather than failing the start, and
+ * fields filled from the defaults let the record grow without a migration.
  */
 export function parseUiPreferences(raw: unknown): UiPreferences {
   const out: UiPreferences = { ...DEFAULT_UI_PREFERENCES }
   if (!isRecord(raw)) return out
   const record = raw
-  /*
-   * **Field by field.** Parsing the record as a whole meant one bad field (a theme id an
-   * older build wrote differently, say) threw away every other preference with it. Each field
-   * falls back on its own.
-   */
+  // Field by field, so one bad field (an older build's theme id, say) cannot discard the rest
   for (const [key, field] of Object.entries(UiPreferences.shape)) {
     if (!(key in record)) continue
     const parsed = field.safeParse(record[key])

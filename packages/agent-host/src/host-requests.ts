@@ -8,24 +8,16 @@ import { rpcError } from './rpc-error.js'
 import { asItRuns, effectOf, namedTargets } from './host-request-targets.js'
 
 /**
- * Host requests (#1405): a call made with the limited credential that cannot be undone or widens what runs without
- * asking (`asks` in transport/method-rights.ts) waits for the person, as a card the window shows, and runs only when
- * they allow it. Not a session's card: the program that asked holds no session's rights, and a card in the
- * Assistant's slot would read as the Assistant's doing.
- *
- * - **What the card names.** The trash's deletes go through the Assistant's own trash flow (sessions/trash-flow.ts),
- *   with this card in place of the Assistant's: the same question, naming each session and what goes with it, and the
- *   same reading of the trash again after Allow, so nothing the card did not name is deleted (`trash.empty` deletes the
- *   rows its card listed, never what arrived while it stood). Every other method gets a card that names the method, what
- *   it acts on by name and what it loses, and its parameters as its schema parses them, quoted on one line; it runs with
- *   those parsed parameters (`generic`, host-request-targets.ts).
- * - **Who answers.** `requests.answer`, which only a window holding the token may call (`window` in method-rights.ts).
- * - **When it is refused at once.** No window that shows host requests is attached with the token (owner, 2026-10-21:
- *   refused, not left standing), or `maxOpen` requests already wait (a loop cannot flood the window).
- * - **When it ends unanswered.** The program disconnects (its socket's signal), `lifetimeMs` passes (15 minutes, owner
- *   2026-10-21: the one card with a timer, since a raw call has no turn to end it), or no window shows requests for
- *   `windowGoneMs` (`closeAll`). A host that stops ends them through the first: its sockets close with it.
- *   Nothing is kept across a host swap: the caller's socket closes with it, and the next host asks again.
+ * Host requests (#1405): a call made with the limited credential that cannot be undone or widens what runs unasked (`asks` in
+ * transport/method-rights.ts) waits for the person as a card the window shows and runs only when they allow it. Not a session's
+ * card: the program holds no session's rights and a card in the Assistant's slot would read as its doing. The trash's deletes
+ * use the Assistant's own flow (sessions/trash-flow.ts) with this card and read the trash again after Allow, so nothing the
+ * card did not name is deleted; every other card names the method, what it acts on and loses, and its parameters as the schema
+ * parses them, which is what runs (`generic`, host-request-targets.ts). Only `requests.answer` (a window with the token)
+ * answers. Refused at once with no window showing requests attached or `maxOpen` waiting (owner, 2026-10-21); ends unanswered
+ * when the program disconnects, `lifetimeMs` passes (15 minutes: the one card with a timer, as a raw call has no turn to end
+ * it) or no window shows requests for `windowGoneMs`. Nothing survives a host swap: the caller's socket closes and the next
+ * host asks again
  */
 export const HOST_REQUEST_LIMITS = { maxOpen: 8, lifetimeMs: 15 * 60_000, windowGoneMs: 30_000 }
 
@@ -36,8 +28,8 @@ const SHOWN_PARAMS_MAX = 2000
 const QUOTED_NAME_MAX = 200
 
 /**
- * A name quoted for a card (`plainQuoted`), within `QUOTED_NAME_MAX` once its escapes are written: a name of format
- * characters is several times longer quoted, and a request over its schema's bound is one the window cannot read
+ * A name quoted for a card (`plainQuoted`) within `QUOTED_NAME_MAX` once escapes are written: a name of format characters is
+ * several times longer quoted, and a request over its schema's bound is one the window cannot read
  */
 export function quotedName(value: string): string {
   for (let max = 60; ; max = Math.floor(max / 2)) {
@@ -59,8 +51,8 @@ export type HostRequestsDeps = {
 }
 
 /**
- * Who asked, as the hello said it: what the program called itself, never checked, and the session whose credential it
- * holds (#1405, session-token.ts), which says only which session's process it claims to be
+ * Who asked, as the hello said it: what the program called itself (never checked) and the session whose credential it holds
+ * (#1405), which says only which session's process it claims to be
  */
 export type RequestFrom = { client: string | null; session?: string }
 
@@ -85,8 +77,8 @@ export class HostRequests {
   }
 
   /**
-   * A limited call of an `asks` method: the card, then the call once allowed. Rejects with `data.refused` when it does
-   * not run. `signal` is the calling socket's: it fires when the program disconnects.
+   * A limited call of an `asks` method: the card, then the call once allowed. Rejects with `data.refused` when it does not run;
+   * `signal` is the calling socket's and fires when the program disconnects
    */
   async ask(method: string, params: unknown, from: RequestFrom, signal: AbortSignal): Promise<unknown> {
     // Said before anything is read; `card` checks both again when it raises, after the trash was read
@@ -106,9 +98,9 @@ export class HostRequests {
   }
 
   /**
-   * Any other method's card (host-request-targets.ts): the call parsed by its method's schema, which is what the card
-   * shows and what runs, what it acts on by name, and what it loses. After Allow the names are read again, and a call
-   * whose target changed meanwhile (renamed, deleted, unlinked) is not run: the person allowed what the card named.
+   * Any other method's card (host-request-targets.ts): the call as its schema parses it is what the card shows and what runs,
+   * with what it acts on by name and what it loses. After Allow the names are read again, and a call whose target changed
+   * meanwhile is not run: the person allowed what the card named
    */
   private async generic(method: string, params: unknown, from: RequestFrom, signal: AbortSignal): Promise<unknown> {
     const runs = asItRuns(method, params)
@@ -153,9 +145,9 @@ export class HostRequests {
   }
 
   /**
-   * How many windows that show requests are attached (`HostServer`'s `onShowing`). With none, what waits is withdrawn
-   * once `windowGoneMs` passes with none back: a card nobody can see is not left standing (owner, 2026-10-21), and a
-   * window that reloads, or reconnects after a swap behind the front door, comes back within it and keeps its cards.
+   * How many windows that show requests are attached (`HostServer`'s `onShowing`). With none, what waits is withdrawn once
+   * `windowGoneMs` passes with none back (owner, 2026-10-21); a window that reloads or reconnects after a swap behind the front
+   * door comes back within it and keeps its cards
    */
   showingChanged(count: number): void {
     if (count > 0) {

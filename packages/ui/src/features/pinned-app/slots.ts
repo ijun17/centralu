@@ -1,31 +1,6 @@
-/**
- * Where a pinned view stands while the project screen shows it (#203).
- *
- * An iframe cannot move. Taking it out of the document throws its document away, and moving it
- * is taking it out and putting it back (PinnedApps' header comment). So the project screen does
- * not draw an app's view inside its panel: the panel holds an empty slot, and the pinned view —
- * the one instance, in the one frame, that the app view also shows — is laid over that slot from
- * where it always stands. Only its style changes, so going between the project screen, the app
- * view and a session keeps one document, and the view never has a second frame.
- *
- * Two sides register here: the panel's slot (ProjectView) and the pinned view laid over it
- * (PinnedApps). Whichever arrives second places the view. After that the slot's own resize
- * observer follows the window, and the project screen calls `placeSlots` after every render,
- * which is what follows a panel that moved without changing size (a drag's preview order).
- *
- * Slots and views are keyed by the pinned view's key (`appKeyOf`, `<project>/<appId>`). The
- * grid lays its app panels' views out the same way (#288), keyed by the grid's own view of the app
- * (`gridAppViewKey`, `grid:<project>/<appId>`).
- *
- * A drag over a view is not this file's business: the view stays in place and in sight, and the panel lays a
- * transparent cover over it for the length of the drag (dragShield.tsx, #296).
- *
- * A slot is also the view's place in the **keyboard** order. The view sits after every panel in the
- * document, so Tab from an app panel's header would skip its own view and land on the next panel,
- * reaching the view only after the last panel. The slot is focusable and hands focus on to the view
- * laid over it — and back to the header when focus comes back out of the view, so Shift+Tab is not
- * caught between the two.
- */
+// A pinned view laid over its panel's empty slot on the project screen (#203) or grid (#288): a moved iframe loses its
+// document (docs/apps/views.md "Pinned, in the main area"). Keyed by `appKeyOf`, or `gridAppViewKey` on the grid. The
+// second side to register places it; the slot's ResizeObserver and `placeSlots` (a move without a resize) follow.
 
 const slots = new Map<string, HTMLElement>()
 const views = new Map<string, HTMLElement>()
@@ -67,10 +42,9 @@ function trackFocus(): void {
 }
 
 /**
- * Focus reached a slot. Coming from before it (Tab from the panel's header), it goes on into the view laid over it:
- * its frame, or the first control a view without one shows (Trust this project, Restart). Coming back out of that view
- * (Shift+Tab from its frame), it goes on to whatever stands before the slot — the header's last control — or Shift+Tab
- * would be sent straight back into the view.
+ * Focus reached a slot, the view's place in the Tab order (the view sits after every panel in the document). From
+ * before it, focus goes into the view: its frame, or its first control (Trust this project, Restart). Coming out of the
+ * view (Shift+Tab), it goes to what stands before the slot, or Shift+Tab would bounce back into the view.
  */
 function slotFocused(key: string, slot: HTMLElement): void {
   const view = views.get(key)

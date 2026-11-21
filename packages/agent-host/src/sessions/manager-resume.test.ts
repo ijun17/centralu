@@ -136,17 +136,12 @@ describe('loading past sessions', () => {
 })
 
 /**
- * On the wake-up path there are times it does not have to pay **the cost of re-reading the
- * external record**.
- *
- * This catch-up is the correction that pulls in what was said outside the app (in the tool's
- * terminal), and it used to read the whole transcript every time, even when nothing had been
- * written outside. The cost grows with the conversation's length — measured at 48.6MB / 8.9s on
- * a 775-turn codex thread, and that 8.9s is paid **before the first message goes out**.
- *
- * Three contracts hold here: do not read if nothing changed, read if it changed, and **read if
- * it is unknown.** The last one matters most — folding "unknown" into "unchanged" means whatever
- * was said outside never comes in, ever.
+ * On the wake-up path there are times it does not have to pay **the cost of re-reading the external record**. This catch-up is
+ * the correction that pulls in what was said outside the app (in the tool's terminal), and reading the whole transcript every
+ * time, even when nothing was written outside, costs more the longer the conversation is — measured at 48.6MB / 8.9s on a
+ * 775-turn codex thread, and that 8.9s is paid **before the first message goes out**. Three contracts hold here: do not read if
+ * nothing changed, read if it changed, and **read if it is unknown.** The last one matters most — folding "unknown" into
+ * "unchanged" means whatever was said outside never comes in, ever.
  */
 describe('a record unchanged outside is not read again', () => {
   class SyncAdapter extends FakeAdapter {
@@ -400,10 +395,9 @@ describe('when the tool cannot find the conversation', () => {
 
     expect(r.resumed).toBe(false)
     /*
-     * This used to assert `/was deleted in Claude Code/` — the test was pinning the lie in
-     * place. All the tool reported was an absence, and an absence has two causes we cannot
-     * tell apart from here: removed there, or the folder moved (issue #28). So: report the
-     * observation, name the directory we looked in, claim no deletion nobody witnessed.
+     * It must not assert `/was deleted in Claude Code/`, which would pin a lie in place. All the tool reported was an absence,
+     * and an absence has two causes we cannot tell apart from here: removed there, or the folder moved (issue #28). So: report
+     * the observation, name the directory we looked in, claim no deletion nobody witnessed.
      */
     expect(r.reason).toMatch(/has no record of this conversation/)
     expect(r.reason).toContain(startedIn!)
@@ -413,10 +407,9 @@ describe('when the tool cannot find the conversation', () => {
   })
 
   /*
-   * codex limits a conversation to one writer ("already has an active writer"). This failure
-   * used to get papered over as "codex app-server exited" by the time it reached the screen, so
-   * the person was told a process had died when it had not, and got no way out. The reason has
-   * to arrive as a **signal**, not a sentence, for the UI to be able to offer a fork.
+   * codex limits a conversation to one writer ("already has an active writer"). Papered over as "codex app-server exited" by
+   * the time it reached the screen, this failure would tell the person a process had died when it had not, with no way out. The
+   * reason has to arrive as a **signal**, not a sentence, for the UI to be able to offer a fork.
    */
   it('gives a locked signal along with the failure when another side holds the conversation', async () => {
     const { a, m, call } = setup()
@@ -737,7 +730,7 @@ describe('catching up on a conversation continued outside', () => {
 
   /*
    * The stretch of events after our last message need not match the record's order, nor start with one we hold
-   * (#843 review): every event our record holds there is skipped, wherever it stands, and only the others are stored.
+   * (#843): every event our record holds there is skipped, wherever it stands, and only the others are stored.
    */
   const label = (r: StoredMessage) =>
     r.kind === 'text' ? (r.payload as { text: string }).text : r.kind === 'marker' ? `[${(r.payload as { type: string }).type}]` : `${r.kind}:${(r.payload as { callId: string }).callId}`
@@ -799,7 +792,7 @@ describe('catching up on a conversation continued outside', () => {
   })
 
   /*
-   * #1618 review, seen with real Claude Code: an update cut a turn, Centralu continued it with its note through its own
+   * #1618, seen with real Claude Code: an update cut a turn, Centralu continued it with its note through its own
    * channel (`deliverMail`: a notice line, no row of the note's words), the continued turn made calls, and the host
    * stopped. At the next wake the record has, after our last words, the CLI's "No response requested." where it resumed
    * the cut turn, then the note, then the calls we hold. Anchored on the words, the note was stored as the person's
@@ -940,8 +933,7 @@ describe('catches up a session even when its cwd differs from the project path (
 describe('when resuming hangs', () => {
   it('a hung spawn fails with a named stage, and Retry starts fresh', async () => {
     const s = await rpc('agents.createSession', { projectId: (await addProject()).id, cwd: tmpdir(), tool: 'claude' }) as { id: string }
-    // Bring down only the process (the same state as a host restart) — this used to be produced by
-    // archive/restore.
+    // Bring down only the process (the same state as a host restart).
     await mgr.tenure.disposeAll()
 
     vi.useFakeTimers()

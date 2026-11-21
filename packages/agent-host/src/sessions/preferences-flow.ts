@@ -39,22 +39,16 @@ function autoCompactText(c: AutoCompact): string {
 }
 
 /**
- * The Assistant's preference commands (#1219, second slice): `get_preferences` reads every setting Settings shows,
- * `set_preferences` changes the reversible ones the window offers. Each is the call the window makes (`prefs.set`,
- * `agents.setSleepPolicy`, `updates.setAuto`, ...) through the router, so the host checks it as it checks the window:
- * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
- * (the agent ceiling, depth and models, trust, approval rules), has no field here: the trust commands (`trust-flow.ts`)
- * change trust, rules, grants and the limits on agents, each behind its own card where it widens. "Let sessions look at
- * other sessions" (`sessionTools`) is not a setting any more (owner decision 2026-10-20): always on, so neither command
- * names it.
- *
- * Reversible means no card, with two exceptions. Turning off the notification for an approval asks first (the one that
- * tells the person a card waits), and so does the sound while it still notifies. The "error" and "every session finished"
- * notifications are gone from the product (owner decision 2026-10-20): the window no longer raises them, so neither command
- * names them, and their stored switches stay readable for older builds. And "Automatic updates" turned **on** asks first,
- * in every preset. With it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
- * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
- * (docs/agent-host/lifecycle/updates.md). Turning it off, and every other switch, acts at once.
+ * The Assistant's preference commands (#1219): `get_preferences` reads every setting Settings shows, `set_preferences` changes
+ * the reversible ones the window offers. Each is the window's own call through the router: the method's own schema, the same
+ * handler. What the window keeps for itself, or that widens what agents may do (agent ceiling, depth, trust, approval rules)
+ * has no field here: the trust commands (`trust-flow.ts`) change those, each behind its own card where it widens. "Let sessions
+ * look at other sessions" is always on (owner decision 2026-10-20), so neither command names it. Reversible means no card, with
+ * two exceptions. Turning off the notification for an approval (the one that says a card waits) asks first, and so does the
+ * sound while it still notifies. Neither command names the dropped "error" and "every session finished" notifications; their
+ * stored switches stay for older builds. And "Automatic updates" turned **on** asks first, in every preset. With it on, this
+ * computer installs a newer Centralu by itself, so code arrives without a later question; `update_centralu` never touches that
+ * switch for the same reason (docs/agent-host/lifecycle/updates.md). Turning it off, and every other switch, acts at once.
  */
 export class PreferencesFlow {
   private rpc: WindowRpc | null = null

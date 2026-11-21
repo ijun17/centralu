@@ -11,10 +11,10 @@
 //!     its own (#440), detached into its own session — and attaches to it over its control socket.
 //!     A macOS release first asks the shell to start it (`crate::shell`, thin-shell plan §6): the
 //!     shell holds macOS permissions across updates, and when it does not start a keeper the window
-//!     starts one itself, as before, and says why. The keeper holds the host, so quitting, crashing
-//!     or replacing the app does not end the host unless background mode is off, in which case the
-//!     keeper stops it the moment the last window detaches, as quitting always did.
-//!   - **Direct**: the app is the host's parent, exactly as before.
+//!     starts one itself, and says why. The keeper holds the host, so quitting, crashing or
+//!     replacing the app does not end the host unless background mode is off, in which case the
+//!     keeper stops it the moment the last window detaches.
+//!   - **Direct**: the app is the host's parent.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -107,6 +107,8 @@ pub struct Supervisor {
     direct: host_proc::Supervisor,
     /// The serve host this window runs on, when it does (`Host::Serve`): what "Quit completely" stops
     serve: ServeSlot,
+    /// The data folder the host works in, once the start chose it: where `store_work` reads host.lock
+    data: Arc<Mutex<Option<PathBuf>>>,
     #[cfg(unix)]
     keeper: Arc<Mutex<Option<Arc<link::KeeperLink>>>>,
 }
@@ -122,7 +124,7 @@ enum Choice {
 
 struct TauriSink(AppHandle);
 
-/// The direct path's sink: the window's, telling the serve fallback when an attempt is ready (#1223 review)
+/// The direct path's sink: the window's, telling the serve fallback when an attempt is ready (#1223)
 fn direct_sink(start: &Start, app: AppHandle) -> Arc<dyn StatusSink> {
     Arc::new(FallbackSink { inner: TauriSink(app), fallback: start.fallback.clone() })
 }
@@ -150,7 +152,7 @@ struct Start {
     bundled: Option<PathBuf>,
     /// The data folder's `centralu` launcher, when the plan runs the serve host through it (#1223, `Host::Serve`).
     serve: Option<PathBuf>,
-    /// The way back to the bundled host when `serve --window` ends before its ready line (#1223 review)
+    /// The way back to the bundled host when `serve --window` ends before its ready line (#1223)
     fallback: Arc<ServeFallback>,
     #[cfg_attr(not(unix), allow(dead_code))]
     resources: Option<PathBuf>,
@@ -162,7 +164,7 @@ fn start_plan(app: &AppHandle) -> Start {
     let serve = centralu_keeper_core::os::serve_launcher();
     let mut facts = Facts::window(Env::current(), found.is_some(), serve.is_some());
     /*
-     * Only a serve that says it takes --window and speaks this window's protocol is used (#1223 review): the hub
+     * Only a serve that says it takes --window and speaks this window's protocol is used (#1223): the hub
      * installed it, of whatever version. Asked only where the plan would choose it, so no other window pays for it.
      */
     if start_plan::plan(&facts).host == Some(Host::Serve) {
@@ -216,10 +218,20 @@ impl Supervisor {
         }
     }
 
+    /// What the host this window waits for does to its store before it can answer (#2334, `host_proc::store_work`)
+    pub fn store_work(&self) -> Option<host_proc::store_work::StoreWork> {
+        let data = self.data.lock().ok()?.clone()?;
+        host_proc::store_work::read(&data)
+    }
+
     /// Starts supervising. The app still comes up even if this fails (the UI shows the status).
     pub fn start(&self, app: AppHandle) {
         let start = start_plan(&app);
         self.remember_serve(&start);
+        if let Ok(mut d) = self.data.lock() {
+            // The folder the host takes: the keeper hands it this one, and a host the window starts finds it the same way
+            *d = Some(centralu_keeper_core::data_folder::data_dir_with(start.plan.dev || std::env::var("CC_DEV").as_deref() == Ok("1")));
+        }
         #[cfg(unix)]
         {
             // What "Apply now" compares the bundle on disk with (#1895); the bundled host only, not one `centralu serve` runs
@@ -257,7 +269,7 @@ impl Supervisor {
 
     /// Called when the app quits.
     ///
-    /// Direct: stops the host, as always. Keeper: only detaches. The keeper applies background
+    /// Direct: stops the host. Keeper: only detaches. The keeper applies background
     /// mode itself — with it off it stops the host now; with it on, the host keeps running.
     /// Either way the app does not wait: the keeper gives the host its grace period after the
     /// app is gone.
@@ -311,7 +323,7 @@ impl Supervisor {
             }),
             #[cfg(unix)]
             Choice::Direct if centralu_keeper_core::os::RELAUNCH_WITHOUT_KEEPER => relaunch::direct_info(),
-            // Where nothing relaunches into the new build (a quit and open is the update): no reason, as before the port was offered here
+            // Where nothing relaunches into the new build (a quit and open is the update): no reason
             _ => RelaunchInfo::default(),
         }
     }
@@ -388,7 +400,7 @@ mod tests {
 
     #[test]
     fn the_direct_path_stays_the_default_for_debug_builds() {
-        // `pnpm app:dev` must keep running the host as the app's own child, unchanged.
+        // `pnpm app:dev` must run the host as the app's own child.
         if cfg!(debug_assertions) && std::env::var("CC_USE_KEEPER").is_err() && std::env::var("CC_HOST_CMD").is_err() {
             assert!(!start_plan::plan(&Facts::window(Env::current(), true, false)).mode.keeper());
         }
@@ -418,7 +430,7 @@ mod tests {
         (launcher, marker)
     }
 
-    /// #1466: `stop_agents` was `_ => Ok(())` and `build` said "direct" for a window on the serve host, and nothing failed
+    /// #1466: for a window on the serve host, `build` reports that host and "Quit completely" stops it
     #[test]
     fn a_window_on_the_serve_host_reports_it_and_quit_completely_stops_it() {
         let (launcher, marker) = stopping_launcher();

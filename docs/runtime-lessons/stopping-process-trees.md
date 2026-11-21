@@ -201,3 +201,20 @@ Rule: `stdio: ['pipe', 'pipe', 'pipe', 'overlapped']`.
 Guard: `host/apps/external/mediation.test.ts` "accepts a broker call carrying its own run id — a request never declared
 is refused by the desk with a reason" (catches it only on the Windows CI job).
 Platforms: Windows.
+
+**KL21. A tool's probe is bounded and ends its tree.**
+Happened: 18 `opencode.exe --version` processes ran on for up to 19 days on a Windows machine with WSL (#2346); a probe
+with no limit, or one whose limit signalled the pid alone, left the tool running.
+Rule: a program asked a short question (`--version`, `--help`, `auth status`) is run by `execText` (os/exec.ts), a tool
+by its name through `execTool` (tool-run.ts), in scripts and tests as in the host: its limit ends the whole tree, and
+a run its limit, an overflow or an abort ended settles only once that stop has finished, so a caller that exits on the answer leaves nothing behind. A
+`child_process` starter, `runSync` or `execTextSync` asked `--version`, `--version=…` or `--help`, or `-v` or `version`
+as its first argument, in a literal argument list or command line is refused in host code, scripts, tests, tooling and
+e2e, except for `git`, `node`, `gpgv` and `process.execPath`, which answer from their own binary. Arguments held in a
+variable, a command line built by interpolation and a starter imported under another name are beyond the lint rule:
+the review catches those. The other way round, `-v` first can mean something else (`ssh -v host`, verbose): nothing in
+the repository asks that today, and one that does names its program in `PROBE_FREE` or takes `execText`. A batch file that is not an npm-style shim is not run through `cmd.exe`: it fails to start
+(EINVAL).
+Guard: `guard/timed-start` (`probe`); `tooling/surface-drift.test.ts` "ends a tool that never answers, and what it
+started, at the run limit (#2346)"; `packages/agent-host/src/tool-run.test.ts` "leaves nothing running when the caller exits on a timeout".
+Platforms: macOS, Linux, Windows.

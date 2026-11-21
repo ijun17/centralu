@@ -6,19 +6,10 @@ import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { PermissionCard, approvalKeyAction } from '../approval/ApprovalCard.jsx'
 
 /**
- * A capability question over a pinned view (M4 D-4) — a chain started by this app's view is trying to
- * use a capability (an agent, another app, host data) for the first time.
- *
- * A call started from a view has no session. What the person pressed was this view, and the request
- * came out of that press — so the question stands over this view (a question from a chain started by
- * a session is that session's approval card instead). Its shape matches the session card
- * (`PermissionCard`): the same question must wear the same face no matter where it stands. If the app
- * trying to use the capability is another app this app called, that app's name appears on the card.
- *
- * The view's call waits until it is answered (the host keeps it alive with progress notifications).
- * If 5 minutes pass unanswered, the host closes it as declined, and this card disappears from the
- * list. The keys are the same y/n as a session card — received only while this view is being looked
- * at.
+ * A capability question over a pinned view (M4 D-4): a chain this view started uses a capability (an agent, another
+ * app, host data) for the first time. A view's call has no session and came from a press here, so it stands here (a
+ * session's chain gets its approval card). Shaped as `PermissionCard`, naming the called app when it asks. The call
+ * waits, kept alive by progress; after 5 minutes unanswered the host declines it. y/n only while this view is seen.
  */
 export function CapabilityAsk({ question, visible }: { question: AppQuestion; visible: boolean }) {
   const answer = useStore((s) => s.answerAppQuestion)
@@ -52,7 +43,7 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
   )
 }
 
-/** Whether the question's y/n keys belong to something else: a layer over the view, or another screen (a pure function — tests attach here) */
+/** Whether the y/n keys belong to something else: a layer over the view, or another screen (pure, for tests) */
 export function capabilityAskCovered(st: CoveringLayers & { view: string }): boolean {
   return isCovered(st) || st.view !== 'app'
 }

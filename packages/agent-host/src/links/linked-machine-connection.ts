@@ -16,6 +16,8 @@ import {
   type MachineStatus,
   type MachineVersions,
   isAssistantOrCoordinator,
+  type StoreWork,
+  storeWorkWords,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
@@ -25,10 +27,10 @@ import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
 import { credentialCheck, verifierOf } from '../lifecycle/serve-credentials.js'
-import { credentialsOf, dataDirError, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
+import { credentialsOf, dataDirError, HostWorksOnStore, shimNames, StartedNotServing, SwitchUnderWay, thisHubName, type ConnectionLine, type RemoteCredential, type Endpoint, type HostStart, type RemoteAutostart, type RemoteInstall, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isNoAnswer } from './away.js'
-import { readSwitchStatus, switchResult, type SwitchState } from './update.js'
+import { clock, readSwitchStatus, switchResult, type SwitchState } from './update.js'
 
 /**
  * A linked machine's connection (links.ts): its transport and client, the backoff, the version gate,
@@ -89,6 +91,8 @@ const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
  */
 const KEEPS_TRYING = 'reconnecting'
 const WAITS_FOR_PERSON = 'press Connect to try again'
+/** How often a link asks again while the host there works on its store: a copy of a large store takes minutes */
+const STORE_WORK_ASK_MS = 5_000
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
 /** How often a connected link reads the machine's full credentials (`host.credentials`, #1405) */
 const CREDENTIALS_MS = 30_000
@@ -142,7 +146,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected hostStarted: (HostStart & { at: number }) | null = null
   protected endpoint: Endpoint | null = null
   /**
-   * The machine's host closed this hub's link because the credential it was paired with is gone there (#1405 review:
+   * The machine's host closed this hub's link because the credential it was paired with is gone there (#1405:
    * 4001 "credential withdrawn"), while it was still this hub's latest: something paired under its label or withdrew
    * it. Kept for as long as this hub runs, since the link pairs again at once and the poll would not see it
    */
@@ -161,7 +165,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   private credentials: RemoteCredential[] | null = null
   /**
-   * The ids of every credential this hub paired on the machine while it runs (#1405 review), and the ids the machine's
+   * The ids of every credential this hub paired on the machine while it runs (#1405), and the ids the machine's
    * host says were used there under a hub's label (`host.credentials` `usedUnderHubLabels`): one under this hub's label
    * that this hub did not pair is something else's, shown as used and gone though its pairer re-paired after it
    */
@@ -181,7 +185,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The read under way for what the host told (`readForReported`), and whether another was asked for while it ran */
   private reportRead: Promise<void> | null = null
   private reportReadAgain = false
-  /** The machine's host says its serve.json cannot be read (#1405 review), or closed this link for that */
+  /** The machine's host says its serve.json cannot be read (#1405), or closed this link for that */
   private fileUnreadable = false
   /** Reads `credentials` again now, while the link that started it is up (`watchCredentials`) */
   protected readCredentials: (() => Promise<void>) | null = null
@@ -394,18 +398,15 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
-   * An agent's call needs this machine (#1532): with Auto reconnect on and the link down, it does what the person's Connect
-   * does (`connect`, the one action that opens a link now) instead of waiting out the backoff, and waits for it a short
-   * bound (`CALL_WAIT_MS`). The caller reads `reachable` afterwards: connected in time, the call goes through; not, it is
-   * answered as not reachable with `whyDown`, and the backoff goes on from where it was (`keepBackoff`).
-   *
-   * - one attempt at a time: a call that finds one under way (the backoff's, the person's press, another call's) waits on
-   *   it and starts none; so do ten calls at once, and a press at the same moment as a call;
-   * - calls cannot defeat the backoff: at most one attempt started by a call per machine within `CALL_WINDOW_MS`; a call
-   *   inside the window waits for nothing and is answered at once;
-   * - with Auto reconnect off nothing is started (#1341): the call is answered as not connected, and the person is named.
-   *   Neither does it when the person disconnected the machine, the host was stopped there, an operation holds the link
-   *   or the versions differ: a Connect does not help those, or is the person's to press
+   * An agent's call needs this machine (#1532): with Auto reconnect on and the link down, it does what the person's Connect does
+   * (`connect`) instead of waiting out the backoff, and waits a short bound (`CALL_WAIT_MS`). The caller reads `reachable`: if
+   * connected in time the call goes through, else it is answered as not reachable with `whyDown` and the backoff goes on from
+   * where it was (`keepBackoff`).
+   * - one attempt at a time: a call that finds one under way (the backoff's, the person's, another call's) waits on it and starts none, also for ten calls at once and a press at the same moment as a call;
+   * - calls cannot defeat the backoff: at most one attempt started by a call per machine within `CALL_WINDOW_MS`; a call inside
+   *   the window is answered at once;
+   * - nothing is started with Auto reconnect off (#1341), when the person disconnected the machine, the host was stopped there,
+   *   an operation holds the link or the versions differ: a Connect does not help those, or is the person's to press
    */
   async reachForCall(): Promise<void> {
     if (this.reachable) return
@@ -556,7 +557,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
-   * Whether `c` is a credential this hub paired on the machine in its present run (#1405 review): its id is one this hub
+   * Whether `c` is a credential this hub paired on the machine in its present run (#1405): its id is one this hub
    * made and, when the host sent a `check` of this read's nonce, the check is of the secret this hub holds under that
    * id. An entry written into serve.json by hand under a reused id, with another secret, is not. A host that sent no
    * check (one from before it) is compared by id alone
@@ -586,7 +587,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
-   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
+   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405), and that
    * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
    * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
    * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
@@ -684,7 +685,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         if (this.client !== client) return
         // Each entry's check read now, with this read's nonce: which are the secrets this hub holds (`own`), kept with the entry
         const listed = this.ownOf(credentialsOf(r.credentials), nonce)
-        // Unreadable there (#1405 review): the last list stands, and the row says the file cannot be read
+        // Unreadable there (#1405): the last list stands, and the row says the file cannot be read
         const unreadable = typeof r.unreadable === 'string'
         if (listed === null && !unreadable) {
           // Not a file it cannot read (none there, or a host not run by serve): nothing to say about one
@@ -1087,6 +1088,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       this.setStatus('unreachable', `Centralu is no longer running on ${this.name}; ${WAITS_FOR_PERSON}`)
       return
     }
+    // A host there that works on its store is the start: waited for, never a second one beside it (#2334)
+    if (!endpoint.line.hostRunning && endpoint.line.starting) {
+      if (this.held) return
+      return this.waitForStoreWork(endpoint.line.starting)
+    }
     // Only where the link can start one; elsewhere a host that is not running is `not_running`, as before
     const notStarted = endpoint.line.hostRunning || !this.tunnel.startHost ? null : this.startRefusal(endpoint.line)
     if (notStarted) {
@@ -1117,6 +1123,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         if (this.stopped) return
         // `--detach` refused: a switch there began since the read above (another hub's, a boot entry's)
         if (err instanceof SwitchUnderWay) return this.waitForSwitch(err.by)
+        if (err instanceof HostWorksOnStore) return this.waitForStoreWork(err.work)
         // A host that was started and never answered, one that crashes at boot (#1143 re-review): counted as one that
         // answered and then stopped, and the Start it answered is spent. A crash the Node there may explain too
         if (err instanceof StartedNotServing || (err instanceof NodeTooOld && err.kind === 'crashed')) this.countStart((err as Error).message)
@@ -1226,6 +1233,17 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // With Auto reconnect off nothing asks again (#1341): the row says so instead of waiting on a retry
     if (!this.autoReconnect) return this.setStatus('unreachable', `${by} is switching the Centralu version on ${this.name}; ${WAITS_FOR_PERSON}`)
     this.retryLater(this.deps.retryMs?.[0] ?? 2_000)
+  }
+
+  /**
+   * The host there works on its store before it can answer (#2334): the row says `starting` with what it does, and the
+   * link asks again later. No start is counted, and none is made beside it
+   */
+  private waitForStoreWork(work: StoreWork | null): void {
+    const doing = work ? `is ${storeWorkWords(work)} (since ${clock(work.since)})` : 'is working on its data'
+    this.setStatus('starting', `Centralu on ${this.name} ${doing}; it connects when that is done`)
+    if (!this.autoReconnect) return this.setStatus('unreachable', `Centralu on ${this.name} ${doing}; ${WAITS_FOR_PERSON}`)
+    this.retryLater(this.deps.retryMs?.[0] ?? STORE_WORK_ASK_MS)
   }
 
   /**
@@ -1385,7 +1403,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
            */
           const serve = `${shimNames(this.record.remote).centralu} serve`
           /*
-           * Its credential withdrawn there while the link held it (#1405 review): pairing again is the way on, and the row
+           * Its credential withdrawn there while the link held it (#1405): pairing again is the way on, and the row
            * keeps saying it happened. Not when this hub had already paired anew (its own earlier link, closed late)
            */
           const withdrawn = r.code === 4001 && r.reason === 'credential withdrawn'
@@ -1394,7 +1412,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
             this.deps.log?.(`[links] ${this.name}: its host closed the link, this computer's credential there was withdrawn; pairing again`)
           }
           /*
-           * Its serve.json cannot be read there (#1405 review, transport/server.ts `CREDENTIAL_FILE_UNREADABLE`): nothing
+           * Its serve.json cannot be read there (#1405, transport/server.ts `CREDENTIAL_FILE_UNREADABLE`): nothing
            * withdrew this hub's credential, so its own is not marked gone, and the row says the file cannot be read
            */
           const unreadable = r.code === 4001 && r.reason === 'credential file unreadable'
@@ -1434,9 +1452,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       await this.pendingDeletes.apply((method, params) => client.call(method, params), () => client.connected)
       try {
         /*
-         * Each list is written as soon as its own answer comes (#2288 review): events after that answer reach the mirror on
-         * top of it (`followState`). Written only once both had answered, a turn that ended while the projects were still
-         * being read was undone by the older sessions list
+         * Each list is written as soon as its own answer comes (#2288): events after that answer reach the mirror on top of it
+         * (`followState`). Written only once both had answered, a turn that ended while the projects were still being read
+         * would be undone by the older sessions list
          */
         await Promise.all(
           (['sessions', 'projects'] as const).map(async (kind) => {
@@ -1552,11 +1570,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
-   * The mirror's row follows every event that moves the session's state (#2288), by the one state rule the machine's host
-   * and the windows run (`applySessionState`). It used to take `state_change` alone, so a turn's end (`turn_complete`), a
-   * card, a limit or an error left the row as it was: a session that had finished its turn still read as working to every
-   * reader of the mirror. An `activity` (a compaction, a review, a retry: rare) is followed too, as the rule writes it. An
-   * event or a row this build cannot read changes nothing; the machine's next list replaces the rows whole (`observe`).
+   * The mirror's row follows every event that moves the session's state (#2288), by the one state rule the machine's host and
+   * the windows run (`applySessionState`). Taking `state_change` alone would leave the row as it was at a turn's end
+   * (`turn_complete`), a card, a limit or an error: a finished session would read as working to every reader of the mirror. An
+   * `activity` (a compaction, a review, a retry: rare) is followed too, as the rule writes it. An event or a row this build
+   * cannot read changes nothing; the machine's next list replaces the rows whole (`observe`).
    */
   private followState(sid: string, raw: Record<string, unknown>): void {
     const e = NormalizedEvent.safeParse(raw)

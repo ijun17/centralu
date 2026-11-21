@@ -5,25 +5,13 @@ import { LEAVE_MS, usePresence } from './presence.js'
 const FOLD_IN_MS = 200
 
 /**
- * A list that opens downward and closes back up (#1605, owner 2026-10-26): a project's rows, the Assistant's children.
- * One way for every fold of the sidebar, so none keeps its own timer or its own keyframes.
+ * A list that opens downward and closes back up, the one fold of the sidebar (docs/design-system.md §9): a transition of
+ * the grid track (`.cc-fold`), so a fold reversed half way goes on from where it is; the rows are uncovered, not moved.
  *
- * It is a transition of the grid track (`0fr` to `1fr`, index.css `.cc-fold`), not a keyframe animation: a fold that is
- * reversed half way (the pointer comes back while it closes) goes from where it is instead of starting over, and what is
- * under it moves with it rather than jumping. The rows inside do not travel: they are uncovered, so a row under the pointer
- * stays where it is and can be pressed while the list moves.
- *
- * The rows stay in the DOM until the exit ends (`usePresence`), so a close does not blink. With reduced motion the track
- * does not move: the rows fade in and fade out in place.
- *
- * `instant` is for a fold that is being set up, not changed (the sidebar before the saved folds are read): it neither
- * slides nor waits (it is gone in the render that closes it, with no `closing` state to be seen), so the window does not open with every folded project closing.
- *
- * A list on its way out takes no presses and no focus (`inert`, as a layer's exit does): the rows are still there only so
- * that the close does not blink, and a menu or a drag begun on one would be taken away with it.
- *
- * The content is clipped only while it moves: a focus ring or a drop line at the edge of a row is not cut off at rest.
- * `data-fold` says where it is (`opening`, `open`, `closing`), for tests that wait on the end state instead of on time.
+ * `instant` is for a fold being set up, not changed (before the saved folds are read): no slide and no `closing` state,
+ * so the window does not open with every folded project closing. A closing list is `inert`: a menu or drag begun on a
+ * row would be taken away with it. The content is clipped only while it moves, so a focus ring at the edge shows at
+ * rest. `data-fold` (`opening`, `open`, `closing`) is for tests that wait on the end state.
  */
 export function Fold({ open, children, className, testId, instant }: { open: boolean; children: ReactNode; className?: string; testId?: string; instant?: boolean }) {
   const { shown } = usePresence(open, instant ? 0 : LEAVE_MS)
@@ -42,7 +30,7 @@ export function Fold({ open, children, className, testId, instant }: { open: boo
     void ref.current?.offsetHeight
     setExpanded(true)
   }, [open, expanded])
-  // Also a layout effect, for the same reason as the exit's: `data-fold` never says `opening` without the end of it scheduled
+  // A layout effect, as usePresence's: `data-fold` never says `opening` without its end scheduled
   useLayoutEffect(() => {
     if (!open || !expanded || settled) return
     const t = setTimeout(() => setSettled(true), FOLD_IN_MS)

@@ -1,6 +1,7 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type EventSink, type InputObserver } from '../contract.js'
-import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
+import { InputReceipts, type InputReceipt } from '../input-receipts.js'
+import { isUuid } from '../../uuid.js'
 import { stopNotConfirmed, stopNotEnded, undeliveredError } from '../session-kit.js'
 import { STOP_CONFIRM_MS } from './ledger.js'
 import type { MidTurnInput, MidTurnWire, ToolTurnEnding } from './seam.js'
@@ -110,6 +111,11 @@ export class MidTurnLedger {
     const ids = this.receipts.ids
     this.receipts.failAll(reason)
     return ids
+  }
+
+  /** Every tracked input completes: the tool took each when it was written and names none back (an older Claude Code, `ClaudeSession.onInit`) */
+  completeTracked(): void {
+    this.receipts.complete(this.receipts.ids)
   }
 
   /** The conversation is open and nothing is in it: no turn runs, and no input waits to be written or answered */

@@ -3,31 +3,14 @@ import { sessionPanelId, withPanel } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
 import { forgetSessions, liveEventWatchers, replayPendingEvents, sessionFromInfo } from '../sessionList.js'
 
-/**
- * A session's own life, apart from its conversation: its history caught up from outside, its
- * settings changed by another hand, and the session created, handed to a new owner or deleted. True
- * when the event was one of these.
- */
-
-/** `history_synced` and `settings_changed`, which come before the notices (`dispatchEvent`) */
 export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): boolean {
-  /*
-   * The host caught up on a conversation continued from outside (through the tool's own
-   * terminal). Its content already went into the store, so the screen is re-read whole — replaying
-   * events row by row here could mix in with the part we already knew.
-   */
+  // A conversation continued in the tool's own terminal is in the store already: re-read whole, not mixed in by row
   if (e.type === 'history_synced') {
     void get().loadHistory(sessionId)
     return true
   }
 
-  /*
-   * The Assistant changed this session's settings (#30).
-   *
-   * The toast is the point — if a setting changed by a hand other than the person's quietly seeped
-   * into the screen, the next person to open the menu would be baffled by a value they never chose.
-   * The value is a snapshot, so it is overwritten as is.
-   */
+  // A setting another hand changed gets a toast, or the menu shows a value nobody chose (#30)
   if (e.type === 'settings_changed') {
     const cur0 = get().sessions[sessionId]
     if (!cur0) return true
@@ -49,22 +32,14 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
           effort: e.effort,
           verbosity: e.verbosity,
           serviceTier: e.serviceTier ?? null,
-          // Absent on a tool's own switch and on frames from before #659: the value held stays
+          // Absent on a tool's own switch and from a host older than #659: the value held stays
           permissionPreset: e.permissionPreset ?? s.sessions[sessionId]!.permissionPreset,
         },
       },
-      /*
-       * A switch the agent tool made by itself (#304) updates the model shown without a toast: the tool's notice in
-       * the conversation already says what changed and why, and a toast would interrupt for something that needs
-       * nothing from the person. The same for a change a client made through `agents.updateSettings` (#659): the
-       * caller's own toast says what it did, and the values here are the ones it chose.
-       */
+      // No toast for the tool's own switch (its notice says it, #304) or a client's change (its own toast says it, #659)
       ...(what && e.by !== 'tool' && !e.person ? { toast: `Assistant changed ${cur0.name}: ${what}` } : {}),
     }))
-    /*
-     * Fields a list that is still out must not write back over (#642): the merge keeps a value that differs from the
-     * one it asked with, but a change that lands back on that value would otherwise read as no change at all.
-     */
+    // A list still out must not write back over these, even a change back to the value it asked with (#642)
     for (const touched of liveEventWatchers) {
       const fields = touched.get(sessionId)
       if (fields) for (const k of ['model', 'effort', 'verbosity', 'serviceTier', 'permissionPreset'] as const) fields.add(k)
@@ -74,24 +49,16 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
   return false
 }
 
-/** `session_created`, `session_owner` and `session_deleted` */
 export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): boolean {
   /*
-   * The only notice for a session the host created on its own (#69) — the Assistant's
-   * `create_session`, or a manager set up by worktree adoption. Without this, such a session did
-   * not appear until after a reconnect, and any event that arrived before that stayed stuck in the
-   * holding pen forever (its release condition was "once registered," and nothing was there to
-   * register it). A session created through an RPC is already registered by its response, so this
-   * is silently discarded for that case.
+   * The only notice of a session the host created itself (#69); without it, its penned events would wait until a
+   * reconnect. One created through an RPC is already registered by its response.
    */
   if (e.type === 'session_created') {
     // Read as the session list reads it (#384): a value a newer host invented costs that value, not the session
     const s = parseTolerant(SessionInfo, e.session) as SessionInfo | undefined
     const ok = typeof s === 'object' && s !== null && typeof s.id === 'string'
-    /*
-     * Said again for a session this window holds: the host moved it into a project (#1141, a user-folder app's builder
-     * and agents when its folder became a project). Only the project is taken; the rest of the row is this window's own
-     */
+    // Said again when the host moved a held session into a project (#1141): only the project is taken
     const held = ok ? get().sessions[s.id] : undefined
     if (ok && held && held.projectId !== s.projectId) {
       const projectId = s.projectId
@@ -103,16 +70,12 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
     }
     if (ok && !held) {
       set((st) => ({ sessions: { ...st.sessions, [s.id]: sessionFromInfo(s) } }))
-      // If there are events held from before registration, now is the moment to replay them
       replayPendingEvents(get)
     }
     return true
   }
 
-  /*
-   * A handoff moved a child to the session that took over (#693, #1475): the sidebar hangs it there now. A session
-   * not known here comes with its owner in the list, so the event is not held for it.
-   */
+  // A handoff moved a child (#693, #1475); an unknown session comes with its owner in the list, so this is not penned
   if (e.type === 'session_owner') {
     set((s) => {
       const cur = s.sessions[sessionId]
@@ -129,7 +92,7 @@ export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: Sto
     set((s) => {
       const sessions = { ...s.sessions }
       delete sessions[sessionId]
-      // List omission on reconnect is ambiguous; only this explicit deletion signal removes membership.
+      // docs/state-management.md "Project panel membership": only this event removes it
       const projectPanels = Object.fromEntries(Object.entries(s.projectPanels).map(([pid, saved]) => [
         pid, saved.panels?.includes(panelId) ? withPanel([], saved, panelId, false) : saved,
       ]))

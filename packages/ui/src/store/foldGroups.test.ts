@@ -39,14 +39,13 @@ describe('foldGroupsHiding (#666)', () => {
     expect(foldGroupsHiding(strayKid, all(loose, strayKid), keyOf, listed)).toEqual([appGroupKey('p/slider')])
   })
 
-  // #1416: a child started on another machine stands in that machine's project, not under its parent, so no group hides it
   it('names no group for a child started on another machine: it stands in its own machine’s project', () => {
     const parent = s('parent')
     const kid = s('m1.kid', { projectId: 'm1.q', machine: 'm1', askedBy: 'parent' })
     expect(foldGroupsHiding(kid, all(parent, kid), keyOf, listed)).toEqual([])
   })
 
-  // The tree draws a fork under its asker when the session it was copied from is gone (`treeParentOf`); the reveal followed forkedFrom
+  // The tree draws a fork under its asker when its source is gone (`treeParentOf`); the reveal follows the tree, not forkedFrom
   it('names the asker’s group for a fork whose source is gone', () => {
     const asker = s('asker')
     const fork = s('fork', { askedBy: 'asker', parentSessionId: 'asker', forkedFrom: 'deleted' })

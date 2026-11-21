@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
+import { execText } from './os/exec.js'
 import { alive as isAlive } from './process.test-helpers.js'
 import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 
@@ -87,12 +88,12 @@ describe('CLI search path augmentation', () => {
     }
   })
 
-  it('whichTool returns the actual executable path (the same job as `which`)', () => {
+  it('whichTool returns the actual executable path (the same job as `which`)', async () => {
     ensureToolPath()
     const found = whichTool('node')
     expect(found).toBeTruthy()
     // It does not matter which directory — it only has to actually exist
-    expect(execFileSync(found!, ['--version'], { encoding: 'utf8' })).toMatch(/^v\d+/)
+    expect((await execText(found!, ['--version'], { timeoutMs: 30_000 })).stdout).toMatch(/^v\d+/)
   })
 
   it('a nonexistent tool is null (so the caller can decide the guidance text)', () => {
@@ -260,5 +261,21 @@ describe('finding a tool on Windows', () => {
     expect(dirs).toContain(npm)
     expect(dirs).toContain('C:\\Users\\me\\.local\\bin')
     expect(dirs.some((d) => d.startsWith('/'))).toBe(false)
+  })
+})
+
+describe('finding a tool under WSL (#2366)', () => {
+  const PATH = '/usr/local/bin:/mnt/c/Users/me/AppData/Roaming/npm'
+  const there = (path: string) => path === '/mnt/c/Users/me/AppData/Roaming/npm/claude'
+  const machine = (files: Record<string, string>) => (path: string) => files[path] ?? null
+
+  it("reads the kernel's release and wsl.conf, and passes over the Windows install there only under WSL", () => {
+    const wsl = machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n' })
+    expect(whichTool('claude', { PATH }, 'linux', there, wsl)).toBeNull()
+    const elsewhere = machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n', '/etc/wsl.conf': '[automount]\nroot = /windir/\n' })
+    expect(whichTool('claude', { PATH }, 'linux', there, elsewhere)).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
+    // A Linux that is not WSL, and macOS, search every folder
+    expect(whichTool('claude', { PATH }, 'linux', there, machine({ '/proc/sys/kernel/osrelease': '6.8.0-45-generic\n' }))).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
+    expect(whichTool('claude', { PATH }, 'darwin', there, machine({ '/proc/sys/kernel/osrelease': '5.15.167.4-microsoft-standard-WSL2\n' }))).toBe('/mnt/c/Users/me/AppData/Roaming/npm/claude')
   })
 })

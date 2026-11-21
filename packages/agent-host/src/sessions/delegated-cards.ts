@@ -44,9 +44,9 @@ export function answersFrom(questions: readonly Question[], text: string): Quest
 }
 
 /**
- * The handle a delegated turn's owner reads a card by and answers it with: the request id, and a digest of the turn
- * and of what the card asks. An adapter's request ids start again in a new process, so the same id can name a new card
- * in the same session; its handle differs, and an answer meant for the earlier card finds nothing (#676 review).
+ * The handle a delegated turn's owner reads a card by and answers it with: the request id, and a digest of the turn and of what
+ * the card asks. An adapter's request ids start again in a new process, so the same id can name a new card in the same session;
+ * its handle differs, and an answer meant for the earlier card finds nothing (#676).
  */
 export function cardHandle(turnId: string, requestId: string, content: unknown): string {
   const digest = createHash('sha256').update(`${turnId}\0${requestId}\0${JSON.stringify(content)}`).digest('hex').slice(0, 8)

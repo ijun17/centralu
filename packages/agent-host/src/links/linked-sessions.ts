@@ -187,7 +187,7 @@ export function linkedSessions(
     return out
   }
 
-  /** Each session's `interruption` as the machine's headers last held it, by its own id (#2146 review) */
+  /** Each session's `interruption` as the machine's headers last held it, by its own id (#2146) */
   const interruptions = (m: RoutedMachine): Map<string, Interruption> => {
     const out = new Map<string, Interruption>()
     for (const s of m.lastKnown('sessions') ?? []) {

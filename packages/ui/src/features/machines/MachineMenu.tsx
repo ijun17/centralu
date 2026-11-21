@@ -6,9 +6,8 @@ import { MachineStatusMark } from './MachineStatusMark.jsx'
 import { connectAction, isTrying } from '../settings/MachinesSection.jsx'
 
 /**
- * What the sidebar's machine badge opens (owner, 2026-10-20): the link's state where the badge is, and Connect beside
- * it, so a project whose machine dropped is brought back from its own line rather than from Settings. The state, the
- * link's last error and when it was last connected are read here; the switches stay in Settings → Machines, one row away.
+ * What the sidebar's machine badge opens: the link's state, last error and last connection, with Connect, so a project
+ * whose machine dropped is brought back from its own line. The switches stay in Settings → Machines.
  */
 export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; anchorEl: HTMLElement | null; onClose: () => void }) {
   const info = useStore((s) => s.machines[machine])
@@ -17,7 +16,7 @@ export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; a
   const connected = status === 'connected'
   // An attempt under way: Connect would only start the same one again
   const action = connectAction(status)
-  // An install, update or rollback is under way there: Settings → Machines hides Connect and Disconnect then, and so does this menu
+  // An install, update or rollback under way hides Connect and Disconnect, as in Settings → Machines
   const busy = !!info?.operation
   const trying = isTrying(status)
   const pick = (fn: () => void) => () => {

@@ -2,16 +2,9 @@ import type { GridPanel } from '@cc/protocol/client'
 import { appGridPanel, gridPanelKey, sessionGridPanel } from '@cc/core'
 import { APP_MIME, SESSION_MIME, moveTo } from '../sidebar/reorder.js'
 
-/**
- * The grid's side of a drag (#288) — kept apart from the DOM events, like the project screen's
- * drop.ts, so "is this taken, and where does it land" can be checked without a browser.
- *
- * The grid takes a session or an app, dragged from the sidebar or from one of its own panels. A
- * panel carries what a sidebar row carries — a session panel the session (`SESSION_MIME`), an app
- * panel the app's key (`APP_MIME`) — so one rule reads both, and a panel is told from a row by
- * being the one this grid is dragging. Any project's app is taken, a user-folder app too: the grid
- * is a hand-picked selection across projects, unlike the project screen.
- */
+// The grid's side of a drag (#288), apart from the DOM events so it is testable without a browser. A panel carries what
+// its sidebar row carries (`SESSION_MIME`, `APP_MIME`), so one rule reads both; a panel is told from a row by being the
+// one this grid drags. Any project's app is taken, a user-folder one too.
 
 /** Does the grid answer this drag? From its types alone — during dragover that is all a page may read */
 export function gridTakes(types: readonly string[]): boolean {
@@ -19,10 +12,8 @@ export function gridTakes(types: readonly string[]): boolean {
 }
 
 /**
- * The panel a drop stands for, or null when it is nothing the grid can show: a session that is not
- * live, or an app the list does not have (`apps` is keyed by `appKeyOf`). Decided from the
- * data, because a drop can arrive without a dragover that said yes (a script, a race) — and the
- * grid never adds an app by itself, nor one it cannot draw.
+ * The panel a drop stands for, or null for a session that is not live or an app the list lacks (`apps` is keyed by
+ * `appKeyOf`). Read from the data: a drop can come without a dragover that said yes (a script, a race).
  */
 export function droppedGridPanel(
   read: (type: string) => string,
@@ -38,9 +29,8 @@ export function droppedGridPanel(
 }
 
 /**
- * The list after `panel` was dropped before or after the panel keyed `target`, or on the padding
- * when `target` is null. One already on the grid moves there, and dropped on the padding stays
- * where it is; a new one is placed there, or at the end.
+ * The list after `panel` was dropped before or after the panel keyed `target`, or on the padding (`target` null): one
+ * already there moves, or stays on the padding; a new one goes there, or at the end.
  */
 export function droppedGridList(
   panels: readonly GridPanel[],

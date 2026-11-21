@@ -139,7 +139,8 @@ export function normalizeMessage(
  *                                  (`latestCommands`) and `listCommands` asks the query each time
  *       `command_lifecycle`       queued, started, completed or cancelled for each message sent with a uuid: delivery
  *                                  is read from the turn's own messages (`user_message_uuids`) and the interrupt's
- *                                  receipt (`cancelled`), and the SDK's types do not declare it at all
+ *                                  receipt (`cancelled`), and the SDK's types do not declare it at all. Read only as the
+ *                                  CLI's receipt for an input given at rest (`TurnStartWait`)
  *       `system/permission_denied` a call the CLI denied without asking: the tool's result follows at once with an
  *                                  error carrying the same words (`message`), so the card already ends failed with them. Measured only for
  *                                  `decision_reason_type: "mode"` (don't-ask mode); a classifier's or a subagent's denial
@@ -169,35 +170,6 @@ export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Normalizes while following one parent stream — memory for things that cannot be decided by
- * looking at a single message alone.
- *
- * Both of these used to live in the adapter loop, or did not exist at all:
- *
- *  1. **Whether the body already went out as deltas** (`textStreamed`, see `normalizeMessage`'s
- *     opts). This flag is cleared every time an assistant message arrives, but a subagent's own
- *     assistant message was also being counted as "assistant" (#98). If a subagent's message
- *     landed between the parent's last delta and the parent's own body, the flag was cleared
- *     early, before the parent's body arrived, and **the parent's whole text was appended a
- *     second time.** Now only the parent's own messages are counted.
- *
- *  2. **A background agent that is still running** (#98). The `tool_result` from the moment it is
- *     launched does not close the card (`backgroundLaunch`). News that it finished arrives as
- *     `system/task_notification` (measured: `tool_use_id`, `status`, `summary`,
- *     `usage{tool_uses, duration_ms}`), and that is what closes it. Only a card left open gets
- *     closed — the notification also arrives (measured) for a background Bash the parent launched
- *     directly, and for a Bash inside a subagent (`owned_by_subagent`), but those cards are already
- *     closed by their own result.
- *
- *     **Closing is deferred while the parent is mid-write.** Running three agents side by side
- *     routinely means the parent is writing an update about a different agent at the exact moment
- *     one of them finishes (a dogfooding session). Because `tool_result` marks a chunk boundary on
- *     the storage side (`manager persistMessage`), emitting it right there splits the parent's
- *     paragraph into two rows — the UI renders it joined back together, but the handoff record and
- *     the preview both read by row. To keep an event the parent did not emit from cutting the
- *     parent's own text, this is sent after the assistant message that closes that chunk instead.
- */
-/**
  * How long what a request wrote stays cached, from the API's split of its writes (`cache_creation`:
  * `ephemeral_1h_input_tokens`, `ephemeral_5m_input_tokens`). Claude Code decides the lifetime per request (CLI 2.1.289:
  * one hour for a subscriber's main conversation and SDK calls when not on overage, five minutes for subagents, API
@@ -224,6 +196,21 @@ function readingOf(events: readonly NormalizedEvent[]): TokenUsage | undefined {
   return undefined
 }
 
+/**
+ * Normalizes while following one parent stream: what cannot be decided by looking at a single message alone.
+ *
+ * - Whether the body already went out as deltas (`textStreamed`) counts the parent's own messages only (#98): a
+ *   subagent's assistant message between the parent's last delta and its body cleared it early, and the parent's whole
+ *   text was appended a second time.
+ * - A background agent's card (#98) stays open past the `tool_result` of its launch (`backgroundLaunch`) and is closed by
+ *   `system/task_notification` (measured: `tool_use_id`, `status`, `summary`, `usage{tool_uses, duration_ms}`). That
+ *   notification also comes (measured) for a background Bash the parent launched and for a subagent's Bash
+ *   (`owned_by_subagent`), whose cards their own result closed, so only a card left open is closed.
+ * - That closing waits while the parent is mid-write, which is routine with agents running side by side: a
+ *   `tool_result` is a row boundary in the store (`SessionRecord.persistMessage`), so it would split the parent's
+ *   paragraph into two rows, which the handoff record and the preview read apart. It goes out after the assistant
+ *   message that closes the chunk.
+ */
 export class ClaudeStreamNormalizer {
   private textStreamed = false
   /** Readable thinking of the current assistant message already went out as deltas (see normalizeMessage's opts) */

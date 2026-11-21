@@ -92,7 +92,7 @@ async function runScript(args, cwd, { signal, limitMs, beat }) {
 /**
  * Runs the repository's pre-PR script in the checkout at `dir` on `head` (with `lowers`, the branches
  * of the pull requests under it, oldest first). Answers { ran: false, why, refsLeft } when it cannot
- * run here or was stopped, or { ran: true, ok, findings, warnings, exempted, notes, head, heads, tier,
+ * run here or was stopped, or { ran: true, ok, findings, warnings, exempted, notes, passed, head, heads, tier,
  * refsLeft } from the script. `exempt` maps a check to the reason it is left out. `beat` is called
  * while it runs; `signal` cancels it.
  */
@@ -138,6 +138,8 @@ export async function runPrePr({ dir, repo, head, base, main, lowers = [], exemp
       warnings: a.warnings ?? [],
       exempted: a.exempted ?? [],
       notes: a.notes ?? [],
+      // What the checks that ran held, in the script's words (the Verified line)
+      passed: Array.isArray(a.passed) ? a.passed.filter((p) => typeof p === 'string') : [],
       head: a.head ?? null,
       heads: a.heads ?? [],
       // The risk tier (#1259): { name, line, because }; deep when the script answered none

@@ -4,12 +4,9 @@ import { gridAppViewKey } from '../../store/store.js'
 import { placeSlots, registerSlot, registerSlottedView } from './slots.js'
 
 /**
- * Where a view laid over a panel lands — the project screen (#203) and the grid (#288) — and that a drag leaves it
- * there, in sight: a drag over a view is answered by the panel's cover (dragShield.tsx, #296), not by hiding the view.
- *
- * Node has no DOM, and slots.ts needs only a little of one: a rect for the slot and the view's containing block, a
- * style to write into, a resize observer that is never called, and the root's text zoom. Where the view lands on a
- * real page is e2e's (fixtures/project-screen.ts, fixtures/grid-apps.ts).
+ * Where a view laid over a panel lands (#203, #288), and that a drag leaves it there, in sight (#296). A minimal fake
+ * DOM: rects, a style, an idle ResizeObserver, the root's text zoom; a real page is e2e's (fixtures/project-screen.ts,
+ * fixtures/grid-apps.ts).
  */
 beforeEach(() => {
   vi.stubGlobal(

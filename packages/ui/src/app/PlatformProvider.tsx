@@ -14,9 +14,8 @@ export function usePlatform(): Platform {
   return p
 }
 
-// Generic over the key because not every capability is a yes/no: `windowControlsInset`
-// is a width. Pinning the return type to boolean would have forced ui to cast, and a
-// cast here is how a platform detail starts leaking back into ui.
+// Generic over the key: not every capability is a yes/no (`windowControlsInset` is a width), and a cast in ui is
+// how a platform detail leaks back in
 export function useCapability<K extends keyof PlatformCapabilities>(k: K): PlatformCapabilities[K] {
   return usePlatform().capabilities[k]
 }

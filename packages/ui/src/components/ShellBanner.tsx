@@ -1,19 +1,10 @@
 import type { ReactNode } from 'react'
 
 /**
- * The strip a shell puts in App's `banner` slot — one line, between the top bar and the lanes.
- *
- * It is a block in the flow, never `fixed` (#326). Laid over the window at top 0, the desktop's
- * "other build" bar put its text under the macOS traffic lights and its button over the header's
- * controls. In the flow, the lanes below give up its height instead and nothing is covered.
- *
- * Not positioned either: the top bar's dropdowns (the waiting list) are positioned, so they paint
- * over a non-positioned strip that comes later in the document, as a dropdown should.
- *
- * One line of a fixed height, whatever it holds: the content is expected to truncate
- * (`min-w-0 truncate`) rather than wrap, and the height does not follow the content. With
- * padding alone the bar was 35.5px with its bordered button and 29.5px without (the switch
- * progress), so every lane below jumped 6px when a switch started (measured in WebKit).
+ * The one-line strip in App's `banner` slot, between the top bar and the lanes. In the flow, never `fixed` (#326): laid
+ * over the window it would sit under the macOS traffic lights and over the header's controls. Not positioned, so the
+ * top bar's dropdowns paint over it. A fixed height, content truncating: with padding alone it was 35.5px with its
+ * bordered button and 29.5px without, and every lane would jump 6px when a switch starts (measured in WebKit).
  */
 export function ShellBanner({
   children,

@@ -16,7 +16,6 @@
  * packages an adapter asks for are installed at @latest into a temp folder, never the workspace (the pins are
  * `pnpm verify`'s); the CLIs are the ones on PATH, which the workflow installs at @latest.
  */
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,12 +23,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // @ts-expect-error — plain .mjs, as the other scripts import theirs
 import { isMain } from './is-main.mjs'
-import { promisify } from 'node:util'
 import type { AgentAdapter, SurfaceEnv } from '../packages/agent-host/src/adapters/contract.js'
 import { createAdapters } from '../packages/agent-host/src/adapters/registry.js'
+import { execTool } from '../packages/agent-host/src/tool-run.js'
 import { baselineSource, compareSurface, findingsKey, surfaceReport, type SurfaceFinding } from '../packages/agent-host/src/adapters/surface-drift.js'
 
-const exec = promisify(execFile)
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
 
 /** Runs `gh` with arguments and, when given, stdin; its stdout */
@@ -110,20 +108,22 @@ export async function runSurfaceDrift(deps: DriftDeps): Promise<number> {
   return failed > 0 ? 1 : 0
 }
 
-/**
- * npm and the CLIs npm installs are .cmd shims on Windows, which execFile starts only through a shell; their arguments
- * here hold no spaces. gh is an .exe, and its titles and bodies do, so it runs without one.
- */
-const run = async (command: string, args: readonly string[], opts: { input?: string; shell?: boolean } = {}): Promise<string> => {
-  const shell = opts.shell ?? process.platform === 'win32'
-  const child = exec(command, [...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell })
-  if (opts.input !== undefined) child.child.stdin?.end(opts.input)
-  return (await child).stdout
+/** How long one program the run starts (an npm install, a CLI's `--version` or `--help`) may take before it and what it started are ended */
+const RUN_LIMIT_MS = 300_000
+
+/** A program by name (`execTool`): bounded by `timeoutMs`, and ended with everything it started when it runs past it */
+const run = async (command: string, args: readonly string[], opts: { input?: string; timeoutMs?: number } = {}): Promise<string> => {
+  const { stdout } = await execTool(command, args, {
+    timeoutMs: opts.timeoutMs ?? RUN_LIMIT_MS,
+    maxBuffer: 64 * 1024 * 1024,
+    ...(opts.input !== undefined ? { input: opts.input } : {}),
+  })
+  return stdout
 }
-const gh: Gh = (args, input) => run('gh', args, { input, shell: false })
+const gh: Gh = (args, input) => run('gh', args, input !== undefined ? { input } : {})
 
 /** The real environment: npm packages at @latest in one temp folder, the CLIs on PATH */
-export function latestEnv(): { env: SurfaceEnv; dispose(): void } {
+export function latestEnv({ timeoutMs = RUN_LIMIT_MS }: { timeoutMs?: number } = {}): { env: SurfaceEnv; dispose(): void } {
   const temps: string[] = []
   const tempDir = () => {
     const d = mkdtempSync(join(tmpdir(), 'surface-drift-'))
@@ -136,12 +136,12 @@ export function latestEnv(): { env: SurfaceEnv; dispose(): void } {
       let dir = installed.get(name)
       if (!dir) {
         const prefix = tempDir()
-        dir = run('npm', ['install', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', `${name}@latest`]).then(() => join(prefix, 'node_modules', name))
+        dir = run('npm', ['install', '--prefix', prefix, '--no-audit', '--no-fund', '--loglevel=error', `${name}@latest`], { timeoutMs }).then(() => join(prefix, 'node_modules', name))
         installed.set(name, dir)
       }
       return dir
     },
-    run: (command, args) => run(command, args),
+    run: (command, args) => run(command, args, { timeoutMs }),
     tempDir,
   }
   return { env, dispose: () => temps.forEach((d) => rmSync(d, { recursive: true, force: true })) }

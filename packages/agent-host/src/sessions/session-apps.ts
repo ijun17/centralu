@@ -13,17 +13,13 @@ import { durationText, raceTimeout, withTimeout } from '../timing.js'
 import { DETACHED_KEEP_MS, RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from './app-call-bounds.js'
 
 /**
- * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
- * a session's agent calls an app through, are both decided once, here.
- *
- * The adapter does not know this decision. It attaches the list it is given in its own way
- * (Claude through an in-process proxy server, Codex through a stdio bridge), and every call goes
- * through `call`. `call` invokes the runtime's single path (`ExternalApps.call`) with the caller
- * `{ kind: 'session' }` — so a call made by an agent passes through the same visibility check,
- * gets the same run id, and is recorded the same way as one made by the UI (A-4, A-6).
- *
- * The one door the core knows about external apps through is `apps/external/runtime.ts`
- * (`host-core-blind-to-apps`). This file uses only that door too.
+ * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path a session's agent calls an app
+ * through, are both decided once, here. The adapter does not know this decision. It attaches the list it is given in its own
+ * way (Claude through an in-process proxy server, Codex through a stdio bridge), and every call goes through `call`. `call`
+ * invokes the runtime's single path (`ExternalApps.call`) with the caller `{ kind: 'session' }` so a call made by an agent
+ * passes the same visibility check, gets the same run id and is recorded as one made by the UI is (A-4, A-6). The one door the
+ * core knows about external apps through is `apps/external/runtime.ts` (`host-core-blind-to-apps`). This file uses only that
+ * door too.
  */
 
 /**
@@ -324,21 +320,13 @@ export class SessionAppsHub {
   }
 
   /**
-   * The apps this session receives (decision 4).
-   *
-   *   assistant                the user-folder apps — it belongs to no project, so it gets no project's inner apps,
-   *                               and it attaches a root app when it needs one (#1205, `givesApp`)
-   *   a project's session         that project's apps — only if the project is trusted. A worktree session
-   *                               carries the same project id, so it receives the root's apps too
-   *                               (A-2: one instance per project)
-   *   other (no project)          none
-   *   a building session (C-3)    the above, plus **its own app** — the building session of a user-folder
-   *                               app has no project, so the rule above would give it nothing. Calling
-   *                               the tools of the app it is building is exactly that session's job
-   *
-   * Trust is read from the runtime's state (`untrusted`) — there is one source of truth (the
-   * store), and the runtime reads it fresh on every call. Keeping a copy here would let that copy
-   * keep answering "yes" even after trust is revoked.
+   * The apps this session receives (decision 4). The assistant: the user-folder apps — it belongs to no project, so it gets no
+   * project's inner apps, and it attaches a root app when it needs one (#1205, `givesApp`); a project's session: that project's
+   * apps, only if the project is trusted. A worktree session carries the same project id, so it receives the root's apps too
+   * (A-2: one instance per project); no project: none; a building session (C-3): the above, plus **its own app** — the building
+   * session of a user-folder app has no project, so the rule above would give it nothing. Calling the tools of the app it is
+   * building is exactly that session's job. Trust is read from the runtime's state (`untrusted`), the one source of truth (the
+   * store), fresh on every call: a copy here would keep answering "yes" after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
     /*

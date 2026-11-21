@@ -75,7 +75,8 @@ export class DelegationFlow {
    */
   delegate(w: DelegatedWork): { d: Delegation; delivered: Promise<string | null> } {
     const d = this.startDelegation(w.key, w.callerId, w.sessionId, w.target, w.agent)
-    const withdraw = this.host.children.delegated(w.callerId, w.sessionId, w.via, w.task)
+    const { taskId, withdraw } = this.host.children.delegated(w.callerId, w.sessionId, w.via, w.task)
+    if (taskId) d.taskId = taskId
     const caller = this.host.meta.get(w.callerId)
     const delivered = (async () => {
       try {

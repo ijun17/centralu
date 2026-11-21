@@ -11,29 +11,15 @@ import { useLoad } from '../../app/useLoad.js'
 import { useGitRefreshKey } from './GitChanges.jsx'
 
 /**
- * The History tab — the place a person comes to **read** the log (#21).
- *
- * It is also the successor to the History strip that used to live below the git tab. That strip had
- * a fixed height, so with splitting (#20) it covered the neighboring group's tab strip, and since
- * this tab already answers the same question ("how did we get here") with a full vertical column,
- * the strip was removed.
- *
- * **The lines (the lane graph) are now drawn here.** Back at #21, the reason this tab chose dates
- * and dropped the lines was "the graph lives over there (the strip)" — now that "over there" is
- * gone, that premise is gone too. A full-width tab has room for both: the lines state branching and
- * merging, the date states "how long ago." Row height is therefore fixed — the lines only look
- * continuous when they line up exactly at each row's boundary.
- *
- * What opens on click is not reinvented either: `openCommit` already expands the History tab of the
- * wide overlay to that commit (`DiffView` draws the single diff that `git show` returns).
+ * The History tab, where the log is read (#21). A full-width tab has room for the lane graph beside the date; a click
+ * opens the commit in the wide overlay (`openCommit`).
  */
 export function CommitHistory({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const openCommit = useStore((s) => s.openCommit)
-  // The commit the wide view shows is the selected row: the same pair as a changed file and a file tree row
+  // The commit the wide view shows is the selected row, as with a changed file or a tree row
   const openSha = useStore((s) => (s.overlay?.kind === 'git' && s.overlay.sub === 'history' ? (s.overlay.sha ?? null) : null))
   const touched = useGitRefreshKey(projectId)
-  // A response arriving late while switching projects must not draw another project's history (`useLoad`)
   const log = useLoad(() => platform.git.log(projectId, COMMIT_LIMIT), [platform, projectId], [touched])
   const commits = log.data
 
@@ -43,10 +29,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
     return { rows, lanes: laneCount(rows) }
   }, [commits])
 
-  /*
-   * A failed read used to be drawn as "No commits yet" (#850 item 8). It stands in place of the history when there is
-   * none, and above the last one when a refresh failed
-   */
+  // A failed read is never "No commits yet" (#850 item 8): it stands in place of no history, or above a stale one
   const failed = log.error !== null && (
     <LoadFailed
       what="the history"
@@ -81,7 +64,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
         {commits.map((c, i) => (
           <li key={c.sha}>
             <button
-              /* Fixed height — if rows had different heights, the lines would misalign at row boundaries and look broken */
+              /* A fixed height, so the graph's lines meet at row boundaries */
               className={`flex w-full items-center gap-1.5 pr-3 text-left transition-colors ${
                 openSha === c.sha ? 'bg-surface-selected' : 'hover:bg-surface-hover/20'
               }`}
@@ -90,7 +73,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
               data-testid={`history-commit-${c.shortSha}`}
               title={`${c.subject} — ${c.author}`}
             >
-              {/* The left padding is the graph's own job (PAD_L) — stacking px-3 on top would push the dot twice as far from the wall */}
+              {/* The graph pads its own left (PAD_L); px-3 here would double it */}
               <CommitGraph row={graph.rows[i]!} commit={c} lanes={graph.lanes} head={i === 0} />
               <span className="min-w-0 flex-1">
                 <span className={`block truncate text-sm ${openSha === c.sha ? 'text-ink' : 'text-ink-muted'}`}>
@@ -101,7 +84,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
                   {[
                     ...(withAuthor ? [c.author] : []),
                     ...(c.parents.length > 1 ? ['merge'] : []),
-                    // Which session made it (#50) — known through observation, without a hook. Absent for a human commit
+                    // The session that made it (#50), observed without a hook; absent for a person's commit
                     ...(c.sessionName ? [c.sessionName] : []),
                   ].map((text) => ` · ${text}`).join('')}
                 </span>
@@ -110,7 +93,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
           </li>
         ))}
       </ul>
-      {/* A list that cuts off silently is a list lying that there are no older commits */}
+      {/* A silent cut would claim there are no older commits */}
       {commits.length >= COMMIT_LIMIT && (
         <p
           className="shrink-0 border-t border-line px-3 py-1.5 text-2xs text-ink-faint"

@@ -2,15 +2,13 @@
 //!
 //! Two callers share this module (#280, option C step 1):
 //!   - the app's **direct** path (`pnpm app:dev`, debug builds, non-unix targets), where the app
-//!     itself is the host's parent, as it always was;
+//!     itself is the host's parent;
 //!   - the **keeper** (`centralu-keeper`, #440), a detached executable of its own that holds the
 //!     host so that quitting or replacing the app does not end it.
 //!
-//! The restart and backoff rules used to live inside `sidecar.rs`, tied to an `AppHandle`. They
-//! moved here unchanged so the keeper restarts a crashed host by exactly the same rules the app
-//! did: five consecutive failures, a 30 s stable-uptime reset, and an immediate stop when the
-//! host says another owner holds the data folder (#184). Only where the status goes differs, and
-//! that is the `StatusSink`.
+//! Both restart a crashed host by the same rules: five consecutive failures, a 30 s stable-uptime
+//! reset, and an immediate stop when the host says another owner holds the data folder (#184).
+//! Only where the status goes differs, and that is the `StatusSink`.
 //!
 //! **Where the operating system shows.** This file is the logic every OS shares, written once. The
 //! mechanism that differs is the OS layer's (`crate::os`): signalling a host and its group
@@ -29,6 +27,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 mod node;
+pub mod store_work;
 
 pub use crate::os::{hide_console, kill_group, kill_group_now, kill_pid};
 use crate::os;
@@ -125,10 +124,9 @@ struct Inner {
     /// second thread — if two of them alternate starting a host against the same data folder,
     /// they end up blocking each other's lock.
     running: bool,
-    /// The last things the host said before it died (dogfooding: an installed build looked
-    /// stuck on "Starting…" forever, and the real reason — another instance was holding the
-    /// data — was something the host had spelled out plainly on stdout the whole time. The
-    /// words were there; they just never reached the screen.)
+    /// The last things the host said before it died, for the screen: a host that dies before
+    /// ready spells out the reason on stdout (another instance holding the data, say), and
+    /// without these lines the window would sit on "Starting…" with no reason.
     last_output: Vec<String>,
 }
 
@@ -153,8 +151,8 @@ pub const STABLE_UPTIME: Duration = Duration::from_secs(30);
 /// `SHUTDOWN_BOUND_MS`). The two are one number in two languages: `shutdown.test.ts` reads this line and fails when they differ.
 pub const HOST_SHUTDOWN_BOUND: Duration = Duration::from_secs(10);
 
-/// How long a host gets to run its own `shutdown()` after the polite request before it is ended. The old 300ms finished the
-/// process off before its WAL checkpoint had completed.
+/// How long a host gets to run its own `shutdown()` after the polite request before it is ended. 300 ms ends the process
+/// before its WAL checkpoint has completed.
 ///
 /// On Windows it is the host's whole bound and a margin: the host waits for the stops of its terminals' trees (a table read
 /// that takes seconds on a busy machine, `STOPS_SETTLE_MS`), and a host ended before they are done leaves a grandchild whose parent
@@ -201,8 +199,8 @@ pub fn after_exit(attempt: u32, uptime: Duration, reason: &str, code: Option<i32
     if is_final_refusal(reason) {
         return AfterExit::GiveUp(reason.to_string());
     }
-    // If it stayed up long enough before dying, the earlier failure history no longer matters —
-    // start counting over from zero.
+    // If it stayed up long enough before dying, the earlier failures do not count: start
+    // counting over from zero.
     let attempt = if uptime >= STABLE_UPTIME { 1 } else { attempt + 1 };
     let msg = if reason.is_empty() {
         format!("agent-host exited (code {code:?})")
@@ -259,10 +257,10 @@ impl Supervisor {
     /**
      * Starts again after giving up (#184 — Retry on the failure screen).
      *
-     * The old Retry only reloaded the webview. The watcher thread had already ended once it
-     * emitted `Failed`, and `start` was only ever called from setup, so even after the person
-     * fixed the cause (closed another window, installed Node), the old message would show up
-     * again after a 30-second wait. There was no way out short of force-quitting.
+     * The watcher thread has ended once it emitted `Failed`, so reloading the webview alone
+     * brings nothing back: even after the person fixed the cause (closed another window,
+     * installed Node), the old message would show up again after a 30-second wait, with no way
+     * out short of force-quitting.
      *
      * Does nothing if a watcher is still running (mid-backoff) — that thread will produce an
      * answer soon. Returns true once one has started.
@@ -420,8 +418,8 @@ impl Supervisor {
                 stop_child(&mut child);
                 return Ok(None);
             };
-            // A shutdown that came while this host was being launched found no child to stop
-            // (#840 item 10): the host would have run on after it, unsupervised.
+            // A shutdown that comes while this host is being launched finds no child to stop
+            // (#840 item 10): without this the host would run on after it, unsupervised.
             if inner.shutting_down {
                 drop(inner);
                 stop_child(&mut child);
@@ -596,10 +594,9 @@ pub fn wait_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
  *
  * Windows has no TERM. There the polite request is **closing the host's stdin**: the host runs
  * with `--watch-parent`, so EOF runs the same `shutdown()` a TERM does (agent-host main.ts).
- * Before this, both kill functions were empty off unix and stdin stayed open, so every quit
- * stalled the full grace period and then hard-killed the host, which never got to release
- * `host.lock` (#14). On unix stdin is kept open until the end, so EOF does not race the signal
- * into a second `shutdown()`.
+ * With stdin left open there, every quit would stall the full grace period and then hard-kill
+ * the host, which never gets to release `host.lock` (#14). On unix stdin is kept open until the
+ * end, so EOF does not race the signal into a second `shutdown()`.
  */
 fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, gone: impl FnMut() -> bool) {
     let _stdin_until_the_end = if os::CLOSE_STDIN_TO_STOP {
@@ -672,8 +669,8 @@ pub fn host_cmd_override() -> Option<(String, Vec<String>)> {
     Some((program, parts))
 }
 
-/// The bundled host, run through the system Node (decision F-0a). Node SEA was excluded from
-/// the dogfooding scope because native addons made it too costly.
+/// The bundled host, run through the system Node (decision F-0a). Not Node SEA: native addons
+/// make it too costly.
 pub fn bundled_launch(main_mjs: &Path, extra: &[String]) -> Result<HostLaunch, LaunchError> {
     let node = resolve_node().map_err(LaunchError::Fatal)?;
     let mut args = vec![

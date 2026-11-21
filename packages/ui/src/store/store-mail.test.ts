@@ -1,7 +1,6 @@
 /**
- * The person's mailbox in the store (#1347): the list is a copy the host's news keeps current, a thread opened in the Inbox is
- * read for the person, and the acts that are theirs go to the host and say why when it refuses. Ports go through `MockPlatform`
- * (the header of platform/src/mock/index.ts).
+ * The mailbox in the store (#1347): a copy the host's news keeps current; a thread opened in the Inbox is read for the
+ * person; the person's acts go to the host and say why it refuses. Ports go through `MockPlatform`.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 // eslint-disable-next-line no-restricted-imports -- tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)

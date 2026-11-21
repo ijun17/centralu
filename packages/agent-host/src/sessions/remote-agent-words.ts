@@ -25,13 +25,13 @@ export function remoteWorktreeLine(
 }
 
 /**
- * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
+ * A remote address as an answer may show it (#1038): the repository it names, never the address as written, which
  * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
  */
 export const shownRemote = (url: string | null): string => (url === null ? 'no origin' : (gitRemoteKey(url) ?? 'a local path'))
 
 /**
- * The most a child on another machine runs under when its caller's `auto` is not carried (#1038 review, as
+ * The most a child on another machine runs under when its caller's `auto` is not carried (#1038, as
  * create_session over a link, #838): `normal`. An `auto` caller's is carried only to a machine that takes it (#1273,
  * `AutoThere`), as that machine's own switch says.
  */

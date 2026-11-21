@@ -1,24 +1,15 @@
 import { parseAppKey, type SessionSummary } from '@cc/core'
 import { treeParentOf } from './sidebarTree.js'
 
-/*
- * Folding a group (#666). A group is the rows hidden behind one chevron: the children a session started, or the
- * sessions an app owns. Its key is what the screen preferences remember (`UiPreferences.foldedGroups`), so it has to
- * name the same group after a restart: a session id and an app key both do.
- */
-/** The most keys the preference holds (`UiPreferences.foldedGroups`); the oldest fold is dropped past it */
+// A folded group's key is remembered in `UiPreferences.foldedGroups` (#666), so it must name the group after a restart.
 export const FOLDED_GROUPS_MAX = 500
 
 export const childrenGroupKey = (sessionId: string): string => `session:${sessionId}`
 export const appGroupKey = (appKey: string): string => `app:${appKey}`
 
 /**
- * Every group that has to be open for this session's row to be on screen: its app's group (when the app is listed, so
- * the row stands under it) and its parent's group (when the parent is in the same list, so it is drawn nested).
- *
- * Opening more than strictly needed is harmless; opening less leaves a session selected and invisible, which is the
- * one thing this exists to prevent. `listedApps` is the set of app keys the sidebar has a row for: a removed app does
- * not claim its sessions (`groupProjectAppSessions`), so its key must not unfold anything.
+ * The groups that must open for this session's row to show; opening too many is harmless, too few leaves it selected
+ * and invisible. A removed app does not claim its sessions (`groupProjectAppSessions`), hence `listedApps`.
  */
 export function foldGroupsHiding(
   session: SessionSummary,
@@ -40,21 +31,14 @@ export function foldGroupsHiding(
   return keys
 }
 
-/** The same keys in the same order. Folds are compared by what they hold, never by which array holds them */
+// By value: a reconnect hands over a new array of the same keys
 export function sameKeys(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((k, i) => k === b[i])
 }
 
 /**
- * The folds whose group no longer exists, to be dropped (#666).
- *
- * A fold outlives its group otherwise: a deleted session or a removed app leaves its key in the preference, the keys
- * add up toward the cap, and past it the oldest are dropped, which are the folds a person set long ago and still uses.
- *
- * Only a key that can be judged here is judged. A linked machine's sessions and apps arrive when its link comes up and
- * are absent before that, so a key naming one (a session id or a project id with a `.`, an app key with a `:`) stays
- * until it is deleted for real. `apps` is null when the app list says nothing (never read, or empty), and then no app
- * key is judged.
+ * Dead folds would crowd the cap and push out old folds still in use (#666). A linked machine's keys stay: its rows
+ * arrive only with its link. `apps` null (the list says nothing) judges no app key.
  */
 export function deadFoldKeys(
   keys: readonly string[],

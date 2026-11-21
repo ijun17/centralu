@@ -96,7 +96,7 @@ function host() {
   const adapter = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   const ref: { svc?: AgentVersionService } = {}
-  const mgr = new SessionManager(store, adapters, (e: NormalizedEvent) => ref.svc?.observe(e), undefined, tmpdir())
+  const mgr = new SessionManager(store, adapters, (e: NormalizedEvent) => ref.svc?.observe(e), undefined, { worktreeRoot: tmpdir() })
   const svc = new AgentVersionService({
     tools: () => [{ tool: 'claude', installedVersion: () => adapter.installedVersion() }],
     sessions: mgr,

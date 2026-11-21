@@ -321,12 +321,13 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
  * lists is what such a removal left part way only when it is a session's folder in `worktreeRoot`
  * (`<root>/<project>/<session>`, never a project's folder of them) and has no `.git` of its own; anything else
  * unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
- * and git's entry stays so the removal can be tried again.
+ * and git's entry stays so the removal can be tried again. `leftoverOnly` refuses a folder git lists: only what a removal
+ * left part way is taken, by git's own list read here, so a list that cannot be read removes nothing.
  */
 export async function gitWorktreeRemove(
   repoCwd: string,
   path: string,
-  { unlocked = false, worktreeRoot }: { unlocked?: boolean; worktreeRoot?: string } = {},
+  { unlocked = false, worktreeRoot, leftoverOnly = false }: { unlocked?: boolean; worktreeRoot?: string; leftoverOnly?: boolean } = {},
 ): Promise<void> {
   if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, not a worktree; nothing was removed`)
   const real = canonicalPath(path)
@@ -334,6 +335,7 @@ export async function gitWorktreeRemove(
   const list = await gitWorktreeList(repoCwd)
   const entry = list.find((w) => canonicalKey(w.path) === key)
   if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
+  if (entry && leftoverOnly) throw new Error(`git still lists ${path} as a worktree of ${repoCwd}; nothing was removed (git worktree remove takes it if it is not wanted)`)
   if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
   // Inside and not the same: real paths, so a short name or a link git listed is not taken for another folder
   const below = (root: string, p: string) => canonicalKey(root) !== canonicalKey(p) && isInside(canonicalPath(root), canonicalPath(p))

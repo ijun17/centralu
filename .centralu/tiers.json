@@ -156,7 +156,7 @@
       "tier": "deep",
       "paths": [
         ".github/**",
-        "scripts/pre-pr.mjs",
+        "scripts/pre-pr*.mjs",
         ".centralu/apps/project-board/queue*.mjs",
         ".centralu/apps/project-board/release*.mjs",
         ".centralu/apps/project-board/{wait-checks,ci,batch,run-failure,pre-pr,contribute-tools}.mjs",

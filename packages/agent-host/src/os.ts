@@ -17,73 +17,64 @@ import { commandInterpreter as rulesCommandInterpreter, pathRules, systemTool as
 
 export type Platform = NodeJS.Platform
 
-/** The platform this host runs on: what the injectable `platform` parameters default to. */
 export const HOST_PLATFORM: Platform = process.platform
 
-/**
- * The family of OS `platform` is, whose rules `os/rules.ts` holds (#1599): Windows, or the POSIX systems. The one place
- * the layer turns the platform into the family; the questions below read the family's answers from there.
- */
+/** The family of OS `platform` is, whose rules `os/rules.ts` holds (#1599): the one place the platform becomes the family */
 export function familyOf(platform: Platform = HOST_PLATFORM): OsFamily {
   return platform === 'win32' ? 'windows' : 'posix'
 }
 
-/** Every question `OsTraits` names, answered for `platform`: the family's answers, and macOS's clones */
 export function traitsFor(platform: Platform = HOST_PLATFORM): OsTraits {
   return { ...traitsOf(familyOf(platform)), clonesFiles: clonesFiles(platform) }
 }
 
 /**
- * `ps` and `lsof` are there to ask about another process: its start time, its working folder.
- * Windows has neither, and reuses pids quickly, so a pid alone says little there.
+ * `ps` and `lsof` ask about another process (start time, working folder); Windows has neither and reuses pids quickly, so a pid
+ * alone says little there
  */
 export function hasPs(platform: Platform = HOST_PLATFORM): boolean {
   return traitsOf(familyOf(platform)).hasPs
 }
 
 /**
- * A Windows system program by its full path under `%SystemRoot%System32` (taskkill, PowerShell, cmd), never looked up
- * by name (`systemTool` in `os/rules.ts`, #428).
+ * A Windows system program by its full path under `%SystemRoot%System32` (taskkill, PowerShell, cmd), never looked up by name
+ * (`systemTool` in `os/rules.ts`, #428)
  */
 export function systemTool(segments: readonly string[], env: Record<string, string | undefined> = process.env): string {
   return rulesSystemTool(segments, env)
 }
 
-/** `%ComSpec%` when it is a whole path from a drive's root, else cmd.exe under `systemTool` (`commandInterpreter` in `os/rules.ts`) */
 export function commandInterpreter(env: Record<string, string | undefined> = process.env): string {
   return rulesCommandInterpreter(env)
 }
 
-/** Windows PowerShell under `systemTool`, like taskkill: a bare name would be looked up in the working directory first */
 export function powershell(env: Record<string, string | undefined> = process.env): string {
   return systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], env)
 }
 
-/** `cp -c` clones a folder with APFS's clonefile: macOS only. */
 export function clonesFiles(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'
 }
 
 /**
  * A CLI's own installer lays it out as a folder of versions, each with its own Node, started through a batch file and a
- * PowerShell script (Windows; Cursor's `agent`, measured 2026.10.22). Elsewhere it is a link into the newest version.
+ * PowerShell script (Windows; Cursor's `agent`, measured 2026.10.22); elsewhere a link into the newest
  */
 export function installsCliAsVersionFolders(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
 
 /**
- * A pty runs on the ConPTY node-pty ships (`useConptyDll`, `conpty/` beside `conpty.node`) rather than the one in the
- * OS (Windows, #849): Windows' own left a `conhost.exe` per terminal tab and per command until the host exited.
+ * A pty runs on the ConPTY node-pty ships (`useConptyDll`) rather than the OS's (Windows, #849): the OS's left a `conhost.exe`
+ * per terminal tab and command until the host exited
  */
 export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
 
 /**
- * The folder an app's settings for every user of the machine live in, which the person's own cannot override: under
- * `%ProgramData%` on Windows, `/Library/Application Support` on macOS, `/etc` elsewhere (OpenCode's managed config,
- * 1.19.4).
+ * The folder an app's settings for every user of the machine live in, which the person's own cannot override: `%ProgramData%`
+ * on Windows, `/Library/Application Support` on macOS, `/etc` elsewhere (OpenCode's managed config, 1.19.4)
  */
 export function systemSettingsFolder(app: string, env: Readonly<Record<string, string | undefined>> = process.env, platform: Platform = HOST_PLATFORM): string {
   if (platform === 'win32') return win32.join(env.ProgramData || 'C:\\ProgramData', app)
@@ -91,22 +82,20 @@ export function systemSettingsFolder(app: string, env: Readonly<Record<string, s
 }
 
 /**
- * OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match` has the flags
- * `si` in its Windows build, `s` in its macOS and Linux builds; #1565): `BASH` is `bash` there, not elsewhere.
+ * OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match` has flags `si` in its
+ * Windows build, `s` elsewhere; #1565)
  */
 export function openCodeMatchesAnyCase(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
 
-/** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
 export function programFile(name: string, platform: Platform = HOST_PLATFORM): string {
   return platform === 'win32' ? `${name}.exe` : name
 }
 
 /**
- * This machine as npm platform packages name it (`<os>-<arch>`, as in `@centralu/darwin-arm64`): Node's own names. The
- * launcher's `targetFor` (`packaging/npm/centralu/bin/platform.mjs`) names them too; it is re-derived here, not imported,
- * as `installedCopyPath` is, and `updates.test.ts` holds the two to one answer on every machine the launcher publishes for.
+ * This machine as npm platform packages name it (`<os>-<arch>`, as `@centralu/darwin-arm64`). Re-derived from the launcher's
+ * `targetFor` (`packaging/npm/centralu/bin/platform.mjs`), not imported; `updates.test.ts` holds the two to one answer
  */
 export function npmMachine(platform: Platform = HOST_PLATFORM, arch: string = process.arch): string {
   return `${platform}-${arch}`
@@ -114,7 +103,7 @@ export function npmMachine(platform: Platform = HOST_PLATFORM, arch: string = pr
 
 /**
  * The Rust target triple a CLI built for this machine carries, as Codex's npm package names its binaries (bin/codex.js,
- * codex-cli 0.160.0): musl on Linux and Android, MSVC on Windows. Null where it ships no build.
+ * codex-cli 0.160.0): musl on Linux and Android, MSVC on Windows; null where it ships no build
  */
 export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = process.arch): string | null {
   const cpu = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'aarch64' : null
@@ -125,24 +114,15 @@ export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = pr
   return null
 }
 
-/** The path rules of `platform`: backslashes and drive letters on Windows, slashes elsewhere. */
 export function pathsOf(platform: Platform = HOST_PLATFORM): PlatformPath {
   return pathRules(familyOf(platform))
 }
 
 /**
- * Where `centralu install` would have put the app on this platform.
- *
- * These paths are the launcher's (`installedPaths` and `windowsInstall` in
- * `packaging/npm/centralu/bin/platform.mjs`), and they are re-derived rather than imported for the
- * same reason the version compare is: the launcher is a published npm package, not a workspace
- * dependency. They must stay in step — if they drift, the symptom is that updating leaves the
- * *old* app in place while npm holds the new one, and the person keeps launching the old one with
- * no sign that anything is wrong. Up to 0.1.0-beta.12 Windows fell through to the Linux path here,
- * so the copy in `%LOCALAPPDATA%\Programs` was never refreshed by an in-app update.
- *
- * Windows reads the same environment the launcher does, so the `centralu install` this decides on
- * writes where this looked.
+ * Where `centralu install` would have put the app on this platform. Re-derived from the launcher (`installedPaths`,
+ * `windowsInstall` in `packaging/npm/centralu/bin/platform.mjs`), not imported, as it is a published package; if they drift, an
+ * in-app update leaves the old app in place while npm holds the new one, with no sign. Windows reads the environment the
+ * launcher does, so the install writes where this looked
  */
 export function installedCopyPath(
   platform: Platform = HOST_PLATFORM,
@@ -158,43 +138,35 @@ export function installedCopyPath(
 }
 
 /**
- * Whether a background process replacing the installed copy may raise an OS prompt (#1736): on macOS, changing a signed
- * bundle in /Applications from another process can ask for App Management, which is never raised unasked.
+ * Whether a background process replacing the installed copy may raise an OS prompt (#1736): on macOS, changing a signed bundle
+ * in /Applications can ask for App Management, which is never raised unasked
  */
 export function copySwapMayPrompt(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'
 }
 
 /**
- * How to read the version the copy `centralu install` made carries (#645).
- *
- * macOS: the bundle's `CFBundleShortVersionString`, printed by `plutil`, which reads XML and binary
- * plists alike. It is the launcher's command (`bundleVersionCommand` in
- * `packaging/npm/centralu/bin/platform.mjs`, pinned to this by `updates.test.ts`), so the host and
- * `centralu install` never disagree about a copy. Windows: the `centralu-version.txt` the launcher
- * writes beside the copy (the exe's version resource drops the prerelease tag). Linux: the menu entry points back
- * into the npm package (`Exec=` names the AppImage in `@centralu/linux-<arch>`), so the copy's version is that
- * package's, read from the `package.json` beside the AppImage (#1736).
+ * How to read the version of the copy `centralu install` made (#645). macOS: the bundle's `CFBundleShortVersionString` via `/usr/bin/plutil`
+ * (the launcher's `bundleVersionCommand`, pinned by `updates.test.ts`). Windows: the `centralu-version.txt` the launcher writes beside the copy
+ * (the exe's version resource drops the prerelease tag). Linux: the menu entry points into the npm package (`Exec=` names the AppImage in
+ * `@centralu/linux-<arch>`), so the version is the `package.json` beside the AppImage (#1736)
  */
 export function installedCopyVersionSource(
   copy: string,
   platform: Platform = HOST_PLATFORM,
-): { kind: 'command'; file: string; args: string[] } | { kind: 'file'; name: string } | { kind: 'menu-entry' } | null {
+): { kind: 'plutil'; args: string[] } | { kind: 'file'; name: string } | { kind: 'menu-entry' } | null {
   if (platform === 'darwin') {
-    return { kind: 'command', file: '/usr/bin/plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(copy, 'Contents', 'Info.plist')] }
+    return { kind: 'plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(copy, 'Contents', 'Info.plist')] }
   }
-  // A file name in the copy, joined where it is read (by that host's path rules)
   if (platform === 'win32') return { kind: 'file', name: 'centralu-version.txt' }
   if (platform === 'linux') return { kind: 'menu-entry' }
   return null
 }
 
 /**
- * Where free memory plus what the OS can reclaim at once is read (#686): the start gate for new agent sessions asks.
- * `os.freemem()` alone undercounts badly on macOS and Linux, where caches hold most of the "used" memory and give it
- * back on demand (a 24 GB Mac read 0.2 GB free with 9 GB inactive). macOS: `vm_stat`'s pages; Linux: `MemAvailable`
- * in `/proc/meminfo`, the kernel's own estimate; elsewhere (Windows), `os.freemem()`, which there already counts the
- * standby list.
+ * Where free memory plus what the OS can reclaim at once is read (#686), for the start gate of new agent sessions. `os.freemem()` alone
+ * undercounts on macOS and Linux, where caches hold most of the "used" memory (a 24 GB Mac read 0.2 GB free with 9 GB inactive). macOS: `vm_stat`'s
+ * pages; Linux: `MemAvailable` in `/proc/meminfo`; Windows: `os.freemem()`, which counts the standby list
  */
 export function availableMemorySource(
   platform: Platform = HOST_PLATFORM,
@@ -205,19 +177,17 @@ export function availableMemorySource(
 }
 
 /**
- * A process's children outlive it unless it puts them in a job object that ends them (Windows, #1067): there the host
- * joins one at start (`lifecycle/work-job.ts`). macOS and Linux end a tree by its process groups instead.
+ * A process's children outlive it unless a job object ends them (Windows, #1067): the host joins one at start
+ * (`lifecycle/work-job.ts`); macOS and Linux end a tree by process groups
  */
 export function endsWorkWithJob(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
 
 /**
- * How to tell whether this host runs with administrator rights (#702). Windows: the token's integrity level, as
- * `whoami /groups` lists it; High (`S-1-16-12288`) or System (`S-1-16-16384`) is an elevated token. Windows OpenSSH
- * gives an account in the Administrators group a full token for a network logon, with no UAC split, so a host the hub
- * started over ssh runs elevated where the same person at the desktop would not. The SIDs read the same in every
- * language. Elsewhere: whether it runs as root (uid 0).
+ * How to tell whether this host runs with administrator rights (#702). Windows: the token's integrity level in `whoami /groups`, High
+ * (`S-1-16-12288`) or System (`S-1-16-16384`); OpenSSH gives an Administrators account a full token for a network logon, so a host the hub
+ * started over ssh runs elevated where the same person at the desktop would not. The SIDs read the same in every language. Elsewhere: uid 0
  */
 export function elevationSource(
   platform: Platform = HOST_PLATFORM,
@@ -227,7 +197,6 @@ export function elevationSource(
   return { kind: 'uid' }
 }
 
-/** Whether `whoami /groups` lists an elevated integrity level (`elevationSource`); null when it lists none at all */
 export function elevatedFromGroups(stdout: string): boolean | null {
   const levels = [...stdout.matchAll(/S-1-16-(\d+)/g)].map((m) => Number(m[1]))
   if (levels.length === 0) return null
@@ -235,15 +204,11 @@ export function elevatedFromGroups(stdout: string): boolean | null {
 }
 
 /**
- * Which kind of Windows logon a process runs in (#1224, the protocol's `HostLogon`), from the well-known group its token carries: `interactive`
- * (S-1-5-4: the person's own sign-in, or a scheduled task that runs in it), `network` (S-1-5-2: what Windows OpenSSH
- * gives a key login), `batch` (S-1-5-3: a task that runs whether or not anyone is signed in) or `service` (S-1-5-6).
- *
- * It matters for what the person saved: only a logon that holds the sign-in's secret can open the user's
- * Credential Manager vault. A key login over ssh has no password, so DPAPI cannot unlock the user's master key there.
- * Measured on a linked Windows 11 PC (2026-10-19): `cmdkey /list` printed `* NONE *` from the host's children while
- * `%LOCALAPPDATA%\Microsoft\Credentials` held 46 credential files, and Git Credential Manager could neither read nor
- * save a sign-in. The SIDs read the same in every language.
+ * Which kind of Windows logon a process runs in (#1224, `HostLogon`), from the well-known group its token carries:
+ * `interactive` (S-1-5-4), `network` (S-1-5-2: Windows OpenSSH's key login), `batch` (S-1-5-3) or `service` (S-1-5-6). It
+ * decides whether the user's Credential Manager vault opens: a key login has no password, so DPAPI cannot unlock the master key
+ * (measured on a linked Windows 11 PC, 2026-10-19: `cmdkey /list` printed `* NONE *` from the host's children while
+ * `%LOCALAPPDATA%\Microsoft\Credentials` held 46 files, and Git Credential Manager could not read or save a sign-in)
  */
 export function logonFromGroups(stdout: string): HostLogon | null {
   const sids = new Set([...stdout.matchAll(/"(S-1-5-[2346])"/g)].map((m) => m[1]))
@@ -255,10 +220,10 @@ export function logonFromGroups(stdout: string): HostLogon | null {
 }
 
 /**
- * How to ask whether the system is ending now (#1397, lifecycle/system-end.ts `askSystemStopping`): on Linux, systemd says
- * `stopping` for the system's manager at a shutdown or restart, and for the user's at the sign-out that ends it. There is no such
- * question elsewhere: macOS and Windows tell a process with a window (`NSWorkspaceWillPowerOffNotification`,
- * `WM_QUERYENDSESSION`), which the host is not. Each is a command and its arguments; `null` where there is none
+ * How to ask whether the system is ending now (#1397, `askSystemStopping`): on Linux systemd says `stopping` for the system's
+ * manager at a shutdown or restart and for the user's at the sign-out that ends it. macOS and Windows tell a process with a
+ * window (`NSWorkspaceWillPowerOffNotification`, `WM_QUERYENDSESSION`), which the host is not. Each is a command and arguments;
+ * `null` where there is none
  */
 export function systemStoppingQueries(platform: Platform = HOST_PLATFORM): readonly (readonly string[])[] | null {
   if (platform !== 'linux') return null

@@ -152,9 +152,9 @@ describe('auto Centralu boundaries (#603)', () => {
   })
 
   /*
-   * How deep agents may start agents (#867). `auto` used to open this boundary: round-4 refactor sessions under auto each
-   * started sessions of their own, twelve ran at once and the load average reached 216 (#862). Now a setting, 1 by
-   * default, that no preset crosses.
+   * How deep agents may start agents (#867). `auto` does not open this boundary (#862: round-4 refactor sessions under auto
+   * each started sessions of their own, twelve ran at once and the load average reached 216): a setting, 1 by default, that no
+   * preset crosses.
    */
   describe('the agent depth (#867)', () => {
     const levelsBelow = (n: number) => `This session is ${n} level${n === 1 ? '' : 's'} below a session the person started`
@@ -197,9 +197,9 @@ describe('auto Centralu boundaries (#603)', () => {
     })
 
     /*
-     * The first gate, before anything is read or asked (#897 review): the later re-read (`agentStartGateError`) refuses
-     * the same caller, so only this shows whether the start got as far as the tool's detection, a model check, a card
-     * or the consent `auto` opens and logs for it.
+     * The first gate, before anything is read or asked: the later re-read (`agentStartGateError`) refuses the same caller, so
+     * only this shows whether the start got as far as the tool's detection, a model check, a card or the consent `auto` opens
+     * and logs for it.
      */
     it.each(['auto', 'safe'] as const)('%s: a caller at it is refused before the tool is detected, a model checked or a card raised', async (preset) => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -236,7 +236,7 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
-    // The mark goes with the turn that consumed the hub's task, not with another turn that happens to end first (#935 review)
+    // The mark goes with the turn that consumed the hub's task, not with another turn that happens to end first (#935)
     it('a turn end that is not the hub task’s leaves the depth in place', async () => {
       const s = await session('auto')
       await w.mgr.linkedHost.sendFromHub(s, 'a task from the hub', 'Assistant on Hub mac', { depth: 1 })

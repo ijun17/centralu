@@ -24,7 +24,7 @@ const WAIT = BRIDGE_ANSWER_MS
 
 const text = (r: AppToolResult) => (r.content as { text?: string }[]).map((c) => c.text ?? '').join('\n')
 
-/** The real setTimeout, captured before the fake clock is turned on — used to wait for real IO (the app process) under a fake clock */
+/** The real setTimeout, captured before the fake clock is turned on, to wait for real IO (the app process) under a fake clock */
 const realSetTimeout = globalThis.setTimeout
 async function untilIo(ok: () => boolean, ms = 15_000): Promise<void> {
   const end = performance.now() + ms

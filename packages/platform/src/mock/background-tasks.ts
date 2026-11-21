@@ -6,25 +6,20 @@ import { mockError } from './mock-error.js'
 
 /** Each session's background tasks (#290) and the calls that stop them */
 export class BackgroundTasksMock {
-  /** Each session's background tasks (#290), kept the way the host keeps them — through `applyBackgroundTasks` */
   private backgroundTasks = new Map<string, BackgroundTask[]>()
   backgroundOf(sessionId: string): BackgroundTask[] {
     return this.backgroundTasks.get(sessionId) ?? []
   }
-  /** Background tasks a test saw stopped one by one, and the sessions it interrupted (#290) */
   readonly stoppedTasks: string[] = []
   readonly interrupts: string[] = []
 
-  /** Keeps what a `background_tasks` event says, the way the host does */
+  /** Through `applyBackgroundTasks`, as the host keeps them */
   track(event: NormalizedEvent): void {
     if (event.type === 'background_tasks') this.backgroundTasks.set(event.sessionId, applyBackgroundTasks(this.backgroundOf(event.sessionId), event))
   }
 
   readonly agents: Pick<AgentPort, 'interrupt' | 'stopBackgroundTask' | 'clearBackgroundTasks'> = {
-    /*
-     * Like a real tool (#290, measured): an interrupt ends the background tasks that stop with the turn, as stopped,
-     * and leaves the rest running.
-     */
+    // As a real tool does (#290, measured): an interrupt stops only the tasks that stop with the turn
     interrupt: async (sessionId: string) => {
       this.interrupts.push(sessionId)
       const live = this.backgroundOf(sessionId).filter((t) => t.status === 'running')
@@ -39,7 +34,7 @@ export class BackgroundTasksMock {
       }
       this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     },
-    /** Like the host: only a running, stoppable task is asked for, and its ending arrives as an event */
+    /** As the host: the ending arrives as an event */
     stopBackgroundTask: async (sessionId: string, taskId: string) => {
       const live = this.backgroundOf(sessionId).filter((t) => t.status === 'running')
       const task = live.find((t) => t.id === taskId)

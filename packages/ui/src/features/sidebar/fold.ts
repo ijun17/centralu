@@ -2,22 +2,10 @@ import { pausedOnBackground, type BackgroundTask, type Interruption, type Sessio
 import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**
- * What a project's name line says of its sessions, in place of the rows a fold hides (#205), and beside them when it is open.
- *
- * The sidebar is the place to see "who is waiting for me" at a glance (FR-1). If folding hides the
- * session rows and also hides that signal along with them, folding stops being a tidying feature and
- * becomes a feature that hides signal instead. So the folded row keeps the state of the hidden rows
- * **as counts**.
- *
- * There are five states counted, in the order the counters are read in (approval → error →
- * waiting for input, then working, then `background`: a turn that ended while its own background work runs, #2146). Error was not part of the original request, but it cannot be
- * dropped: it is a state that the inbox and ⌘⇧A count as a waiting session (core `isWaiting`), and if a
- * session stalled inside a folded project disappears with no indication at all, folding has just done
- * exactly that. Idle and rate-limited are not counted — they are rows that neither call the person nor
- * move.
- *
- * The counts are never summed (the same rule as the dashboard in FR-12): seeing only "3" does not say
- * whether it is three approvals or three working sessions.
+ * The counts a project's name line shows of its sessions (#205), so a fold never hides "who is waiting for me" (FR-1).
+ * Read in counter order: approval, error (the inbox counts it as waiting, core `isWaiting`), input, working, then
+ * `background` (a turn ended while its background work runs, #2146). Idle and rate-limited neither call nor move, so
+ * are not counted. Never summed (FR-12): "3" alone does not say three of what.
  */
 export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input', 'working', 'background'] as const
 
@@ -30,18 +18,9 @@ export function foldSummary(
   for (const raw of sessions) {
     // An open question is an approval here as it is in the inbox (`listedState`): the line cannot call it working or nothing
     const s = { ...raw, state: listedState(raw) }
-    /*
-     * An idle session is not counted at all, read or unread (owner, 2026-10-20): the chips speak only of what runs and
-     * what needs the person (an approval, a question, an error). An unread answer looked as urgent as an approval, and
-     * whether an idle session counted depended on having opened it, which the line could not show. The inbox lists the
-     * unread ones.
-     */
+    // An idle session is not counted, read or unread: an unread answer would look as urgent as an approval. The inbox lists those
     const stopped = !!s.interruption && isListedWaiting(s)
-    /*
-     * A turn that ended while its own background work runs (`pausedOnBackground`) is not running here (owner, 2026-11-10,
-     * #2146: "running" was confusing) and not dropped either: it has its own chip after working, the waiting look with the
-     * background dot. It calls nobody, so it is quieter than working. Subagents count through their session, once.
-     */
+    // A turn paused on its own background work is not "working" (#2146) but its own quieter chip. Subagents count once
     const paused = !stopped && pausedOnBackground(s)
     if (s.state === 'waiting_input' && !stopped && !paused) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
@@ -55,12 +34,8 @@ export function foldSummary(
 }
 
 /**
- * What a folded group (the children of a session, the sessions of an app) says about the rows it hides (#666).
- *
- * A fold must not hide the one thing the sidebar is for, "who is waiting for me" (FR-1), so a group that hides such a
- * row keeps a sign. Two strengths, the same ladder as a row: `alert` is a hidden row that needs an answer (an
- * approval, a question, an error) and is spoken in the signal ink; `unread` is a hidden row with something new to read
- * and is spoken one step quieter. Working, idle and asleep rows say nothing, as in a project's `foldSummary`.
+ * The sign a folded group (a session's children, an app's sessions) keeps of the rows it hides (#666, FR-1): `alert`
+ * (an approval, a question, an error; signal ink) or `unread` (one step quieter). Working, idle and asleep say nothing.
  */
 export type GroupAttention = 'alert' | 'unread'
 
@@ -77,17 +52,13 @@ export function groupAttention(
   return found
 }
 
-/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26: 200 ms in #1578, 100 ms in #1605). The Assistant's button shares it (#1591) */
+/** How long the pointer rests on a folded project's name row before it expands (#1605); the Assistant's too (#1591) */
 export const HOVER_EXPAND_MS = 100
 
 /**
- * The transient expansion of a folded project under the pointer (#1578). It lives on top of the saved fold and never
- * writes to it: the block reads `saved fold && !open`. One timer per project: it starts when the pointer enters the name
- * row (all of it, the empty space beside the name included, #1605) and is cleared when it leaves, so a pass shorter than
- * `HOVER_EXPAND_MS` does nothing. Only a mouse pointer counts; keyboard focus and touch never call `enterRow`.
- *
- * `leaveBlock` folds again, unless something holds the project as it is (an open menu, a drag): `hold(true)` defers the
- * fold, and `hold(false)` settles it by asking `pointerInside` where the pointer is now.
+ * The transient expansion of a folded project under the pointer (#1578), over the saved fold and never written to it
+ * (`saved fold && !open`). Only a mouse pointer counts; keyboard focus and touch never call `enterRow`. A menu or drag
+ * `hold`s the project open; releasing it folds only if `pointerInside` says the pointer left.
  */
 export class HoverExpander {
   private cancel: (() => void) | null = null
@@ -118,12 +89,11 @@ export class HoverExpander {
     }, HOVER_EXPAND_MS)
   }
 
-  /** The pointer left the row or pressed on it (still inside the block): a rest that has not finished is cancelled; an expansion stays */
+  /** The pointer left the row or pressed on it, still inside the block: an expansion stays */
   leaveRow(): void {
     this.clearTimer()
   }
 
-  /** The pointer left the project's whole block */
   leaveBlock(): void {
     this.clearTimer()
     if (!this.held) this.set(false)

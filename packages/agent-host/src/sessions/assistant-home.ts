@@ -24,23 +24,12 @@ export function assistantRole(): string {
 }
 
 /**
- * The Assistant's working directory.
- *
- * **It is not placed inside a project.** Inside a project it would touch the same files as that
- * project's sessions, which is us manufacturing with our own hands the concurrent-session
- * conflict that FR-2 warns about.
- *
- * And it is **empty.** At one point there was an attempt to write a role here as AGENTS.md, and
- * that turned out to be a vulnerability:
- *
- *   A worker session only has permission in its own project, but it can still write files.
- *   If that session (or content in a repository the session read) wrote an instruction into
- *   this folder, the Assistant — which **can instruct every session** — would read it as its
- *   own instruction. That opens a path from low privilege up to high privilege.
- *
- * So nothing is ever read from this folder (settingSources: []). The role is injected directly as
- * ASSISTANT_ROLE when the session is spawned — since it never goes through a file, nobody can
- * rewrite it along the way.
+ * The Assistant's working directory. **It is not placed inside a project:** it would touch the same files as that project's
+ * sessions, manufacturing the concurrent-session conflict FR-2 warns about. And it is **empty**, and nothing is read from it
+ * (settingSources: []): a worker session has permission only in its own project but can still write files, and if that session
+ * (or content in a repository it read) wrote an instruction into this folder, the Assistant, which **can instruct every
+ * session**, would read it as its own: a path from low privilege up to high. The role is injected directly as ASSISTANT_ROLE
+ * when the session is spawned, so it never goes through a file and nobody can rewrite it along the way.
  */
 export function assistantHome(): string {
   const dir = renamedFolder('orchestrator', 'assistant')
@@ -50,7 +39,7 @@ export function assistantHome(): string {
 
 /**
  * Where the sessions the Assistant starts work (#853): each in a folder of its own under `<data>/orchestrator-agents` (or `assistant-agents`, `renamedFolder`),
- * never in the Assistant's (#994 review). A child writes files; written into the Assistant's folder they would
+ * never in the Assistant's. A child writes files; written into the Assistant's folder they would
  * reach the session that directs every other one (Codex loads `.agents/skills` from its folder whatever the trust,
  * `codex/launch-config.ts`), and children sharing one folder would write over each other. Removed when its session is
  * deleted for good (`purgeSession`).
@@ -114,10 +103,5 @@ Rules to follow:
 Answer in the language the person writes in.
 `
 
-/*
- * projectAssistantRole(#13), which used to live here, was removed (2026-09-01).
- *
- * Once the seat that directs sessions per project doubled up with the worktree manager (#69),
- * even the person who built it confused the two — and the project assistant was never used
- * even once. One directing seat per project is enough, and the manager already holds that seat.
- */
+// No project-assistant role: the manager already holds the one directing seat per project, and a second one doubled up with the
+// worktree manager (#69)

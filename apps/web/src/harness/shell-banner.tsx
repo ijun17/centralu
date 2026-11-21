@@ -10,35 +10,11 @@ import { QuitDialog } from '../../../desktop/src/quit-dialog.js'
 import '../../../../packages/ui/src/styles/index.css'
 
 /**
- * A test rig for the desktop shell's own surfaces (#326, #387, exclusively for
- * e2e/shell-banner*.spec.ts, e2e/quit-dialog.spec.ts and e2e/desktop-dialog-layers.spec.ts).
- *
- * The keeper's build bar and the quit question only exist inside Tauri. So this stands the whole
- * App up on the mock, the way the browser entry does, and draws **the desktop's own components**
- * (apps/desktop/src/build-bar.tsx, quit-dialog.tsx) with a made-up `ShellHostBuild`, decided by the same
- * `buildBar` the desktop calls. What the buttons would do in the app is recorded in
- * `window.__shellCalls` instead.
- *
- * The mock reports no window controls (a browser has none), so this one says 86px, what
- * `window_controls_inset` returns on macOS, and draws three dots where trafficLightPosition puts
- * the traffic lights. The dots are inert (pointer-events: none) and only make a screenshot
- * readable; the spec reads the same position from tauri.conf.json to measure against.
- *
- * Query: `?demo=focus|grid` picks the scene; `?state=` the keeper's report:
- *   - `other`: the host and the keeper are of another build, a keeper that stops for an update, with something running
- *     (the restart into this build is offered, behind a question)
- *   - `earlier`: the same with a keeper of an earlier build, which gets a plain stop
- *   - `idle`: the same with nothing running (the restart goes without a question)
- *   - `older`: this window is an older build than the host and the keeper (#352: a backed-up
- *     app opened while a newer one runs; the restart back is offered, by hand only)
- *   - `shell`: everything on this build, but a release started its keeper without the permission
- *     shell (thin-shell plan §6), which refused the content
- * `?dialog=quit&background=on|off|serve` (`serve`: the window runs on the computer's `centralu serve` host, #1466; `&running=n`: sessions in a turn) opens the quit question instead; `?dialog=restart` the
- * restart question (e2e/desktop-dialog-layers.spec.ts).
- *
- * Only on the dev server: `vite build`'s only input is index.html.
+ * The desktop's own build bar and quit question (they exist only inside Tauri) on the full App over the mock, for
+ * e2e/shell-banner*, quit-dialog and desktop-dialog-layers specs; button presses land in `window.__shellCalls`. Dev only.
  */
 
+// macOS's `window_controls_inset`; the dots sit where trafficLightPosition puts the lights, inert, for screenshots
 const MACOS_CONTROLS_INSET = 86
 const LIGHTS = { x: 19, y: 12, size: 12, gap: 8 }
 
@@ -61,7 +37,12 @@ const newer = {
 }
 const older = { commit: '2ffcaec5', version: '0.1.0-beta.6', bundlePath: '/Applications/Centralu.app' }
 
-/** What the keeper would report in each state, as the shell hands it to the window */
+/**
+ * `?state=`: `other` a keeper of another build that stops for an update, something running (restart asks first);
+ * `earlier` its keeper is of an earlier build (a plain stop); `idle` nothing running; `older` this window is older than
+ * host and keeper (#352, restart back by hand); `shell` the permission shell refused the content (thin-shell plan §6).
+ * `?dialog=quit&background=on|off|serve[&running=n]` (`serve`: a `centralu serve` host, #1466) or `?dialog=restart`.
+ */
 function reported(): ShellHostBuild {
   const base = { mode: 'keeper' as const, app: newer, host: older, keeper: older, sameBuild: false, keeperSameBuild: false, stopsForUpdate: true, busy: true }
   switch (state) {
@@ -92,7 +73,7 @@ function reported(): ShellHostBuild {
   }
 }
 
-/** What main.tsx does with the bar, with the keeper's request recorded instead of sent */
+/** As main.tsx, with the keeper's request recorded instead of sent */
 function Banner() {
   const [build] = useState(reported)
   const [dismissed, setDismissed] = useState(false)

@@ -1,14 +1,4 @@
-/**
- * Back and forward between screens, like a web browser (#374).
- *
- * An entry is what a person would call "a screen": one session, one project's screen, one app's page, the grid, the
- * assistant, or Settings. Nothing finer: a keystroke, a scroll, a panel moved on the grid or a session picked
- * inside the grid does not make a new entry, because going back to it would look like nothing happened. The grid is
- * one entry whatever stands on it; going back to it shows the grid as it is now, as a browser shows a page.
- *
- * Pure, so the rules are tested without a store: the store derives the screen on every change (`screenOf` in
- * store.ts) and folds it in here.
- */
+// Back and forward between screens: docs/state-management.md §5a. Pure; the store folds `screenOf` in here.
 
 export type Screen =
   | { kind: 'session'; id: string }
@@ -18,10 +8,8 @@ export type Screen =
   | { kind: 'assistant' }
   | { kind: 'settings' }
   /*
-   * A file and the git screen are pages of their own (owner, 2026-10-18): they open over the screen they were opened
-   * from (`under`, which back returns to with its reading place, #61) and are drawn over it in the centre lane, so
-   * coming back costs nothing. `under` is where they stand, not what they are, so it is not part of their sameness.
-   * A file's `sessionId` is the session whose folder (its worktree) it was opened in (#1209); absent is the project's.
+   * A file and the git screen are pages drawn over the screen they opened from (`under`, owner 2026-10-18), which is
+   * not part of their sameness. A file's `sessionId` is the session whose worktree it opened in (#1209).
    */
   | { kind: 'file'; path: string; projectId: string | null; sessionId?: string | null; under: Screen | null }
   | {
@@ -33,15 +21,11 @@ export type Screen =
       under: Screen | null
     }
 
-/** The entries, oldest first, and which one is on screen. `index` is -1 only while there are none */
+/** Oldest first; `index` is -1 only while there are none */
 export type NavHistory = { entries: Screen[]; index: number }
 
 export const EMPTY_NAV: NavHistory = { entries: [], index: -1 }
 
-/**
- * How many entries are kept. Past it the oldest goes, as a browser's does: nobody walks back fifty screens, and the
- * history lives for one run of the app only, so it has no reason to grow with the day.
- */
 export const NAV_LIMIT = 50
 
 export function sameScreen(a: Screen | undefined, b: Screen | undefined): boolean {
@@ -67,21 +51,13 @@ export function sameScreen(a: Screen | undefined, b: Screen | undefined): boolea
   }
 }
 
-/**
- * A new screen is on: it becomes the current entry, and whatever was ahead of the old one is dropped (a browser's
- * forward list goes the moment you follow a link). Opening the screen already on adds nothing.
- */
 export function visit(h: NavHistory, screen: Screen): NavHistory {
   if (sameScreen(h.entries[h.index], screen)) return h
   const entries = [...h.entries.slice(0, h.index + 1), screen].slice(-NAV_LIMIT)
   return { entries, index: entries.length - 1 }
 }
 
-/**
- * A layer laid over a screen (Settings, a file, the git screen) was closed, and the screen under it is on again. When the layer is the
- * current entry and that screen is the one before it, this steps back to it rather than adding it a second time:
- * closing Settings is going back, and forward reopens it. Anything else is an ordinary visit.
- */
+// Closing a layer over the previous entry is a step back, so forward reopens it (docs/state-management.md §5a).
 export function closeLayer(h: NavHistory, under: Screen): NavHistory {
   const kind = h.entries[h.index]?.kind
   if (
@@ -94,10 +70,8 @@ export function closeLayer(h: NavHistory, under: Screen): NavHistory {
 }
 
 /**
- * One step back (-1) or forward (1). A screen that no longer exists (a deleted session, a removed app or project) is
- * skipped and dropped, as is an entry the same as the current one (which removing a screen between two visits of
- * the same place leaves behind), so every step shows something new. `screen` is null when there is nowhere to go;
- * `history` may still have lost entries that are gone.
+ * Skips and drops gone entries and ones equal to the current (docs/state-management.md §5a). `screen` is null when
+ * there is nowhere to go; `history` may still have lost entries.
  */
 export function step(
   h: NavHistory,
@@ -121,7 +95,6 @@ export function step(
   return { history: entries.length === h.entries.length ? h : { entries, index }, screen: null }
 }
 
-/** Whether a step that way would land somewhere, for the top bar's buttons (the same rules as `step`) */
 export function canStep(h: NavHistory, dir: -1 | 1, exists: (s: Screen) => boolean): boolean {
   return step(h, dir, exists).screen !== null
 }

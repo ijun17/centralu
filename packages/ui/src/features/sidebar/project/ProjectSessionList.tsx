@@ -29,10 +29,7 @@ export function ProjectSessionList({
   setConfirming: (id: string | null) => void
 }) {
   const focusedSessionId = useSelectedSessionId()
-  /*
-   * A drop reorders the list as it is at the drop, read from here, so the handler is one function for the list's life
-   * and a row whose session did not change is not drawn again (SessionListRow).
-   */
+  // Read at the drop, so the handler stays one function and unchanged rows are not redrawn (SessionListRow)
   const latest = useRef({ sessions, byApp: groupedSessions.byApp })
   useLayoutEffect(() => {
     latest.current = { sessions, byApp: groupedSessions.byApp }
@@ -40,7 +37,7 @@ export function ProjectSessionList({
   const onReorder = useCallback(
     (rowId: string, draggedId: string, before: boolean) => {
       const { sessions: listed, byApp } = latest.current
-      // App-owned rows can still be dropped on the grid, but their appId — not list position — is their membership.
+      // An app-owned row belongs by its appId, not its position
       if ([...byApp.values()].some((owned) => owned.some((session) => session.id === draggedId))) return
       void useStore.getState().reorderSessions(projectId, moveTo(listed.map((x) => x.id), draggedId, rowId, before))
     },

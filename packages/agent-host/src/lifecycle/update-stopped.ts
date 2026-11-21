@@ -3,10 +3,10 @@ import { UPDATE_CONTINUE_TEXT, UPDATE_NOTE_HEAD } from '../adapters/input-receip
 import { isObj } from '../json-value.js'
 
 /**
- * What an update's stop ends in a session besides its turn, told to the agent when the next host starts (#1902,
- * docs/agent-host/lifecycle/continue-after-update.md): the background tasks its process held and the cards that waited for the person. All of it dies
- * with the process, and none of it is anything the person chose, so the agent is told which, in Centralu's own note, and
- * decides what to start or ask again. Kept in the update-resume list beside the turns (`update-resume.ts`).
+ * What an update's stop ends in a session besides its turn, told to the agent when the next host starts
+ * (docs/agent-host/lifecycle/continue-after-update.md): the background tasks its process held and the cards that waited for the
+ * person. All of it dies with the process and none of it is anything the person chose, so the agent is told which, in
+ * Centralu's own note, and decides what to start or ask again. Kept in the update-resume list beside the turns
  */
 export type StoppedTask = { kind: BackgroundTaskKind; description: string; command?: string }
 
@@ -22,9 +22,9 @@ const clip = (text: string, max: number): string => (text.length > max ? `${text
 
 /**
  * What this stop ends in each live session: its running tasks (a timer too: it dies with the process; ambient housekeeping is
- * not work) with the command of the tool call that started each (`inputOf`, the stored call), and its open cards. A session
- * with neither is not listed. The mark (`seq`) is not known yet: it is the end of the conversation once the processes are down,
- * the same instant the turns are marked at, and the caller puts it on.
+ * not work) with the command of the tool call that started each (`inputOf`), and its open cards. A session with neither is not
+ * listed. The mark (`seq`) is not known yet: it is the end of the conversation once the processes are down, the instant the
+ * turns are marked at, and the caller puts it on
  */
 export function stoppedAtUpdate(
   sessions: readonly SessionInfo[],
@@ -72,9 +72,9 @@ function taskLine(t: StoppedTask): string {
 }
 
 /**
- * Centralu's note to the agent after an update stopped it (#1902), through Centralu's channel: for a turn the update cut
- * (`turn`), the Continue of #1618 with what else the stop ended; for a session at rest, only the tasks. Every card text is
- * here: its words are the owner's to approve.
+ * Centralu's note to the agent after an update stopped it, through Centralu's channel: for a turn the update cut (`turn`), the
+ * Continue with what else the stop ended; for a session at rest, only the tasks. Every card text is here: its words are the
+ * owner's to approve
  */
 export function updateNote(turn: boolean, stopped: Stopped | null): string {
   const head = turn

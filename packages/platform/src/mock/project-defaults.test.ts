@@ -3,8 +3,7 @@ import { MockPlatform } from './index.js'
 
 /**
  * A saved default model reaches the screen through `projects_changed` and a re-list, never by changing the object the
- * screen already holds (#1011 review): the host's answers are always new objects, and setTrusted swaps one in for the
- * same reason.
+ * screen holds: the host's answers are always new objects.
  */
 describe('the mock project defaults', () => {
   it('a model chosen for a session leaves the project object add returned as it was', async () => {

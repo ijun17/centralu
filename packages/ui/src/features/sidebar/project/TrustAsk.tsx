@@ -3,16 +3,8 @@ import { useStore } from '../../../store/store.js'
 import { TrustCard } from '../../project/TrustCard.jsx'
 
 /**
- * Trust asked once at registration (M4, decision 3), and again from the project menu's "Trust this project…" when the
- * project has apps (#1141).
- *
- * Not a modal — it stands under that project's own row. Right after registration there is a path
- * (the Assistant's folder picker) that immediately opens a new-session dialog, and stacking a
- * dialog on top of a dialog would leave both only half-read. Standing here, the question is still
- * there even after the session dialog is closed and the person comes back. A project left
- * unanswered stays untrusted — it is safer to default to silently off than to silently on.
- *
- * The card itself, with the list of the project's apps, is `TrustCard`: the same one every "Trust this project…" opens.
+ * Trust asked at registration (M4, decision 3) and from "Trust this project…" (#1141), under the project's row, not as
+ * a modal: registration can open a new-session dialog at once, and the question outlives it. Unanswered stays untrusted.
  */
 export function TrustAsk({ project }: { project: ProjectInfo }) {
   const answer = useStore((s) => s.answerTrustAsk)

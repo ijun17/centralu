@@ -7,28 +7,9 @@ import { backgroundNote } from '../../session/BackgroundTasks.jsx'
 import { usePresence } from '../../../components/presence.js'
 
 /**
- * The session mark — tool and state, in one spot. Without the tool, there would be no way to tell
- * apart two sessions with similar titles (this was actually mixed up during dogfooding).
- *
- * **No official logo is used.** Both companies' marks are trademarks with their own brand
- * guidelines — bundling a logo file into the app and distributing it could run into those rules.
- * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
- * distinguishing things by shape in grayscale.
- *
- * The ring and the fill are the state, in four looks (`lookOf`, #736; the lines are in styles/index.css
- * under `.cc-mark`): a thin grey line at rest, a thick white line while it answers, the same line dashed
- * on grey when the turn broke off, and solid on grey when the person has to act. Nothing moves. The
- * chip's own 1px border is the same in all four, and the exact state is in the tooltip.
- *
- * Background work (#290) is a dot on the mark's bottom-right corner, not a chip of its own (owner, 2026-11-05): it
- * takes no width on the row. The dot is faint on purpose: brightness is this app's urgency signal and the ring states
- * the turn. The count and what runs are in the tooltip and the label.
- */
-/*
- * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
- * restart. Not shown at all, not even in the tooltip (owner, 2026-10-18): sleep is the app working as it should,
- * nothing the person has to act on (using the session wakes it), and a fade would be mistaken for a stalled session
- * (#670). So a finished turn still looks finished and idle still looks idle. `data-asleep` stays for tests.
+ * The session mark: tool and state in one spot. Our own letter, not a vendor logo (trademarks). The state is the chip's
+ * look (`lookOf`, #736; docs/themes.md "The urgency order"); background work is a faint dot (docs/design-system.md §1);
+ * asleep is not shown (docs/design-system.md §10).
  */
 export function ToolMark({
   tool,
@@ -88,16 +69,9 @@ export function ToolMark({
       >
         <span
           /*
-            A bright letter on a dark chip, in the UI's own face (Pretendard, owner 2026-10-18: rounder and clearer at
-            this size than the code face; the chip's width is fixed, so a fixed-width face bought nothing here). The chip is 14px inside the ring's 1.5px, so the mark is 17px in
-            every look.
-
-            The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps (none in Dark since 2026-10-27), so
-            a single border does not separate them well. Instead of raising the border brightness
-            further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
-            a shadow underneath. It reads as a separate object without spending more brightness, and
-            brightness is the resource this app uses to state urgency, so spending it on decoration
-            would cut into that signal by the same amount. Its fill follows the look (`.cc-mark`).
+            The letter in the UI face (docs/design-system.md §4). 14px inside the ring's 1.5px: 17px in every look. The
+            sidebar and chip grounds are close (equal in the high-contrast themes), so the keycap treatment (`.cc-chip`)
+            parts them without spending brightness. Its fill follows the look (`.cc-mark`).
           */
           className="cc-chip cc-chip-letter flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
         >

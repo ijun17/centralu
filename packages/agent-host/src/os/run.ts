@@ -1,4 +1,5 @@
 import type { OsChild, OsClock, OsFiles, OsProcesses, RunOptions, RunResult } from './port.js'
+import { STOPS_SETTLE_MS } from './stop-bounds.js'
 
 /** How long a run waits for its output to close once the program has exited: a grandchild may hold the pipes (git-exec.ts) */
 export const CLOSE_AFTER_EXIT_MS = 1000
@@ -18,6 +19,12 @@ export const RUN_STOP_GRACE_MS = 2000
  * Settles with the output once the child's output has closed, or `CLOSE_AFTER_EXIT_MS` after it exited when something
  * it started still holds the pipes. A timeout, an overflow past `maxBuffer` or an abort ends the whole tree
  * (`stop`), and the result says which (`ended`). Rejects only when the program could not be started.
+ *
+ * A run that ends its tree for a timeout, an overflow or an abort settles once that stop has finished, or after
+ * `STOPS_SETTLE_MS`: on Windows the tree is ended from the process table after the child (`stopTreeWindows`), and a caller
+ * that exits on the answer left what the stop had not reached yet running (a tool's shim, its child and grandchild, KL21).
+ * One its reader stopped (`onStdout`, `ended: 'stopped'`) settles as before: the reader had what it wanted, and its group
+ * went with it.
  */
 export function runChild(
   os: {
@@ -42,12 +49,14 @@ export function runChild(
     const stderr: Buffer[] = []
     let ended: RunResult['ended']
     let settled = false
+    let stopping: Promise<unknown> | undefined
     const timers: Array<{ cancel(): void }> = []
     const stopFor = (why: NonNullable<RunResult['ended']>) => {
       if (ended || settled) return
       ended = why
       // Ended because the reader had enough: its group went with it, and a sweep for leftovers would only cost a listing
-      void os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS, { sweep: why !== 'stopped' }).catch(() => {})
+      const stop = os.processes.stop(child, options.stopGraceMs ?? RUN_STOP_GRACE_MS, { sweep: why !== 'stopped' }).catch(() => {})
+      if (why !== 'stopped') stopping = stop
     }
     // Not once the program has exited: what it did then is done, and the answer is its own
     const onAbort = () => {
@@ -61,7 +70,16 @@ export function runChild(
       // A program the run no longer waits for may still hold the pipes: let go of them
       child.stdout?.destroy()
       child.stderr?.destroy()
-      finish()
+      if (!stopping) return finish()
+      let finished = false
+      const once = () => {
+        if (finished) return
+        finished = true
+        bound.cancel()
+        finish()
+      }
+      const bound = os.clock.setTimeout(once, STOPS_SETTLE_MS)
+      void stopping.then(once)
     }
     // Each stream counted on its own, as `maxBuffer` says; past it, the rest is dropped while the tree ends
     const collect = (into: Buffer[]) => {

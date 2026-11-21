@@ -3,7 +3,7 @@ import { plainLine } from '@cc/protocol/client'
 import type { MailHeldRow, MailMessage, MailParty, MailTaskRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
- * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;
+ * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §12.3). The host names the parties and states why mail is held;
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 
@@ -91,8 +91,8 @@ export function choicesLabel(answered: boolean, picked: boolean, open: boolean):
 }
 
 /**
- * The questions to the person in a thread that wait for their answer (#2191), oldest first, as the host names them (`thread.ask.open`: its one rule, which
- * decides who can still be answered and what the person may read), the ones this view holds. A reply box offers a choice of which one its words answer when there is more than one; with one, the words answer it as before
+ * The thread's questions waiting on the person (#2191) that this view holds, oldest first, as the host names them
+ * (`thread.ask.open`, its one rule for what can still be answered and what the person may read)
  */
 export function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>): MailMessage[] {
   const open = view.thread.ask?.open ?? []
@@ -100,9 +100,9 @@ export function openQuestions(view: Pick<MailThreadView, 'thread' | 'messages'>)
 }
 
 /**
- * The question the reply box's words answer, and the open ones to switch between. With more than one question waiting the box says which one its words answer (the
- * newest by default); with one, nothing changes (no target, the words answer it as before). A question the person named stays the one named until their words are
- * sent: if another window answered it meanwhile, the host refuses these words ("answered") and the toast says so, and they do not go to another question unseen
+ * The question the reply box's words answer (the newest by default; no target with only one), and the open ones to
+ * switch between. A named question stays named until the words are sent: if another window answered it meanwhile, the
+ * host refuses them ("answered", in a toast), so they never go to another question unseen
  */
 export function answeringTarget(view: Pick<MailThreadView, 'thread' | 'messages'>, chosen: string | null): { questions: MailMessage[]; target: MailMessage | undefined } {
   const questions = openQuestions(view)

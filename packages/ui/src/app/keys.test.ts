@@ -5,12 +5,7 @@ import { composingKey, confirmKeyAction, isPlainEnter, isPlainEscape, isTextEntr
 const ev = (key: string, code: string) => ({ key, code }) as Pick<KeyboardEvent, 'key' | 'code'>
 
 /**
- * The fix for reading letter shortcuts only from the character the keyboard produced (the
- * settings screen's `⌥a` did nothing on a Mac).
- *
- * The values below are not invented — they were asked directly of the installed keyboard layout
- * (Carbon UCKeyTranslate, 2026-08-24):
- *
+ * Values asked of the installed layouts (Carbon UCKeyTranslate):
  *   ABC / U.S.     A = a    ⌥A = å
  *   2-Set Korean   A = ㅁ   ⌥A = a
  */
@@ -35,12 +30,7 @@ describe('letterOf', () => {
     expect(letterOf(ev('Process', 'KeyN'))).toBe('n')
   })
 
-  /**
-   * Why this does not standardize on position. On Dvorak, y sits at QWERTY's KeyF position.
-   * Reading position alone would read y when the person pressed f, and y is approval in this app
-   * — the thing that must never be misread cannot be misread because of a keyboard layout. A
-   * character that arrives as Latin is the character the person actually produced.
-   */
+  /** On Dvorak, y (approve) sits at QWERTY's KeyF: position alone would read y for f */
   it('Dvorak: when the character is Latin, position is not consulted — f is f', () => {
     expect(letterOf(ev('f', 'KeyY'))).toBe('f')
     expect(letterOf(ev('y', 'KeyF'))).toBe('y')
@@ -146,10 +136,7 @@ describe('confirmKeyAction — Enter and Esc on the quit confirmation dialog (#1
   })
 })
 
-/**
- * #181: the run dialog's Enter handling did not check composition state — the last syllable of a
- * Korean-language alias was dropped
- */
+/** #181: without the composition check, a Korean alias loses its last syllable */
 describe('isPlainEnter — the save key for a single-line field (#181)', () => {
   it('only a non-composing Enter saves', () => {
     expect(isPlainEnter({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(true)
@@ -159,12 +146,7 @@ describe('isPlainEnter — the save key for a single-line field (#181)', () => {
   })
 })
 
-/**
- * Each of the three signals on its own has to count, because each engine sends only some of
- * them. The WebKit one is the desktop app's engine: the Enter that ends a composition can arrive
- * after `compositionend`, with `isComposing` false and `key` 'Enter', and only `keyCode` 229 gives
- * it away.
- */
+/** Each signal has to count alone: each engine sends only some of them (`composingKey`) */
 describe('composingKey — the shapes an IME key arrives in', () => {
   it('Chromium: isComposing set', () => {
     expect(composingKey({ key: 'Enter', isComposing: true, keyCode: 229 })).toBe(true)

@@ -6,7 +6,7 @@ import type { ChatItem } from '../../../store/store.js'
  * bubble on the left, like the person's own message on the right. Rows of text in a row share one bubble. Tool calls,
  * images, approvals, markers (compaction, handoff, an error line) and reasoning summaries (Codex's "Tuning preview
  * size") are what it did, thought or what happened, not what it said, so they stand outside, on the page, and split
- * it (owner: a tool card inside the bubble read as a box in a box; a reasoning line inside it read as a message).
+ * it (owner: a tool card inside the bubble reads as a box in a box; a reasoning line inside it reads as a message).
  *
  * The list is virtual, so the bubble is drawn in pieces, one per row: the first rounds the top, the last the
  * bottom, the ones between carry only the sides. No gap between rows inside a bubble: the spacing is the piece's

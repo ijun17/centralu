@@ -5,8 +5,8 @@ import { Markdown, MarkdownBlock } from './Markdown.jsx'
 import { advanceSplit, piecesOf, type MarkdownSplit } from './markdownBlocks.js'
 
 /*
- * #2242: a mail (and a reply) that numbers its questions under bold lines lost its numbers: CommonMark lets only a list
- * starting at 1 interrupt a paragraph, so `2.` stayed words in the bold line's paragraph. The numbers are drawn by `<ol start>`.
+ * #2242: a mail (and a reply) that numbers its questions under bold lines must keep its numbers: CommonMark lets only a
+ * list starting at 1 interrupt a paragraph, so `2.` would stay words in the bold line's paragraph. The numbers are drawn by `<ol start>`.
  */
 const html = (text: string) => renderToStaticMarkup(<Markdown text={text} projectRoot={null} />)
 

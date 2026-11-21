@@ -137,7 +137,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     expect(hub.store.machines.listMachineAskConsents()).toEqual([])
   })
 
-  // #550 review: the target's `auto` is its own, and answers no card of another machine
+  // #550: the target's `auto` is its own, and answers no card of another machine
   it('raises the card for a hub session under auto too, and remembers nothing until Allow', async () => {
     const { machine, hub } = await rig({ preset: 'auto' })
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')?.permissionPreset).toBe('auto')
@@ -150,7 +150,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     expect(hub.store.machines.listMachineAskConsents()).toEqual([expect.objectContaining({ machineId: 'm1', sessionId: 'w1', projectId: 'p-hub' })])
   })
 
-  // #550 review: a call given up on the machine is withdrawn on the hub, so its card does not wait for nobody
+  // #550: a call given up on the machine is withdrawn on the hub, so its card does not wait for nobody
   it('closes the hub’s card when the machine’s call runs out of time, and sends nothing', async () => {
     const { machine, hub } = await rig({ askTimeoutMs: 500 })
     const call = machine.ask({ project: hub.projectName, task: 'say hello' })

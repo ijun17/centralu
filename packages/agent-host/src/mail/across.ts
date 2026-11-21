@@ -1,34 +1,29 @@
-import { HubFindResult, HubMailResult, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
+import { HubFindResult, HubMailResult, TASK_REPORT_ANSWER_MAX, errorMessage, oneLineText, type HostMailParams, type HubFindParams, type HubMailParams, type TaskReport } from '@cc/protocol'
 import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } from './address.js'
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { DelegationOrigin } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
-import { reportWords } from './last-response.js'
+import { answerKept, reportWords } from './last-response.js'
 import { older, unreachable, type AcrossMachine, type AcrossSent, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
 import { MAILBOX_RETENTION } from '../dev-services/store/mailbox.js'
 
 /**
- * Mail across linked machines (#2067 items 2 and 3, docs/plans/linked-mail.md §5 to §8): every session reaches every
- * other, on this computer or on one linked to it, both ways.
- *
- *   - **Names on the wire are the hub's.** A hub names a machine's session `session:<hub id>/<machine id>.<id>`; a machine
- *     names everything on the hub's side the same way, and reads `session:<hub id>/<its id there>.<id>` as its own.
- *   - **The recipient's host writes the message**, with its checks and guards; the sender's host writes its copy, under the
- *     same id (which it picked), once that host answered or showed it has the message. A refusal, or a link that is down,
- *     writes nothing anywhere; a send whose answer was lost goes again under its id (`unsure`).
- *   - **Receipts** go back as the state of the rows (`*.mailRows`), merged forward only; a Centralu notice to a session on
- *     the other side is passed on as a notice.
- *
- * A host may be a hub (it links machines) and a machine (hubs link it) at once: which one an address calls on is read off
- * the address.
+ * Mail across linked machines (docs/plans/linked-mail.md §5 to §8): every session reaches every other, on this computer or one
+ * linked to it, both ways. **Names on the wire are the hub's:** a hub names a machine's session `session:<hub id>/<machine
+ * id>.<id>`; a machine names everything on the hub's side the same way and reads `session:<hub id>/<its id there>.<id>` as its
+ * own. **The recipient's host writes the message**, with its checks and guards; the sender's host writes its copy under the
+ * same id (which it picked) once that host answered or showed it has the message. A refusal or a down link writes nothing
+ * anywhere; a send whose answer was lost goes again under its id (`unsure`). **Receipts** go back as the state of the rows
+ * (`*.mailRows`), merged forward only. A host may be a hub and a machine at once: which one an address calls on is read off the
+ * address.
  */
 
 /**
- * Whether `from` may mail `to` across a link. **Every pair may** (owner decision 2026-11-09, recorded on #2067): every
- * agent reaches every other, both ways, whichever machine each runs on, whatever the asks switch says. The one place
- * per-direction trust (#1455) would change, if it comes
+ * Whether `from` may mail `to` across a link. **Every pair may** (owner decision 2026-11-09): every agent reaches every other,
+ * both ways, whichever machine each runs on, whatever the asks switch says. The one place per-direction trust would change, if
+ * it comes
  */
 export function mayReachAcross(_from: string, _to: string): boolean {
   return true
@@ -50,8 +45,9 @@ export const NAMED_HERE_MS = 600
 /** The most open tasks one offer asks a machine about (`HubOffer.open`): the oldest; the rest are asked at a later connect */
 const OPEN_ASKED = 500
 /**
- * How old a copy an offer still asks about may be: younger than what a machine keeps a settled task (`MAILBOX_RETENTION.settledMs`), less a day for
- * clocks that differ. A task the machine had, settled and swept would read there as never arrived, and its sender would be told so wrongly
+ * How old a copy an offer still asks about may be: younger than what a machine keeps a settled task
+ * (`MAILBOX_RETENTION.settledMs`), less a day for clocks that differ. A task the machine had, settled and swept would read
+ * there as never arrived, and its sender would be told so wrongly
  */
 const ASKED_WITHIN = MAILBOX_RETENTION.settledMs - 24 * 60 * 60 * 1000
 /** The most task ids a machine remembers as never arrived from one hub (`lacking`), the oldest forgotten first */
@@ -76,10 +72,10 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a hub: work a session here gives a linked machine's session (#1948 step 6, docs/plans/linked-mail.md §9): written there as a task (or a note),
-   * which that machine's delivery gives the session and its engine reports; the copy here is a task too, so the report that comes back answers it. A
-   * machine that does not take tasks is refused `older`, and nothing is written. `forPerson` is said only for this host's Assistant's `send_to_session`;
-   * `depth`, the agent depth the session there works at on it
+   * On a hub: work a session here gives a linked machine's session (docs/plans/linked-mail.md §9): written there as a task (or
+   * a note), which that machine's delivery gives the session and its engine reports; the copy here is a task too, so the report
+   * that comes back answers it. A machine that does not take tasks is refused `older`, and nothing is written. `forPerson` is
+   * said only for this host's Assistant's `send_to_session`; `depth`, the agent depth the session there works at on it
    */
   async sendTask(senderId: string, to: string, text: string, task: { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }): Promise<AcrossSent> {
     const sender = this.d.service.sessionAddress(senderId)
@@ -134,9 +130,10 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a hub: `machineId` answered this connection's offer, and `lacks` are the tasks it says never arrived there (#2289): sends whose answer was lost
-   * before the machine wrote them. Nothing there will ever report on one, so each copy still open and in no send now is deleted, as a refusal deletes
-   * one, and each sender is told in one notice and woken once, as for a stop. Then what is owed to the machine goes (`changed`)
+   * On a hub: `machineId` answered this connection's offer, and `lacks` are the tasks it says never arrived there: sends whose
+   * answer was lost before the machine wrote them. Nothing there will ever report on one, so each copy still open and in no
+   * send now is deleted, as a refusal deletes one, and each sender is told in one notice and woken once, as for a stop. Then
+   * what is owed to the machine goes (`changed`)
    */
   offerAnswered(machineId: string, lacks: readonly string[]): void {
     const lost = new Map<string, { id: string; name: string }[]>()
@@ -156,10 +153,10 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a machine: which of the tasks hub `hubId`'s offer asks about (`HubOffer.open`) never arrived here. Only that hub's own ids (`<hubId>.m_…`) are
-   * answered: another hub learns nothing of what is stored here, and cannot have a hub's later task refused. Each is remembered for that hub, and a
-   * late one from it is refused (`taskFrom`): a send on a link the hub already counted as dead can still land after this answer. Memory is enough, as
-   * no connection outlives this process: after a restart nothing sent before it can arrive
+   * On a machine: which of the tasks hub `hubId`'s offer asks about (`HubOffer.open`) never arrived here. Only that hub's own
+   * ids (`<hubId>.m_…`) are answered: another hub learns nothing of what is stored here and cannot have a hub's later task
+   * refused. Each is remembered for that hub and a late one from it is refused (`taskFrom`): a send on a link the hub already
+   * counted as dead can still land after this answer. Memory is enough, as no connection outlives this process
    */
   lacking(hubId: string, ids: readonly string[]): string[] {
     const lacks = ids.filter((id) => id.startsWith(`${hubId}.`) && !id.startsWith(`${this.d.hostId}.`) && FOREIGN_ID.test(id) && !this.d.records.message(id))
@@ -190,8 +187,9 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a machine: the copy of the task a hub wrote for `sender`'s ask_project to its session `to` (`HubAskResult.taskId`, #1948 step 6), under the hub's
-   * id, so the report the hub sends (`host.mail` with `report`) answers it. An id that is not another host's, or that names a message here, keeps nothing
+   * On a machine: the copy of the task a hub wrote for `sender`'s ask_project to its session `to` (`HubAskResult.taskId`),
+   * under the hub's id, so the report the hub sends (`host.mail` with `report`) answers it. An id that is not another host's,
+   * or that names a message here, keeps nothing
    */
   keepAsk(sender: string, to: string, id: string, text: string): void {
     if (!FOREIGN_ID.test(id) || id.startsWith(`${this.d.hostId}.`) || this.d.records.message(id)) return
@@ -203,11 +201,11 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a machine: where its session's mail to the person goes (#1987). The person works in the window of the hub that links this
-   * computer, so it goes to the hub's person: the hub that started the session, else the one hub that offers mail here. Null when it
-   * stays on this computer: no hub links it (or none has offered since this host started), or several do and none started the
-   * session (`several`), where a guess would put it before the person in a window they may not read. A session a hub started whose
-   * hub is not linked now is refused at once, as all mail across is (#2067)
+   * On a machine: where its session's mail to the person goes. The person works in the window of the hub that links this
+   * computer, so it goes to the hub's person: the hub that started the session, else the one hub that offers mail here. Null
+   * when it stays on this computer: no hub links it (or none has offered since this host started), or several do and none
+   * started the session (`several`), where a guess would put it before the person in a window they may not read. A session a
+   * hub started whose hub is not linked now is refused at once, as all mail across is
    */
   personTarget(sessionId: string, fromHub: boolean): { address: string } | { several: true } | { refused: AcrossSent & { ok: false } } | null {
     const started = this.peers?.startingHub?.(sessionId) ?? null
@@ -270,10 +268,20 @@ export class MailAcross extends AcrossReceipts {
     return this.wrote(sender, input.to, kept, h.name, r)
   }
 
+  /** The computer whose session `parent` names for a session a hub started here (`startingHub`), or null: the giver of its tasks from there (#2357) */
+  parentHost(sessionId: string): string | null {
+    return this.startedBy(sessionId)?.id ?? null
+  }
+
+  /** The hub that started a session here, as recorded with the session (`startingHub`), or null */
+  private startedBy(sessionId: string): { id: string; name: string } | null {
+    return this.peers?.startingHub?.(sessionId) ?? null
+  }
+
   /** A session a hub started here, to the session there that started it: through that hub only, which knows who that is */
   private async toParent(sessionId: string, sender: string, kept: Kept): Promise<AcrossSent> {
     const { question: _question, ...fields } = kept
-    const started = this.peers?.startingHub?.(sessionId) ?? null
+    const started = this.startedBy(sessionId)
     if (!started) {
       return {
         ok: false,
@@ -371,8 +379,9 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * On a machine: work a session of the hub gives one here (#1948 step 6), written as the task it is, under the hub's id, and given by this host's own
-   * delivery (held while the session is busy, as here). `forPerson` is the hub's word for its Assistant's `send_to_session`, taken from this link only
+   * On a machine: work a session of the hub gives one here, written as the task it is under the hub's id and given by this
+   * host's own delivery (held while the session is busy, as here). `forPerson` is the hub's word for its Assistant's
+   * `send_to_session`, taken from this link only
    */
   private taskFrom(hub: { id: string; name: string }, from: string, to: string, p: HostMailParams & { task: NonNullable<HostMailParams['task']> }): HubMailResult & { address?: string } {
     if (from === CENTRALU || isPerson(from)) return { ok: false, why: 'not_allowed', text: `${hub.name} gives work here only from its sessions.` }
@@ -394,10 +403,10 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * Centralu's report on a task a session here gave one on the other side (#1948 step 6): on a hub, a machine's session; on a machine, the hub's session
-   * its ask_project went to. Taken only from the side that task went to (its copy's one row is a session there), and written here as this host's report
-   * on its copy: the task's sender here (the heir, after a handoff) reads it as a local child's, answering the task. The same report again is the one
-   * written (`MessageService.report` dedupes it)
+   * Centralu's report on a task a session here gave one on the other side: on a hub, a machine's session; on a machine, the
+   * hub's session its ask_project went to. Taken only from the side that task went to (its copy's one row is a session there)
+   * and written here as this host's report on its copy: the task's sender here (the heir, after a handoff) reads it as a local
+   * child's, answering the task. The same report again is the one written (`MessageService.report` dedupes it)
    */
   private reportFrom(side: { hub: string } | { machine: string }, name: string, report: TaskReport, p: { replyTo?: string | undefined; text: string; centralu: boolean }): HubMailResult {
     const task = p.replyTo === undefined ? undefined : this.d.records.message(p.replyTo)
@@ -411,7 +420,7 @@ export class MailAcross extends AcrossReceipts {
       // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
       const party = row ? parseAddress(row.recipient) : null
       const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
-      const body = reportWords(childId, { outcome: report.outcome, answered: !!report.answer, ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
+      const body = reportWords(childId, { outcome: report.outcome, answer: answerKept(report.answer, TASK_REPORT_ANSWER_MAX), ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
       const written = this.d.service.report(task.id, { ...report, body })
       return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
     } catch (e) {
@@ -492,9 +501,9 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * The sessions on other computers named `name` exactly, and the computers that could not be asked. `here`: a session on
-   * this computer has the name, so a hub is waited for only as long as a reachable one answers in (`NAMED_HERE_MS`), not
-   * `FIND_MS`: one that does not answer then leaves the send to the session here (#2067 review)
+   * The sessions on other computers named `name` exactly, and the computers that could not be asked. `here`: a session on this
+   * computer has the name, so a hub is waited for only as long as a reachable one answers in (`NAMED_HERE_MS`), not `FIND_MS`:
+   * one that does not answer then leaves the send to the session here
    */
   async named(name: string, o: { here?: boolean } = {}): Promise<{ found: FoundEntry[]; away: { name: string; why: string }[] }> {
     const { entries, away } = await this.directory(name, true, false, o.here ? NAMED_HERE_MS : FIND_MS)
@@ -570,8 +579,9 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
 const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`
 
 /**
- * The notice to a sender whose tasks never reached a machine (#2289, docs/plans/linked-mail.md §10): one per sender and connect, so many lost at once
- * wake it once. Several are each named by id and recipient, the first `NAMED_MAX` of them; their copies are gone, so none is ever told again
+ * The notice to a sender whose tasks never reached a machine (docs/plans/linked-mail.md §10): one per sender and connect, so
+ * many lost at once wake it once. Several are each named by id and recipient, the first `NAMED_MAX` of them; their copies are
+ * gone, so none is ever told again
  */
 function notArrived(tasks: readonly { id: string; name: string }[]): { body: string; facts: { notArrived: { messages: string[] } }; dedupeKey: string } {
   const ids = tasks.map((t) => t.id)

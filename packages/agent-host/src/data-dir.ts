@@ -57,6 +57,22 @@ export function dataRoot(): string {
 }
 
 /**
+ * The folder session worktrees are made in (`<root>/<project id>/<session id>`): `worktrees` in the data folder, so dev
+ * and the packaged app never touch each other's, and a host or test given `CC_DATA_DIR` never makes one in the real
+ * `~/.centralu`. In the data folder, not beside the store: a `--db` named elsewhere moves the store and what the host
+ * keeps beside it (docs/agent-host/delegation/child-workspace.md "Where worktrees are, and what a start sweeps" lists
+ * them), and a worktree stays beside its recovery snapshots (`worktreeRecoveryFolder`), which a restore reads together.
+ */
+export function worktreesFolder(): string {
+  return join(dataRoot(), 'worktrees')
+}
+
+/** The folder of each archived session's worktree snapshots (`<root>/<session id>`), in the data folder as `worktreesFolder` is */
+export function worktreeRecoveryFolder(): string {
+  return join(dataRoot(), 'worktree-recovery')
+}
+
+/**
  * Which folder this host keeps its data in (#973), and which legacy folder (if any) is moved into it first.
  *
  * One rule: `CC_DATA_DIR` when it is set, else `~/.centralu` (`~/.centralu-dev` when `CC_DEV=1`). The legacy folder

@@ -7,10 +7,9 @@ import { ListRow, People, RowEnd, RowSubject } from './MailRows.jsx'
 import { taskStateLabel } from './mailLabels.js'
 
 /**
- * The Inbox's Tasks (#1577, owner 2026-11-14): the host's work grouped by who acts next (`groupTasks`), a group drawn only while it has a row, Done
- * folded. A row opens its chain in the Inbox's thread view; one between sessions opens read-only (`MailThreadView.lookIn`). The keys walk the rows
- * as they walk Waiting's (`Inbox`), so the row under the cursor is named by `cursor`. On a hub it lists the linked machines' work too, and names a
- * machine whose work could not be read (#2268).
+ * The Inbox's Tasks (#1577): the host's work grouped by who acts next (`groupTasks`), empty groups not drawn, Done
+ * folded. A row opens its chain in the thread view, read-only between sessions (`MailThreadView.lookIn`). The keys walk
+ * the rows as on Waiting (`cursor`). On a hub it lists linked machines' work and names one it could not read (#2268).
  */
 export function TaskList({
   groups: g,

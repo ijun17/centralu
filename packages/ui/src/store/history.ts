@@ -7,12 +7,8 @@ import { omitKey } from './patch.js'
 import { bumpChatKeysAbove, messagesToChat } from './transcript.js'
 import { formatCount } from '../app/format.js'
 
-/**
- * Reading a conversation's history from the host's store: its newest page, the page around a search
- * hit, an older page, and a launch card's subagent steps. The merge rules are in historyPages.ts.
- */
+// Reading a conversation's history from the host's store; the merge rules are in historyPages.ts.
 
-/** The store's actions that read a conversation's history */
 type HistoryActions = Pick<
   AppState,
   | 'loadHistory'
@@ -29,12 +25,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
   async loadHistory(sessionId) {
     const platform = get().platform
     if (!platform) return
-    /*
-     * A page that fails to arrive is asked for again (`RETRY_MS`), and meanwhile the cursor is dropped.
-     * Swallowing the failure left a re-read's gap for good: a resync re-reads sessions that already hold a cursor,
-     * and a cursor is what tells the screen and `focusSession` the conversation was read, so nothing read it again
-     * until the app was reopened. Without the cursor, opening the conversation reads it again too.
-     */
+    // docs/state-management.md §5: a failed page is read again, and the cursor dropped meanwhile so opening reads it too
     let held: AppState['history'][string] | undefined
     const msgs = await retryLadder(
       () => {
@@ -50,28 +41,20 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
           return { history }
         }),
     )
-    // Even if history fails to load, a new conversation is still possible, so the last failure is not shown
+    // Not shown: a new conversation is still possible
     if (!msgs) return
     try {
       const items = messagesToChat(msgs)
       bumpChatKeysAbove(items)
       set((s) => {
-        /*
-         * Screen rows are merged with history, never discarded (#79, `mergePage`). This used to
-         * discard the page whenever rows existed on screen — setting the cursor from the discarded
-         * page. Re-reads (catching up on a conversation continued elsewhere, filling a gap) go
-         * through the same path: within the page's range, history is the source of truth, and only
-         * whatever streams after it belongs to the screen.
-         * The cursor is the stored number of the top row of the merged result: the page's first
-         * row, or the cursor the person had already read back to when those rows are kept (`readBack`).
-         */
+        // Merged, never discarded (#79, `mergePage`); the cursor is the merged top row's stored number (`readBack`)
         const have = s.chat[sessionId] ?? []
         const held = s.history[sessionId]
         const read = readBack(have, held, msgs)
         const merged = mergePage(have, items, msgs)
         return {
           chat: { ...s.chat, [sessionId]: read.length ? prependPage(merged, read) : merged },
-          // Slots for past cards' app views (M4 B-1) — a view this UI already knows about (a live one) is left as is
+          // Past cards' app views (M4 B-1)
           inlineViews: mergeInlineHistory(s.inlineViews, sessionId, inlineViewsFromHistory(msgs)),
           history: {
             ...s.history,
@@ -83,7 +66,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
         }
       })
     } catch {
-      // A page that cannot be turned into rows is not worth taking the screen down for; the conversation goes on
+      // A page that cannot become rows does not take the screen down
       return
     }
     await syncInlineViews(get, set, sessionId)
@@ -93,9 +76,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     const platform = get().platform
     if (!platform) return
     try {
-      // `beforeSeq` is exclusive. The first page ends on the row search named; the second
-      // extends the window past it. Together they avoid walking every page from a long
-      // conversation's newest message while still leaving context after the matched line.
+      // `beforeSeq` is exclusive: the first page ends on the hit, the second adds context after it
       const [before, after] = await Promise.all([
         platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + 1),
         platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + HISTORY_PAGE + 1),
@@ -129,11 +110,8 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     const asked = { ...cur, loading: true }
     set((s) => ({ history: { ...s.history, [sessionId]: asked } }))
     /*
-     * The page is only good for the cursor it was asked from (#79). A re-read that lands while this
-     * one is out (`loadHistory`: a catch-up, a resync) or a trim on leaving the session moves the
-     * cursor and the rows under it; prepending the page then left the rows between it and the new
-     * cursor out for good, since the cursor was set below them. Such a page is dropped: the cursor
-     * that replaced it is right, and the next scroll asks again from there.
+     * A page is good only for the cursor it was asked from (#79): after a re-read or a trim moved it, prepending would
+     * leave a gap for good. Such a page is dropped, and the next scroll asks from the new cursor.
      */
     const stale = () => get().history[sessionId] !== asked
     try {
@@ -191,10 +169,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
     const after = cur.rows.at(-1)?.seq ?? 0
     set((s) => putSubagentSteps(s.subagentSteps, sessionId, callId, { ...cur, loading: true, error: null }))
     try {
-      /*
-       * With the first page, how many of the card's steps are in the session archive (#418), so an empty card says where they went
-       * rather than that none were recorded. A host before it does not answer, and the card reads as before.
-       */
+      // docs/state-management.md §4 (`messages.subagentTrashed`, #418); an older host does not answer, and the card goes without
       const [page, trashed] = await Promise.all([
         platform.agents.loadSubagentMessages(sessionId, callId, after, SUBAGENT_STEPS_PAGE),
         after === 0 ? platform.agents.subagentTrashed(sessionId, callId).then((r) => r.steps, () => cur.trashed) : cur.trashed,
@@ -229,10 +204,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       const { steps } = await platform.trash.trashSubagentSteps(sessionId)
       rereadSubagentSteps(sessionId, set, get)
       const name = get().sessions[sessionId]?.name ?? 'the session'
-      /*
-       * The person is on Settings → Archive, where the entry now stands with its Restore: the toast says what moved and
-       * points nowhere (docs/ux-writing.md §1.1)
-       */
+      // The person is on Settings → Archive, by the entry's Restore: the toast points nowhere (docs/ux-writing.md §1.1)
       set({
         toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the session archive`,
         // Archiving them is undone by the archive's own Restore, so it needs no question first (#1512)
@@ -266,11 +238,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
   },
 })
 
-/**
- * After a session's subagent steps was archived or came back (#418), its launch cards read them again: what an
- * open card shows is no longer what the host keeps under it. An open card reads at once and stays open; a closed one
- * forgets what it read, and reads when it is opened.
- */
+// docs/state-management.md §4: archiving or restoring steps makes open cards read again and closed ones forget (#418)
 function rereadSubagentSteps(sessionId: string, set: StoreSet, get: StoreGet): void {
   const cards = get().subagentSteps[sessionId]
   if (!cards) return

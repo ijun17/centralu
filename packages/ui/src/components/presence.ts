@@ -4,24 +4,13 @@ import { useLayoutEffect, useState } from 'react'
 export const LEAVE_MS = 150
 
 /**
- * Keeps a layer on screen for its exit animation after it is closed (owner, 2026-10-18: the palette, settings and the
- * top bar's dropdowns come and go smoothly, not cut off).
- *
- * `shown` is whether to render at all: true while open, and for `ms` after it closes. `leaving` is true in that tail,
- * for the exit class and to stop the layer taking presses while it fades. One rule for every layer, so none of them
- * keeps its own timer (the run window's did, CommandRunner).
- *
- * A timer, not animationend: with reduced motion there is no animation to end, and the layer must still go.
- *
- * With `ms` of 0 there is no exit: `shown` follows `open` in the same render. A zero-length timer is still a timer, and
- * whether it has run when something looks (a test on a paused clock, a slow frame) is not up to the layer.
+ * Keeps a layer on screen for its exit (docs/design-system.md §9): `shown` is true while open and for `ms`
+ * after, `leaving` in that tail (the exit class, no presses). A timer, not animationend: with reduced motion there is no
+ * animation to end. With `ms` 0 `shown` follows `open` in the same render; a zero-length timer would still be a timer,
+ * and whether it ran when something looks (a test on a paused clock, a slow frame) is not up to the layer.
  */
 export function usePresence(open: boolean, ms = LEAVE_MS): { shown: boolean; leaving: boolean } {
-  /*
-   * Decided while rendering, not in an effect: an effect runs after the frame that closed the layer, so that frame drew
-   * nothing and the next one drew the layer again for its exit, a blink (owner, 2026-10-18, the palette). React's
-   * "state from the previous props" pattern: the render that sees `open` turn false already says `leaving`.
-   */
+  // React's "state from the previous props": the render that sees `open` turn false already says `leaving` (§9)
   const [prev, setPrev] = useState(open)
   const [leaving, setLeaving] = useState(false)
   if (prev !== open) {

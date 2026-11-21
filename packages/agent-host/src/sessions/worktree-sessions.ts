@@ -51,6 +51,7 @@ import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
 import { durationText, sleep } from '../timing.js'
 import { realOs } from '../os/real.js'
+import { isUuid } from '../uuid.js'
 
 /** How long a project's setup command may run in a new worktree */
 const SETUP_TIMEOUT_MS = 90_000
@@ -67,6 +68,11 @@ export const STOPPING_WAIT_MS = 10_000
  * store needs no step; it goes with the session when it is deleted for good.
  */
 export const branchWasThereKey = (sessionId: string) => `worktree_branch_was_there:${sessionId}`
+
+/** Sessions by name, quoted, for a refusal that names who is still in a worktree */
+function sessionNames(sessions: readonly { name: string }[]): string {
+  return sessions.map((s) => `"${s.name}"`).join(', ')
+}
 
 /** A branch a new worktree starts on that was there already (#1662): where it starts, and whether a local branch of that name exists */
 type TakenBranch = ForkBase & { sha: string; existing: boolean }
@@ -93,6 +99,14 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
   }
 }
 
+/** The folders directly in `dir`, not links; none when it cannot be read */
+function childFolders(dir: string): string[] {
+  try {
+    return realOs().files.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return []
+  }
+}
 
 /** The line a new session shows when its worktree was set up only in part (#841 item 3); `problems` from `createWorktree` */
 export function worktreeSetupNotice(problems: readonly string[]): string {
@@ -103,7 +117,7 @@ export function worktreeSetupNotice(problems: readonly string[]): string {
 
 /**
  * The same, for the agent's task (#841 item 3): Centralu's own words in its bracket, and what failed as quoted data
- * after them. A problem line carries file names from the project and the setup command's own output (#989 review),
+ * after them. A problem line carries file names from the project and the setup command's own output (#989),
  * which could otherwise read as Centralu speaking.
  */
 export function worktreeSetupFrame(problems: readonly string[]): string {
@@ -191,19 +205,14 @@ export class WorktreeSessions {
     }
     const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
     /*
-     * Where it forks from (#76). Order: **what was asked for -> the project's trunk as the remote has it (#1484) -> the local trunk -> HEAD**.
-     *
-     * Why what was asked for comes first (user feedback, 2026-09-07: "there is no way to say
-     * where to fork a new worker from"): the trunk is the project's default, not the answer for
-     * every case. Without a way to say "just this one, from that branch", the only path left is
-     * swapping the branch in the original folder, which gives up the whole reason for using
-     * worktrees in the first place.
-     *
-     * If asked for something that does not exist, it is **rejected.** Silently falling back to
-     * HEAD would let the person think it forked from that branch, and the mistake would not show
-     * up until commits had already piled up. A trunk that has disappeared is a different case —
-     * that is stale configuration, not something asked for right now, so it falls back to the next
-     * place (`resolveForkBase`) and says so in the start answer.
+     * Where it forks from (#76). Order: **what was asked for -> the project's trunk as the remote has it (#1484) -> the local
+     * trunk -> HEAD**. What was asked for comes first (user feedback, 2026-09-07: "there is no way to say where to fork a new
+     * worker from"): the trunk is the project's default, not the answer for every case, and without a way to say "just this
+     * one, from that branch" the only path left is swapping the branch in the original folder, which gives up the whole reason
+     * for using worktrees. Asked for something that does not exist, it is **rejected:** silently falling back to HEAD would let
+     * the person think it forked from that branch, and the mistake would not show until commits had piled up. A trunk that has
+     * disappeared is stale configuration, not something asked for now, so it falls back to the next place (`resolveForkBase`)
+     * and says so in the start answer.
      */
     const asked = params.worktreeBase?.trim()
     const askedSha = asked ? await gitRevParse(params.cwd, asked) : null
@@ -293,11 +302,15 @@ export class WorktreeSessions {
     const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
     if (!holder) return
     const where = `${branch} is checked out at ${holder.path}`
-    const id = canonicalKey(dirname(holder.path)) === canonicalKey(join(this.host.worktreeRoot, projectId)) ? basename(holder.path) : null
-    const live = id ? this.host.meta.get(id) : undefined
-    if (live) throw rpcError(`${where}, the worktree of the session "${live.name}". Delete that session first, or start on another branch.`)
-    const archived = id && isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
-    if (!archived) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    const id = basename(holder.path)
+    const live = this.host.meta.get(id)
+    if (live) throw rpcError(`${where}, a folder named for the session "${live.name}", which is not archived. Delete that session first, or start on another branch.`)
+    const archived = isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
+    // Whose worktree it is, by the path and project the session recorded: where the folder sits under today's root does not decide it
+    const recorded = archived?.record.projectId === projectId ? archived.session.worktree?.path : undefined
+    if (!archived || !recorded || canonicalKey(recorded) !== canonicalKey(holder.path)) {
+      throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    }
     const kept = (why: string) => rpcError(`${where}, the worktree of the archived session "${archived.session.name}", which ${why}. Nothing was removed: restore that session to keep its work, or start on another branch.`)
     /*
      * Held across the checks and the removal: the archive refuses a restore or a purge of a session whose worktree is
@@ -320,11 +333,72 @@ export class WorktreeSessions {
       }
       // Restored between the read above and the mark: it is a session's worktree again, and is not taken
       if (this.host.meta.has(sid) || !this.host.store.trash.trashedSession(sid)) throw kept('was restored from the archive just now')
+      // A session working in it (a helper started there) loses its folder: refused, as deleting the worktree's session is
+      const occupants = this.host.sessionsInside(archived.session)
+      if (occupants.length) throw kept(`has ${sessionNames(occupants)} working in it`)
       await gitWorktreeRemove(cwd, holder.path, { worktreeRoot: this.host.worktreeRoot })
     } finally {
       this.worktreeCleanup.delete(sid)
     }
     console.error(`[worktree] removed the archived session ${sid.slice(0, 8)}'s worktree at ${holder.path} to start a new one on ${branch}`)
+  }
+
+  /**
+   * Removes the session folders in the worktree root that a worktree removal left part way (#2344): a folder named as
+   * this host names one (`<project id>/<session id>`, the id a UUID) that no session owns, that git does not list and
+   * that has no `.git` of its own, so no git command can reach or recover it. Owned means a live or archived session has
+   * its name as its id, or has it (or a folder inside it) as its worktree or working folder.
+   *
+   * A folder no session owns that git still lists stays (`leftoverOnly`): a purge without "remove worktree" keeps it on
+   * the person's word, and "no uncommitted changes and no unpublished commits" still misses what git ignores (`.env`,
+   * local builds). Each removal and each folder kept for want of an owner is a line in the log.
+   *
+   * Run once as the host starts: the folders are listed before this returns its promise, so a worktree made by this
+   * host is never among them; ownership is read again for each folder just before it is judged.
+   */
+  sweepLeftoverWorktrees(): Promise<void> {
+    const root = this.host.worktreeRoot
+    const projects = childFolders(root)
+      .filter(isProjectId)
+      .map((projectId) => ({ projectId, folders: childFolders(join(root, projectId)).filter(isUuid).map((name) => join(root, projectId, name)) }))
+    return (async () => {
+      for (const { projectId, folders } of projects) {
+        const orphans = folders.filter((path) => !this.ownedFolder(path))
+        if (!orphans.length) continue
+        let repo: string
+        try {
+          repo = this.host.cwdOf(projectId)
+        } catch {
+          console.error(`[worktree] kept ${orphans.length} folder(s) in ${join(root, projectId)} that no session owns: no project ${projectId} is registered here`)
+          continue
+        }
+        for (const path of orphans) {
+          if (this.ownedFolder(path) || !realOs().files.existsSync(path)) continue
+          await gitWorktreeRemove(repo, path, { worktreeRoot: root, leftoverOnly: true }).then(
+            () => console.error(`[worktree] removed ${path}: a worktree removal had left it part way, and no session owns it`),
+            (e: Error) => console.error(`[worktree] kept ${path}, which no session owns: ${e.message.trim()}`),
+          )
+        }
+      }
+    })()
+  }
+
+  /**
+   * Whether a live or archived session has `path`'s name as its id, or `path` or a folder inside it as its worktree or
+   * working folder. Only a path written under the worktree root is resolved: one elsewhere cannot be inside, and resolving
+   * it could wait on a drive that is not there.
+   */
+  private ownedFolder(path: string): boolean {
+    const id = basename(path)
+    if (this.host.meta.has(id) || this.host.store.trash.isTrashed(id)) return true
+    const roots = [this.host.worktreeRoot, canonicalPath(this.host.worktreeRoot)]
+    const real = canonicalPath(path)
+    const sessions = [...this.host.meta.values(), ...this.host.store.sessions.readSessions('1 = 1')]
+    return sessions.some((s) => {
+      if (s.id === id) return true
+      const used = [s.worktree?.path, this.host.store.sessions.sessionCwd(s.id)]
+      return used.some((p) => p != null && roots.some((r) => isInside(r, p)) && isInside(real, canonicalPath(p)))
+    })
   }
 
   /**
@@ -361,24 +435,16 @@ export class WorktreeSessions {
   }
 
   /**
-   * Sets up a new worktree's workspace (#69): copy configured files, reuse JS dependencies, run setup.
-   *
-   * A fresh worktree is an empty workspace with only tracked files — no node_modules, no .env — so
-   * the session's first turn starts not with real work but with "command not found". The agent cannot
-   * even recover a .env-type file on its own (its contents were never in git). This is the single most
-   * repeated complaint across this whole category.
-   *
-   * **Session creation continues even if this fails.** A half-set-up workspace is something the agent
-   * can finish setting up itself, but failing to create the session just because setup died would
-   * leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log) and
-   * returned, one line each, so the new session can say it (#841 item 3): logged only, a `.env` that
-   * never arrived was found by the agent's first failing command.
-   *
-   * **Capped at 90 seconds.** pnpm install takes 6.5 seconds in this repository (measured), but a cold
-   * store or a heavy project takes longer. Since this is longer than the 30-second RPC limit, the
-   * creation response can be delayed — but that is better than opening the session while setup is
-   * still running: if the first turn has to compete with an install, this feature's whole reason for
-   * existing disappears.
+   * Sets up a new worktree's workspace (#69): copy configured files, reuse JS dependencies, run setup. A fresh worktree is an
+   * empty workspace with only tracked files (no node_modules, no .env), so the session's first turn would start with "command
+   * not found", and the agent cannot recover a .env-type file on its own (its contents were never in git). **Session creation
+   * continues even if this fails:** a half-set-up workspace is something the agent can finish itself, but failing to create the
+   * session because setup died would leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log)
+   * and returned, one line each, so the new session can say it (#841 item 3): logged only, a `.env` that never arrived was
+   * found by the agent's first failing command. **Capped at 90 seconds:** pnpm install takes 6.5 seconds in this repository
+   * (measured), but a cold store or a heavy project takes longer; that is longer than the 30-second RPC limit, so the creation
+   * response can be delayed, which is better than opening the session while setup still runs: a first turn competing with an
+   * install defeats the feature.
    */
   private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<string[]> {
     const setup = this.host.store.projects.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
@@ -421,10 +487,10 @@ export class WorktreeSessions {
         continue
       }
       /*
-       * Session creation continues even if a single copy fails (#167) — this is the promise made in
-       * the header comment above. This used to sit outside the try block, so a single unreadable file
-       * inside node_modules threw an exception all the way out of createSession, and since that path
-       * runs before the failure cleanup, the worktree and its branch were left with no owner.
+       * Session creation continues even if a single copy fails (#167) — this is the promise made in the header comment above.
+       * It sits inside the try block: outside it, a single unreadable file inside node_modules would throw all the way out of
+       * createSession, and since that path runs before the failure cleanup, the worktree and its branch would be left with no
+       * owner.
        */
       try {
         // Clone is tried first (#76) — an 8.5GB target crosses over in 4 seconds and 10MB (measured). Falls
@@ -538,7 +604,7 @@ export class WorktreeSessions {
     const occupied = (): { ok: false; error: string } | null => {
       const occupants = this.host.sessionsInside(target)
       if (!occupants.length) return null
-      return { ok: false, error: `${occupants.map((s) => `"${s.name}"`).join(', ')} ${occupants.length === 1 ? 'is' : 'are'} still in the worktree of "${target.name}" — delete ${occupants.length === 1 ? 'it' : 'them'} first` }
+      return { ok: false, error: `${sessionNames(occupants)} ${occupants.length === 1 ? 'is' : 'are'} still in the worktree of "${target.name}" — delete ${occupants.length === 1 ? 'it' : 'them'} first` }
     }
     const taken = occupied()
     if (taken) return taken
@@ -618,7 +684,7 @@ export class WorktreeSessions {
     }
     const projectId = m.projectId
     /*
-     * Only the worktree Centralu made for a session another session started (#1161 review): a person's own worktree
+     * Only the worktree Centralu made for a session another session started (#1161): a person's own worktree
      * session on the same branch name, named by an id a caller knows, is never one, whatever else holds
      */
     if (!wt.base || wt.branch !== branch || !projectId || recordedAgentDepth(this.host.store.settings, sessionId) < 1) {

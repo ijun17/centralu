@@ -2,23 +2,10 @@ import { z } from 'zod'
 import { ToolName } from './ids.js'
 
 /**
- * The tokens reported by a tool (`usage_update`). The three input fields **do not overlap** —
- * the same accounting as the Anthropic API:
- *
- *   inputTokens          input that did not come from cache
- *   cacheReadTokens      input read from cache
- *   cacheCreationTokens  input written to cache
- *
- * So all the input the model actually read is the sum of the three. Codex reports input that
- * came from cache **inside** its input count, so the adapter subtracts it to fit this shape
- * (`codex/token-readings.ts`). If the two tools did not carry the same meaning here, whatever sums
- * them up (an app's requested-agent history, M4 D-5) would record a different number depending
- * on the tool.
- *
- * `cacheCreationTokens` is 0 when the tool does not report cache writes (Codex), not absent (#843): every reader sums
- * it as a number (an app's requested-agent usage, `app-agents.ts`), so making it optional would change its meaning
- * for each of them, a change rather than an addition (protocol.md §4). Where "wrote nothing" and "not reported" must
- * differ, the prompt cache accounting, the reading is `RequestInput`, which leaves it absent.
+ * A tool's running token reading (`usage_update`). The three input fields do not overlap, as in the Anthropic API, so
+ * their sum is all the input the model read; Codex counts cached input inside its input, and its adapter subtracts it
+ * (`codex/token-readings.ts`). `cacheCreationTokens` is 0, not absent, when the tool reports no writes (Codex): every
+ * reader sums it, so making it optional would be a change, not an addition (docs/protocol.md §4). See `RequestInput`.
  */
 export const TokenUsage = z.object({
   inputTokens: z.number(),
@@ -30,59 +17,34 @@ export const TokenUsage = z.object({
 export type TokenUsage = z.infer<typeof TokenUsage>
 
 /**
- * The input of **one model request**, split as `TokenUsage` splits it — what the prompt cache is judged by.
- *
- * `TokenUsage` is a running reading (Claude's result is cumulative over the process, Codex's `total` over the
- * thread), so it cannot be put into a window of time. This is sent once per request, alongside it, by the adapter
- * that can tell requests apart: Claude per assistant message (deduplicated by its message id), Codex per change of
- * its thread's total (`last`).
- *
- * `cacheCreationTokens` is **absent when the tool does not report cache writes**: Codex reports the input it read
- * from cache and nothing about writing it, and an absent figure must not read as "wrote nothing".
+ * One model request's input, split as `TokenUsage` splits it: what the prompt cache is judged by, since a running
+ * reading cannot be put into a window of time (docs/agent-host/prompt-cache.md). `cacheCreationTokens` is absent when
+ * the tool reports no writes (Codex), which must not read as "wrote nothing".
  */
 export const RequestInput = z.object({
   inputTokens: z.number(),
   cacheReadTokens: z.number(),
   cacheCreationTokens: z.number().optional(),
-  /** The tokens the model wrote back, as the tool reported them for this request; absent when it did not say (usage history, §6.2) */
+  /** As the tool reported them for this request; absent when it did not say */
   outputTokens: z.number().optional(),
-  /**
-   * The subagent that made the request (Claude: the id of the tool call that launched it); absent for the session's
-   * own conversation. A subagent has a prompt and a cache of its own, so its requests are judged apart.
-   */
+  /** The subagent that made it (Claude: the launching call's id); absent for the session's own. It has its own cache */
   agent: z.string().optional(),
-  /**
-   * How long what this request wrote stays cached, as the API reported it (Claude's `cache_creation` split). Absent
-   * when the tool does not say, or the request wrote nothing.
-   */
+  /** How long what it wrote stays cached (Claude's `cache_creation` split); absent when not said or nothing written */
   cacheTtl: z.enum(['5m', '1h']).optional(),
   /**
-   * Of `cacheCreationTokens`, what the API said stays cached an hour and five minutes (Claude's `cache_creation` split, #1492):
-   * the two are priced apart (docs/agent-host/prompt-cache.md), so the weighting of writes needs them, not only which one the request had
-   * most of. Absent when the tool did not split its writes; the part that is in neither is priced as a five-minute write.
+   * The one-hour and five-minute parts of `cacheCreationTokens`, as the API split them: priced apart
+   * (docs/agent-host/prompt-cache.md). Absent when not split; a part in neither is priced as a five-minute write.
    */
   cacheWrite1hTokens: z.number().optional(),
   cacheWrite5mTokens: z.number().optional(),
-  /** The model that served this request, as the tool reported it (Claude's `message.model`); absent when it does not say (usage history, §6.2) */
+  /** The model that served it (Claude's `message.model`); absent when the tool does not say */
   model: z.string().optional(),
 })
 export type RequestInput = z.infer<typeof RequestInput>
 
 /**
- * Why a rebuild most likely happened, from what the host saw in that session between the request before it and this
- * one (docs/agent-host/prompt-cache.md). A string on the wire, so a newer host's cause reaches an older screen as its name.
- *
- *   cold_start         the session's first request
- *   subagent           a subagent's first request (its own prompt)
- *   new_process        the session's process was started again: resumed, restarted, revived, a new host
- *   model_change       the model changed
- *   compaction         the conversation was compacted or cleared
- *   thread_restart     Codex's thread was restarted for its apps or settings
- *   instructions       the session's tools or instructions changed (apps attached, the Assistant's skills)
- *   launch_settings    retained launch settings changed or were not recorded by the previous build
- *   expired            idle longer than the cache lifetime the API reported
- *   probably_expired   idle more than 5 minutes, the lifetime unknown
- *   unknown            none of these
+ * Why a rebuild most likely happened, from what the host saw since the request before; each cause in
+ * docs/agent-host/prompt-cache.md. A string on the wire, so a newer host's cause reaches an older screen as its name.
  */
 export const RebuildCause = z.enum([
   'cold_start',
@@ -110,9 +72,8 @@ const CacheCounts = z.object({
   /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
   rebuildCauses: z.record(z.string(), z.number()).optional(),
   /**
-   * What the rebuilds wrote to the cache, in tokens (#1492): the sum of the cache writes of the requests counted as rebuilds, so the
-   * steady writes every new message needs are not in it. For a tool that does not report writes (Codex) the input it did not read
-   * from the cache stands in. Absent from a host that predates it, and from hours an earlier build stored.
+   * The cache writes of the rebuilds only, so not the steady writes of each new message; for Codex, the input it did
+   * not read from the cache. Absent from an older host, and from hours an earlier build stored.
    */
   rebuildTokens: z.number().optional(),
 })
@@ -120,18 +81,15 @@ const CacheCounts = z.object({
 /** One session's share of a cache window (`CacheWindowStats.sessions`) */
 export const CacheSessionStats = z.object({
   sessionId: z.string(),
-  /** The session's name when the host was asked; empty for a session that no longer exists */
+  /** Empty for a session that no longer exists */
   name: z.string(),
   ...CacheCounts.shape,
 })
 export type CacheSessionStats = z.infer<typeof CacheSessionStats>
 
 /**
- * The prompt cache over one window of time, summed from the requests in it (docs/agent-host/prompt-cache.md).
- *
- * The sums, not the rate: the hit rate is `cacheReadTokens / (inputTokens + cacheReadTokens + cacheCreationTokens)`
- * and is computed where it is shown (`@cc/core` `cacheHitRate`), so a host and a UI of different builds cannot
- * disagree on what it means.
+ * The prompt cache over one window of time. Sums, not the rate: the hit rate is computed where it is shown (`@cc/core`
+ * `cacheHitRate`), so a host and a UI of different builds cannot disagree on it (docs/agent-host/prompt-cache.md).
  */
 export const CacheWindowStats = CacheCounts.extend({
   /** `5h`, `today` */
@@ -141,18 +99,12 @@ export const CacheWindowStats = CacheCounts.extend({
   /** ISO8601, where the window begins */
   since: z.string(),
   /**
-   * What the cache cost in units of an uncached input token (#1492), for the share the writes were of it: the tokens read from the cache
-   * times the price of a read, and the tokens written times the price of a write, each as a ratio to uncached input (Anthropic: read 0.1,
-   * five-minute write 1.25, one-hour write 2; Codex by model, docs/agent-host/prompt-cache.md). No money: the ratios, not the prices. For a tool
-   * that does not report writes (Codex) the write units are those of the input it did not read from the cache. Absent from a host that
-   * predates them.
+   * In units of an uncached input token, by price ratios, no money (docs/agent-host/prompt-cache.md). For a tool that
+   * reports no writes (Codex) the write units are those of the input it did not read from the cache. Absent: older host.
    */
   cacheReadCost: z.number().optional(),
   cacheWriteCost: z.number().optional(),
-  /**
-   * The shortest and longest idle time before a rebuild put down to the cache expiring (`expired`, `probably_expired`),
-   * in milliseconds; absent when there was none
-   */
+  /** The shortest and longest idle (ms) before a rebuild put down to `expired` or `probably_expired`; absent when none */
   expiredIdleMs: z.object({ min: z.number(), max: z.number() }).optional(),
   /** The sessions that cost the cache most in this window, most first, a few at most */
   sessions: z.array(CacheSessionStats),
@@ -163,19 +115,13 @@ export type CacheWindowStats = z.infer<typeof CacheWindowStats>
 export const CacheStats = z.object({
   /** The tool reports cache writes (Claude). False: reads only (Codex), and every write figure here is 0 */
   writes: z.boolean(),
-  /**
-   * ISO8601, when this host began counting. The figures live in the host's memory, so a window that began before
-   * this is only partly known, and the screen says "since" this time instead of the window's name.
-   */
+  /** ISO8601. The figures live in host memory, so the screen says "since" this for a window that began earlier */
   countingSince: z.string(),
   windows: z.array(CacheWindowStats),
 })
 export type CacheStats = z.infer<typeof CacheStats>
 
-/**
- * What `usage.history` groups the token rows by (docs/agent-host/usage.md "Usage over time"); `day` and `hour` are the time axis
- * (`groupBy`).
- */
+/** The token rows' key (docs/agent-host/usage.md "Usage over time"); `day` and `hour` are the time axis (`groupBy`) */
 export const UsageHistoryBy = z.enum(['session', 'project', 'model', 'tool'])
 export type UsageHistoryBy = z.infer<typeof UsageHistoryBy>
 
@@ -198,7 +144,7 @@ export const UsageHistoryRow = z.object({
   period: z.string(),
   /** The session id, project id, model or tool; `*` for the rows folded into "others", `none` for the sessions of no project */
   key: z.string(),
-  /** What to call the key; a project that no longer exists is named by its id */
+  /** A project that no longer exists is named by its id */
   name: z.string(),
   requests: z.number(),
   inputTokens: z.number(),
@@ -216,7 +162,7 @@ export type UsageHistoryRow = z.infer<typeof UsageHistoryRow>
 
 /** The answer of `usage.history`: the limit readings and the token rows of a time range */
 export const UsageHistory = z.object({
-  /** What the rows' keys are, as asked: a hub qualifies the ids of a linked machine's sessions and projects by it */
+  /** As asked: a hub qualifies the ids of a linked machine's sessions and projects by it */
   by: UsageHistoryBy,
   readings: z.array(UsageHistoryReadings),
   rows: z.array(UsageHistoryRow),
@@ -226,20 +172,15 @@ export const UsageHistory = z.object({
 export type UsageHistory = z.infer<typeof UsageHistory>
 
 /**
- * A usage snapshot — **per account** (unrelated to any particular session or directory).
- *
- * Received as an array since the number and names of windows differ by tool:
- *   Claude — session (5 hours), weekly_all, weekly_scoped
- *   Codex  — primary (10080 minutes = weekly), secondary
- * The UI draws this without knowing how many windows there are. Adding a new window never
- * requires a screen change.
+ * One limit window of an account, not of a session. Tools differ in their windows (Claude: session (5 hours),
+ * weekly_all, weekly_scoped; Codex: primary (weekly), secondary), so the UI draws any number of them.
  */
 export const UsageWindow = z.object({
   id: z.string(),
   label: z.string(),
-  /** 0 to 100. How much of the limit has been used */
+  /** 0 to 100, of the limit used */
   percent: z.number(),
-  /** When the window resets (ISO). Null if unknown */
+  /** ISO; null if unknown */
   resetsAt: z.string().nullable().default(null),
   /** If this window applies to one specific model only, that model's name */
   scope: z.string().nullable().default(null),
@@ -249,21 +190,17 @@ export type UsageWindow = z.infer<typeof UsageWindow>
 export const UsageSnapshot = z.object({
   plan: z.string().nullable().default(null),
   windows: z.array(UsageWindow).default([]),
-  /** Daily tokens. A tool that cannot report this leaves it empty — the UI collapses that row on its own */
+  /** Empty from a tool that cannot report it: the UI collapses that row */
   daily: z.array(z.object({ date: z.string(), tokens: z.number() })).default([]),
   /**
-   * What the tool counted locally, as a total and not a limit (#1623): a tool with no limits to read (`agents.usage`
-   * answers it `notReported`) may still say how much was used on this computer. Absent when it says nothing, and from a
-   * host that predates it.
+   * What the tool counted on this computer, a total and not a limit: a tool with no limits to read (`notReported`) may
+   * still say this. Absent when it says nothing, and from an older host.
    */
   totals: z
     .object({
       /** What the totals cover, in the words the person reads under their title ("all time") */
       scope: z.string(),
-      /**
-       * When the host read them, in ms since the epoch. A large database is read slowly, so the host keeps the last totals and
-       * the screen says how old they are. Absent from a host that predates it
-       */
+      /** When the host read them (ms): a large database reads slowly, so the host keeps the last ones and the screen says their age */
       asOf: z.number().optional(),
       rows: z.array(
         z.object({
@@ -271,7 +208,6 @@ export const UsageSnapshot = z.object({
           label: z.string(),
           /** Null: the tool printed it in a form the host could not read. The screen shows it as unread, never as a number */
           value: z.number().nullable(),
-          /** How the screen writes the value: a count, a number of tokens, or dollars */
           unit: z.enum(['count', 'tokens', 'usd']),
         }),
       ),

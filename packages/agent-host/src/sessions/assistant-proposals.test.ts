@@ -38,9 +38,9 @@ describe('assistant proposals read from a row another build wrote', () => {
 })
 
 /*
- * What a change writes back (#384). An approval rewrites the skills row whole, so an approved skill a newer build
- * stored in a shape this one cannot read was dropped by the next approval, and a row that was not a list was replaced
- * by it with no word: the approved skills were gone.
+ * What a change writes back (#384). An approval rewrites the skills row whole, so an approved skill a newer build stored in a
+ * shape this one cannot read must survive the next approval, and a row that is not a list must not be replaced by it with no
+ * word: the approved skills would be gone.
  */
 describe('a change written over a row another build wrote', () => {
   it('approving a skill keeps an approved skill this build cannot read', () => {
@@ -71,8 +71,8 @@ describe('a change written over a row another build wrote', () => {
 })
 
 /**
- * A screen re-reads the lists when told one changed (#703), so the tell must come **after** the write: a read made on it
- * has to return the new list. (The screen used to read on the Assistant's `tool_call`, which comes before any of this.)
+ * A screen re-reads the lists when told one changed (#703), so the tell must come **after** the write: a read made on it has to
+ * return the new list. It does not come on the Assistant's `tool_call`, which comes before any of this.
  */
 describe('a change to a proposal list is announced after it is saved', () => {
   it('a skill proposal, its answer, an MCP proposal and its dismissal each announce once, with the list already saved', () => {
@@ -144,8 +144,8 @@ describe('an approval announces once, when what it changes is saved', () => {
 })
 
 /*
- * The person approves a proposal by its name, and approval installs what is stored when they press it (#838). A second
- * proposal under the same name replaced the first while the person read it: they approved one command and got another.
+ * The person approves a proposal by its name, and approval installs what is stored when they press it (#838). A second proposal
+ * under the same name must not replace the first while the person reads it: they would approve one command and get another.
  */
 describe('a pending proposal is never replaced', () => {
   it('a second MCP proposal under a pending name is refused, and approval installs the one the person saw', () => {

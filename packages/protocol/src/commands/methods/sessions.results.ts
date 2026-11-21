@@ -24,9 +24,9 @@ import {
   UpdateSettingsResult,
 } from '../sessions.js'
 
-/** The results of the `sessions` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./sessions.params.ts */
+/** Results of the `sessions` methods, read through `parseRpcResult`. Params and what each method does: ./sessions.params.ts */
 export const sessionsResults = {
-  /** `worktreeBase`: where a new worktree forked from and what could not be done to make it current (#1488); an older host leaves it out */
+  /** `worktreeBase`: where a new worktree forked from, and what could not be done to make it current. Absent from an older host */
   'agents.createSession': SessionInfo.extend({ worktreeBase: z.string().optional() }),
   'agents.send': z.object({ ok: z.literal(true) }),
   'agents.respondApproval': z.object({ ok: z.literal(true) }),
@@ -85,7 +85,7 @@ export const sessionsResults = {
       changedFiles: z.number(),
       /** At least `changedFiles` (the host's count stopped at its cap) */
       more: z.boolean().optional(),
-      /** git did not answer: `dirty` is true because clean is not known (#850 review) */
+      /** git did not answer: `dirty` is true because clean is not known */
       unknown: z.boolean().optional(),
     })
     .nullable(),
@@ -98,11 +98,7 @@ export const sessionsResults = {
     session: SessionInfo,
     resumed: z.boolean(),
     reason: z.string().optional(),
-    /**
-     * **Someone else holds** this conversation. The screen decides which fork to offer based
-     * on this value alone — it never parses the reason string (doing that would make the
-     * wording a contract that breaks silently if it is ever edited).
-     */
+    /** Someone else holds the conversation. The screen offers the fork on this alone, never by parsing `reason` */
     lockedElsewhere: z.boolean().optional(),
   }),
   'agents.forkConversation': z.object({
@@ -157,30 +153,16 @@ export const sessionsResults = {
     supported: z.boolean(),
     reason: z.string().optional(),
     usage: UsageSnapshot.nullable(),
-    /**
-     * With `supported: false`: the tool has no way to report limits at all (its adapter has none), as against a read
-     * that failed, which also answers `supported: false` (not logged in, a timeout). The screen draws only this one as
-     * a plain dimmed ring (#1616); a host that predates it sends neither, and its failed and never answers look alike,
-     * so both stay the unknown they were. Absent otherwise.
-     */
+    /** With `supported: false`: the tool cannot report limits at all, not a failed read (docs/protocol.md §3 "usage") */
     notReported: z.boolean().optional(),
     /**
-     * The answer stands in for one the host is still reading (#1623): a tool with no limits whose own command was
-     * slower than the host waits (`usage` holds nothing yet), or whose last answer is old and is being read again (`usage`
-     * is that answer, with its `totals.asOf`). Asking again with `settle` returns what the command read. Absent
-     * otherwise, and from a host that predates it.
+     * Stands in for a read of the tool's own command still running: `usage` is empty (slower than the host waits) or the
+     * old answer with its `totals.asOf`. `settle` waits for the read.
      */
     provisional: z.boolean().optional(),
-    /**
-     * Set on the hub's answer for a linked machine when `usage` is this computer's own because both are logged in to
-     * the same account (#726); the meter says so. Absent otherwise, and from a host that predates it.
-     */
+    /** On the hub's answer for a linked machine: `usage` is the hub's own, both on one account; the meter says so */
     sameAccountAsHub: z.boolean().optional(),
-    /**
-     * The prompt cache over the last hours, counted by this host from its sessions' requests (docs/agent-host/prompt-cache.md).
-     * Independent of `supported`: a limit the tool would not tell does not hide what the host counted.
-     * Absent from a host that predates it.
-     */
+    /** Counted by this host (docs/agent-host/prompt-cache.md), whatever `supported` says. Absent from an older host */
     cache: CacheStats.optional(),
   }),
   'agents.account': z.object({ loggedIn: z.boolean().nullable(), fingerprint: z.string().nullable() }),
@@ -189,11 +171,7 @@ export const sessionsResults = {
     runs: z.array(TrashedRun).default([]),
     bytes: z.number(),
     unreached: z.array(UnreachedMachine).optional(),
-    /**
-     * The subagent steps moved to the trash without their session (#418), most recently moved first. Their bytes
-     * are in `bytes`. `trash.empty` leaves them: the window deletes each one it listed (`trash.purgeSubagentSteps`).
-     * Absent from a host before it.
-     */
+    /** Steps moved without their session, most recent first, counted in `bytes` (docs/protocol.md §3). Absent from an older host */
     subagentSteps: z.array(TrashedSubagentSteps).optional(),
   }),
   'trash.readRun': z.object({

@@ -1,9 +1,6 @@
 /**
- * Store regression tests: the conversation, its rows and the composer.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: the conversation, its rows and the composer. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -15,15 +12,8 @@ import { delta, line, resetStore, sessionInfo } from './store.test-helpers.js'
 beforeEach(resetStore)
 
 /*
- * When the current turn started (issue #23).
- *
- * The "Waiting for response" line counted up from its own mount, so any remount put a
- * three-minute turn back at zero. The instant lives here now and the count is derived from
- * it — which only helps if the instant itself holds still while a turn streams, and is let
- * go when the turn ends. Both are what these check.
- *
- * It is deliberately not `waitingSince`: that one is when a session started waiting for a
- * *human*, and the reducer nulls it the moment a session goes back to working.
+ * The instant lives in the store, so a remount of the "Waiting for response" line does not reset the count; it holds
+ * still while a turn streams and goes when it ends. Not `waitingSince`: that is a wait for a human, nulled once working.
  */
 describe('the instant a turn started (issue #23)', () => {
   it('the instant does not move while streaming continues — elapsed time is derived from it', async () => {
@@ -71,9 +61,8 @@ describe('preventing the opening prompt from being drawn twice', () => {
     const p = await useStore.getState().addProject('/tmp/ip')
     const info = await useStore.getState().createSession(p.id, { initialPrompt: 'first instruction' })
 
-    // The host also stores and announces the opening prompt (the `user_message` in manager.createSession)
-    // — the mock also announces it before the response (#172). Even if the same confirmation arrives a
-    // second time (reconnect replay), it is never drawn twice
+    // The host (`manager.createSession`) and the mock announce the opening prompt before the response (#172);
+    // a confirmation replayed on reconnect is drawn once
     useStore
       .getState()
       .dispatchEvent({ type: 'user_message', sessionId: info.id, seq: 1, text: 'first instruction' } as NormalizedEvent)
@@ -94,21 +83,14 @@ describe('whether a conversation stood at the bottom (issue #31)', () => {
     expect(useStore.getState().stickToBottom['sb-s1']).toBe(false)
   })
 
-  /*
-   * The default (bottom) is recorded **by not being recorded**. That way, an entry does not pile up
-   * for every session that was merely passed through — the same rule as an unfinished draft clearing
-   * itself once emptied.
-   */
+  // The default (bottom) is not stored, so sessions merely passed through leave no entry, as an emptied draft clears itself.
   it('returning to the bottom makes the entry itself disappear', () => {
     useStore.getState().setStickToBottom('sb-s2', false)
     useStore.getState().setStickToBottom('sb-s2', true)
     expect('sb-s2' in useStore.getState().stickToBottom).toBe(false)
   })
 
-  /*
-   * A single scroll fires dozens of events. If a new object were created even when the value stays
-   * the same, every subscriber watching this map would re-render for the entire scroll.
-   */
+  // A new object would re-render every subscriber of the map for the whole scroll.
   it('an unchanged value never creates a new state object — scrolling fires dozens of times a second', () => {
     useStore.getState().setStickToBottom('sb-s3', false)
     const before = useStore.getState().stickToBottom
@@ -118,11 +100,7 @@ describe('whether a conversation stood at the bottom (issue #31)', () => {
 })
 
 describe('messagesToChat — restoring tool output', () => {
-  /*
-   * The host keeps the call and the result as separate rows. While there was no branch for the
-   * result, reopening a session left the card with only its title, its output gone — a screen that
-   * had only ever existed for whoever watched it live.
-   */
+  // The host keeps the call and its result as separate rows; without the result's branch a reopened card keeps only its title.
   const call = (seq: number) => ({
     sessionId: 's',
     seq,
@@ -169,14 +147,10 @@ describe('messagesToChat — restoring tool output', () => {
   })
 })
 
-/**
- * A tool row finds its own result and output by `callId` (#98).
- *
- * A background agent's card stays open from the moment it is raised until it finishes (the adapter
- * withholds the result of raising it), and in the meantime the parent uses its own tool. The
- * positional rule (the longest-open row, the last-opened row) swaps ownership between them during
- * that window — the parent's Bash result to the agent's card, the agent's own steps to the parent's
- * Bash card. Both the live and restored paths are checked together.
+/*
+ * A background agent's card stays open until the agent finishes (the adapter withholds the launch's result) while the
+ * parent runs its own tools; pairing by position (longest-open, last-opened row) would swap their outputs. Live and
+ * restored paths both.
  */
 describe('a tool row finds its pair by callId — beside an open agent card (#98)', () => {
   const agentCall = {
@@ -241,10 +215,7 @@ describe('a tool row finds its pair by callId — beside an open agent card (#98
   })
 })
 
-/**
- * A launch card's subagent steps (#222): read only when the person opens them, never part of the conversation, and
- * joined live by later steps once every earlier one is read.
- */
+// docs/state-management.md §4: a launch card's subagent steps are outside the window (#222)
 describe('a subagent\'s steps under its launch card (#222)', () => {
   const AGENT = 'toolu_agent'
   const step = (sessionId: string, s: object) =>
@@ -351,7 +322,7 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
   })
 
-  // #418: the steps was archived, and a card still showing them, or reading as "none recorded", was wrong
+  // #418: once the steps are archived, a card still showing them, or reading as "none recorded", is wrong
   it('moving the steps to the session archive and back makes an open card read again and say where they went', async () => {
     const s = 'sub-trash'
     const mock = await setup(s)
@@ -386,13 +357,9 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
   })
 })
 
-/**
- * A failed turn **must be visible** (#107).
- *
- * An actual incident: a codex rollout carried the full 400 error in `task_complete`, but the app kept
- * an empty reply and a state of `waiting_input`. "Waiting for a human" was a lie — what needed waiting
- * for was an explanation, not a person. Both halves are checked together: does it survive in the
- * transcript, and is the state honest.
+/*
+ * A codex rollout can carry the full 400 error in `task_complete`; an empty reply and `waiting_input` would claim it
+ * waits for a human. Checked together: the error survives in the transcript, and the state is honest.
  */
 describe('a failed turn reaches the screen (#107)', () => {
   const boom = (sessionId: string, message: string) =>
@@ -504,11 +471,8 @@ describe('messagesToChat — reasoning rows', () => {
 })
 
 /*
- * Two neighboring replies are two blocks (#77). A new reply with no human message in between (a
- * background task finished, a question card was answered) used to run together with the reply before
- * it, with no gap: "…still running.All six reviews are in." Messages are split by stored number — the
- * host groups a message's chunks into one row and carries that row's number on every chunk (#66). The
- * mock numbers them by the same rule.
+ * A reply after another with no human message between (a background task finished, a card answered) must not run into
+ * it: "…still running.All six reviews are in." The host, and the mock, carry the row's number on every chunk (#66).
  */
 describe('neighboring replies are split by stored number (#77)', () => {
   const ask = (sessionId: string, seq: number, text: string) =>
@@ -600,15 +564,9 @@ describe('neighboring replies are split by stored number (#77)', () => {
   })
 })
 
-/**
- * A conversation item's **identity** — only a changed row becomes a new object.
- *
- * The screen's own optimization rests on this rule: `ChatRow` is memoized, so it does not re-render
- * while the item object stays the same. So when a single streaming chunk arrives, exactly **one**
- * bubble re-renders (measured at 1.0 renders per chunk). If the reducer ever did something like
- * `items.map((i) => ({ ...i }))`, that property would quietly disappear — the screen would look
- * identical while the cost grew in proportion to the conversation's length. The render count can only
- * be measured in a browser, but the identity it rests on can be pinned down right here.
+/*
+ * `ChatRow` is memoized on the item object, so a streamed chunk re-renders one bubble (measured: 1.0 renders per chunk).
+ * Copying every item would grow the cost with the conversation, unseen; renders are measured only in a browser.
  */
 describe('a conversation item\'s identity — only a changed row becomes a new object', () => {
   const idOf = (sessionId: string) => useStore.getState().chat[sessionId] ?? []
@@ -652,13 +610,7 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
   })
 })
 
-/**
- * Restoring written text after a send failure (a follow-up to the loss incident of 2026-09-02).
- *
- * The composer is cleared the instant it is sent (#38). On failure, the bubble is removed, which
- * leaves the sentence **nowhere at all** — a toast only reports the failure, it does not return the
- * text. A failed sentence must come back to the composer to be sent again.
- */
+// The composer clears on send (#38) and a failed send removes the bubble; the toast does not return the text.
 describe('restoring written text after a send failure', () => {
   it('a failure returns the sentence to the composer', async () => {
     const s = 'sf-s1'
@@ -671,7 +623,7 @@ describe('restoring written text after a send failure', () => {
 
     expect(useStore.getState().drafts[s]?.text).toBe('a sentence that must not be lost')
     expect(useStore.getState().toast).toMatch(/Could not send/)
-    // Still no bubble left behind that looks sent (existing behavior kept)
+    // Still no bubble left behind that looks sent
     expect((useStore.getState().chat[s] ?? []).some((i) => i.kind === 'user')).toBe(false)
   })
 
@@ -701,11 +653,8 @@ describe('restoring written text after a send failure', () => {
   })
 })
 
-/*
- * #158: if a second input arrives on the same card before the first response's result reaches the
- * screen, the second response became a "vanished request" on the host and recorded a command that had
- * already run as Denied. A request is sent only once.
- */
+// #158: a second answer before the first one's result reaches the screen is a vanished request on the host, and
+// records a command that already ran as Denied.
 describe('an approval is sent only once per request (#158)', () => {
   async function pendingCard() {
     const platform = new MockPlatform()
@@ -732,7 +681,7 @@ describe('an approval is sent only once per request (#158)', () => {
     expect(spy.mock.calls.map((c) => c[2])).toEqual(['allow'])
   })
 
-  // #683 review: ids repeat across sessions (each process counts its own), so the guard is per session
+  // #683: ids repeat across sessions (each process counts its own), so the guard is per session
   it('an answer in flight in one session does not swallow the same request id in another', async () => {
     const { platform, id } = await pendingCard()
     const other = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
@@ -771,11 +720,9 @@ describe('an approval is sent only once per request (#158)', () => {
 })
 
 /*
- * #174 (the rest of #125): when text cannot be an answer to a question (several questions, or an
- * attachment), sending it starts a new turn and drops the question. The hint text never looked at
- * attachments, so it said "write an answer" while sending the text as a new turn, and the card
- * vanished with no explanation. Handing off a session with an open question sent the request text as
- * that question's answer.
+ * #174: text that cannot answer the question (several questions, an attachment) starts a new turn and drops it. The hint
+ * and the send use one decision, so the hint never says "write an answer" for it. A handoff never sends its request as
+ * the answer.
  */
 describe('an open question and the composer (#174)', () => {
   const q = (requestId: string, ...questions: string[]) => ({
@@ -823,16 +770,13 @@ describe('an open question and the composer (#174)', () => {
       projects: { ...st.projects, [proj.id]: proj },
       sessions: { ...st.sessions, q174: { ...st.sessions.q174!, projectId: proj.id } },
     }))
-    await useStore.getState().handoffSession('q174', { mode: 'agent' })
+    await useStore.getState().handoffSession('q174', { tool: 'claude', deleteOld: true, mode: 'agent' })
     expect(answered).not.toHaveBeenCalled()
     expect(sent).not.toHaveBeenCalled()
     expect(useStore.getState().toast).toBe('Answer the open question first, or hand off from the record')
   })
 })
 
-/*
- * #180: if the send path failed or raced, what a person wrote disappeared.
- */
 describe('a failed send returns what was written (#180)', () => {
   it('text sent as an answer to a question comes back to the composer if it never lands', async () => {
     const mock = new MockPlatform()
@@ -887,10 +831,7 @@ describe('a failed send returns what was written (#180)', () => {
   })
 })
 
-/**
- * A composer asked to take the keyboard (#528) belongs to the session asked for: showing another
- * session withdraws the request, so it never lands later in a session the person has left.
- */
+// Showing another session withdraws a keyboard request, so it never lands later in a session the person has left.
 describe('composerFocusFor (#528)', () => {
   it('is kept while the session asked for is shown, and withdrawn when another one is', async () => {
     const mock = new MockPlatform()

@@ -9,41 +9,16 @@ import { isMissing } from './os/errors.js'
 import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
 
 /**
- * User-folder apps become projects (#1141, docs/plans/root-apps.md §4). Each `<data>/apps/<id>/` whose manifest is
- * valid and names its folder's id is registered as a project **in place**, and is that project's root app from then
- * on; what was kept under its old key (`_user/<id>`) is carried to the new one (`<project id>/<id>`): the files by the
- * app runtime (`ExternalApps.carryAppState`: data, logs, versions, secrets), the rest by the store, in the same
- * transaction that registers the project (`store.adoption.carry`: grants, runs, sessions, builder, attachments, grid
- * panels, view port, the window's span and open app).
- *
- * **When**: once the host is ready (main.ts, where the steps a swap left for later run). A host that fails before ready
- * hands back to the previous build without having moved anything, so the copies are taken from what that build last
- * wrote. The manager has loaded its sessions by then, so the ones moved are handed to it (`sessionsMoved`), which
- * updates them and tells the windows: the builder is found under the new key in this same run. It runs again whenever
- * the user folder gains an app (an MCP server the person approved is written there).
- *
- * Each folder once: the store records it, bound to a mark written in the folder (`ADOPTION_MARK`), so a project the
- * person later deletes is not registered again, while a different folder made later under the same name is. Not the
- * folder's file id: Linux (ext4) gives a folder made where one was just removed the same inode, and the same birth
- * time too (a coarse clock), so the new folder read as the deleted project's (#1152, measured under WSL).
- *
- * Not adopted: a folder whose manifest does not pass, or names an id other than its folder (a backup copy such as
- * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
- * It stays in the user folder with its reason, and the log says so once.
- *
- * **A project the person deletes gives its folder back** (#1204), once nothing in the session archive could bring it back: no
- * session of it is left there (restoring one registers the project again, at the same path, under the same id) and no
- * project is registered at the folder (the person may have added it again). Until
- * then the folder stays where it is, adopted, so a restore finds it. After, it goes to `<data>/app-trash/` as a
- * removed user-folder app's does, what the project kept for it returns to the user-folder key, and the record goes: a
- * person who moves the folder back into the user folder gets it as a new project, with its data. Left in place, it was
- * listed nowhere and nothing could remove it. Checked at each run (so once the host is ready: a project deleted
- * before this build, or a move a stopped host left half done) and whenever a project is deleted or the session archive loses
- * sessions (`settle`).
- *
- * Trust: the project is trusted, as the user folder was, except for an imported app the person never enabled (or
- * whose command or uses changed since): its project starts untrusted, and trusting it is enabling it. A folder that is
- * already a project keeps whatever trust the person gave it.
+ * User-folder apps become projects (#1141, docs/plans/root-apps.md §4): each `<data>/apps/<id>/` whose manifest is valid and
+ * names its folder's id is registered in place as a project and is its root app; what was kept under its old key (`_user/<id>`)
+ * is carried to `<project id>/<id>`, the files by the app runtime (`ExternalApps.carryAppState`) and the rest by the store in
+ * the transaction that registers the project (`store.adoption.carry`). It runs once the host is ready (main.ts), as a host
+ * failing before ready hands back to the previous build with nothing moved, and again whenever the user folder gains an app.
+ * Each folder once, bound to a mark written in it (`ADOPTION_MARK`), so a deleted project is not registered again while a new
+ * folder of the same name is: not the file id, as ext4 gives a folder made where one was just removed the same inode and a
+ * coarse clock the same birth time (#1152, measured under WSL). A manifest that fails or names another id (a backup copy) is
+ * not adopted and stays `invalid`, as it would make two runnable apps of one id. A deleted project gives its folder back
+ * (#1204, docs/plans/root-apps.md §2) once the session archive could not bring it back (`settle`)
  */
 
 export type AdoptionDeps = {

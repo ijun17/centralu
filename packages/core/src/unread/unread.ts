@@ -1,8 +1,4 @@
-/**
- * Read/unread (FR-16). An axis independent of the session state.
- * "The agent worked alone for 5 minutes and finished" = waiting_input + unread — both axes have to show, or
- * it gets missed.
- */
+/** Read/unread (FR-16), an axis independent of the session state */
 
 export type ReadTracked = { lastSeq: number; lastReadSeq: number }
 
@@ -14,14 +10,12 @@ export function unreadCount(s: ReadTracked): number {
   return Math.max(0, s.lastSeq - s.lastReadSeq)
 }
 
-/** When to mark read — a short response has nothing to scroll, so time focused is a secondary condition */
+/** A short response has nothing to scroll, so time focused also marks it read */
 export const FOCUS_READ_MS = 3000
 
 export type ReadSignals = {
   focused: boolean
-  /** Whether the scroll has reached the latest */
   atBottom: boolean
-  /** Time since it was focused (ms) */
   focusedForMs: number
 }
 

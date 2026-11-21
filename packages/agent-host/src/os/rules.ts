@@ -2,16 +2,11 @@ import { posix, win32 } from 'node:path'
 import type { PlatformPath } from 'node:path'
 
 /**
- * The OS layer's rules for a family of operating systems, as pure functions (#1599, docs/plans/os-layer.md §7.1).
- *
- * Each rule answers for the family it is given, never for the OS this code runs on: nothing here reads the OS, so
- * the in-memory OS (`memory.ts`) follows Windows' rules on Linux with the very definitions the real one uses
- * (`real.ts`, and the layer modules `os.ts`, `env-path.ts`, `tool-launch.ts`, `kill-tree.ts` that it is built from).
- * Only the layer maps the running OS to its family (`familyOf` in `os.ts`); code outside it asks `Os.traits` and
- * the `Os` it was given, not the family.
- *
- * `posix` is the rules of Linux. macOS differs in a few (its default volume ignores case, `clonesFiles`); the real
- * `Os` answers those for macOS, the in-memory one does not model them.
+ * The OS layer's rules for a family of operating systems, as pure functions (#1599, docs/plans/os-layer.md §7.1): each answers
+ * for the family it is given, never the OS it runs on, so the in-memory OS (`memory.ts`) follows Windows' rules on Linux with
+ * the definitions the real one (`real.ts`, `os.ts`, `env-path.ts`, `tool-launch.ts`, `kill-tree.ts`) uses. Only `familyOf` in
+ * `os.ts` maps the running OS to its family; code outside the layer asks `Os.traits`. `posix` is Linux's rules; macOS differs
+ * in a few (its default volume ignores case, `clonesFiles`), answered by the real `Os` only
  */
 export type OsFamily = 'windows' | 'posix'
 
@@ -35,10 +30,9 @@ export type OsTraits = {
   /** A watched folder's parents cannot be moved: a project is watched by one recursive watch on its root */
   readonly locksWatchedFolders: boolean
   /**
-   * A tree's links to folders keep their meaning in a copy of it: false on Windows, where pnpm and workspaces link
-   * folders by junction, whose target is always a whole path, so the `Os`'s copy keeps them leading into the source
-   * unless it is given `links` (`retarget`), as a copy that must stand alone is; a worktree on Windows is copied by
-   * dev-services `copyTreeWindows`, by the same rule
+   * Whether a tree's links to folders keep their meaning in a copy: false on Windows, where pnpm and workspaces link folders by
+   * junction with an always-whole target, so `Os`'s copy keeps them leading into the source unless given `links` (`retarget`); a
+   * worktree on Windows is copied by dev-services `copyTreeWindows` by the same rule
    */
   readonly cpKeepsLinks: boolean
   /** A folder can be cloned with `cp -c` (APFS clonefile) */
@@ -85,12 +79,11 @@ export function traitsOf(family: OsFamily): OsTraits {
 }
 
 /**
- * Characters JavaScript's `toUpperCase` maps to one other character but NTFS's case table does not, as code point
- * ranges: measured on Windows 11 (NTFS, 2026-10-27) by making a file under each and asking for it under its upper
- * case. Among them the micro sign, the dotless i (`ı` and `I` are two files), the long s, final sigma, Georgian
- * Mkhedruli and Cherokee small letters: NTFS's table predates their upper cases. A volume keeps the table it was
- * formatted with, so an old volume may differ further; the host only needs the folding to agree with itself and to
- * err towards two names, which these do.
+ * Characters JavaScript's `toUpperCase` maps to one other character but NTFS's case table does not, as code point ranges
+ * (measured on Windows 11, NTFS, 2026-10-27, by making a file under each and asking for it under its upper case): the micro
+ * sign, the dotless i (`ı` and `I` are two files), the long s, final sigma, Georgian Mkhedruli and Cherokee small letters,
+ * whose upper cases NTFS's table predates. A volume keeps the table it was formatted with; the host needs the folding only to
+ * agree with itself and err towards two names
  */
 const NTFS_KEEPS_CASE: ReadonlyArray<readonly [number, number]> = [
   [0xb5, 0xb5],
@@ -138,10 +131,10 @@ const NTFS_KEEPS_CASE: ReadonlyArray<readonly [number, number]> = [
 const keepsCase = (code: number) => NTFS_KEEPS_CASE.some(([lo, hi]) => code >= lo && code <= hi)
 
 /**
- * A name in the one case the family compares names in: on Windows each character in its upper case where NTFS has
- * one (NTFS compares names through its upcase table, so `Name.TXT` and `name.txt` are one file, and so are `é` and
- * `É`, while the Kelvin sign and `k`, or `ß` and `SS`, are two), unchanged elsewhere. One character never becomes two.
- * Upper, not lower: the folded names also sort as NTFS lists a folder (`_` after `Z`).
+ * A name in the one case the family compares names in: on Windows each character in its upper case where NTFS has one (through
+ * its upcase table `Name.TXT` and `name.txt` are one file, so are `é` and `É`, while the Kelvin sign and `k`, or `ß` and `SS`,
+ * are two), unchanged elsewhere; one character never becomes two. Upper, not lower, so folded names sort as NTFS lists a folder
+ * (`_` after `Z`)
  */
 export function foldCase(name: string, family: OsFamily): string {
   if (!traitsOf(family).foldsPathCase) return name
@@ -172,10 +165,10 @@ export function pathRulesFrom(family: OsFamily, cwd: () => string): PlatformPath
 }
 
 /**
- * A resolved Windows path without its `\\?\` prefix: `\\?\C:\x` names the file `C:\x` does, and `\\?\UNC\s\sh` the
- * share `\\s\sh` (the prefix only tells Win32 to leave the rest alone). Another `\\?\` form (a volume GUID) is kept.
- * Dots and spaces that end a name are not dropped: Node opens every path in its `\\?\` form, so `y.` is a name of its
- * own to it (measured: `readFileSync` of `d\y.\f` and of `d\y\f` read two files).
+ * A resolved Windows path without its `\\?\` prefix (`\\?\C:\x` names `C:\x`, `\\?\UNC\s\sh` the share `\\s\sh`; the prefix
+ * only tells Win32 to leave the rest alone); another form (a volume GUID) is kept. Trailing dots and spaces are not dropped:
+ * Node opens every path in its `\\?\` form, so `y.` is a name of its own (measured: `readFileSync` of `d\y.\f` and `d\y\f` read
+ * two files)
  */
 function withoutVerbatimPrefix(full: string): string {
   const prefix = /^\\\\\?\\/.exec(full)
@@ -187,10 +180,9 @@ function withoutVerbatimPrefix(full: string): string {
 }
 
 /**
- * The form two spellings of one path share: resolved (relative to `cwd`, default this process's working folder),
- * without a trailing separator, and on Windows in one case (`foldCase`) with one kind of separator, the `\\?\` form
- * as the plain one. Not the real spelling (that is
- * `realpathSync.native`'s): a key to compare and to index by.
+ * The form two spellings of one path share: resolved (against `cwd`, default this process's), no trailing separator, on Windows
+ * one case (`foldCase`), one kind of separator and the plain form of `\\?\`. Not the real spelling (`realpathSync.native`'s): a
+ * key to compare and index by
  */
 export function pathKey(path: string, family: OsFamily, cwd?: string): string {
   const p = pathRules(family)
@@ -229,10 +221,10 @@ export function expandHome(path: string, home: string, family: OsFamily): string
 }
 
 /**
- * Where a link copied from the tree `links.from` leads in its copy at `links.to`: a whole `target` inside `from` leads
- * to the same place inside `to`; any other answers null (kept as written, or left out, by the caller). The one rule for
- * the `Os`'s copy (`copy.ts`, its `links` option) and the worktree copy on Windows (dev-services `copyTreeWindows`). By
- * name, as `isInside`: canonicalize both where a link or a short name could make one path look like two.
+ * Where a link copied from the tree `links.from` leads in its copy at `links.to`: a whole `target` inside `from` leads to the
+ * same place inside `to`, any other answers null (kept as written or left out by the caller). The one rule for the `Os`'s copy
+ * (`copy.ts`) and the worktree copy on Windows (dev-services `copyTreeWindows`); by name, as `isInside`, canonicalizing both
+ * where a link or short name could make one path look like two
  */
 export function retarget(
   target: string,
@@ -262,12 +254,12 @@ export function envValue(env: Env, name: string, family: OsFamily): string | und
 }
 
 /**
- * Signals by family. On Windows Node knows a few names (`os.constants.signals`), and of those only TERM, KILL, INT and
- * QUIT end a process (at once: Windows has no signal a program can trap). Measured on Windows 11 with Node 22: another
- * name Node knows there throws `ENOSYS` from `process.kill` and leaves the process running, while `ChildProcess.kill`
- * ends it reporting SIGKILL; a name Node does not know there (`SIGUSR1`) throws `ERR_UNKNOWN_SIGNAL` from both. The
- * `Os` takes the one rule for both calls: a signal it cannot deliver throws, and never ends anything by accident.
- * Linux's names are delivered; a program may trap all but KILL and STOP, and those in `IGNORED_BY_DEFAULT` end nothing.
+ * Signals by family. On Windows Node knows a few names (`os.constants.signals`) and only TERM, KILL, INT and QUIT end a
+ * process, at once (no signal can be trapped). Measured on Windows 11 with Node 22: another known name throws `ENOSYS` from
+ * `process.kill` and leaves the process running while `ChildProcess.kill` ends it reporting SIGKILL, and a name Node does not
+ * know there (`SIGUSR1`) throws `ERR_UNKNOWN_SIGNAL` from both; the `Os` takes one rule for both: a signal it cannot deliver
+ * throws and ends nothing by accident. Linux's names are delivered, a program may trap all but KILL and STOP, and those in
+ * `IGNORED_BY_DEFAULT` end nothing
  */
 const WINDOWS_SIGNAL_NAMES: readonly string[] = [
   'SIGHUP',
@@ -345,11 +337,9 @@ export function signalError(signal: string, code: 'ERR_UNKNOWN_SIGNAL' | 'ENOSYS
 export type TimePrecision = 'microsecond' | 'nanosecond'
 
 /**
- * What decides how finely a time set with `utimes` is kept is libuv (Node's file layer), not the OS alone: Windows
- * is cut to microseconds on every Node measured (22, 24, 26); POSIX (Linux and macOS alike) is cut to microseconds
- * until libuv 1.52.0 (Node 22.23 ships 1.51.0, Node 24.22 ships 1.52.1), which keeps nanoseconds ("unix: support
- * nanosecond resolution in uv__fs_to_timespec"; measured on macOS with Node 22.23.4, 24.22.2 and 26.12.1). `uv`
- * defaults to the running Node's.
+ * How finely a time set with `utimes` is kept is decided by libuv, not the OS alone: Windows is cut to microseconds on every
+ * Node measured (22, 24, 26); POSIX, to microseconds until libuv 1.52.0 (Node 22.23 ships 1.51.0, 24.22 ships 1.52.1), which
+ * keeps nanoseconds (measured on macOS with Node 22.23.4, 24.22.2 and 26.12.1). `uv` defaults to the running Node's
  */
 export function timePrecision(family: OsFamily, uv: string = process.versions.uv): TimePrecision {
   if (family === 'windows') return 'microsecond'
@@ -358,21 +348,19 @@ export function timePrecision(family: OsFamily, uv: string = process.versions.uv
 }
 
 /**
- * How `rmSync` is made, which decides what it answers to a folder a process works in on Windows (measured on Windows
- * with Node 22.23.4, 23.11.1, 24.22.1 and 26.12.1): `js` (Node 22) walks the tree in JavaScript and gives the system's
- * `EBUSY`; `native` (Node 23 and later; nodejs/node#53617, commit 7168295e7a, "fs: move rmSync implementation to c++")
- * removes it with C++'s `std::filesystem` and gives `EPERM` for the same refusal. `rmdirSync`, `rename` and the promise
- * `rm` give `EBUSY` on every Node. `nodeVersion` defaults to the running Node's.
+ * How `rmSync` is made, which decides what it answers to a folder a process works in on Windows (measured with Node 22.23.4,
+ * 23.11.1, 24.22.1, 26.12.1): `js` (Node 22) walks the tree in JavaScript and gives `EBUSY`; `native` (Node 23+,
+ * nodejs/node#53617) uses C++'s `std::filesystem` and gives `EPERM`. `rmdirSync`, `rename` and promise `rm` give `EBUSY` on
+ * every Node. `nodeVersion` defaults to the running Node's
  */
 export function rmSyncImplementation(nodeVersion: string = process.versions.node): 'js' | 'native' {
   return Number(nodeVersion.split('.')[0]) >= 23 ? 'native' : 'js'
 }
 
 /**
- * A file time as the family stores what `utimes` is given (seconds, or a `Date`), in nanoseconds, cut from the seconds
- * as libuv does (see `timePrecision`): to whole microseconds from the fraction on POSIX (so a `Date`'s milliseconds
- * come out a nanosecond short), from the whole value on Windows (so they come out exact); or, where nanoseconds are
- * kept, as the double gives them.
+ * A file time as the family stores what `utimes` is given (seconds or a `Date`), in nanoseconds, cut as libuv does
+ * (`timePrecision`): to whole microseconds from the fraction on POSIX (a `Date`'s milliseconds come out a nanosecond short),
+ * from the whole value on Windows (exact); where nanoseconds are kept, as the double gives them
  */
 export function storedTimeNs(
   time: number | Date,
@@ -391,10 +379,10 @@ export function storedTimeNs(
 export type ListedEntry = { readonly name: string; isDirectory(): boolean; isSymbolicLink(): boolean }
 
 /**
- * A folder's recursive listing as the `Os` gives it, from `list` (one folder's entries, in the OS's order): breadth
- * first, as Node's own `readdir({ recursive })` (`a, b, a/x, a/x/f`), each name relative to `root`. It never enters a
- * link: Node does not on POSIX, but on Windows it enters a junction, and a junction to a folder above it made Node's
- * listing stop at some depth without saying so. With the rule here a listing is the same on every OS and ends.
+ * A folder's recursive listing as the `Os` gives it, from `list` (one folder's entries in the OS's order): breadth first as
+ * Node's `readdir({ recursive })` (`a, b, a/x, a/x/f`), names relative to `root`. It never enters a link: Node does not on
+ * POSIX but enters a Windows junction, and a junction to a folder above made its listing stop at some depth unannounced, so the
+ * listing is the same on every OS and ends
  */
 export function listRecursive<E extends ListedEntry>(
   root: string,
@@ -440,10 +428,10 @@ function driveAbsolute(p: string | undefined): p is string {
 }
 
 /**
- * A Windows system program by its full path under `%SystemRoot%\System32` (taskkill, PowerShell, cmd), so it is
- * never looked up by name: Windows looks a bare or relative name up in the working directory first, and the host runs
- * in a project's folder, where a planted `taskkill.exe` would run. A `SystemRoot` that is not a whole path from a
- * drive's root is not used (an empty one made `System32\taskkill.exe` relative to the working directory, #428).
+ * A Windows system program by its full path under `%SystemRoot%\System32` (taskkill, PowerShell, cmd), never looked up by name:
+ * Windows looks a bare name up in the working directory first and the host runs in a project's folder, where a planted
+ * `taskkill.exe` would run. A `SystemRoot` that is not a whole path from a drive's root is not used (an empty one made the path
+ * relative to the working directory, #428)
  */
 export function systemTool(segments: readonly string[], env: Env): string {
   const root = envValue(env, 'SystemRoot', 'windows')
@@ -457,21 +445,21 @@ export function commandInterpreter(env: Env): string {
 }
 
 /**
- * What is started on Windows for a program that is not on PATH: a path under `%SystemRoot%\System32` that only an
- * administrator can make, so the start reports the program missing (ENOENT, which every caller reads as "not
- * installed") and Windows looks for it nowhere else. Given the bare name, Windows looks in the child's working folder
- * before PATH: a `git.exe` committed in a project ran whenever git itself was not installed (#838).
+ * What is started for a program the host's lookup did not find: a path only an administrator can make, so the start reports it
+ * missing (ENOENT, which every caller reads as "not installed") and nothing is looked for elsewhere. Windows: under
+ * `%SystemRoot%\System32`, as the bare name would make Windows look in the child's working folder first and run a `git.exe`
+ * committed in a project (#838). Elsewhere: a folder at the root, as the bare name lets the start's PATH search find what
+ * `findOnPath` passes over (a Windows install under WSL, #2366)
  */
-export function notOnPath(name: string, env: Env): string {
-  return systemTool(['centralu-not-on-path', `${name}.exe`], env)
+export function notOnPath(name: string, env: Env, family: OsFamily): string {
+  return family === 'windows' ? systemTool(['centralu-not-on-path', `${name}.exe`], env) : posix.join('/centralu-not-on-path', name)
 }
 
 /**
- * A program the host runs by name in a project's folder (`git`, `gh`), as the path to start (`programPath` in
- * tool-launch.ts, which remembers what it found). Elsewhere than Windows, the name: the start searches PATH and nothing
- * else. On Windows the absolute path found on PATH, never a batch file (Node refuses to start one): a `.cmd` is taken
- * as the `.exe` it starts, or else the first `.exe` on PATH, or else the `.exe` beside it (missing, so the start says
- * so); with nothing found, `notOnPath`. Never the bare name, which Windows would look up in the project first.
+ * A program the host runs by name in a project's folder (`git`, `gh`), as the path to start (`programPath` in tool-launch.ts
+ * remembers what it found). Off Windows, the name. On Windows the absolute path found on PATH, never a batch file (Node refuses
+ * it): a `.cmd` is taken as the `.exe` it starts, else the first `.exe` on PATH, else the `.exe` beside it (missing, so the
+ * start says so); with nothing found, `notOnPath`; never the bare name, which Windows would look up in the project first
  */
 export function programFor(
   name: string,
@@ -491,7 +479,7 @@ export function programFor(
         : find(name, '.COM;.EXE')
     if (!found) return { path: win32.join(win32.dirname(batch), `${name}.exe`), found: false }
   }
-  return found ? { path: found, found: true } : { path: notOnPath(name, env), found: false }
+  return found ? { path: found, found: true } : { path: notOnPath(name, env, family), found: false }
 }
 
 /** What Windows assumes when PATHEXT is not set */
@@ -509,19 +497,22 @@ export function programCandidates(path: string, family: OsFamily): string[] {
 }
 
 /**
- * A tool's path on PATH (the job of `which`), or null. `exists` says whether a name is there.
- *
- * **Windows** finds a command by trying each PATHEXT extension in each folder, never by its bare name: `npm i -g`
- * writes `claude` (a sh script, for Git Bash), `claude.cmd` and `claude.ps1` side by side, and only the `.cmd` is
- * something Windows can start (#14). Extensions are lowercased: NTFS ignores case, and `claude.cmd` is the name npm
- * wrote. Only absolute entries are searched (a relative one is read from the working folder, which may be a cloned
- * repository), and an entry is read without its quotes (`"C:\Program Files\Git\cmd"`), as Windows reads it.
+ * A tool's path on PATH (the job of `which`), or null; `exists` says whether a name is there. Windows (#14) tries each PATHEXT
+ * extension in each folder, never the bare name: `npm i -g` writes `claude` (a sh script), `claude.cmd` and `claude.ps1`, and
+ * only the `.cmd` starts. Extensions are lowercased (NTFS ignores case, and `claude.cmd` is what npm wrote); only absolute
+ * entries are searched (a relative one reads from the working folder, which may be a cloned repository) and an entry is read
+ * without its quotes. Under WSL (`windowsDrives`, where Windows' drives are mounted: `wslDrives`) a folder on a Windows drive
+ * is not searched for a name without `.exe`: WSL appends Windows' PATH, and what npm wrote there for a Windows install
+ * (`/mnt/c/…/npm/opencode`, an sh script ending in `exec …/opencode.exe`) would run the Windows tool with the Windows install's
+ * config, home and sign-in from a Linux host (#2366), so a tool installed only on Windows is not installed for that host; a
+ * `.exe` asked for by name is a Windows program the host means to run and is found
  */
 export function findOnPath(
   name: string,
   env: Env,
   family: OsFamily,
   exists: (path: string) => boolean,
+  { windowsDrives = null }: { windowsDrives?: string | null } = {},
 ): string | null {
   if (family === 'windows') {
     const exts = /\.[^\\/.]+$/.test(name)
@@ -540,12 +531,30 @@ export function findOnPath(
     }
     return null
   }
+  const skipped = name.toLowerCase().endsWith('.exe') ? null : windowsDrives
+  // A drive is one letter under the mount folder: `/mnt/wsl`, a disk mounted at `/mnt/data` and, with `root = /`, `/usr` are Linux's
+  const onDrive = (dir: string) => skipped !== null && dir.startsWith(skipped) && /^[a-z]\//i.test(dir.slice(skipped.length))
   for (const dir of (env.PATH ?? '').split(posix.delimiter)) {
-    if (!dir) continue
+    if (!dir || onDrive(posix.join(dir, '/'))) continue
     const candidate = posix.join(dir, name)
     if (exists(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * The folder WSL mounts Windows' drives in (with a trailing `/`), from the kernel's release (`/proc/sys/kernel/osrelease`,
+ * which names Microsoft under WSL) and `/etc/wsl.conf`: its `[automount]` `root`, `/mnt/` when it names none or cannot be
+ * read. null when this is not WSL.
+ */
+export function wslDrives(osRelease: string | null, wslConf: string | null): string | null {
+  if (!osRelease || !/microsoft/i.test(osRelease)) return null
+  // Every `[automount]` section is read, and the last `root` in them counts, as INI readers merge a section given twice
+  const sections = (wslConf ?? '').matchAll(/^\s*\[automount\]\s*(?:#.*)?$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/gim)
+  const roots = [...sections].flatMap(([, body]) => [...(body ?? '').matchAll(/^\s*root\s*=\s*(?:"([^"]*)"|'([^']*)'|([^#\s]+))/gim)])
+  const last = roots.at(-1)
+  const root = last && (last[1] ?? last[2] ?? last[3])
+  return posix.join(root && posix.isAbsolute(root) ? root : '/mnt/', '/')
 }
 
 /** How to start a found tool: a program and the arguments that go before the tool's own */
@@ -568,12 +577,10 @@ export type LaunchDeps = {
 const MAX_SHIM_DEPTH = 3
 
 /**
- * How to start a tool `findOnPath` found (#14). Elsewhere than Windows, the path itself. On Windows a tool installed
- * with `npm i -g` (or pnpm) is a `.cmd` batch file, and Node refuses to start a `.bat` or `.cmd` without a shell
- * (EINVAL since the CVE-2024-27980 fix). A shell is no option: the arguments carry JSON and prompts, which cmd.exe
- * would read as its own. So the batch file is read for the program it starts, and that is started instead: a `.js`
- * entry through this same Node, an `.exe` directly. `npm.cmd` and `npx.cmd` are batch files of another shape
- * (`nodeShimEntry`), read the same way.
+ * How to start a tool `findOnPath` found (#14): off Windows the path itself. On Windows a tool from `npm i -g` (or pnpm) is a
+ * `.cmd` batch file, which Node refuses without a shell (EINVAL since CVE-2024-27980), and a shell would read the JSON and
+ * prompts in the arguments as its own; so the batch file is read for the program it starts: a `.js` entry through this Node, or
+ * an `.exe`. `npm.cmd` and `npx.cmd` are batch files of another shape (`nodeShimEntry`)
  */
 export function launchFor(path: string, deps: LaunchDeps, depth = 0): ToolLaunch {
   const plain = { command: path, args: [] }
@@ -598,16 +605,11 @@ export function launchFor(path: string, deps: LaunchDeps, depth = 0): ToolLaunch
 }
 
 /**
- * The file a package manager's batch shim starts, relative to the shim's folder.
- *
- * Both shapes in use name it as a quoted path off the shim's own folder, next to an optional `node.exe` in that
- * folder (used when one sits beside the shim):
- *
- *   npm (cmd-shim):          "%_prog%"  "%dp0%\node_modules\@openai\codex\bin\codex.js" %*
- *   pnpm (@zkochan/cmd-shim): node  "%~dp0\..\@anthropic-ai\claude-code\cli.js" %*
- *
- * and for a package whose bin is an executable, npm writes `"%dp0%\node_modules\…\x.exe"   %*`.
- * The first quoted path that is not that `node.exe` is the target.
+ * The file a package manager's batch shim starts, relative to the shim's folder. Both shapes name it as a quoted path off the
+ * shim's folder, next to an optional `node.exe` there: npm (cmd-shim) `"%_prog%"
+ * "%dp0%\node_modules\@openai\codex\bin\codex.js" %*`, pnpm (@zkochan/cmd-shim) `node
+ * "%~dp0\..\@anthropic-ai\claude-code\cli.js" %*`, and for a package whose bin is an executable `"%dp0%\node_modules\…\x.exe"
+ * %*`. The first quoted path that is not that `node.exe` is the target
  */
 export function shimTarget(text: string): string | null {
   for (const m of text.matchAll(/"%(?:~dp0|dp0%)\\?([^"%]+)"/gi)) {
@@ -619,23 +621,12 @@ export function shimTarget(text: string): string | null {
 }
 
 /**
- * The `.js` that the `npm.cmd` or `npx.cmd` shipped with Node starts, or null for any other file.
- *
- * Those two are not cmd-shim output. They set variables and start the last of them, so the quoted paths `shimTarget`
- * looks for are not there (read on Windows 11 with Node 24.21, 2026-10-08):
- *
- *   SET "NODE_EXE=%~dp0\node.exe"
- *   SET "NPM_PREFIX_JS=%~dp0\node_modules\npm\bin\npm-prefix.js"
- *   SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"
- *   FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
- *     SET "NPM_PREFIX_NPM_CLI_JS=%%F\node_modules\npm\bin\npm-cli.js"
- *   )
- *   IF EXIST "%NPM_PREFIX_NPM_CLI_JS%" ( SET "NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%" )
- *   "%NODE_EXE%" "%NPM_CLI_JS%" %*
- *
- * The middle part is followed too: after `npm i -g npm`, the npm in the global prefix is the one the shim runs, and it
- * is the one the person's own terminal runs. A prefix that cannot be asked for falls back to the npm beside Node, which
- * is what the shim does as well.
+ * The `.js` that the `npm.cmd` or `npx.cmd` shipped with Node starts, or null for any other file. They are not cmd-shim output:
+ * they set variables (read on Windows 11 with Node 24.21, 2026-10-08: `SET "NODE_EXE=%~dp0\node.exe"`, `NPM_PREFIX_JS`,
+ * `NPM_CLI_JS`, a `FOR /F` that asks `npm-prefix.js` for the prefix, `IF EXIST "%NPM_PREFIX_NPM_CLI_JS%"` to take that one) and
+ * start the last, so the quoted paths `shimTarget` looks for are not there. The middle part is followed too: after `npm i -g
+ * npm` the npm in the global prefix is the one the shim runs, and the one the person's terminal runs; a prefix that cannot be
+ * asked for falls back to the npm beside Node, as the shim does
  */
 export function nodeShimEntry(
   text: string,

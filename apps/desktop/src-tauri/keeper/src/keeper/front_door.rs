@@ -17,7 +17,7 @@
 //!     across every host restart (the host's `transport/bridge-token.ts`, #382).
 //!
 //! The door listens on loopback only. Anyone on this machine can open a TCP connection to it, as
-//! they can to a host today; what they cannot do without the token is get past the host's `hello`.
+//! they can to a host; what they cannot do without the token is get past the host's `hello`.
 //! The token reaches clients only through the user-only control socket and the host's environment.
 //!
 //! While no host is ready (the gap between one host run ending and the next one reporting ready), a
@@ -49,9 +49,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long one side may refuse the relay's bytes before the connection is given up (#392).
 ///
 /// The relay writes with blocking writes, and a peer that stops reading (a stopped Codex bridge,
-/// any loopback client that hangs) blocked one forever: its thread, its descriptors and full socket
-/// buffers stayed for the keeper's life. A live client reads within this; the bridge reconnects
-/// on its next call.
+/// any loopback client that hangs) would block one forever: its thread, its descriptors and full
+/// socket buffers would stay for the keeper's life. A live client reads within this; the bridge
+/// reconnects on its next call.
 #[cfg(not(test))]
 const STALL_LIMIT: Duration = Duration::from_secs(30);
 #[cfg(test)]
@@ -59,7 +59,7 @@ const STALL_LIMIT: Duration = Duration::from_millis(300);
 
 /// The most connections the door relays at once; one past it is closed as it is accepted (#840
 /// item 3). Each relay holds two descriptors and a thread, and anyone on this machine can connect to
-/// the door: without a bound, a client opening connections in a loop ran the keeper out of
+/// the door: without a bound, a client opening connections in a loop runs the keeper out of
 /// descriptors, and with them every agent, terminal and window it serves. A window, its app views and
 /// every Codex bridge together use a few dozen.
 #[cfg(not(test))]
@@ -75,7 +75,7 @@ struct Door {
     /// a restart does not slip through to the host run that ended.
     generation: u64,
     /// Relay threads alive, connected to a host or still waiting for one. Each holds its two sockets and nothing else
-    /// does (#840 item 3: a table that duplicated them held four descriptors per relay).
+    /// does (#840 item 3: a table holding duplicates would double the descriptors per relay).
     active: usize,
 }
 
@@ -378,9 +378,8 @@ mod tests {
         c
     }
 
-    /// #840 item 3: a relay holds one descriptor per socket. Each socket was also duplicated for the
-    /// door's table, four per relay, so far fewer clients ran the keeper out of descriptors. Counted
-    /// in a process of its own, where no other test opens anything meanwhile.
+    /// #840 item 3: a relay holds one descriptor per socket, two per relay, and no duplicate of
+    /// either. Counted in a process of its own, where no other test opens anything meanwhile.
     #[test]
     fn a_relay_holds_one_descriptor_per_socket() {
         if crate::keeper::accept::few_descriptors::rerun("keeper::front_door::tests::a_relay_holds_one_descriptor_per_socket").is_some() {
@@ -461,9 +460,9 @@ mod tests {
         door.point_at(Some(port));
         let c = connect(&door);
         // Read the host's first bytes, so the relay is known to exist and to be copying before
-        // the wait for it to go. `connect` returns before the door accepts; checking at once saw no
-        // relay yet and passed whether or not a stalled one is let go, and failed when the accept
-        // landed between that check and the assert (#368).
+        // the wait for it to go. `connect` returns before the door accepts; checking at once would see
+        // no relay yet and pass whether or not a stalled one is let go, and fail when the accept
+        // lands between that check and the assert (#368).
         let mut first = [0u8; 1];
         io::Read::read_exact(&mut &c, &mut first).unwrap();
         assert_eq!(door.relays(), 1);
@@ -500,9 +499,9 @@ mod tests {
         assert_ne!(new_token().unwrap(), new_token().unwrap());
     }
 
-    /// #840 item 3, the door's half: out of descriptors, the accept loop came straight back to the
-    /// connection waiting in the queue, a core spinning and a log line each time. It pauses now, and
-    /// relays again once a descriptor is free.
+    /// #840 item 3, the door's half: out of descriptors, the accept loop pauses rather than come
+    /// straight back to the connection waiting in the queue (a core spinning and a log line each
+    /// time), and relays again once a descriptor is free.
     #[test]
     fn a_door_out_of_descriptors_pauses_accepting_instead_of_spinning() {
         let Some(stderr) =

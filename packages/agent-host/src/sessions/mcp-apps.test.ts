@@ -15,15 +15,11 @@ import { CapturingAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './centralu-tools.js'
 
 /**
- * An MCP server a person approved becomes a headless app in the user folder (M4 A-7, decision 8).
- *
- * It used to be that, once approved, a server was written to app_settings
- * (`orchestrator_mcp_servers`) and loaded raw into the Assistant's MCP configuration — a call
- * passed through neither an intermediary nor a record, and there was no listing and no removal.
- * This is checked here with a real store, a real runtime and a real app process (a fixture); only
- * the adapter is fake — it records the options it received, and an attached app is called through
- * the session's live attachment (`liveFor`) — the same door Centralu's `app` tool calls through
- * (#2231).
+ * An MCP server a person approved becomes a headless app in the user folder (M4 A-7, decision 8). An approved server is not
+ * written to app_settings (`orchestrator_mcp_servers`) and loaded raw into the Assistant's MCP configuration: a call would pass
+ * through neither an intermediary nor a record, with no listing and no removal. This is checked here with a real store, a real
+ * runtime and a real app process (a fixture); only the adapter is fake — it records the options it received, and an attached
+ * app is called through the session's live attachment (`liveFor`) — the same door Centralu's `app` tool calls through (#2231).
  */
 
 const LEGACY_KEY = 'orchestrator_mcp_servers'
@@ -54,7 +50,7 @@ beforeEach(() => {
   store = new Store()
   adapter = new CapturingAdapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   rt = new ExternalApps({
     projects: () => store.projects.projectRoots(),

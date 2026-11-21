@@ -1,36 +1,22 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 import { familyOf } from './os.js'
-import { findOnPath } from './os/rules.js'
+import { findOnPath, wslDrives } from './os/rules.js'
 
 /**
- * Aligns the GUI app's PATH with **the user's actual PATH**.
- *
- * **Why this is needed (measured):** launching as a `.app` on macOS does not inherit the login
- * shell's PATH, so only `/usr/bin:/bin:/usr/sbin:/sbin` comes through. As a result, `claude` and
- * `codex` were detected as "not installed," and the Start button in the create-session dialog
- * appeared to do nothing at all.
- *
- * **How:** a static list of paths is not enough — an agent tool could be anywhere: not just
- * Homebrew, but npm -g, nvm, volta, mise, asdf, or a manual install.
- * So **the user's login shell is run once to ask for the real PATH.** Whatever is written in the
- * shell config (.zshrc, etc.) is reflected exactly.
- * If that fails or is slow, it falls back to the static candidates below (better than finding
- * nothing at all).
+ * Aligns the GUI app's PATH with the user's actual one. A `.app` on macOS inherits only `/usr/bin:/bin:/usr/sbin:/sbin` (measured), so
+ * `claude` and `codex` read "not installed". A static list cannot cover an agent tool anywhere (Homebrew, npm -g, nvm, volta, mise,
+ * asdf), so the login shell runs once and reports the real PATH; on failure or a slow shell the static candidates apply
  */
 
 type Env = Record<string, string | undefined>
 
 /**
- * The fallback for when the shell cannot be used. Only common install locations.
- *
- * Windows (#14) has no login shell to ask, and mostly does not need one: a program started from
- * Explorer inherits the user's PATH from the registry. These are the per-user folders the tools'
- * own installers write to, for a PATH that is stale (a tool installed after Explorer started):
- * `npm i -g` (`%APPDATA%\npm`), Claude Code's native installer (`%USERPROFILE%\.local\bin`),
- * pnpm, Volta, Bun, Cargo and Scoop.
+ * The fallback when the shell cannot be used: common install locations. Windows (#14) has no login shell and mostly needs none (Explorer
+ * passes the registry PATH), but a PATH can be stale for a tool installed after Explorer started, so these are the per-user folders
+ * of npm -g (`%APPDATA%\npm`), Claude Code's installer (`%USERPROFILE%\.local\bin`), pnpm, Volta, Bun, Cargo and Scoop
  */
 export function fallbackDirs(
   platform: NodeJS.Platform = process.platform,
@@ -59,18 +45,13 @@ export function fallbackDirs(
   ]
 }
 
-/** How long the login shell gets to answer before the fallback folders are used (lessons PA2) */
 export const PROBE_TIMEOUT_MS = 3000
 
 /**
- * Asks the login shell for PATH. It has to be interactive (-i) for .zshrc's nvm/mise init to take
- * effect. Bounded (PA2): some shells ignore SIGTERM, and a shell config that waits on a prompt, or
- * a shell stopped by its terminal, would otherwise keep the host from ever reaching ready.
- *
- * **In a session of its own** (`detached`), as the keeper's probe runs it (`os/unix.rs` `probe_shell`, #428): an
- * interactive shell in a background group of a terminal's session is stopped (SIGTTOU) when it sets up job control, so
- * a host started from a terminal waited out the bound. And its own session is its own group, which a timeout ends as a
- * whole: killing the shell alone left what its config had started (a `sleep`, an agent, a prompt helper) running.
+ * Asks the login shell for PATH. Interactive (-i) so .zshrc's nvm/mise init runs. Bounded (PA2): some shells ignore SIGTERM, and a config
+ * waiting on a prompt would keep the host from reaching ready. In a session of its own (`detached`), as the keeper's `probe_shell` (#428):
+ * an interactive shell in a terminal's background group is stopped (SIGTTOU) setting up job control, and its own group lets a timeout end what its
+ * config started (a `sleep`, an agent, a prompt helper)
  */
 export function probeLoginShell(
   platform: NodeJS.Platform = process.platform,
@@ -85,8 +66,7 @@ export function probeLoginShell(
     encoding: 'utf8',
     windowsHide: true,
     timeout: timeoutMs,
-    // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
-    // if this hangs, the host never reaches ready and the whole app fails to start
+    // SIGKILL: some shells ignore SIGTERM, and a hang here keeps the host from ever reaching ready
     killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'ignore'],
     // So that a shell init script does not pop up an interactive prompt
@@ -95,7 +75,6 @@ export function probeLoginShell(
     ...({ detached: true } as object),
   })
   if (r.error && r.pid > 1) {
-    // Cut off, or never started. Its session's group is its pid: whatever it started goes with it
     try {
       process.kill(-r.pid, 'SIGKILL')
     } catch {
@@ -103,9 +82,8 @@ export function probeLoginShell(
     }
   }
   /*
-   * What it printed is read even when it was cut off: a config that hangs after the marked line was printed (a
-   * prompt helper, a background job holding the pipe) still said the PATH. The shell config might print something
-   * else, so only the marked line is picked out, whatever spaces or a CR around it.
+   * Read even when cut off: a config that hangs after the marked line (a prompt helper, a background job holding the pipe) still
+   * said the PATH; only the marked line counts, whatever spaces or CR surround it
    */
   const line = (r.stdout ?? '')
     .split('\n')
@@ -114,21 +92,13 @@ export function probeLoginShell(
   return line ? line.slice('__CC_PATH__:'.length).split(delimiter).filter(Boolean) : []
 }
 
+/** Augments PATH and returns the result; called once at host startup, and a no-op from `pnpm host`, whose PATH is already right */
 /**
- * Augments PATH and returns the result. Called exactly once at host startup.
- * When launched from a terminal with `pnpm host`, PATH is already correct, so this is effectively
- * a no-op.
- */
-/**
- * Cache of the login shell PATH lookup result.
- *
- * probeLoginShell() launches the whole shell, so it costs around a second each time. Calling it
- * every time a terminal is opened would stall by that much every time (measured: terminal creation
- * takes 1 to 4 seconds). PATH cannot change while the process is alive, so it is asked only once.
+ * The login shell lookup costs about a second (terminal creation measured 1 to 4 s), and PATH cannot change while the process
+ * lives, so it is asked once
  */
 let cachedShellPath: string[] | null = null
 
-/** Forces the lookup to run again in tests */
 export function __resetToolPathCache(): void {
   cachedShellPath = null
 }
@@ -141,13 +111,10 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
   const source = fromShell.length > 0 ? 'shell' : 'fallback'
   const candidates = fromShell.length > 0 ? fromShell : fallbackDirs().filter((p) => existsSync(p))
 
-  // The shell's own list might have duplicates — preserve order and keep each entry only once
   const merged = [...new Set([...current, ...candidates])]
   /*
-   * "Unchanged" means the same list, not the same length. Comparing lengths read an inherited PATH
-   * holding duplicates, plus as many new folders as there were duplicates, as "nothing added": the
-   * new folders were dropped and the duplicates kept (seen on a Windows runner, whose PATH repeats
-   * entries, once its fallback folders existed, #14).
+   * "Unchanged" means the same list, not the same length: with duplicates in an inherited PATH and as many new folders, comparing
+   * lengths dropped the new folders and kept the duplicates (a Windows runner, #14)
    */
   if (merged.length === current.length && merged.every((p, i) => p === current[i])) {
     return { path: process.env.PATH ?? '', source: 'unchanged' }
@@ -158,39 +125,39 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
 }
 
 /**
- * Finds a tool's actual path (the same job as `which`).
- * Being able to show the user where it is installed is what lets them work out "why can it not be found" on their own.
- *
- * **Windows (#14)** finds a command by trying each PATHEXT extension in each folder, never by its
- * bare name: `npm i -g` writes `claude` (a sh script, for Git Bash), `claude.cmd` and `claude.ps1`
- * side by side, and only the `.cmd` is something Windows can start. The bare-name lookup returned
- * the sh script, spawning it failed with ENOENT, and both tools showed as "not installed". A
- * `.cmd` still cannot be spawned without a shell; `tool-launch.ts` turns it into the program it
- * starts.
- *
- * Only absolute PATH entries are searched on Windows: a relative one is resolved against the
- * working directory, which may be a cloned repository.
- *
- * And no narrower than Windows' own search (review of #1073): since a tool not found here is never
- * spawned by its bare name, a tool Windows would start has to be found here too. An entry is read
- * without its quotes (`"C:\Program Files\Git\cmd"`, as Windows reads it), and a name counts as there
- * when the name itself is (`presentOnWindows`), an App Execution Alias in WindowsApps included. The rule itself is
- * `findOnPath` (`os/rules.ts`), which the in-memory OS follows too.
+ * Finds a tool's actual path, as `which` does, so the user can see where it is installed. Windows (#14) tries each PATHEXT
+ * extension in each folder, never the bare name: `npm i -g` writes `claude` (a sh script), `claude.cmd` and `claude.ps1` side
+ * by side and only the `.cmd` starts, so the bare name found the script, spawning it failed ENOENT and both tools read "not
+ * installed" (`tool-launch.ts` turns a `.cmd` into the program it starts). Only absolute PATH entries are searched on Windows
+ * (a relative one resolves against the working directory, which may be a cloned repository), and no narrower than Windows' own
+ * search, since a tool not found here is never spawned: quotes are stripped from an entry and a name counts when the name
+ * itself is there (`presentOnWindows`), an App Execution Alias included. The rule is `findOnPath` (`os/rules.ts`), which the
+ * in-memory OS follows too
  */
 export function whichTool(
   name: string,
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
   exists: (path: string) => boolean = platform === 'win32' ? presentOnWindows : existsSync,
+  read: (path: string) => string | null = readOrNull,
 ): string | null {
-  return findOnPath(name, env, familyOf(platform), exists)
+  // Under WSL, where Windows' drives are (`wslDrives`): two small files, read at each lookup so nothing is kept to go stale
+  const windowsDrives = platform === 'linux' ? wslDrives(read('/proc/sys/kernel/osrelease'), read('/etc/wsl.conf')) : null
+  return findOnPath(name, env, familyOf(platform), exists, { windowsDrives })
+}
+
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
 }
 
 /**
- * Whether a name in a PATH folder is there, as Windows' search asks it: of the name itself, never of where it leads.
- * `existsSync` follows a reparse point, and an App Execution Alias (`winget.exe`, a Store-installed tool, in
- * `%LOCALAPPDATA%\Microsoft\WindowsApps`) leads somewhere only process creation can open, so it answered false for a
- * tool Windows starts (measured on Windows 11: `existsSync` false, `lstat` a link).
+ * Whether a name in a PATH folder is there as Windows' search asks it: of the name itself, never where it leads. `existsSync`
+ * follows a reparse point and an App Execution Alias (`winget.exe`, in `%LOCALAPPDATA%\Microsoft\WindowsApps`) leads somewhere
+ * only process creation opens (measured on Windows 11: `existsSync` false, `lstat` a link)
  */
 function presentOnWindows(path: string): boolean {
   if (existsSync(path)) return true

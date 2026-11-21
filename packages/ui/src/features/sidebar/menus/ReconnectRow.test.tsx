@@ -68,7 +68,7 @@ describe('Reconnect in a project menu', () => {
 
   it('puts its result in a live region that is not a status among the menu items, and describes the row by it only once it has one', () => {
     const html = render(machine({ status: 'refused', error: 'box@box: Permission denied (publickey).' }))
-    // A menu holds menu items: an unnamed `status` between them is not one (#1543 review)
+    // A menu holds menu items: an unnamed `status` between them is not one (#1543)
     expect(html).not.toContain('role="status"')
     expect(html).toMatch(/<div id="[^"]+" aria-live="polite"[^>]*data-testid="reconnect-result-api">/)
     // Nothing to describe the row by before a press has a result

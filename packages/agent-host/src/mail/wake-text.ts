@@ -1,15 +1,7 @@
 /**
- * Recognises a mail wake in a conversation read back from the tool (docs/plans/mailbox.md §9.2).
- *
- * A delivery is the CLI's input, and the tool keeps it in its record as a user turn: the reminder, then the inline messages
- * behind it (`buildMessageFrame`, and an older build’s frame, `oldWake` in the tests). The host writes no user row for it and shows a compact line instead, so a record read back
- * (the catch-up at a wake, an import) must not make it the person's words: `read_session` and `recall` would attribute
- * what a session wrote to them. The read-back takes it out, whole, and the line the delivery left stays the only trace.
- *
- * The text is matched by what Centralu wrote and nobody else can write: the reminder's fixed head, and the inline
- * messages' fixed header with every body line behind `> `. This file stands apart from `frame.ts` so the adapters can use it
- * without the store; `wake-text.test.ts` reads back the frame now and the older one's text, so a change to the frame that this does
- * not follow fails there.
+ * Recognises a mail wake in a read-back conversation (docs/plans/mailbox.md §9.2): the host writes no user row for it, so
+ * `read_session` and `recall` must not credit it to the person. Matched by text only Centralu writes: the reminder head and the
+ * message header. Apart from `frame.ts` so adapters need not the store; `wake-text.test.ts` reads this and an older frame.
  */
 
 /** The reminder a wake writes, up to its end tag, and the inline messages that follow it (a header line, then its quoted lines) */

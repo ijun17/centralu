@@ -1,53 +1,24 @@
 import { z } from 'zod'
 import { HostHandover, HostLogon } from './host-logon.js'
 
-/**
- * Linked machines (remote mode as linked hosts, #82; docs/plans/remote-hub.md).
- *
- * Every machine runs one host. The host a UI is attached to (the hub) links to the hosts of other
- * machines and shows their sessions and projects with their ids qualified as `<machine>.<id>`
- * (§3.3). These are the shapes the hub tells its UI about those links.
- */
+/** What a hub tells its UI about its links to other machines' hosts (docs/protocol.md §6, docs/plans/remote-hub.md). */
 
-/** Lowercase, digits and hyphens, starting with a letter. Never a dot: the first dot of a qualified id ends it */
+/** Never a dot: the first dot of a qualified id ends the machine id */
 export const MACHINE_ID_RE = /^[a-z][a-z0-9-]{0,31}$/
 export const MachineId = z.string().regex(MACHINE_ID_RE, 'Not a machine id')
 export type MachineId = z.infer<typeof MachineId>
 
-/** A linked machine a hub's merged answer could not read just now, by its id and the name the person gave it (`trash.list`, `mail.tasks`) */
+/** A linked machine a hub's merged answer could not read just now (`trash.list`, `mail.tasks`) */
 export const UnreachedMachine = z.object({ machineId: z.string(), name: z.string() })
 export type UnreachedMachine = z.infer<typeof UnreachedMachine>
 
 /**
- * Where a link stands.
- *
- *   connecting       opening the transport or waiting for the remote host's hello
- *   connected        calls and events flow
- *   unreachable      the machine answered or was linked and then failed, or its link dropped: an ssh the machine
- *                    refused (a key, a host key), a link that ended; `error` says why. The hub retries on its own while
- *                    Auto reconnect is on (`MachineInfo.autoReconnect`), and waits for the person's Connect when it is off
- *   away             the machine does not answer at all (#1398): ssh's connect timed out, there is no route, or the name
- *                    does not resolve. Asleep, off or off the network, not an error; `error` keeps ssh's own line for the
- *                    details, `lastConnectedAt` says when the link was last up, and `nextAttemptAt` when the hub tries
- *                    again. The status stays `away` between attempts that fail the same way. An older window reads it as
- *                    unreachable
- *   not_running      the machine answers, but no `centralu serve` is running there, and the hub
- *                    could not start one (`error` says why)
- *   starting         no host was running there; the hub is starting one (`centralu serve --detach`,
- *                    docs/plans/remote-hub.md §10.9 decision 7). An older window reads it as unreachable
- *   versions_differ  the two sides run different versions; nothing connects until they are aligned
- *                    or the person declines (`machines.acceptVersions`, plan §4)
- *   refused          the remote host turned the hub's hello away and asking again did not help
- *   updating         the hub is stopping, switching or removing the Centralu it installed there
- *                    (`machines.update` / `rollback` / `uninstall`; `operation` says which step). The
- *                    link waits meanwhile. An older window reads it as unreachable
- *   disconnected     the hub keeps no link open and tries none (#1134): the person disconnected it. Its sessions
- *                    keep running there; what they say arrives once the link is up again. An older window reads
- *                    it as unreachable
- *   stopped          no host runs there and the hub starts none by itself (#1143): the person stopped it there
- *                    (`centralu serve --stop`, or quitting Centralu there), or the hosts the hub started kept
- *                    stopping soon after they started. `error` says which; the person's Start
- *                    (`machines.reconnect`) starts one. An older window reads it as unreachable
+ * Where a link stands (docs/protocol.md §6 `MachineInfo`). What that list does not say:
+ *   unreachable  the machine refused ssh (a key, a host key) or the link ended; one that does not answer at all is
+ *                `away`, and stays `away` between attempts that fail the same way
+ *   refused      the remote host turned the hub's hello away and asking again did not help
+ *   updating     the hub is stopping, switching or removing the Centralu it installed there (`operation` says the
+ *                step); an older window reads it as unreachable
  */
 export const MachineStatus = z.enum([
   'connecting',
@@ -67,39 +38,30 @@ export type MachineStatus = z.infer<typeof MachineStatus>
 export const MachineSide = z.object({
   version: z.string(),
   protocolVersion: z.number().int(),
-  /** A build run from source (not from npm): there is no "newer" to compare it with (plan §4) */
+  /** A build run from source: there is no "newer" to compare it with */
   dev: z.boolean().default(false),
 })
 export type MachineSide = z.infer<typeof MachineSide>
 
-/**
- * What runs a command at the other end of ssh (measured on a Windows laptop, 2026-10-05): a Unix
- * shell, Windows OpenSSH's PowerShell, or a Linux distro inside WSL on that Windows machine (WSL2
- * forwards the distro's loopback ports to Windows' loopback, so the same forward reaches it).
- */
+/** `wsl`: a distro on Windows, reached by the same forward since WSL2 forwards its loopback ports (measured) */
 export const RemoteShell = z.enum(['posix', 'powershell', 'wsl'])
 export type RemoteShell = z.infer<typeof RemoteShell>
 
-/** The two sides of a link, and what the version prompt says about them (plan §4) */
 export const MachineVersions = z.object({
   hub: MachineSide,
   remote: MachineSide,
   /** The side to bring up to the other. Null when they match, or when a dev build is involved */
   older: z.enum(['hub', 'remote']).nullable(),
-  /** Both speak one protocol. When false the link cannot connect at all until one side updates */
+  /** False: the link cannot connect at all until one side updates */
   compatible: z.boolean(),
-  /** Both are releases of the same channel (beta, stable). Versions are only ranked within one */
+  /** Versions are only ranked within one channel (beta, stable) */
   sameChannel: z.boolean().default(true),
-  /** The person chose to connect without aligning (`machines.acceptVersions`); only possible when compatible */
+  /** Only possible when compatible */
   accepted: z.boolean().default(false),
 })
 export type MachineVersions = z.infer<typeof MachineVersions>
 
-/**
- * Where a managed version came from, when it is not a release: a dev build of the host made on that machine from a git
- * commit (`pnpm remote-dev`, #1036), `dirty` when the working copy had changes the commit does not hold. Its version
- * is `<base>.local.N`
- */
+/** A dev build made on that machine from a commit (`pnpm remote-dev`); its version is `<base>.local.N` */
 export const InstallSource = z.object({
   kind: z.literal('dev'),
   commit: z.string(),
@@ -107,10 +69,6 @@ export const InstallSource = z.object({
 })
 export type InstallSource = z.infer<typeof InstallSource>
 
-/**
- * One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there). `source`
- * (additive, #1036) is set for a dev build only; a release has none
- */
 export const InstalledVersion = z.object({
   version: z.string(),
   node: z.string(),
@@ -119,35 +77,26 @@ export const InstalledVersion = z.object({
 export type InstalledVersion = z.infer<typeof InstalledVersion>
 
 /**
- * A step of what the hub does to the Centralu it installs on a machine (docs/plans/remote-hub.md §10.5):
- *
- *   install    preflight, registry, node, centralu (install.ts)
- *   update     those, then stop (the running host, `serve --stop`), switch (`current`), start
- *              (`serve --detach`), check (a hello from the new version within 30 s), then prune, or
- *              roll_back when the check failed
- *   rollback   stop, switch, start, check
- *   uninstall  stop, remove
- *   autostart  on, off or status: `machines.autostart` (§10.4), one step. It holds the machine like
- *              the others, since the entry it writes names a launcher an uninstall may be removing.
- *              Additive (#850): a build before it reads the kind as `update`
+ * A step of what the hub does to the Centralu it installs on a machine (docs/plans/remote-hub.md §10.5). `autostart`
+ * holds the machine like the others, since the entry it writes names a launcher an uninstall may be removing; a build
+ * before it reads the kind as `update`
  */
 export const MachineOperation = z.object({
   kind: z.enum(['install', 'update', 'rollback', 'uninstall', 'autostart']).catch('update'),
+  /** install: preflight, registry, node, centralu; update adds stop, switch, start, check, then prune or roll_back */
   step: z.string(),
-  /** The version it brings the machine to, when there is one */
   target: z.string().nullable().default(null),
   at: z.number(),
-  /** What `wait_idle` (sessions in a turn) or `wait_open` (open terminals and project commands) waits for: how many. Additive (#1579) */
+  /** How many `wait_idle` (sessions in a turn) or `wait_open` (open terminals and project commands) waits for */
   count: z.number().optional(),
 })
 export type MachineOperation = z.infer<typeof MachineOperation>
 
 /**
- * Whether a linked machine starts its host at boot (docs/plans/remote-hub.md §10.4, owner decision 4:
- * offered per machine, off by default), as the machine said. `how` is what it uses: `systemd`, a user
- * unit on Linux; `task`, a scheduled task at sign-in on Windows and for WSL; null where it offers
- * nothing (macOS, a Linux without systemd, WSL without interop). `linger` (systemd only): whether the
- * user's manager starts at boot, or only at login because `loginctl enable-linger` needs an administrator
+ * Whether a linked machine starts its host at boot (docs/plans/remote-hub.md §10.4), as the machine said. `how`:
+ * `systemd`, a user unit; `task`, a scheduled task at sign-in (Windows, WSL); null where it offers nothing (macOS, a
+ * Linux without systemd, WSL without interop). `linger` false: only at login, since `loginctl enable-linger` needs an
+ * administrator
  */
 export const MachineAutostart = z.object({
   on: z.boolean().catch(false),
@@ -156,41 +105,25 @@ export const MachineAutostart = z.object({
 })
 export type MachineAutostart = z.infer<typeof MachineAutostart>
 
+/** The fields not noted here are in docs/protocol.md §6 `MachineInfo` and §3's `machines` row */
 export const MachineInfo = z.object({
   id: MachineId,
-  /** What the person calls it; shown as the group header in the sidebar */
   name: z.string(),
-  /** What the hub hands to `ssh`: a host alias from ~/.ssh/config, or user@host */
+  /** A host alias from ~/.ssh/config, or user@host */
   sshTarget: z.string(),
   shell: RemoteShell.catch('posix').default('posix'),
-  /** The distro, when `shell` is `wsl` */
   wslDistro: z.string().nullable().default(null),
-  /**
-   * What runs in place of `centralu` on the remote, in that shell's syntax, when it is neither on
-   * the PATH an ssh command gets nor at the launcher `centralu serve` keeps. Null: those two
-   */
+  /** Runs in place of `centralu`, in that shell's syntax, when it is neither on ssh's PATH nor at serve's launcher */
   command: z.string().nullable().default(null),
   status: MachineStatus.catch('unreachable'),
-  /** Why the link is not connected, in words for the person; null when connected */
+  /** In words for the person; null when connected */
   error: z.string().nullable().default(null),
   versions: MachineVersions.nullable().default(null),
-  /** When the link last completed a hello, for "last seen" */
   lastConnectedAt: z.number().nullable().default(null),
-  /** While `away`: when the hub tries again, as a time in ms; null when it tries none until the person's Connect (#1398). Additive */
   nextAttemptAt: z.number().nullable().catch(null).default(null),
-  /**
-   * The local end of the forward, and whether it equals the remote host's port. For diagnosis only:
-   * app views of a linked machine are served by the hub itself and need neither
-   * (docs/plans/remote-hub.md §11).
-   */
+  /** For diagnosis only: the hub serves a linked machine's app views itself (docs/plans/remote-hub.md §11) */
   localPort: z.number().int().nullable().default(null),
   sameLocalPort: z.boolean().default(false),
-  /**
-   * The hub started the host there, because it found none running (plan §10.9, decision 7), and how:
-   * `detached` lives on whatever happens to the link; `link_bound` runs in the link's own ssh session,
-   * because that machine blocks starting a process through WMI, and ends when the link does (`note`
-   * says why). Null when the host was already running. Additive; an older hub sends nothing
-   */
   hostStarted: z
     .object({
       how: z.enum(['detached', 'link_bound']).catch('detached'),
@@ -200,12 +133,7 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
-  /**
-   * What the hub installed there, as the remote's connection line last said (docs/plans/remote-hub.md
-   * §10.5, S12): `managed` when the running `centralu` is that install, `current` and `previous` (the
-   * rollback target) from its pointer files. Null when the machine has not answered, or predates the
-   * field. Additive
-   */
+  /** From the connection line: `managed` when the running `centralu` is that install; `previous` is the rollback target */
   install: z
     .object({
       managed: z.boolean().catch(false),
@@ -215,88 +143,35 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
-  /**
-   * An install, update, rollback or uninstall the hub is running there, and its step, while it runs
-   * (`machines.install` / `update` / `rollback` / `uninstall`). Null otherwise. Additive
-   */
   operation: MachineOperation.nullable().catch(null).default(null),
-  /**
-   * Whether the machine starts its host at boot, from its connection line and the last
-   * `machines.autostart` (`MachineAutostart`). Null when the machine has not answered, or predates it.
-   * Additive
-   */
+  /** From the connection line and the last `machines.autostart`; null before the machine answered */
   autostart: MachineAutostart.nullable().catch(null).default(null),
-  /**
-   * The machine's host said in its hello that it runs with administrator rights (#702): on Windows, an account in the
-   * Administrators group linked over ssh gets a full token with no UAC split, so every agent there and every tool call
-   * runs as an administrator. Null when the host has not said (not connected yet, or a build that predates it). Additive
-   */
+  /** On Windows an administrator linked over ssh gets a full token, no UAC split: every agent there runs elevated */
   elevated: z.boolean().nullable().catch(null).default(null),
-  /**
-   * The reverse direction (#550, docs/plans/remote-hub.md §12.7): whether this machine's sessions may ask this
-   * computer's projects (`on`, the switch in Settings → Machines, off by default and stored with the machine), and a
-   * sentence for the person when it is on but cannot work (`note`: the machine runs a Centralu from before it). Null
-   * from a hub that predates it. Additive
-   */
+  /** Whether this machine's sessions may ask this computer's projects (remote-hub.md §12.7); `note`: why not, while on */
   asks: z
     .object({ on: z.boolean().catch(false), note: z.string().nullable().catch(null).default(null) })
     .nullable()
     .catch(null)
     .default(null),
-  /**
-   * Which Windows logon the machine's host said in its hello it runs in (#1224, `HelloServer.logon`): `network` is the
-   * one Windows OpenSSH gives a key login, where Git cannot use a sign-in saved in Windows Credential Manager. Null when
-   * the host has not said (not connected yet, not Windows, or a build that predates it). Additive
-   */
   logon: HostLogon.nullable().catch(null).default(null),
-  /**
-   * The machine's host said a `serve` in the person's Windows sign-in waits to take over from it, or gave up waiting
-   * (#1224, `HostHandover`, from its hello and its `host_handover` events). Null otherwise, and from a host that
-   * predates it. Additive
-   */
+  /** From the host's hello and its `host_handover` events */
   handover: HostHandover.nullable().catch(null).default(null),
-  /**
-   * Auto reconnect (#1341), the person's switch per machine, on by default. On: the hub connects when it starts and
-   * again after every drop, on a backoff from 2 s to 5 minutes. Off: it tries once when it starts; after a drop or a
-   * failed attempt it tries no more until the person presses Connect (`machines.reconnect`), and an agent's call that
-   * needs the machine is answered at once as not connected. Additive: an older hub sends nothing, which is on
-   */
+  /** Absent from an older hub, which reads as on */
   autoReconnect: z.boolean().catch(true).default(true),
-  /**
-   * `machines.update` waits for the sessions there to finish before it stops the host (#1399; see `machines.update { when }`).
-   * Additive: an older hub sends nothing and stops at once, so a window must not promise a wait without this
-   */
+  /** An older hub sends nothing and stops at once, so a window must not promise a wait without this */
   updateWaits: z.boolean().optional(),
-  /**
-   * How the machine's last version switch ended, when this hub did not follow it to its end (docs/plans/remote-hub.md
-   * §10.5a): the machine runs the switch itself, so one a hub that went away handed over finishes there and is said here
-   * once. Null otherwise. Additive: an older hub sends nothing
-   */
+  /** How a switch the machine ran itself ended, when this hub did not follow it (remote-hub.md §10.5a); said once */
   switchNote: z.string().nullable().catch(null).optional(),
-  /**
-   * The hub's own update of this machine to the hub's version (#1508), started by itself while the hub's automatic updates
-   * are on, that did not go through: `version` is the one it tried to install, `failed` says why, and `retryAt` is when it
-   * tries once more (null: it will not try again for this version; the person's Update still can). Null or absent while none
-   * failed.
-   * Additive
-   */
+  /** `retryAt` null: no retry for this version, though the person's Update still can */
   followHub: z
     .object({ version: z.string(), failed: z.string(), retryAt: z.number().nullable().catch(null) })
     .nullable()
     .optional()
     .catch(undefined),
   /**
-   * The full credentials the machine holds besides this hub's own (#1405, its `centralu serve --connection`'s `others`,
-   * then `host.credentials` every 30 seconds while connected): who each was made for (`label`, as the one who paired
-   * said it) and when. Never their values. Another hub that pairs with the machine, the machine's own window on
-   * Windows, and anything of that user that ran `--pair` itself show here; the row offers to withdraw each
-   * (`machines.revokeCredential`). `replaced`: its pairing took the place of an earlier credential of its label that was
-   * asked for another way (a `--pair window` in the window's place; the window or a hub pairing again is not marked).
-   * `hubsName`: it carries this hub's own label, and this hub did not make it. `gone` (#1405 review): no longer held,
-   * but something said hello with it on that host before it went, so a credential used and withdrawn between two reads
-   * still shows; the row offers nothing to withdraw for it (#1712: also one the host told the hub of, over the link, as it let it in,
-   * until a read answers for it, shown while the link is away as it was seen). The first 32; `otherCredentialsMore` counts the rest. Null while it is not
-   * known: not connected yet (and nothing told), or a Centralu there from before it. Additive
+   * Never their values. `gone`: withdrawn, but something said hello with it first (or the host told the hub of it as it
+   * let it in), so a use between two reads still shows, also while the link is away; it offers nothing to withdraw
    */
   otherCredentials: z
     .array(
@@ -313,32 +188,22 @@ export const MachineInfo = z.object({
     .nullable()
     .catch(null)
     .default(null),
-  /** How many of the machine's other full credentials `otherCredentials` leaves out past its first 32 (#1405). Additive */
   otherCredentialsMore: z.number().int().min(0).catch(0).default(0),
-  /**
-   * This hub's own full credential there is gone (#1405): something paired under its label or withdrew it while the
-   * link was up. The host there closes the link then (#1405 review) and the next link pairs again; the mark stays for as
-   * long as this hub runs, so the link coming back does not hide it. Additive
-   */
+  /** The host there then closes the link; the mark stays while this hub runs, so the link coming back hides nothing */
   ownCredentialGone: z.boolean().catch(false).default(false),
-  /**
-   * The machine's `serve.json` cannot be read there (#1405 review: permission denied): its host refuses every new full
-   * hello, closes the links in with one after a few seconds, and this hub cannot pair again until it can. The row says
-   * so. Additive
-   */
+  /** Its host then refuses every new full hello and closes the links in with one, so this hub cannot pair again */
   credentialFileUnreadable: z.boolean().catch(false).default(false),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
 
 /**
- * A pair the person approved for the reverse direction (#550): a session of a linked machine may ask a project of this
- * computer with no card, until withdrawn (`machines.withdrawAsk`) or the machine's switch goes off. The names are as
- * they are now (the project's) or were when approved (the session's, which lives on the other machine)
+ * A pair the person approved for the reverse direction: that session may ask that project with no card, until withdrawn
+ * (`machines.withdrawAsk`) or the machine's switch goes off. `sessionName` is as it was when approved
  */
 export const MachineAskConsent = z.object({
   machineId: MachineId,
   machineName: z.string(),
-  /** The session's own id on that machine (not qualified) */
+  /** Not qualified */
   sessionId: z.string(),
   sessionName: z.string(),
   projectId: z.string(),
@@ -347,39 +212,26 @@ export const MachineAskConsent = z.object({
 })
 export type MachineAskConsent = z.infer<typeof MachineAskConsent>
 
-/**
- * What `machines.install` did there (docs/plans/remote-hub.md §10.2): the version `current` names
- * now, the one kept as `previous` (the rollback target), the versions it removed, and folders it could
- * not remove (a Windows program still running from them). `machine` is the row after it
- */
+/** `left`: folders `machines.install` could not remove (a Windows program still running from them) */
 export const MachineInstallResult = z.object({
   machine: MachineInfo,
   current: InstalledVersion,
   previous: InstalledVersion.nullable(),
   removed: z.array(z.string()).default([]),
   left: z.array(z.string()).default([]),
-  /** Why the version installed is not this computer's own (a local build installs its release; #689). Additive */
+  /** Why the version installed is not this computer's own (a local build installs its release) */
   note: z.string().optional(),
 })
 export type MachineInstallResult = z.infer<typeof MachineInstallResult>
 
-/**
- * What `machines.uninstall` did: the row after it, and whether a host was running there that it stopped.
- * The remote's data (its store, `serve.json`, logs) stays, as `centralu uninstall` keeps history
- */
+/** The remote's data (its store, `serve.json`, logs) stays, as `centralu uninstall` keeps history */
 export const MachineUninstallResult = z.object({ machine: MachineInfo, stopped: z.boolean() })
 export type MachineUninstallResult = z.infer<typeof MachineUninstallResult>
 
-/** What `machines.autostart` left: the row after it, and the machine's answer */
 export const MachineAutostartResult = z.object({ machine: MachineInfo, autostart: MachineAutostart })
 export type MachineAutostartResult = z.infer<typeof MachineAutostartResult>
 
-/**
- * What would stop if a host stopped now (the `hostBusy` rule, docs/agent-host/lifecycle/updates.md): its live sessions
- * that are working, waiting on an approval, asking a question, or running background work, its open
- * terminals and its running project commands. `host.activity` answers it about one host. A remote
- * host has no keeper today (plan §10.4), so stopping it ends all of these
- */
+/** What stopping a host would end (`hostBusy`, docs/agent-host/lifecycle/updates.md); a remote one has no keeper */
 export const HostActivity = z.object({
   working: z.number().int().default(0),
   approvals: z.number().int().default(0),
@@ -391,19 +243,16 @@ export const HostActivity = z.object({
 export type HostActivity = z.infer<typeof HostActivity>
 
 /**
- * How many sessions of a host are in a turn or hold work that stopping it would end (#1399): working, waiting on an approval or
- * a question, or running background work. Terminals and project commands are left out: they are kept open for hours, and an
- * update that waited for them would wait for good. Null (the host cannot say) counts none
+ * Leaves out terminals and project commands: they are kept open for hours, and an update that waited for them would
+ * wait for good. Null (the host cannot say) counts none
  */
 export function turnsRunning(a: HostActivity | null | undefined): number {
   return a ? a.working + a.approvals + a.questions + a.background : 0
 }
 
 /*
- * What a hub's Assistant reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).
- * The machine answers with the Assistant's own code, in its own terms (its ids, its project names), over the view
- * the hub's window has: every session but its Assistant and coordinators. The hub qualifies the ids and names the
- * machine. Text fields are the machine's words; the hub fences them before a model reads them
+ * What a hub's Assistant reads about a linked machine's sessions (docs/plans/remote-hub.md §12), in the machine's own
+ * terms. Text fields are the machine's words; the hub fences them before a model reads them
  */
 
 /** One session, as `list_sessions` shows it (`host.sessions`) */
@@ -424,16 +273,14 @@ export type HostSessionRow = z.infer<typeof HostSessionRow>
 export const HostReadSessionResult = z.object({
   state: z.string(),
   lines: z.array(z.string()),
-  /** The budget the machine fitted these lines to (#1480): absent from a machine that does not, and the hub bounds them itself */
+  /** The budget the machine fitted these lines to; absent from one that does not, and the hub bounds them itself */
   maxChars: z.number().int().optional(),
 })
 export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
 
 /**
- * A session's last response, whole (`host.lastAnswer`, #1186): its text up to the characters asked for, how long it is
- * in all, and the seq of its first message (`host.readSession`'s `around`), null when it has said nothing. A hub read
- * it from `host.readSession`'s lines, which are cut at 2,000 characters, so a long answer came back as an older line or
- * nothing at all
+ * A session's last response, whole (`host.lastAnswer`): `host.readSession` cuts lines at 2,000 characters, so a long
+ * answer read from it comes back as an older line or nothing. `seq` is its first message's, for `around`
  */
 export const HostLastAnswerResult = z.object({
   text: z.string(),
@@ -454,18 +301,16 @@ export const HostRecallHit = z.object({
 export type HostRecallHit = z.infer<typeof HostRecallHit>
 
 /**
- * One concrete `Host` alias from the ssh config of the computer the hub runs on (#514): what
- * `machines.sshHosts` lists so the person picks a machine instead of typing it, as VS Code's
- * Remote-SSH does. `hostName`, `user` and `port` are what `ssh -G <alias>` resolves (null when it
- * could not). `linked` names the machines already linked through this alias: one Windows computer
- * can be linked twice, as Windows and as a WSL distro
+ * A concrete `Host` alias from the hub's ssh config, so the person picks a machine instead of typing it. `hostName`,
+ * `user` and `port` are what `ssh -G <alias>` resolves. One Windows computer can be linked twice: as Windows and as a
+ * WSL distro
  */
 export const SshHost = z.object({
   alias: z.string(),
   hostName: z.string().nullable().default(null),
   user: z.string().nullable().default(null),
   port: z.number().int().nullable().default(null),
-  /** Where the alias is declared, `<file>:<line>`, with the home folder as `~` */
+  /** `<file>:<line>`, with the home folder as `~` */
   source: z.string().default(''),
   linked: z
     .array(
@@ -481,12 +326,11 @@ export const SshHost = z.object({
 export type SshHost = z.infer<typeof SshHost>
 
 /**
- * The answer of `machines.sshHosts`: the aliases in file order (an `Include` read where it stands, as
- * OpenSSH reads it), and notes for the person about what was left out (a `Match` block, an `Include`
- * that could not be read, aliases past the cap)
+ * The aliases in file order (an `Include` read where it stands, as OpenSSH reads it), and notes on what was left out (a
+ * `Match` block, an `Include` that could not be read, aliases past the cap)
  */
 export const SshHostList = z.object({
-  /** The file read first, with the home folder as `~` */
+  /** With the home folder as `~` */
   configFile: z.string(),
   hosts: z.array(SshHost),
   notes: z.array(z.string()).default([]),
@@ -494,14 +338,9 @@ export const SshHostList = z.object({
 export type SshHostList = z.infer<typeof SshHostList>
 
 /**
- * What one BatchMode ssh found at the other end of a target (`machines.probe`, #514):
- *
- *   reachable      ssh got there and ran the probe (false: `error` is ssh's own last line)
- *   os             `posix` (a Unix shell answered) or `windows` (Windows OpenSSH); null when ssh
- *                  could not get there, or what came back was not recognised (`error` says what)
- *   windowsShell   the shell Windows OpenSSH runs a command under (its `DefaultShell`; cmd.exe when
- *                  none is set). cmd.exe is the one that limits a command line to 8,191 characters
- *   wslDistros     the WSL distros registered for that account, the default one marked
+ * What one BatchMode ssh found at the other end of a target (`machines.probe`). `error` is ssh's own last line, or what
+ * was not recognised. `windowsShell` is Windows OpenSSH's `DefaultShell` (cmd.exe when none is set): cmd.exe limits a
+ * command line to 8,191 characters
  */
 export const MachineProbe = z.object({
   sshTarget: z.string(),

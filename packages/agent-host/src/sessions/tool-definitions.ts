@@ -810,7 +810,7 @@ export const AGENT_BUDGET_CHARS = 1330
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind "question". In a report, say what each claim was checked against, and what was not.`,
+    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind: "question". In a report, say what each claim rests on and what you did not check.`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'close', 'find', 'watch']),
       thread: z.string().optional(),
@@ -946,7 +946,7 @@ export const APP_BUDGET_CHARS = 500
  * the prompt's cached prefix and must not change when an app is added or changed (#512). This one line, the same
  * whichever apps they are, sends an agent to that guide before it reaches for `gh` or `git` by hand.
  *
- * Only in an ordinary session that has an app attached when it starts (#992 review): without one there is no help to
+ * Only in an ordinary session that has an app attached when it starts (#992): without one there is no help to
  * read, and the 88 characters would ride in every request for nothing. Decided once, at the start, so the session's
  * prefix never changes under it; an app attached later is found through its tools. Not the Assistant's: it does
  * no repository work itself ("You have no hands").
@@ -989,7 +989,7 @@ export function readerFirst(subagentTool?: string): readonly string[] {
 /**
  * The reader set's instructions (#564): the product rule (product-spec.md §1.2), worded as needs rather than as a
  * role. "Unless the person says otherwise" is the rule's own limit: a direct instruction wins. With REPO_WORK_FIRST
- * for an ordinary session that starts with an app attached (#957, #992 review).
+ * for an ordinary session that starts with an app attached (#957, #992).
  */
 export function readerInstructions(subagentTool?: string, appsAttached = false): string {
   const first = appsAttached ? [...readerFirst(subagentTool), REPO_WORK_FIRST] : readerFirst(subagentTool)

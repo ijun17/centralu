@@ -6,7 +6,6 @@ import type { Emit } from './event-bus.js'
 /** The host's requests from the limited credential (#1405), raised by a test (`raiseHostRequest`) and answered here */
 export class HostRequestsMock {
   private readonly open: HostRequest[] = []
-  /** For tests: every answer this window gave, in order */
   readonly hostRequestAnswers: { requestId: string; decision: 'allow' | 'deny' }[] = []
   private next = 0
 
@@ -15,7 +14,6 @@ export class HostRequestsMock {
     private readonly emit: Emit,
   ) {}
 
-  /** For tests: a program asks, as the host's `host_request` event says it */
   raiseHostRequest(question: string, opts: { method?: string; client?: string | null; session?: string | null } = {}): string {
     const createdAt = this.clock.now()
     const request: HostRequest = {
@@ -32,7 +30,7 @@ export class HostRequestsMock {
     return request.requestId
   }
 
-  /** For tests: the program went away before an answer */
+  /** The program went away before an answer */
   withdrawHostRequest(requestId: string): void {
     const i = this.open.findIndex((r) => r.requestId === requestId)
     if (i < 0) return

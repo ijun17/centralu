@@ -73,12 +73,9 @@ export function ChatStream({
    * The height (px) of the raised input card. When set, the margin below grows by **exactly
    * that card's height**.
    *
-   * Collapsed originally meant "overlay instead of pushing" — the row being read not moving on
-   * rise looked like the right virtue. In practice, the cost of that virtue turned out to be
-   * **not being able to read the last few lines** (reported by a user on 2026-09-13: "it
-   * covers the conversation as it rises, which is annoying"). So instead of overlaying, this
-   * pushes the content up. The value has to match the card's actual height, so it takes a
-   * measured number rather than a constant — the card grows when an attachment is added or the
+   * It pushes the content up instead of overlaying it: an overlay keeps the row being read
+   * still, but then the card rising covers **the last few lines**, and they cannot be read.
+   * The value has to match the card's actual height, so it takes a measured number rather than a constant — the card grows when an attachment is added or the
    * input field wraps to more than one line.
    */
   bottomPad?: number
@@ -225,7 +222,7 @@ export function ChatStream({
     /*
      * The scroller's size-change compensation is applied to where the view is now, not to the
      * offset the scroller last saw in a scroll event — which is a frame stale right after our
-     * own landing or following write, and put the view 54px above the end in WebKit. While the
+     * own landing or following write, and puts the view 54px above the end in WebKit. While the
      * view sticks to the end there is none at all (see `writeScroll`).
      */
     scrollToFn: (offset, options, instance) => {
@@ -261,9 +258,9 @@ export function ChatStream({
 
   /*
    * The conversation fades in as it opens (owner, 2026-10-18), started by hand when the list stops hiding. A CSS
-   * transition on the class was not enough: when the list settled within one frame (already at the bottom), the hidden
-   * state was never painted, so there was nothing to transition from, and some opens (the Assistant's, often) just
-   * appeared.
+   * transition on the class is not enough: when the list settles within one frame (already at the bottom), the hidden
+   * state is never painted, so there is nothing to transition from, and some opens (the Assistant's, often) just
+   * appear.
    */
   const wasSettling = useRef(false)
   const fadeIn = useCallback(() => {
@@ -350,7 +347,7 @@ export function ChatStream({
 
         {/*
         No scroll anchoring on the rows. They move with `top` (below), which Chromium's scroll
-        anchoring sees, while a transform it did not; the virtualizer already keeps the view in
+        anchoring sees (a transform it does not); the virtualizer already keeps the view in
         place when a row above changes size, and anchoring on top of it would move it twice.
       */}
         {/* `data-sized-rows`: how many row heights the scroller holds, read by the #392 scenario */}
@@ -386,7 +383,7 @@ export function ChatStream({
             */
               /*
               The line of a folded run stands 8px from an answer bubble above and 8px from one below (owner,
-              2026-11-07: it was 16 each side; after the person's message the row keeps its 24px): the row before it and the line's own row take 4px of bottom
+              2026-11-07; after the person's message the row keeps its 24px): the row before it and the line's own row take 4px of bottom
               padding instead of 12, and the line's own 4px stays, so the space is the line's, not the bubbles'.
               A row that is not next to a line keeps the 12px the bubbles stand apart by.
             */
@@ -409,8 +406,8 @@ export function ChatStream({
               /*
               Placed with `top`, not `transform` (#364). A transform makes every row a stacking
               context, and once a code block in one row scrolls sideways (a composited scroller
-              of its own), WebKit composited nearly every later row for overlap: six idle grid
-              panels had 119 layers, 61 with `top`, and ~22 MB more backing store, kept for as long
+              of its own), WebKit composites nearly every later row for overlap: six idle grid
+              panels measured 119 layers with a transform, 61 with `top`, and ~22 MB more backing store, kept for as long
               as anything repaints (docs/spikes/2026-10-memory-heavy-store.md §10). Rows only move when
               a size is measured, so `top` costs one positioned layout then, nothing on scroll.
             */
@@ -467,8 +464,8 @@ export function ChatStream({
       <div ref={fade.bottom} className="cc-edge-fade-bottom" style={{ height: EDGE_FADE_PX }} aria-hidden data-testid="chat-fade-bottom" />
       {/*
         The skeleton stands over the list, not in it, from the moment history is asked for until the list has settled
-        where it opens (owner, 2026-10-18). In the list it vanished as the rows arrived, and the list then stayed hidden
-        while it settled (#61), so the pane went blank for a moment between the two; one overlay covers both. It shows
+        where it opens (owner, 2026-10-18). In the list it would vanish as the rows arrive while the list stays hidden as
+        it settles (#61), leaving the pane blank for a moment between the two; one overlay covers both. It shows
         only after 600ms (cc-skeleton-late); a quicker open is the rows fading in as the list stops hiding.
       */}
       {((reading && !gaveUp) || settling) && (
@@ -479,7 +476,7 @@ export function ChatStream({
           <ChatSkeleton late />
         </div>
       )}
-      {/* Pressing the thumb is a person taking over, as a press on the native bar was */}
+      {/* Pressing the thumb is a person taking over, as a press on a native bar is */}
       <OverlayScrollbar
         scrollRef={scrollRef}
         onGrab={() => {

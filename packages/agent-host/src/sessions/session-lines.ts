@@ -8,19 +8,18 @@ import { authorOf } from './transcript-view.js'
  */
 
 /**
- * The longest text one line shows in a plain read. Past it the line is cut, and says where and how to read on
- * (#1186): it used to be cut at 2,000 characters of its JSON with no word of it, so the middle of a long answer, which
- * ask_project's cut sent the caller here to find, could not be read at all.
+ * The longest text one line shows in a plain read. Past it the line is cut, and says where and how to read on (#1186): cut
+ * silently at 2,000 characters of its JSON, the middle of a long answer, which ask_project's cut sends the caller here to find,
+ * could not be read at all.
  */
 export const LINE_MAX_CHARS = 2000
 /** How much of one line a read from an offset shows: a long answer is read in a few calls, not one per 2,000 characters */
 export const LINE_WINDOW_CHARS = 8000
 
 /**
- * The most characters one read_session call returns for its lines when `maxChars` is not given (#1480). A call used to
- * have no total: 40 lines of up to 2,000 characters each came back as about 80,000 characters, all of it read again on
- * every later request of the reader. Large enough that the common read is one call: each further call re-reads the
- * reader's own context
+ * The most characters one read_session call returns for its lines when `maxChars` is not given (#1480). Without a total, 40
+ * lines of up to 2,000 characters each come back as about 80,000 characters, all of it read again on every later request of the
+ * reader. Large enough that the common read is one call: each further call re-reads the reader's own context
  */
 export const READ_BUDGET_CHARS = 12_000
 /** The smallest and largest `maxChars` a read takes; a value outside is brought to the nearest */

@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest'
+import type { StoreWork } from '@cc/protocol'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,6 +26,27 @@ afterEach(() => {
 })
 
 describe('single-instance lock for the host', () => {
+  /*
+   * #2334: what the host does to its store before it can answer is said in host.lock, which every starter reads. The record
+   * is pinned by one fixture, which every reader's test reads too
+   */
+  it('says the store work in host.lock beside who holds it, replaces the file whole, and takes it out again', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../../../tooling/fixtures/host-lock-store-work.json', import.meta.url), 'utf8')) as { record: string }
+    const said = JSON.parse(fixture.record) as { pid: number; at: number; store: StoreWork }
+    const db = dbIn()
+    const r = acquireInstanceLock(db, () => null, { by: 'app' }, () => said.at)
+    if (!r.ok) throw new Error('not taken')
+    const lock = join(db, '..', 'host.lock')
+    r.sayWork(said.store)
+    expect(readFileSync(lock, 'utf8')).toBe(fixture.record.replace(`"pid":${said.pid},`, `"pid":${process.pid},`))
+    r.sayWork(null)
+    expect(JSON.parse(readFileSync(lock, 'utf8'))).toEqual({ pid: process.pid, started: null, at: said.at, by: 'app' })
+    // Nothing is left beside it, and the release still knows the file for its own
+    expect(readdirSync(join(db, '..')).filter((n) => n.startsWith('host.lock'))).toEqual(['host.lock'])
+    r.release()
+    expect(existsSync(lock)).toBe(false)
+  })
+
   it('acquiring it for the first time succeeds and creates a lock file', () => {
     const db = dbIn()
     const r = acquireInstanceLock(db)

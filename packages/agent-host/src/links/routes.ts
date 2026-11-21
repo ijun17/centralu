@@ -3,32 +3,16 @@ import { isObj, type Obj } from '../json-value.js'
 import type { Qualifier } from './qualifier.js'
 
 /**
- * How every RPC method reaches a linked machine (docs/plans/remote-hub.md §5).
- *
- * The table is keyed by `RpcMethodName` with no default, so a method added to the protocol does not
- * compile until someone decides how it routes: forwarding a new call by accident, or keeping on the
- * hub one that names a remote session, would both be silent.
- *
- *   hub        Served by the hub's own host whatever its parameters say: the person's layout,
- *              preferences, themes, updates, the Assistant, app imports, screen questions
- *   internal   The callbacks of the hub's own agents (the Codex bridge). A remote's bridge talks
- *              to its own host; these never cross a link
- *   session    The machine named by `sessionId`'s prefix; the hub's own session when unprefixed
- *   project    The same by `projectId` (or `key`). A null project (a user-folder app) is the hub's
- *   terminal   The same by `terminalId`
- *   machine    The machine named by the optional `machine` parameter; the hub when absent
- *   merge      Every reachable machine, answers combined by the router (`router.ts`)
- *   view       An app view's call, named by several ids at once (`keys`: its project, its instance,
- *              the conversation it sends to). Goes to the machine any of them names, all of them
- *              stripped; ids of two different machines (or of a machine and the hub) are refused,
- *              since a view is open on one machine and reaches only what is there (plan §11)
- *   noRemote   Routed like `session`/`project`, but refused for a remote one: the answer is a path
- *              for this computer's OS (reveal in Finder)
- *   chain      The machine named by `threadId`'s prefix when what follows it is a mail id (a linked machine's chain,
- *              #2268); the hub's own otherwise. A hub's own id starts with its host id, shaped as a machine id too
- *
- * `params` turns the hub's parameters into the remote's (the routing key is always stripped);
- * `result` turns the remote's answer into the hub's terms, field by field through `fields` and `each`.
+ * How every RPC method reaches a linked machine (docs/plans/remote-hub.md §5). The table is keyed by `RpcMethodName` with no
+ * default, so a method added to the protocol does not compile until someone decides how it routes: forwarding a new call by
+ * accident, or keeping on the hub one that names a remote session, would both be silent.
+ *   hub / internal   the hub's own host whatever the parameters say / its own agents' callbacks, never across a link
+ *   session, project, terminal   the machine named by the id's prefix (`sessionId`, `projectId`/`key`, `terminalId`); null project: the hub's
+ *   machine / merge   the optional `machine` parameter, the hub when absent / every reachable machine, combined by the router
+ *   view   an app view's call, named by several ids (`keys`): the machine any names; ids of two machines, or of a machine and the hub, are refused: a view reaches only its own machine (plan §11)
+ *   noRemote   like `session`/`project`, refused for a remote one: the answer is a path for this computer's OS
+ *   chain   the machine named by `threadId`'s prefix when a mail id follows it (#2268; a hub's own id is shaped as a machine id too); the hub's own otherwise
+ * `params` turns the hub's parameters into the remote's; `result` turns the answer into the hub's terms (`fields`, `each`).
  */
 
 type ParamsFix = (p: Record<string, unknown>, q: Qualifier) => Record<string, unknown>
