@@ -411,7 +411,7 @@ not run; it prints each step's time as it goes. In that order:
   cycle, a layer rule);
 - `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references, the OS allowlist, the old name,
   the tiers' globs and more), at your head: they fail on a file your branch did not touch. A guard is declared there with the files
-  it reads, and the names of its tests when not all of the file's are the guard. Every test under `tooling/` is named there once:
+  it reads, and the names of its tests (its describes', when all of the file's are the guard), which every run of it passes to vitest. Every test under `tooling/` is named there once:
   a guard holds the files of a folder, or of the repository, to a rule, and any other test is listed in `NOT_GUARDS` under why it
   is not one; `tooling/guards.test.ts` fails on a test named nowhere;
 - `store-step`: a store step number your branch adds (a new `to: N,` under `packages/agent-host/src/dev-services/store/migrations/`)
