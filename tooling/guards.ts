@@ -68,6 +68,8 @@ export const GUARDS: readonly Guard[] = [
   // The modules the app's build reaches from its entries, held to what may load first and to the calls left out of what ships
   { test: 'tooling/startup-bundle.test.ts', reads: ['tooling/window-build.test-helpers.ts'] },
   { test: 'tooling/pure-calls.test.ts', tests: 'the window bundle', reads: ['tooling/pure-calls.mjs', 'tooling/window-build.test-helpers.ts'] },
+  // Each map of the folder names only paths that are there: another pull request that deletes or moves one fails it
+  { test: 'tooling/feature-maps.test.ts', tests: 'name no repository path', reads: ['tooling/feature-maps.ts'] },
   // The board app's folder holds no data file of the person's
   { test: 'tooling/project-board-contribute.test.ts', tests: 'the private word list in the data folder', reads: [] },
   { test: 'tooling/project-board-reader.test.ts', tests: 'on this computer only', reads: [] },
@@ -92,6 +94,7 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/desktop-csp.test.ts',
     'tooling/dev-live.test.ts',
     'tooling/drift-workflow.test.ts',
+    'tooling/e2e-affected.test.ts',
     'tooling/e2e-engine.test.ts',
     'tooling/e2e-flaky-report.test.ts',
     'tooling/e2e-host-fixture.test.ts',
