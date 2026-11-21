@@ -1641,7 +1641,7 @@ Never a fallback to a copy: an app of another machine that cannot be reached ans
   link is back.
 - **Back.** A refused call is never made again by itself, since a call may change something there. The waste is the
   session idling: once the host is back (a machine answering the hub's offer, or a hub offering again to a machine),
-  each session whose call it refused in the last `AWAY_TOLD_MS` (10 minutes) gets one Centralu notice in its mail,
+  each session whose call it refused in the last `LINK_HOLD_MS` (10 minutes, the same bound as held mail) gets one Centralu notice in its mail,
   "<host> is reachable again; <app> was not called while it was away" (`LinkedApps.back`). An offer answered also
   comes while the host is still away or does not answer app calls on that connection, so a session's record waits
   until it can call the host. An older call is not told: its session has moved on. A call of a tool not in a list the

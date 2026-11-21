@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/client'
 import { errorMessage, LinkedAppCallResult, LinkedAppsResult, oneLineText, type ExternalAppInfo, type LinkedApp } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
+import { LINK_HOLD_MS } from '../mail/across-core.js'
 import type { AppCallOutcome, AppRef } from '../apps/external/runtime.js'
 import { LOOKUP_MS, awayRefusal } from './machine-reach.js'
 import { qualify, splitQualified } from './machine-ids.js'
@@ -66,9 +67,6 @@ const START_LIST_MS = TOOL_LIST_WAIT_MS + SLACK_MS
 
 const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 const LOST_KEPT = 500
-/** How long ago a call refused while its host was away is still told once that host is back: older, its session has moved on */
-export const AWAY_TOLD_MS = 10 * 60_000
-
 /** Gives a session here Centralu's notice under `dedupeKey` */
 export type TellSession = (sessionId: string, body: string, dedupeKey: string) => void
 
@@ -111,7 +109,7 @@ export class LinkedApps {
   }
 
   /**
-   * A linked host may be reachable again: each session here whose app call it refused while away, within `AWAY_TOLD_MS`, and
+   * A linked host may be reachable again: each session here whose app call it refused while away, within `LINK_HOLD_MS`, and
    * that can call it now, is told once, naming the apps. None is called again by itself: a call may change something, and the
    * session decides. The caller's signal (an offer answered) also comes when the host is still away, so each session's
    * record waits until it can call the host.
@@ -123,7 +121,7 @@ export class LinkedApps {
     for (const [sessionId, apps] of host.sessions) {
       if (!this.peersOf(sessionId).some((p) => p.id === hostId && p.reachable && p.answers)) continue
       host.sessions.delete(sessionId)
-      const names = [...apps].filter(([, at]) => now - at <= AWAY_TOLD_MS).map(([name]) => name)
+      const names = [...apps].filter(([, at]) => now - at <= LINK_HOLD_MS).map(([name]) => name)
       if (names.length === 0) continue
       const which = names.length === 1 ? `${names[0]} was` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} were`
       const body = `[Centralu] ${host.name} is reachable again; ${which} not called while it was away. Call ${names.length === 1 ? 'it again if it is' : 'them again if they are'} still needed.`

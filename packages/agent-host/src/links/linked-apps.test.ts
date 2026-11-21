@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
 import { sessionAddress } from '../mail/address.js'
-import { AWAY_TOLD_MS, LinkedApps, type LinkedTool } from './linked-apps.js'
+import { LINK_HOLD_MS } from '../mail/across-core.js'
+import { LinkedApps, type LinkedTool } from './linked-apps.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -202,7 +203,7 @@ describe('a session whose app call was refused while its host was away hears onc
   }
   afterEach(() => vi.restoreAllMocks())
 
-  it('names each app once, per session, only for calls within AWAY_TOLD_MS, and only once', async () => {
+  it('names each app once, per session, only for calls within LINK_HOLD_MS, and only once', async () => {
     const { linked, told, ref, away } = rig()
     for (const s of ['s1', 's2', 's3', 's4']) await linked.refresh(s)
     away(true)
@@ -210,10 +211,10 @@ describe('a session whose app call was refused while its host was away hears onc
     await linked.call('s3', ref('board'), 'peek', {}, { name: 'board' })
     now.mockReturnValue(1_000_001)
     await linked.call('s4', ref('notes'), 'peek', {}, { name: 'notes' })
-    now.mockReturnValue(1_000_000 + AWAY_TOLD_MS)
+    now.mockReturnValue(1_000_000 + LINK_HOLD_MS)
     for (const appId of ['board', 'notes', 'board']) expect((await linked.call('s1', ref(appId), 'peek', {}, { name: appId })).error).toMatch(/Box is not reachable.*nothing ran/)
     await linked.call('s2', ref('board', 'm2'), 'peek', {}, { name: 'board' })
-    now.mockReturnValue(1_000_001 + AWAY_TOLD_MS)
+    now.mockReturnValue(1_000_001 + LINK_HOLD_MS)
     away(false)
     linked.back('m1')
     // s3's call is one past the window, s4's exactly at it; s2's was on the other host
